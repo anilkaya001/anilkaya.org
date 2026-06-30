@@ -14,6 +14,8 @@ window.TOPIC_META = [
   { id: "logit",  num: "06", title: "Logit & Probit",                    level: "Intermediate", blurb: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.", tags: ["limited-dependent", "MLE"] },
   { id: "gmm",    num: "07", title: "Generalized Method of Moments",     level: "Advanced",     blurb: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", tags: ["estimation", "theory"] },
 ];
+// Total stages per topic (so the Lab home can show progress without loading the full curriculum-data.js).
+window.TOPIC_META.forEach((t) => { t.stages = ({ ols: 14, iv2sls: 25, did: 23, var: 24, panel: 23, logit: 25, gmm: 27 })[t.id] || 0; });
 
 window.CURRICULUM = {
   ols: {

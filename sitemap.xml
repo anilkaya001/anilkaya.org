@@ -15,8 +15,11 @@
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
-  <url><loc>https://anilkaya.org/lab/lesson.html?m=ols</loc><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/lesson.html?m=iv2sls</loc><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/lesson.html?m=did</loc><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/lesson.html?m=var</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=ols</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=iv2sls</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=did</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=var</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=panel</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=logit</loc><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course.html?m=gmm</loc><priority>0.7</priority></url>
 </urlset>
