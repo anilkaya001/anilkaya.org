@@ -1,0 +1,17 @@
+-- D1 schema for the Econometrics Lab.
+-- Apply with:  wrangler d1 execute iewt --remote --file=./schema.sql
+
+CREATE TABLE IF NOT EXISTS users (
+  id         TEXT PRIMARY KEY,   -- "g_<google-sub>"
+  email      TEXT,
+  name       TEXT,
+  created_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS progress (
+  user_id    TEXT NOT NULL,
+  model_id   TEXT NOT NULL,      -- e.g. "ols", "iv2sls"
+  done_json  TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, model_id)
+);

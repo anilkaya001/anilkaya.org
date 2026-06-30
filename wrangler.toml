@@ -1,0 +1,22 @@
+# Cloudflare Pages config (used when this repo is deployed to Cloudflare Pages).
+# Has NO effect on the current GitHub Pages deployment.
+
+name = "anilkaya-org"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "."
+
+# D1 binding — create the DB, then paste its id here (or set in the dashboard).
+#   wrangler d1 create iewt
+[[d1_databases]]
+binding = "DB"
+database_name = "iewt"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+BASE_URL = "https://anilkaya.org"
+
+# Secrets — DO NOT put these here. Set them in the Pages dashboard
+# (Settings → Environment variables, encrypted) or via:
+#   wrangler pages secret put GOOGLE_CLIENT_ID
+#   wrangler pages secret put GOOGLE_CLIENT_SECRET
+#   wrangler pages secret put SESSION_SECRET   # any long random string

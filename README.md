@@ -61,18 +61,18 @@ output). Progress is saved per-device in `localStorage`.
 `code` steps) — no new HTML needed; `/lab/lesson.html?m=<id>` renders it and the
 home grid picks it up automatically.
 
-## Accounts — Phase 2 (Google sign-in)
+## Accounts — Phase 2 (Google sign-in) — scaffolded
 
-Today, identity + progress are on-device (`auth.js`), which is free and private.
-To add real cross-device accounts later:
+The full backend is already in the repo and **inert on GitHub Pages**; it
+activates when deployed to **Cloudflare Pages**:
 
-1. Move hosting from GitHub Pages to **Cloudflare Pages** (Functions + D1).
-2. Create a **Google OAuth** client; store the client secret as a Pages secret.
-3. Add an `/auth/google` Pages Function (OAuth round-trip → signed session
-   cookie) and a tiny `progress` API backed by **D1**.
-4. Replace `Auth.signIn()` and point progress reads/writes at the API.
+- `functions/auth/*` — Google OAuth flow (`/auth/google`, `/auth/callback`, `/auth/logout`)
+- `functions/api/me`, `functions/api/progress` — session + progress API (D1)
+- `functions/_middleware.js`, `shared/session.js` — stateless signed-cookie sessions
+- `schema.sql`, `wrangler.toml` — D1 database + Pages config
 
-The app only talks to `auth.js`, so this swap is localised.
+`auth.js` auto-detects the backend (falls back to on-device when absent), so the
+site keeps working either way. **Deployment steps are in [`DEPLOY.md`](./DEPLOY.md).**
 
 ## Add an article
 

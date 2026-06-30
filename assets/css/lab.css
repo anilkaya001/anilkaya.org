@@ -146,3 +146,38 @@
 @media (prefers-reduced-motion: reduce) { .boot__spin { animation: none; } }
 
 .lab-foot { text-align: center; color: var(--ink-faint); font-size: 0.86rem; margin-top: 3.5rem; border-top: 1px solid var(--hairline); padding-top: 2rem; }
+
+/* ---- Interactive widget (landscape: controls | live output) ---- */
+.lesson { max-width: 56rem; }
+.cell--interactive { background: var(--bg-deep); }
+.interactive { display: grid; grid-template-columns: minmax(13rem, 17rem) 1fr; }
+.interactive__controls {
+  display: flex; flex-direction: column; gap: 1.15rem;
+  padding: 1.1rem; border-right: 1px solid var(--hairline);
+}
+.interactive__output { min-width: 0; padding: 0.4rem 0; }
+.interactive__output .cell__figs { padding: 0.85rem 1rem 0.4rem; }
+.interactive__output .cell__figs:not(:empty) { border-top: 0; }
+.interactive__output .cell__out { max-height: 16rem; }
+@media (max-width: 720px) {
+  .interactive { grid-template-columns: 1fr; }
+  .interactive__controls { border-right: 0; border-bottom: 1px solid var(--hairline); }
+}
+.control { display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85rem; color: var(--ink-dim); }
+.control__label { display: flex; justify-content: space-between; gap: 0.5rem; }
+.control__val { color: var(--gold-celadon); font-variant-numeric: tabular-nums; font-weight: 700; }
+.control__range { width: 100%; accent-color: var(--gold-harvest); cursor: pointer; }
+
+/* ---- Quiz ---- */
+.quiz { border: 1px solid var(--hairline); border-radius: 12px; padding: 1.2rem 1.35rem; background: var(--bg-elev); }
+.quiz__prompt { font-weight: 700; }
+.quiz__choices { display: flex; flex-direction: column; gap: 0.55rem; margin: 0.95rem 0; }
+.quiz__choice { display: flex; gap: 0.6rem; align-items: center; cursor: pointer; color: var(--ink); }
+.quiz__choice input { accent-color: var(--gold-harvest); width: 1.05rem; height: 1.05rem; }
+.quiz__actions { display: flex; gap: 0.6rem; }
+.quiz .btn { padding: 0.5rem 1rem; font-size: 0.85rem; }
+.quiz__feedback { margin-top: 1rem; font-size: 0.92rem; line-height: 1.5; }
+.quiz__feedback:empty { display: none; }
+.quiz__feedback.ok { color: var(--gold-celadon); }
+.quiz__feedback.err { color: #ff9d6e; }
+.quiz__feedback.hint { color: var(--ink-dim); }
