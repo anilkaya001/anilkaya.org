@@ -104,9 +104,14 @@
   }
 
   // ---- Stage renderers ----------------------------------------
+  const QUESTION = { quiz: 1, truefalse: 1, multi: 1, numeric: 1, fillblank: 1 };
   function guideHTML(st) {
     if (st.type === "read") return st.html || "";
-    if (st.type === "quiz") return "<h3>" + esc(st.title || "Question") + '</h3><p class="quiz__prompt">' + st.prompt + "</p>";
+    // prompt-in-guide question types (the blank/expression lives in the work column for fillblank)
+    if (st.type === "quiz" || st.type === "truefalse" || st.type === "multi" || st.type === "numeric")
+      return "<h3>" + esc(st.title || "Question") + '</h3><p class="quiz__prompt">' + st.prompt + "</p>";
+    if (st.type === "fillblank")
+      return "<h3>" + esc(st.title || "Question") + "</h3>" + (st.lead ? "<p>" + st.lead + "</p>" : "");
     return "<h3>" + esc(st.title || "") + "</h3>" + (st.note ? "<p>" + st.note + "</p>" : "");
   }
 
@@ -115,7 +120,7 @@
       return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: (el) => mark(i, el), figsEl }).el;
     }
     if (st.type === "interactive") return buildInteractive(st, i, figsEl);
-    if (st.type === "quiz") return buildQuiz(st, i);
+    if (QUESTION[st.type]) return buildQuestion(st, i);
     return null;
   }
 
@@ -153,34 +158,89 @@
     return cell;
   }
 
-  function buildQuiz(st, i) {
-    const quiz = el("div", "quiz");
+  // Normalize a free-text answer the same way for the input and the accept list.
+  const normTxt = (s) => String(s).trim().toLowerCase().replace(/\s+/g, " ")
+    .replace(/^[\s"'(]+|[\s"'.,;:!?)]+$/g, "").replace(/^the\s+/, "");
+
+  // Deterministic grading for every question type. Returns {ok} or {empty:true}.
+  function grade(st, root, name) {
+    if (st.type === "numeric") {
+      const v = parseFloat((root.querySelector(".q-num").value || "").replace(/[,%=\s]/g, ""));
+      if (!isFinite(v)) return { empty: true };
+      const ok = Math.abs(v - st.answer) <= st.tol || (st.rtol && Math.abs(v - st.answer) <= st.rtol * Math.abs(st.answer));
+      return { ok: !!ok };
+    }
+    if (st.type === "fillblank") {
+      const raw = root.querySelector(".q-blank").value;
+      if (!raw.trim()) return { empty: true };
+      return { ok: new Set((st.accept || []).map(normTxt)).has(normTxt(raw)) };
+    }
+    if (st.type === "multi") {
+      const picked = [...root.querySelectorAll('input[name="' + name + '"]:checked')].map((e) => +e.value).sort((a, b) => a - b);
+      if (!picked.length) return { empty: true };
+      const ans = [...(st.answers || [])].sort((a, b) => a - b);
+      return { ok: picked.length === ans.length && picked.every((v, k) => v === ans[k]) };
+    }
+    const sel = root.querySelector('input[name="' + name + '"]:checked');   // quiz / truefalse
+    if (!sel) return { empty: true };
+    if (st.type === "truefalse") return { ok: (sel.value === "true") === !!st.answer, sel };
+    return { ok: +sel.value === st.answer, sel };
+  }
+
+  function emptyMsg(t) {
+    return t === "numeric" ? "Enter a number." : t === "fillblank" ? "Type the missing term."
+      : t === "multi" ? "Select all that apply first." : "Pick an answer first.";
+  }
+  function wrongMsg(st, r) {
+    if (st.why && r.sel && st.why[+r.sel.value]) return esc(st.why[+r.sel.value]);
+    if (st.type === "multi") return "Close — some right, some wrong. Try again, or tap Hint.";
+    return "Not quite — try again, or tap Hint.";
+  }
+  function markCorrect(st, root, name) {
+    const tag = (v) => { const c = root.querySelector('input[name="' + name + '"][value="' + v + '"]'); if (c && c.closest(".quiz__choice")) c.closest(".quiz__choice").classList.add("is-correct"); };
+    if (st.type === "quiz") tag(st.answer);
+    else if (st.type === "truefalse") tag(st.answer ? "true" : "false");
+    else if (st.type === "multi") (st.answers || []).forEach(tag);
+  }
+
+  function buildQuestion(st, i) {
+    const q = el("div", "quiz quiz--" + st.type);
     const name = "q_" + topic.id + "_" + i;
-    quiz.innerHTML =
-      '<div class="quiz__choices">' +
-      st.choices.map((c, k) => '<label class="quiz__choice"><input type="radio" name="' + name + '" value="' + k + '"><span>' + esc(c) + "</span></label>").join("") +
-      "</div>" +
+    const radios = (items, type) => '<div class="quiz__choices' + (type === "tf" ? " quiz__choices--tf" : "") + '">' +
+      items.map((it) => '<label class="quiz__choice"><input type="' + (st.type === "multi" ? "checkbox" : "radio") +
+        '" name="' + name + '" value="' + it.v + '"><span>' + esc(it.label) + "</span></label>").join("") + "</div>";
+    let inputHTML = "";
+    if (st.type === "quiz") inputHTML = radios(st.choices.map((c, k) => ({ v: k, label: c })));
+    else if (st.type === "multi") inputHTML = radios(st.choices.map((c, k) => ({ v: k, label: c })));
+    else if (st.type === "truefalse") inputHTML = radios([{ v: "true", label: "True" }, { v: "false", label: "False" }], "tf");
+    else if (st.type === "numeric") inputHTML = '<div class="q-numwrap"><input class="q-num" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Your numeric answer">' + (st.unit ? '<span class="q-unit">' + esc(st.unit) + "</span>" : "") + "</div>";
+    else if (st.type === "fillblank") { const parts = String(st.prompt).split("___"); inputHTML = '<p class="q-fill">' + (parts[0] || "") + '<input class="q-blank" type="text" autocomplete="off" spellcheck="false" aria-label="Fill in the blank">' + (parts.slice(1).join("___")) + "</p>"; }
+
+    q.innerHTML = inputHTML +
       '<div class="quiz__actions"><button class="quiz__hint btn btn--ghost" type="button">Hint</button><button class="quiz__check btn btn--gold" type="button">Check</button></div>' +
       '<div class="quiz__feedback" role="status"></div>';
-    const fb = quiz.querySelector(".quiz__feedback");
-    quiz.querySelector(".quiz__hint").addEventListener("click", () => { fb.className = "quiz__feedback hint"; fb.textContent = "Hint: " + st.hint; });
-    const checkBtn = quiz.querySelector(".quiz__check");
+    const fb = q.querySelector(".quiz__feedback");
+    const checkBtn = q.querySelector(".quiz__check");
+    if (st.hint) q.querySelector(".quiz__hint").addEventListener("click", () => { fb.className = "quiz__feedback hint"; fb.textContent = "Hint: " + st.hint; });
+    else q.querySelector(".quiz__hint").remove();
+    q.querySelectorAll('input[type="text"]').forEach((inp) => inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); checkBtn.click(); } }));
+
     checkBtn.addEventListener("click", () => {
-      const sel = quiz.querySelector('input[name="' + name + '"]:checked');
-      if (!sel) { fb.className = "quiz__feedback hint"; fb.textContent = "Pick an answer first."; if (window.FX) window.FX.wrong(checkBtn); return; }
-      const chosen = sel.closest(".quiz__choice");
-      if (+sel.value === st.answer) {
-        fb.className = "quiz__feedback ok"; fb.textContent = "Correct. " + st.explain;
-        quiz.classList.add("is-solved"); if (chosen) chosen.classList.add("is-correct");
+      if (q.classList.contains("is-solved")) return;
+      const r = grade(st, q, name);
+      if (r.empty) { fb.className = "quiz__feedback hint"; fb.textContent = emptyMsg(st.type); return; }
+      if (r.ok) {
+        fb.className = "quiz__feedback ok"; fb.innerHTML = "Correct. " + (st.explain || "");
+        q.classList.add("is-solved"); markCorrect(st, q, name);
         if (window.FX) window.FX.correct(checkBtn);
         mark(i, checkBtn);
       } else {
-        fb.className = "quiz__feedback err"; fb.textContent = "Not quite — try again, or tap Hint.";
-        if (chosen) { chosen.classList.add("is-wrong"); setTimeout(() => chosen.classList.remove("is-wrong"), 700); }
-        if (window.FX) window.FX.wrong(quiz);
+        fb.className = "quiz__feedback err"; fb.innerHTML = wrongMsg(st, r);
+        if (r.sel) { const ch = r.sel.closest(".quiz__choice"); if (ch) { ch.classList.add("is-wrong"); setTimeout(() => ch.classList.remove("is-wrong"), 700); } }
+        if (window.FX) window.FX.wrong(q);
       }
     });
-    return quiz;
+    return q;
   }
 
   // ---- Draggable horizontal splitter (persisted) -------------

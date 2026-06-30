@@ -204,6 +204,20 @@
 .quiz__feedback.err { color: #ff9d6e; }
 .quiz__feedback.hint { color: var(--ink-dim); }
 
+/* True/False — two large side-by-side targets */
+.quiz__choices--tf { flex-direction: row; gap: 0.7rem; }
+.quiz__choices--tf .quiz__choice { flex: 1 1 0; justify-content: center; border: 1px solid var(--hairline); padding: 0.7rem; }
+/* Numeric answer */
+.q-numwrap { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0 0.9rem; }
+.q-num { width: 9rem; max-width: 60vw; padding: 0.6rem 0.8rem; border-radius: 10px; border: 1px solid var(--hairline); background: var(--bg-deep); color: var(--ink); font-family: var(--font-mono); font-size: 1rem; }
+.q-num:focus { outline: 0; border-color: color-mix(in srgb, var(--gold-harvest) 60%, transparent); }
+.q-unit { color: var(--ink-dim); font-family: var(--font-mono); }
+/* Fill in the blank — inline underlined input */
+.q-fill { line-height: 2.2; margin: 0.1rem 0 0.9rem; }
+.q-blank { min-width: 7rem; max-width: 90%; padding: 0.2rem 0.6rem; margin: 0 0.15rem; border: 0; border-bottom: 2px solid color-mix(in srgb, var(--gold-harvest) 55%, transparent); background: color-mix(in srgb, var(--gold-celadon) 7%, transparent); color: var(--ink); font-family: var(--font-mono); font-size: 0.95rem; border-radius: 4px 4px 0 0; }
+.q-blank:focus { outline: 0; border-bottom-color: var(--gold-harvest); background: color-mix(in srgb, var(--gold-harvest) 12%, transparent); }
+.quiz.is-solved .q-num, .quiz.is-solved .q-blank { border-color: #7fd17f; color: #7fd17f; }
+
 /* ============== Staged course player ============== */
 .lab--wide { max-width: 76rem; }
 .course { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.6rem; align-items: start; }
