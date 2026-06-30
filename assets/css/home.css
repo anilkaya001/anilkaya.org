@@ -91,6 +91,11 @@
   font-style: italic;
 }
 
+.hero__cta {
+  pointer-events: auto; /* hero is click-through; the button is not */
+  animation: rise 1s var(--ease) 0.12s both;
+}
+
 .hero__hint {
   pointer-events: none;
   font-size: clamp(0.72rem, 0.68rem + 0.2vw, 0.85rem);
@@ -98,7 +103,7 @@
   text-transform: uppercase;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
-  animation: rise 1s var(--ease) 0.18s both;
+  animation: rise 1s var(--ease) 0.22s both;
 }
 
 @keyframes rise {

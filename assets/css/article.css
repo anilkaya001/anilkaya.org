@@ -3,36 +3,11 @@
    Pairs with base.css. Optimised for long-form, paper-like text.
    ============================================================= */
 
-.site-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.9rem var(--pad);
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: saturate(140%) blur(10px);
-  -webkit-backdrop-filter: saturate(140%) blur(10px);
-  border-bottom: 1px solid var(--hairline);
-}
-.site-header__brand {
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  text-decoration: none;
-}
-.site-header__brand:hover { color: var(--gold-celadon); }
-.site-nav { display: flex; gap: 1.4rem; font-size: 0.95rem; }
-.site-nav a { color: var(--ink-dim); text-decoration: none; }
-.site-nav a:hover { color: var(--gold-harvest); }
-
 .prose {
   width: 100%;
   max-width: var(--measure);
   margin-inline: auto;
-  padding: clamp(2rem, 6vh, 4.5rem) var(--pad) 6rem;
+  padding: calc(3.6rem + clamp(1.5rem, 5vh, 3rem)) var(--pad) 6rem;
 }
 
 .prose > * + * { margin-top: 1.15em; }

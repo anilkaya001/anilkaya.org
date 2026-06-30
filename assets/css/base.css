@@ -128,3 +128,117 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
   white-space: nowrap; border: 0;
 }
+
+/* ---- Seamless cross-document tab switching ---- */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ---- Top bar: brand · pill nav · social ---- */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: max(0.7rem, env(safe-area-inset-top)) var(--pad) 0.7rem;
+  pointer-events: none; /* gaps stay click-through (canvas on home) */
+}
+.topbar > * { pointer-events: auto; }
+
+.topbar__brand {
+  justify-self: start;
+  font-weight: 700; font-size: 1.5rem; line-height: 1;
+  text-decoration: none;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest), var(--gold-mystic));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+.pill {
+  justify-self: center;
+  display: flex; align-items: center; gap: 0.15rem;
+  padding: 0.28rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  border: 1px solid var(--hairline);
+  backdrop-filter: saturate(150%) blur(14px);
+  -webkit-backdrop-filter: saturate(150%) blur(14px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+.pill a {
+  position: relative;
+  display: inline-flex; align-items: center;
+  padding: 0.5rem 1.05rem;
+  border-radius: 999px;
+  font-size: 0.9rem; line-height: 1; white-space: nowrap;
+  color: var(--ink-dim); text-decoration: none;
+  transition: color 0.2s var(--ease);
+}
+.pill a:hover { color: var(--ink); }
+.pill a.is-active {
+  color: #1a1407; font-weight: 700;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+  box-shadow: 0 2px 14px color-mix(in srgb, var(--gold-harvest) 45%, transparent);
+  view-transition-name: navpill; /* slides between tabs across navigations */
+}
+
+.topbar__social { justify-self: end; display: inline-flex; gap: 0.5rem; }
+.social-btn {
+  display: inline-grid; place-items: center;
+  width: 2.4rem; height: 2.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.social-btn svg { width: 1.2rem; height: 1.2rem; }
+.social-btn:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--gold-harvest) 60%, transparent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--gold-harvest) 30%, transparent);
+}
+
+@media (max-width: 600px) {
+  .topbar__brand { display: none; }
+  .pill a { padding: 0.5rem 0.72rem; font-size: 0.8rem; }
+}
+
+/* ---- Toast (auth scaffold + notices) ---- */
+.toast {
+  position: fixed; left: 50%; bottom: 1.5rem;
+  transform: translateX(-50%) translateY(1rem);
+  z-index: 200; max-width: min(92vw, 30rem);
+  background: var(--bg-elev); color: var(--ink);
+  border: 1px solid var(--hairline); border-radius: 12px;
+  padding: 0.8rem 1.1rem; font-size: 0.92rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.7rem 1.3rem; border-radius: 999px;
+  font-weight: 700; font-size: 0.95rem; line-height: 1;
+  text-decoration: none; cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+.btn--gold {
+  color: #1a1407;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--gold-harvest) 28%, transparent);
+}
+.btn--ghost {
+  color: var(--ink); background: transparent; border-color: var(--hairline);
+}
+.btn:hover { transform: translateY(-2px); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; transform: none; }
