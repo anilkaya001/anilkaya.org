@@ -43,6 +43,7 @@
 .lab-grid {
   display: grid; gap: 1.1rem;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  perspective: 1200px;            /* gives the reveal a real depth tilt */
 }
 .model-card {
   display: flex; flex-direction: column; gap: 0.7rem;

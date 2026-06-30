@@ -6,16 +6,13 @@ on **Google accounts + cross-device progress**, deploy this same repo to
 None of this can be done from the agent sandbox — it needs your Cloudflare and
 Google accounts. Steps:
 
-## 1. Create the D1 database
-```bash
-npm i -g wrangler        # if needed
-wrangler login
-wrangler d1 create iewt
-```
-Copy the printed `database_id` into `wrangler.toml`, then load the schema:
-```bash
-wrangler d1 execute iewt --remote --file=./schema.sql
-```
+## 1. D1 database — ✅ already done
+The database **`iewt`** is already created on your Cloudflare account and the
+schema (`users`, `progress`) is applied. Its id is already in `wrangler.toml`:
+`73c8c626-e971-44da-b8c1-21d6062cb9f2`. Nothing to do here.
+
+> To recreate from scratch: `wrangler d1 create iewt` then
+> `wrangler d1 execute iewt --remote --file=./schema.sql`.
 
 ## 2. Create the Pages project (Git integration = automatic deploys)
 - Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git**.

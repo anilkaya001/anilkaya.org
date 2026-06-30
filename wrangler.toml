@@ -5,12 +5,11 @@ name = "anilkaya-org"
 compatibility_date = "2024-11-01"
 pages_build_output_dir = "."
 
-# D1 binding — create the DB, then paste its id here (or set in the dashboard).
-#   wrangler d1 create iewt
+# D1 binding — database "iewt" already created and migrated (schema.sql applied).
 [[d1_databases]]
 binding = "DB"
 database_name = "iewt"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 
 [vars]
 BASE_URL = "https://anilkaya.org"

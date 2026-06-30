@@ -65,7 +65,7 @@
     LESSONS.forEach((lesson) => {
       const pct = Progress.pct(lesson);
       const cta = pct === 0 ? "Start" : pct === 100 ? "Review" : "Continue";
-      const card = el("a", "model-card");
+      const card = el("a", "model-card reveal");
       card.href = "/lab/lesson.html?m=" + encodeURIComponent(lesson.id);
       card.innerHTML =
         '<div class="model-card__top"><span class="model-card__badge">' + lesson.level +
@@ -77,7 +77,7 @@
       grid.appendChild(card);
     });
     ROADMAP.forEach((m) => {
-      const card = el("div", "model-card");
+      const card = el("div", "model-card reveal");
       card.setAttribute("aria-disabled", "true");
       card.innerHTML =
         '<div class="model-card__top"><span class="model-card__badge">' + m.badge + "</span></div>" +
@@ -85,6 +85,29 @@
         '<div class="model-card__foot"><span class="model-card__cta">In&nbsp;preparation</span></div>';
       grid.appendChild(card);
     });
+    revealCards(grid);
+  }
+
+  // Stagger the cards in with a depth tilt as they enter the viewport.
+  function revealCards(grid) {
+    const cards = Array.from(grid.querySelectorAll(".reveal"));
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || !("IntersectionObserver" in window)) {
+      cards.forEach((c) => c.classList.add("in"));
+      return;
+    }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        const i = cards.indexOf(e.target);
+        e.target.style.transitionDelay = Math.min(i, 8) * 65 + "ms";
+        e.target.classList.add("in");
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0.08, rootMargin: "0px 0px -5% 0px" });
+    cards.forEach((c) => io.observe(c));
+    // Safety net: never leave a card hidden if the observer doesn't fire.
+    setTimeout(() => cards.forEach((c) => c.classList.add("in")), 4000);
   }
 
   // ============== LESSON PAGE ==================================
