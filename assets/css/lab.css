@@ -182,3 +182,45 @@
 .quiz__feedback.ok { color: var(--gold-celadon); }
 .quiz__feedback.err { color: #ff9d6e; }
 .quiz__feedback.hint { color: var(--ink-dim); }
+
+/* ============== Staged course player ============== */
+.lab--wide { max-width: 76rem; }
+.course { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.6rem; align-items: start; }
+
+.course-nav { position: sticky; top: 4.4rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.course-nav__title { font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 0.4rem; padding-left: 0.3rem; }
+.course-nav__mod {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  width: 100%; text-align: left; padding: 0.6rem 0.7rem; border-radius: 10px;
+  border: 1px solid transparent; background: transparent; color: var(--ink-dim);
+  font: inherit; cursor: pointer; transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.course-nav__mod:hover { color: var(--ink); background: var(--bg-elev); }
+.course-nav__mod.is-current { color: var(--ink); background: var(--bg-elev); border-color: color-mix(in srgb, var(--gold-harvest) 40%, transparent); }
+.course-nav__name { font-size: 0.9rem; line-height: 1.25; }
+.course-nav__count { font-size: 0.72rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.course-nav__mod.is-done .course-nav__count { color: var(--gold-celadon); }
+
+.course-head h1 { font-size: clamp(1.7rem, 1.2rem + 2vw, 2.6rem); font-weight: 700; letter-spacing: -0.015em; margin-top: 0.4rem; }
+.course-progress { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.9rem; }
+
+.stage { margin-top: 1.6rem; scroll-margin-top: 4.8rem; }
+.stage__kicker { font-size: 0.74rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-harvest); margin-bottom: 1rem; }
+.stage__split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; align-items: start; }
+.stage__solo { max-width: 46rem; }
+.stage__guide > * + * { margin-top: 1.05em; }
+.stage__work { position: sticky; top: 4.4rem; min-width: 0; }
+
+.course-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 2.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
+.course-foot__pos { font-size: 0.85rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.course-empty { text-align: center; padding: 6rem var(--pad); }
+.course-empty h1 { font-size: clamp(1.8rem, 1.3rem + 2vw, 2.6rem); font-weight: 700; margin: 1rem 0 0.6rem; }
+
+@media (max-width: 900px) {
+  .course { grid-template-columns: 1fr; }
+  .course-nav { position: static; top: auto; flex-direction: row; flex-wrap: wrap; }
+  .course-nav__title { width: 100%; }
+  .course-nav__mod { width: auto; flex: 1 1 auto; }
+  .stage__split { grid-template-columns: 1fr; }
+  .stage__work { position: static; }
+}

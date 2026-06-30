@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>Course — Econometrics Lab</title>
+  <meta name="description" content="A staged, interactive econometrics course with a live Python IDE — estimated for real in your browser.">
+  <meta name="theme-color" content="#0a0a08">
+  <meta name="color-scheme" content="dark">
+
+  <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/fonts/LM-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css">
+  <link rel="stylesheet" href="/assets/css/lab.css">
+
+  <script src="/assets/js/nav.js" defer></script>
+  <script src="/assets/js/auth.js" defer></script>
+  <script src="/assets/js/lab-core.js" defer></script>
+  <script src="/assets/js/curriculum.js" defer></script>
+  <script src="/assets/js/lab-course.js" defer></script>
+</head>
+
+<body>
+  <header class="topbar">
+    <a class="topbar__brand" href="/" aria-label="Home">&#949;</a>
+    <nav class="pill" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/articles/">Articles</a>
+      <a href="/lab/" class="is-active" aria-current="page"><span class="lab-full">Econometrics&nbsp;Lab</span><span class="lab-short">Lab</span></a>
+    </nav>
+    <a class="topbar__social social-btn" href="https://www.linkedin.com/in/anillkaya" target="_blank" rel="me noopener" aria-label="Anıl Kaya on LinkedIn">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lkg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#c9c6ac"/><stop offset=".55" stop-color="#da9100"/><stop offset="1" stop-color="#af983f"/>
+        </linearGradient></defs>
+        <path fill="url(#lkg)" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z"/>
+      </svg>
+    </a>
+  </header>
+
+  <main class="lab lab--wide">
+    <div class="course" id="course"></div>
+  </main>
+</body>
+</html>
