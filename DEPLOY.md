@@ -36,7 +36,9 @@ schema (`users`, `progress`) is applied. Its id is already in `wrangler.toml`:
 | `GOOGLE_CLIENT_ID` | from step 3 |
 | `GOOGLE_CLIENT_SECRET` | from step 3 (mark **encrypted**) |
 | `SESSION_SECRET` | any long random string (mark **encrypted**) |
-| `BASE_URL` | `https://anilkaya.org` |
+
+`BASE_URL` is optional — leave it unset and the functions use the request's
+own origin (works on `*.pages.dev` and `anilkaya.org` alike).
 
 ## 5. Move the domain to Pages
 In the Pages project → **Custom domains → Set up a domain → `anilkaya.org`**.

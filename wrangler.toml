@@ -11,8 +11,9 @@ binding = "DB"
 database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 
-[vars]
-BASE_URL = "https://anilkaya.org"
+# BASE_URL is intentionally NOT set, so the auth functions use the request's
+# own origin — works on both <project>.pages.dev and anilkaya.org with no edits.
+# (Set it only if you ever want to force one canonical origin.)
 
 # Secrets — DO NOT put these here. Set them in the Pages dashboard
 # (Settings → Environment variables, encrypted) or via:
