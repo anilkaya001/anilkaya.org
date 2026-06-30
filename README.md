@@ -28,17 +28,51 @@ domain [anilkaya.org](https://anilkaya.org), with DNS on Cloudflare.
 ├── robots.txt · sitemap.xml · site.webmanifest
 ├── assets/
 │   ├── css/
-│   │   ├── base.css         # Design tokens, @font-face, reset, shared type
+│   │   ├── base.css         # Tokens, @font-face, reset, top bar, pill nav
 │   │   ├── home.css         # Landing hero
-│   │   └── article.css      # Long-form reading layout
+│   │   ├── article.css      # Long-form reading layout
+│   │   └── lab.css          # Econometrics Lab + Python IDE
 │   ├── js/
-│   │   └── particles.js     # Canvas field engine
+│   │   ├── particles.js     # Canvas field engine
+│   │   ├── auth.js          # Account scaffold (on-device now, Google later)
+│   │   ├── lab-core.js      # Pyodide engine + IDE cells
+│   │   ├── lessons.js       # Course content (data-driven)
+│   │   └── lab-ui.js        # Lab home grid + lesson renderer + progress
 │   ├── fonts/               # Latin Modern woff2 (see NOTICE.md)
 │   └── img/                 # favicon.svg, etc.
-└── articles/
-    ├── index.html           # Article listing
-    └── _template/           # Copy this to start a new article
+├── articles/
+│   ├── index.html           # Article listing
+│   └── _template/           # Copy this to start a new article
+└── lab/
+    ├── index.html           # Lab home (model grid)
+    └── lesson.html          # Generic lesson renderer (?m=<model>)
 ```
+
+## Econometrics Lab
+
+`/lab/` runs **real** econometrics in the browser via **Pyodide + statsmodels**
+(CPython + NumPy/SciPy/pandas/statsmodels/matplotlib compiled to WebAssembly).
+Estimation is genuine statsmodels output — not an approximation — and it runs on
+the visitor's machine, so it costs nothing to serve and scales without limit.
+Each lesson includes a **live Python IDE** (editable cells, Run, matplotlib
+output). Progress is saved per-device in `localStorage`.
+
+**Add a model:** append an object to `assets/js/lessons.js` (with `read` and
+`code` steps) — no new HTML needed; `/lab/lesson.html?m=<id>` renders it and the
+home grid picks it up automatically.
+
+## Accounts — Phase 2 (Google sign-in)
+
+Today, identity + progress are on-device (`auth.js`), which is free and private.
+To add real cross-device accounts later:
+
+1. Move hosting from GitHub Pages to **Cloudflare Pages** (Functions + D1).
+2. Create a **Google OAuth** client; store the client secret as a Pages secret.
+3. Add an `/auth/google` Pages Function (OAuth round-trip → signed session
+   cookie) and a tiny `progress` API backed by **D1**.
+4. Replace `Auth.signIn()` and point progress reads/writes at the API.
+
+The app only talks to `auth.js`, so this swap is localised.
 
 ## Add an article
 
