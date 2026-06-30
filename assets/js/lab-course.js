@@ -29,7 +29,7 @@
   const PKEY = "iewt:progress";
   const all = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || {}; } catch { return {}; } };
   const doneSet = () => new Set((all()[topic.id] || {}).done || []);
-  function mark(i) {
+  function mark(i, originEl) {
     const a = all(); const d = new Set((a[topic.id] || {}).done || []);
     if (d.has(i)) return;
     d.add(i); a[topic.id] = { done: [...d] };
@@ -37,7 +37,9 @@
     paintProgress();
     const pts = ({ read: 5, code: 10, interactive: 10, quiz: 15 })[stages[i].type] || 5;
     if (window.Gamify) window.Gamify.award(pts);
-    if (window.FX) window.FX.floatPoints(pts, root.querySelector("[data-gamify]"));
+    const badge = root.querySelector("[data-gamify]");
+    if (window.FX && window.FX.coin) window.FX.coin(originEl, badge, pts);
+    else if (window.FX) window.FX.floatPoints(pts, badge);
     if (window.Auth && typeof window.Auth.pushProgress === "function") window.Auth.pushProgress(topic.id, [...d]);
     // Module finished? quiet cheer. Whole topic? big one (also handled at Finish).
     const mi = stages[i].mi;
@@ -110,7 +112,7 @@
 
   function buildWork(st, i, figsEl) {
     if (st.type === "code") {
-      return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: () => mark(i), figsEl }).el;
+      return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: (el) => mark(i, el), figsEl }).el;
     }
     if (st.type === "interactive") return buildInteractive(st, i, figsEl);
     if (st.type === "quiz") return buildQuiz(st, i);
@@ -143,7 +145,7 @@
       running = true;
       const ok = await window.Lab.run(render(), { out, figs });
       running = false;
-      if (ok && !launched) { launched = true; runBtn.textContent = "↻ Re-run"; mark(i); }
+      if (ok && !launched) { launched = true; runBtn.textContent = "↻ Re-run"; mark(i, runBtn); }
       if (pending) { pending = false; exec(); }
     }
     function schedule() { if (!launched) return; if (running) { pending = true; return; } clearTimeout(schedule._t); schedule._t = setTimeout(exec, 180); }
@@ -171,7 +173,7 @@
         fb.className = "quiz__feedback ok"; fb.textContent = "Correct. " + st.explain;
         quiz.classList.add("is-solved"); if (chosen) chosen.classList.add("is-correct");
         if (window.FX) window.FX.correct(checkBtn);
-        mark(i);
+        mark(i, checkBtn);
       } else {
         fb.className = "quiz__feedback err"; fb.textContent = "Not quite — try again, or tap Hint.";
         if (chosen) { chosen.classList.add("is-wrong"); setTimeout(() => chosen.classList.remove("is-wrong"), 700); }
@@ -250,9 +252,16 @@
       }
       return;
     }
+    const dir = i >= cur ? 1 : -1;
     history.replaceState(null, "", "#s" + i);
-    render(i);
-    stageEl.scrollIntoView({ block: "start", behavior: "smooth" });
+    const swap = () => {
+      render(i);
+      stageEl.scrollIntoView({ block: "start", behavior: "auto" });
+      const h = stageEl.querySelector(".stage__guide h3, .stage__guide h1, .stage__guide h2, .stage__kicker");
+      if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }   // focus follows the turn
+    };
+    if (window.FX && window.FX.pageTurn) window.FX.pageTurn(stageEl, dir, swap);
+    else swap();
   }
 
   prevBtn.addEventListener("click", () => go(cur - 1));

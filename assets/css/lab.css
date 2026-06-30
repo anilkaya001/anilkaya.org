@@ -385,6 +385,13 @@
 .fx-bloom { animation: fxBloom 0.54s var(--ease); border-radius: 10px; }
 @keyframes fxBloom { 0% { box-shadow: 0 0 0 0 rgba(218, 145, 0, 0.5); } 100% { box-shadow: 0 0 0 8px rgba(218, 145, 0, 0); } }
 
+/* points coin arc + streak flame lifecycle */
+.fx-coin { position: fixed; left: 0; top: 0; z-index: 325; pointer-events: none; white-space: nowrap; font: 700 0.95rem/1 var(--font-serif); color: var(--gold-harvest); text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6); }
+.fx-flare { animation: fxFlare 0.6s var(--ease); }
+@keyframes fxFlare { 0%, 100% { transform: scale(1); filter: none; } 35% { transform: scale(1.35); filter: brightness(1.35); } }
+.gstreak.fx-lit { animation: fxLit 3.4s ease-in-out infinite; }
+@keyframes fxLit { 0%, 100% { text-shadow: 0 0 5px color-mix(in srgb, var(--gold-harvest) 45%, transparent); } 50% { text-shadow: 0 0 13px color-mix(in srgb, var(--gold-harvest) 80%, transparent); } }
+
 /* Quiz answer states */
 .quiz__choice { padding: 0.32rem 0.5rem; border-radius: 8px; transition: background 0.2s, color 0.2s; }
 .quiz__choice.is-correct { color: #7fd17f; background: color-mix(in srgb, #7fd17f 13%, transparent); }
@@ -397,6 +404,7 @@
   .cell__out .fx-ignite, .cell__out .fx-sweep::after,
   .cell__run.fx-busy::after, .cell__run.fx-fire, .fx-bloom { animation: none !important; }
   .cell__run.fx-busy::after { display: none; }
+  .fx-flare, .gstreak.fx-lit { animation: none !important; }
   .stage__figs img.fx-develop { clip-path: none; opacity: 1; transform: none; transition: none; }
   .fx-banner { transition: opacity 0.2s linear; }
 }

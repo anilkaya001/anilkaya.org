@@ -1,19 +1,34 @@
 /* =============================================================
    particles.js — Data-Oriented gold particle field
    Self-contained, dependency-free, GPU-composited 2D canvas.
+   Hardened for iOS Safari: alpha:true (screen-blend bug), a calm
+   twinkle under reduced-motion instead of a dead frame, bfcache/
+   focus resume hooks + watchdog, robust sizing, and a ?fxdebug
+   overlay. Toggles: ?srcover (force source-over), ?boost (2x).
    ============================================================= */
 (() => {
   "use strict";
 
   const canvas = document.getElementById("field");
   if (!canvas) return;
-  // NB: no `desynchronized` — it can leave the canvas blank on iOS Safari.
-  const ctx = canvas.getContext("2d", { alpha: false });
+  // alpha:true — WebKit mishandles 'screen' compositing on an alpha-less
+  // backing store and renders the canvas black on iOS; a real alpha
+  // channel fixes it (the explicit trail fills still keep it dark).
+  const ctx = canvas.getContext("2d", { alpha: true });
 
+  const Q = location.search;
+  const DEBUG = /[?&]fxdebug/.test(Q);
+  const FORCE_SRC_OVER = /[?&]srcover/.test(Q);
+  const BOOST = /[?&]boost/.test(Q) ? 2 : 1;
+
+  // Under reduced-motion we keep a CALM, non-translating twinkle. A single
+  // static frame is visually indistinguishable from "nothing rendered" on a
+  // real phone; steady in-place opacity respects WCAG 2.3.3 (which targets
+  // large-scale motion) while staying clearly alive.
   const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const calm = REDUCE;
 
   // --- Tuning ---------------------------------------------------
-  // Particle count scales with viewport so phones stay buttery.
   const area = window.innerWidth * window.innerHeight;
   const COUNT = Math.max(900, Math.min(3000, Math.round(area / 720)));
 
@@ -24,11 +39,9 @@
   const BOHR_RADIUS = 160;
   const N_LEVELS = 6;
 
-  // Requested shades: Mystic Gold, Harvest Gold, Celadon Gold (+ tints for depth)
   const PALETTE = ["#af983f", "#da9100", "#c9c6ac", "#f1d27a", "#8a6f2e"];
   const LINK_COLOR = "#c9c6ac";
   const TRAIL_BG = "rgba(8, 7, 4, 0.40)";
-  const SOLID_BG = "#060604";
 
   // --- DOD buffers ---------------------------------------------
   const pX = new Float32Array(COUNT), pY = new Float32Array(COUNT), pZ = new Float32Array(COUNT);
@@ -49,14 +62,21 @@
     isObserved: false, time: 0, running: false,
   };
   let lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
+  let frameCount = 0;
 
   function resize() {
-    state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    state.width = window.innerWidth;
-    state.height = window.innerHeight;
-    canvas.width = Math.round(state.width * state.dpr);
-    canvas.height = Math.round(state.height * state.dpr);
-    ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    const r = canvas.getBoundingClientRect();
+    const vv = window.visualViewport;
+    let w = r.width || (vv && vv.width) || window.innerWidth || document.documentElement.clientWidth;
+    let h = r.height || (vv && vv.height) || window.innerHeight || document.documentElement.clientHeight;
+    if (!w || !h || w < 1 || h < 1) { requestAnimationFrame(resize); return; }  // retry until laid out
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // keep the backing store inside WebKit's per-side (4096) / area (16.7M) caps
+    while (dpr > 0.75 && (w * dpr > 4096 || h * dpr > 4096 || w * dpr * h * dpr > 16777216)) dpr -= 0.25;
+    state.dpr = dpr; state.width = w; state.height = h;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   function pointerMove(e) {
@@ -88,16 +108,18 @@
     }
   }
 
-  function frame(time, single) {
+  function frame(time) {
+    frameCount++;
     let dt = time - lastTime;
     lastTime = time;
     if (dt > 50 || isNaN(dt)) dt = 16;
     const dtScale = dt * 0.05;
     state.time += dtScale;
+    const motion = calm ? 0 : 1;
 
     const cx = state.width / 2, cy = state.height / 2;
 
-    if (!state.isObserved) {
+    if (!state.isObserved && !calm) {
       state.targetYaw += 0.002;
       state.targetPitch = Math.sin(state.time * 0.005) * 0.15 + Math.PI / 8;
     }
@@ -108,9 +130,9 @@
     const cosX = Math.cos(state.pitch), sinX = Math.sin(state.pitch);
 
     ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = single ? SOLID_BG : (state.isObserved ? "rgba(8, 7, 4, 0.60)" : TRAIL_BG);
+    ctx.fillStyle = state.isObserved ? "rgba(8, 7, 4, 0.60)" : TRAIL_BG;
     ctx.fillRect(0, 0, state.width, state.height);
-    ctx.globalCompositeOperation = "screen";
+    ctx.globalCompositeOperation = FORCE_SRC_OVER ? "source-over" : "screen";
 
     for (let i = 0; i < COUNT; i++) {
       if (isNaN(pX[i]) || isNaN(pY[i]) || isNaN(pZ[i])) {
@@ -133,14 +155,14 @@
       forceZ += (pX[i] * invDist) * orbitSpeed - vZ[i] * 0.05;
       forceY -= vY[i] * 0.1;
 
-      pPhase[i] += pEnergyLevel[i] * 0.05 * dtScale;
-      if (!state.isObserved) {
+      pPhase[i] += pEnergyLevel[i] * 0.05 * dtScale;     // keeps advancing -> twinkle
+      if (!state.isObserved && !calm) {
         forceX += Math.sin(pPhase[i]) * 0.3 * pSpin[i];
         forceY += Math.cos(pPhase[i] * 2) * 0.15;
         forceZ += Math.sin(pPhase[i]) * 0.3 * -pSpin[i];
       }
 
-      vX[i] += forceX * dtScale; vY[i] += forceY * dtScale; vZ[i] += forceZ * dtScale;
+      vX[i] += forceX * dtScale * motion; vY[i] += forceY * dtScale * motion; vZ[i] += forceZ * dtScale * motion;
 
       const velSq = vX[i] * vX[i] + vY[i] * vY[i] + vZ[i] * vZ[i];
       if (velSq > 36.0) {
@@ -149,7 +171,7 @@
       }
 
       const partner = pEntangled[i];
-      if (Math.random() < 0.005 && partner < COUNT) {
+      if (!calm && Math.random() < 0.005 && partner < COUNT) {
         pEnergyLevel[i] = (Math.random() * N_LEVELS | 0) + 1;
         pEnergyLevel[partner] = pEnergyLevel[i];
       }
@@ -157,9 +179,9 @@
       const momentum = Math.sqrt(vX[i] * vX[i] + vY[i] * vY[i] + vZ[i] * vZ[i]);
       pUncertainty[i] = state.isObserved ? 0 : Math.min(momentum * PLANCK_H_BAR * 3.0, 10.0);
 
-      pX[i] += vX[i] * SPEED * dtScale;
-      pY[i] += vY[i] * SPEED * dtScale;
-      pZ[i] += vZ[i] * SPEED * dtScale;
+      pX[i] += vX[i] * SPEED * dtScale * motion;
+      pY[i] += vY[i] * SPEED * dtScale * motion;
+      pZ[i] += vZ[i] * SPEED * dtScale * motion;
 
       const x1 = pX[i] * cosY - pZ[i] * sinY;
       const z1 = pZ[i] * cosY + pX[i] * sinY;
@@ -185,7 +207,7 @@
           pEnergyLevel[i] === pEnergyLevel[p]) {
         const dx = sX[i] - sX[p], dy = sY[i] - sY[p];
         if (dx * dx + dy * dy < 250000) {
-          ctx.globalAlpha = Math.min(sScale[i], 0.12);
+          ctx.globalAlpha = Math.min(Math.min(sScale[i], 0.12) * BOOST, 0.5);
           ctx.beginPath();
           ctx.moveTo(sX[i], sY[i]);
           ctx.lineTo(sX[p], sY[p]);
@@ -200,21 +222,22 @@
       const rs = sScale[i];
       const depthAlpha = Math.min(rs * 1.5, 1.0);
       ctx.fillStyle = PALETTE[pColor[i]];
-      let jx = 0, jy = 0;
-      if (!single && !state.isObserved) {
+      let jx = 0, jy = 0, a = depthAlpha;
+      if (calm) {
+        a = depthAlpha * (0.4 + 0.45 * (0.5 + 0.5 * Math.sin(pPhase[i] * 0.6)));   // twinkle in place
+      } else if (!state.isObserved) {
         const amt = Math.min(pUncertainty[i] * 0.3 * rs, 4.0);
         jx = (Math.random() - 0.5) * amt;
         jy = (Math.random() - 0.5) * amt;
-        ctx.globalAlpha = depthAlpha * 0.8;
-      } else {
-        ctx.globalAlpha = depthAlpha;
+        a = depthAlpha * 0.8;
       }
+      ctx.globalAlpha = Math.min(1, a * BOOST);
       ctx.beginPath();
-      ctx.arc(sX[i] + jx, sY[i] + jy, MAX_SIZE * rs, 0, Math.PI * 2);
+      ctx.arc(sX[i] + jx, sY[i] + jy, MAX_SIZE * rs * BOOST, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    if (!single && !document.hidden) {
+    if (!document.hidden) {
       requestAnimationFrame(frame);
     } else {
       state.running = false;
@@ -224,8 +247,26 @@
   function start() {
     if (state.running) return;
     state.running = true;
-    lastTime = performance.now();
+    lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
     requestAnimationFrame(frame);
+  }
+
+  function startDebug() {
+    const d = document.createElement("div");
+    d.style.cssText = "position:fixed;top:0;left:0;z-index:9999;pointer-events:none;font:11px/1.45 monospace;color:#5f5;background:rgba(0,0,0,.7);padding:5px 7px;white-space:pre;max-width:70vw";
+    document.body.appendChild(d);
+    const upd = () => {
+      let probe = "n/a";
+      try { const px = ctx.getImageData(canvas.width >> 1, canvas.height >> 1, 1, 1).data; probe = px[0] + "," + px[1] + "," + px[2] + "," + px[3]; } catch (e) { probe = "err"; }
+      d.textContent =
+        "frames:" + frameCount + "  running:" + state.running + "\n" +
+        "vis:" + document.visibilityState + "  reduced-motion:" + window.matchMedia("(prefers-reduced-motion: reduce)").matches + "\n" +
+        "css:" + Math.round(state.width) + "x" + Math.round(state.height) + "  buffer:" + canvas.width + "x" + canvas.height + "\n" +
+        "dpr:" + state.dpr + " (raw " + (window.devicePixelRatio || 1) + ")  count:" + COUNT + "\n" +
+        "center-pixel rgba:" + probe + (FORCE_SRC_OVER ? "  [srcover]" : "") + (BOOST > 1 ? "  [boost]" : "");
+      requestAnimationFrame(upd);
+    };
+    upd();
   }
 
   function init() {
@@ -235,28 +276,29 @@
     let rt;
     const onResize = () => { clearTimeout(rt); rt = setTimeout(resize, 150); };
     window.addEventListener("resize", onResize, { passive: true });
-    // iOS Safari fires this (not always a plain resize) on rotation.
     window.addEventListener("orientationchange", () => setTimeout(resize, 250), { passive: true });
-    // The visual viewport changes as Safari's toolbar collapses/expands.
+    window.addEventListener("load", resize);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize, { passive: true });
+    // settle iOS viewport / toolbar / bfcache geometry
+    requestAnimationFrame(() => requestAnimationFrame(resize));
+    setTimeout(resize, 400);
 
-    if (REDUCE) {
-      // Static, motion-free render for users who prefer reduced motion.
-      requestAnimationFrame((t) => frame(t, true));
-      return;
+    // Pointer "observe" (collapse the field) only makes sense when it moves.
+    if (!calm) {
+      window.addEventListener("pointerdown", (e) => { state.isObserved = true; pointerMove(e); });
+      window.addEventListener("pointermove", (e) => { if (state.isObserved) pointerMove(e); });
+      window.addEventListener("pointerup", () => { state.isObserved = false; });
+      window.addEventListener("pointercancel", () => { state.isObserved = false; });
+      canvas.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     }
 
-    window.addEventListener("pointerdown", (e) => { state.isObserved = true; pointerMove(e); });
-    window.addEventListener("pointermove", (e) => { if (state.isObserved) pointerMove(e); });
-    window.addEventListener("pointerup", () => { state.isObserved = false; });
-    window.addEventListener("pointercancel", () => { state.isObserved = false; });
-    canvas.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
+    // Resume hooks — visibilitychange misses iOS bfcache restores (pageshow).
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) start(); });
+    window.addEventListener("focus", () => { if (!document.hidden) start(); });
+    window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
+    setInterval(() => { if (!document.hidden && !state.running) start(); }, 1000);  // watchdog
 
-    // Pause when the tab is hidden; resume on return (saves CPU + battery).
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) start();
-    });
-
+    if (DEBUG) startDebug();
     start();
   }
 

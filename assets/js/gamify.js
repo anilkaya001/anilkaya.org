@@ -15,6 +15,7 @@
     get() { return read(); },
     award(points) {
       const s = read();
+      const prevStreak = s.streak || 0;
       s.points = (s.points || 0) + points;
       const today = day(new Date());
       if (s.last !== today) {
@@ -23,6 +24,9 @@
         s.last = today;
       }
       write(s); this.paint();
+      if ((s.streak || 0) > prevStreak && window.FX && window.FX.streakUp) {
+        document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.streakUp(el));
+      }
       if (window.Auth && typeof window.Auth.pushStats === "function") window.Auth.pushStats(s);
       return s;
     },
@@ -38,6 +42,9 @@
         el.innerHTML = '<span class="gpts" title="Points">★ ' + (s.points || 0) + '</span>' +
           '<span class="gstreak" title="Day streak">🔥 ' + (s.streak || 0) + "</span>";
       });
+      if (window.FX && window.FX.setStreakState) {
+        document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.setStreakState(el, (s.streak || 0) > 0 ? "lit" : "none"));
+      }
     },
   };
   window.Gamify = Gamify;

@@ -214,5 +214,59 @@
     }
   }
 
-  window.FX = { confetti, correct, wrong, floatPoints, moduleDone, celebrate, ignite, reveal, swap, runState, landed };
+  // ---- points fly as a coin arc into the badge ----------------
+  function coin(originEl, badgeEl, amount) {
+    if (!badgeEl || !amount) return;
+    if (reduce() || !originEl) { floatPoints(amount, badgeEl); return; }
+    const o = rectOf(originEl), b = rectOf(badgeEl);
+    const x0 = o.left + o.width / 2, y0 = o.top + o.height / 2;
+    const x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
+    const midX = (x0 + x1) / 2, midY = Math.min(y0, y1) - 64;     // arc apex above the path
+    const c = document.createElement("span");
+    c.className = "fx-coin"; c.textContent = "+" + amount; c.setAttribute("aria-hidden", "true");
+    document.body.appendChild(c);
+    const anim = c.animate([
+      { transform: `translate(${x0}px,${y0}px) translate(-50%,-50%) scale(0.7)`, opacity: 0 },
+      { transform: `translate(${midX}px,${midY}px) translate(-50%,-50%) scale(1.15)`, opacity: 1, offset: 0.5 },
+      { transform: `translate(${x1}px,${y1}px) translate(-50%,-50%) scale(0.5)`, opacity: 0.85 },
+    ], { duration: 560, easing: "cubic-bezier(0.22,1,0.36,1)", fill: "forwards" });
+    let done = false;
+    const land = () => {
+      if (done) return; done = true; c.remove();
+      badgeEl.classList.remove("fx-pop"); void badgeEl.offsetWidth; badgeEl.classList.add("fx-pop");
+      setTimeout(() => badgeEl.classList.remove("fx-pop"), 600);
+    };
+    anim.onfinish = land; setTimeout(land, 720);
+  }
+
+  // ---- streak flame: breathing when lit, flare on increment ---
+  function streakUp(el) {
+    if (!el || reduce()) return;
+    el.classList.remove("fx-flare"); void el.offsetWidth; el.classList.add("fx-flare");
+    el.addEventListener("animationend", () => el.classList.remove("fx-flare"), { once: true });
+  }
+  function setStreakState(el, state) {
+    if (!el) return;
+    el.classList.toggle("fx-lit", state === "lit" && !reduce());
+  }
+
+  // ---- directional page-turn between stages (guide+work) ------
+  function pageTurn(el, dir, swapFn) {
+    if (!el) return;
+    if (reduce()) { swapFn(); return; }
+    const d = dir < 0 ? -1 : 1;
+    el.style.transition = "transform 0.2s var(--ease), opacity 0.2s var(--ease)";
+    el.style.transform = "translateY(" + d * 16 + "px)"; el.style.opacity = "0";
+    setTimeout(() => {
+      swapFn();
+      el.style.transition = "none";
+      el.style.transform = "translateY(" + -d * 18 + "px)"; el.style.opacity = "0";
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.transition = "transform 0.3s var(--ease), opacity 0.3s var(--ease)";
+        el.style.transform = "none"; el.style.opacity = "1";
+      }));
+    }, 200);
+  }
+
+  window.FX = { confetti, correct, wrong, floatPoints, moduleDone, celebrate, ignite, reveal, swap, runState, landed, coin, streakUp, setStreakState, pageTurn };
 })();

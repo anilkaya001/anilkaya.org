@@ -228,7 +228,7 @@ def _grab_figs():
       runBtn.textContent = label; runBtn.disabled = false;
       if (ok) {
         if (window.FX && window.FX.landed) window.FX.landed((figs && figs.children && figs.children.length) ? figs : out);
-        if (typeof onRun === "function") onRun();
+        if (typeof onRun === "function") onRun(runBtn);
       }
     }
     runBtn.addEventListener("click", doRun);
