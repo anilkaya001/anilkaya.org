@@ -17,8 +17,16 @@
   function renderNote() {
     const a = document.getElementById("account");
     if (!a) return;
+    const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
     a.classList.add("account--note");
-    a.innerHTML = '<span class="account__txt">Every topic is a staged, hands-on course that runs <b>real Python (statsmodels)</b> in your browser. Progress is saved on this device.</span><span class="gamify" data-gamify></span>';
+    const signedIn = window.Auth && window.Auth.isSignedIn();
+    const note = signedIn
+      ? "Signed in as <b>" + esc(window.Auth.user().name || window.Auth.user().email || "you") + "</b> — progress &amp; points sync across your devices."
+      : "Staged, hands-on courses that run <b>real Python (statsmodels)</b> in your browser. Sign in to sync across devices.";
+    a.innerHTML = '<span class="account__txt">' + note + "</span>" +
+      '<span class="account__right"><span class="gamify" data-gamify></span>' +
+      '<button class="btn btn--ghost" id="authBtn" type="button">' + (signedIn ? "Sign out" : "Sign in") + "</button></span>";
+    a.querySelector("#authBtn").addEventListener("click", () => (signedIn ? window.Auth.signOut() : window.Auth.signIn()));
     if (window.Gamify) window.Gamify.paint();
   }
 
@@ -59,5 +67,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     const grid = document.getElementById("labGrid");
     if (grid) { renderNote(); renderGrid(grid); }
+    document.addEventListener("iewt:auth-ready", renderNote);
+    document.addEventListener("iewt:synced", () => { renderNote(); if (grid) renderGrid(grid); });
   });
 })();

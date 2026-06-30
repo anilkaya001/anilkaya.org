@@ -15,3 +15,11 @@ CREATE TABLE IF NOT EXISTS progress (
   updated_at INTEGER,
   PRIMARY KEY (user_id, model_id)
 );
+
+CREATE TABLE IF NOT EXISTS stats (
+  user_id    TEXT PRIMARY KEY,
+  points     INTEGER DEFAULT 0,
+  streak     INTEGER DEFAULT 0,
+  last       TEXT,
+  updated_at INTEGER
+);

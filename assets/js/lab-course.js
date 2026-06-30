@@ -238,4 +238,5 @@
   const start = Math.max(0, Math.min(N - 1, parseInt((location.hash.match(/^#s(\d+)/) || [])[1], 10) || 0));
   render(start);
   if (window.Gamify) window.Gamify.paint();
+  document.addEventListener("iewt:synced", () => { render(cur); if (window.Gamify) window.Gamify.paint(); });
 })();

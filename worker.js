@@ -129,6 +129,32 @@ export default {
       return new Response("Method not allowed", { status: 405 });
     }
 
+    // --- Points & streak ---
+    if (path === "/api/stats") {
+      const user = await currentUser(request, env);
+      if (!user) return new Response("Unauthorized", { status: 401 });
+      if (request.method === "GET") {
+        let stats = { points: 0, streak: 0, last: null };
+        if (env.DB) {
+          const row = await env.DB.prepare("SELECT points, streak, last FROM stats WHERE user_id = ?").bind(user.id).first();
+          if (row) stats = { points: row.points || 0, streak: row.streak || 0, last: row.last || null };
+        }
+        return json({ stats });
+      }
+      if (request.method === "PUT") {
+        const b = await request.json().catch(() => null);
+        if (!b) return new Response("Bad request", { status: 400 });
+        if (env.DB) {
+          await env.DB.prepare(
+            "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, ?, ?, ?, ?) " +
+            "ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, streak=excluded.streak, last=excluded.last, updated_at=excluded.updated_at"
+          ).bind(user.id, b.points | 0, b.streak | 0, b.last || null, Date.now()).run();
+        }
+        return json({ ok: true });
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
     // --- Everything else: static assets (index.html, /lab/, css, js, ...) ---
     return env.ASSETS.fetch(request);
   },

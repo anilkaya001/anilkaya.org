@@ -38,6 +38,7 @@
 }
 .account__txt { color: var(--ink-dim); font-size: 0.95rem; }
 .account__txt b { color: var(--ink); }
+.account__right { display: inline-flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 
 /* ---- Model grid ---- */
 .lab-grid {
