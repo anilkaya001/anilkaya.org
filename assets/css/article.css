@@ -1,0 +1,140 @@
+/* =============================================================
+   article.css — reading layout for /articles/** pages
+   Pairs with base.css. Optimised for long-form, paper-like text.
+   ============================================================= */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem var(--pad);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  border-bottom: 1px solid var(--hairline);
+}
+.site-header__brand {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.site-header__brand:hover { color: var(--gold-celadon); }
+.site-nav { display: flex; gap: 1.4rem; font-size: 0.95rem; }
+.site-nav a { color: var(--ink-dim); text-decoration: none; }
+.site-nav a:hover { color: var(--gold-harvest); }
+
+.prose {
+  width: 100%;
+  max-width: var(--measure);
+  margin-inline: auto;
+  padding: clamp(2rem, 6vh, 4.5rem) var(--pad) 6rem;
+}
+
+.prose > * + * { margin-top: 1.15em; }
+
+.article-head { margin-bottom: 2.5rem; }
+.article-head__kicker {
+  font-size: 0.78rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-harvest);
+  margin-bottom: 0.6rem;
+}
+.article-head__meta {
+  color: var(--ink-faint);
+  font-size: 0.92rem;
+  font-variant-numeric: oldstyle-nums;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  line-height: 1.15;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+  margin-top: 1.9em;
+}
+.prose h1 { font-size: clamp(2.1rem, 1.4rem + 3vw, 3.4rem); margin-top: 0; }
+.prose h2 { font-size: clamp(1.55rem, 1.2rem + 1.6vw, 2.1rem); }
+.prose h3 { font-size: 1.3rem; }
+.prose :is(h2, h3) { color: var(--ink); }
+
+.prose p, .prose li { hyphens: auto; }
+.prose strong { font-weight: 700; }
+.prose em { font-style: italic; }
+
+.prose blockquote {
+  border-inline-start: 3px solid color-mix(in srgb, var(--gold-harvest) 70%, transparent);
+  padding-inline-start: 1.2rem;
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+.prose hr {
+  border: 0;
+  height: 1px;
+  background: var(--hairline);
+  margin-block: 2.4rem;
+}
+
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  padding: 0.12em 0.4em;
+}
+.prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+}
+.prose pre code { all: unset; white-space: pre; }
+
+.prose img, .prose video { border-radius: 10px; }
+.prose figure { margin-block: 1.8rem; }
+.prose figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.88rem;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+.prose th, .prose td {
+  text-align: start;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.prose thead th { color: var(--ink-dim); border-bottom-color: color-mix(in srgb, var(--gold-mystic) 50%, transparent); }
+
+.site-footer {
+  border-top: 1px solid var(--hairline);
+  padding: 2rem var(--pad);
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 0.88rem;
+}
+
+/* Articles index listing */
+.post-list { list-style: none; padding: 0; }
+.post-list li + li { margin-top: 1.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
+.post-list a { text-decoration: none; color: var(--ink); display: block; }
+.post-list a:hover .post-list__title { color: var(--gold-harvest); }
+.post-list__title { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.01em; }
+.post-list__meta { color: var(--ink-faint); font-size: 0.9rem; margin-top: 0.25rem; }
+.post-list__excerpt { color: var(--ink-dim); margin-top: 0.4rem; }

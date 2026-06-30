@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  ARTICLE TEMPLATE
+  ----------------
+  To publish a new article:
+    1. Copy this folder:  cp -r articles/_template articles/my-article-slug
+    2. Edit the <title>, <meta>, canonical URL, and the <article> body below.
+    3. Add a <li> linking to /articles/my-article-slug/ in articles/index.html.
+    4. (Optional) add the URL to sitemap.xml.
+  All styling comes from /assets/css/base.css + /assets/css/article.css.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>Article title — In Econometrics We Trust</title>
+  <meta name="description" content="One-sentence summary of the article.">
+  <meta name="theme-color" content="#0a0a08">
+  <meta name="color-scheme" content="dark">
+  <link rel="canonical" href="https://anilkaya.org/articles/_template/">
+
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Article title">
+  <meta property="og:description" content="One-sentence summary of the article.">
+  <meta property="og:url" content="https://anilkaya.org/articles/_template/">
+  <meta property="og:site_name" content="anilkaya.org">
+
+  <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/fonts/LM-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css">
+  <link rel="stylesheet" href="/assets/css/article.css">
+</head>
+
+<body>
+  <header class="site-header">
+    <a class="site-header__brand" href="/">In Econometrics We Trust</a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/articles/">Articles</a>
+    </nav>
+  </header>
+
+  <main class="prose">
+    <article>
+      <div class="article-head">
+        <p class="article-head__kicker">Econometrics</p>
+        <h1>Article title</h1>
+        <p class="article-head__meta">
+          <time datetime="2026-01-01">1 January 2026</time> · by Anıl Kaya
+        </p>
+      </div>
+
+      <p>Opening paragraph. Replace this with your writing. Body copy is set in
+      Latin Modern at a comfortable measure for sustained reading.</p>
+
+      <h2>A section heading</h2>
+      <p>Use <strong>strong</strong> and <em>emphasis</em> as needed. Inline code
+      looks like <code>y = Xβ + ε</code>, and block code is supported:</p>
+
+      <pre><code>import statsmodels.api as sm
+model = sm.OLS(y, sm.add_constant(X)).fit()
+print(model.summary())</code></pre>
+
+      <blockquote>A pull-quote or notable remark.</blockquote>
+
+      <p>Continue with figures, tables, and further sections as the piece requires.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <p>© <span id="y">2026</span> Anıl Kaya · <a href="/">anilkaya.org</a></p>
+  </footer>
+  <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+</body>
+</html>

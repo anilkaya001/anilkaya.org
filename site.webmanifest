@@ -1,0 +1,18 @@
+{
+  "name": "In Econometrics We Trust",
+  "short_name": "Econometrics",
+  "description": "In Econometrics We Trust — the personal site of Anıl Kaya.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#060604",
+  "theme_color": "#0a0a08",
+  "icons": [
+    {
+      "src": "/assets/img/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}
