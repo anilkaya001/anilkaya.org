@@ -35,6 +35,9 @@
     d.add(i); a[topic.id] = { done: [...d] };
     localStorage.setItem(PKEY, JSON.stringify(a));
     paintProgress();
+    const pts = ({ read: 5, code: 10, interactive: 10, quiz: 15 })[stages[i].type] || 5;
+    if (window.Gamify) window.Gamify.award(pts);
+    if (window.Auth && typeof window.Auth.pushProgress === "function") window.Auth.pushProgress(topic.id, [...d]);
   }
   const pct = () => Math.round((100 * doneSet().size) / N);
 
@@ -49,7 +52,7 @@
         '<a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
         "<h1>" + esc(topic.title) + "</h1>" +
         '<div class="course-progress"><div class="progress"><div class="progress__bar" id="cBar"></div></div>' +
-        '<span class="progress-label" id="cPctL"></span></div>' +
+        '<span class="progress-label" id="cPctL"></span><span class="gamify" data-gamify></span></div>' +
       "</div>" +
       '<div class="stage" id="cStage"></div>' +
       '<div class="course-foot">' +
@@ -163,6 +166,24 @@
     return quiz;
   }
 
+  // ---- Draggable horizontal splitter (persisted) -------------
+  function wireResize(splitEl, handle) {
+    const saved = parseFloat(localStorage.getItem("iewt:splitW"));
+    if (saved >= 25 && saved <= 72) splitEl.style.setProperty("--guideW", saved + "%");
+    let dragging = false;
+    const move = (e) => {
+      if (!dragging) return;
+      const r = splitEl.getBoundingClientRect();
+      let p = ((e.clientX - r.left) / r.width) * 100;
+      p = Math.max(25, Math.min(72, p));
+      splitEl.style.setProperty("--guideW", p + "%");
+      localStorage.setItem("iewt:splitW", p.toFixed(1));
+    };
+    handle.addEventListener("pointerdown", (e) => { dragging = true; handle.classList.add("drag"); handle.setPointerCapture(e.pointerId); e.preventDefault(); });
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", (e) => { dragging = false; handle.classList.remove("drag"); try { handle.releasePointerCapture(e.pointerId); } catch {} });
+  }
+
   // ---- Render one stage ---------------------------------------
   let cur = 0;
   function render(i) {
@@ -177,7 +198,15 @@
     const body = el("div", work ? "stage__split" : "stage__solo");
     const guide = el("div", "stage__guide step--read", guideHTML(st));
     body.appendChild(guide);
-    if (work) { const w = el("div", "stage__work"); w.appendChild(work); body.appendChild(w); }
+    if (work) {
+      const handle = el("div", "stage__handle");
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-orientation", "vertical");
+      handle.title = "Drag to resize";
+      const w = el("div", "stage__work"); w.appendChild(work);
+      body.append(handle, w);
+      wireResize(body, handle);
+    }
     stageEl.appendChild(body);
 
     if (st.type === "read") mark(i);          // reading a page completes it
@@ -208,4 +237,5 @@
 
   const start = Math.max(0, Math.min(N - 1, parseInt((location.hash.match(/^#s(\d+)/) || [])[1], 10) || 0));
   render(start);
+  if (window.Gamify) window.Gamify.paint();
 })();

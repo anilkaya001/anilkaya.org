@@ -117,12 +117,29 @@
 .cell__run:disabled { opacity: 0.5; cursor: progress; }
 .cell__reset { padding: 0.4rem 0.7rem; border-radius: 8px; cursor: pointer; font-size: 0.82rem;
   color: var(--ink-dim); background: transparent; border: 1px solid var(--hairline); }
-.cell__editor {
-  width: 100%; min-height: 3rem; resize: vertical; border: 0; outline: 0;
-  padding: 0.9rem 1rem; tab-size: 4;
+.cell__editwrap { position: relative; }
+.cell__hl, .cell__editor {
+  margin: 0; border: 0; padding: 0.9rem 1rem; tab-size: 4;
   font-family: var(--font-mono); font-size: 0.86rem; line-height: 1.55;
-  color: #f3ead0; background: transparent; white-space: pre; overflow-wrap: normal; overflow-x: auto;
+  letter-spacing: 0; white-space: pre; overflow-wrap: normal;
 }
+.cell__hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: #f3ead0; background: transparent; }
+.cell__editor {
+  position: relative; display: block; width: 100%; min-height: 3rem; resize: vertical;
+  color: transparent; background: transparent; caret-color: var(--gold-harvest);
+  outline: 0; overflow: auto; z-index: 1;
+}
+.cell__editor::selection { background: color-mix(in srgb, var(--gold-harvest) 32%, transparent); }
+/* Python token colours */
+.tk-c { color: #6f6b57; font-style: italic; }
+.tk-s { color: #a7c489; }
+.tk-k { color: #e8913a; }
+.tk-b { color: #d8b86a; }
+.tk-f { color: #c9c6ac; }
+.tk-n { color: #e0c98a; }
+/* Significance colouring in console output */
+.cell__out .sig { color: #7fd17f; font-weight: 700; }
+.cell__out .insig { color: #ff9d6e; font-weight: 700; }
 .cell__out {
   font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
   padding: 0 1rem; max-height: 26rem; overflow: auto; white-space: pre-wrap; color: var(--ink-dim);
@@ -206,10 +223,26 @@
 
 .stage { margin-top: 1.6rem; scroll-margin-top: 4.8rem; }
 .stage__kicker { font-size: 0.74rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-harvest); margin-bottom: 1rem; }
-.stage__split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; align-items: start; }
+.stage__split { display: flex; align-items: stretch; }
 .stage__solo { max-width: 46rem; }
+.stage__guide { flex: 0 0 var(--guideW, 48%); min-width: 0; padding-right: 0.7rem; }
 .stage__guide > * + * { margin-top: 1.05em; }
-.stage__work { position: sticky; top: 4.4rem; min-width: 0; }
+.stage__work { flex: 1 1 0; min-width: 0; padding-left: 0.7rem; }
+.stage__handle { flex: 0 0 14px; align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+.stage__handle::before { content: ""; position: absolute; inset: 0 6px; border-radius: 2px; background: var(--hairline); transition: background 0.2s; }
+.stage__handle:hover::before, .stage__handle.drag::before { background: color-mix(in srgb, var(--gold-harvest) 65%, transparent); }
+@media (max-width: 900px) {
+  .stage__split { flex-direction: column; }
+  .stage__guide { flex-basis: auto; padding-right: 0; }
+  .stage__work { padding-left: 0; margin-top: 1.2rem; }
+  .stage__handle { display: none; }
+}
+
+/* Points & streak badge */
+.gamify { display: inline-flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; }
+.gamify span { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.82rem; padding: 0.28rem 0.65rem; border-radius: 999px; border: 1px solid var(--hairline); background: var(--bg-elev); white-space: nowrap; }
+.gamify .gpts { color: var(--gold-celadon); }
+.gamify .gstreak { color: var(--gold-harvest); }
 
 .course-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 2.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
 .course-foot__pos { font-size: 0.85rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }

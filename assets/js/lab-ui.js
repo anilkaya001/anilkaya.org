@@ -18,7 +18,8 @@
     const a = document.getElementById("account");
     if (!a) return;
     a.classList.add("account--note");
-    a.innerHTML = '<span class="account__txt">Every topic is a staged, hands-on course that runs <b>real Python (statsmodels)</b> in your browser. Your progress is saved on this device as you go.</span>';
+    a.innerHTML = '<span class="account__txt">Every topic is a staged, hands-on course that runs <b>real Python (statsmodels)</b> in your browser. Progress is saved on this device.</span><span class="gamify" data-gamify></span>';
+    if (window.Gamify) window.Gamify.paint();
   }
 
   function renderGrid(grid) {
