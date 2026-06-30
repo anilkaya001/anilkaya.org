@@ -1,67 +1,66 @@
-# Deploy — Phase 2 (Cloudflare Pages + D1 + Google sign-in)
+# Deploy — Phase 2 (Cloudflare Worker + D1 + Google sign-in)
 
-The site runs fine today on **GitHub Pages** (static, on-device progress). To turn
-on **Google accounts + cross-device progress**, deploy this same repo to
-**Cloudflare Pages**, which runs the `functions/` and binds the `D1` database.
-None of this can be done from the agent sandbox — it needs your Cloudflare and
-Google accounts. Steps:
+The site runs on **GitHub Pages** today (static, on-device progress). To turn on
+**Google accounts + cross-device progress**, deploy this repo as a **Cloudflare
+Worker with Static Assets** (`worker.js` serves the site via the `ASSETS`
+binding and handles `/auth/*` + `/api/*`, backed by D1). GitHub Pages keeps
+working untouched until you move the domain in the last step.
 
 ## 1. D1 database — ✅ already done
-The database **`iewt`** is already created on your Cloudflare account and the
-schema (`users`, `progress`) is applied. Its id is already in `wrangler.toml`:
-`73c8c626-e971-44da-b8c1-21d6062cb9f2`. Nothing to do here.
+Database **`iewt`** is created on your Cloudflare account and migrated
+(`users`, `progress`). Its id is already in `wrangler.toml`
+(`73c8c626-e971-44da-b8c1-21d6062cb9f2`). The `[[d1_databases]]` binding is
+applied automatically by `wrangler deploy`.
 
-> To recreate from scratch: `wrangler d1 create iewt` then
-> `wrangler d1 execute iewt --remote --file=./schema.sql`.
-
-## 2. Create the Pages project (Git integration = automatic deploys)
-- Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git**.
-- Pick `anilkaya001/anilkaya.org`, production branch **main**.
-- Build command: **(none)**. Build output directory: **`/`**.
-- Every push to `main` now deploys production; every branch/PR gets its own
-  **preview deployment** in parallel.
-- **Settings → Functions → D1 database bindings:** add `DB` → `iewt`.
+## 2. Create the Worker (Git-connected)
+- **Workers & Pages → Create → Workers → Connect to Git** (or *Import a
+  repository*) → select `anilkaya001/anilkaya.org`.
+- **Worker name:** `anilkaya-org` (must match `name` in `wrangler.toml`).
+- **Build command:** *(empty)*  ·  **Deploy command:** `npx wrangler deploy`
+  ·  **Root directory:** `/`
+- **Save and Deploy.** First deploy publishes the site + Worker to a
+  `*.workers.dev` URL. (Sign-in won't work yet — no Google keys.)
 
 ## 3. Google OAuth client
 - Google Cloud Console → **APIs & Services → Credentials → Create OAuth client
   ID → Web application**.
-- Authorized redirect URIs:
+- **Authorized redirect URIs** (add both):
+  - `https://<your-worker>.workers.dev/auth/callback`
   - `https://anilkaya.org/auth/callback`
-  - (optional, for previews) `https://<project>.pages.dev/auth/callback`
 - Copy the **Client ID** and **Client secret**.
 
-## 4. Set environment variables (Pages → Settings → Environment variables)
-| Name | Value |
-|------|-------|
-| `GOOGLE_CLIENT_ID` | from step 3 |
-| `GOOGLE_CLIENT_SECRET` | from step 3 (mark **encrypted**) |
-| `SESSION_SECRET` | any long random string (mark **encrypted**) |
+## 4. Add secrets (Worker → Settings → Variables and Secrets)
+| Name | Type | Value |
+|------|------|-------|
+| `GOOGLE_CLIENT_ID` | Plaintext | from step 3 |
+| `GOOGLE_CLIENT_SECRET` | **Secret** | from step 3 |
+| `SESSION_SECRET` | **Secret** | a long random string |
 
-`BASE_URL` is optional — leave it unset and the functions use the request's
-own origin (works on `*.pages.dev` and `anilkaya.org` alike).
+Then **Deploy** again (or wait for the next push) so the Worker picks them up.
 
-## 5. Move the domain to Pages
-In the Pages project → **Custom domains → Set up a domain → `anilkaya.org`**.
-Because the zone is already on Cloudflare, DNS updates automatically (this
-supersedes the GitHub Pages A records). Add `www` if you want it too.
+## 5. Test on the workers.dev URL
+Open `https://<your-worker>.workers.dev/lab/` → **Sign in** → Google → you land
+back signed in. A row appears in the D1 `users` table.
 
-## 6. Verify
-Open `https://anilkaya.org/lab/`, click **Sign in** → Google → you return signed
-in; finishing a lesson step writes to D1 and syncs across devices.
+## 6. Move the domain (last step, switches off GitHub Pages)
+Worker → **Settings → Domains & Routes → Add → Custom domain → `anilkaya.org`**
+(add `www` too if you like). Cloudflare updates DNS automatically — this
+supersedes the GitHub Pages A records, so `anilkaya.org` now serves from the
+Worker with sign-in live.
 
 ---
 
-### Local development
+### Local dev
 ```bash
 echo 'GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
-SESSION_SECRET=dev-secret
-BASE_URL=http://localhost:8788' > .dev.vars       # git-ignored
-wrangler pages dev . --d1 DB=iewt
+SESSION_SECRET=dev-secret' > .dev.vars     # git-ignored
+npx wrangler dev
 ```
 
 ### Notes
-- `functions/`, `wrangler.toml`, `schema.sql`, `shared/` are inert on GitHub
-  Pages — they only activate on Cloudflare Pages. The frontend (`auth.js`)
-  auto-detects the backend, so nothing breaks in the meantime.
-- Sessions are stateless signed cookies (HMAC), so no session store is needed.
+- `worker.js`, `wrangler.toml`, `shared/`, `schema.sql`, `.assetsignore` are
+  inert on GitHub Pages — they only matter on Cloudflare. `auth.js` auto-detects
+  the backend and falls back to on-device when absent, so nothing breaks
+  in the meantime.
+- Sessions are stateless signed cookies (HMAC) — no session store needed.

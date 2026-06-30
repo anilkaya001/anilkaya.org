@@ -64,12 +64,12 @@ home grid picks it up automatically.
 ## Accounts — Phase 2 (Google sign-in) — scaffolded
 
 The full backend is already in the repo and **inert on GitHub Pages**; it
-activates when deployed to **Cloudflare Pages**:
+activates when deployed as a **Cloudflare Worker (Static Assets + D1)**:
 
-- `functions/auth/*` — Google OAuth flow (`/auth/google`, `/auth/callback`, `/auth/logout`)
-- `functions/api/me`, `functions/api/progress` — session + progress API (D1)
-- `functions/_middleware.js`, `shared/session.js` — stateless signed-cookie sessions
-- `schema.sql`, `wrangler.toml` — D1 database + Pages config
+- `worker.js` — serves the static site via the `ASSETS` binding and handles
+  `/auth/google`, `/auth/callback`, `/auth/logout`, `/api/me`, `/api/progress`
+- `shared/session.js` — stateless signed-cookie sessions (HMAC)
+- `schema.sql`, `wrangler.toml`, `.assetsignore` — D1 + Worker config
 
 `auth.js` auto-detects the backend (falls back to on-device when absent), so the
 site keeps working either way. **Deployment steps are in [`DEPLOY.md`](./DEPLOY.md).**

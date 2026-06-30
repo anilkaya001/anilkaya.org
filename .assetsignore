@@ -1,0 +1,13 @@
+# Keep server code, config, and repo metadata out of the public static bundle.
+.git/
+.github/
+node_modules/
+shared/
+functions/
+worker.js
+wrangler.toml
+.assetsignore
+.gitignore
+.dev.vars
+schema.sql
+*.md

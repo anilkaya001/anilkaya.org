@@ -1,22 +1,25 @@
-# Cloudflare Pages config (used when this repo is deployed to Cloudflare Pages).
-# Has NO effect on the current GitHub Pages deployment.
+# Cloudflare Worker (Static Assets + API). Used when deployed to Cloudflare
+# via `wrangler deploy`. Has NO effect on the current GitHub Pages site.
 
 name = "anilkaya-org"
+main = "worker.js"
 compatibility_date = "2024-11-01"
-pages_build_output_dir = "."
 
-# D1 binding — database "iewt" already created and migrated (schema.sql applied).
+# Serve the repo root as the static site; .assetsignore keeps server/config
+# files out of the public bundle. The Worker (worker.js) only runs for routes
+# that are not static assets (i.e. /auth/* and /api/*).
+[assets]
+directory = "."
+binding = "ASSETS"
+not_found_handling = "404-page"
+
+# D1 — database "iewt" is already created and migrated (schema.sql applied).
 [[d1_databases]]
 binding = "DB"
 database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 
-# BASE_URL is intentionally NOT set, so the auth functions use the request's
-# own origin — works on both <project>.pages.dev and anilkaya.org with no edits.
-# (Set it only if you ever want to force one canonical origin.)
-
-# Secrets — DO NOT put these here. Set them in the Pages dashboard
-# (Settings → Environment variables, encrypted) or via:
-#   wrangler pages secret put GOOGLE_CLIENT_ID
-#   wrangler pages secret put GOOGLE_CLIENT_SECRET
-#   wrangler pages secret put SESSION_SECRET   # any long random string
+# Secrets are NOT stored here. Set them in the Worker dashboard
+# (Settings → Variables and Secrets) or via `wrangler secret put`:
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET
+# BASE_URL is intentionally unset — the Worker uses the request's own origin.
