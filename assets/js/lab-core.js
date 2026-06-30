@@ -17,14 +17,25 @@
 import matplotlib
 matplotlib.use("AGG")
 import matplotlib.pyplot as plt
+# Match the website's typography (Computer Modern == Latin Modern's basis,
+# bundled with matplotlib so it needs no download) and a clean, gridless look.
 plt.rcParams.update({
     "figure.facecolor": "#0a0a08", "axes.facecolor": "#0a0a08",
     "savefig.facecolor": "#0a0a08", "savefig.edgecolor": "#0a0a08",
     "text.color": "#ece8d8", "axes.labelcolor": "#ece8d8",
     "axes.titlecolor": "#ece8d8", "xtick.color": "#b7b298",
     "ytick.color": "#b7b298", "axes.edgecolor": "#6f6b57",
-    "grid.color": "#221f17", "axes.grid": True, "grid.alpha": 0.4,
-    "font.size": 11, "figure.dpi": 120,
+    "axes.grid": False,                       # gridless backgrounds
+    "axes.spines.top": False, "axes.spines.right": False,
+    "axes.linewidth": 0.8,
+    "font.family": "serif",
+    "font.serif": ["CMU Serif", "Latin Modern Roman", "cmr10", "DejaVu Serif"],
+    "mathtext.fontset": "cm", "axes.unicode_minus": False,
+    "font.size": 12, "axes.titlesize": 13, "axes.labelsize": 12,
+    "legend.fontsize": 10.5, "legend.frameon": False,
+    "figure.dpi": 130, "figure.figsize": (7.0, 4.2),
+    "lines.linewidth": 1.9, "lines.markersize": 5,
+    "patch.linewidth": 0.8,
 })
 import io as _io, base64 as _b64
 import numpy as np, pandas as pd
@@ -33,7 +44,7 @@ def _grab_figs():
     for n in plt.get_fignums():
         f = plt.figure(n)
         b = _io.BytesIO()
-        f.savefig(b, format="png", bbox_inches="tight")
+        f.savefig(b, format="png", bbox_inches="tight", pad_inches=0.28)
         out.append(_b64.b64encode(b.getvalue()).decode("ascii"))
     plt.close("all")
     return out

@@ -7,7 +7,8 @@
 
   const canvas = document.getElementById("field");
   if (!canvas) return;
-  const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+  // NB: no `desynchronized` — it can leave the canvas blank on iOS Safari.
+  const ctx = canvas.getContext("2d", { alpha: false });
 
   const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -232,10 +233,12 @@
     seed();
 
     let rt;
-    window.addEventListener("resize", () => {
-      clearTimeout(rt);
-      rt = setTimeout(resize, 150);
-    }, { passive: true });
+    const onResize = () => { clearTimeout(rt); rt = setTimeout(resize, 150); };
+    window.addEventListener("resize", onResize, { passive: true });
+    // iOS Safari fires this (not always a plain resize) on rotation.
+    window.addEventListener("orientationchange", () => setTimeout(resize, 250), { passive: true });
+    // The visual viewport changes as Safari's toolbar collapses/expands.
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize, { passive: true });
 
     if (REDUCE) {
       // Static, motion-free render for users who prefer reduced motion.

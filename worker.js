@@ -6,8 +6,48 @@
    ============================================================= */
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 
+// --- Content Security Policy ---------------------------------------------
+// Strict by default. Pyodide (the in-browser Python runtime) is loaded from
+// jsDelivr and needs eval/wasm; everything else is same-origin. No inline
+// scripts exist in the site, so script-src omits 'unsafe-inline'.
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net",
+  "connect-src 'self' https://cdn.jsdelivr.net",
+  "worker-src 'self' blob:",
+  "form-action 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": CSP,
+  "Strict-Transport-Security": "max-age=31536000",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "X-Frame-Options": "DENY",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
+};
+
+// Re-emit a (possibly immutable) response with the security headers applied.
+// Used for static-asset responses — the documents where CSP/clickjacking matter.
+function secure(resp) {
+  const headers = new Headers(resp.headers);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+}
+
 const json = (obj, status = 200) =>
-  new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  new Response(JSON.stringify(obj), {
+    status,
+    headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" },
+  });
 
 async function currentUser(request, env) {
   const token = getCookie(request, "session");
@@ -156,6 +196,6 @@ export default {
     }
 
     // --- Everything else: static assets (index.html, /lab/, css, js, ...) ---
-    return env.ASSETS.fetch(request);
+    return secure(await env.ASSETS.fetch(request));
   },
 };
