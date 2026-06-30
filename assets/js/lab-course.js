@@ -37,7 +37,12 @@
     paintProgress();
     const pts = ({ read: 5, code: 10, interactive: 10, quiz: 15 })[stages[i].type] || 5;
     if (window.Gamify) window.Gamify.award(pts);
+    if (window.FX) window.FX.floatPoints(pts, root.querySelector("[data-gamify]"));
     if (window.Auth && typeof window.Auth.pushProgress === "function") window.Auth.pushProgress(topic.id, [...d]);
+    // Module finished? quiet cheer. Whole topic? big one (also handled at Finish).
+    const mi = stages[i].mi;
+    const modIdxs = stages.map((s, k) => (s.mi === mi ? k : -1)).filter((k) => k >= 0);
+    if (window.FX && modIdxs.every((k) => d.has(k))) window.FX.moduleDone(root.querySelector(".course-nav__mod.is-current"));
   }
   const pct = () => Math.round((100 * doneSet().size) / N);
 
@@ -103,24 +108,24 @@
     return "<h3>" + esc(st.title || "") + "</h3>" + (st.note ? "<p>" + st.note + "</p>" : "");
   }
 
-  function buildWork(st, i) {
+  function buildWork(st, i, figsEl) {
     if (st.type === "code") {
-      return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: () => mark(i) }).el;
+      return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: () => mark(i), figsEl }).el;
     }
-    if (st.type === "interactive") return buildInteractive(st, i);
+    if (st.type === "interactive") return buildInteractive(st, i, figsEl);
     if (st.type === "quiz") return buildQuiz(st, i);
     return null;
   }
 
-  function buildInteractive(st, i) {
+  function buildInteractive(st, i, figsEl) {
     const cell = el("div", "cell cell--interactive");
     const params = {}; st.params.forEach((p) => (params[p.name] = p.value));
     const bar = el("div", "cell__bar");
     bar.innerHTML = '<span class="cell__dot"></span><span class="cell__title">interactive</span><button class="cell__run" type="button">▶ Launch</button>';
     const body = el("div", "interactive");
     const controls = el("div", "interactive__controls");
-    const out = el("div", "cell__out"); const figs = el("div", "cell__figs");
-    const output = el("div", "interactive__output"); output.append(figs, out);
+    const out = el("div", "cell__out"); const figs = figsEl || el("div", "cell__figs");
+    const output = el("div", "interactive__output"); if (figsEl) output.append(out); else output.append(figs, out);
     st.params.forEach((p) => {
       const row = el("label", "control");
       row.innerHTML = '<span class="control__label">' + esc(p.label) + ' <b class="control__val"></b></span>' +
@@ -157,11 +162,21 @@
       '<div class="quiz__feedback" role="status"></div>';
     const fb = quiz.querySelector(".quiz__feedback");
     quiz.querySelector(".quiz__hint").addEventListener("click", () => { fb.className = "quiz__feedback hint"; fb.textContent = "Hint: " + st.hint; });
-    quiz.querySelector(".quiz__check").addEventListener("click", () => {
+    const checkBtn = quiz.querySelector(".quiz__check");
+    checkBtn.addEventListener("click", () => {
       const sel = quiz.querySelector('input[name="' + name + '"]:checked');
-      if (!sel) { fb.className = "quiz__feedback hint"; fb.textContent = "Pick an answer first."; return; }
-      if (+sel.value === st.answer) { fb.className = "quiz__feedback ok"; fb.textContent = "Correct. " + st.explain; mark(i); }
-      else { fb.className = "quiz__feedback err"; fb.textContent = "Not quite — try again, or tap Hint."; }
+      if (!sel) { fb.className = "quiz__feedback hint"; fb.textContent = "Pick an answer first."; if (window.FX) window.FX.wrong(checkBtn); return; }
+      const chosen = sel.closest(".quiz__choice");
+      if (+sel.value === st.answer) {
+        fb.className = "quiz__feedback ok"; fb.textContent = "Correct. " + st.explain;
+        quiz.classList.add("is-solved"); if (chosen) chosen.classList.add("is-correct");
+        if (window.FX) window.FX.correct(checkBtn);
+        mark(i);
+      } else {
+        fb.className = "quiz__feedback err"; fb.textContent = "Not quite — try again, or tap Hint.";
+        if (chosen) { chosen.classList.add("is-wrong"); setTimeout(() => chosen.classList.remove("is-wrong"), 700); }
+        if (window.FX) window.FX.wrong(quiz);
+      }
     });
     return quiz;
   }
@@ -170,18 +185,22 @@
   function wireResize(splitEl, handle) {
     const saved = parseFloat(localStorage.getItem("iewt:splitW"));
     if (saved >= 25 && saved <= 72) splitEl.style.setProperty("--guideW", saved + "%");
-    let dragging = false;
-    const move = (e) => {
-      if (!dragging) return;
+    let dragging = false, raf = 0, lastX = 0, lastP = saved;
+    const apply = () => {
+      raf = 0;
       const r = splitEl.getBoundingClientRect();
-      let p = ((e.clientX - r.left) / r.width) * 100;
-      p = Math.max(25, Math.min(72, p));
-      splitEl.style.setProperty("--guideW", p + "%");
-      localStorage.setItem("iewt:splitW", p.toFixed(1));
+      let p = ((lastX - r.left) / r.width) * 100;
+      lastP = Math.max(25, Math.min(72, p));
+      splitEl.style.setProperty("--guideW", lastP + "%");
     };
+    const move = (e) => { if (!dragging) return; lastX = e.clientX; if (!raf) raf = requestAnimationFrame(apply); };
     handle.addEventListener("pointerdown", (e) => { dragging = true; handle.classList.add("drag"); handle.setPointerCapture(e.pointerId); e.preventDefault(); });
     handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", (e) => { dragging = false; handle.classList.remove("drag"); try { handle.releasePointerCapture(e.pointerId); } catch {} });
+    handle.addEventListener("pointerup", (e) => {
+      dragging = false; handle.classList.remove("drag");
+      if (lastP >= 25 && lastP <= 72) localStorage.setItem("iewt:splitW", lastP.toFixed(1));  // persist once, not per move
+      try { handle.releasePointerCapture(e.pointerId); } catch {}
+    });
   }
 
   // ---- Render one stage ---------------------------------------
@@ -189,7 +208,11 @@
   function render(i) {
     cur = i;
     const st = stages[i];
-    const work = (st.type !== "read") ? buildWork(st, i) : null;
+    // Charts render in the LEFT guide column (under the prompt) so a tall code
+    // cell doesn't push them far down the page.
+    const figsEl = st.type === "code" ? el("div", "stage__figs")
+      : st.type === "interactive" ? el("div", "stage__figs stage__figs--live") : null;
+    const work = (st.type !== "read") ? buildWork(st, i, figsEl) : null;
 
     stageEl.innerHTML = "";
     const kicker = el("div", "stage__kicker", esc(st.mTitle) + " &middot; step " + (st.si + 1));
@@ -197,6 +220,7 @@
 
     const body = el("div", work ? "stage__split" : "stage__solo");
     const guide = el("div", "stage__guide step--read", guideHTML(st));
+    if (figsEl) guide.appendChild(figsEl);
     body.appendChild(guide);
     if (work) {
       const handle = el("div", "stage__handle");
@@ -219,7 +243,11 @@
 
   function go(i) {
     if (i < 0 || i >= N) {
-      if (i >= N) { if (window.toast) window.toast("Topic complete — superb work. ✓"); location.href = "/lab/"; }
+      if (i >= N) {
+        if (window.FX) window.FX.celebrate("Topic complete — superb work.");
+        else if (window.toast) window.toast("Topic complete — superb work. ✓");
+        setTimeout(() => { location.href = "/lab/"; }, window.FX ? 1900 : 0);
+      }
       return;
     }
     history.replaceState(null, "", "#s" + i);

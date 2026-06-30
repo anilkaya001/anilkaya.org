@@ -31,6 +31,7 @@ plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["CMU Serif", "Latin Modern Roman", "cmr10", "DejaVu Serif"],
     "mathtext.fontset": "cm", "axes.unicode_minus": False,
+    "axes.formatter.use_mathtext": True,     # silence cmr10+mathtext warning; nicer tick numerals
     "font.size": 12, "axes.titlesize": 13, "axes.labelsize": 12,
     "legend.fontsize": 10.5, "legend.frameon": False,
     "figure.dpi": 130, "figure.figsize": (7.0, 4.2),
@@ -97,8 +98,11 @@ def _grab_figs():
       // statsmodels coefficient row: label + 6 floats; the 4th is P>|t|
       const m = line.match(/^(\s*\S.*?\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s*)$/);
       if (m) {
-        return m[1] + m[2] + m[3] + m[4] + m[5] + m[6] + m[7] +
-          '<span class="' + sig(m[8]) + '">' + m[8] + "</span>" + m[9] + m[10] + m[11] + m[12] + m[13];
+        const cls = sig(m[8]);
+        const row = m[1] + m[2] + m[3] + m[4] + m[5] + m[6] + m[7] +
+          '<span class="' + cls + '">' + m[8] + "</span>" + m[9] + m[10] + m[11] + m[12] + m[13];
+        // wrap significant rows so FX.ignite can sweep them
+        return cls === "sig" ? '<span class="sigrow">' + row + "</span>" : row;
       }
       return line
         .replace(/(Prob[^:]*:\s*)([0-9.]+(?:[eE][+-]?\d+)?)/g, (_, a, b) => a + '<span class="' + sig(b) + '">' + b + "</span>")
@@ -156,21 +160,38 @@ def _grab_figs():
     try {
       await py.runPythonAsync(code);
       stream.innerHTML = colorize(buf);                 // colour p-values once complete
+      if (window.FX && window.FX.ignite) window.FX.ignite(stream);   // significant rows "resolve"
       if (figs) {
         const proxy = await py.runPythonAsync("_grab_figs()");
         const arr = proxy.toJs(); proxy.destroy();
-        for (const b64 of arr) { const img = document.createElement("img"); img.loading = "lazy"; img.alt = "Model output figure"; img.src = "data:image/png;base64," + b64; figs.appendChild(img); }
+        renderFigs(figs, arr);
       }
       return true;
     } catch (e) {
       stream.innerHTML = colorize(buf);
+      if (window.FX && window.FX.ignite) window.FX.ignite(stream);
       const er = document.createElement("span"); er.className = "err"; er.textContent = (buf ? "\n" : "") + (e && e.message ? e.message : String(e)); out.appendChild(er);
       return false;
     } finally { py.setStdout(); py.setStderr(); }
   }
 
+  // Render matplotlib PNGs: live (slider) figures crossfade so the
+  // before/after delta is visible; first-arrival figures "develop".
+  function renderFigs(figs, arr) {
+    const mk = (b64) => { const img = document.createElement("img"); img.loading = "lazy"; img.alt = "Model output figure"; img.src = "data:image/png;base64," + b64; return img; };
+    const live = figs.classList && figs.classList.contains("stage__figs--live");
+    if (live && arr.length === 1 && window.FX && window.FX.swap) { window.FX.swap(figs, mk(arr[0])); return; }
+    figs.innerHTML = "";
+    arr.forEach((b64, k) => {
+      const img = mk(b64); figs.appendChild(img);
+      if (!live && window.FX && window.FX.reveal) {
+        (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(() => window.FX.reveal(img, { stagger: k }));
+      }
+    });
+  }
+
   // ---- Editable, highlighted, runnable code cell --------------
-  function makeCell({ code = "", title = "python", onRun } = {}) {
+  function makeCell({ code = "", title = "python", onRun, figsEl = null } = {}) {
     const cell = document.createElement("div"); cell.className = "cell";
     const bar = document.createElement("div"); bar.className = "cell__bar";
     bar.innerHTML = '<span class="cell__dot"></span><span class="cell__title"></span>' +
@@ -191,16 +212,24 @@ def _grab_figs():
     wrap.append(pre, editor);
 
     const out = document.createElement("div"); out.className = "cell__out";
-    const figs = document.createElement("div"); figs.className = "cell__figs";
-    cell.append(bar, wrap, out, figs);
+    // Figures can render into an external target (e.g. the left guide column)
+    // so a tall code cell doesn't push the chart far down the page.
+    const figs = figsEl || document.createElement("div");
+    if (figsEl) { cell.append(bar, wrap, out); }
+    else { figs.className = "cell__figs"; cell.append(bar, wrap, out, figs); }
 
     const runBtn = bar.querySelector(".cell__run");
     const resetBtn = bar.querySelector(".cell__reset");
     async function doRun() {
       runBtn.disabled = true; const label = runBtn.textContent; runBtn.textContent = "Running…";
+      if (window.FX && window.FX.runState) window.FX.runState(runBtn, "busy");
       const ok = await run(editor.value, { out, figs });
+      if (window.FX && window.FX.runState) window.FX.runState(runBtn, "done");
       runBtn.textContent = label; runBtn.disabled = false;
-      if (ok && typeof onRun === "function") onRun();
+      if (ok) {
+        if (window.FX && window.FX.landed) window.FX.landed((figs && figs.children && figs.children.length) ? figs : out);
+        if (typeof onRun === "function") onRun();
+      }
     }
     runBtn.addEventListener("click", doRun);
     resetBtn.addEventListener("click", () => { editor.value = initial; paint(); out.textContent = ""; figs.innerHTML = ""; });

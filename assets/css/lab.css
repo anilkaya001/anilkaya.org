@@ -280,3 +280,123 @@
   .stage__split { grid-template-columns: 1fr; }
   .stage__work { position: static; }
 }
+
+/* ============== Figures under the prompt (left guide column) ============== */
+.stage__figs { display: grid; gap: 0.8rem; margin-top: 1.15rem; justify-items: center; }
+.stage__figs:empty { display: none; }
+.stage__figs img {
+  width: 100%; max-width: 100%; height: auto; border-radius: 10px;
+  border: 1px solid var(--hairline); background: var(--bg-deep);
+}
+/* a freshly-estimated figure "develops" top-down (JS-driven via FX.reveal);
+   live (slider) charts crossfade via FX.swap so the before/after delta shows */
+.stage__figs img.fx-develop {
+  clip-path: inset(0 0 100% 0); opacity: 0; transform: scale(0.985);
+  transition: clip-path 0.26s var(--ease), opacity 0.22s linear, transform 0.26s var(--ease);
+}
+.stage__figs img.fx-develop.in { clip-path: inset(0 0 0 0); opacity: 1; transform: none; }
+
+/* ====================== Delight layer (window.FX) ====================== */
+.fx-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 300; }
+
+.fx-points {
+  position: fixed; z-index: 320; pointer-events: none;
+  font: 700 1.15rem/1 var(--font-serif); color: var(--gold-harvest);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
+  animation: fxRise 1.2s var(--ease) both;
+}
+@keyframes fxRise {
+  0%   { opacity: 0; transform: translate(-50%, -10%) scale(0.8); }
+  22%  { opacity: 1; transform: translate(-50%, -65%) scale(1.12); }
+  100% { opacity: 0; transform: translate(-50%, -185%) scale(1); }
+}
+
+.fx-pop { animation: fxPop 0.55s var(--ease); }
+@keyframes fxPop { 0%, 100% { transform: none; } 35% { transform: scale(1.18); } }
+
+.fx-ring {
+  position: fixed; z-index: 310; width: 26px; height: 26px; border-radius: 999px;
+  pointer-events: none; border: 2.5px solid; transform: translate(-50%, -50%) scale(0.3);
+  animation: fxRing 0.7s var(--ease) both;
+}
+.fx-ring--ok  { border-color: #7fd17f; box-shadow: 0 0 26px rgba(127, 209, 127, 0.55); }
+.fx-ring--err { border-color: #ff9d6e; box-shadow: 0 0 26px rgba(255, 157, 110, 0.55); }
+@keyframes fxRing {
+  0%   { opacity: 0.85; transform: translate(-50%, -50%) scale(0.3); }
+  100% { opacity: 0;    transform: translate(-50%, -50%) scale(5.5); }
+}
+
+.fx-shake { animation: fxShake 0.42s ease; }
+@keyframes fxShake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-8px); } 30% { transform: translateX(7px); }
+  45% { transform: translateX(-6px); } 60% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+
+.fx-glow { animation: fxGlow 1.4s var(--ease); }
+@keyframes fxGlow {
+  0%, 100% { box-shadow: none; }
+  30% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold-harvest) 60%, transparent),
+                    0 0 22px color-mix(in srgb, var(--gold-harvest) 45%, transparent); }
+}
+
+.fx-banner {
+  position: fixed; z-index: 330; left: 50%; top: 38%;
+  transform: translate(-50%, -50%) scale(0.92); opacity: 0;
+  display: inline-flex; align-items: center; gap: 0.7rem;
+  padding: 1rem 1.6rem; border-radius: 999px;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--gold-celadon) 92%, #fff), var(--gold-harvest));
+  color: #1a1407; font: 700 1.15rem/1.1 var(--font-serif); white-space: nowrap; max-width: 92vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px color-mix(in srgb, var(--gold-harvest) 45%, transparent);
+  pointer-events: none; transition: opacity 0.4s var(--ease), transform 0.4s var(--ease);
+}
+.fx-banner.in { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.fx-banner__check { display: inline-grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 999px; background: #1a1407; color: var(--gold-celadon); font-size: 0.92rem; }
+
+/* Significance ignite — significant p-values flare gold->green, rows sweep */
+.cell__out .fx-ignite { animation: fxIgnite 0.42s var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms); }
+@keyframes fxIgnite {
+  0%   { color: var(--gold-harvest); text-shadow: 0 0 11px color-mix(in srgb, #7fd17f 75%, transparent); }
+  100% { color: #7fd17f; text-shadow: none; }
+}
+.cell__out .sigrow { position: relative; }
+.cell__out .fx-sweep::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg, var(--gold-harvest), #7fd17f);
+  transform: scaleX(0); transform-origin: left;
+  animation: fxSweep 0.5s var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms + 180ms);
+}
+@keyframes fxSweep { to { transform: scaleX(1); opacity: 0.55; } }
+
+/* Run button — charge/release + honest meniscus while Pyodide works */
+.cell__run { position: relative; overflow: hidden; }
+.cell__run:not(:disabled):active { transform: scale(0.95) translateY(1px); }
+.cell__run.fx-busy::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: #1a1407; opacity: 0.5; transform: scaleX(0); transform-origin: left;
+  animation: fxMeniscus 0.65s var(--ease) forwards;
+}
+@keyframes fxMeniscus { to { transform: scaleX(0.85); } }
+.cell__run.fx-fire { animation: fxFire 0.28s var(--ease); }
+@keyframes fxFire { 0% { transform: scale(0.94); } 55% { transform: scale(1.06); } 100% { transform: none; } }
+
+/* result handoff bloom around the freshly-computed output */
+.fx-bloom { animation: fxBloom 0.54s var(--ease); border-radius: 10px; }
+@keyframes fxBloom { 0% { box-shadow: 0 0 0 0 rgba(218, 145, 0, 0.5); } 100% { box-shadow: 0 0 0 8px rgba(218, 145, 0, 0); } }
+
+/* Quiz answer states */
+.quiz__choice { padding: 0.32rem 0.5rem; border-radius: 8px; transition: background 0.2s, color 0.2s; }
+.quiz__choice.is-correct { color: #7fd17f; background: color-mix(in srgb, #7fd17f 13%, transparent); }
+.quiz__choice.is-correct input { accent-color: #7fd17f; }
+.quiz__choice.is-wrong { color: #ff9d6e; background: color-mix(in srgb, #ff9d6e 13%, transparent); }
+.quiz.is-solved .quiz__check { opacity: 0.55; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-points, .fx-ring, .fx-shake, .fx-glow, .fx-pop,
+  .cell__out .fx-ignite, .cell__out .fx-sweep::after,
+  .cell__run.fx-busy::after, .cell__run.fx-fire, .fx-bloom { animation: none !important; }
+  .cell__run.fx-busy::after { display: none; }
+  .stage__figs img.fx-develop { clip-path: none; opacity: 1; transform: none; transition: none; }
+  .fx-banner { transition: opacity 0.2s linear; }
+}
