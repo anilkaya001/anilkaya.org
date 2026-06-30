@@ -15,7 +15,10 @@ window.TOPIC_META = [
   { id: "gmm",    num: "07", title: "Generalized Method of Moments",     level: "Advanced",     blurb: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", tags: ["estimation", "theory"] },
 ];
 // Total stages per topic (so the Lab home can show progress without loading the full curriculum-data.js).
-window.TOPIC_META.forEach((t) => { t.stages = ({ ols: 14, iv2sls: 25, did: 23, var: 24, panel: 23, logit: 25, gmm: 27 })[t.id] || 0; });
+// Base stage counts + the authored questions appended by curriculum-questions.js
+// (ols+6, iv2sls+6, did+6, var+6, panel+7, logit+7, gmm+6). On the course page
+// the loader recomputes these exactly; here they keep the Lab home progress right.
+window.TOPIC_META.forEach((t) => { t.stages = ({ ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33 })[t.id] || 0; });
 
 window.CURRICULUM = {
   ols: {
