@@ -97,6 +97,11 @@
 }
 .prose thead th { color: var(--ink-dim); border-bottom-color: color-mix(in srgb, var(--gold-mystic) 50%, transparent); }
 
+/* Sticky footer: pin .site-footer to the viewport bottom on short pages
+   (.topbar is position:fixed, so it is not a flex item). */
+body { min-height: 100svh; display: flex; flex-direction: column; }
+.prose { flex: 1 0 auto; }
+
 .site-footer {
   border-top: 1px solid var(--hairline);
   padding: 2rem var(--pad);
@@ -111,6 +116,7 @@
 .post-list a { text-decoration: none; color: var(--ink); display: block; }
 @media (pointer: coarse) { .post-list a { padding-block: 0.4rem; } }
 .post-list a:hover .post-list__title { color: var(--gold-harvest); }
+.post-list__title, .post-list__meta, .post-list__excerpt { display: block; }
 .post-list__title { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.01em; }
 .post-list__meta { color: var(--ink-faint); font-size: 0.9rem; margin-top: 0.25rem; }
 .post-list__excerpt { color: var(--ink-dim); margin-top: 0.4rem; }
