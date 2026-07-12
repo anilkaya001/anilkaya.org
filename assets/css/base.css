@@ -94,10 +94,6 @@ body {
 img, svg, video, canvas { display: block; max-width: 100%; }
 input, button, textarea, select { font: inherit; color: inherit; }
 
-/* Mobile touch niceties: no grey tap flash, no double-tap-zoom delay */
-a, button, label, input, textarea { -webkit-tap-highlight-color: transparent; }
-a, button { touch-action: manipulation; }
-
 a {
   color: var(--gold-harvest);
   text-decoration-color: color-mix(in srgb, var(--gold-harvest) 45%, transparent);
@@ -150,63 +146,37 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 1rem;
-  padding: max(0.7rem, env(safe-area-inset-top))
-           max(var(--pad), env(safe-area-inset-right))
-           0.7rem
-           max(var(--pad), env(safe-area-inset-left));
+  padding: max(0.7rem, env(safe-area-inset-top)) var(--pad) 0.7rem;
   pointer-events: none; /* gaps stay click-through (canvas on home) */
 }
 .topbar > * { pointer-events: auto; }
 
 .topbar__brand {
   justify-self: start;
-  position: relative;
   font-weight: 700; font-size: 1.5rem; line-height: 1;
   text-decoration: none;
-  padding: 0.55rem; margin: -0.55rem;   /* invisible ≥44px hit area */
   background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest), var(--gold-mystic));
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  transition: filter 0.25s var(--ease);
 }
-.topbar__brand:hover { filter: brightness(1.25); }
 
-/* ---- The pill: layered glass with a gradient hairline ---- */
 .pill {
   position: relative;
   justify-self: center;
-  display: flex; align-items: center; gap: 0.2rem;
-  padding: 0.3rem;
+  display: flex; align-items: center; gap: 0.15rem;
+  padding: 0.28rem;
   border-radius: 999px;
-  border: 1px solid transparent;
-  background:
-    linear-gradient(color-mix(in srgb, var(--bg) 78%, transparent),
-                    color-mix(in srgb, var(--bg) 62%, transparent)) padding-box,
-    linear-gradient(150deg,
-      rgba(201, 198, 172, 0.34),
-      rgba(218, 145, 0, 0.20) 45%,
-      rgba(201, 198, 172, 0.08)) border-box;
-  backdrop-filter: saturate(160%) blur(18px);
-  -webkit-backdrop-filter: saturate(160%) blur(18px);
-  box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(236, 232, 216, 0.05);
-  transition: box-shadow 0.3s var(--ease);
-}
-/* deepen the pill's shadow once content scrolls beneath it */
-.topbar.is-scrolled .pill {
-  box-shadow:
-    0 14px 44px rgba(0, 0, 0, 0.62),
-    inset 0 1px 0 rgba(236, 232, 216, 0.06);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  border: 1px solid var(--hairline);
+  backdrop-filter: saturate(150%) blur(14px);
+  -webkit-backdrop-filter: saturate(150%) blur(14px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
 /* Sliding gold indicator (positioned by nav.js) */
 .pill__ind {
   position: absolute; left: 0; top: 0; z-index: 0;
   border-radius: 999px;
-  background: linear-gradient(140deg, var(--gold-celadon), #f1d27a 45%, var(--gold-harvest));
-  box-shadow:
-    0 2px 14px color-mix(in srgb, var(--gold-harvest) 45%, transparent),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+  box-shadow: 0 2px 14px color-mix(in srgb, var(--gold-harvest) 45%, transparent);
   transition: transform 0.34s var(--ease), width 0.34s var(--ease), height 0.34s var(--ease);
   will-change: transform, width;
   pointer-events: none;
@@ -214,25 +184,20 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
 .pill a {
   position: relative; z-index: 1;
   display: inline-flex; align-items: center;
-  padding: 0.58rem 1.1rem;
+  padding: 0.5rem 1.05rem;
   border-radius: 999px;
   font-size: 0.9rem; line-height: 1; white-space: nowrap;
   color: var(--ink-dim); text-decoration: none;
-  transition: color 0.25s var(--ease), transform 0.12s var(--ease);
+  transition: color 0.25s var(--ease);
 }
-/* invisible vertical hit-area extension → ≥44px effective touch target */
-.pill a::after { content: ""; position: absolute; inset: -7px -2px; border-radius: inherit; }
 .pill a:hover { color: var(--ink); }
-.pill a:active { transform: scale(0.965); }
-.pill a:focus-visible { outline-offset: 0; }
 .pill a.is-active { color: var(--ink); }            /* no-JS fallback */
 .pill a.is-current { color: #1a1407; font-weight: 700; }  /* under the indicator */
 .lab-short { display: none; }
-@media (prefers-reduced-motion: reduce) { .pill__ind { transition: none; } .pill a:active { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pill__ind { transition: none; } }
 
 .topbar__social { justify-self: end; display: inline-flex; gap: 0.5rem; }
 .social-btn {
-  position: relative;
   display: inline-grid; place-items: center;
   width: 2.4rem; height: 2.4rem;
   border-radius: 999px;
@@ -241,31 +206,28 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
-.social-btn::after { content: ""; position: absolute; inset: -5px; border-radius: inherit; }  /* ≥44px hit area */
 .social-btn svg { width: 1.2rem; height: 1.2rem; }
 .social-btn:hover {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--gold-harvest) 60%, transparent);
   box-shadow: 0 6px 20px color-mix(in srgb, var(--gold-harvest) 30%, transparent);
 }
-.social-btn:active { transform: scale(0.95); }
 
 @media (max-width: 600px) {
   .topbar__brand { display: none; }
-  .pill a { padding: 0.56rem 0.78rem; font-size: 0.82rem; }
+  .pill a { padding: 0.5rem 0.7rem; font-size: 0.82rem; }
 }
 @media (max-width: 480px) {
   .lab-full { display: none; }
   .lab-short { display: inline; }     /* "Lab" instead of "Econometrics Lab" */
-  .pill a { padding: 0.55rem 0.66rem; font-size: 0.78rem; }
-  .social-btn { width: 2.25rem; height: 2.25rem; }
-  .social-btn::after { inset: -6px; }
+  .pill a { padding: 0.46rem 0.6rem; font-size: 0.78rem; }
+  .social-btn { width: 2.1rem; height: 2.1rem; }
   .topbar { gap: 0.5rem; }
 }
 
 /* ---- Toast (auth scaffold + notices) ---- */
 .toast {
-  position: fixed; left: 50%; bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  position: fixed; left: 50%; bottom: 1.5rem;
   transform: translateX(-50%) translateY(1rem);
   z-index: 200; max-width: min(92vw, 30rem);
   background: var(--bg-elev); color: var(--ink);
@@ -296,11 +258,6 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
 }
 .btn:hover { transform: translateY(-2px); }
 .btn[disabled], .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; transform: none; }
-
-/* Touch devices: every button meets the 44px comfortable-tap minimum */
-@media (pointer: coarse) {
-  .btn { min-height: 2.75rem; }
-}
 
 /* ---- Depth reveal (cards rise with a 3D tilt as they appear) ---- */
 .reveal {

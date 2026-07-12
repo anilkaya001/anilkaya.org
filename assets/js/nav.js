@@ -45,17 +45,7 @@
     }
   }
 
-  function init() {
-    document.querySelectorAll(".pill").forEach(setup);
-    // deepen the pill's shadow once content scrolls beneath the topbar
-    const tb = document.querySelector(".topbar");
-    if (tb) {
-      let t;
-      const onScroll = () => { clearTimeout(t); t = setTimeout(() => tb.classList.toggle("is-scrolled", window.scrollY > 8), 20); };
-      window.addEventListener("scroll", onScroll, { passive: true });
-      onScroll();
-    }
-  }
+  function init() { document.querySelectorAll(".pill").forEach(setup); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
   } else { init(); }
