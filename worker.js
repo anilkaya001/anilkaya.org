@@ -232,12 +232,39 @@ export default {
         );
         if ((asset.headers.get("Content-Type") || "").includes("text/html")) {
           const img = origin + meta.img;
+          const pageUrl = origin + "/lab/course.html?m=" + url.searchParams.get("m");
+          const topicName = meta.title.split(" — ")[0];
+          // Topic-specific Course + breadcrumb markup so each topic indexes
+          // as its own page (the canonical below makes it self-referencing).
+          const ld = JSON.stringify({
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "Course", "@id": pageUrl, "url": pageUrl,
+                "name": topicName, "description": meta.desc,
+                "provider": { "@type": "Person", "name": "Anıl Kaya", "url": origin + "/" },
+                "isAccessibleForFree": true, "inLanguage": "en",
+                "hasCourseInstance": { "@type": "CourseInstance", "courseMode": "Online" },
+              },
+              {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                  { "@type": "ListItem", "position": 1, "name": "Home", "item": origin + "/" },
+                  { "@type": "ListItem", "position": 2, "name": "Econometrics Lab", "item": origin + "/lab/" },
+                  { "@type": "ListItem", "position": 3, "name": topicName, "item": pageUrl },
+                ],
+              },
+            ],
+          });
           const rewritten = new HTMLRewriter()
             .on("title", { element: (el) => el.setInnerContent(meta.title) })
+            .on('meta[name="description"]', setAttr("content", meta.desc))
+            .on('link[rel="canonical"]', setAttr("href", pageUrl))
             .on('meta[property="og:title"]', setAttr("content", meta.title))
             .on('meta[property="og:description"]', setAttr("content", meta.desc))
             .on('meta[property="og:image"]', setAttr("content", img))
             .on('meta[name="twitter:image"]', setAttr("content", img))
+            .on("head", { element: (el) => el.append('<script type="application/ld+json">' + ld + "</scr" + "ipt>", { html: true }) })
             .transform(asset);
           return secure(rewritten);
         }

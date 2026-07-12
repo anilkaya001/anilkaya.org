@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
-  <title>In Econometrics We Trust</title>
-  <meta name="description" content="In Econometrics We Trust — the personal site of Anıl Kaya.">
+  <title>Anıl Kaya — In Econometrics We Trust</title>
+  <meta name="description" content="Anıl Kaya — econometrics, interactive courses, and articles. Learn OLS, IV/2SLS, DiD, VAR, panel data, logit and GMM by running real models live in your browser. Free.">
+  <meta name="author" content="Anıl Kaya">
   <meta name="theme-color" content="#0a0a08">
   <meta name="color-scheme" content="dark">
   <link rel="canonical" href="https://anilkaya.org/">
@@ -16,8 +17,8 @@
 
   <!-- Open Graph / Twitter -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="In Econometrics We Trust">
-  <meta property="og:description" content="In Econometrics We Trust — the personal site of Anıl Kaya.">
+  <meta property="og:title" content="Anıl Kaya — In Econometrics We Trust">
+  <meta property="og:description" content="Econometrics, interactive courses, and articles — real models estimated live in your browser. Free.">
   <meta property="og:url" content="https://anilkaya.org/">
   <meta property="og:site_name" content="anilkaya.org">
   <meta property="og:image" content="https://anilkaya.org/assets/img/og.png">
@@ -34,6 +35,45 @@
 
   <script src="/assets/js/particles.js?v=16" defer></script>
   <script src="/assets/js/nav.js?v=16" defer></script>
+
+  <!-- Structured data: who this site is about and what it contains. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Person",
+        "@id": "https://anilkaya.org/#person",
+        "name": "Anıl Kaya",
+        "alternateName": "Anil Kaya",
+        "url": "https://anilkaya.org/",
+        "sameAs": ["https://www.linkedin.com/in/anillkaya"],
+        "knowsAbout": ["Econometrics", "Statistics", "Causal Inference", "Time Series Analysis", "Data Science"]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://anilkaya.org/#website",
+        "url": "https://anilkaya.org/",
+        "name": "In Econometrics We Trust",
+        "alternateName": "Anıl Kaya",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://anilkaya.org/#person" }
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://anilkaya.org/",
+        "url": "https://anilkaya.org/",
+        "name": "Anıl Kaya — In Econometrics We Trust",
+        "isPartOf": { "@id": "https://anilkaya.org/#website" },
+        "about": { "@id": "https://anilkaya.org/#person" },
+        "hasPart": [
+          { "@type": "WebPage", "@id": "https://anilkaya.org/lab/", "url": "https://anilkaya.org/lab/", "name": "Econometrics Lab" },
+          { "@type": "WebPage", "@id": "https://anilkaya.org/articles/", "url": "https://anilkaya.org/articles/", "name": "Articles" }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 
 <body class="home">
@@ -62,5 +102,7 @@
     <a class="btn btn--gold hero__cta" href="/lab/">Enter the Econometrics Lab&nbsp;→</a>
     <p class="hero__hint" aria-hidden="true">Hold anywhere to collapse the field</p>
   </main>
+
+  <footer class="home-foot">Anıl Kaya · <a href="/articles/">Articles</a> · <a href="/lab/">Econometrics Lab</a></footer>
 </body>
 </html>
