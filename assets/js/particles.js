@@ -285,7 +285,10 @@
 
     // Pointer "observe" (collapse the field) only makes sense when it moves.
     if (!calm) {
-      window.addEventListener("pointerdown", (e) => { state.isObserved = true; pointerMove(e); });
+      // Only the field itself "collapses" on press — taps on the topbar,
+      // links or the CTA must navigate cleanly without disturbing the field.
+      const onUI = (e) => e.target && e.target.closest && e.target.closest(".topbar, a, button, input, label");
+      window.addEventListener("pointerdown", (e) => { if (onUI(e)) return; state.isObserved = true; pointerMove(e); });
       window.addEventListener("pointermove", (e) => { if (state.isObserved) pointerMove(e); });
       window.addEventListener("pointerup", () => { state.isObserved = false; });
       window.addEventListener("pointercancel", () => { state.isObserved = false; });
