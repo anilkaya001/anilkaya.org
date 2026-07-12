@@ -33,7 +33,7 @@
     const a = all(); const d = new Set((a[topic.id] || {}).done || []);
     if (d.has(i)) return;
     d.add(i); a[topic.id] = { done: [...d] };
-    localStorage.setItem(PKEY, JSON.stringify(a));
+    try { localStorage.setItem(PKEY, JSON.stringify(a)); } catch { /* private mode */ }
     paintProgress();
     const pts = ({ read: 5, code: 10, interactive: 10, quiz: 15 })[stages[i].type] || 5;
     if (window.Gamify) window.Gamify.award(pts);
@@ -260,7 +260,7 @@
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", (e) => {
       dragging = false; handle.classList.remove("drag");
-      if (lastP >= 25 && lastP <= 72) localStorage.setItem("iewt:splitW", lastP.toFixed(1));  // persist once, not per move
+      if (lastP >= 25 && lastP <= 72) { try { localStorage.setItem("iewt:splitW", lastP.toFixed(1)); } catch { /* private mode */ } }  // persist once, not per move
       try { handle.releasePointerCapture(e.pointerId); } catch {}
     });
   }

@@ -8,7 +8,7 @@
   "use strict";
   const KEY = "iewt:gamify";
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || { points: 0, streak: 0, last: null }; } catch { return { points: 0, streak: 0, last: null }; } };
-  const write = (s) => localStorage.setItem(KEY, JSON.stringify(s));
+  const write = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode */ } };
   const day = (d) => d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
 
   const Gamify = {
