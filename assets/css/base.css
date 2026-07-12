@@ -220,6 +220,10 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
 
 @media (max-width: 600px) {
   .topbar__brand { display: none; }
+  /* keep grid placement when the brand leaves the flow: pill stays centered,
+     social stays right (auto-placement would cram both leftward) */
+  .pill { grid-column: 2; }
+  .topbar__social { grid-column: 3; }
   .pill a { padding: 0.5rem 0.7rem; font-size: 0.82rem; }
 }
 @media (max-width: 480px) {
