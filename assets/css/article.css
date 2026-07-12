@@ -109,6 +109,7 @@
 .post-list { list-style: none; padding: 0; }
 .post-list li + li { margin-top: 1.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
 .post-list a { text-decoration: none; color: var(--ink); display: block; }
+@media (pointer: coarse) { .post-list a { padding-block: 0.4rem; } }
 .post-list a:hover .post-list__title { color: var(--gold-harvest); }
 .post-list__title { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.01em; }
 .post-list__meta { color: var(--ink-faint); font-size: 0.9rem; margin-top: 0.25rem; }
