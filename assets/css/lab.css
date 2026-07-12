@@ -99,6 +99,8 @@
 .step--read > * + * { margin-top: 1.05em; }
 .step--read h2 { font-size: 1.5rem; font-weight: 700; margin-top: 0.6em; letter-spacing: -0.01em; }
 .step--read h3 { font-size: 1.2rem; font-weight: 700; }
+/* stage-title h2 for code/interactive/question stages: semantic h2, compact size */
+.stage__guide .stage__h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 0; }
 .step--read p, .step--read li { color: var(--ink); }
 .step--read code { font-family: var(--font-mono); font-size: 0.86em; background: var(--bg-elev); border: 1px solid var(--hairline); border-radius: 5px; padding: 0.1em 0.38em; }
 .step--read .callout {

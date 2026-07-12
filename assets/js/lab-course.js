@@ -105,14 +105,16 @@
 
   // ---- Stage renderers ----------------------------------------
   const QUESTION = { quiz: 1, truefalse: 1, multi: 1, numeric: 1, fillblank: 1 };
+  // Each stage's title is an <h2> so the page has a real h1(topic) → h2(stage)
+  // outline that screen-reader users can navigate by heading.
   function guideHTML(st) {
     if (st.type === "read") return st.html || "";
     // prompt-in-guide question types (the blank/expression lives in the work column for fillblank)
     if (st.type === "quiz" || st.type === "truefalse" || st.type === "multi" || st.type === "numeric")
-      return "<h3>" + esc(st.title || "Question") + '</h3><p class="quiz__prompt">' + st.prompt + "</p>";
+      return '<h2 class="stage__h2">' + esc(st.title || "Question") + '</h2><p class="quiz__prompt">' + st.prompt + "</p>";
     if (st.type === "fillblank")
-      return "<h3>" + esc(st.title || "Question") + "</h3>" + (st.lead ? "<p>" + st.lead + "</p>" : "");
-    return "<h3>" + esc(st.title || "") + "</h3>" + (st.note ? "<p>" + st.note + "</p>" : "");
+      return '<h2 class="stage__h2">' + esc(st.title || "Question") + "</h2>" + (st.lead ? "<p>" + st.lead + "</p>" : "");
+    return '<h2 class="stage__h2">' + esc(st.title || "") + "</h2>" + (st.note ? "<p>" + st.note + "</p>" : "");
   }
 
   function buildWork(st, i, figsEl) {
@@ -336,7 +338,7 @@
     const swap = () => {
       render(i);
       stageEl.scrollIntoView({ block: "start", behavior: "auto" });
-      const h = stageEl.querySelector(".stage__guide h3, .stage__guide h1, .stage__guide h2, .stage__kicker");
+      const h = stageEl.querySelector(".stage__guide h2, .stage__guide h1, .stage__kicker");
       if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }   // focus follows the turn
     };
     if (window.FX && window.FX.pageTurn) window.FX.pageTurn(stageEl, dir, swap);
