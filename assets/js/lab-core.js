@@ -221,6 +221,7 @@ def _grab_figs():
     const runBtn = bar.querySelector(".cell__run");
     const resetBtn = bar.querySelector(".cell__reset");
     async function doRun() {
+      if (runBtn.disabled) return;    // Ctrl+Enter bypasses the disabled button; guard re-entry
       runBtn.disabled = true; const label = runBtn.textContent; runBtn.textContent = "Running…";
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "busy");
       const ok = await run(editor.value, { out, figs });

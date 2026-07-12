@@ -313,6 +313,8 @@
       return;
     }
     const dir = i >= cur ? 1 : -1;
+    cur = i;   // set NOW — render() runs after the page-turn delay, and rapid
+               // Next/arrow presses must step from the target, not a stale index
     history.replaceState(null, "", "#s" + i);
     const swap = () => {
       render(i);
