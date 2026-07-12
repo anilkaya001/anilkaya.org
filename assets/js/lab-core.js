@@ -115,7 +115,8 @@ def _grab_figs():
     let b = document.getElementById("labBoot");
     if (!b) {
       b = document.createElement("div"); b.id = "labBoot"; b.className = "boot";
-      b.innerHTML = '<span class="boot__spin"></span><span class="boot__txt"></span>';
+      b.setAttribute("role", "status");   // polite live region: boot progress + failures reach screen readers
+      b.innerHTML = '<span class="boot__spin" aria-hidden="true"></span><span class="boot__txt"></span>';
       document.body.appendChild(b);
     }
     return b;
@@ -235,7 +236,8 @@ def _grab_figs():
     runBtn.addEventListener("click", doRun);
     resetBtn.addEventListener("click", () => { editor.value = initial; paint(); out.textContent = ""; figs.innerHTML = ""; });
     editor.addEventListener("keydown", (e) => {
-      if (e.key === "Tab") { e.preventDefault(); const s = editor.selectionStart, en = editor.selectionEnd; editor.value = editor.value.slice(0, s) + "    " + editor.value.slice(en); editor.selectionStart = editor.selectionEnd = s + 4; paint(); }
+      // Tab indents; Shift+Tab falls through to native backward focus (no keyboard trap)
+      if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); const s = editor.selectionStart, en = editor.selectionEnd; editor.value = editor.value.slice(0, s) + "    " + editor.value.slice(en); editor.selectionStart = editor.selectionEnd = s + 4; paint(); }
       else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); doRun(); }
     });
 
