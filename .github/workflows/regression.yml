@@ -1,0 +1,25 @@
+name: regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright + Chromium
+        working-directory: tests
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright@1.48
+          npx playwright install --with-deps chromium
+      - name: Run regression suite
+        working-directory: tests
+        # SITE_DIR is the repo root relative to tests/; the script serves it itself.
+        run: SITE_DIR=.. node regression.mjs
