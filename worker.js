@@ -35,6 +35,26 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
 };
 
+// --- Per-topic social preview cards --------------------------------------
+// The course player is one static page (/lab/course.html) that reads ?m= in
+// JavaScript, so a shared link to any topic would show the same generic card
+// to social crawlers (they don't run JS). For crawler user-agents only, we
+// rewrite the og/twitter tags to the topic's own 1200x630 card. Human
+// requests never enter this path — they get the untouched static asset.
+const OG_TOPICS = {
+  ols:    { title: "Ordinary Least Squares — Econometrics Lab",        desc: "The line of best fit, how it's computed, inference, and the assumptions behind it.", img: "/assets/img/og-ols.png" },
+  iv2sls: { title: "Instrumental Variables & 2SLS — Econometrics Lab", desc: "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.",         img: "/assets/img/og-iv2sls.png" },
+  did:    { title: "Difference-in-Differences — Econometrics Lab",     desc: "Treatment effects from before/after × treated/control, parallel trends, event studies.", img: "/assets/img/og-did.png" },
+  var:    { title: "Vector Autoregression — Econometrics Lab",         desc: "Joint dynamics of several series: estimation, impulse responses, Granger causality.",     img: "/assets/img/og-var.png" },
+  panel:  { title: "Panel: Fixed & Random Effects — Econometrics Lab", desc: "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.",             img: "/assets/img/og-panel.png" },
+  logit:  { title: "Logit & Probit — Econometrics Lab",                desc: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.",   img: "/assets/img/og-logit.png" },
+  gmm:    { title: "Generalized Method of Moments — Econometrics Lab", desc: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.",     img: "/assets/img/og-gmm.png" },
+};
+
+const CRAWLER = /facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|slack-imgproxy|whatsapp|telegrambot|discordbot|pinterest|redditbot|applebot|googlebot|bingbot|embedly|iframely|vkshare|skypeuripreview|nuzzel|flipboard|tumblr|mastodon|w3c_validator/i;
+
+const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
+
 // Re-emit a (possibly immutable) response with the security headers applied.
 // IMPORTANT: must use new Response(body, response) — rebuilding from an init
 // dict corrupts the runtime's Content-Encoding handling on the edge and
@@ -198,6 +218,31 @@ export default {
         return json({ ok: true });
       }
       return new Response("Method not allowed", { status: 405 });
+    }
+
+    // --- Per-topic social preview card (crawlers only; humans untouched) ---
+    if (path === "/lab/course.html") {
+      const meta = OG_TOPICS[url.searchParams.get("m")];
+      if (meta && CRAWLER.test(request.headers.get("User-Agent") || "")) {
+        // Fetch uncompressed so HTMLRewriter can parse the HTML; it streams the
+        // body through without a Content-Encoding header, so the edge is free to
+        // (re)compress cleanly for the crawler.
+        const asset = await env.ASSETS.fetch(
+          new Request(origin + "/lab/course.html", { headers: { "Accept-Encoding": "identity" } })
+        );
+        if ((asset.headers.get("Content-Type") || "").includes("text/html")) {
+          const img = origin + meta.img;
+          const rewritten = new HTMLRewriter()
+            .on("title", { element: (el) => el.setInnerContent(meta.title) })
+            .on('meta[property="og:title"]', setAttr("content", meta.title))
+            .on('meta[property="og:description"]', setAttr("content", meta.desc))
+            .on('meta[property="og:image"]', setAttr("content", img))
+            .on('meta[name="twitter:image"]', setAttr("content", img))
+            .transform(asset);
+          return secure(rewritten);
+        }
+        return secure(asset);
+      }
     }
 
     // --- Everything else: static assets (index.html, /lab/, css, js, ...) ---
