@@ -286,6 +286,13 @@
   .stage__guide { flex-basis: auto; padding-right: 0; }
   .stage__work { padding-left: 0; margin-top: 1.2rem; }
   .stage__handle { display: none; }
+  /* Narrow screens: wrap code instead of clipping it behind an invisible
+     horizontal scrollbar. BOTH overlay layers must wrap identically, and
+     the editor's scrollbars are hidden so its content width can never
+     drift from the overflow-hidden highlight layer beneath it. */
+  .cell__hl, .cell__editor { white-space: pre-wrap; overflow-wrap: break-word; }
+  .cell__editor { scrollbar-width: none; }
+  .cell__editor::-webkit-scrollbar { display: none; }
 }
 
 /* Points & streak badge */
