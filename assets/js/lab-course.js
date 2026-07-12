@@ -243,24 +243,41 @@
     return q;
   }
 
-  // ---- Draggable horizontal splitter (persisted) -------------
+  // ---- Draggable horizontal splitter (persisted, keyboard-operable) ----
   function wireResize(splitEl, handle) {
     const saved = parseFloat(localStorage.getItem("iewt:splitW"));
+    let lastP = (saved >= 25 && saved <= 72) ? saved : 38;
     if (saved >= 25 && saved <= 72) splitEl.style.setProperty("--guideW", saved + "%");
-    let dragging = false, raf = 0, lastX = 0, lastP = saved;
+    const persist = () => { if (lastP >= 25 && lastP <= 72) { try { localStorage.setItem("iewt:splitW", lastP.toFixed(1)); } catch { /* private mode */ } } };
+    const set = (p) => {
+      lastP = Math.max(25, Math.min(72, p));
+      splitEl.style.setProperty("--guideW", lastP + "%");
+      handle.setAttribute("aria-valuenow", Math.round(lastP));
+    };
+    handle.setAttribute("tabindex", "0");
+    handle.setAttribute("aria-label", "Resize guide and workspace panels");
+    handle.setAttribute("aria-valuemin", "25");
+    handle.setAttribute("aria-valuemax", "72");
+    handle.setAttribute("aria-valuenow", Math.round(lastP));
+    handle.addEventListener("keydown", (e) => {
+      const act = { ArrowLeft: () => set(lastP - 3), ArrowRight: () => set(lastP + 3), Home: () => set(25), End: () => set(72) }[e.key];
+      if (!act) return;
+      e.preventDefault();
+      e.stopPropagation();   // keep arrows from ALSO triggering stage navigation
+      act(); persist();
+    });
+    let dragging = false, raf = 0, lastX = 0;
     const apply = () => {
       raf = 0;
       const r = splitEl.getBoundingClientRect();
-      let p = ((lastX - r.left) / r.width) * 100;
-      lastP = Math.max(25, Math.min(72, p));
-      splitEl.style.setProperty("--guideW", lastP + "%");
+      set(((lastX - r.left) / r.width) * 100);
     };
     const move = (e) => { if (!dragging) return; lastX = e.clientX; if (!raf) raf = requestAnimationFrame(apply); };
     handle.addEventListener("pointerdown", (e) => { dragging = true; handle.classList.add("drag"); handle.setPointerCapture(e.pointerId); e.preventDefault(); });
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", (e) => {
       dragging = false; handle.classList.remove("drag");
-      if (lastP >= 25 && lastP <= 72) { try { localStorage.setItem("iewt:splitW", lastP.toFixed(1)); } catch { /* private mode */ } }  // persist once, not per move
+      persist();   // persist once, not per move
       try { handle.releasePointerCapture(e.pointerId); } catch {}
     });
   }
