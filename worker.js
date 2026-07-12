@@ -246,6 +246,28 @@ export default {
     }
 
     // --- Everything else: static assets (index.html, /lab/, css, js, ...) ---
-    return secure(await env.ASSETS.fetch(request));
+    const resp = secure(await env.ASSETS.fetch(request));
+    const ct = resp.headers.get("Content-Type") || "";
+    if (ct.includes("text/html")) {
+      // Documents must revalidate every time (cheap: assets carry ETags, so
+      // unchanged pages are 304s). Guarantees nobody keeps stale HTML that
+      // points at old asset versions.
+      resp.headers.set("Cache-Control", "no-cache");
+      // One-time purge: browsers that visited during the Content-Encoding
+      // incident hold corrupted cache entries for random assets and replay
+      // them (styled topbar, dead grid). Clearing this origin's HTTP cache
+      // once evicts them all; the cookie survives the purge, so each browser
+      // pays a single cold load and never again.
+      if (!getCookie(request, "cachefix")) {
+        resp.headers.set("Clear-Site-Data", '"cache"');
+        resp.headers.append("Set-Cookie", cookie("cachefix", "1", { maxAge: 60 * 60 * 24 * 365 }));
+      }
+    } else if (url.searchParams.has("v")) {
+      // Versioned subresources never change under a given ?v — cache hard.
+      resp.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (ct && !ct.includes("application/json")) {
+      resp.headers.set("Cache-Control", "public, max-age=3600");
+    }
+    return resp;
   },
 };
