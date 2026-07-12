@@ -121,7 +121,10 @@
   font-size: clamp(0.7rem, 0.66rem + 0.2vw, 0.85rem);
   letter-spacing: clamp(0.12em, 0.06em + 0.6vw, 0.32em);
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink-dim);
+  /* the tight layer occludes bright field streaks behind the small glyphs */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 14px rgba(0, 0, 0, 0.85);
+  text-wrap: balance;
   font-variant-numeric: tabular-nums;
   animation: rise 1s var(--ease) 0.22s both;
 }

@@ -136,7 +136,7 @@
 }
 .cell__editor::selection { background: color-mix(in srgb, var(--gold-harvest) 32%, transparent); }
 /* Python token colours */
-.tk-c { color: #6f6b57; font-style: italic; }
+.tk-c { color: #8a8571; font-style: italic; }   /* readable comments (AA on the cell bg) */
 .tk-s { color: #a7c489; }
 .tk-k { color: #e8913a; }
 .tk-b { color: #d8b86a; }

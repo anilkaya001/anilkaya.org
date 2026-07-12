@@ -50,7 +50,7 @@
   /* Ink */
   --ink:       #ece8d8;
   --ink-dim:   #b7b298;
-  --ink-faint: #6f6b57;
+  --ink-faint: #8a8571;   /* ≥4.5:1 (WCAG AA) on all site surfaces */
   --hairline:  rgba(201, 198, 172, 0.14);
 
   /* Type */
