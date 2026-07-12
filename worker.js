@@ -36,11 +36,16 @@ const SECURITY_HEADERS = {
 };
 
 // Re-emit a (possibly immutable) response with the security headers applied.
-// Used for static-asset responses — the documents where CSP/clickjacking matter.
+// IMPORTANT: must use new Response(body, response) — rebuilding from an init
+// dict corrupts the runtime's Content-Encoding handling on the edge and
+// browsers then fail to decode CSS/JS (ERR_CONTENT_DECODING_FAILED).
 function secure(resp) {
-  const headers = new Headers(resp.headers);
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
-  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+  const out = new Response(resp.body, resp);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v);
+  // CSP only matters on documents; keep asset payload headers lean.
+  const ct = out.headers.get("Content-Type") || "";
+  if (!ct.includes("text/html")) out.headers.delete("Content-Security-Policy");
+  return out;
 }
 
 const json = (obj, status = 200) =>
