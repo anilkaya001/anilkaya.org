@@ -173,23 +173,24 @@ must return structured JSON 401, not HTML or plain text.
 ### Canonical course metadata
 
 ```bash
-curl -fsSI 'https://anilkaya.org/lab/course.html?m=ols'
-curl -fsS 'https://anilkaya.org/lab/course?m=ols' \
+curl -fsSI 'https://anilkaya.org/lab/course?m=ols'
+curl -fsS 'https://anilkaya.org/lab/ordinary-least-squares/' \
   -o /tmp/course.html
 grep -F '<title>Ordinary Least Squares — Econometrics Lab</title>' /tmp/course.html
-grep -F 'https://anilkaya.org/lab/course?m=ols' /tmp/course.html
+grep -F 'https://anilkaya.org/lab/ordinary-least-squares/' /tmp/course.html
+grep -F '<h1>Ordinary Least Squares</h1>' /tmp/course.html
 grep -F 'id="courseStructuredData"' /tmp/course.html
 ```
 
-The legacy URL must return 308 to the extensionless URL. Repeat metadata checks
-for all seven topic IDs when SEO code changes.
+The legacy URL must return 308 to the clean course path. Repeat metadata and
+crawlable-outline checks for all seven course paths when SEO code changes.
 
 ### Cache and encoding invariant
 
 ```bash
 curl --compressed --fail --silent --show-error \
   -D /tmp/css.headers \
-  'https://anilkaya.org/assets/css/base.css?v=17' \
+  'https://anilkaya.org/assets/css/base.css?v=18' \
   -o /tmp/base.css
 cmp /tmp/base.css assets/css/base.css
 grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers

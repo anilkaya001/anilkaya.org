@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { signSession } from "../shared/session.js";
 import { REPO_ROOT, SESSION_SECRET, startWorker } from "./worker-server.mjs";
 
@@ -46,14 +47,14 @@ try {
   const repeat = await fetch(base + "/", { headers: { Cookie: "cachefix=1" } });
   assert.equal(repeat.headers.get("clear-site-data"), null, "cache purge must happen once per browser");
 
-  const css = await fetch(base + "/assets/css/base.css?v=17");
+  const css = await fetch(base + "/assets/css/base.css?v=18");
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");
   const cssEtag = css.headers.get("etag");
   assertSecurity(css, false);
   const localCSS = await readFile(path.join(REPO_ROOT, "assets/css/base.css"), "utf8");
   assert.equal(await css.text(), localCSS, "response cloning changed CSS bytes");
   assert(cssEtag, "versioned asset ETag missing");
-  const revalidatedCSS = await fetch(base + "/assets/css/base.css?v=17", { headers: { "If-None-Match": cssEtag } });
+  const revalidatedCSS = await fetch(base + "/assets/css/base.css?v=18", { headers: { "If-None-Match": cssEtag } });
   assert.equal(revalidatedCSS.status, 304);
   assert.equal(revalidatedCSS.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assertSecurity(revalidatedCSS, false);
@@ -61,7 +62,7 @@ try {
   const unversioned = await fetch(base + "/assets/css/base.css");
   assert.equal(unversioned.headers.get("cache-control"), "public, max-age=3600");
   assertSecurity(unversioned, false);
-  for (const asset of ["/assets/js/nav.js?v=17", "/assets/fonts/LM-regular.woff2?v=17", "/assets/img/og.png"]) {
+  for (const asset of ["/assets/js/nav.js?v=18", "/assets/fonts/LM-regular.woff2?v=18", "/assets/img/og.png"]) {
     const response = await fetch(base + asset);
     assert.equal(response.status, 200, `${asset}: missing`);
     assertSecurity(response, false);
@@ -69,54 +70,124 @@ try {
   const missing = await fetch(base + "/definitely-missing");
   assert.equal(missing.status, 404);
   assertSecurity(missing, true);
-  const missingVersioned = await fetch(base + "/definitely-missing.js?v=17");
+  const missingVersioned = await fetch(base + "/definitely-missing.js?v=18");
   assert.equal(missingVersioned.status, 404);
   assert.notEqual(missingVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable");
   for (const privatePath of ["/.wrangler/cache/cf.json", "/articles/_template/", "/CNAME"]) {
     assert.equal((await fetch(base + privatePath)).status, 404, `${privatePath} must not be a public asset`);
   }
 
-  for (const legacy of ["/lab/course.html?m=ols", "/lab/course/?m=ols"]) {
+  const robots = await fetch(base + "/robots.txt");
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get("content-type") || "", /^text\/plain\b/);
+  assert.equal((await robots.text()).trim(), "User-agent: *\nAllow: /\n\nSitemap: https://anilkaya.org/sitemap.xml");
+
+  const sitemapResponse = await fetch(base + "/sitemap.xml");
+  assert.equal(sitemapResponse.status, 200);
+  assert.match(sitemapResponse.headers.get("content-type") || "", /xml/i);
+  const sitemap = await sitemapResponse.text();
+  const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  assert.deepEqual(sitemapURLs, [
+    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+  ]);
+  for (const canonicalURL of sitemapURLs) {
+    const path = new URL(canonicalURL).pathname;
+    const response = await fetch(base + path, { headers: { Cookie: "cachefix=1" } });
+    assert.equal(response.status, 200, `${path}: sitemap URL must return 200`);
+    const html = await response.text();
+    assert.equal(attr(html, 'rel="canonical"', "href"), canonicalURL, `${path}: sitemap URL must self-canonicalize`);
+    assert(!/content="[^"]*noindex/i.test(html), `${path}: sitemap URL must not be noindex`);
+  }
+
+  const articles = await fetch(base + "/articles/", { headers: { Cookie: "cachefix=1" } });
+  assert.equal(articles.status, 200);
+  const articlesHTML = await articles.text();
+  assert.equal(attr(articlesHTML, 'name="robots"'), "noindex,follow");
+  assert.equal(attr(articlesHTML, 'rel="canonical"', "href"), SITE_ORIGIN + "/articles/");
+  assert(!sitemap.includes("/articles/"), "noindexed Articles placeholder must not be in sitemap");
+
+  for (const unknown of ["/lab/not-a-course", "/lab/not-a-course/"]) {
+    const response = await fetch(base + unknown);
+    assert.equal(response.status, 404, `${unknown}: unknown clean slug must be a 404`);
+    const html = await response.text();
+    assert.equal(attr(html, 'name="robots"'), "noindex", `${unknown}: 404 must be noindex`);
+    assert.equal(attr(html, 'rel="canonical"', "href"), null, `${unknown}: 404 must not canonicalize`);
+    const head = await fetch(base + unknown, { method: "HEAD" });
+    assert.equal(head.status, 404, `${unknown}: HEAD status`);
+    assert.equal(await head.text(), "", `${unknown}: HEAD body must be empty`);
+  }
+
+  for (const topic of COURSE_TOPICS) {
+    for (const method of ["GET", "HEAD"]) {
+      const response = await fetch(base + `/lab/course?m=${topic.id}`, { method, redirect: "manual" });
+      assert.equal(response.status, 308, `${topic.id} ${method}: legacy course redirect`);
+      assert.equal(response.headers.get("location"), base + topic.path);
+      if (method === "HEAD") assert.equal(await response.text(), "", `${topic.id}: HEAD redirect body must be empty`);
+    }
+  }
+
+  for (const legacy of [
+    "/lab/course.html?m=ols", "/lab/course/?m=ols",
+    "/lab/lesson?m=ols", "/lab/lesson.html?m=ols", "/lab/lesson/?m=ols",
+  ]) {
     const response = await fetch(base + legacy, { redirect: "manual" });
     assert.equal(response.status, 308, `${legacy}: expected permanent canonical redirect`);
-    assert.equal(response.headers.get("location"), base + "/lab/course?m=ols");
+    assert.equal(response.headers.get("location"), base + "/lab/ordinary-least-squares/");
     assert.equal(response.headers.get("cache-control"), "no-store");
     assertSecurity(response, false);
   }
 
-  const topics = {
-    ols: ["Ordinary Least Squares — Econometrics Lab", "The line of best fit, how it's computed, inference, and the assumptions behind it.", "og-ols.png", "Beginner"],
-    iv2sls: ["Instrumental Variables & 2SLS — Econometrics Lab", "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.", "og-iv2sls.png", "Intermediate"],
-    did: ["Difference-in-Differences — Econometrics Lab", "Treatment effects from before/after × treated/control, parallel trends, event studies.", "og-did.png", "Intermediate"],
-    var: ["Vector Autoregression — Econometrics Lab", "Joint dynamics of several series: estimation, impulse responses, Granger causality.", "og-var.png", "Advanced"],
-    panel: ["Panel: Fixed & Random Effects — Econometrics Lab", "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.", "og-panel.png", "Advanced"],
-    logit: ["Logit & Probit — Econometrics Lab", "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.", "og-logit.png", "Intermediate"],
-    gmm: ["Generalized Method of Moments — Econometrics Lab", "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", "og-gmm.png", "Advanced"],
-  };
-  for (const [id, [title, description, image, level]] of Object.entries(topics)) {
-    const response = await fetch(base + `/lab/course?m=${id}`, { headers: { Cookie: "cachefix=1" } });
+  for (const missingTopic of ["/lab/course", "/lab/course?m=unknown", "/lab/course?m=constructor", "/lab/lesson?m=unknown"]) {
+    const response = await fetch(base + missingTopic, { redirect: "manual" });
+    assert.equal(response.status, 308, `${missingTopic}: generic course shell must not be indexable`);
+    assert.equal(response.headers.get("location"), base + "/lab/");
+  }
+
+  for (const topic of COURSE_TOPICS) {
+    const noSlash = await fetch(base + topic.path.slice(0, -1), { redirect: "manual" });
+    assert.equal(noSlash.status, 308, `${topic.id}: missing-slash URL must canonicalize`);
+    assert.equal(noSlash.headers.get("location"), base + topic.path);
+
+    const response = await fetch(base + topic.path + "?utm_source=regression", { headers: { Cookie: "cachefix=1" } });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-cache");
-    assert.equal(response.headers.get("etag"), null, `${id}: backing ETag leaked after rewrite`);
+    assert.equal(response.headers.get("etag"), null, `${topic.id}: backing ETag leaked after rewrite`);
     assertSecurity(response, true);
     const html = await response.text();
-    assert.equal(decode(html.match(/<title>([^<]+)<\/title>/)?.[1]), title, `${id}: title`);
-    assert.equal(attr(html, 'name="description"'), description, `${id}: description`);
-    assert.equal(attr(html, 'rel="canonical"', "href"), `${base}/lab/course?m=${id}`, `${id}: canonical`);
-    assert.equal(attr(html, 'property="og:url"'), `${base}/lab/course?m=${id}`, `${id}: og:url`);
-    assert.equal(attr(html, 'property="og:image"'), `${base}/assets/img/${image}`, `${id}: image`);
+    const pageText = decode(html.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ");
+    assert.equal(decode(html.match(/<title>([^<]+)<\/title>/)?.[1]), topic.pageTitle, `${topic.id}: title`);
+    assert.equal(attr(html, 'name="description"'), topic.description, `${topic.id}: description`);
+    assert.equal(attr(html, 'rel="canonical"', "href"), SITE_ORIGIN + topic.path, `${topic.id}: canonical`);
+    assert.equal(attr(html, 'property="og:url"'), SITE_ORIGIN + topic.path, `${topic.id}: og:url`);
+    assert.equal(attr(html, 'property="og:site_name"'), "Anıl Kaya", `${topic.id}: site name`);
+    assert.equal(attr(html, 'property="og:image"'), SITE_ORIGIN + topic.image, `${topic.id}: image`);
+    assert.equal(attr(html, 'name="twitter:image"'), SITE_ORIGIN + topic.image, `${topic.id}: Twitter image`);
+    assert.match(html, new RegExp(`<h1>${topic.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&/g, "&amp;")}</h1>`), `${topic.id}: raw HTML H1`);
+    for (const module of topic.modules) assert(pageText.includes(module.title), `${topic.id}: missing crawlable module ${module.title}`);
+    for (const related of COURSE_TOPICS.filter((item) => item.id !== topic.id)) {
+      assert(html.includes(`href="${related.path}"`), `${topic.id}: missing related link to ${related.id}`);
+    }
     const script = html.match(/<script id="courseStructuredData" type="application\/ld\+json">([\s\S]*?)<\/script>/)?.[1];
-    assert(script, `${id}: structured data missing`);
+    assert(script, `${topic.id}: structured data missing`);
     const structured = JSON.parse(script);
     assert.deepEqual(structured["@graph"].map((entry) => entry["@type"]), ["Course", "BreadcrumbList"]);
-    assert.equal(structured["@graph"][0].url, `${base}/lab/course?m=${id}`);
-    assert.equal(structured["@graph"][0].educationalLevel, level, `${id}: education level`);
+    assert.equal(structured["@graph"][0]["@id"], SITE_ORIGIN + topic.path);
+    assert.equal(structured["@graph"][0].url, SITE_ORIGIN + topic.path);
+    assert.equal(structured["@graph"][0].educationalLevel, topic.level, `${topic.id}: education level`);
+    assert.equal(structured["@graph"][0].provider["@id"], SITE_ORIGIN + "/#person", `${topic.id}: provider ID`);
+    assert.equal(structured["@graph"][0].provider.url, SITE_ORIGIN + "/", `${topic.id}: provider URL`);
+    assert.deepEqual(
+      structured["@graph"][1].itemListElement.map((item) => item.item),
+      [SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", SITE_ORIGIN + topic.path],
+      `${topic.id}: breadcrumb URLs`,
+    );
+
+    const head = await fetch(base + topic.path, { method: "HEAD", headers: { Cookie: "cachefix=1" } });
+    assert.equal(head.status, 200, `${topic.id}: HEAD status`);
+    assert.equal(await head.text(), "", `${topic.id}: HEAD body must be empty`);
   }
-  const generic = await fetch(base + "/lab/course?m=unknown");
-  const genericEtag = generic.headers.get("etag");
-  assert.match(await generic.text(), /<title>Course — Econometrics Lab<\/title>/);
-  assert(genericEtag, "backing course ETag missing");
-  const conditionalCourse = await fetch(base + "/lab/course?m=ols", { headers: { "If-None-Match": genericEtag, Cookie: "cachefix=1" } });
+
+  const conditionalCourse = await fetch(base + COURSE_TOPICS[0].path, { headers: { "If-None-Match": '"backing-asset-validator"', Cookie: "cachefix=1" } });
   assert.equal(conditionalCourse.status, 200, "rewritten metadata must not use the backing asset validator");
   assert.equal(conditionalCourse.headers.get("etag"), null);
   assert.match(await conditionalCourse.text(), /<title>Ordinary Least Squares — Econometrics Lab<\/title>/);

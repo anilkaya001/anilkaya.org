@@ -6,13 +6,13 @@
    ============================================================= */
 
 window.TOPIC_META = [
-  { id: "ols",    num: "01", title: "Ordinary Least Squares",            level: "Beginner",     blurb: "The line of best fit, how it's computed, inference, and the assumptions behind it.", tags: ["regression", "inference"] },
-  { id: "iv2sls", num: "02", title: "Instrumental Variables & 2SLS",     level: "Intermediate", blurb: "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.", tags: ["causal", "endogeneity"] },
-  { id: "did",    num: "03", title: "Difference-in-Differences",         level: "Intermediate", blurb: "Treatment effects from before/after × treated/control, parallel trends, event studies.", tags: ["causal", "panel"] },
-  { id: "var",    num: "04", title: "Vector Autoregression",             level: "Advanced",     blurb: "Joint dynamics of several series: estimation, impulse responses, Granger causality.", tags: ["time series", "macro"] },
-  { id: "panel",  num: "05", title: "Panel: Fixed & Random Effects",     level: "Advanced",     blurb: "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.", tags: ["panel", "causal"] },
-  { id: "logit",  num: "06", title: "Logit & Probit",                    level: "Intermediate", blurb: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.", tags: ["limited-dependent", "MLE"] },
-  { id: "gmm",    num: "07", title: "Generalized Method of Moments",     level: "Advanced",     blurb: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", tags: ["estimation", "theory"] },
+  { id: "ols",    slug: "ordinary-least-squares",             num: "01", title: "Ordinary Least Squares",                   level: "Beginner",     blurb: "The line of best fit, how it's computed, inference, and the assumptions behind it.", tags: ["regression", "inference"] },
+  { id: "iv2sls", slug: "instrumental-variables-2sls",        num: "02", title: "Instrumental Variables & 2SLS",            level: "Intermediate", blurb: "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.", tags: ["causal", "endogeneity"] },
+  { id: "did",    slug: "difference-in-differences",          num: "03", title: "Difference-in-Differences",                level: "Intermediate", blurb: "Treatment effects from before/after × treated/control, parallel trends, event studies.", tags: ["causal", "panel"] },
+  { id: "var",    slug: "vector-autoregression",              num: "04", title: "Vector Autoregression (VAR)",              level: "Advanced",     blurb: "Joint dynamics of several series: estimation, impulse responses, Granger causality.", tags: ["time series", "macro"] },
+  { id: "panel",  slug: "panel-fixed-random-effects",         num: "05", title: "Panel Data: Fixed & Random Effects",        level: "Advanced",     blurb: "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.", tags: ["panel", "causal"] },
+  { id: "logit",  slug: "logit-probit",                       num: "06", title: "Logit & Probit (Binary Outcomes)",          level: "Intermediate", blurb: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.", tags: ["limited-dependent", "MLE"] },
+  { id: "gmm",    slug: "generalized-method-of-moments",      num: "07", title: "Generalized Method of Moments (GMM)",       level: "Advanced",     blurb: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", tags: ["estimation", "theory"] },
 ];
 // Total stages per topic (so the Lab home can show progress without loading the full curriculum-data.js).
 // Base stage counts + the authored questions appended by curriculum-questions.js

@@ -5,6 +5,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { COURSE_STAGE_POINTS } from "../shared/course-points.js";
+import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { cookie, getCookie, signSession, verifySession } from "../shared/session.js";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -34,13 +35,31 @@ for (const file of ["assets/js/curriculum.js", "assets/js/curriculum-data.js", "
 const topicIds = ["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"];
 assert.deepEqual([...context.window.TOPIC_META.map((topic) => topic.id)], topicIds, "topic ids drifted");
 assert.deepEqual(Object.keys(context.window.CURRICULUM), topicIds, "curriculum ids drifted");
+assert.deepEqual(COURSE_TOPICS.map((topic) => topic.id), topicIds, "SEO course ids drifted");
+assert.equal(new Set(COURSE_TOPICS.map((topic) => topic.slug)).size, topicIds.length, "course slugs must be unique");
+
+const seoById = Object.fromEntries(COURSE_TOPICS.map((topic) => [topic.id, topic]));
 
 const defaults = { read: 5, code: 10, interactive: 10, quiz: 15, truefalse: 10, fillblank: 15, numeric: 20, multi: 20 };
 const knownTypes = new Set(Object.keys(defaults));
 
 for (const meta of context.window.TOPIC_META) {
   const course = context.window.CURRICULUM[meta.id];
+  const seo = seoById[meta.id];
+  assert(seo, `${meta.id}: missing search metadata`);
+  assert.equal(meta.slug, seo.slug, `${meta.id}: browser slug drifted`);
+  assert.equal(meta.num, seo.number, `${meta.id}: browser course number drifted`);
+  assert.equal(meta.title, seo.name, `${meta.id}: browser course name drifted`);
+  assert.equal(meta.blurb, seo.description, `${meta.id}: browser course description drifted`);
+  assert.equal(meta.level, seo.level, `${meta.id}: browser course level drifted`);
+  assert.equal(course.title, seo.name, `${meta.id}: visible H1 and search name drifted`);
+  assert.equal(seo.pageTitle, `${seo.name} — Econometrics Lab`, `${meta.id}: page title drifted`);
   assert.equal(course.modules.length, 4, `${meta.id}: expected four modules`);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(course.modules.map(({ title, summary }) => ({ title, summary })))),
+    seo.modules.map(({ title, summary }) => ({ title, summary })),
+    `${meta.id}: crawlable module outline drifted`,
+  );
   const stages = course.modules.flatMap((module) => module.stages);
   assert.equal(stages.length, meta.stages, `${meta.id}: stage count metadata drifted`);
 
@@ -92,6 +111,34 @@ for (const meta of context.window.TOPIC_META) {
   assert.deepEqual(points, COURSE_STAGE_POINTS[meta.id], `${meta.id}: server scoring manifest drifted`);
   assert.deepEqual(points, Array.from(context.window.COURSE_STAGE_POINTS[meta.id]), `${meta.id}: browser scoring manifest drifted`);
 }
+
+const sitemap = read("sitemap.xml");
+const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+assert.deepEqual(sitemapURLs, [
+  `${SITE_ORIGIN}/`,
+  `${SITE_ORIGIN}/lab/`,
+  ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+], "sitemap must contain only final canonical pages");
+assert(!/<(?:priority|changefreq)>/.test(sitemap), "sitemap must not contain ignored priority/changefreq hints");
+assert.match(read("articles/index.html"), /<meta name="robots" content="noindex,follow">/, "empty articles page must stay noindex");
+assert(!sitemap.includes("/articles/"), "empty articles page must not be in the sitemap");
+
+const labIndex = read("lab/index.html");
+const staticCourseLinks = [...labIndex.matchAll(/<a class="model-card" href="([^"]+)">/g)].map((match) => match[1]);
+assert.deepEqual(staticCourseLinks, COURSE_TOPICS.map((topic) => topic.path), "static Lab links must exactly match canonical course paths");
+for (const topic of COURSE_TOPICS) {
+  assert(labIndex.includes(`href="${topic.path}"`), `${topic.id}: missing static crawlable Lab link`);
+  assert(labIndex.includes(`"url": "${SITE_ORIGIN + topic.path}"`), `${topic.id}: Lab JSON-LD URL drifted`);
+}
+assert(!labIndex.includes("/lab/course?m="), "Lab must not advertise legacy query-string course URLs");
+
+for (const file of ["index.html", "articles/index.html", "lab/index.html", "lab/course.html"]) {
+  assert(read(file).includes('<meta property="og:site_name" content="Anıl Kaya">'), `${file}: site name signal drifted`);
+}
+const homeGraphs = [...read("index.html").matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+  .flatMap((match) => JSON.parse(match[1])["@graph"] || []);
+const website = homeGraphs.find((entry) => entry["@type"] === "WebSite");
+assert.equal(website?.name, "Anıl Kaya", "homepage WebSite name drifted");
 
 const version = read("assets/version.txt").trim();
 assert.match(version, /^\d+$/, "asset version must be an integer");

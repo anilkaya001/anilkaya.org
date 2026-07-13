@@ -5,8 +5,13 @@
    ============================================================= */
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
+import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 
-const COURSE_PATH = "/lab/course";
+const COURSE_ASSET_PATH = "/lab/course";
+const LEGACY_COURSE_PATHS = new Set([
+  "/lab/course", "/lab/course.html", "/lab/course/",
+  "/lab/lesson", "/lab/lesson.html", "/lab/lesson/",
+]);
 const MAX_JSON_BYTES = 16 * 1024;
 
 // Pyodide is loaded from jsDelivr and requires eval + WebAssembly evaluation.
@@ -34,16 +39,6 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
   "X-Permitted-Cross-Domain-Policies": "none",
 };
-
-const OG_TOPICS = Object.freeze({
-  ols:    { title: "Ordinary Least Squares — Econometrics Lab",        desc: "The line of best fit, how it's computed, inference, and the assumptions behind it.", img: "/assets/img/og-ols.png",    level: "Beginner" },
-  iv2sls: { title: "Instrumental Variables & 2SLS — Econometrics Lab", desc: "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.",         img: "/assets/img/og-iv2sls.png", level: "Intermediate" },
-  did:    { title: "Difference-in-Differences — Econometrics Lab",     desc: "Treatment effects from before/after × treated/control, parallel trends, event studies.", img: "/assets/img/og-did.png",    level: "Intermediate" },
-  var:    { title: "Vector Autoregression — Econometrics Lab",         desc: "Joint dynamics of several series: estimation, impulse responses, Granger causality.",     img: "/assets/img/og-var.png",    level: "Advanced" },
-  panel:  { title: "Panel: Fixed & Random Effects — Econometrics Lab", desc: "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.",             img: "/assets/img/og-panel.png",  level: "Advanced" },
-  logit:  { title: "Logit & Probit — Econometrics Lab",                desc: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.",   img: "/assets/img/og-logit.png",  level: "Intermediate" },
-  gmm:    { title: "Generalized Method of Moments — Econometrics Lab", desc: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.",     img: "/assets/img/og-gmm.png",    level: "Advanced" },
-});
 
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
@@ -208,55 +203,89 @@ async function currentUser(request, env) {
   return payload ? { id: payload.sub, email: payload.email || "", name: payload.name || "" } : null;
 }
 
-function courseStructuredData(origin, pageUrl, topicName, meta) {
+const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+})[character]);
+
+function courseStructuredData(pageUrl, meta) {
   return JSON.stringify({
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "Course", "@id": pageUrl, url: pageUrl,
-        name: topicName, description: meta.desc,
-        provider: { "@type": "Person", name: "Anıl Kaya", url: origin + "/" },
+        name: meta.name, description: meta.description,
+        provider: { "@type": "Person", "@id": SITE_ORIGIN + "/#person", name: "Anıl Kaya", url: SITE_ORIGIN + "/" },
         isAccessibleForFree: true, inLanguage: "en", educationalLevel: meta.level,
         hasCourseInstance: { "@type": "CourseInstance", courseMode: "Online" },
       },
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Home", item: origin + "/" },
-          { "@type": "ListItem", position: 2, name: "Econometrics Lab", item: origin + "/lab/" },
-          { "@type": "ListItem", position: 3, name: topicName, item: pageUrl },
+          { "@type": "ListItem", position: 1, name: "Home", item: SITE_ORIGIN + "/" },
+          { "@type": "ListItem", position: 2, name: "Econometrics Lab", item: SITE_ORIGIN + "/lab/" },
+          { "@type": "ListItem", position: 3, name: meta.name, item: pageUrl },
         ],
       },
     ],
   }).replace(/</g, "\\u003c");
 }
 
-async function renderCourse(request, env, url, meta, topicId) {
+function courseFallback(meta) {
+  return '<div class="course-fallback">' +
+    '<nav class="course-breadcrumb" aria-label="Breadcrumb"><a href="/lab/">Econometrics Lab</a><span aria-hidden="true">/</span><span>' + escapeHTML(meta.name) + "</span></nav>" +
+    "<h1>" + escapeHTML(meta.name) + "</h1>" +
+    "<p>" + escapeHTML(meta.description) + "</p>" +
+    '<p class="course-fallback__meta">' + escapeHTML(meta.level) + " · 4 modules · Free and browser-based</p>" +
+    '<p><a class="btn btn--gold" href="#courseModules">View the course outline</a></p>' +
+    "</div>";
+}
+
+function courseOverview(meta) {
+  const modules = meta.modules.map((module) =>
+    '<article class="course-outline__module"><h3>' + escapeHTML(module.title) + "</h3><p>" + escapeHTML(module.summary) + "</p></article>"
+  ).join("");
+  const related = COURSE_TOPICS.filter((topic) => topic.id !== meta.id).map((topic) =>
+    '<li><a href="' + topic.path + '">' + escapeHTML(topic.name) + "</a></li>"
+  ).join("");
+  return '<section class="course-overview" aria-labelledby="courseOverviewTitle">' +
+    '<p class="course-overview__kicker">Course overview</p>' +
+    '<h2 id="courseOverviewTitle">Learn ' + escapeHTML(meta.name) + " interactively</h2>" +
+    "<p>This free course uses real Python and statsmodels in your browser. Work through the four modules below with explanations, executable examples, interactive controls, and questions.</p>" +
+    '<div class="course-outline" id="courseModules">' + modules + "</div>" +
+    '<p class="course-overview__byline">Course by <a href="/">Anıl Kaya</a> · ' + escapeHTML(meta.level) + " level</p>" +
+    '<h2 class="course-overview__related-title">Explore other econometrics courses</h2>' +
+    '<ul class="course-related">' + related + "</ul>" +
+    "</section>";
+}
+
+async function renderCourse(request, env, url, meta) {
   const headers = new Headers(request.headers);
   headers.set("Accept-Encoding", "identity");
   for (const name of ["If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "Range", "If-Range"]) {
     headers.delete(name);
   }
-  const asset = await env.ASSETS.fetch(new Request(url.origin + COURSE_PATH, { method: "GET", headers }));
+  const asset = await env.ASSETS.fetch(new Request(url.origin + COURSE_ASSET_PATH, { method: "GET", headers }));
   if (!(asset.headers.get("Content-Type") || "").includes("text/html")) return asset;
 
-  const pageUrl = url.origin + COURSE_PATH + "?m=" + encodeURIComponent(topicId);
-  const imageUrl = url.origin + meta.img;
-  const topicName = meta.title.split(" — ")[0];
-  const structured = courseStructuredData(url.origin, pageUrl, topicName, meta);
+  const pageUrl = SITE_ORIGIN + meta.path;
+  const imageUrl = SITE_ORIGIN + meta.image;
+  const structured = courseStructuredData(pageUrl, meta);
 
   const transformed = new HTMLRewriter()
-    .on("title", { element: (el) => el.setInnerContent(meta.title) })
-    .on('meta[name="description"]', setAttr("content", meta.desc))
+    .on("title", { element: (el) => el.setInnerContent(meta.pageTitle) })
+    .on('meta[name="description"]', setAttr("content", meta.description))
     .on('link[rel="canonical"]', setAttr("href", pageUrl))
-    .on('meta[property="og:title"]', setAttr("content", meta.title))
-    .on('meta[property="og:description"]', setAttr("content", meta.desc))
+    .on('meta[property="og:title"]', setAttr("content", meta.pageTitle))
+    .on('meta[property="og:description"]', setAttr("content", meta.description))
     .on('meta[property="og:url"]', setAttr("content", pageUrl))
+    .on('meta[property="og:site_name"]', setAttr("content", "Anıl Kaya"))
     .on('meta[property="og:image"]', setAttr("content", imageUrl))
-    .on('meta[name="twitter:title"]', setAttr("content", meta.title))
-    .on('meta[name="twitter:description"]', setAttr("content", meta.desc))
+    .on('meta[name="twitter:title"]', setAttr("content", meta.pageTitle))
+    .on('meta[name="twitter:description"]', setAttr("content", meta.description))
     .on('meta[name="twitter:image"]', setAttr("content", imageUrl))
     .on("#courseStructuredData", { element: (el) => el.setInnerContent(structured, { html: true }) })
+    .on("#course", { element: (el) => el.setInnerContent(courseFallback(meta), { html: true }) })
+    .on("#courseOverview", { element: (el) => el.setInnerContent(courseOverview(meta), { html: true }) })
     .transform(asset);
   const rewritten = new Response(transformed.body, transformed);
   for (const name of ["ETag", "Last-Modified", "Content-Length", "Content-Encoding", "Accept-Ranges"]) {
@@ -449,17 +478,21 @@ async function route(request, env) {
     throw new HttpError(404, "not_found", "API route not found");
   }
 
-  if (path === COURSE_PATH + ".html" || path === COURSE_PATH + "/") {
+  if (LEGACY_COURSE_PATHS.has(path)) {
     requireMethod(request, ["GET", "HEAD"]);
-    url.pathname = COURSE_PATH;
-    return redirect(url.toString(), 308);
+    const topicId = url.searchParams.get("m");
+    const target = topicId && Object.hasOwn(COURSE_BY_ID, topicId) ? COURSE_BY_ID[topicId].path : "/lab/";
+    return redirect(new URL(target, url).toString(), 308);
   }
 
-  if (path === COURSE_PATH && request.method === "GET") {
-    const topicId = url.searchParams.get("m");
-    if (topicId && Object.hasOwn(OG_TOPICS, topicId)) {
-      return renderCourse(request, env, url, OG_TOPICS[topicId], topicId);
+  const courseMatch = path.match(/^\/lab\/([a-z0-9-]+)\/?$/);
+  if (courseMatch && Object.hasOwn(COURSE_BY_SLUG, courseMatch[1])) {
+    requireMethod(request, ["GET", "HEAD"]);
+    const meta = COURSE_BY_SLUG[courseMatch[1]];
+    if (path !== meta.path) {
+      return redirect(new URL(meta.path, url).toString(), 308);
     }
+    return renderCourse(request, env, url, meta);
   }
 
   return env.ASSETS.fetch(request);

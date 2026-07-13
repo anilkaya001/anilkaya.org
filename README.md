@@ -19,7 +19,7 @@ delivery and provides:
 
 - static HTML/CSS/JS/font/image delivery through the `ASSETS` binding;
 - consistent security and caching headers;
-- canonical `/lab/course?m=<topic>` metadata and structured-data rewriting;
+- canonical `/lab/<course-slug>/` metadata, crawlable outlines, and structured-data rewriting;
 - Google OAuth and signed session cookies under `/auth/*`;
 - JSON progress/streak APIs under `/api/*` backed by D1 database `iewt`;
 - atomic cross-device progress unions and exact progress-derived points.
@@ -35,7 +35,7 @@ verify them before operational changes.
 index.html                      landing page
 articles/                       articles index and reusable template
 lab/index.html                  Econometrics Lab catalogue
-lab/course.html                 backing asset for /lab/course?m=<topic>
+lab/course.html                 backing template for clean course-slug pages
 assets/css/                     design system and section styles
 assets/js/curriculum*.js        curricula, browser scoring manifest, questions
 assets/js/lab-core.js           Pyodide runtime and Python editor
@@ -44,6 +44,7 @@ assets/js/storage.js            validated, guarded browser persistence
 assets/js/auth.js               Worker API detection and synchronization
 shared/session.js               signed-session helpers
 shared/course-points.js         server scoring manifest
+shared/course-seo.js            canonical slugs and crawlable course metadata
 worker.js · wrangler.toml       Worker implementation and configuration
 schema.sql                      D1 schema
 tests/                          contract, Worker-runtime, and browser suites

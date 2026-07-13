@@ -6,9 +6,19 @@ import { startWorker } from "./worker-server.mjs";
 const server = await startWorker();
 const BASE = server.baseURL;
 let browser;
-const PAGES = ["/", "/lab/", "/lab/course?m=ols", "/articles/"];
 const TOPICS = { ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33 };
-const stageRoute = (topic, index, nonce = index) => `/lab/course?m=${topic}&test=${nonce}#s${index}`;
+const SLUGS = {
+  ols: "ordinary-least-squares",
+  iv2sls: "instrumental-variables-2sls",
+  did: "difference-in-differences",
+  var: "vector-autoregression",
+  panel: "panel-fixed-random-effects",
+  logit: "logit-probit",
+  gmm: "generalized-method-of-moments",
+};
+const courseRoute = (topic) => `/lab/${SLUGS[topic]}/`;
+const PAGES = ["/", "/lab/", courseRoute("ols"), "/articles/"];
+const stageRoute = (topic, index, nonce = index) => `${courseRoute(topic)}?test=${nonce}#s${index}`;
 
 function watch(page, ignored = () => false) {
   const errors = [];
@@ -149,7 +159,7 @@ try {
   // Rapid navigation advances from the target index, not a stale rendered index.
   {
     const page = await browser.newPage();
-    await page.goto(BASE + "/lab/course?m=ols", { waitUntil: "load" });
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
     assert.equal((await page.locator("#cPos").textContent()).trim(), "1 / 20");
     assert.equal(await page.locator('.course-nav__mod[aria-current="step"]').count(), 1);
     await page.click("#cNext"); await page.click("#cNext"); await page.click("#cNext");
@@ -165,7 +175,7 @@ try {
   // Background account synchronization repaints progress without destroying unsaved work.
   {
     const page = await browser.newPage();
-    await page.goto(BASE + "/lab/course?m=ols#s13", { waitUntil: "load" });
+    await page.goto(BASE + stageRoute("ols", 13), { waitUntil: "load" });
     await page.fill(".q-num", "36");
     const state = await page.evaluate(() => {
       const input = document.querySelector(".q-num");
@@ -203,7 +213,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await context.addInitScript(() => localStorage.setItem("iewt:splitW", "61.4"));
     const page = await context.newPage();
-    await page.goto(BASE + "/lab/course?m=ols#s1", { waitUntil: "load" });
+    await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
     const migrated = await page.evaluate(() => ({
       width: document.querySelector(".stage__split").style.getPropertyValue("--guideW"),
       current: localStorage.getItem("iewt:guideW"), legacy: localStorage.getItem("iewt:splitW"),
@@ -232,7 +242,7 @@ try {
     });
     const page = await blocked.newPage();
     const clean = watch(page);
-    await page.goto(BASE + "/lab/course?m=ols#s1", { waitUntil: "load" });
+    await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
     assert.equal((await page.locator("#cPos").textContent()).trim(), "2 / 20");
     assert(await page.locator(".cell__editor").isVisible());
     clean();
@@ -244,7 +254,7 @@ try {
       localStorage.setItem("iewt:gamify", "5");
     });
     const malformedPage = await malformed.newPage();
-    await malformedPage.goto(BASE + "/lab/course?m=ols", { waitUntil: "load" });
+    await malformedPage.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
     const repaired = await malformedPage.evaluate(() => ({ progress: JSON.parse(localStorage.getItem("iewt:progress")), gamify: JSON.parse(localStorage.getItem("iewt:gamify")) }));
     assert.equal(typeof repaired.progress, "object");
     assert.deepEqual(Object.keys(repaired.gamify).sort(), ["last", "points", "streak"]);
@@ -257,7 +267,7 @@ try {
       Storage.prototype.setItem = () => { throw new DOMException("full", "QuotaExceededError"); };
     });
     const quotaPage = await quota.newPage();
-    await quotaPage.goto(BASE + "/lab/course?m=ols#s4", { waitUntil: "load" });
+    await quotaPage.goto(BASE + stageRoute("ols", 4), { waitUntil: "load" });
     await quotaPage.check('input[value="false"]');
     await quotaPage.click(".quiz__check");
     const quotaState = await quotaPage.evaluate(() => ({
@@ -290,7 +300,7 @@ try {
     await context.addInitScript(() => { window.loadPyodide = () => new Promise(() => {}); });
     const page = await context.newPage();
     const clean = watch(page, (value) => value.includes("cdn.jsdelivr.net"));
-    await page.goto(BASE + "/lab/course?m=ols#s1", { waitUntil: "load" });
+    await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
     await page.click(".cell__run");
     const boot = page.locator("#labBoot.show");
     await boot.waitFor();
@@ -332,18 +342,18 @@ try {
   }
 
   // Authored rewards and deterministic grading for every question family.
-  await solve("/lab/course?m=ols#s4", (page) => page.check('input[value="false"]'), 10, true);
-  await solve("/lab/course?m=ols#s3", (page) => page.check('input[value="2"]'), 15, false);
-  await solve("/lab/course?m=ols#s13", (page) => page.fill(".q-num", "36"), 20, false);
-  await solve("/lab/course?m=ols#s19", async (page) => {
+  await solve(stageRoute("ols", 4), (page) => page.check('input[value="false"]'), 10, true);
+  await solve(stageRoute("ols", 3), (page) => page.check('input[value="2"]'), 15, false);
+  await solve(stageRoute("ols", 13), (page) => page.fill(".q-num", "36"), 20, false);
+  await solve(stageRoute("ols", 19), async (page) => {
     for (const value of [0, 1, 2]) await page.check(`input[value="${value}"]`);
   }, 20, false);
-  await solve("/lab/course?m=iv2sls#s20", (page) => page.fill(".q-blank", "  THE fitted values. "), 15, false);
-  await solve("/lab/course?m=iv2sls#s29", (page) => page.fill(".q-num", "−3.6"), 20, false);
+  await solve(stageRoute("iv2sls", 20), (page) => page.fill(".q-blank", "  THE fitted values. "), 15, false);
+  await solve(stageRoute("iv2sls", 29), (page) => page.fill(".q-num", "−3.6"), 20, false);
 
   {
     const page = await browser.newPage();
-    await page.goto(BASE + "/lab/course?m=ols#s13", { waitUntil: "load" });
+    await page.goto(BASE + stageRoute("ols", 13), { waitUntil: "load" });
     await page.fill(".q-num", "36abc"); await page.click(".quiz__check");
     assert(await page.locator(".quiz__feedback.err").isVisible());
     assert.equal(await points(page), 0);

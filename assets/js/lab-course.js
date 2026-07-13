@@ -1,6 +1,6 @@
 /* =============================================================
    lab-course.js — staged, horizontal course player.
-   Reads CURRICULUM[?m], flattens modules→stages, and shows ONE
+   Resolves the course slug, flattens modules→stages, and shows ONE
    stage at a time: a left module navigator, instructions on the
    left, the live workspace on the right, Prev/Next (+ arrow keys).
    ============================================================= */
@@ -9,7 +9,12 @@
 
   const root = document.getElementById("course");
   if (!root) return;
-  const topic = (window.CURRICULUM || {})[new URLSearchParams(location.search).get("m")];
+  const slug = location.pathname.split("/").filter(Boolean).pop();
+  const meta = (window.TOPIC_META || []).find((item) => item.slug === slug);
+  // Query fallback keeps the backing template usable in a plain static preview;
+  // production permanently redirects every legacy ?m= URL to a clean slug.
+  const topicId = meta ? meta.id : new URLSearchParams(location.search).get("m");
+  const topic = (window.CURRICULUM || {})[topicId];
 
   if (!topic) {
     root.innerHTML =

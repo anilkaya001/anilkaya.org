@@ -35,10 +35,10 @@
       const p = pct(t);
       const cta = p === 0 ? "Start" : p === 100 ? "Review" : "Continue";
       const card = el("a", "model-card reveal");
-      card.href = "/lab/course?m=" + encodeURIComponent(t.id);
+      card.href = "/lab/" + encodeURIComponent(t.slug) + "/";
       card.innerHTML =
         '<div class="model-card__top"><span class="model-card__badge">' + t.level + '</span><span class="model-card__num">' + t.num + "</span></div>" +
-        "<h3>" + t.title + "</h3><p>" + t.blurb + "</p>" +
+        "<h2>" + t.title + "</h2><p>" + t.blurb + "</p>" +
         '<div class="model-card__foot"><div class="progress"><div class="progress__bar" style="width:' + p + '%"></div></div><span class="progress-label">' + p + "%</span></div>" +
         '<div class="model-card__foot"><span class="model-card__cta">' + cta + ' &rarr;</span><span class="model-card__num">' + t.stages + " steps · 4 modules</span></div>";
       grid.appendChild(card);

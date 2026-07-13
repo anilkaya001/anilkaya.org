@@ -15,8 +15,8 @@ the Worker modules during deployment. The committed npm dependencies under
 Browser ──► Cloudflare Worker (worker.js; runs before assets)
               ├─ /auth/*  Google OAuth → HMAC-signed session cookie
               ├─ /api/*   JSON API backed by D1 (SQLite)
+              ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
               └─ everything else → ASSETS binding
-                   └─ /lab/course?m=<topic> → topic metadata via HTMLRewriter
 ```
 
 - `wrangler.toml` is the Worker source of truth: name `anilkaya`, entrypoint
@@ -25,9 +25,10 @@ Browser ──► Cloudflare Worker (worker.js; runs before assets)
 - `assets.run_worker_first = true` is required. Without it, matching static
   assets bypass `worker.js`, disabling response headers, cache policy, and
   course metadata rewriting.
-- `assets.html_handling = "auto-trailing-slash"`. The canonical course route is
-  `/lab/course`; legacy `/lab/course.html` and `/lab/course/` requests receive
-  a query-preserving 308 redirect.
+- `assets.html_handling = "auto-trailing-slash"`. Each course has a descriptive
+  canonical path such as `/lab/ordinary-least-squares/`. Legacy
+  `/lab/course?m=<id>` and `/lab/lesson?m=<id>` forms receive a 308 redirect;
+  missing or invalid IDs redirect to `/lab/` instead of exposing a soft 404.
 - `.assetsignore` excludes Worker code, `shared/`, tests, the private article
   template, `CNAME`, local secrets, schema, Markdown, dotfiles, and configuration
   from the Cloudflare static bundle. `CNAME` remains in Git for GitHub Pages.
@@ -53,12 +54,13 @@ it until `www` is attached to the Worker and verified.
 |---|---|
 | `index.html` | Landing page and particle-field hero. |
 | `articles/index.html`, `articles/_template/` | Articles index and article template. |
-| `lab/index.html` | Topic catalogue rendered from `TOPIC_META`. |
-| `lab/course.html` | Backing asset for canonical `/lab/course?m=<id>`. |
-| `lab/lesson.html` | Noindexed legacy redirect to `/lab/course`. |
+| `lab/index.html` | Crawlable topic catalogue, progressively enhanced from `TOPIC_META`. |
+| `lab/course.html` | Private routing template rewritten for canonical course-slug pages. |
+| `lab/lesson.html` | Noindexed static fallback for legacy lesson URLs. |
 | `worker.js` | Routing, response policy, OAuth, API, D1 synchronization, SEO rewriting. |
 | `shared/session.js` | Defensive HMAC-SHA256 session sign/verify and cookie helpers. |
 | `shared/course-points.js` | Server scoring manifest used to derive points from progress. |
+| `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
 | `schema.sql` | D1 `users`, `progress`, and `stats` tables. |
 | `assets/js/curriculum.js` | Seven-topic metadata, browser scoring manifest, and OLS curriculum. |
 | `assets/js/curriculum-data.js` | IV, DiD, VAR, panel, logit, and GMM curricula. |
@@ -166,9 +168,10 @@ exactly from progress.
 5. HTML sends one `Clear-Site-Data: "cache"` repair unless the `cachefix`
    cookie is present. Keep this until the historical encoding incident is no
    longer operationally relevant.
-6. `/lab/course?m=<valid-topic>` receives exact title, description, canonical,
-   Open Graph/Twitter fields, and one parseable Course + Breadcrumb JSON-LD
-   graph. Unknown topics keep the generic shell.
+6. Every `/lab/<valid-course-slug>/` receives an apex-domain canonical, exact
+   title/description, Open Graph/Twitter fields, visible H1 and four-module
+   outline, related course links, and one parseable Course + Breadcrumb JSON-LD
+   graph. Generic and invalid legacy routes never return an indexable shell.
 7. Malformed, oversized, wrongly signed, or expired sessions fail closed as an
    anonymous user and never throw a request-level 500.
 
@@ -208,7 +211,8 @@ The suites prove:
 
 - all seven curricula, four modules each, every stage schema, scoring manifest,
   local asset existence/versioning, and hardened sessions;
-- real Worker-first routing, canonical redirects, all seven metadata variants,
+- real Worker-first routing, canonical redirects, all seven crawlable metadata
+  and syllabus variants,
   response-cloned asset byte integrity, conditional caching, security headers,
   JSON API errors, OAuth failure behavior, D1 user isolation, concurrent
   progress union, and exact derived points;

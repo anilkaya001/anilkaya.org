@@ -2,30 +2,38 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://anilkaya.org/</loc>
-    <lastmod>2026-07-12</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>1.0</priority>
-  </url>
-  <url>
-    <loc>https://anilkaya.org/articles/</loc>
-    <lastmod>2026-07-12</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
     <loc>https://anilkaya.org/lab/</loc>
-    <lastmod>2026-07-12</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
+    <lastmod>2026-07-13</lastmod>
   </url>
-  <!-- Each course topic is a first-class page: crawlers receive a
-       topic-specific title, description, canonical and Course markup
-       from the edge (worker.js), so these index independently. -->
-  <url><loc>https://anilkaya.org/lab/course?m=ols</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=iv2sls</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=did</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=var</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=panel</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=logit</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course?m=gmm</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url>
+    <loc>https://anilkaya.org/lab/ordinary-least-squares/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/instrumental-variables-2sls/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/difference-in-differences/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/vector-autoregression/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/panel-fixed-random-effects/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/logit-probit/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://anilkaya.org/lab/generalized-method-of-moments/</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
 </urlset>
