@@ -4,22 +4,38 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - name: Install Playwright + Chromium
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - name: Install pinned test dependencies
         working-directory: tests
-        run: |
-          npm init -y >/dev/null 2>&1
-          npm install --no-save playwright@1.48
-          npx playwright install --with-deps chromium
-      - name: Run regression suite
+        run: npm ci
+      - name: Install Chromium
         working-directory: tests
-        # SITE_DIR is the repo root relative to tests/; the script serves it itself.
-        run: SITE_DIR=.. node regression.mjs
+        run: npx playwright install --with-deps chromium
+      - name: Validate Worker bundle and configuration
+        run: ./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-worker-dry-run
+      - name: Run contract, Worker, and browser regressions
+        working-directory: tests
+        env:
+          ASSET_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm test

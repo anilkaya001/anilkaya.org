@@ -6,11 +6,10 @@
 (() => {
   "use strict";
   const META = window.TOPIC_META || [];
-  const PKEY = "iewt:progress";
-  const progress = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || {}; } catch { return {}; } };
+  const progress = () => window.IEWTStorage.progress();
   const pct = (t) => {
     const done = ((progress()[t.id] || {}).done || []).length;
-    return t.stages ? Math.round((100 * Math.min(done, t.stages)) / t.stages) : 0;
+    return t.stages ? Math.max(0, Math.min(100, Math.round((100 * Math.min(done, t.stages)) / t.stages))) : 0;
   };
   const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
 
@@ -36,7 +35,7 @@
       const p = pct(t);
       const cta = p === 0 ? "Start" : p === 100 ? "Review" : "Continue";
       const card = el("a", "model-card reveal");
-      card.href = "/lab/course.html?m=" + encodeURIComponent(t.id);
+      card.href = "/lab/course?m=" + encodeURIComponent(t.id);
       card.innerHTML =
         '<div class="model-card__top"><span class="model-card__badge">' + t.level + '</span><span class="model-card__num">' + t.num + "</span></div>" +
         "<h3>" + t.title + "</h3><p>" + t.blurb + "</p>" +

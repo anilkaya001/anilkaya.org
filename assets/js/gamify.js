@@ -6,17 +6,46 @@
    ============================================================= */
 (() => {
   "use strict";
-  const KEY = "iewt:gamify";
-  const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || { points: 0, streak: 0, last: null }; } catch { return { points: 0, streak: 0, last: null }; } };
-  const write = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode */ } };
-  const day = (d) => d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+  const store = window.IEWTStorage;
+  const write = (state) => store.setGamify(state);
+  const day = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  let remotePointFloor = 0;
+
+  function derivedPoints() {
+    const manifest = window.COURSE_STAGE_POINTS;
+    if (!manifest || typeof manifest !== "object") return null;
+    let total = 0;
+    const progress = store.progress();
+    for (const [model, value] of Object.entries(progress)) {
+      if (!Object.hasOwn(manifest, model) || !Array.isArray(value && value.done)) continue;
+      const weights = manifest[model];
+      for (const index of new Set(value.done)) {
+        if (Number.isInteger(index) && index >= 0 && index < weights.length) total += weights[index];
+      }
+    }
+    return total;
+  }
+
+  function read() {
+    const state = store.gamify();
+    const points = derivedPoints();
+    const reconciled = points == null ? state.points : Math.max(points, remotePointFloor);
+    if (state.points !== reconciled) {
+      state.points = reconciled;
+      return write(state);
+    }
+    return state;
+  }
 
   const Gamify = {
     get() { return read(); },
     award(points) {
-      const s = read();
+      const delta = Number(points);
+      if (!Number.isSafeInteger(delta) || delta <= 0) return read();
+      const s = store.gamify();
       const prevStreak = s.streak || 0;
-      s.points = (s.points || 0) + points;
+      const exact = derivedPoints();
+      s.points = exact == null ? Math.min(Number.MAX_SAFE_INTEGER, (s.points || 0) + delta) : Math.max(exact, remotePointFloor);
       const today = day(new Date());
       if (s.last !== today) {
         const y = new Date(); y.setDate(y.getDate() - 1);
@@ -27,20 +56,37 @@
       if ((s.streak || 0) > prevStreak && window.FX && window.FX.streakUp) {
         document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.streakUp(el));
       }
-      if (window.Auth && typeof window.Auth.pushStats === "function") window.Auth.pushStats(s);
+      if (window.Auth && typeof window.Auth.pushStats === "function") void window.Auth.pushStats(s);
       return s;
     },
-    // Merge backend stats in (keep the best of each).
-    merge(s) {
+    // Merge the server-derived total and the newest activity date.
+    merge(s, options = {}) {
       const c = read();
-      write({ points: Math.max(c.points || 0, (s && s.points) || 0), streak: Math.max(c.streak || 0, (s && s.streak) || 0), last: (s && s.last) || c.last });
+      const remote = s && typeof s === "object" ? s : {};
+      const remoteLast = store.normalizeDay(remote.last);
+      const localLast = store.normalizeDay(c.last);
+      const remotePoints = Number.isSafeInteger(remote.points) && remote.points >= 0 ? remote.points : 0;
+      if (options.progressComplete === true) remotePointFloor = 0;
+      else if (options.progressComplete === false) remotePointFloor = Math.max(remotePointFloor, remotePoints);
+      const exact = derivedPoints();
+      const latest = !localLast || (remoteLast && remoteLast > localLast) ? "remote" :
+        !remoteLast || localLast > remoteLast ? "local" : "same";
+      const streak = latest === "remote" ? remote.streak : latest === "local" ? c.streak : Math.max(c.streak || 0, remote.streak || 0);
+      write({
+        points: exact == null ? Math.max(c.points || 0, remotePoints) : Math.max(exact, remotePointFloor),
+        streak: Number(streak) || 0,
+        last: latest === "remote" ? remoteLast : localLast || remoteLast,
+      });
       this.paint();
     },
     paint() {
       const s = read();
       document.querySelectorAll("[data-gamify]").forEach((el) => {
-        el.innerHTML = '<span class="gpts" title="Points">★ ' + (s.points || 0) + '</span>' +
-          '<span class="gstreak" title="Day streak">🔥 ' + (s.streak || 0) + "</span>";
+        const points = document.createElement("span");
+        points.className = "gpts"; points.title = "Points"; points.textContent = "★ " + (s.points || 0);
+        const streak = document.createElement("span");
+        streak.className = "gstreak"; streak.title = "Day streak"; streak.textContent = "🔥 " + (s.streak || 0);
+        el.replaceChildren(points, streak);
       });
       if (window.FX && window.FX.setStreakState) {
         document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.setStreakState(el, (s.streak || 0) > 0 ? "lit" : "none"));

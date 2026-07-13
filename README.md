@@ -1,95 +1,131 @@
 # anilkaya.org
 
-Personal site of **Anıl Kaya** — *In Econometrics We Trust*.
+Personal site of **Anıl Kaya** — *In Econometrics We Trust* — plus the
+**Econometrics Lab**, a staged course platform that runs genuine Python,
+statsmodels, NumPy, SciPy, pandas, and matplotlib in the browser through
+Pyodide/WebAssembly.
 
-A fast, dependency-free static site served by **GitHub Pages** on the custom
-domain [anilkaya.org](https://anilkaya.org), with DNS on Cloudflare.
+The browser frontend is hand-written semantic HTML, CSS, and vanilla JavaScript.
+There is no frontend framework, frontend build step, or runtime npm dependency;
+Wrangler bundles the Worker modules when deploying. Pyodide and its scientific
+packages load from pinned jsDelivr paths only when a learner runs Python. The
+pinned npm dependencies under `tests/` are verification tools, not application
+dependencies.
 
-## Stack & principles
+## Runtime
 
-- **No frameworks, no build step.** Hand-written semantic HTML + CSS + a single
-  vanilla-JS canvas animation. Everything is same-origin, so there are no
-  third-party requests on load.
-- **Latin Modern** (self-hosted `woff2`, `font-display: swap`, preloaded) for all
-  text — the classic LaTeX look.
-- **Gold palette:** Mystic Gold `#af983f`, Harvest Gold `#da9100`,
-  Celadon Gold `#c9c6ac`.
-- **Accessible & efficient:** honours `prefers-reduced-motion` (static render),
-  pauses the animation when the tab is hidden, and scales particle count to the
-  viewport.
+`worker.js` is a Cloudflare Worker with Static Assets. It runs before asset
+delivery and provides:
 
-## Structure
+- static HTML/CSS/JS/font/image delivery through the `ASSETS` binding;
+- consistent security and caching headers;
+- canonical `/lab/course?m=<topic>` metadata and structured-data rewriting;
+- Google OAuth and signed session cookies under `/auth/*`;
+- JSON progress/streak APIs under `/api/*` backed by D1 database `iewt`;
+- atomic cross-device progress unions and exact progress-derived points.
 
+As observed on 2026-07-12, the apex used the Worker API while
+`www.anilkaya.org` still used GitHub Pages to redirect to the apex. Dashboard
+deployment settings and custom-domain state are external to this repository;
+verify them before operational changes.
+
+## Repository map
+
+```text
+index.html                      landing page
+articles/                       articles index and reusable template
+lab/index.html                  Econometrics Lab catalogue
+lab/course.html                 backing asset for /lab/course?m=<topic>
+assets/css/                     design system and section styles
+assets/js/curriculum*.js        curricula, browser scoring manifest, questions
+assets/js/lab-core.js           Pyodide runtime and Python editor
+assets/js/lab-course.js         course player, grading, progress, splitter
+assets/js/storage.js            validated, guarded browser persistence
+assets/js/auth.js               Worker API detection and synchronization
+shared/session.js               signed-session helpers
+shared/course-points.js         server scoring manifest
+worker.js · wrangler.toml       Worker implementation and configuration
+schema.sql                      D1 schema
+tests/                          contract, Worker-runtime, and browser suites
+AGENTS.md                       complete engineering handbook
+DEPLOY.md                       deployment and rollback runbook
 ```
-.
-├── index.html              # Landing page (animated gold field + headline)
-├── 404.html                # Themed not-found page
-├── CNAME                    # Custom domain (anilkaya.org)
-├── robots.txt · sitemap.xml · site.webmanifest
-├── assets/
-│   ├── css/
-│   │   ├── base.css         # Tokens, @font-face, reset, top bar, pill nav
-│   │   ├── home.css         # Landing hero
-│   │   ├── article.css      # Long-form reading layout
-│   │   └── lab.css          # Econometrics Lab + Python IDE
-│   ├── js/
-│   │   ├── particles.js     # Canvas field engine
-│   │   ├── auth.js          # Account scaffold (on-device now, Google later)
-│   │   ├── lab-core.js      # Pyodide engine + IDE cells
-│   │   ├── lessons.js       # Course content (data-driven)
-│   │   └── lab-ui.js        # Lab home grid + lesson renderer + progress
-│   ├── fonts/               # Latin Modern woff2 (see NOTICE.md)
-│   └── img/                 # favicon.svg, etc.
-├── articles/
-│   ├── index.html           # Article listing
-│   └── _template/           # Copy this to start a new article
-└── lab/
-    ├── index.html           # Lab home (model grid)
-    └── lesson.html          # Generic lesson renderer (?m=<model>)
-```
 
-## Econometrics Lab
+## Econometrics Lab data model
 
-`/lab/` runs **real** econometrics in the browser via **Pyodide + statsmodels**
-(CPython + NumPy/SciPy/pandas/statsmodels/matplotlib compiled to WebAssembly).
-Estimation is genuine statsmodels output — not an approximation — and it runs on
-the visitor's machine, so it costs nothing to serve and scales without limit.
-Each lesson includes a **live Python IDE** (editable cells, Run, matplotlib
-output). Progress is saved per-device in `localStorage`.
+`assets/js/curriculum.js` declares `TOPIC_META` and the OLS curriculum.
+`assets/js/curriculum-data.js` adds IV/2SLS, DiD, VAR, panel, logit, and GMM.
+Each topic has four modules made from `read`, `code`, `interactive`, and
+question stages. `assets/js/curriculum-questions.js` adds true/false,
+multi-select, numeric, and fill-in-the-blank questions.
 
-**Add a model:** append an object to `assets/js/lessons.js` (with `read` and
-`code` steps) — no new HTML needed; `/lab/lesson.html?m=<id>` renders it and the
-home grid picks it up automatically.
+To change or add course content:
 
-## Accounts — Phase 2 (Google sign-in) — scaffolded
+1. update `TOPIC_META` and the appropriate curriculum source;
+2. preserve existing stage ordering or provide a progress-index migration;
+3. update both scoring manifests in `curriculum.js` and
+   `shared/course-points.js` if stage rewards/order changed;
+4. bump `assets/version.txt` and every local `?v=` reference for browser-asset
+   changes;
+5. run the full test suite.
 
-The full backend is already in the repo and **inert on GitHub Pages**; it
-activates when deployed as a **Cloudflare Worker (Static Assets + D1)**:
+The contract test verifies topic IDs, module/stage counts, every stage schema,
+the scoring manifest, local asset existence, and cache-version consistency.
 
-- `worker.js` — serves the static site via the `ASSETS` binding and handles
-  `/auth/google`, `/auth/callback`, `/auth/logout`, `/api/me`, `/api/progress`
-- `shared/session.js` — stateless signed-cookie sessions (HMAC)
-- `schema.sql`, `wrangler.toml`, `.assetsignore` — D1 + Worker config
+## Local development
 
-`auth.js` auto-detects the backend (falls back to on-device when absent), so the
-site keeps working either way. **Deployment steps are in [`DEPLOY.md`](./DEPLOY.md).**
-
-## Add an article
+Production-equivalent development requires Node.js 22 or newer and uses the
+pinned Wrangler version:
 
 ```bash
-cp -r articles/_template articles/my-article-slug
+cd tests
+npm ci
+npx playwright install chromium
+cd ..
+
+./tests/node_modules/.bin/wrangler d1 execute iewt --local --file schema.sql
+./tests/node_modules/.bin/wrangler dev --local
 ```
 
-1. Edit `articles/my-article-slug/index.html` — `<title>`, meta, canonical URL,
-   and the `<article>` body.
-2. Add a `<li>` linking to `/articles/my-article-slug/` in `articles/index.html`
-   (newest first).
-3. Optionally add the URL to `sitemap.xml`.
+For local Google OAuth, add git-ignored `.dev.vars`:
 
-Styling is inherited automatically from `base.css` + `article.css`; you only
-write content.
+```dotenv
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+SESSION_SECRET=use-a-long-random-local-value
+```
 
-## Deploy
+`python3 -m http.server` is only a limited static-file preview. It does not
+reproduce extensionless routing, Worker response policy, HTML rewriting,
+OAuth, APIs, or D1.
 
-Pages publishes from the **`main`** branch (root). Any push to `main` rebuilds
-and deploys automatically — usually live within a minute.
+## Verification
+
+```bash
+cd tests
+npm ci
+npx playwright install chromium
+npm test
+
+cd ..
+./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-dry-run
+```
+
+The suite executes curriculum/session contracts, a real local Wrangler Worker
+with D1 and static assets, and Playwright across all 205 course stages. GitHub
+Actions runs it on pushes to `main`, pull requests, and manual dispatch.
+
+## Deployment
+
+See [`DEPLOY.md`](./DEPLOY.md). The short version is:
+
+1. pass `npm test` and the Wrangler dry-run;
+2. confirm D1 schema and secrets in the target Cloudflare account;
+3. deploy the exact tested commit with pinned Wrangler;
+4. run the documented production smoke tests;
+5. verify dashboard header rules and both apex/`www` routing;
+6. roll back immediately if response encoding, auth, or persistence differs.
+
+Do not assume that a push deploys, that staging exists, or that CI gates an
+external Workers Build merely because repository tests are green. Those are
+dashboard settings and must be verified independently.

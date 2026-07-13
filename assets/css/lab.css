@@ -162,9 +162,10 @@
    The syntax-highlight layer must keep IDENTICAL metrics to the textarea. */
 @media (pointer: coarse) {
   .cell__hl, .cell__editor { font-size: 16px; line-height: 1.5; }
-  .q-blank, .q-num { font-size: 16px; }
+  .q-blank, .q-num { min-height: 2.75rem; font-size: 16px; }
   .quiz__choice { min-height: 2.75rem; align-items: center; }
-  .cell__run, .cell__reset { min-height: 2.5rem; }
+  .cell__run, .cell__reset, .course-nav__mod { min-height: 2.75rem; }
+  .control__range { min-height: 2.75rem; }
 }
 
 /* ---- Pyodide boot indicator ---- */
@@ -264,6 +265,9 @@
 /* Draggable divider — wide hit area + a visible gold grip knob so it reads as
    "drag me to resize". Mechanics live in lab-course.js (pointer events). */
 .stage__handle { flex: 0 0 22px; align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+@media (pointer: coarse) and (min-width: 901px) {
+  .stage__handle { flex-basis: 44px; }
+}
 .stage__handle::before {
   content: ""; position: absolute; top: 0; bottom: 0; left: 50%;
   width: 2px; transform: translateX(-50%); border-radius: 999px;

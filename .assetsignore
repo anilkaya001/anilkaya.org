@@ -1,14 +1,19 @@
 # Keep server code, config, and repo metadata out of the public static bundle.
+.*
 .git/
 .github/
+.wrangler/
 tests/
 node_modules/
 shared/
 functions/
+articles/_template/
 worker.js
 wrangler.toml
 .assetsignore
 .gitignore
-.dev.vars
+.dev.vars*
+.env*
+CNAME
 schema.sql
 *.md

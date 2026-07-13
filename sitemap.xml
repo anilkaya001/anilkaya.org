@@ -21,11 +21,11 @@
   <!-- Each course topic is a first-class page: crawlers receive a
        topic-specific title, description, canonical and Course markup
        from the edge (worker.js), so these index independently. -->
-  <url><loc>https://anilkaya.org/lab/course.html?m=ols</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=iv2sls</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=did</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=var</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=panel</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=logit</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
-  <url><loc>https://anilkaya.org/lab/course.html?m=gmm</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=ols</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=iv2sls</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=did</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=var</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=panel</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=logit</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
+  <url><loc>https://anilkaya.org/lab/course?m=gmm</loc><lastmod>2026-07-12</lastmod><priority>0.7</priority></url>
 </urlset>

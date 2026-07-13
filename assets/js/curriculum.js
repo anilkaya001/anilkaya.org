@@ -20,6 +20,19 @@ window.TOPIC_META = [
 // the loader recomputes these exactly; here they keep the Lab home progress right.
 window.TOPIC_META.forEach((t) => { t.stages = ({ ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33 })[t.id] || 0; });
 
+// Browser scoring manifest. Gamification derives the total from completed
+// stages so v16 under-counts and tampered/stale totals repair automatically.
+// Contract tests keep this entry-for-entry equivalent to the server manifest.
+window.COURSE_STAGE_POINTS = Object.freeze(Object.fromEntries(Object.entries({
+  ols: [5, 10, 10, 15, 10, 5, 10, 15, 15, 5, 10, 10, 15, 20, 20, 5, 10, 15, 10, 20],
+  iv2sls: [5, 5, 10, 10, 15, 15, 5, 5, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 10, 5, 5, 10, 10, 10, 15, 15, 20, 15],
+  did: [5, 5, 10, 10, 15, 15, 5, 5, 10, 10, 15, 15, 10, 5, 5, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 20],
+  var: [5, 5, 10, 10, 15, 15, 20, 5, 10, 10, 10, 15, 15, 15, 5, 10, 10, 10, 15, 15, 15, 10, 5, 10, 10, 10, 15, 15, 10, 20],
+  panel: [5, 5, 10, 15, 15, 15, 5, 10, 5, 10, 15, 15, 5, 10, 10, 10, 15, 15, 15, 10, 10, 5, 10, 10, 5, 10, 15, 15, 15, 10],
+  logit: [5, 5, 10, 10, 15, 15, 10, 5, 5, 10, 10, 15, 15, 10, 15, 5, 5, 10, 10, 15, 15, 20, 20, 20, 5, 5, 10, 10, 15, 15, 15, 10],
+  gmm: [5, 5, 10, 10, 15, 15, 15, 20, 5, 5, 10, 10, 10, 15, 15, 15, 5, 5, 10, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 10],
+}).map(([id, points]) => [id, Object.freeze(points)])));
+
 window.CURRICULUM = {
   ols: {
     id: "ols",

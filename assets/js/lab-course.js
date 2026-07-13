@@ -26,27 +26,35 @@
   const N = stages.length;
 
   // ---- Progress (on-device) -----------------------------------
-  const PKEY = "iewt:progress";
-  const all = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || {}; } catch { return {}; } };
+  const store = window.IEWTStorage;
+  const DEFAULT_POINTS = Object.freeze({
+    read: 5, code: 10, interactive: 10, quiz: 15,
+    truefalse: 10, fillblank: 15, numeric: 20, multi: 20,
+  });
+  const all = () => store.progress();
   const doneSet = () => new Set((all()[topic.id] || {}).done || []);
   function mark(i, originEl) {
     const a = all(); const d = new Set((a[topic.id] || {}).done || []);
     if (d.has(i)) return;
-    d.add(i); a[topic.id] = { done: [...d] };
-    try { localStorage.setItem(PKEY, JSON.stringify(a)); } catch { /* private mode */ }
+    d.add(i); a[topic.id] = { done: [...d].sort((x, y) => x - y) };
+    store.setProgress(a);
     paintProgress();
-    const pts = ({ read: 5, code: 10, interactive: 10, quiz: 15 })[stages[i].type] || 5;
+    const manifest = window.COURSE_STAGE_POINTS && window.COURSE_STAGE_POINTS[topic.id];
+    const canonical = manifest && manifest[i];
+    const authored = stages[i].points;
+    const pts = Number.isSafeInteger(canonical) && canonical >= 0 ? canonical :
+      Number.isSafeInteger(authored) && authored >= 0 ? authored : (DEFAULT_POINTS[stages[i].type] || 5);
     if (window.Gamify) window.Gamify.award(pts);
     const badge = root.querySelector("[data-gamify]");
     if (window.FX && window.FX.coin) window.FX.coin(originEl, badge, pts);
     else if (window.FX) window.FX.floatPoints(pts, badge);
-    if (window.Auth && typeof window.Auth.pushProgress === "function") window.Auth.pushProgress(topic.id, [...d]);
+    if (window.Auth && typeof window.Auth.pushProgress === "function") void window.Auth.pushProgress(topic.id, [...d]);
     // Module finished? quiet cheer. Whole topic? big one (also handled at Finish).
     const mi = stages[i].mi;
     const modIdxs = stages.map((s, k) => (s.mi === mi ? k : -1)).filter((k) => k >= 0);
     if (window.FX && modIdxs.every((k) => d.has(k))) window.FX.moduleDone(root.querySelector(".course-nav__mod.is-current"));
   }
-  const pct = () => Math.round((100 * doneSet().size) / N);
+  const pct = () => Math.max(0, Math.min(100, Math.round((100 * doneSet().size) / N)));
 
   const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
   const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
@@ -96,7 +104,10 @@
       node.type = "button"; node.dataset.mi = mi;
       node.innerHTML = '<span class="course-nav__name">' + esc(m.title) + "</span>" +
         '<span class="course-nav__count"></span>';
-      if (mi === stages[current].mi) node.classList.add("is-current");
+      if (mi === stages[current].mi) {
+        node.classList.add("is-current");
+        node.setAttribute("aria-current", "step");
+      }
       node.addEventListener("click", () => go(firstIdx));
       navEl.appendChild(node);
     });
@@ -108,7 +119,10 @@
   // Each stage's title is an <h2> so the page has a real h1(topic) → h2(stage)
   // outline that screen-reader users can navigate by heading.
   function guideHTML(st) {
-    if (st.type === "read") return st.html || "";
+    if (st.type === "read") {
+      const html = st.html || "";
+      return /<h2\b/i.test(html) ? html : '<h2 class="stage__h2">' + esc(st.title || "Lesson") + "</h2>" + html;
+    }
     // prompt-in-guide question types (the blank/expression lives in the work column for fillblank)
     if (st.type === "quiz" || st.type === "truefalse" || st.type === "multi" || st.type === "numeric")
       return '<h2 class="stage__h2">' + esc(st.title || "Question") + '</h2><p class="quiz__prompt">' + st.prompt + "</p>";
@@ -164,13 +178,30 @@
   const normTxt = (s) => String(s).trim().toLowerCase().replace(/\s+/g, " ")
     .replace(/^[\s"'(]+|[\s"'.,;:!?)]+$/g, "").replace(/^the\s+/, "");
 
+  // Parse the entire answer instead of accepting a numeric prefix ("36abc").
+  // A single decimal comma is accepted for learners using that locale.
+  function parseNumeric(value) {
+    let text = String(value).trim().replace(/\u2212/g, "-").replace(/\s+/g, "");
+    if (!text) return null;
+    const commas = (text.match(/,/g) || []).length;
+    if (commas === 1 && !text.includes(".")) text = text.replace(",", ".");
+    else if (commas) return null;
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
+    const number = Number(text);
+    return Number.isFinite(number) ? number : null;
+  }
+
   // Deterministic grading for every question type. Returns {ok} or {empty:true}.
   function grade(st, root, name) {
     if (st.type === "numeric") {
-      const v = parseFloat((root.querySelector(".q-num").value || "").replace(/[,%=\s]/g, ""));
-      if (!isFinite(v)) return { empty: true };
-      const ok = Math.abs(v - st.answer) <= st.tol || (st.rtol && Math.abs(v - st.answer) <= st.rtol * Math.abs(st.answer));
-      return { ok: !!ok };
+      const raw = root.querySelector(".q-num").value || "";
+      if (!raw.trim()) return { empty: true };
+      const value = parseNumeric(raw);
+      if (value == null) return { invalid: true };
+      const absolute = Number.isFinite(st.tol) && st.tol >= 0 ? st.tol : 0;
+      const relative = Number.isFinite(st.rtol) && st.rtol >= 0 ? st.rtol : 0;
+      const tolerance = Math.max(absolute, relative * Math.abs(st.answer));
+      return { ok: Number.isFinite(st.answer) && Math.abs(value - st.answer) <= tolerance };
     }
     if (st.type === "fillblank") {
       const raw = root.querySelector(".q-blank").value;
@@ -194,6 +225,7 @@
       : t === "multi" ? "Select all that apply first." : "Pick an answer first.";
   }
   function wrongMsg(st, r) {
+    if (r.invalid) return "Enter a valid number using digits and an optional decimal point or comma.";
     if (st.why && r.sel && st.why[+r.sel.value]) return esc(st.why[+r.sel.value]);
     if (st.type === "multi") return "Close — some right, some wrong. Try again, or tap Hint.";
     return "Not quite — try again, or tap Hint.";
@@ -247,20 +279,22 @@
 
   // ---- Draggable horizontal splitter (persisted, keyboard-operable) ----
   function wireResize(splitEl, handle) {
-    const saved = parseFloat(localStorage.getItem("iewt:splitW"));
+    const saved = store.guideWidth();
     let lastP = (saved >= 25 && saved <= 72) ? saved : 38;
     if (saved >= 25 && saved <= 72) splitEl.style.setProperty("--guideW", saved + "%");
-    const persist = () => { if (lastP >= 25 && lastP <= 72) { try { localStorage.setItem("iewt:splitW", lastP.toFixed(1)); } catch { /* private mode */ } } };
+    const persist = () => { if (lastP >= 25 && lastP <= 72) store.setGuideWidth(lastP); };
     const set = (p) => {
       lastP = Math.max(25, Math.min(72, p));
       splitEl.style.setProperty("--guideW", lastP + "%");
       handle.setAttribute("aria-valuenow", Math.round(lastP));
+      handle.setAttribute("aria-valuetext", Math.round(lastP) + "% guide width");
     };
     handle.setAttribute("tabindex", "0");
     handle.setAttribute("aria-label", "Resize guide and workspace panels");
     handle.setAttribute("aria-valuemin", "25");
     handle.setAttribute("aria-valuemax", "72");
     handle.setAttribute("aria-valuenow", Math.round(lastP));
+    handle.setAttribute("aria-valuetext", Math.round(lastP) + "% guide width");
     handle.addEventListener("keydown", (e) => {
       const act = { ArrowLeft: () => set(lastP - 3), ArrowRight: () => set(lastP + 3), Home: () => set(25), End: () => set(72) }[e.key];
       if (!act) return;
@@ -356,5 +390,5 @@
   const start = Math.max(0, Math.min(N - 1, parseInt((location.hash.match(/^#s(\d+)/) || [])[1], 10) || 0));
   render(start);
   if (window.Gamify) window.Gamify.paint();
-  document.addEventListener("iewt:synced", () => { render(cur); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:synced", () => { paintProgress(); if (window.Gamify) window.Gamify.paint(); });
 })();
