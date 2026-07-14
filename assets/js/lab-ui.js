@@ -215,7 +215,7 @@
     renderFrame = requestAnimationFrame(() => { renderFrame = 0; renderAll(); });
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
+  function init() {
     document.getElementById("courseSearch")?.addEventListener("input", renderGrid);
     document.getElementById("levelFilter")?.addEventListener("change", renderGrid);
     document.getElementById("statusFilter")?.addEventListener("change", renderGrid);
@@ -227,5 +227,14 @@
     for (const eventName of ["iewt:auth-ready", "iewt:auth-state", "iewt:synced", "iewt:progress-reset", "iewt:owner-changed", "iewt:storage-reset"]) {
       document.addEventListener(eventName, scheduleRender);
     }
-  });
+  }
+
+  // Deferred scripts normally execute after parsing but before DOMContentLoaded.
+  // Initialize immediately in that interactive state so an unrelated blocked
+  // deferred script cannot strand the academy in its loading skeleton.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
 })();
