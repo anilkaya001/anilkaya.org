@@ -215,7 +215,10 @@
     renderFrame = requestAnimationFrame(() => { renderFrame = 0; renderAll(); });
   }
 
+  let initialized = false;
   function init() {
+    if (initialized || !document.getElementById("account")) return;
+    initialized = true;
     document.getElementById("courseSearch")?.addEventListener("input", renderGrid);
     document.getElementById("levelFilter")?.addEventListener("change", renderGrid);
     document.getElementById("statusFilter")?.addEventListener("change", renderGrid);
@@ -229,12 +232,11 @@
     }
   }
 
-  // Deferred scripts normally execute after parsing but before DOMContentLoaded.
-  // Initialize immediately in that interactive state so an unrelated blocked
-  // deferred script cannot strand the academy in its loading skeleton.
+  // This file is loaded with `defer`, so its DOM is parsed before execution.
+  // Initialize now even when a browser still reports `loading`: Safari can keep
+  // DOMContentLoaded pending behind an unrelated CSP-blocked deferred beacon.
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
-  } else {
-    init();
   }
+  init();
 })();
