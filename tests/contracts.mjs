@@ -452,6 +452,9 @@ for (const file of ["lab/index.html", "lab/course.html", "assets/js/lab-ui.js", 
 }
 assert(read("wrangler.toml").includes("run_worker_first = true"), "Worker must run before assets");
 assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), "HTML handling must be explicit");
+for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
+  assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
+}
 
 let diffBase = process.env.ASSET_DIFF_BASE || "";
 if (!diffBase) {

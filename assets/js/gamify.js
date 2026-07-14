@@ -112,7 +112,11 @@
     },
   };
   window.Gamify = Gamify;
-  document.addEventListener("DOMContentLoaded", () => Gamify.paint());
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => Gamify.paint(), { once: true });
+  } else {
+    Gamify.paint();
+  }
   // A server-derived floor is meaningful only for the account that supplied
   // it. Never carry that closure state into an anonymous or different account
   // scope on a shared browser.
