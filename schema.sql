@@ -62,3 +62,20 @@ CREATE TABLE IF NOT EXISTS mastery_attempts (
   received_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, attempt_id)
 );
+
+-- Minimal placement result used to route a learner into the right starting
+-- course. Individual answers are deliberately never stored server-side.
+CREATE TABLE IF NOT EXISTS placement (
+  user_id           TEXT PRIMARY KEY,
+  band              TEXT NOT NULL CHECK (band IN ('foundation', 'applied', 'advanced')),
+  score             INTEGER NOT NULL CHECK (score BETWEEN 0 AND 15),
+  total             INTEGER NOT NULL CHECK (total = 15),
+  completed_day     TEXT NOT NULL,
+  recommended_topic TEXT NOT NULL CHECK (recommended_topic IN ('ols', 'iv2sls', 'did', 'var', 'panel', 'logit', 'gmm')),
+  updated_at        INTEGER NOT NULL,
+  CHECK (
+    (band = 'foundation' AND score BETWEEN 0 AND 6) OR
+    (band = 'applied' AND score BETWEEN 7 AND 11) OR
+    (band = 'advanced' AND score BETWEEN 12 AND 15)
+  )
+);

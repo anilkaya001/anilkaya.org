@@ -9,6 +9,7 @@ import { REPO_ROOT, SESSION_SECRET, startWorker } from "./worker-server.mjs";
 const server = await startWorker();
 const base = server.baseURL;
 const assetVersion = (await readFile(path.join(REPO_ROOT, "assets/version.txt"), "utf8")).trim();
+const TEST_SESSION_TTL_MS = 10 * 60 * 1000;
 const securityHeaders = [
   "strict-transport-security", "x-content-type-options", "referrer-policy",
   "x-frame-options", "cross-origin-opener-policy", "permissions-policy",
@@ -102,7 +103,8 @@ try {
   const sitemap = await sitemapResponse.text();
   const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
   assert.deepEqual(sitemapURLs, [
-    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", SITE_ORIGIN + "/lab/review/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", SITE_ORIGIN + "/lab/placement/",
+    SITE_ORIGIN + "/lab/review/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
   ]);
   for (const canonicalURL of sitemapURLs) {
     const path = new URL(canonicalURL).pathname;
@@ -207,12 +209,17 @@ try {
   assert.match(await conditionalCourse.text(), /<title>Ordinary Least Squares — Econometrics Lab<\/title>/);
 
   assert.deepEqual(await json(await fetch(base + "/api/me", { headers: { Cookie: "session=%" } }), 200), { user: null });
+  assert.deepEqual(await json(await fetch(base + "/api/bootstrap", { headers: { Cookie: "session=%" } }), 200), { user: null });
   const method = await fetch(base + "/api/me", { method: "POST" });
   const methodBody = await json(method, 405);
   assert.equal(method.headers.get("allow"), "GET");
   assert.equal(methodBody.error.code, "method_not_allowed");
+  const bootstrapMethod = await fetch(base + "/api/bootstrap", { method: "POST" });
+  assert.equal((await json(bootstrapMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(bootstrapMethod.headers.get("allow"), "GET");
   assert.equal((await json(await fetch(base + "/api/progress"), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/mastery"), 401)).error.code, "unauthorized");
+  assert.equal((await json(await fetch(base + "/api/placement"), 401)).error.code, "unauthorized");
   const progressMethod = await fetch(base + "/api/progress", { method: "POST" });
   assert.equal((await json(progressMethod, 405)).error.code, "method_not_allowed");
   assert.equal(progressMethod.headers.get("allow"), "GET, PUT, DELETE");
@@ -222,6 +229,9 @@ try {
   const masteryMethod = await fetch(base + "/api/mastery", { method: "DELETE" });
   assert.equal((await json(masteryMethod, 405)).error.code, "method_not_allowed");
   assert.equal(masteryMethod.headers.get("allow"), "GET, PUT");
+  const placementMethod = await fetch(base + "/api/placement", { method: "POST" });
+  assert.equal((await json(placementMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(placementMethod.headers.get("allow"), "GET, PUT, DELETE");
   assert.equal((await json(await fetch(base + "/api/progress", { method: "DELETE" }), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/not-a-route"), 404)).error.code, "not_found");
 
@@ -239,7 +249,7 @@ try {
   assert.equal((await json(logoutGet, 405)).error.code, "method_not_allowed");
   assert.equal(logoutGet.headers.get("allow"), "POST");
 
-  const session = await signSession({ sub: "g_test", email: "test@example.com", name: "Test", exp: Date.now() + 60000 }, SESSION_SECRET);
+  const session = await signSession({ sub: "g_test", email: "test@example.com", name: "Test", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
   const authWithoutGeneration = {
     Cookie: `session=${session}`,
     "Content-Type": "application/json",
@@ -264,10 +274,22 @@ try {
   assert.match(logout.headers.get("set-cookie") || "", /session=;.*Max-Age=0/, "sign-out must clear the session cookie");
 
   // Deployed databases created before the generation barrier do not have this
-  // table. The first authenticated learning request must migrate them lazily.
+  // tables. The first authenticated bootstrap must migrate them lazily.
   await server.d1("DROP TABLE learning_sync");
   await server.d1("DROP TABLE mastery_attempts");
   await server.d1("DROP TABLE mastery");
+  await server.d1("DROP TABLE placement");
+  const emptyBootstrap = await learningJSON(await fetch(base + "/api/bootstrap", {
+    headers: { Cookie: `session=${session}`, Accept: "application/json" },
+  }), 200, 0);
+  assert.deepEqual(emptyBootstrap, {
+    user: { id: "g_test", email: "test@example.com", name: "Test" },
+    progress: {},
+    stats: { points: 0, streak: 0, last: null },
+    mastery: {},
+    placement: null,
+    generation: 0,
+  }, "bootstrap must hydrate every sanitized learning domain in one response");
   for (const headers of [
     { Cookie: `session=${session}`, Accept: "application/json" },
     { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_test" },
@@ -287,8 +309,13 @@ try {
       { mastery: {}, generation: 0 },
       "mastery reads must allow an absent or matching owner",
     );
+    assert.deepEqual(
+      await learningJSON(await fetch(base + "/api/placement", { headers }), 200, 0),
+      { placement: null, generation: 0 },
+      "placement reads must allow an absent or matching owner",
+    );
   }
-  for (const apiPath of ["/api/progress", "/api/stats", "/api/mastery"]) {
+  for (const apiPath of ["/api/bootstrap", "/api/progress", "/api/stats", "/api/mastery", "/api/placement"]) {
     const denied = await json(await fetch(base + apiPath, {
       headers: { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_other" },
     }), 409);
@@ -307,6 +334,7 @@ try {
       ["/api/progress", { method: "PUT", headers, body: JSON.stringify({ model: "ols", done: [0] }) }],
       ["/api/stats", { method: "PUT", headers, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
       ["/api/mastery", { method: "PUT", headers, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "owner-check", correct: true, hinted: false, day: "2026-07-14" }) }],
+      ["/api/placement", { method: "PUT", headers, body: JSON.stringify({ band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }) }],
       ["/api/progress", { method: "DELETE", headers }],
     ]) {
       const denied = await json(await fetch(base + apiPath, init), 409);
@@ -318,6 +346,7 @@ try {
     ["/api/progress", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ model: "ols", done: [0] }) }],
     ["/api/stats", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
     ["/api/mastery", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "origin-check", correct: true, hinted: false, day: "2026-07-14" }) }],
+    ["/api/placement", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }) }],
     ["/api/progress", { method: "DELETE", headers: crossOriginAuth }],
   ]) {
     const denied = await json(await fetch(base + apiPath, init), 403);
@@ -338,6 +367,7 @@ try {
       ["/api/progress", { model: "ols", done: [0] }],
       ["/api/stats", { streak: 1, last: "2026-07-12" }],
       ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "generation-check", correct: true, hinted: false, day: "2026-07-14" }],
+      ["/api/placement", { band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }],
     ]) {
       const denied = await learningJSON(await fetch(base + apiPath, {
         method: "PUT", headers: generationHeaders, body: JSON.stringify(body),
@@ -388,6 +418,39 @@ try {
     method: "PUT", headers: auth, body: JSON.stringify({ streak: 100000, last: "9999-12-31" }),
   }), 400)).error.code, "invalid_stats", "far-future activity must be rejected");
 
+  const putPlacement = (value, headers = auth) => fetch(base + "/api/placement", {
+    method: "PUT", headers, body: JSON.stringify(value),
+  });
+  const appliedPlacement = {
+    band: "applied", score: 9, total: 15, completedDay: "2026-07-14", recommendedTopic: "did",
+  };
+  const savedPlacement = await learningJSON(await putPlacement({
+    ...appliedPlacement, responses: ["must never be stored"], weakestTopic: "did",
+  }), 200, 0);
+  assert.deepEqual(savedPlacement.placement, appliedPlacement, "placement API must persist only the five-field summary");
+  const olderPlacement = await learningJSON(await putPlacement({
+    band: "foundation", score: 3, total: 15, completedDay: "2026-07-13", recommendedTopic: "ols",
+  }), 200, 0);
+  assert.deepEqual(olderPlacement.placement, appliedPlacement, "an older placement must not replace a newer checkpoint");
+  for (const invalid of [
+    { ...appliedPlacement, total: 14 },
+    { ...appliedPlacement, band: "advanced" },
+    { ...appliedPlacement, recommendedTopic: "constructor" },
+    { ...appliedPlacement, completedDay: "9999-12-31" },
+  ]) {
+    assert.equal((await json(await putPlacement(invalid), 400)).error.code, "invalid_placement", "invalid placement summary was accepted");
+  }
+  assert.deepEqual(await learningJSON(await fetch(base + "/api/placement", {
+    method: "DELETE", headers: auth,
+  }), 200, 0), { ok: true, placement: null, generation: 0 }, "placement clear response drifted");
+  assert.deepEqual(await learningJSON(await fetch(base + "/api/placement", {
+    headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
+  }), 200, 0), { placement: null, generation: 0 }, "placement clear did not persist");
+  const advancedPlacement = {
+    band: "advanced", score: 13, total: 15, completedDay: "2026-07-15", recommendedTopic: "gmm",
+  };
+  assert.deepEqual((await learningJSON(await putPlacement(advancedPlacement), 200, 0)).placement, advancedPlacement);
+
   const masteryAttempt = (attemptId, correct, hinted = false, itemId = "ols:ols-line-04", headers = auth, day = "2026-07-14") =>
     fetch(base + "/api/mastery", {
       method: "PUT", headers,
@@ -418,6 +481,17 @@ try {
     headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
   }), 200, 0);
   assert.deepEqual(masterySnapshot.mastery["ols:ols-line-04"], hintedMastery.record);
+  const hydrated = await learningJSON(await fetch(base + "/api/bootstrap", {
+    headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
+  }), 200, 0);
+  assert.deepEqual(hydrated, {
+    user: { id: "g_test", email: "test@example.com", name: "Test" },
+    progress: { ols: { done: [0, 1, 2, 3] } },
+    stats: { points: 40, streak: 3, last: "2026-07-12" },
+    mastery: { "ols:ols-line-04": hintedMastery.record },
+    placement: advancedPlacement,
+    generation: 0,
+  }, "bootstrap must preserve granular API sanitization and generation semantics");
   assert.equal((await json(await masteryAttempt("unknown-item", true, false, "constructor"), 400)).error.code, "invalid_mastery_attempt");
 
   let parityRecord = null;
@@ -460,7 +534,7 @@ try {
   const repairedPoints = await json(await fetch(base + "/api/stats", { headers: { Cookie: `session=${session}` } }), 200);
   assert.equal(repairedPoints.stats.points, 40, "legacy or forged stored points must be recomputed exactly");
 
-  const streakSession = await signSession({ sub: "g_streak", exp: Date.now() + 60000 }, SESSION_SECRET);
+  const streakSession = await signSession({ sub: "g_streak", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
   const streakAuth = {
     Cookie: `session=${streakSession}`,
     "Content-Type": "application/json",
@@ -479,11 +553,13 @@ try {
   assert.deepEqual(continued.stats, { points: 0, streak: 11, last: "2026-07-12" }, "next-day stale client must not regress a known streak");
 
   await server.d1("INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES ('g_legacy_future', 123, 77, '9999-12-31', 1)");
-  const legacyFutureSession = await signSession({ sub: "g_legacy_future", exp: Date.now() + 60000 }, SESSION_SECRET);
-  const legacyFuture = await json(await fetch(base + "/api/stats", { headers: { Cookie: `session=${legacyFutureSession}` } }), 200);
+  const legacyFutureSession = await signSession({ sub: "g_legacy_future", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
+  const legacyFuture = await learningJSON(await fetch(base + "/api/bootstrap", {
+    headers: { Cookie: `session=${legacyFutureSession}` },
+  }), 200, 0);
   assert.deepEqual(legacyFuture.stats, { points: 0, streak: 0, last: null }, "legacy future-dated streak must be repaired atomically");
 
-  const other = await signSession({ sub: "g_other", exp: Date.now() + 60000 }, SESSION_SECRET);
+  const other = await signSession({ sub: "g_other", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
   const otherAuth = {
     Cookie: `session=${other}`,
     "Content-Type": "application/json",
@@ -500,6 +576,10 @@ try {
     method: "PUT", headers: otherAuth, body: JSON.stringify({ streak: 7, last: "2026-07-12" }),
   }), 200);
   await learningJSON(await masteryAttempt("other-attempt", true, false, "ols:ols-line-04", otherAuth), 200, 0);
+  const otherPlacement = {
+    band: "foundation", score: 4, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols",
+  };
+  assert.deepEqual((await learningJSON(await putPlacement(otherPlacement, otherAuth), 200, 0)).placement, otherPlacement);
 
   const resetHeaders = {
     Cookie: `session=${session}`,
@@ -517,6 +597,7 @@ try {
     progress: {},
     stats: { points: 0, streak: 0, last: null },
     mastery: {},
+    placement: null,
     generation: 1,
   }, "reset response must expose the deterministic empty state");
 
@@ -524,6 +605,7 @@ try {
     ["/api/progress", { model: "ols", done: [8] }],
     ["/api/stats", { streak: 99, last: "2026-07-13" }],
     ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "stale-attempt", correct: true, hinted: false, day: "2026-07-14" }],
+    ["/api/placement", { band: "applied", score: 9, total: 15, completedDay: "2026-07-15", recommendedTopic: "did" }],
   ]) {
     const staleWrite = await learningJSON(await fetch(base + apiPath, {
       method: "PUT", headers: auth, body: JSON.stringify(body),
@@ -545,6 +627,11 @@ try {
     await learningJSON(await fetch(base + "/api/mastery", { headers: { Cookie: `session=${session}` } }), 200, 1),
     { mastery: {}, generation: 1 },
     "reset must atomically delete mastery and its retry ledger",
+  );
+  assert.deepEqual(
+    await learningJSON(await fetch(base + "/api/placement", { headers: { Cookie: `session=${session}` } }), 200, 1),
+    { placement: null, generation: 1 },
+    "reset must atomically delete placement and stale writes must not restore it",
   );
 
   const generationOneAuth = { ...authWithoutGeneration, "X-IEWT-Generation": "1" };
@@ -592,10 +679,14 @@ try {
     await fetch(base + "/api/mastery", { headers: { Cookie: `session=${other}` } }), 200, 0,
   );
   assert.equal(isolatedMastery.mastery["ols:ols-line-04"].attempts, 1, "reset must not affect another user's mastery");
+  const isolatedPlacement = await learningJSON(
+    await fetch(base + "/api/placement", { headers: { Cookie: `session=${other}` } }), 200, 0,
+  );
+  assert.deepEqual(isolatedPlacement.placement, otherPlacement, "reset must not affect another user's placement");
   const expired = await signSession({ sub: "g_expired", exp: Date.now() - 1 }, SESSION_SECRET);
   assert.equal((await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${expired}` } }), 401)).error.code, "unauthorized");
 
-  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery idempotency, generation-fenced reset, derived points");
+  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points");
 } finally {
   await server.stop();
 }

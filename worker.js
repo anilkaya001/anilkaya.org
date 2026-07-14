@@ -41,6 +41,19 @@ const MASTERY_ATTEMPTS_SCHEMA_SQL =
   ")";
 const MASTERY_INDEX_SQL =
   "CREATE INDEX IF NOT EXISTS mastery_due_by_user ON mastery (user_id, due_day, item_id)";
+const PLACEMENT_SCHEMA_SQL =
+  "CREATE TABLE IF NOT EXISTS placement (" +
+    "user_id TEXT PRIMARY KEY, " +
+    "band TEXT NOT NULL CHECK (band IN ('foundation', 'applied', 'advanced')), " +
+    "score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 15), " +
+    "total INTEGER NOT NULL CHECK (total = 15), " +
+    "completed_day TEXT NOT NULL, " +
+    "recommended_topic TEXT NOT NULL CHECK (recommended_topic IN ('ols', 'iv2sls', 'did', 'var', 'panel', 'logit', 'gmm')), " +
+    "updated_at INTEGER NOT NULL, " +
+    "CHECK ((band='foundation' AND score BETWEEN 0 AND 6) OR " +
+      "(band='applied' AND score BETWEEN 7 AND 11) OR " +
+      "(band='advanced' AND score BETWEEN 12 AND 15))" +
+  ")";
 
 // Pyodide is loaded from jsDelivr and requires eval + WebAssembly evaluation.
 const CSP = [
@@ -218,6 +231,21 @@ function normalizeActivityDay(value, now = Date.now()) {
   return day <= latest ? day : undefined;
 }
 
+const PLACEMENT_BANDS = new Set(["foundation", "applied", "advanced"]);
+const PLACEMENT_TOPICS = new Set(["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"]);
+
+function normalizePlacement(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !PLACEMENT_BANDS.has(value.band) || !PLACEMENT_TOPICS.has(value.recommendedTopic)) return null;
+  const score = value.score;
+  const total = value.total;
+  const completedDay = normalizeActivityDay(value.completedDay);
+  const expectedBand = score <= 6 ? "foundation" : score <= 11 ? "applied" : "advanced";
+  if (!Number.isSafeInteger(score) || total !== 15 || score < 0 || score > total ||
+      value.band !== expectedBand || !completedDay) return null;
+  return { band: value.band, score, total, completedDay, recommendedTopic: value.recommendedTopic };
+}
+
 function progressFromRows(rows) {
   const progress = Object.create(null);
   for (const row of rows || []) {
@@ -293,6 +321,17 @@ async function masteryBatch(env, userId, buildStatements) {
   }
 }
 
+async function placementBatch(env, userId, buildStatements) {
+  try {
+    return await masteryBatch(env, userId, buildStatements);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table:\s*(?:main\.)?placement\b/i.test(message)) throw error;
+    await env.DB.prepare(PLACEMENT_SCHEMA_SQL).run();
+    return masteryBatch(env, userId, buildStatements);
+  }
+}
+
 function masteryRecord(row) {
   if (!row || !Object.hasOwn(REVIEW_ITEM_BY_ID, row.item_id)) return null;
   const level = Number(row.level);
@@ -333,6 +372,32 @@ async function loadMasterySnapshot(env, userId) {
   return { mastery, generation: normalizeGeneration(sync.generation) };
 }
 
+function placementRecord(row) {
+  if (!row) return null;
+  return normalizePlacement({
+    band: row.band,
+    score: Number(row.score),
+    total: Number(row.total),
+    completedDay: row.completed_day,
+    recommendedTopic: row.recommended_topic,
+  });
+}
+
+async function loadPlacementSnapshot(env, userId) {
+  const results = await placementBatch(env, userId, () => [
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+    env.DB.prepare(
+      "SELECT band, score, total, completed_day, recommended_topic FROM placement WHERE user_id = ?"
+    ).bind(userId),
+  ]);
+  const sync = results[1].results[0];
+  if (!sync) throw new Error("Learning sync state is missing");
+  return {
+    placement: placementRecord(results[2].results[0]),
+    generation: normalizeGeneration(sync.generation),
+  };
+}
+
 async function loadGeneration(env, userId) {
   const results = await learningBatch(env, userId, () => [
     env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
@@ -371,9 +436,8 @@ async function loadProgressSnapshot(env, userId) {
   };
 }
 
-async function syncDerivedPoints(env, userId) {
-  const now = Date.now();
-  await env.DB.prepare(
+function syncDerivedPointsStatement(env, userId, now = Date.now()) {
+  return env.DB.prepare(
     "WITH weights(model_id, stage_index, points) AS (" +
       "SELECT courses.key, CAST(stages.key AS INTEGER), CAST(stages.value AS INTEGER) " +
       "FROM json_each(?) AS courses, json_each(courses.value) AS stages" +
@@ -388,7 +452,11 @@ async function syncDerivedPoints(env, userId) {
     "SELECT ?, derived.points, 0, NULL, ? FROM derived WHERE 1 " +
     "ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, " +
     "updated_at=MAX(COALESCE(stats.updated_at, 0), excluded.updated_at)"
-  ).bind(JSON.stringify(COURSE_STAGE_POINTS), userId, userId, now).run();
+  ).bind(JSON.stringify(COURSE_STAGE_POINTS), userId, userId, now);
+}
+
+async function syncDerivedPoints(env, userId) {
+  await syncDerivedPointsStatement(env, userId).run();
 }
 
 async function loadStatsSnapshot(env, userId) {
@@ -430,6 +498,72 @@ async function loadStatsSnapshot(env, userId) {
       streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
       last: storedLast || null,
     },
+  };
+}
+
+async function loadBootstrapSnapshot(env, user) {
+  const read = async () => {
+    // D1 executes a batch in order and rolls it back as a unit on failure. The
+    // derived-points repair therefore lands before this response's consistent
+    // snapshot without adding four separate browser round trips.
+    const results = await placementBatch(env, user.id, () => [
+      syncDerivedPointsStatement(env, user.id),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(user.id),
+      env.DB.prepare(
+        "SELECT model_id, done_json FROM progress WHERE user_id = ? ORDER BY model_id"
+      ).bind(user.id),
+      env.DB.prepare(
+        "SELECT points, streak, last FROM stats WHERE user_id = ?"
+      ).bind(user.id),
+      env.DB.prepare(
+        "SELECT item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at " +
+        "FROM mastery WHERE user_id = ? ORDER BY item_id"
+      ).bind(user.id),
+      env.DB.prepare(
+        "SELECT band, score, total, completed_day, recommended_topic FROM placement WHERE user_id = ?"
+      ).bind(user.id),
+    ]);
+    const sync = results[2].results[0];
+    if (!sync) throw new Error("Learning sync state is missing");
+    return {
+      generation: normalizeGeneration(sync.generation),
+      progress: progressFromRows(results[3].results),
+      statsRow: results[4].results[0] || null,
+      masteryRows: results[5].results || [],
+      placementRow: results[6].results[0] || null,
+    };
+  };
+
+  let snapshot = await read();
+  let storedLast = normalizeActivityDay(snapshot.statsRow && snapshot.statsRow.last);
+  if (snapshot.statsRow && snapshot.statsRow.last != null && !storedLast) {
+    const poisonedLast = String(snapshot.statsRow.last);
+    await env.DB.prepare(
+      "UPDATE stats SET streak=0, last=NULL, updated_at=MAX(COALESCE(updated_at, 0), ?) " +
+      "WHERE user_id=? AND last=?"
+    ).bind(Date.now(), user.id, poisonedLast).run();
+    snapshot = await read();
+    storedLast = normalizeActivityDay(snapshot.statsRow && snapshot.statsRow.last);
+  }
+
+  const storedStreak = Number(snapshot.statsRow && snapshot.statsRow.streak);
+  const mastery = Object.create(null);
+  for (const row of snapshot.masteryRows) {
+    const record = masteryRecord(row);
+    if (record) mastery[row.item_id] = record;
+  }
+
+  return {
+    user,
+    progress: snapshot.progress,
+    stats: {
+      points: Number(snapshot.statsRow && snapshot.statsRow.points) || 0,
+      streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
+      last: storedLast || null,
+    },
+    mastery,
+    placement: placementRecord(snapshot.placementRow),
+    generation: snapshot.generation,
   };
 }
 
@@ -631,6 +765,16 @@ async function route(request, env) {
     return json({ user: await currentUser(request, env) });
   }
 
+  if (path === "/api/bootstrap") {
+    requireMethod(request, ["GET"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) return json({ user: null });
+    requireReadOwnerIfPresent(request, user.id);
+    const snapshot = await loadBootstrapSnapshot(env, user);
+    return json(snapshot, 200, generationHeaders(snapshot.generation));
+  }
+
   if (path === "/api/progress") {
     requireMethod(request, ["GET", "PUT", "DELETE"]);
     requireSessionSecret(env);
@@ -648,7 +792,7 @@ async function route(request, env) {
 
     if (request.method === "DELETE") {
       const now = Date.now();
-      const results = await masteryBatch(env, user.id, () => [
+      const results = await placementBatch(env, user.id, () => [
         env.DB.prepare(
           "INSERT INTO learning_sync (user_id, generation) VALUES (?, 1) " +
           "ON CONFLICT(user_id) DO UPDATE SET generation=" +
@@ -658,6 +802,7 @@ async function route(request, env) {
         env.DB.prepare("DELETE FROM progress WHERE user_id = ?").bind(user.id),
         env.DB.prepare("DELETE FROM mastery WHERE user_id = ?").bind(user.id),
         env.DB.prepare("DELETE FROM mastery_attempts WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM placement WHERE user_id = ?").bind(user.id),
         env.DB.prepare(
           "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, 0, 0, NULL, ?) " +
           "ON CONFLICT(user_id) DO UPDATE SET points=0, streak=0, last=NULL, updated_at=excluded.updated_at"
@@ -669,6 +814,7 @@ async function route(request, env) {
         progress: {},
         stats: { points: 0, streak: 0, last: null },
         mastery: {},
+        placement: null,
         generation,
       }, 200, generationHeaders(generation));
     }
@@ -771,6 +917,69 @@ async function route(request, env) {
     await syncDerivedPoints(env, user.id);
     const snapshot = await loadStatsSnapshot(env, user.id);
     return json(snapshot, 200, generationHeaders(snapshot.generation));
+  }
+
+  if (path === "/api/placement") {
+    requireMethod(request, ["GET", "PUT", "DELETE"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    if (request.method === "GET") {
+      requireReadOwnerIfPresent(request, user.id);
+      const snapshot = await loadPlacementSnapshot(env, user.id);
+      return json(snapshot, 200, generationHeaders(snapshot.generation));
+    }
+
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+
+    if (request.method === "DELETE") {
+      const results = await placementBatch(env, user.id, () => [
+        env.DB.prepare(
+          "DELETE FROM placement WHERE user_id=? AND EXISTS (" +
+            "SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?" +
+          ") RETURNING user_id"
+        ).bind(user.id, user.id, generation),
+        env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+      ]);
+      const currentGeneration = normalizeGeneration(results[2].results[0]?.generation);
+      if (currentGeneration !== generation) throwResetRequired(currentGeneration);
+      return json({ ok: true, placement: null, generation }, 200, generationHeaders(generation));
+    }
+
+    const placement = normalizePlacement(await readJSON(request));
+    if (!placement) {
+      throw new HttpError(400, "invalid_placement", "Placement result must be valid");
+    }
+    const now = Date.now();
+    const results = await placementBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO placement (user_id, band, score, total, completed_day, recommended_topic, updated_at) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
+          "SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?" +
+        ") ON CONFLICT(user_id) DO UPDATE SET " +
+          "band=CASE WHEN excluded.completed_day>=placement.completed_day THEN excluded.band ELSE placement.band END, " +
+          "score=CASE WHEN excluded.completed_day>=placement.completed_day THEN excluded.score ELSE placement.score END, " +
+          "total=CASE WHEN excluded.completed_day>=placement.completed_day THEN excluded.total ELSE placement.total END, " +
+          "completed_day=MAX(placement.completed_day, excluded.completed_day), " +
+          "recommended_topic=CASE WHEN excluded.completed_day>=placement.completed_day THEN excluded.recommended_topic ELSE placement.recommended_topic END, " +
+          "updated_at=MAX(placement.updated_at, excluded.updated_at) " +
+        "RETURNING user_id"
+      ).bind(
+        user.id, placement.band, placement.score, placement.total, placement.completedDay,
+        placement.recommendedTopic, now, user.id, generation,
+      ),
+    ]);
+    if (!results[1].results[0]) throwResetRequired(await loadGeneration(env, user.id));
+    const snapshot = await loadPlacementSnapshot(env, user.id);
+    if (snapshot.generation !== generation) throwResetRequired(snapshot.generation);
+    return json(
+      { ok: true, placement: snapshot.placement, generation },
+      200,
+      generationHeaders(generation),
+    );
   }
 
   if (path === "/api/mastery") {

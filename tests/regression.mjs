@@ -17,7 +17,7 @@ const SLUGS = {
   gmm: "generalized-method-of-moments",
 };
 const courseRoute = (topic) => `/lab/${SLUGS[topic]}/`;
-const PAGES = ["/", "/lab/", "/lab/review/", courseRoute("ols"), "/articles/"];
+const PAGES = ["/", "/lab/", "/lab/placement/", "/lab/review/", courseRoute("ols"), "/articles/"];
 const stageRoute = (topic, index, nonce = index) => `${courseRoute(topic)}?test=${nonce}#s${index}`;
 
 function watch(page, ignored = () => false) {
@@ -28,7 +28,8 @@ function watch(page, ignored = () => false) {
   });
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText || "unknown";
-    const navigationAbortedAuthProbe = reason === "net::ERR_ABORTED" && new URL(request.url()).pathname === "/api/me";
+    const navigationAbortedAuthProbe = reason === "net::ERR_ABORTED" &&
+      ["/api/bootstrap", "/api/me"].includes(new URL(request.url()).pathname);
     const detail = `request failed: ${request.url()} (${reason})`;
     if (!navigationAbortedAuthProbe && !ignored(detail)) errors.push(detail);
   });
@@ -79,6 +80,14 @@ async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } =
       contentType: "application/json",
       body: JSON.stringify(body),
     });
+    if (url.pathname === "/api/bootstrap") return reply({
+      user: { id: "g_browser", name: "Browser Learner", email: "" },
+      progress: { ols: { done: [0, 1] } },
+      stats: { points: 15, streak: 2, last: "2026-07-13" },
+      mastery: {},
+      placement: null,
+      generation,
+    });
     if (url.pathname === "/api/me") return reply({ user: { id: "g_browser", name: "Browser Learner", email: "" } });
     if (url.pathname === "/api/progress" && method === "GET") return reply({ progress: { ols: { done: [0, 1] } }, generation });
     if (url.pathname === "/api/stats" && method === "GET") return reply({ stats: { points: 15, streak: 2, last: "2026-07-13" }, generation });
@@ -87,7 +96,7 @@ async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } =
       if (deleteGate) await deleteGate;
       if (deleteStatus === 200) generation++;
       return deleteStatus === 200
-        ? reply({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, generation })
+        ? reply({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation })
         : reply({ error: { code: "temporary" } }, deleteStatus);
     }
     if (url.pathname === "/api/progress" && method === "PUT") return reply({ ok: true, generation });
@@ -126,7 +135,7 @@ async function solve(route, answer, expectedPoints, repeat) {
 try {
   browser = await chromium.launch();
   // Layout and console integrity at all supported viewports.
-  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [768, 1024, true], [1440, 900, false]]) {
+  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [768, 1024, true], [1440, 900, false], [2048, 1152, false]]) {
     const context = await browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 2 : 1 });
     const page = await context.newPage();
     const clean = watch(page);
@@ -137,11 +146,36 @@ try {
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
-      if (route === "/lab/" && ((width === 390 && height === 844) || (width === 1440 && height === 900))) {
-        const resume = await page.locator(".dashboard-resume .btn").boundingBox();
+      if (route === "/lab/" && [320, 390, 1440, 2048].includes(width)) {
+        const cockpit = await page.locator(".academy-cockpit").boundingBox();
+        const hero = await page.locator(".lab-hero").boundingBox();
         const heroAction = await page.locator("#heroPrimaryCta").boundingBox();
-        assert(resume && resume.y + resume.height <= height, `[${width}px] resume action falls below the fold at ${Math.round((resume?.y || 0) + (resume?.height || 0))}px`);
+        const diagnostic = await page.locator(".lab-hero__diagnostic").boundingBox();
+        const resumeCard = await page.locator(".dashboard-resume").boundingBox();
+        const resumeAction = await page.locator(".dashboard-resume .btn").boundingBox();
+        assert(cockpit && hero && hero.y >= cockpit.y && hero.y + hero.height <= cockpit.y + cockpit.height,
+          `[${width}px] academy identity escaped the cockpit`);
         assert(heroAction && heroAction.height >= 44, `[${width}px] hero action is not a 44px touch target`);
+        assert(diagnostic && diagnostic.height >= 44, `[${width}px] placement diagnostic is not a 44px touch target`);
+        assert(resumeAction && resumeAction.height >= 44, `[${width}px] resume action is not a 44px touch target`);
+        if (width !== 320) {
+          assert(resumeCard && resumeCard.y + resumeCard.height <= height,
+            `[${width}px] personalized next-action card falls below the fold at ${Math.round((resumeCard?.y || 0) + (resumeCard?.height || 0))}px`);
+        }
+        if (width >= 1440) {
+          const account = await page.locator("#account").boundingBox();
+          const reset = await page.locator("#resetProgressBtn").boundingBox();
+          const metrics = await page.locator(".dashboard-metrics").boundingBox();
+          const firstCourse = await page.locator("#labGrid .model-card").first().boundingBox();
+          assert(cockpit.height <= 620, `[desktop] academy cockpit is ${Math.round(cockpit.height)}px tall; expected at most 620px`);
+          assert(account && account.y + account.height <= height, "[desktop] account and sync state are below the fold");
+          assert(reset && reset.height >= 44 && reset.y + reset.height <= height, "[desktop] reset control is not fully visible and touch-safe");
+          assert(metrics && metrics.y + metrics.height <= height, "[desktop] core progress metrics are below the fold");
+          const requiredIntersection = width === 2048 ? 96 : 40;
+          assert(firstCourse && firstCourse.y <= height - requiredIntersection,
+            `[desktop] course discovery begins too late at ${Math.round(firstCourse?.y || 0)}px`);
+          if (width === 2048) assert(cockpit.width >= 1320, `[wide desktop] cockpit underuses the viewport at ${Math.round(cockpit.width)}px`);
+        }
       }
     }
     clean();
@@ -157,6 +191,7 @@ try {
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
     assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("ols"));
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start with OLS/);
+    assert.equal(new URL(await page.locator(".lab-hero__diagnostic").getAttribute("href"), BASE).pathname, "/lab/placement/");
     assert.equal(await page.locator("#labGrid .model-card").count(), 7, "no-JS course catalogue disappeared");
     await context.close();
   }
@@ -378,6 +413,44 @@ try {
     await context.close();
   }
 
+  // A completed placement checkpoint changes the no-progress starting route,
+  // survives reload, and is included in the same anonymous full-reset closure.
+  {
+    const context = await browser.newContext();
+    await context.addInitScript(() => {
+      localStorage.setItem("iewt:placement:v2:anonymous", JSON.stringify({
+        version: 2,
+        owner: "anonymous",
+        value: {
+          band: "applied", score: 9, total: 15,
+          completedDay: "2026-07-15", recommendedTopic: "did",
+        },
+      }));
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await waitForAcademy(page);
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start DiD · lesson 1/);
+    assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("did"));
+    assert.match(await page.locator(".dashboard-resume h3").textContent(), /Difference-in-Differences/);
+    assert.match(await page.locator("#dashboardSummary").textContent(), /applied diagnostic result recommends DiD first/i);
+    assert.equal((await page.locator(".lab-hero__diagnostic").textContent()).trim(), "Retake diagnostic");
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), {}, "placement seeded course completion");
+
+    await page.reload({ waitUntil: "load" });
+    await waitForAcademy(page);
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start DiD · lesson 1/, "placement route did not survive reload");
+    await page.click("#resetProgressBtn");
+    assert.match(await page.locator("#resetDescription").textContent(), /placement result/);
+    await page.click("#resetConfirm");
+    await page.waitForFunction(() => window.IEWTStorage.placement() === null && !document.querySelector("#resetDialog").open);
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start OLS · lesson 1/);
+    assert.equal((await page.locator(".lab-hero__diagnostic").textContent()).trim(), "Find your level");
+    clean();
+    await context.close();
+  }
+
   // Signed-in reset is server-first and carries the verified owner binding.
   {
     const context = await browser.newContext();
@@ -386,6 +459,11 @@ try {
     const clean = watch(page);
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
     await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.isSignedIn() && window.IEWTStorage.progress().ols?.done?.length === 2);
+    assert.deepEqual(
+      calls.filter((call) => call.method === "GET").map((call) => call.path),
+      ["/api/bootstrap"],
+      "signed-in hydration must use one read request without the legacy waterfall",
+    );
     await page.click("#resetProgressBtn");
     assert.match(await page.locator("#resetScope").textContent(), /synced account record and this device/);
     await page.click("#resetConfirm");
@@ -453,6 +531,14 @@ try {
       const reply = (body, status = 200) => route.fulfill({
         status, contentType: "application/json", body: JSON.stringify(body),
       });
+      if (path === "/api/bootstrap") return reply({
+        user: { id: "g_switch", name: "Switching Learner", email: "" },
+        progress: serverProgress,
+        stats: serverStats,
+        mastery: {},
+        placement: null,
+        generation,
+      });
       if (path === "/api/me") return reply({ user: { id: "g_switch", name: "Switching Learner", email: "" } });
       if (path === "/api/progress" && method === "GET") return reply({ progress: serverProgress, generation });
       if (path === "/api/stats" && method === "GET") return reply({ stats: serverStats, generation });
@@ -463,7 +549,7 @@ try {
         generation = 1;
         serverProgress = {};
         serverStats = { points: 0, streak: 0, last: null };
-        return reply({ ok: true, progress: serverProgress, stats: serverStats, generation });
+        return reply({ ok: true, progress: serverProgress, stats: serverStats, mastery: {}, placement: null, generation });
       }
       if (method === "PUT") return reply({ ok: true, stats: serverStats, generation });
       return reply({ error: { code: "not_found" } }, 404);
@@ -522,11 +608,21 @@ try {
     await page.route("**/api/**", (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
-      const body = path === "/api/me" ? { user: signedIn ? { id: "g_signout", name: "Sign-out Learner", email: "" } : null }
+      const signedInUser = signedIn ? { id: "g_signout", name: "Sign-out Learner", email: "" } : null;
+      const body = path === "/api/bootstrap" ? (signedInUser ? {
+        user: signedInUser,
+        progress: {},
+        stats: { points: 0, streak: 0, last: null },
+        mastery: {},
+        placement: null,
+        generation: 0,
+      } : { user: null })
+        : path === "/api/me" ? { user: signedInUser }
         : path === "/api/progress" ? { progress: {}, generation: 0 }
           : path === "/api/stats" ? { stats: { points: 0, streak: 0, last: null }, generation: 0 }
             : path === "/api/mastery" ? { mastery: {}, generation: 0 }
-            : { error: { code: "not_found" } };
+              : path === "/api/placement" ? { placement: null, generation: 0 }
+                : { error: { code: "not_found" } };
       return route.fulfill({ status: path.startsWith("/api/") ? 200 : 404, contentType: "application/json", body: JSON.stringify(body) });
     });
     await page.route("**/auth/logout", (route) => {
@@ -863,11 +959,13 @@ try {
       window.fetch = (input, init = {}) => {
         const path = new URL(typeof input === "string" ? input : input.url, location.href).pathname;
         const method = init.method || "GET";
+        if (path === "/api/bootstrap") return Promise.resolve(reply({ error: { code: "not_found" } }, 404));
         if (path === "/api/me") return Promise.resolve(reply({ user: { id: "g_partial", name: "Partial Sync", email: "" } }));
         if (path === "/api/progress") return Promise.resolve(reply({ error: { code: "temporary" } }, 500));
         if (path === "/api/stats" && method === "GET") return Promise.resolve(reply({ stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
         if (path === "/api/stats" && method === "PUT") return Promise.resolve(reply({ ok: true, stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
         if (path === "/api/mastery" && method === "GET") return Promise.resolve(reply({ mastery: {}, generation: 0 }));
+        if (path === "/api/placement" && method === "GET") return Promise.resolve(reply({ placement: null, generation: 0 }));
         return nativeFetch(input, init);
       };
     });

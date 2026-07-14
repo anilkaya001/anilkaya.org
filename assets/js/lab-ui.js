@@ -115,11 +115,19 @@
     const totalLessons = META.reduce((sum, topic) => sum + topic.stages, 0);
     const completedLessons = states.reduce((sum, state) => sum + state.done.length, 0);
     const completeCourses = states.filter((state) => state.status === "completed").length;
-    const active = states.find((state) => state.status === "in-progress") || states.find((state) => state.status === "not-started") || states[0];
+    const placement = typeof store().placement === "function" ? store().placement() : null;
+    const placedState = placement && byId[placement.recommendedTopic]
+      ? states.find((state) => state.topic.id === placement.recommendedTopic)
+      : null;
+    const placementGuided = completedLessons === 0 && placedState && placedState.status !== "completed";
+    const active = states.find((state) => state.status === "in-progress") ||
+      (placementGuided ? placedState : null) || states.find((state) => state.status === "not-started") || states[0];
     const overall = totalLessons ? Math.round((100 * completedLessons) / totalLessons) : 0;
     const gamify = window.Gamify ? window.Gamify.get() : { points: 0, streak: 0 };
     const review = reviewQueue(snapshot);
-    const resumeLabel = active.status === "not-started" ? "Start the foundations" : active.status === "completed" ? "Review any course" : "Resume where you stopped";
+    const resumeLabel = placementGuided
+      ? `${placement.band.charAt(0).toUpperCase() + placement.band.slice(1)} diagnostic route`
+      : active.status === "not-started" ? "Start the foundations" : active.status === "completed" ? "Review any course" : "Resume where you stopped";
     const activeHref = hrefFor(active.topic, active.firstOpen);
     const activeVerb = active.status === "completed" ? "Review" : active.status === "not-started" ? "Start" : "Continue";
 
@@ -129,6 +137,14 @@
       heroCta.href = activeHref;
       heroCta.textContent = `${activeVerb} ${active.topic.shortTitle || active.topic.title}${lesson} →`;
       heroCta.setAttribute("aria-label", `${activeVerb} ${active.topic.title}${active.status === "completed" ? "" : ` at lesson ${active.firstOpen + 1}`}`);
+    }
+
+    const diagnosticCta = document.querySelector(".lab-hero__diagnostic");
+    if (diagnosticCta) {
+      diagnosticCta.textContent = placement ? "Retake diagnostic" : "Find your level";
+      diagnosticCta.setAttribute("aria-label", placement
+        ? `Retake the placement diagnostic; current band ${placement.band}, score ${placement.score} of ${placement.total}`
+        : "Find your level with the placement diagnostic");
     }
 
     const reviewCta = document.getElementById("dailyReviewCta");
@@ -170,7 +186,9 @@
     const summary = document.getElementById("dashboardSummary");
     if (summary) summary.textContent = completedLessons
       ? `${completedLessons} lessons completed across ${states.filter((state) => state.done.length).length} courses.`
-      : "Begin with OLS, or choose a path aligned to your goal.";
+      : placementGuided
+        ? `Your ${placement.band} diagnostic result recommends ${active.topic.shortTitle || active.topic.title} first.`
+        : "Begin with OLS, or choose a path aligned to your goal.";
   }
 
   function renderPaths() {

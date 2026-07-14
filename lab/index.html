@@ -24,18 +24,18 @@
 
   <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=23" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/css/base.css?v=23">
-  <link rel="stylesheet" href="/assets/css/lab.css?v=23">
+  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=24" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css?v=24">
+  <link rel="stylesheet" href="/assets/css/lab.css?v=24">
 
-  <script src="/assets/js/nav.js?v=23" defer></script>
-  <script src="/assets/js/course-catalog.js?v=23" defer></script>
-  <script src="/assets/js/mastery.js?v=23" defer></script>
-  <script src="/assets/js/review-catalog.js?v=23" defer></script>
-  <script src="/assets/js/storage.js?v=23" defer></script>
-  <script src="/assets/js/gamify.js?v=23" defer></script>
-  <script src="/assets/js/auth.js?v=23" defer></script>
-  <script src="/assets/js/lab-ui.js?v=23" defer></script>
+  <script src="/assets/js/nav.js?v=24" defer></script>
+  <script src="/assets/js/course-catalog.js?v=24" defer></script>
+  <script src="/assets/js/mastery.js?v=24" defer></script>
+  <script src="/assets/js/review-catalog.js?v=24" defer></script>
+  <script src="/assets/js/storage.js?v=24" defer></script>
+  <script src="/assets/js/gamify.js?v=24" defer></script>
+  <script src="/assets/js/auth.js?v=24" defer></script>
+  <script src="/assets/js/lab-ui.js?v=24" defer></script>
 
   <!-- Structured data: the course catalogue, for search engines. -->
   <script type="application/ld+json">
@@ -251,39 +251,44 @@
   </header>
 
   <main class="lab lab--academy">
-    <section class="lab-hero" aria-labelledby="academyTitle">
-      <p class="lab-hero__kicker">Econometrics Lab</p>
-      <h1 id="academyTitle">Learn econometrics by doing the real work.</h1>
-      <p>Run real Python estimators, test assumptions, and prove your understanding — from first regression to advanced moment methods.</p>
-      <div class="lab-hero__actions" aria-label="Start learning">
-        <a class="btn btn--gold" id="heroPrimaryCta" href="/lab/ordinary-least-squares/">Start with OLS &rarr;</a>
-        <a class="lab-hero__browse" href="#courseLibrary">Explore all courses</a>
-      </div>
-      <ul class="lab-hero__proof" aria-label="Platform features">
-        <li><b>205</b> interactive lessons</li>
-        <li><b>7</b> complete core courses</li>
-        <li><b>0</b> installs required</li>
-      </ul>
-    </section>
+    <div class="academy-cockpit">
+      <section class="lab-hero" aria-labelledby="academyTitle">
+        <div class="lab-hero__meta">
+          <p class="lab-hero__kicker">Econometrics Lab</p>
+          <a class="lab-hero__browse" href="#courseLibrary">Browse 7 courses <span aria-hidden="true">↓</span></a>
+        </div>
+        <h1 id="academyTitle">Learn econometrics by doing the real work.</h1>
+        <p>Run real Python estimators, test assumptions, and prove your understanding — from first regression to advanced moment methods.</p>
+        <div class="lab-hero__actions" aria-label="Start learning">
+          <a class="btn btn--gold" id="heroPrimaryCta" href="/lab/ordinary-least-squares/">Start with OLS &rarr;</a>
+          <a class="btn btn--ghost lab-hero__diagnostic" href="/lab/placement/">Find your level</a>
+        </div>
+        <ul class="lab-hero__proof" aria-label="Platform features">
+          <li><b>205</b><span>interactive lessons</span></li>
+          <li><b>7</b><span>core courses</span></li>
+          <li><b>0</b><span>installs required</span></li>
+        </ul>
+      </section>
 
-    <section class="academy-dashboard" id="academyDashboard" aria-labelledby="dashboardTitle" aria-busy="true">
-      <div class="academy-section__head">
-        <div><p class="academy-kicker">Your learning</p><h2 id="dashboardTitle">Continue with purpose</h2></div>
-        <p id="dashboardSummary">Your progress stays on this device unless you sign in.</p>
-      </div>
-      <div class="dashboard-grid" id="dashboardGrid"></div>
-      <div class="dashboard-command-grid">
-        <a class="dashboard-review" id="dailyReviewCta" href="/lab/review/">
-          <span class="academy-kicker">Daily mastery</span>
-          <strong id="dailyReviewCount">Build your review queue</strong>
-          <span id="dailyReviewSummary">Complete assessed lessons, then revisit them at the right time.</span>
-        </a>
-        <div class="dashboard-focus" id="dashboardFocus"></div>
-      </div>
-    </section>
+      <section class="academy-dashboard" id="academyDashboard" aria-labelledby="dashboardTitle" aria-busy="true">
+        <div class="academy-section__head">
+          <div><p class="academy-kicker">Your learning</p><h2 id="dashboardTitle">Continue with purpose</h2></div>
+          <p id="dashboardSummary">Your progress stays on this device unless you sign in.</p>
+        </div>
+        <div class="dashboard-grid" id="dashboardGrid"></div>
+        <div class="dashboard-command-grid">
+          <a class="dashboard-review" id="dailyReviewCta" href="/lab/review/">
+            <span class="academy-kicker">Daily mastery</span>
+            <strong id="dailyReviewCount">Build your review queue</strong>
+            <span id="dailyReviewSummary">Complete assessed lessons, then revisit them at the right time.</span>
+          </a>
+          <div class="dashboard-focus" id="dashboardFocus"></div>
+        </div>
+      </section>
 
-    <div class="account account--loading" id="account" aria-live="polite">
-      <span class="account__txt">Checking account and saved progress…</span>
+      <div class="account account--loading" id="account" aria-live="polite">
+        <span class="account__txt">Checking account and saved progress…</span>
+      </div>
     </div>
 
     <section class="academy-section course-explorer" id="courseLibrary" aria-labelledby="coursesTitle">
@@ -374,7 +379,7 @@
     <form method="dialog" class="reset-dialog__panel">
       <p class="academy-kicker">Fresh start</p>
       <h2 id="resetTitle">Reset all learning progress?</h2>
-      <p id="resetDescription">This removes completed lessons, points, and streak data. Your course layout preference stays unchanged.</p>
+      <p id="resetDescription">This removes completed lessons, mastery history, points, streak data, and your placement result. Your course layout preference stays unchanged.</p>
       <p class="reset-dialog__scope" id="resetScope"></p>
       <p class="reset-dialog__status" id="resetStatus" role="status" aria-live="polite"></p>
       <div class="reset-dialog__actions">

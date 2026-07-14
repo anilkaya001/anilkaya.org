@@ -133,11 +133,63 @@ for (const meta of context.window.TOPIC_META) {
   assert(gzipSync(payloadSource).byteLength <= 14_000, `${meta.id}: generated payload exceeds 14 KB gzip budget`);
 }
 
+const placementBank = JSON.parse(read("assets/data/placement-bank.json"));
+assert.equal(placementBank.schemaVersion, 1, "placement bank schema version drifted");
+assert.equal(placementBank.questions.length, 15, "placement diagnostic must contain exactly 15 questions");
+assert.equal(new Set(placementBank.questions.map((item) => item.id)).size, 15, "placement question ids must be unique");
+assert.deepEqual(
+  Object.fromEntries([...new Set(placementBank.questions.map((item) => item.type))].sort().map((type) => [
+    type, placementBank.questions.filter((item) => item.type === type).length,
+  ])),
+  { boolean: 3, choice: 3, fill: 3, multi: 3, numeric: 3 },
+  "placement bank must balance all five question formats",
+);
+assert.deepEqual(
+  Object.fromEntries([...new Set(placementBank.questions.map((item) => item.difficulty))].sort().map((difficulty) => [
+    difficulty, placementBank.questions.filter((item) => item.difficulty === difficulty).length,
+  ])),
+  { advanced: 5, applied: 5, foundation: 5 },
+  "placement bank must balance all three difficulty bands",
+);
+assert.deepEqual(
+  [...new Set(placementBank.questions.map((item) => item.topic))].sort(),
+  [...topicIds].sort(),
+  "placement bank must cover every course topic",
+);
+for (const item of placementBank.questions) {
+  const label = `placement ${item.id}`;
+  assert.match(item.id, /^[a-z0-9-]+$/, `${label}: id must be a stable slug`);
+  assert(typeof item.prompt === "string" && item.prompt.trim(), `${label}: prompt missing`);
+  assert(typeof item.explanation === "string" && item.explanation.trim(), `${label}: explanation missing`);
+  assert(typeof item.topicTitle === "string" && item.topicTitle.trim(), `${label}: topic title missing`);
+  if (item.type === "choice") {
+    assert(Array.isArray(item.choices) && item.choices.length >= 2, `${label}: choices missing`);
+    assert(Number.isInteger(item.answer) && item.answer >= 0 && item.answer < item.choices.length, `${label}: answer invalid`);
+  } else if (item.type === "boolean") {
+    assert.equal(typeof item.answer, "boolean", `${label}: boolean answer invalid`);
+  } else if (item.type === "multi") {
+    assert(Array.isArray(item.choices) && item.choices.length >= 2, `${label}: choices missing`);
+    assert(Array.isArray(item.answers) && item.answers.length > 0, `${label}: answers missing`);
+    assert.equal(new Set(item.answers).size, item.answers.length, `${label}: duplicate answer index`);
+    assert(item.answers.every((answer) => Number.isInteger(answer) && answer >= 0 && answer < item.choices.length), `${label}: answer index invalid`);
+  } else if (item.type === "numeric") {
+    assert(Number.isFinite(item.answer), `${label}: numeric answer invalid`);
+    assert(Number.isFinite(item.tolerance) && item.tolerance >= 0, `${label}: numeric tolerance invalid`);
+  } else if (item.type === "fill") {
+    assert.equal((item.prompt.match(/___/g) || []).length, 1, `${label}: prompt needs exactly one blank`);
+    assert(Array.isArray(item.accept) && item.accept.length > 0 && item.accept.every((answer) => typeof answer === "string" && answer.trim()), `${label}: accepted answers missing`);
+    assert(typeof item.displayAnswer === "string" && item.displayAnswer.trim(), `${label}: display answer missing`);
+  } else {
+    assert.fail(`${label}: unknown type ${item.type}`);
+  }
+}
+
 const sitemap = read("sitemap.xml");
 const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
 assert.deepEqual(sitemapURLs, [
   `${SITE_ORIGIN}/`,
   `${SITE_ORIGIN}/lab/`,
+  `${SITE_ORIGIN}/lab/placement/`,
   `${SITE_ORIGIN}/lab/review/`,
   ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
 ], "sitemap must contain only final canonical pages");
@@ -148,6 +200,7 @@ assert(!sitemap.includes("/articles/"), "empty articles page must not be in the 
 const labIndex = read("lab/index.html");
 const labCourse = read("lab/course.html");
 const labReview = read("lab/review/index.html");
+const labPlacement = read("lab/placement/index.html");
 const staticCourseLinks = [...labIndex.matchAll(/<a class="model-card" href="([^"]+)">/g)].map((match) => match[1]);
 assert.deepEqual(staticCourseLinks, COURSE_TOPICS.map((topic) => topic.path), "static Lab links must exactly match canonical course paths");
 for (const topic of COURSE_TOPICS) {
@@ -162,13 +215,19 @@ for (const asset of ["course-catalog.js", "mastery.js", "storage.js", "gamify.js
 }
 for (const heavyweight of ["lab-core.js", "pyodide.js", "curriculum.js", "curriculum-data.js", "curriculum-questions.js"]) {
   assert(!labReview.includes(`/assets/js/${heavyweight}`), `Daily review must not load ${heavyweight}`);
+  assert(!labPlacement.includes(`/assets/js/${heavyweight}`), `Placement diagnostic must not load ${heavyweight}`);
 }
+for (const asset of ["storage.js", "auth.js", "placement.js"]) {
+  assert(labPlacement.includes(`/assets/js/${asset}`), `Placement diagnostic must load ${asset}`);
+}
+assert(labPlacement.includes('href="https://anilkaya.org/lab/placement/"'), "Placement diagnostic canonical drifted");
+assert(labPlacement.includes('href="/lab/"'), "Placement diagnostic must retain a crawlable Lab fallback");
 for (const heavyweight of ["curriculum.js", "curriculum-data.js", "curriculum-questions.js"]) {
   assert(!labIndex.includes(`/assets/js/${heavyweight}`), `Lab catalogue must not load ${heavyweight}`);
   assert(!labCourse.includes(`/assets/js/${heavyweight}`), `Course shell must not load ${heavyweight}`);
 }
 
-for (const file of ["index.html", "articles/index.html", "lab/index.html", "lab/course.html", "lab/review/index.html"]) {
+for (const file of ["index.html", "articles/index.html", "lab/index.html", "lab/course.html", "lab/review/index.html", "lab/placement/index.html"]) {
   assert(read(file).includes('<meta property="og:site_name" content="Anıl Kaya">'), `${file}: site name signal drifted`);
 }
 const homeGraphs = [...read("index.html").matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
@@ -180,6 +239,7 @@ const version = read("assets/version.txt").trim();
 assert.match(version, /^\d+$/, "asset version must be an integer");
 assert.equal(labCourse.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "course payload version must match asset version");
 assert.equal(labReview.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "review payload version must match asset version");
+assert.equal(labPlacement.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "placement payload version must match asset version");
 const documents = [...filesUnder("articles", (file) => file.endsWith(".html")), ...filesUnder("lab", (file) => file.endsWith(".html")), "index.html", "404.html"];
 const referenceFiles = [...documents, "assets/css/base.css"];
 let referenceCount = 0;
@@ -271,16 +331,24 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
     "invalid item": { level: 99, dueDay: "never" },
   });
   storage.queueMasteryAttempt({ itemId: "ols:ols-line-04", attemptId: "anon-1", correct: true, hinted: false, day: "2026-07-13" });
+  storage.setPlacement({
+    band: "foundation", score: 3, total: 15, completedDay: "2026-07-13", recommendedTopic: "ols",
+    responses: ["must-not-persist"],
+  });
   storage.bindOwner("g_account_a", { announce: true });
   assert.deepEqual(plain(storage.progress()), { ols: { done: [0] } }, "first account must claim pre-sign-in progress");
   assert.equal(storage.mastery()["ols:ols-line-04"].level, 1, "first account must claim pre-sign-in mastery");
   assert.equal(storage.mastery()["ols:ols-line-04"].correct, 1, "mastery correctness cannot exceed attempts");
   assert.equal(storage.masteryOutbox().length, 1, "first account must claim queued review attempts");
+  assert.deepEqual(plain(storage.placement()), {
+    band: "foundation", score: 3, total: 15, completedDay: "2026-07-13", recommendedTopic: "ols",
+  }, "first account must claim only the minimal sanitized placement result");
   storage.setProgress({ ols: { done: [0, 1] } });
   storage.setGamify({ points: 15, streak: 2, last: "2026-07-14" });
   storage.setSyncGeneration(3);
   storage.bindOwner(null, { claimAnonymous: false, announce: true });
   assert.deepEqual(plain(storage.progress()), {}, "signed-out scope must not expose account progress");
+  assert.equal(storage.placement(), null, "signed-out scope must not expose account placement");
   storage.setProgress({ ols: { done: [2] } });
   storage.bindOwner("g_account_b", { announce: true });
   assert.deepEqual(plain(storage.progress()), { ols: { done: [2] } }, "second account must claim only current anonymous work");
@@ -304,6 +372,7 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
   assert.deepEqual(plain(storage.gamify()), { points: 0, streak: 0, last: null }, "owner reset must clear gamification");
   assert.deepEqual(plain(storage.mastery()), {}, "owner reset must clear mastery");
   assert.deepEqual(plain(storage.masteryOutbox()), [], "owner reset must clear queued review attempts");
+  assert.equal(storage.placement(), null, "owner reset must clear the placement result");
   assert.equal(storage.guideWidth(), 57.5, "learning reset must preserve guide width");
 }
 
@@ -328,6 +397,46 @@ async function waitFor(predicate, message) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.fail(message);
+}
+
+// A bootstrap snapshot is sufficient for the ordinary signed-in path. If this
+// device contributes offline progress during that merge, auth performs exactly
+// one follow-up stats read so server-derived points cannot lag the uploaded work.
+{
+  const calls = [];
+  let progressSaved = false;
+  const response = (value, status = 200) => new Response(JSON.stringify(value), {
+    status, headers: { "Content-Type": "application/json" },
+  });
+  const fetchImpl = (input, options = {}) => {
+    const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
+    const method = options.method || "GET";
+    calls.push(`${method} ${url.pathname}`);
+    if (url.pathname === "/api/bootstrap" && method === "GET") return Promise.resolve(response({
+      user: { id: "g_bootstrap_merge", name: "Bootstrap Learner", email: "" },
+      progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 0,
+    }));
+    if (url.pathname === "/api/progress" && method === "PUT") {
+      progressSaved = true;
+      return Promise.resolve(response({ ok: true, done: [0], generation: 0 }));
+    }
+    if (url.pathname === "/api/stats" && method === "GET" && progressSaved) {
+      return Promise.resolve(response({ stats: { points: 5, streak: 0, last: null }, generation: 0 }));
+    }
+    return Promise.resolve(response({ error: { code: "not_found" } }, 404));
+  };
+  const harness = clientHarness({
+    "iewt:progress": JSON.stringify({ ols: { done: [0] } }),
+    "iewt:gamify": JSON.stringify({ points: 5, streak: 0, last: null }),
+  }, fetchImpl);
+  runClient(harness, "assets/js/course-catalog.js");
+  runClient(harness, "assets/js/storage.js");
+  runClient(harness, "assets/js/gamify.js");
+  runClient(harness, "assets/js/auth.js");
+  await harness.window.Auth.whenReady();
+  assert.deepEqual(calls, ["GET /api/bootstrap", "PUT /api/progress", "GET /api/stats"], "bootstrap merge request shape drifted");
+  assert.deepEqual(plain(harness.window.IEWTStorage.progress()), { ols: { done: [0] } }, "bootstrap merge lost offline progress");
+  assert.equal(harness.window.Gamify.get().points, 5, "bootstrap merge left derived points stale");
 }
 
 // A returning owner's offline mastery attempt is replayed only into that
@@ -466,6 +575,7 @@ async function waitFor(predicate, message) {
   storage.setGuideWidth(61);
   storage.setProgress({ ols: { done: [0] } });
   storage.setMastery({ "ols:ols-line-04": { level: 2, dueDay: "2026-07-17", attempts: 2, correct: 2, lastResult: true, lastAttemptId: "seed-2", updatedAt: 20 } });
+  storage.setPlacement({ band: "foundation", score: 3, total: 15, completedDay: "2026-07-13", recommendedTopic: "ols" });
   Gamify.merge({ points: 100, streak: 2, last: "2026-07-13" }, { progressComplete: false });
   assert.equal(Gamify.get().points, 100, "test setup did not establish a remote point floor");
 
@@ -489,6 +599,7 @@ async function waitFor(predicate, message) {
   assert.equal(resetSynced && resetSynced.masteryComplete, true, "reset sync event omitted mastery completion");
   assert.deepEqual(plain(storage.progress()), {}, "successful reset did not clear local progress");
   assert.deepEqual(plain(storage.mastery()), {}, "successful reset did not clear local mastery");
+  assert.equal(storage.placement(), null, "successful reset did not clear local placement");
   assert.deepEqual(plain(Gamify.get()), { points: 0, streak: 0, last: null }, "reset did not clear gamification closure state");
   assert.equal(storage.syncGeneration(), 1, "successful reset did not retain the server generation");
   assert.equal(storage.guideWidth(), 61, "signed-in reset removed guide width");
@@ -496,11 +607,13 @@ async function waitFor(predicate, message) {
   storage.setProgress({ ols: { done: [1] } });
   storage.setGamify({ points: 15, streak: 1, last: "2026-07-14" });
   storage.setMastery({ "ols:ols-line-04": { level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1, lastResult: true, lastAttemptId: "preserve-1", updatedAt: 30 } });
+  storage.setPlacement({ band: "applied", score: 9, total: 15, completedDay: "2026-07-14", recommendedTopic: "did" });
   failDelete = true;
   await assert.rejects(Auth.resetProgress(), /Nothing was removed from this device/);
   assert.deepEqual(plain(storage.progress()), { ols: { done: [1] } }, "failed server reset cleared local progress");
   assert.equal(storage.gamify().streak, 1, "failed server reset cleared local gamification");
   assert.equal(storage.mastery()["ols:ols-line-04"].lastAttemptId, "preserve-1", "failed server reset cleared local mastery");
+  assert.equal(storage.placement().recommendedTopic, "did", "failed server reset cleared local placement");
   assert.equal(storage.guideWidth(), 61, "failed reset removed guide width");
 }
 
@@ -574,6 +687,10 @@ async function waitFor(predicate, message) {
     const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
     const method = options.method || "GET";
     if (method === "PUT") mutations.push({ path: url.pathname, generation: new Headers(options.headers).get("x-iewt-generation") });
+    if (url.pathname === "/api/bootstrap") return Promise.resolve(response({
+      user: { id: "g_returning", name: "Returning Learner", email: "" },
+      progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 2,
+    }));
     if (url.pathname === "/api/me") return Promise.resolve(response({ user: { id: "g_returning", name: "Returning Learner", email: "" } }));
     if (url.pathname === "/api/progress" && method === "GET") return Promise.resolve(response({ progress: {}, generation: 2 }));
     if (url.pathname === "/api/stats" && method === "GET") return Promise.resolve(response({ stats: { points: 0, streak: 0, last: null }, generation: 2 }));
@@ -599,7 +716,7 @@ async function waitFor(predicate, message) {
   assert.deepEqual(mutations, [], "pre-reset state was reuploaded after sign-in");
 }
 
-for (const file of ["lab/index.html", "lab/course.html", "assets/js/lab-ui.js", "assets/js/lesson-redirect.js", "sitemap.xml"]) {
+for (const file of ["lab/index.html", "lab/course.html", "lab/placement/index.html", "assets/js/lab-ui.js", "assets/js/lesson-redirect.js", "sitemap.xml"]) {
   assert(!read(file).includes("/lab/course.html"), `${file}: use canonical /lab/course URLs`);
 }
 assert(read("wrangler.toml").includes("run_worker_first = true"), "Worker must run before assets");

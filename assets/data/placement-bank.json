@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 1,
+  "title": "Econometrics Placement Diagnostic",
+  "questions": [
+    {
+      "id": "ols-slope-meaning",
+      "topic": "ols",
+      "topicTitle": "Ordinary Least Squares",
+      "difficulty": "foundation",
+      "type": "choice",
+      "prompt": "A fitted model is y = 2 + 0.5x. What is the careful interpretation of the slope 0.5?",
+      "choices": [
+        "Expected y is 0.5 units higher for a one-unit increase in x, holding other included regressors fixed",
+        "x is 0.5 units higher whenever y rises by one unit",
+        "y always rises by exactly 50% when x rises",
+        "The residual variance equals 0.5"
+      ],
+      "answer": 0,
+      "explanation": "An OLS slope describes the change in the fitted conditional mean of y for a one-unit change in x, holding other included regressors fixed. A causal interpretation needs additional identification assumptions."
+    },
+    {
+      "id": "iv-relevance-is-not-exclusion",
+      "topic": "iv2sls",
+      "topicTitle": "Identification & IV",
+      "difficulty": "foundation",
+      "type": "boolean",
+      "prompt": "A strong first stage by itself proves that an instrument satisfies the exclusion restriction.",
+      "answer": false,
+      "explanation": "A strong first stage supports relevance: the instrument predicts the endogenous regressor. Exclusion is a separate claim that the instrument affects the outcome only through that regressor, and it is not proved by first-stage strength."
+    },
+    {
+      "id": "did-two-by-two",
+      "topic": "did",
+      "topicTitle": "Difference-in-Differences",
+      "difficulty": "foundation",
+      "type": "numeric",
+      "prompt": "The treated group mean moves from 20 to 31, while the control group mean moves from 18 to 23. What is the 2×2 DiD estimate?",
+      "answer": 6,
+      "tolerance": 0.001,
+      "unit": "points",
+      "explanation": "The treated change is 31 − 20 = 11 and the control change is 23 − 18 = 5. Their difference is 11 − 5 = 6 points."
+    },
+    {
+      "id": "panel-within-transformation",
+      "topic": "panel",
+      "topicTitle": "Panel Data",
+      "difficulty": "foundation",
+      "type": "fill",
+      "prompt": "Subtracting each unit's time mean from its observations is called the ___ transformation.",
+      "accept": ["within", "within transformation", "demeaning", "fixed effects", "fixed-effects"],
+      "displayAnswer": "within transformation",
+      "explanation": "The within transformation removes every time-invariant unit effect by demeaning each variable within the unit. The fixed-effects slope is then identified from within-unit variation."
+    },
+    {
+      "id": "var-reduced-form-basics",
+      "topic": "var",
+      "topicTitle": "VAR & Time Series",
+      "difficulty": "foundation",
+      "type": "multi",
+      "prompt": "Which statements about a reduced-form VAR are correct? Select all that apply.",
+      "choices": [
+        "Each variable may depend on lags of every variable in the system",
+        "Granger causality is predictive precedence, not automatic structural causation",
+        "A significant lag coefficient proves that an intervention on that variable changes the outcome",
+        "Stability depends on the roots or companion-matrix eigenvalues lying inside the unit circle"
+      ],
+      "answers": [0, 1, 3],
+      "explanation": "A reduced-form VAR models joint lag dynamics and supports prediction. Granger tests concern incremental forecast content. Structural causal interpretation requires additional identifying assumptions, while stability is governed by the system's roots rather than one coefficient in isolation."
+    },
+    {
+      "id": "logit-odds-ratio",
+      "topic": "logit",
+      "topicTitle": "Binary Response Models",
+      "difficulty": "applied",
+      "type": "numeric",
+      "prompt": "A logit coefficient is ln(2). What odds ratio corresponds to a one-unit increase in that regressor?",
+      "answer": 2,
+      "tolerance": 0.01,
+      "unit": "odds ratio",
+      "explanation": "Logit coefficients are changes in log odds. Exponentiating ln(2) gives exp(ln(2)) = 2, so the odds are multiplied by two, holding other regressors fixed."
+    },
+    {
+      "id": "gmm-identification-count",
+      "topic": "gmm",
+      "topicTitle": "Generalized Method of Moments",
+      "difficulty": "applied",
+      "type": "choice",
+      "prompt": "Assume four moment conditions identify two parameters (the moment Jacobian has full column rank). How is this GMM model classified?",
+      "choices": [
+        "Under-identified",
+        "Just-identified",
+        "Over-identified, with two over-identifying restrictions",
+        "Identification cannot be discussed by counting moments and parameters"
+      ],
+      "answer": 2,
+      "explanation": "Given the stated rank condition, m = 4 exceeds k = 2, so the model is over-identified. The surplus count m − k equals two over-identifying restrictions; counting alone would not establish identification without the rank assumption."
+    },
+    {
+      "id": "ols-heteroskedasticity",
+      "topic": "ols",
+      "topicTitle": "Ordinary Least Squares",
+      "difficulty": "applied",
+      "type": "boolean",
+      "prompt": "When E[ε|X] = 0 holds, heteroskedasticity makes the OLS coefficient estimates biased.",
+      "answer": false,
+      "explanation": "Under conditional mean zero, heteroskedasticity does not by itself bias OLS coefficients. It invalidates the usual homoskedastic standard errors and affects efficiency, so heteroskedasticity-robust inference is appropriate."
+    },
+    {
+      "id": "iv-exclusion-name",
+      "topic": "iv2sls",
+      "topicTitle": "Identification & IV",
+      "difficulty": "applied",
+      "type": "fill",
+      "prompt": "The requirement that an instrument affects the outcome only through the endogenous regressor is the ___ restriction.",
+      "accept": ["exclusion", "exclusion restriction"],
+      "displayAnswer": "exclusion restriction",
+      "explanation": "The exclusion restriction rules out a direct path from the instrument to the outcome and other channels not mediated by the endogenous regressor. It complements, rather than follows from, relevance."
+    },
+    {
+      "id": "did-design-diagnostics",
+      "topic": "did",
+      "topicTitle": "Difference-in-Differences",
+      "difficulty": "applied",
+      "type": "multi",
+      "prompt": "Which statements are correct for a standard DiD design? Select all that apply.",
+      "choices": [
+        "Similar pre-treatment trends make the parallel-trends claim more credible",
+        "The control group's change proxies for the treated group's untreated counterfactual change",
+        "Treated and control outcomes must have identical pre-treatment levels",
+        "A large, statistically significant pre-treatment lead is a warning for the design"
+      ],
+      "answers": [0, 1, 3],
+      "explanation": "DiD permits baseline level differences but relies on a credible untreated trend. Similar pre-trends are supportive evidence, while a nonzero lead signals that the groups may already have been moving differently."
+    },
+    {
+      "id": "panel-hausman-choice",
+      "topic": "panel",
+      "topicTitle": "Panel Data",
+      "difficulty": "advanced",
+      "type": "choice",
+      "prompt": "A Hausman test comparing fixed and random effects returns p = 0.002. Which choice is most defensible?",
+      "choices": [
+        "Prefer random effects because it usually has smaller standard errors",
+        "Prefer fixed effects because the random-effects orthogonality assumption is rejected",
+        "Use pooled OLS because both panel estimators must be biased",
+        "The test selects neither estimator"
+      ],
+      "answer": 1,
+      "explanation": "A small Hausman p-value rejects the restrictions that make random effects consistent. Fixed effects remains the defensible choice when unit effects may correlate with regressors, even if random effects appears more precise."
+    },
+    {
+      "id": "var-cholesky-ordering",
+      "topic": "var",
+      "topicTitle": "VAR & Time Series",
+      "difficulty": "advanced",
+      "type": "boolean",
+      "prompt": "Cholesky-orthogonalized impulse responses are invariant to the ordering of variables in the VAR.",
+      "answer": false,
+      "explanation": "Cholesky orthogonalization imposes a recursive contemporaneous ordering. Reordering the variables changes that identifying assumption and can change impact and subsequent impulse responses."
+    },
+    {
+      "id": "logit-interpretation-set",
+      "topic": "logit",
+      "topicTitle": "Binary Response Models",
+      "difficulty": "advanced",
+      "type": "multi",
+      "prompt": "Which statements about a logit model are correct? Select all that apply.",
+      "choices": [
+        "Exponentiating a slope coefficient gives its conditional odds ratio",
+        "A regressor's probability marginal effect generally depends on the covariate values",
+        "Maximum likelihood requires classifying observations at a 0.5 threshold",
+        "ROC AUC summarizes ranking performance across classification thresholds",
+        "A slope coefficient is directly a constant probability-point effect"
+      ],
+      "answers": [0, 1, 3],
+      "explanation": "Logit is nonlinear in probability: exp(β) is an odds ratio, while β itself is not a fixed probability change. Marginal effects depend on the probability index. The likelihood estimates probabilities without requiring a 0.5 classification cutoff, and AUC evaluates ranking across thresholds."
+    },
+    {
+      "id": "gmm-j-degrees-freedom",
+      "topic": "gmm",
+      "topicTitle": "Generalized Method of Moments",
+      "difficulty": "advanced",
+      "type": "numeric",
+      "prompt": "A GMM model has seven moment conditions and three estimated parameters. What are the degrees of freedom for its J-test?",
+      "answer": 4,
+      "tolerance": 0.001,
+      "unit": "degrees of freedom",
+      "explanation": "The J-test uses the number of over-identifying restrictions: m − k = 7 − 3 = 4 degrees of freedom."
+    },
+    {
+      "id": "gmm-efficient-weight",
+      "topic": "gmm",
+      "topicTitle": "Generalized Method of Moments",
+      "difficulty": "advanced",
+      "type": "fill",
+      "prompt": "In efficient GMM, if S is the covariance matrix of the sample moments, the optimal weighting matrix is ___.",
+      "accept": ["S^-1", "S⁻¹", "inverse of S", "S inverse", "inverse moment covariance", "inverse of the moment covariance matrix"],
+      "displayAnswer": "S⁻¹, the inverse moment-covariance matrix",
+      "explanation": "Efficient GMM weights moments by the inverse of their covariance matrix. This downweights noisy moment combinations and accounts for correlation across moments."
+    }
+  ]
+}
