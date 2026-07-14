@@ -17,6 +17,8 @@
     gamify: "iewt:gamify",
     progressPrefix: "iewt:progress:v2:",
     gamifyPrefix: "iewt:gamify:v2:",
+    masteryPrefix: "iewt:mastery:v2:",
+    masteryOutboxPrefix: "iewt:mastery-outbox:v2:",
     syncPrefix: "iewt:sync:v2:",
     activeOwner: "iewt:activeOwner",
     guideWidth: "iewt:guideW",
@@ -85,7 +87,9 @@
 
   function scopedKey(kind, owner = activeOwner) {
     const prefix = kind === "progress" ? KEYS.progressPrefix :
-      kind === "gamify" ? KEYS.gamifyPrefix : KEYS.syncPrefix;
+      kind === "gamify" ? KEYS.gamifyPrefix :
+      kind === "mastery" ? KEYS.masteryPrefix :
+      kind === "masteryOutbox" ? KEYS.masteryOutboxPrefix : KEYS.syncPrefix;
     return prefix + encodeURIComponent(owner);
   }
 
@@ -157,12 +161,62 @@
     };
   }
 
+  const validItemId = (value) => typeof value === "string" && /^[a-z0-9][a-z0-9:_-]{0,127}$/i.test(value);
+  const validAttemptId = (value) => typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
+
+  function cleanMastery(value) {
+    const source = plainObject(value) ? value : {};
+    const clean = {};
+    for (const [itemId, record] of Object.entries(source).slice(0, 1000)) {
+      if (!validItemId(itemId) || !plainObject(record)) continue;
+      const level = Number(record.level);
+      const dueDay = normalizeDay(record.dueDay);
+      if (!Number.isSafeInteger(level) || level < 0 || level > 5 || !dueDay) continue;
+      const attempts = safeInteger(record.attempts, 0, 1000000);
+      clean[itemId] = {
+        level,
+        dueDay,
+        attempts,
+        correct: Math.min(attempts, safeInteger(record.correct, 0, 1000000)),
+        lastResult: typeof record.lastResult === "boolean" ? record.lastResult : null,
+        lastAttemptId: validAttemptId(record.lastAttemptId) ? record.lastAttemptId : null,
+        updatedAt: safeInteger(record.updatedAt),
+      };
+    }
+    return clean;
+  }
+
+  function cleanMasteryOutbox(value) {
+    if (!Array.isArray(value)) return [];
+    const clean = [];
+    const seen = new Set();
+    for (const event of value.slice(-500)) {
+      if (!plainObject(event) || !validItemId(event.itemId) || !validAttemptId(event.attemptId) || seen.has(event.attemptId)) continue;
+      const day = normalizeDay(event.day);
+      if (!day || typeof event.correct !== "boolean" || typeof event.hinted !== "boolean") continue;
+      seen.add(event.attemptId);
+      clean.push({
+        attemptId: event.attemptId,
+        itemId: event.itemId,
+        correct: event.correct,
+        hinted: event.hinted,
+        day,
+      });
+    }
+    return clean;
+  }
+
   function cleanFor(kind, value) {
-    return kind === "progress" ? cleanProgress(value) : cleanGamify(value);
+    if (kind === "progress") return cleanProgress(value);
+    if (kind === "gamify") return cleanGamify(value);
+    if (kind === "mastery") return cleanMastery(value);
+    return cleanMasteryOutbox(value);
   }
 
   function emptyFor(kind) {
-    return kind === "progress" ? {} : { points: 0, streak: 0, last: null };
+    if (kind === "progress" || kind === "mastery") return {};
+    if (kind === "masteryOutbox") return [];
+    return { points: 0, streak: 0, last: null };
   }
 
   function readScoped(kind, owner = activeOwner) {
@@ -173,7 +227,7 @@
 
     // Pre-v2 values have no owner identity. They are therefore eligible only
     // for the anonymous scope and are immediately migrated into an envelope.
-    const legacy = owner === ANONYMOUS ? parseRaw(KEYS[kind]) : null;
+    const legacy = owner === ANONYMOUS && (kind === "progress" || kind === "gamify") ? parseRaw(KEYS[kind]) : null;
     const value = cleanFor(kind, legacy ?? emptyFor(kind));
     writeScoped(kind, value, owner);
     return value;
@@ -188,17 +242,18 @@
     }));
     // Keep old anonymous-only integrations working during the migration. An
     // authenticated scope is never copied into these unscoped legacy keys.
-    if (owner === ANONYMOUS) writeRaw(KEYS[kind], JSON.stringify(clean));
+    if (owner === ANONYMOUS && (kind === "progress" || kind === "gamify")) writeRaw(KEYS[kind], JSON.stringify(clean));
     return clean;
   }
 
   function removeScoped(kind, owner = activeOwner) {
     removeRaw(scopedKey(kind, owner));
-    if (owner === ANONYMOUS) removeRaw(KEYS[kind]);
+    if (owner === ANONYMOUS && (kind === "progress" || kind === "gamify")) removeRaw(KEYS[kind]);
   }
 
   function hasScopedState(owner) {
     return readRaw(scopedKey("progress", owner)) != null || readRaw(scopedKey("gamify", owner)) != null ||
+      readRaw(scopedKey("mastery", owner)) != null || readRaw(scopedKey("masteryOutbox", owner)) != null ||
       readRaw(scopedKey("sync", owner)) != null;
   }
 
@@ -207,9 +262,10 @@
     catch { return false; }
   }
 
-  function hasLearningState(progressValue, gamifyValue) {
+  function hasLearningState(progressValue, gamifyValue, masteryValue, masteryOutboxValue) {
     return Object.values(progressValue).some((entry) => Array.isArray(entry.done) && entry.done.length) ||
-      gamifyValue.points > 0 || gamifyValue.streak > 0 || gamifyValue.last != null;
+      gamifyValue.points > 0 || gamifyValue.streak > 0 || gamifyValue.last != null ||
+      Object.keys(masteryValue).length > 0 || masteryOutboxValue.length > 0;
   }
 
   function bindOwner(ownerId, options = {}) {
@@ -223,11 +279,17 @@
     if (next !== ANONYMOUS && next !== previous && claimAnonymous && !hasScopedState(next)) {
       const anonymousProgress = readScoped("progress", ANONYMOUS);
       const anonymousGamify = readScoped("gamify", ANONYMOUS);
-      if (hasLearningState(anonymousProgress, anonymousGamify)) {
+      const anonymousMastery = readScoped("mastery", ANONYMOUS);
+      const anonymousMasteryOutbox = readScoped("masteryOutbox", ANONYMOUS);
+      if (hasLearningState(anonymousProgress, anonymousGamify, anonymousMastery, anonymousMasteryOutbox)) {
         writeScoped("progress", anonymousProgress, next);
         writeScoped("gamify", anonymousGamify, next);
+        writeScoped("mastery", anonymousMastery, next);
+        writeScoped("masteryOutbox", anonymousMasteryOutbox, next);
         removeScoped("progress", ANONYMOUS);
         removeScoped("gamify", ANONYMOUS);
+        removeScoped("mastery", ANONYMOUS);
+        removeScoped("masteryOutbox", ANONYMOUS);
       }
     }
 
@@ -280,6 +342,34 @@
     return writeScoped("gamify", value);
   }
 
+  function mastery() {
+    const clean = readScoped("mastery");
+    return writeScoped("mastery", clean);
+  }
+
+  function setMastery(value) {
+    return writeScoped("mastery", value);
+  }
+
+  function masteryOutbox() {
+    const clean = readScoped("masteryOutbox");
+    return writeScoped("masteryOutbox", clean);
+  }
+
+  function setMasteryOutbox(value) {
+    return writeScoped("masteryOutbox", value);
+  }
+
+  function queueMasteryAttempt(event) {
+    const pending = masteryOutbox();
+    if (!pending.some((entry) => entry.attemptId === event.attemptId)) pending.push(event);
+    return setMasteryOutbox(pending);
+  }
+
+  function removeMasteryAttempt(attemptId) {
+    return setMasteryOutbox(masteryOutbox().filter((event) => event.attemptId !== attemptId));
+  }
+
   function syncGeneration(ownerId = publicOwner()) {
     return readSync(normalizeOwner(ownerId));
   }
@@ -294,15 +384,19 @@
     if (generation == null) throw new TypeError("Invalid learning-state generation");
     removeScoped("progress", owner);
     removeScoped("gamify", owner);
+    removeScoped("mastery", owner);
+    removeScoped("masteryOutbox", owner);
     // Materialize clean owner-bound state immediately so subsequent reads and
     // other same-page components cannot observe a removed legacy value.
     const cleanProgress = writeScoped("progress", {}, owner);
     const cleanGamify = writeScoped("gamify", emptyFor("gamify"), owner);
+    const cleanMastery = writeScoped("mastery", {}, owner);
+    const cleanMasteryOutbox = writeScoped("masteryOutbox", [], owner);
     writeSync(generation, owner);
     if (options.announce !== false) {
       emit("iewt:storage-reset", { owner: publicOwner(owner), anonymous: owner === ANONYMOUS, generation });
     }
-    return { progress: cleanProgress, gamify: cleanGamify, generation };
+    return { progress: cleanProgress, gamify: cleanGamify, mastery: cleanMastery, masteryOutbox: cleanMasteryOutbox, generation };
   }
 
   function removeAnonymousProgress(model, indexes) {
@@ -363,6 +457,12 @@
     setProgress,
     gamify,
     setGamify,
+    mastery,
+    setMastery,
+    masteryOutbox,
+    setMasteryOutbox,
+    queueMasteryAttempt,
+    removeMasteryAttempt,
     syncGeneration,
     setSyncGeneration,
     resetLearning,

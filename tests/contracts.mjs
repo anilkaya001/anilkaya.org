@@ -138,6 +138,7 @@ const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) =>
 assert.deepEqual(sitemapURLs, [
   `${SITE_ORIGIN}/`,
   `${SITE_ORIGIN}/lab/`,
+  `${SITE_ORIGIN}/lab/review/`,
   ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
 ], "sitemap must contain only final canonical pages");
 assert(!/<(?:priority|changefreq)>/.test(sitemap), "sitemap must not contain ignored priority/changefreq hints");
@@ -146,6 +147,7 @@ assert(!sitemap.includes("/articles/"), "empty articles page must not be in the 
 
 const labIndex = read("lab/index.html");
 const labCourse = read("lab/course.html");
+const labReview = read("lab/review/index.html");
 const staticCourseLinks = [...labIndex.matchAll(/<a class="model-card" href="([^"]+)">/g)].map((match) => match[1]);
 assert.deepEqual(staticCourseLinks, COURSE_TOPICS.map((topic) => topic.path), "static Lab links must exactly match canonical course paths");
 for (const topic of COURSE_TOPICS) {
@@ -155,12 +157,18 @@ for (const topic of COURSE_TOPICS) {
 assert(!labIndex.includes("/lab/course?m="), "Lab must not advertise legacy query-string course URLs");
 assert(labIndex.includes("/assets/js/course-catalog.js"), "Lab catalogue must load the lightweight course catalog");
 assert(labCourse.includes("/assets/js/course-catalog.js"), "Course shell must load the lightweight course catalog");
+for (const asset of ["course-catalog.js", "mastery.js", "storage.js", "gamify.js", "auth.js", "lab-review.js"]) {
+  assert(labReview.includes(`/assets/js/${asset}`), `Daily review must load ${asset}`);
+}
+for (const heavyweight of ["lab-core.js", "pyodide.js", "curriculum.js", "curriculum-data.js", "curriculum-questions.js"]) {
+  assert(!labReview.includes(`/assets/js/${heavyweight}`), `Daily review must not load ${heavyweight}`);
+}
 for (const heavyweight of ["curriculum.js", "curriculum-data.js", "curriculum-questions.js"]) {
   assert(!labIndex.includes(`/assets/js/${heavyweight}`), `Lab catalogue must not load ${heavyweight}`);
   assert(!labCourse.includes(`/assets/js/${heavyweight}`), `Course shell must not load ${heavyweight}`);
 }
 
-for (const file of ["index.html", "articles/index.html", "lab/index.html", "lab/course.html"]) {
+for (const file of ["index.html", "articles/index.html", "lab/index.html", "lab/course.html", "lab/review/index.html"]) {
   assert(read(file).includes('<meta property="og:site_name" content="Anıl Kaya">'), `${file}: site name signal drifted`);
 }
 const homeGraphs = [...read("index.html").matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
@@ -171,6 +179,7 @@ assert.equal(website?.name, "Anıl Kaya", "homepage WebSite name drifted");
 const version = read("assets/version.txt").trim();
 assert.match(version, /^\d+$/, "asset version must be an integer");
 assert.equal(labCourse.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "course payload version must match asset version");
+assert.equal(labReview.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "review payload version must match asset version");
 const documents = [...filesUnder("articles", (file) => file.endsWith(".html")), ...filesUnder("lab", (file) => file.endsWith(".html")), "index.html", "404.html"];
 const referenceFiles = [...documents, "assets/css/base.css"];
 let referenceCount = 0;
@@ -257,8 +266,16 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
   runClient(harness, "assets/js/storage.js");
   const storage = harness.window.IEWTStorage;
   assert.deepEqual(plain(storage.progress()), { ols: { done: [0] } }, "legacy anonymous progress must migrate");
+  storage.setMastery({
+    "ols:ols-line-04": { level: 1, dueDay: "2026-07-14", attempts: 1, correct: 99, lastResult: true, lastAttemptId: "anon-1", updatedAt: 10 },
+    "invalid item": { level: 99, dueDay: "never" },
+  });
+  storage.queueMasteryAttempt({ itemId: "ols:ols-line-04", attemptId: "anon-1", correct: true, hinted: false, day: "2026-07-13" });
   storage.bindOwner("g_account_a", { announce: true });
   assert.deepEqual(plain(storage.progress()), { ols: { done: [0] } }, "first account must claim pre-sign-in progress");
+  assert.equal(storage.mastery()["ols:ols-line-04"].level, 1, "first account must claim pre-sign-in mastery");
+  assert.equal(storage.mastery()["ols:ols-line-04"].correct, 1, "mastery correctness cannot exceed attempts");
+  assert.equal(storage.masteryOutbox().length, 1, "first account must claim queued review attempts");
   storage.setProgress({ ols: { done: [0, 1] } });
   storage.setGamify({ points: 15, streak: 2, last: "2026-07-14" });
   storage.setSyncGeneration(3);
@@ -269,6 +286,7 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
   assert.deepEqual(plain(storage.progress()), { ols: { done: [2] } }, "second account must claim only current anonymous work");
   storage.bindOwner("g_account_a", { announce: true });
   assert.deepEqual(plain(storage.progress()), { ols: { done: [0, 1] } }, "returning account scope was contaminated");
+  assert.equal(storage.mastery()["ols:ols-line-04"].lastAttemptId, "anon-1", "returning account mastery was contaminated");
   assert.equal(storage.syncGeneration(), 3, "returning account lost its reset generation");
   const envelope = JSON.parse(harness.values.get("iewt:progress:v2:user%3Ag_account_a"));
   assert.equal(envelope.owner, "user:g_account_a", "persisted progress must carry its explicit owner");
@@ -284,7 +302,24 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
   storage.bindOwner("g_account_a", { announce: true });
   assert.deepEqual(plain(storage.progress()), {}, "owner reset must clear progress");
   assert.deepEqual(plain(storage.gamify()), { points: 0, streak: 0, last: null }, "owner reset must clear gamification");
+  assert.deepEqual(plain(storage.mastery()), {}, "owner reset must clear mastery");
+  assert.deepEqual(plain(storage.masteryOutbox()), [], "owner reset must clear queued review attempts");
   assert.equal(storage.guideWidth(), 57.5, "learning reset must preserve guide width");
+}
+
+// Streak persistence is capped at the shared Worker/storage maximum instead
+// of wrapping a long-lived learner back to zero on the next activity day.
+{
+  const harness = clientHarness();
+  runClient(harness, "assets/js/storage.js");
+  runClient(harness, "assets/js/gamify.js");
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const day = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  harness.window.IEWTStorage.setGamify({ points: 0, streak: 100000, last: day(yesterday) });
+  assert.equal(harness.window.Gamify.touch().streak, 100000, "review activity overflowed the streak cap");
+  harness.window.IEWTStorage.setGamify({ points: 0, streak: 100000, last: day(yesterday) });
+  assert.equal(harness.window.Gamify.award(5).streak, 100000, "course activity overflowed the streak cap");
 }
 
 async function waitFor(predicate, message) {
@@ -293,6 +328,100 @@ async function waitFor(predicate, message) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.fail(message);
+}
+
+// A returning owner's offline mastery attempt is replayed only into that
+// owner, carries the reset generation, and is removed only after acceptance.
+{
+  const owner = "user:g_mastery";
+  const encoded = encodeURIComponent(owner);
+  const itemId = "ols:ols-line-04";
+  const queued = { itemId, attemptId: "replay-1", correct: true, hinted: false, day: "2026-07-14" };
+  const seed = {
+    [`iewt:mastery:v2:${encoded}`]: JSON.stringify({
+      version: 2,
+      owner,
+      value: { [itemId]: { level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1, lastResult: true, lastAttemptId: "replay-1", updatedAt: 10 } },
+    }),
+    [`iewt:mastery-outbox:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: [queued] }),
+    [`iewt:sync:v2:${encoded}`]: JSON.stringify({ version: 2, owner, generation: 0 }),
+  };
+  const masteryPuts = [];
+  const response = (value, status = 200) => new Response(JSON.stringify(value), {
+    status, headers: { "Content-Type": "application/json" },
+  });
+  const fetchImpl = (input, options = {}) => {
+    const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
+    const method = options.method || "GET";
+    if (url.pathname === "/api/me") return Promise.resolve(response({ user: { id: "g_mastery", name: "Mastery Learner", email: "" } }));
+    if (url.pathname === "/api/progress" && method === "GET") return Promise.resolve(response({ progress: {}, generation: 0 }));
+    if (url.pathname === "/api/stats" && method === "GET") return Promise.resolve(response({ stats: { points: 0, streak: 0, last: null }, generation: 0 }));
+    if (url.pathname === "/api/mastery" && method === "GET") return Promise.resolve(response({ mastery: {}, generation: 0 }));
+    if (url.pathname === "/api/mastery" && method === "PUT") {
+      const event = JSON.parse(options.body);
+      masteryPuts.push({ event, headers: new Headers(options.headers) });
+      const second = event.attemptId === "live-2";
+      return Promise.resolve(response({
+        ok: true,
+        record: {
+          level: second ? 2 : 1,
+          dueDay: second ? "2026-07-18" : "2026-07-15",
+          attempts: second ? 2 : 1,
+          correct: second ? 2 : 1,
+          lastResult: true,
+          lastAttemptId: event.attemptId,
+          updatedAt: second ? 20 : 10,
+        },
+        duplicate: false,
+        generation: 0,
+      }));
+    }
+    return Promise.resolve(response({ error: { code: "not_found" } }, 404));
+  };
+
+  const harness = clientHarness(seed, fetchImpl);
+  runClient(harness, "assets/js/mastery.js");
+  runClient(harness, "assets/js/storage.js");
+  runClient(harness, "assets/js/gamify.js");
+  runClient(harness, "assets/js/auth.js");
+  const { IEWTStorage: storage, Auth } = harness.window;
+  await Auth.whenReady();
+  assert.equal(storage.owner(), "g_mastery", "mastery replay escaped its captured owner");
+  assert.deepEqual(plain(storage.masteryOutbox()), [], "accepted offline mastery attempt remained queued");
+  assert.equal(storage.mastery()[itemId].lastAttemptId, "replay-1", "accepted replay did not replace local mastery");
+  assert.equal(masteryPuts.length, 1, "offline mastery replay count drifted");
+  assert.equal(masteryPuts[0].headers.get("x-iewt-owner"), "g_mastery", "mastery replay omitted its verified owner");
+  assert.equal(masteryPuts[0].headers.get("x-iewt-generation"), "0", "mastery replay omitted its reset generation");
+
+  const live = await Auth.recordMasteryAttempt(itemId, {
+    correct: true,
+    hinted: false,
+    attemptId: "live-2",
+    day: "2026-07-15",
+  });
+  assert.equal(live.synced, true, "live mastery attempt did not synchronize");
+  assert.equal(live.record.level, 2, "live mastery response was not persisted");
+  assert.deepEqual(plain(storage.masteryOutbox()), [], "accepted live mastery attempt remained queued");
+  assert.deepEqual(masteryPuts.map(({ event }) => event.attemptId), ["replay-1", "live-2"]);
+}
+
+// Anonymous reset emits the same complete-area contract as an authenticated
+// reset so every page can repaint mastery without special casing ownership.
+{
+  const response = (value) => new Response(JSON.stringify(value), {
+    status: 200, headers: { "Content-Type": "application/json" },
+  });
+  const harness = clientHarness({}, () => Promise.resolve(response({ user: null })));
+  runClient(harness, "assets/js/storage.js");
+  runClient(harness, "assets/js/gamify.js");
+  runClient(harness, "assets/js/auth.js");
+  await harness.window.Auth.whenReady();
+  let resetSynced = null;
+  harness.document.addEventListener("iewt:synced", (event) => {
+    if (event.detail && event.detail.reset) resetSynced = event.detail;
+  });
+  await harness.window.Auth.resetProgress();
+  assert.equal(resetSynced && resetSynced.masteryComplete, true, "anonymous reset sync event omitted mastery completion");
 }
 
 // A signed-in reset is server-first and serialized behind any in-flight write.
@@ -329,9 +458,14 @@ async function waitFor(predicate, message) {
   runClient(harness, "assets/js/auth.js");
   const { IEWTStorage: storage, Gamify, Auth } = harness.window;
   await Auth.whenReady();
+  let resetSynced = null;
+  harness.document.addEventListener("iewt:synced", (event) => {
+    if (event.detail && event.detail.reset) resetSynced = event.detail;
+  });
   assert.equal(storage.owner(), "g_reset", "authenticated storage owner was not bound");
   storage.setGuideWidth(61);
   storage.setProgress({ ols: { done: [0] } });
+  storage.setMastery({ "ols:ols-line-04": { level: 2, dueDay: "2026-07-17", attempts: 2, correct: 2, lastResult: true, lastAttemptId: "seed-2", updatedAt: 20 } });
   Gamify.merge({ points: 100, streak: 2, last: "2026-07-13" }, { progressComplete: false });
   assert.equal(Gamify.get().points, 100, "test setup did not establish a remote point floor");
 
@@ -352,17 +486,21 @@ async function waitFor(predicate, message) {
   assert.equal(mutationRequests[1].headers.get("x-iewt-generation"), null, "reset must not claim a stale generation");
   deleteResolve(response({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, generation: 1 }));
   await reset;
+  assert.equal(resetSynced && resetSynced.masteryComplete, true, "reset sync event omitted mastery completion");
   assert.deepEqual(plain(storage.progress()), {}, "successful reset did not clear local progress");
+  assert.deepEqual(plain(storage.mastery()), {}, "successful reset did not clear local mastery");
   assert.deepEqual(plain(Gamify.get()), { points: 0, streak: 0, last: null }, "reset did not clear gamification closure state");
   assert.equal(storage.syncGeneration(), 1, "successful reset did not retain the server generation");
   assert.equal(storage.guideWidth(), 61, "signed-in reset removed guide width");
 
   storage.setProgress({ ols: { done: [1] } });
   storage.setGamify({ points: 15, streak: 1, last: "2026-07-14" });
+  storage.setMastery({ "ols:ols-line-04": { level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1, lastResult: true, lastAttemptId: "preserve-1", updatedAt: 30 } });
   failDelete = true;
   await assert.rejects(Auth.resetProgress(), /Nothing was removed from this device/);
   assert.deepEqual(plain(storage.progress()), { ols: { done: [1] } }, "failed server reset cleared local progress");
   assert.equal(storage.gamify().streak, 1, "failed server reset cleared local gamification");
+  assert.equal(storage.mastery()["ols:ols-line-04"].lastAttemptId, "preserve-1", "failed server reset cleared local mastery");
   assert.equal(storage.guideWidth(), 61, "failed reset removed guide width");
 }
 
@@ -422,6 +560,12 @@ async function waitFor(predicate, message) {
   const seed = {
     [`iewt:progress:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: { ols: { done: [0, 1] } } }),
     [`iewt:gamify:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: { points: 15, streak: 2, last: "2026-07-13" } }),
+    [`iewt:mastery:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: {
+      "ols:ols-line-04": { level: 1, dueDay: "2026-07-14", attempts: 1, correct: 1, lastResult: true, lastAttemptId: "stale-review", updatedAt: 10 },
+    } }),
+    [`iewt:mastery-outbox:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: [
+      { itemId: "ols:ols-line-04", attemptId: "stale-review", correct: true, hinted: false, day: "2026-07-13" },
+    ] }),
     [`iewt:sync:v2:${encoded}`]: JSON.stringify({ version: 2, owner, generation: 0 }),
   };
   const mutations = [];
@@ -433,6 +577,7 @@ async function waitFor(predicate, message) {
     if (url.pathname === "/api/me") return Promise.resolve(response({ user: { id: "g_returning", name: "Returning Learner", email: "" } }));
     if (url.pathname === "/api/progress" && method === "GET") return Promise.resolve(response({ progress: {}, generation: 2 }));
     if (url.pathname === "/api/stats" && method === "GET") return Promise.resolve(response({ stats: { points: 0, streak: 0, last: null }, generation: 2 }));
+    if (url.pathname === "/api/mastery" && method === "GET") return Promise.resolve(response({ mastery: {}, generation: 2 }));
     return Promise.resolve(response({ ok: true, generation: 2 }));
   };
 
@@ -440,9 +585,16 @@ async function waitFor(predicate, message) {
   runClient(harness, "assets/js/storage.js");
   runClient(harness, "assets/js/gamify.js");
   runClient(harness, "assets/js/auth.js");
+  let remoteResetSynced = null;
+  harness.document.addEventListener("iewt:synced", (event) => {
+    if (event.detail && event.detail.remote && event.detail.reset) remoteResetSynced = event.detail;
+  });
   await harness.window.Auth.whenReady();
   assert.deepEqual(plain(harness.window.IEWTStorage.progress()), {}, "newer generation merged stale progress");
   assert.deepEqual(plain(harness.window.Gamify.get()), { points: 0, streak: 0, last: null }, "newer generation merged stale rewards");
+  assert.deepEqual(plain(harness.window.IEWTStorage.mastery()), {}, "newer generation retained stale mastery");
+  assert.deepEqual(plain(harness.window.IEWTStorage.masteryOutbox()), [], "newer generation replayed a stale mastery attempt");
+  assert.equal(remoteResetSynced && remoteResetSynced.masteryComplete, true, "remote reset sync event omitted mastery completion");
   assert.equal(harness.window.IEWTStorage.syncGeneration(), 2, "newer server generation was not persisted");
   assert.deepEqual(mutations, [], "pre-reset state was reuploaded after sign-in");
 }

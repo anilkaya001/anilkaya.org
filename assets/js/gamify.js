@@ -54,11 +54,29 @@
       const today = day(new Date());
       if (s.last !== today) {
         const y = new Date(); y.setDate(y.getDate() - 1);
-        s.streak = (s.last === day(y)) ? (s.streak || 0) + 1 : 1;
+        s.streak = (s.last === day(y)) ? Math.min(100000, (s.streak || 0) + 1) : 1;
         s.last = today;
       }
       write(s); this.paint();
       if ((s.streak || 0) > prevStreak && window.FX && window.FX.streakUp) {
+        document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.streakUp(el));
+      }
+      if (window.Auth && typeof window.Auth.pushStats === "function") void window.Auth.pushStats(s);
+      return s;
+    },
+    // Count a completed mastery-review session as learning activity without
+    // minting repeatable course points.
+    touch() {
+      const s = read();
+      const today = day(new Date());
+      if (s.last === today) { this.paint(); return s; }
+      const previous = s.streak || 0;
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      s.streak = s.last === day(yesterday) ? Math.min(100000, previous + 1) : 1;
+      s.last = today;
+      write(s);
+      this.paint();
+      if (s.streak > previous && window.FX && window.FX.streakUp) {
         document.querySelectorAll("[data-gamify] .gstreak").forEach((el) => window.FX.streakUp(el));
       }
       if (window.Auth && typeof window.Auth.pushStats === "function") void window.Auth.pushStats(s);

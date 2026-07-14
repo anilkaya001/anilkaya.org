@@ -17,7 +17,7 @@ const SLUGS = {
   gmm: "generalized-method-of-moments",
 };
 const courseRoute = (topic) => `/lab/${SLUGS[topic]}/`;
-const PAGES = ["/", "/lab/", courseRoute("ols"), "/articles/"];
+const PAGES = ["/", "/lab/", "/lab/review/", courseRoute("ols"), "/articles/"];
 const stageRoute = (topic, index, nonce = index) => `${courseRoute(topic)}?test=${nonce}#s${index}`;
 
 function watch(page, ignored = () => false) {
@@ -82,6 +82,7 @@ async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } =
     if (url.pathname === "/api/me") return reply({ user: { id: "g_browser", name: "Browser Learner", email: "" } });
     if (url.pathname === "/api/progress" && method === "GET") return reply({ progress: { ols: { done: [0, 1] } }, generation });
     if (url.pathname === "/api/stats" && method === "GET") return reply({ stats: { points: 15, streak: 2, last: "2026-07-13" }, generation });
+    if (url.pathname === "/api/mastery" && method === "GET") return reply({ mastery: {}, generation });
     if (url.pathname === "/api/progress" && method === "DELETE") {
       if (deleteGate) await deleteGate;
       if (deleteStatus === 200) generation++;
@@ -132,13 +133,32 @@ try {
     for (const route of PAGES) {
       await page.goto(BASE + route, { waitUntil: "load" });
       if (route === courseRoute("ols")) await waitForCourse(page, "1 / 20");
+      if (route === "/lab/") await waitForAcademy(page);
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
+      if (route === "/lab/" && ((width === 390 && height === 844) || (width === 1440 && height === 900))) {
+        const resume = await page.locator(".dashboard-resume .btn").boundingBox();
+        const heroAction = await page.locator("#heroPrimaryCta").boundingBox();
+        assert(resume && resume.y + resume.height <= height, `[${width}px] resume action falls below the fold at ${Math.round((resume?.y || 0) + (resume?.height || 0))}px`);
+        assert(heroAction && heroAction.height >= 44, `[${width}px] hero action is not a 44px touch target`);
+      }
     }
     clean();
     await context.close();
 
+  }
+
+  // The initial HTML remains useful without JavaScript: the primary action is
+  // a canonical course link and the crawlable course catalogue stays present.
+  {
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("ols"));
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start with OLS/);
+    assert.equal(await page.locator("#labGrid .model-card").count(), 7, "no-JS course catalogue disappeared");
+    await context.close();
   }
 
   // The faintest text token remains WCAG-AA on the base surface.
@@ -166,8 +186,22 @@ try {
     assert.equal(await page.locator("#labGrid .model-card").count(), 7, "course catalogue did not render");
     assert.match(await page.locator(".dashboard-resume").textContent(), /2 of 20 lessons complete/);
     assert((await page.locator(".dashboard-resume a").getAttribute("href")).endsWith("#s2"), "resume link did not target the first unfinished lesson");
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Continue OLS · lesson 3/);
+    assert((await page.locator("#heroPrimaryCta").getAttribute("href")).endsWith("#s2"), "hero action did not personalize to the next lesson");
+    assert.equal(await page.locator("#dashboardFocus li").count(), 3, "focus plan did not render three steps");
+    assert.deepEqual(await page.locator("#dashboardFocus li a").evaluateAll((links) => links.map((link) => link.hash)), ["#s2", "#s3", "#s4"]);
+    assert.match(await page.locator("#dailyReviewCount").textContent(), /Build your review queue/);
+    assert.equal(new URL(await page.locator("#dailyReviewCta").getAttribute("href"), BASE).pathname, "/lab/review/");
     assert.equal(await page.locator("#academyDashboard [role=progressbar]").count(), 2);
     assert.equal(await page.locator("#academyDashboard [role=progressbar]").first().getAttribute("aria-valuenow"), "10");
+    assert(await page.evaluate(() => {
+      const dashboard = document.querySelector("#academyDashboard");
+      const account = document.querySelector("#account");
+      const library = document.querySelector("#courseLibrary");
+      const paths = document.querySelector("#learningPaths").closest("section");
+      return !!(dashboard.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+        !!(library.compareDocumentPosition(paths) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }), "learning-first DOM order drifted");
 
     await page.fill("#courseSearch", "binary outcomes");
     await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "1 course");
@@ -186,6 +220,121 @@ try {
     await page.fill("#courseSearch", "no-such-econometrics-method");
     await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "0 courses");
     assert(await page.locator("#courseEmptyState").isVisible(), "empty search result was not announced visibly");
+    const queuedItem = await page.evaluate(() => {
+      const item = window.REVIEW_ITEMS[0];
+      const snapshot = window.IEWTStorage.progress();
+      const done = new Set((snapshot[item.courseId] || {}).done || []);
+      done.add(item.stageIndex);
+      snapshot[item.courseId] = { done: [...done].sort((a, b) => a - b) };
+      window.IEWTStorage.setProgress(snapshot);
+      document.dispatchEvent(new Event("iewt:synced"));
+      return item.id;
+    });
+    assert(queuedItem, "review catalogue did not expose a deterministic first item");
+    await page.waitForFunction(() => document.querySelector("#dailyReviewCta")?.dataset.due === "1");
+    assert.equal((await page.locator("#dailyReviewCount").textContent()).trim(), "1 review due now");
+    clean();
+    await context.close();
+  }
+
+  // Daily Mastery Review grades every supported assessment type without
+  // loading Pyodide, persists local mastery, and never changes course points.
+  {
+    const reviewItems = [
+      {
+        id: "ols:review-test-01", courseId: "ols", courseTitle: "Ordinary Least Squares",
+        courseSlug: "ordinary-least-squares", stageIndex: 0, type: "quiz",
+        title: "Coefficient interpretation", prompt: "Which answer is correct?",
+        choices: ["The first answer", "The second answer"], answer: 1,
+        hint: "Look at the second answer.", explain: "A coefficient is interpreted holding included regressors fixed.",
+      },
+      {
+        id: "ols:review-test-02", courseId: "ols", courseTitle: "Ordinary Least Squares",
+        courseSlug: "ordinary-least-squares", stageIndex: 1, type: "truefalse",
+        title: "Exogeneity", prompt: "Zero conditional mean is an exogeneity condition.", answer: true,
+        explain: "It restricts the conditional expectation of the disturbance.",
+      },
+      {
+        id: "ols:review-test-03", courseId: "ols", courseTitle: "Ordinary Least Squares",
+        courseSlug: "ordinary-least-squares", stageIndex: 2, type: "multi",
+        title: "Select the assumptions", prompt: "Select both requested conditions.",
+        choices: ["Linearity", "Perfect collinearity", "Finite variance"], answers: [0, 2],
+        explain: "Linearity and finite variance are compatible with the classical setup.",
+      },
+      {
+        id: "ols:review-test-04", courseId: "ols", courseTitle: "Ordinary Least Squares",
+        courseSlug: "ordinary-least-squares", stageIndex: 3, type: "numeric",
+        title: "Compute the estimate", prompt: "Enter the value.", answer: 2.5, tol: 0.01,
+        explain: "The requested estimate is 2.5.",
+      },
+      {
+        id: "ols:review-test-05", courseId: "ols", courseTitle: "Ordinary Least Squares",
+        courseSlug: "ordinary-least-squares", stageIndex: 4, type: "fillblank",
+        title: "Complete the statement", prompt: "A mean-reverting series is often called ___.",
+        accept: ["stationary"], explain: "Stationarity formalizes stable distributional behavior over time.",
+      },
+    ];
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    await context.addInitScript(() => {
+      localStorage.setItem("iewt:progress", JSON.stringify({ ols: { done: [0, 1, 2, 3, 4] } }));
+      localStorage.setItem("iewt:gamify", JSON.stringify({ points: 80, streak: 0, last: null }));
+    });
+    const page = await context.newPage();
+    const requested = [];
+    page.on("request", (request) => requested.push(new URL(request.url()).pathname));
+    await page.route("**/assets/data/review-bank.json*", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ schemaVersion: 1, items: reviewItems }),
+    }));
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/review/", { waitUntil: "load" });
+    await page.waitForFunction(() => document.querySelector("#reviewQuestionTitle")?.textContent === "Coefficient interpretation");
+    const pointsBeforeReview = await points(page);
+    assert.equal(await page.locator("#reviewApp").getAttribute("aria-busy"), "false");
+    assert.equal(await page.locator("#reviewProgress").getAttribute("max"), "5");
+    assert(!requested.some((pathname) => pathname.includes("pyodide") || pathname.startsWith("/assets/data/courses/")), "daily review loaded the Python runtime or a course payload");
+
+    await page.click("button:has-text('Show hint')");
+    await page.check("input[name='review-answer'][value='1']");
+    await page.click("button:has-text('Check answer')");
+    await page.waitForSelector(".review-feedback.is-correct");
+    await page.click("button:has-text('Next question')");
+
+    await page.check("input[name='review-answer'][value='true']");
+    await page.click("button:has-text('Check answer')");
+    await page.waitForSelector(".review-feedback.is-correct");
+    await page.click("button:has-text('Next question')");
+
+    await page.check("input[name='review-answer'][value='0']");
+    await page.check("input[name='review-answer'][value='2']");
+    await page.click("button:has-text('Check answer')");
+    await page.waitForSelector(".review-feedback.is-correct");
+    await page.click("button:has-text('Next question')");
+
+    await page.fill("input[name='review-answer']", "2.5");
+    await page.click("button:has-text('Check answer')");
+    await page.waitForSelector(".review-feedback.is-correct");
+    await page.click("button:has-text('Next question')");
+
+    await page.fill("input[name='review-answer']", "stationary");
+    await page.click("button:has-text('Check answer')");
+    await page.waitForSelector(".review-feedback.is-correct");
+    await page.click("button:has-text('See session summary')");
+    await page.waitForSelector("#reviewSummaryTitle");
+
+    const result = await page.evaluate(() => ({
+      masteryCount: Object.keys(window.IEWTStorage.mastery()).length,
+      outboxCount: window.IEWTStorage.masteryOutbox().length,
+      gamify: window.Gamify.get(),
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    }));
+    assert.equal(result.masteryCount, 5);
+    assert.equal(result.outboxCount, 5, "signed-out review attempts must remain queued for a later account sync");
+    assert.equal(result.gamify.points, pointsBeforeReview, "daily review must not award course points");
+    assert.equal(result.gamify.streak, 1, "a complete five-question session must count as daily activity");
+    assert(result.overflow <= 1, `daily review overflowed the 390px viewport by ${result.overflow}px`);
+    assert.match(await page.locator(".review-summary__stats").textContent(), /5\s*Concepts reviewed[\s\S]*4\s*First-try recall[\s\S]*1\s*Hints opened/);
     clean();
     await context.close();
   }
@@ -307,6 +456,7 @@ try {
       if (path === "/api/me") return reply({ user: { id: "g_switch", name: "Switching Learner", email: "" } });
       if (path === "/api/progress" && method === "GET") return reply({ progress: serverProgress, generation });
       if (path === "/api/stats" && method === "GET") return reply({ stats: serverStats, generation });
+      if (path === "/api/mastery" && method === "GET") return reply({ mastery: {}, generation });
       if (path === "/api/progress" && method === "DELETE") {
         markDeleteStarted();
         await deleteGate;
@@ -375,6 +525,7 @@ try {
       const body = path === "/api/me" ? { user: signedIn ? { id: "g_signout", name: "Sign-out Learner", email: "" } : null }
         : path === "/api/progress" ? { progress: {}, generation: 0 }
           : path === "/api/stats" ? { stats: { points: 0, streak: 0, last: null }, generation: 0 }
+            : path === "/api/mastery" ? { mastery: {}, generation: 0 }
             : { error: { code: "not_found" } };
       return route.fulfill({ status: path.startsWith("/api/") ? 200 : 404, contentType: "application/json", body: JSON.stringify(body) });
     });
@@ -716,6 +867,7 @@ try {
         if (path === "/api/progress") return Promise.resolve(reply({ error: { code: "temporary" } }, 500));
         if (path === "/api/stats" && method === "GET") return Promise.resolve(reply({ stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
         if (path === "/api/stats" && method === "PUT") return Promise.resolve(reply({ ok: true, stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
+        if (path === "/api/mastery" && method === "GET") return Promise.resolve(reply({ mastery: {}, generation: 0 }));
         return nativeFetch(input, init);
       };
     });
