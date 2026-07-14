@@ -1,7 +1,7 @@
 {
-  "name": "In Econometrics We Trust",
-  "short_name": "Econometrics",
-  "description": "In Econometrics We Trust — the personal site of Anıl Kaya.",
+  "name": "Anıl Kaya — In Econometrics We Trust",
+  "short_name": "Anıl Kaya",
+  "description": "Anıl Kaya's personal site and interactive Econometrics Lab.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

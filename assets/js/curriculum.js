@@ -1,24 +1,9 @@
 /* =============================================================
-   curriculum.js — the course tree.
-   TOPIC_META drives the Lab home grid. CURRICULUM[topicId] holds the
-   detailed modules → stages. Stage types: read | code | interactive | quiz.
+   curriculum.js — canonical OLS course authoring.
+   Production course pages consume generated per-topic JSON payloads; this
+   source remains human-editable and is validated by the contract suite.
    Interactive `template` uses {{param}} tokens replaced with slider values.
    ============================================================= */
-
-window.TOPIC_META = [
-  { id: "ols",    num: "01", title: "Ordinary Least Squares",            level: "Beginner",     blurb: "The line of best fit, how it's computed, inference, and the assumptions behind it.", tags: ["regression", "inference"] },
-  { id: "iv2sls", num: "02", title: "Instrumental Variables & 2SLS",     level: "Intermediate", blurb: "When OLS is biased by endogeneity, and how an instrument plus 2SLS rescues it.", tags: ["causal", "endogeneity"] },
-  { id: "did",    num: "03", title: "Difference-in-Differences",         level: "Intermediate", blurb: "Treatment effects from before/after × treated/control, parallel trends, event studies.", tags: ["causal", "panel"] },
-  { id: "var",    num: "04", title: "Vector Autoregression",             level: "Advanced",     blurb: "Joint dynamics of several series: estimation, impulse responses, Granger causality.", tags: ["time series", "macro"] },
-  { id: "panel",  num: "05", title: "Panel: Fixed & Random Effects",     level: "Advanced",     blurb: "Unobserved heterogeneity, pooled-OLS bias, the within estimator, FE vs RE.", tags: ["panel", "causal"] },
-  { id: "logit",  num: "06", title: "Logit & Probit",                    level: "Intermediate", blurb: "Binary outcomes: the logistic model, odds ratios, marginal effects, classification.", tags: ["limited-dependent", "MLE"] },
-  { id: "gmm",    num: "07", title: "Generalized Method of Moments",     level: "Advanced",     blurb: "Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.", tags: ["estimation", "theory"] },
-];
-// Total stages per topic (so the Lab home can show progress without loading the full curriculum-data.js).
-// Base stage counts + the authored questions appended by curriculum-questions.js
-// (ols+6, iv2sls+6, did+6, var+6, panel+7, logit+7, gmm+6). On the course page
-// the loader recomputes these exactly; here they keep the Lab home progress right.
-window.TOPIC_META.forEach((t) => { t.stages = ({ ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33 })[t.id] || 0; });
 
 window.CURRICULUM = {
   ols: {

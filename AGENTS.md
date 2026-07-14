@@ -1,190 +1,334 @@
 # anilkaya.org — project handbook for coding agents
 
 Personal site of Anıl Kaya: a landing page, an Articles section, and the
-**Econometrics Lab** — an interactive course platform that runs *real* Python
-(statsmodels) in the browser via Pyodide/WebAssembly. No frameworks, no build
-step, no npm dependencies at runtime: plain HTML + CSS + vanilla JS (IIFE
-modules), served as Cloudflare Worker Static Assets with a small API.
+**Econometrics Lab** — an interactive course platform that runs real Python
+(statsmodels) in the browser via Pyodide/WebAssembly.
+
+The browser frontend has no framework, frontend bundler, or runtime npm
+dependency. It is plain HTML, CSS, and vanilla JavaScript. Wrangler bundles the
+Worker modules during deployment. Course authoring has one explicit generation
+step that writes committed JSON payloads; production does not generate or
+compile them. The committed npm dependencies under `tests/` are development-only
+and power verification.
 
 ## Architecture
 
-```
-Browser ──► Cloudflare Worker (worker.js)
-              ├─ /auth/*  Google OAuth → HMAC-signed session cookie (shared/session.js)
-              ├─ /api/*   JSON API backed by D1 (SQLite) — me / progress / stats
-              └─ everything else → ASSETS binding (this repo, minus .assetsignore)
-                   └─ /lab/course.html?m=<topic> + crawler UA → HTMLRewriter injects
-                      per-topic title/description/canonical/og:image/Course JSON-LD
+```text
+Browser ──► Cloudflare Worker (worker.js; runs before assets)
+              ├─ /auth/*  Google OAuth → HMAC-signed session cookie
+              ├─ /api/*   JSON API backed by D1 (SQLite)
+              ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
+              └─ everything else → ASSETS binding
 ```
 
-- **Hosting**: Cloudflare Workers with git integration ("Workers Builds").
-  **Every push to `main` auto-deploys** (`npx wrangler deploy`). There is no
-  staging environment — treat `main` as production.
-- **wrangler.toml**: worker name `anilkaya`, assets directory `.` (repo root),
-  binding `ASSETS`, D1 binding `DB` → database `iewt`
-  (id `73c8c626-e971-44da-b8c1-21d6062cb9f2`).
-- **.assetsignore** keeps `worker.js`, `shared/`, `tests/`, `schema.sql`,
-  `*.md`, dotfiles out of the public bundle. Note: **`*.md` means this file
-  and README are never served** — safe place for docs.
-- **Secrets** (set in the Cloudflare dashboard → Worker → Settings → Variables,
-  never in the repo): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-  `SESSION_SECRET`.
-- **Domain**: anilkaya.org (CNAME file is a GitHub-Pages leftover; harmless).
+- `wrangler.toml` is the Worker source of truth: name `anilkaya`, entrypoint
+  `worker.js`, static directory `.`, binding `ASSETS`, and D1 binding `DB` to
+  database name `iewt`.
+- `assets.run_worker_first = true` is required. Without it, matching static
+  assets bypass `worker.js`, disabling response headers, cache policy, and
+  course metadata rewriting.
+- `assets.html_handling = "auto-trailing-slash"`. Each course has a descriptive
+  canonical path such as `/lab/ordinary-least-squares/`. Legacy
+  `/lab/course?m=<id>` and `/lab/lesson?m=<id>` forms receive a 308 redirect;
+  missing or invalid IDs redirect to `/lab/` instead of exposing a soft 404.
+- `.assetsignore` excludes Worker code, `shared/`, tests, authoring-only combined
+  curriculum scripts, the private article template, `CNAME`, local secrets,
+  schema, Markdown, dotfiles, and configuration from the Cloudflare static
+  bundle. `CNAME` remains in Git for GitHub Pages.
+- Secrets are bindings, never source: `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET`.
+- Invocation observability is enabled in `wrangler.toml`; application code
+  emits structured logs only for unexpected failures and OAuth callback errors.
+
+### External deployment state
+
+Repository files cannot prove Workers Builds branch mapping, dashboard secrets,
+custom domains, staging environments, or deployment gates. Verify those in the
+Cloudflare dashboard before changing production assumptions.
+
+As observed on 2026-07-12, the apex used the Worker API while
+`www.anilkaya.org` was still served by GitHub Pages and redirected to the apex.
+The `CNAME` file therefore supports a live hybrid redirect path; do not remove
+it until `www` is attached to the Worker and verified.
 
 ## File map
 
 | Path | Role |
 |---|---|
-| `index.html` | Landing page (particle-field hero). |
-| `articles/index.html`, `articles/_template/` | Articles index + template for future posts. |
-| `lab/index.html` | Lab home: topic grid rendered by `lab-ui.js` from `TOPIC_META`. |
-| `lab/course.html` | The course player (one page for all topics, `?m=<id>`). |
-| `lab/lesson.html` | Legacy redirect stub → course.html (noindexed). |
-| `worker.js` | All server logic (see Architecture). |
-| `shared/session.js` | HMAC-SHA256 session sign/verify + cookie helpers. |
-| `schema.sql` | D1 schema. Apply: `wrangler d1 execute iewt --remote --file=./schema.sql`. |
-| `assets/js/curriculum.js` | `TOPIC_META` (7 topics) + the full OLS curriculum + stage-count map. |
-| `assets/js/curriculum-data.js` | Curricula for iv2sls, did, var, panel, logit, gmm (one big JSON assign). |
-| `assets/js/curriculum-questions.js` | Extra authored quiz items, appended non-destructively per module. |
-| `assets/js/lab-core.js` | Pyodide boot (v0.26.4 from jsDelivr) + code-cell factory (`window.Lab.makeCell`) + editor/highlight overlay + matplotlib capture. |
-| `assets/js/lab-course.js` | Course player: flattens modules→stages, renders one stage at a time, progress, keyboard nav, resizable splitter. |
-| `assets/js/lab-ui.js` | Lab home grid + account strip. |
-| `assets/js/lab-fx.js` | Delight layer: confetti, correct/wrong flashes, coin fly, streak flame, page-turn. `window.FX`. |
-| `assets/js/gamify.js` | Points/streak in `localStorage` + `window.Gamify` (`award/merge/paint`). |
-| `assets/js/auth.js` | `window.Auth`; detects backend via `/api/me`, syncs progress+stats when signed in. |
-| `assets/js/nav.js` | Pill nav: equal-width tabs + fixed-size gold indicator (transform-only animation). |
-| `assets/js/particles.js` | Landing-page gold particle field (canvas), reduced-motion aware. |
-| `assets/css/base.css` | Design tokens, fonts, reset, topbar/pill/buttons. Loaded everywhere. |
-| `assets/css/home.css`, `lab.css`, `article.css` | Per-section styles. |
-| `assets/fonts/LM-*.woff2` | Latin Modern, **subset** (Latin+Greek+math ranges, ~29-35 KB each). |
-| `assets/img/og.png`, `og-<topic>.png` | 1200×630 social cards (generic + one per topic). |
-| `tests/regression.mjs` | Self-contained Playwright suite (see Testing). |
-| `.github/workflows/regression.yml` | Runs the suite on every push/PR. |
+| `index.html` | Landing page and particle-field hero. |
+| `articles/index.html`, `articles/_template/` | Articles index and article template. |
+| `lab/index.html` | Crawlable academy catalogue plus learner dashboard, guided paths, search, filters, and reset dialog. |
+| `lab/course.html` | Private routing template rewritten for canonical course-slug pages; loads only the selected course payload. |
+| `lab/lesson.html` | Noindexed static fallback for legacy lesson URLs. |
+| `worker.js` | Routing, response policy, OAuth, API, D1 synchronization, SEO rewriting. |
+| `shared/session.js` | Defensive HMAC-SHA256 session sign/verify and cookie helpers. |
+| `shared/course-points.js` | Server scoring manifest used to derive points from progress. |
+| `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
+| `schema.sql` | D1 `users`, `progress`, `stats`, and per-owner `learning_sync` generation tables. |
+| `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
+| `assets/js/curriculum.js` | Canonical OLS authoring source. |
+| `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
+| `assets/js/curriculum-questions.js` | Additional authored question stages applied before payload generation. |
+| `assets/data/courses/<topic>.json` | Committed, generated `schemaVersion: 1` payload loaded only for the selected course. |
+| `scripts/generate-course-payloads.mjs` | Deterministically regenerates the seven per-course JSON payloads and stable stage IDs. |
+| `assets/js/storage.js` | Validated owner-scoped v2 persistence, legacy migration, reset, and in-memory fallback. |
+| `assets/js/lab-core.js` | Pyodide loader, Python editor, execution, output, and figures. |
+| `assets/js/lab-course.js` | Course player, grading, progress, points, navigation, splitter. |
+| `assets/js/auth.js` | Account binding, serialized owner-checked synchronization, and server-first reset coordination. |
+| `assets/js/gamify.js` | Local points/streak state and rendering. |
+| `assets/js/lab-ui.js`, `lab-fx.js` | Academy dashboard/path/search/reset UI and visual feedback. |
+| `assets/css/base.css`, `lab.css` | Design system and Lab/course UI. |
+| `assets/version.txt` | Canonical browser-asset cache version. |
+| `tests/contracts.mjs` | Curriculum/payload/scoring/storage/asset/session contracts. |
+| `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
+| `tests/regression.mjs` | Full Playwright browser regression suite. |
 
-## Data structures
+## Curriculum and stage contracts
 
-### Topics — `window.TOPIC_META` (curriculum.js)
-```js
-{ id: "ols", num: "01", title: "Ordinary Least Squares", level: "Beginner",
-  blurb: "...", tags: ["regression","inference"], stages: 20 /* injected */ }
-```
-Topic ids: `ols`, `iv2sls`, `did`, `var`, `panel`, `logit`, `gmm`.
-Stage counts: ols 20, iv2sls 31, did 29, var 30, panel 30, logit 32, gmm 33.
+`window.TOPIC_META` in the lightweight `course-catalog.js` contains exactly:
 
-### Curriculum — `window.CURRICULUM[topicId]`
-```js
-{ id, title, modules: [ { id, title, summary, stages: [Stage, ...] } ] }  // 4 modules per topic
+```text
+ols 20 · iv2sls 31 · did 29 · var 30 · panel 30 · logit 32 · gmm 33
 ```
 
-### Stage types (the course player renders exactly these)
-- `read` — `{ type, title, html }` (rich HTML; `.katexish` for math lines, `.callout` boxes)
-- `code` — `{ type, title, guide?/html?, code }` → live Python cell; Run executes in Pyodide
-- `interactive` — `{ type, title, note, params: [{name,label,min,max,step,value}], template }`
-  — template contains `{{param}}` placeholders, re-run debounced on slider input
-- `quiz` — `{ type, title, prompt, choices: [..], answer: idx, hint, explain }`
-
-`curriculum-questions.js` appends extra items with `moduleIndex` and extended
-types handled by the same quiz renderer: `truefalse` (`answer: bool`),
-`multi` (`answers: [idx,..]`), `numeric` (`answer`, `tolerance`),
-`fillblank` (`answer` string(s)), plus more `quiz`.
-
-### Client storage (localStorage, all guarded for Safari private mode)
-- `iewt:progress` — `{ [topicId]: { done: [stageIndex, ...] } }`
-- `iewt:gamify` — `{ points, streak, last }` (last = YYYY-MM-DD of last activity)
-- `iewt:guideW` — persisted splitter width (% of course layout)
-
-### D1 (schema.sql)
-- `users(id "g_<google-sub>", email, name, created_at)`
-- `progress(user_id, model_id, done_json, updated_at)` PK (user_id, model_id)
-- `stats(user_id, points, streak, last, updated_at)`
-
-### API (all JSON; 401 when signed out)
-- `GET /api/me` → `{ user: { id, email, name } | null }`
-- `GET/PUT /api/progress` → `{ progress: { [model]: { done: [] } } }` / body `{ model, done: [] }`
-- `GET/PUT /api/stats` → `{ stats: { points, streak, last } }`
-- Sign-in: `/auth/google` → Google → `/auth/callback` → 30-day `session` cookie; `/auth/logout`.
-
-Points per stage type on completion: read 5, code 10, interactive 10, quiz 15.
-
-## Worker behaviors you must preserve
-
-1. **Never rebuild responses from an init dict.** Always
-   `new Response(resp.body, resp)`. Rebuilding corrupts Content-Encoding at
-   the edge → browsers get undecodable CSS/JS (this caused a full outage once).
-2. **Security headers** on everything; CSP only on `text/html`. CSP allows
-   `cdn.jsdelivr.net` scripts + `'unsafe-eval'`/`'wasm-unsafe-eval'` (Pyodide
-   needs them) — don't tighten without testing the Lab.
-3. **Crawler SEO path** (`/lab/course.html?m=X` + social/search UA regex):
-   HTMLRewriter swaps title/description/canonical/og tags and appends
-   per-topic `Course` + `BreadcrumbList` JSON-LD. Humans never hit this path.
-4. **Caching self-heal**: HTML → `Cache-Control: no-cache` + a one-time
-   `Clear-Site-Data: "cache"` (gated by `cachefix` cookie) to purge clients
-   poisoned by the old encoding bug; `?v=` assets → immutable 1y; other
-   assets → 1h. Keep this block last, after the API early-returns.
-
-## Conventions
-
-- **Cache busting**: every CSS/JS/font URL carries `?v=N` (currently
-  **v=16**). If you change any asset, bump ALL `?v=` references in every
-  HTML file (and the `@font-face` src urls in base.css) to N+1 — versioned
-  assets are cached immutable for a year, so an unbumped change never reaches
-  returning visitors.
-- **JS style**: one IIFE per file, `"use strict"`, no globals except the
-  deliberate `window.Lab / Auth / Gamify / FX / CURRICULUM / TOPIC_META /
-  toast`. No TypeScript, no bundler, no framework.
-- **Design tokens** (base.css `:root`): gold palette `--gold-mystic #af983f`,
-  `--gold-harvest #da9100`, `--gold-celadon #c9c6ac`; ink tiers `--ink`,
-  `--ink-dim`, `--ink-faint #8a8571` (WCAG-AA on the bg — don't darken);
-  `--bg #0a0a08`. Serif = subset Latin Modern.
-- **Fonts are subset.** If you need glyphs outside Latin/Greek/math operators
-  (e.g. CJK, more arrows), re-subset from upstream Latin Modern — don't edit
-  the woff2s. Greek β/ε and sub/superscripts intentionally render via the
-  browser's fallback serif (the originals lacked them too).
-- **Charts (matplotlib in Pyodide)**: Computer Modern font, gridless, figures
-  are captured and shown in the guide column, styled in lab-core.
-- **Accessibility invariants** (tested in CI): ≥16px inputs on touch (iOS
-  zoom), 44px effective touch targets, heading outline h1→h2 without skips,
-  keyboard-operable splitter (ARIA slider), `role=status` boot messages.
-- **Pill nav**: tabs are equalized to the widest tab; the indicator is
-  fixed-size and animates `transform` only. Don't reintroduce width morphing.
-
-## Testing / CI
+Every curriculum has four modules. Each module owns ordered stages. The
+canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
+`curriculum-questions.js`; neither the catalogue nor the course page downloads
+those heavyweight combined sources. Run this after any authored course change:
 
 ```bash
-# from repo root (needs playwright-core + a Chromium binary):
-cd tests && npm install --no-save playwright@1.48 && npx playwright install chromium
-SITE_DIR=.. node regression.mjs        # exits 1 on any failure
+node scripts/generate-course-payloads.mjs
 ```
-The suite starts its own static server (port 8399) and asserts: no horizontal
-overflow or console errors at 320/390/768/1440, `--ink-faint` contrast ≥ 4.5,
-pill equal-width + transform-only, iOS editor ≥16px with matched overlay
-metrics + pre-wrap, rapid-Next race (3 clicks → stage 4/20), heading outline.
-GitHub Actions runs it on every push/PR (`regression.yml`). Keep it green.
 
-Local preview: `python3 -m http.server 8000` from the repo root covers all
-static behavior (the `/api/*` endpoints 404 → the site auto-falls back to
-on-device mode). `wrangler dev` runs the full Worker if you need auth/API.
+Commit all changed files under `assets/data/courses/`. The generator adds
+`schemaVersion: 1` and stable per-module stage IDs, while current progress is
+still stored by flattened stage index. Inserting or reordering stages therefore
+changes the meaning of existing progress; append stages or ship an explicit
+progress migration.
 
-## SEO state (July 2026)
+Stage schemas:
 
-- JSON-LD: Person/WebSite/WebPage on home, CollectionPage + ItemList of 7
-  `Course`s + breadcrumbs on /lab/, CollectionPage + breadcrumbs on /articles/,
-  BreadcrumbList on course.html, per-topic Course injected at the edge.
-- Each course topic self-canonicalizes (edge) and is listed in sitemap.xml.
-- robots.txt → sitemap. lesson.html is `noindex`.
-- Site is registered in Google Search Console; sitemap submitted.
-- Titles: "Anıl Kaya — In Econometrics We Trust" (home), "… — Anıl Kaya"
-  (sections). Keep the name in titles.
+- `read`: `{ type, title, html }`
+- `code`: `{ type, title, code, note?/html? }`
+- `interactive`: `{ type, title, note, params, template }`; template uses
+  `{{paramName}}` placeholders.
+- `quiz`: `{ type, title, prompt, choices, answer, hint?, explain?, points? }`
+- `truefalse`: boolean `answer`
+- `multi`: `choices` plus integer-index `answers[]`
+- `numeric`: finite `answer`, non-negative `tol` and/or `rtol`, optional `unit`
+- `fillblank`: prompt containing exactly one `___`, plus non-empty `accept[]`
 
-## Known pitfalls (learned the hard way)
+Default rewards are read 5, code 10, interactive 10, and quiz 15. Authored
+question rewards override defaults: true/false 10, fill-blank 15, numeric 20,
+and multi-select 20. `tests/contracts.mjs` proves that authored curricula,
+generated payloads, the browser manifest, and `shared/course-points.js` remain
+identical. It also requires unique generated stage IDs and caps every course
+payload at 14 KiB gzip.
 
-- The Content-Encoding rule above (worker.js). Seriously.
-- `.assetsignore` excludes `*.md` — putting a doc in the repo is safe, but a
-  served page must not be markdown.
-- Course topics ship ~150 KB of curriculum JS; it's fine — don't try to
-  lazy-split it without measuring first.
-- Pyodide boot takes seconds on first visit; the boot pill communicates
-  progress. Don't run Python before `lab-core`'s ready promise resolves.
-- All localStorage access must stay inside try/catch (Safari private mode).
-- If a bug report says "site looks broken/unstyled": suspect stale client
-  cache first (see the self-heal block) — verify server bytes before changing code.
+Both client and server derive points from unique completed stages. This repairs
+legacy local under-counts and stale/tampered totals. Client-submitted point
+totals are deliberately ignored; D1 recomputes its exact total atomically from
+the merged progress rows.
+
+## Client persistence
+
+All browser storage access must go through `window.IEWTStorage`. Learning data
+uses owner-scoped v2 envelopes:
+
+- `iewt:progress:v2:<encoded-owner>` → `{ version: 2, owner, value: progress }`
+- `iewt:gamify:v2:<encoded-owner>` → `{ version: 2, owner, value: gamify }`
+- `iewt:sync:v2:<encoded-owner>` → `{ version: 2, owner, generation }`
+- `iewt:activeOwner` → the account scope last verified and announced by this browser
+- `iewt:guideW` → device-wide guide-column width percentage
+- `iewt:splitW` → legacy width key, migrated once to `iewt:guideW`
+
+The old `iewt:progress` and `iewt:gamify` values are anonymous-only migration
+inputs and mirrors; authenticated state must never be copied into them. On its
+first local binding, an account without an existing local scope may claim work
+completed before sign-in. A returning local account scope stays isolated from
+another account or anonymous profile on the same browser. Cross-tab owner
+changes invalidate stale synchronization state.
+
+`storage.js` validates owners, shapes, bounds, dates, numbers, and non-negative
+safe-integer synchronization generations. Every native
+`localStorage` operation is inside `try/catch`; an in-memory copy preserves the
+current page when storage is unavailable. `resetLearning()` clears progress and
+gamification for an explicit or active owner, records the confirmed reset
+generation, and deliberately preserves `iewt:guideW`.
+
+When signed in, the client serializes mutations, binds them to the verified
+account and a mutation epoch, unions local and remote progress, uploads only
+missing work, then refreshes exact server-derived points and monotonic streak
+state. Every authenticated progress/stats request carries `X-IEWT-Owner`.
+Progress and stats PUTs also carry the latest owner-scoped
+`X-IEWT-Generation`. D1 uses an atomic JSON-union UPSERT guarded by that
+generation, so overlapping snapshots cannot delete completed stages and a
+delayed pre-reset write cannot recreate cleared data.
+
+## API contract
+
+Every `/api/*` response, including errors, is JSON and `Cache-Control: no-store`.
+Errors use:
+
+```json
+{ "error": { "code": "unauthorized", "message": "Authentication required" } }
+```
+
+- `GET /api/me` → `200 { user: { id, email, name } | null }`
+- `GET /api/progress` → `200 { progress, generation }`; signed-out → JSON 401
+- `PUT /api/progress` with `X-IEWT-Generation`, body `{ model, done }` → `{ ok: true, done, generation }`
+- `DELETE /api/progress` → `{ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, generation }`
+- `GET /api/stats` → `{ stats: { points, streak, last }, generation }`
+- `PUT /api/stats` with `X-IEWT-Generation`, body `{ streak, last }` → `{ ok: true, stats, generation }`
+- Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
+  `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
+
+Authenticated PUT/DELETE requests require an exact `X-IEWT-Owner` match with
+the verified session user. Conflicting `Origin` or `Sec-Fetch-Site` metadata is
+rejected, and browser cross-origin use is blocked by the custom owner header
+plus the absence of CORS permission. Missing or mismatched mutation ownership
+returns JSON `409 account_changed`; identified cross-origin mutation attempts
+return JSON 403. The two authenticated GET routes allow the owner header to be
+absent for compatibility, but reject a present mismatch with the same 409
+response.
+
+Missing, malformed, or stale `X-IEWT-Generation` values on PUT return JSON
+`409 reset_required` with the current generation in both the response body and
+header. The client discards the affected owner's stale local learning state
+before any later upload. DELETE deliberately does not require the old
+generation: it atomically increments the server value and returns the new one.
+
+Progress models and indexes are allowlisted against the scoring manifest.
+Stats writes accept only a bounded streak and a valid activity date no more than
+one UTC day ahead. Older writes cannot replace newer activity, and a stale
+next-day device cannot reduce a known consecutive streak. Points are recomputed
+exactly from progress. Reset uses prepared statements in one D1 `batch()`
+transaction: it increments `learning_sync.generation`, deletes every progress
+row for the verified user, and resets that user's points, streak, and
+last-activity value without touching another user. `schema.sql` provisions the
+table and the Worker has an idempotent first-use fallback for databases that
+predate it.
+
+Sign-out is `POST /auth/logout`, not a link or GET. It is same-origin protected,
+requires the verified owner's `X-IEWT-Owner` when a valid session exists, clears
+the session cookie only after those checks, and returns JSON. Do not restore a
+GET logout route; that would reintroduce forced-logout CSRF.
+
+## Worker invariants
+
+1. **Preserve response objects when mutating them.** The single finalizer must
+   begin with `new Response(response.body, response)`. Rebuilding an existing
+   asset response from a status/header dictionary can corrupt
+   `Content-Encoding` at the edge.
+2. **Every route uses the finalizer**, including auth, API success/errors,
+   rewritten HTML, static assets, 404s, and unexpected exceptions.
+3. Full security headers apply to every response. CSP applies only to HTML and
+   permits jsDelivr plus eval/WebAssembly evaluation required by Pyodide.
+4. HTML is `no-cache`; successful/304 versioned assets are immutable for one
+   year; other successful/304 assets cache for one hour; API/auth is `no-store`.
+5. HTML sends one `Clear-Site-Data: "cache"` repair unless the `cachefix`
+   cookie is present. Keep this until the historical encoding incident is no
+   longer operationally relevant.
+6. Every `/lab/<valid-course-slug>/` receives an apex-domain canonical, exact
+   title/description, Open Graph/Twitter fields, visible H1 and four-module
+   outline, related course links, and one parseable Course + Breadcrumb JSON-LD
+   graph. Generic and invalid legacy routes never return an indexable shell.
+7. Malformed, oversized, wrongly signed, or expired sessions fail closed as an
+   anonymous user and never throw a request-level 500.
+
+Dashboard Transform Rules can override Worker headers after code runs. A
+post-deploy header smoke test is mandatory; remove or align stale dashboard
+rules if live headers differ from `worker.js`.
+
+## Asset versioning
+
+The browser-asset version is always the integer read from `assets/version.txt`.
+Do not copy a current value into documentation or automation. Every local CSS,
+JavaScript, and font reference in HTML, the course shell's
+`data-asset-version`, and every `@font-face` URL must use that exact `?v=`
+value.
+
+When any file under `assets/css/`, `assets/js/`, or `assets/fonts/` changes:
+
+1. increment `assets/version.txt`;
+2. update every versioned HTML/CSS reference;
+3. run the contract test.
+
+The contract test compares changed browser assets with `assets/version.txt`,
+so a missing bump fails CI.
+
+## Testing and CI
+
+```bash
+# Requires Node.js 22 or newer.
+cd tests
+npm ci
+npx playwright install chromium
+npm test
+
+# From the repository root: bundle/config validation without deployment
+./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-dry-run
+```
+
+The suites prove:
+
+- all seven curricula, four modules each, every stage schema, exact generated
+  per-course payloads and IDs, payload-size budgets, scoring manifests,
+  owner-scoped v2 migration/reset behavior, local asset existence/versioning,
+  and hardened sessions;
+- real Worker-first routing, canonical redirects, all seven crawlable metadata
+  and syllabus variants,
+  response-cloned asset byte integrity, conditional caching, security headers,
+  JSON API errors, OAuth and POST-only logout behavior, D1 user isolation,
+  concurrent progress union, owner-header and same-origin enforcement,
+  generation-fenced transactional reset, stale-write rejection, and exact
+  derived points;
+- academy dashboard metrics, four learning paths, search/level/status filters,
+  single-course payload isolation, anonymous and signed-in reset safety, no
+  horizontal overflow or browser errors across 320/390/768/1440 widths,
+  WCAG-AA faint text, pill geometry, 44×44 primary course targets (including
+  range inputs), ≥16 px text inputs, every stage heading outline, rapid
+  navigation, preserved unsaved work during sync, splitter migration and
+  keyboard persistence, blocked/malformed/quota-limited storage, score
+  reconciliation, boot live-region output, grading edge cases, exact rewards,
+  and duplicate-award prevention.
+
+GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
+manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
+
+## Local development
+
+For production-equivalent routing and API behavior:
+
+```bash
+cd tests && npm ci && cd ..
+./tests/node_modules/.bin/wrangler d1 execute iewt --local --file schema.sql
+./tests/node_modules/.bin/wrangler dev --local
+```
+
+Put local-only OAuth values in `.dev.vars` (git-ignored). A plain
+`python3 -m http.server` can preview individual static files, but it does not
+implement canonical extensionless routing, Worker headers, auth, API, D1, or
+HTML rewriting and is therefore not a complete test environment.
+
+## Design and accessibility invariants
+
+- JavaScript remains IIFE-based and framework-free; production globals are
+  deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `TOPIC_META`,
+  `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`, `LEARNING_PATHS`, and `toast`.
+  `CURRICULUM` is an authoring/generator input, not a production course-page
+  payload.
+- Design tokens live in `base.css`; typography is self-hosted subset Latin
+  Modern. Re-subset from upstream for new glyph coverage rather than editing
+  WOFF2 files.
+- Matplotlib uses a Computer Modern-style, gridless theme; figures appear in
+  the guide column.
+- The course page has one topic `h1` followed by stage `h2` content without
+  skipped heading levels.
+- The adjustable divider is a keyboard-operable ARIA `separator` with numeric
+  value attributes; it is not a slider.
+- Primary course controls provide at least 44×44 CSS-pixel targets on coarse
+  pointers; course text inputs are at least 16 px to prevent iOS focus zoom.
+- Pyodide boot progress uses a non-empty `role="status"` live region.
+- Pill tabs remain equal-width; the fixed-size indicator animates only
+  `transform`.

@@ -1,19 +1,27 @@
-# Cloudflare Worker (Static Assets + API). Used when deployed to Cloudflare
-# via `wrangler deploy`. Has NO effect on the current GitHub Pages site.
+# Cloudflare Worker (Static Assets + API). This configuration is used by direct
+# `wrangler deploy` commands and can be used by a verified Workers Builds setup.
 
 name = "anilkaya"
 main = "worker.js"
-compatibility_date = "2024-11-01"
+compatibility_date = "2026-07-12"
 
 # Serve the repo root as the static site; .assetsignore keeps server/config
-# files out of the public bundle. The Worker (worker.js) only runs for routes
-# that are not static assets (i.e. /auth/* and /api/*).
+# files out of the public bundle. Worker-first routing is required because
+# worker.js applies security/cache headers and crawler metadata to assets.
 [assets]
 directory = "."
 binding = "ASSETS"
+html_handling = "auto-trailing-slash"
 not_found_handling = "404-page"
+run_worker_first = true
 
-# D1 — database "iewt" is already created and migrated (schema.sql applied).
+# Persist production invocation logs for incident diagnosis. Application code
+# only emits structured errors; normal static requests do not create log noise.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# D1 target. Verify the remote schema separately before any deployment.
 [[d1_databases]]
 binding = "DB"
 database_name = "iewt"
