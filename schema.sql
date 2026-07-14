@@ -23,3 +23,11 @@ CREATE TABLE IF NOT EXISTS stats (
   last       TEXT,
   updated_at INTEGER
 );
+
+-- Monotonic reset barrier. Browser writes are accepted only when their
+-- generation matches this row; reset increments it before clearing state.
+CREATE TABLE IF NOT EXISTS learning_sync (
+  user_id    TEXT PRIMARY KEY,
+  generation INTEGER NOT NULL DEFAULT 0
+             CHECK (generation BETWEEN 0 AND 9007199254740991)
+);

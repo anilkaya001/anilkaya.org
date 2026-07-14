@@ -682,7 +682,4 @@
       t.modules[mi].stages.push(stage);
     });
   });
-  if (window.TOPIC_META) window.TOPIC_META.forEach(function (m) {
-    var t = C[m.id]; if (t && t.modules) m.stages = t.modules.reduce(function (n, mod) { return n + mod.stages.length; }, 0);
-  });
 })();

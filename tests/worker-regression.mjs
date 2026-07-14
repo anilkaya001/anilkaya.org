@@ -7,6 +7,7 @@ import { REPO_ROOT, SESSION_SECRET, startWorker } from "./worker-server.mjs";
 
 const server = await startWorker();
 const base = server.baseURL;
+const assetVersion = (await readFile(path.join(REPO_ROOT, "assets/version.txt"), "utf8")).trim();
 const securityHeaders = [
   "strict-transport-security", "x-content-type-options", "referrer-policy",
   "x-frame-options", "cross-origin-opener-policy", "permissions-policy",
@@ -35,6 +36,17 @@ async function json(response, status) {
   return response.json();
 }
 
+async function learningJSON(response, status, generation) {
+  assert.equal(
+    response.headers.get("x-iewt-generation"),
+    String(generation),
+    `${response.url}: sync generation header`,
+  );
+  const body = await json(response, status);
+  assert.equal(body.generation, generation, `${response.url}: sync generation body`);
+  return body;
+}
+
 try {
   const root = await fetch(base + "/");
   assert.equal(root.status, 200);
@@ -47,14 +59,14 @@ try {
   const repeat = await fetch(base + "/", { headers: { Cookie: "cachefix=1" } });
   assert.equal(repeat.headers.get("clear-site-data"), null, "cache purge must happen once per browser");
 
-  const css = await fetch(base + "/assets/css/base.css?v=18");
+  const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");
   const cssEtag = css.headers.get("etag");
   assertSecurity(css, false);
   const localCSS = await readFile(path.join(REPO_ROOT, "assets/css/base.css"), "utf8");
   assert.equal(await css.text(), localCSS, "response cloning changed CSS bytes");
   assert(cssEtag, "versioned asset ETag missing");
-  const revalidatedCSS = await fetch(base + "/assets/css/base.css?v=18", { headers: { "If-None-Match": cssEtag } });
+  const revalidatedCSS = await fetch(base + `/assets/css/base.css?v=${assetVersion}`, { headers: { "If-None-Match": cssEtag } });
   assert.equal(revalidatedCSS.status, 304);
   assert.equal(revalidatedCSS.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assertSecurity(revalidatedCSS, false);
@@ -62,7 +74,7 @@ try {
   const unversioned = await fetch(base + "/assets/css/base.css");
   assert.equal(unversioned.headers.get("cache-control"), "public, max-age=3600");
   assertSecurity(unversioned, false);
-  for (const asset of ["/assets/js/nav.js?v=18", "/assets/fonts/LM-regular.woff2?v=18", "/assets/img/og.png"]) {
+  for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/LM-regular.woff2?v=${assetVersion}`, "/assets/img/og.png"]) {
     const response = await fetch(base + asset);
     assert.equal(response.status, 200, `${asset}: missing`);
     assertSecurity(response, false);
@@ -70,7 +82,7 @@ try {
   const missing = await fetch(base + "/definitely-missing");
   assert.equal(missing.status, 404);
   assertSecurity(missing, true);
-  const missingVersioned = await fetch(base + "/definitely-missing.js?v=18");
+  const missingVersioned = await fetch(base + `/definitely-missing.js?v=${assetVersion}`);
   assert.equal(missingVersioned.status, 404);
   assert.notEqual(missingVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable");
   for (const privatePath of ["/.wrangler/cache/cf.json", "/articles/_template/", "/CNAME"]) {
@@ -198,6 +210,13 @@ try {
   assert.equal(method.headers.get("allow"), "GET");
   assert.equal(methodBody.error.code, "method_not_allowed");
   assert.equal((await json(await fetch(base + "/api/progress"), 401)).error.code, "unauthorized");
+  const progressMethod = await fetch(base + "/api/progress", { method: "POST" });
+  assert.equal((await json(progressMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(progressMethod.headers.get("allow"), "GET, PUT, DELETE");
+  const statsMethod = await fetch(base + "/api/stats", { method: "DELETE" });
+  assert.equal((await json(statsMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(statsMethod.headers.get("allow"), "GET, PUT");
+  assert.equal((await json(await fetch(base + "/api/progress", { method: "DELETE" }), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/not-a-route"), 404)).error.code, "not_found");
 
   const authStart = await fetch(base + "/auth/google", { redirect: "manual" });
@@ -210,11 +229,116 @@ try {
   assert.equal(badCallback.status, 302);
   assert.equal(badCallback.headers.get("location"), base + "/lab/?auth=error");
 
+  const logoutGet = await fetch(base + "/auth/logout", { redirect: "manual" });
+  assert.equal((await json(logoutGet, 405)).error.code, "method_not_allowed");
+  assert.equal(logoutGet.headers.get("allow"), "POST");
+
   const session = await signSession({ sub: "g_test", email: "test@example.com", name: "Test", exp: Date.now() + 60000 }, SESSION_SECRET);
-  const auth = { Cookie: `session=${session}`, "Content-Type": "application/json", Accept: "application/json" };
+  const authWithoutGeneration = {
+    Cookie: `session=${session}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    Origin: base,
+    "Sec-Fetch-Site": "same-origin",
+    "X-IEWT-Owner": "g_test",
+  };
+  const auth = { ...authWithoutGeneration, "X-IEWT-Generation": "0" };
+  const crossOriginLogout = await json(await fetch(base + "/auth/logout", {
+    method: "POST",
+    headers: { ...auth, Origin: "https://attacker.example", "Sec-Fetch-Site": "cross-site" },
+  }), 403);
+  assert.equal(crossOriginLogout.error.code, "forbidden", "cross-site sign-out must be rejected");
+  const staleOwnerLogout = await json(await fetch(base + "/auth/logout", {
+    method: "POST",
+    headers: { ...auth, "X-IEWT-Owner": "g_other" },
+  }), 409);
+  assert.equal(staleOwnerLogout.error.code, "account_changed", "stale tabs must not sign out a new account");
+  const logout = await fetch(base + "/auth/logout", { method: "POST", headers: auth });
+  assert.deepEqual(await json(logout, 200), { ok: true });
+  assert.match(logout.headers.get("set-cookie") || "", /session=;.*Max-Age=0/, "sign-out must clear the session cookie");
+
+  // Deployed databases created before the generation barrier do not have this
+  // table. The first authenticated learning request must migrate them lazily.
+  await server.d1("DROP TABLE learning_sync");
+  for (const headers of [
+    { Cookie: `session=${session}`, Accept: "application/json" },
+    { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_test" },
+  ]) {
+    assert.deepEqual(
+      await learningJSON(await fetch(base + "/api/progress", { headers }), 200, 0),
+      { progress: {}, generation: 0 },
+      "progress reads must allow an absent or matching owner",
+    );
+    assert.deepEqual(
+      await learningJSON(await fetch(base + "/api/stats", { headers }), 200, 0),
+      { stats: { points: 0, streak: 0, last: null }, generation: 0 },
+      "stats reads must allow an absent or matching owner",
+    );
+  }
+  for (const apiPath of ["/api/progress", "/api/stats"]) {
+    const denied = await json(await fetch(base + apiPath, {
+      headers: { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_other" },
+    }), 409);
+    assert.equal(denied.error.code, "account_changed", `${apiPath}: mismatched read owner must be rejected`);
+  }
+  const missingOwnerAuth = {
+    Cookie: `session=${session}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    Origin: base,
+    "Sec-Fetch-Site": "same-origin",
+  };
+  const mismatchedOwnerAuth = { ...auth, "X-IEWT-Owner": "g_other" };
+  for (const [label, headers] of [["missing", missingOwnerAuth], ["mismatched", mismatchedOwnerAuth]]) {
+    for (const [apiPath, init] of [
+      ["/api/progress", { method: "PUT", headers, body: JSON.stringify({ model: "ols", done: [0] }) }],
+      ["/api/stats", { method: "PUT", headers, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
+      ["/api/progress", { method: "DELETE", headers }],
+    ]) {
+      const denied = await json(await fetch(base + apiPath, init), 409);
+      assert.equal(denied.error.code, "account_changed", `${apiPath}: ${label} owner must be rejected`);
+    }
+  }
+  const crossOriginAuth = { ...auth, Origin: "https://attacker.example" };
+  for (const [apiPath, init] of [
+    ["/api/progress", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ model: "ols", done: [0] }) }],
+    ["/api/stats", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
+    ["/api/progress", { method: "DELETE", headers: crossOriginAuth }],
+  ]) {
+    const denied = await json(await fetch(base + apiPath, init), 403);
+    assert.equal(denied.error.code, "forbidden", `${apiPath}: cross-origin mutation must be denied`);
+  }
+  const fetchMetadataDenied = await json(await fetch(base + "/api/progress", {
+    method: "DELETE",
+    headers: { Cookie: `session=${session}`, "Sec-Fetch-Site": "cross-site" },
+  }), 403);
+  assert.equal(fetchMetadataDenied.error.code, "forbidden", "Sec-Fetch-Site must independently block cross-site mutations");
+
+  for (const [label, generationHeaders] of [
+    ["missing", authWithoutGeneration],
+    ["malformed", { ...authWithoutGeneration, "X-IEWT-Generation": "00" }],
+    ["mismatched", { ...authWithoutGeneration, "X-IEWT-Generation": "1" }],
+  ]) {
+    for (const [apiPath, body] of [
+      ["/api/progress", { model: "ols", done: [0] }],
+      ["/api/stats", { streak: 1, last: "2026-07-12" }],
+    ]) {
+      const denied = await learningJSON(await fetch(base + apiPath, {
+        method: "PUT", headers: generationHeaders, body: JSON.stringify(body),
+      }), 409, 0);
+      assert.equal(denied.error.code, "reset_required", `${apiPath}: ${label} generation must refresh state`);
+    }
+  }
+
   const putProgress = (done) => fetch(base + "/api/progress", { method: "PUT", headers: auth, body: JSON.stringify({ model: "ols", done }) });
-  for (const response of await Promise.all([putProgress([0, 2]), putProgress([1, 3])])) await json(response, 200);
-  const progress = await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${session}` } }), 200);
+  for (const response of await Promise.all([putProgress([0, 2]), putProgress([1, 3])])) {
+    await learningJSON(response, 200, 0);
+  }
+  const progress = await learningJSON(
+    await fetch(base + "/api/progress", { headers: { Cookie: `session=${session}` } }),
+    200,
+    0,
+  );
   assert.deepEqual(progress.progress.ols.done, [0, 1, 2, 3], "concurrent snapshots must union");
 
   const badModel = await json(await fetch(base + "/api/progress", {
@@ -222,10 +346,10 @@ try {
   }), 400);
   assert.equal(badModel.error.code, "invalid_progress");
   assert.equal((await json(await fetch(base + "/api/progress", {
-    method: "PUT", headers: { Cookie: `session=${session}`, "Content-Type": "text/plain" }, body: "{}",
+    method: "PUT", headers: { ...auth, "Content-Type": "text/plain" }, body: "{}",
   }), 415)).error.code, "unsupported_media_type");
   assert.equal((await json(await fetch(base + "/api/progress", {
-    method: "PUT", headers: { Cookie: `session=${session}`, "Content-Type": "text/application/json-evil" }, body: "{}",
+    method: "PUT", headers: { ...auth, "Content-Type": "text/application/json-evil" }, body: "{}",
   }), 415)).error.code, "unsupported_media_type");
   assert.equal((await json(await fetch(base + "/api/progress", {
     method: "PUT", headers: auth, body: "{" ,
@@ -253,7 +377,15 @@ try {
   assert.equal(repairedPoints.stats.points, 40, "legacy or forged stored points must be recomputed exactly");
 
   const streakSession = await signSession({ sub: "g_streak", exp: Date.now() + 60000 }, SESSION_SECRET);
-  const streakAuth = { Cookie: `session=${streakSession}`, "Content-Type": "application/json", Accept: "application/json" };
+  const streakAuth = {
+    Cookie: `session=${streakSession}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    Origin: base,
+    "Sec-Fetch-Site": "same-origin",
+    "X-IEWT-Owner": "g_streak",
+    "X-IEWT-Generation": "0",
+  };
   await json(await fetch(base + "/api/stats", {
     method: "PUT", headers: streakAuth, body: JSON.stringify({ streak: 10, last: "2026-07-11" }),
   }), 200);
@@ -268,12 +400,99 @@ try {
   assert.deepEqual(legacyFuture.stats, { points: 0, streak: 0, last: null }, "legacy future-dated streak must be repaired atomically");
 
   const other = await signSession({ sub: "g_other", exp: Date.now() + 60000 }, SESSION_SECRET);
-  const isolated = await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${other}` } }), 200);
-  assert.deepEqual(isolated.progress, {}, "users must be isolated");
+  const otherAuth = {
+    Cookie: `session=${other}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    Origin: base,
+    "Sec-Fetch-Site": "same-origin",
+    "X-IEWT-Owner": "g_other",
+    "X-IEWT-Generation": "0",
+  };
+  await json(await fetch(base + "/api/progress", {
+    method: "PUT", headers: otherAuth, body: JSON.stringify({ model: "ols", done: [0] }),
+  }), 200);
+  await json(await fetch(base + "/api/stats", {
+    method: "PUT", headers: otherAuth, body: JSON.stringify({ streak: 7, last: "2026-07-12" }),
+  }), 200);
+
+  const resetHeaders = {
+    Cookie: `session=${session}`,
+    Origin: base,
+    "Sec-Fetch-Site": "same-origin",
+    "X-IEWT-Owner": "g_test",
+    Accept: "application/json",
+  };
+  const reset = await learningJSON(await fetch(base + "/api/progress", {
+    method: "DELETE",
+    headers: resetHeaders,
+  }), 200, 1);
+  assert.deepEqual(reset, {
+    ok: true,
+    progress: {},
+    stats: { points: 0, streak: 0, last: null },
+    generation: 1,
+  }, "reset response must expose the deterministic empty state");
+
+  for (const [apiPath, body] of [
+    ["/api/progress", { model: "ols", done: [8] }],
+    ["/api/stats", { streak: 99, last: "2026-07-13" }],
+  ]) {
+    const staleWrite = await learningJSON(await fetch(base + apiPath, {
+      method: "PUT", headers: auth, body: JSON.stringify(body),
+    }), 409, 1);
+    assert.equal(staleWrite.error.code, "reset_required", `${apiPath}: a pre-reset write must be fenced out`);
+  }
+
+  assert.deepEqual(
+    await learningJSON(await fetch(base + "/api/progress", { headers: { Cookie: `session=${session}` } }), 200, 1),
+    { progress: {}, generation: 1 },
+    "reset must delete every progress row and stale writes must not restore it",
+  );
+  assert.deepEqual(
+    await learningJSON(await fetch(base + "/api/stats", { headers: { Cookie: `session=${session}` } }), 200, 1),
+    { stats: { points: 0, streak: 0, last: null }, generation: 1 },
+    "reset must atomically zero stats and stale writes must not restore them",
+  );
+
+  const generationOneAuth = { ...authWithoutGeneration, "X-IEWT-Generation": "1" };
+  await learningJSON(await fetch(base + "/api/progress", {
+    method: "PUT",
+    headers: generationOneAuth,
+    body: JSON.stringify({ model: "ols", done: [4] }),
+  }), 200, 1);
+  const secondReset = await learningJSON(await fetch(base + "/api/progress", {
+    method: "DELETE", headers: resetHeaders,
+  }), 200, 2);
+  assert.equal(secondReset.generation, 2, "each reset must advance the barrier exactly once");
+  const staleGenerationOne = await learningJSON(await fetch(base + "/api/progress", {
+    method: "PUT",
+    headers: generationOneAuth,
+    body: JSON.stringify({ model: "ols", done: [9] }),
+  }), 409, 2);
+  assert.equal(staleGenerationOne.error.code, "reset_required", "every prior generation must remain fenced out");
+  assert.deepEqual(
+    await learningJSON(await fetch(base + "/api/progress", { headers: { Cookie: `session=${session}` } }), 200, 2),
+    { progress: {}, generation: 2 },
+    "the second reset must win over both accepted older work and delayed writes",
+  );
+
+  const isolated = await learningJSON(
+    await fetch(base + "/api/progress", { headers: { Cookie: `session=${other}` } }),
+    200,
+    0,
+  );
+  assert.deepEqual(isolated.progress.ols.done, [0], "reset must not affect another user's progress");
+  const isolatedStats = await learningJSON(
+    await fetch(base + "/api/stats", { headers: { Cookie: `session=${other}` } }),
+    200,
+    0,
+  );
+  assert.deepEqual(isolatedStats.stats, { points: 5, streak: 7, last: "2026-07-12" }, "reset must not affect another user's stats");
   const expired = await signSession({ sub: "g_expired", exp: Date.now() - 1 }, SESSION_SECRET);
   assert.equal((await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${expired}` } }), 401)).error.code, "unauthorized");
 
-  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, derived points");
+  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, generation-fenced reset, derived points");
 } finally {
   await server.stop();
 }

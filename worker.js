@@ -13,6 +13,14 @@ const LEGACY_COURSE_PATHS = new Set([
   "/lab/lesson", "/lab/lesson.html", "/lab/lesson/",
 ]);
 const MAX_JSON_BYTES = 16 * 1024;
+const GENERATION_HEADER = "X-IEWT-Generation";
+const MAX_SYNC_GENERATION = Number.MAX_SAFE_INTEGER;
+const LEARNING_SYNC_SCHEMA_SQL =
+  "CREATE TABLE IF NOT EXISTS learning_sync (" +
+    "user_id TEXT PRIMARY KEY, " +
+    "generation INTEGER NOT NULL DEFAULT 0 " +
+      "CHECK (generation BETWEEN 0 AND 9007199254740991)" +
+  ")";
 
 // Pyodide is loaded from jsDelivr and requires eval + WebAssembly evaluation.
 const CSP = [
@@ -43,11 +51,12 @@ const SECURITY_HEADERS = {
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
 class HttpError extends Error {
-  constructor(status, code, message, headers) {
+  constructor(status, code, message, headers, details) {
     super(message);
     this.status = status;
     this.code = code;
     this.headers = headers;
+    this.details = details;
   }
 }
 
@@ -57,8 +66,8 @@ const json = (value, status = 200, headers) => {
   return new Response(JSON.stringify(value), { status, headers: out });
 };
 
-const apiError = (status, code, message, headers) =>
-  json({ error: { code, message } }, status, headers);
+const apiError = (status, code, message, headers, details) =>
+  json({ error: { code, message }, ...(details || {}) }, status, headers);
 
 const redirect = (location, status = 302, cookies = []) => {
   const headers = new Headers({ Location: location, "Cache-Control": "no-store" });
@@ -69,6 +78,38 @@ const redirect = (location, status = 302, cookies = []) => {
 function requireMethod(request, allowed) {
   if (!allowed.includes(request.method)) {
     throw new HttpError(405, "method_not_allowed", "Method not allowed", { Allow: allowed.join(", ") });
+  }
+}
+
+function requireSameOrigin(request) {
+  const expectedOrigin = new URL(request.url).origin;
+  const suppliedOrigin = request.headers.get("Origin");
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+
+  let originMatches = true;
+  if (suppliedOrigin !== null) {
+    try {
+      originMatches = new URL(suppliedOrigin).origin === expectedOrigin;
+    } catch {
+      originMatches = false;
+    }
+  }
+
+  if (!originMatches || (fetchSite !== null && fetchSite.trim().toLowerCase() !== "same-origin")) {
+    throw new HttpError(403, "forbidden", "Same-origin request required");
+  }
+}
+
+function requireMutationOwner(request, userId) {
+  if (request.headers.get("X-IEWT-Owner") !== userId) {
+    throw new HttpError(409, "account_changed", "Signed-in account changed; refresh and try again");
+  }
+}
+
+function requireReadOwnerIfPresent(request, userId) {
+  const owner = request.headers.get("X-IEWT-Owner");
+  if (owner !== null && owner !== userId) {
+    throw new HttpError(409, "account_changed", "Signed-in account changed; refresh and try again");
   }
 }
 
@@ -169,11 +210,86 @@ function progressFromRows(rows) {
   return progress;
 }
 
-async function loadProgress(env, userId) {
-  const rows = await env.DB.prepare(
-    "SELECT model_id, done_json FROM progress WHERE user_id = ? ORDER BY model_id"
-  ).bind(userId).all();
-  return progressFromRows(rows.results);
+function normalizeGeneration(value) {
+  const generation = Number(value);
+  if (!Number.isSafeInteger(generation) || generation < 0) {
+    throw new Error("Invalid learning sync generation");
+  }
+  return generation;
+}
+
+function generationHeaders(generation) {
+  return { [GENERATION_HEADER]: String(generation) };
+}
+
+function throwResetRequired(generation) {
+  throw new HttpError(
+    409,
+    "reset_required",
+    "Learning progress was reset; refresh synchronized state and try again",
+    generationHeaders(generation),
+    { generation },
+  );
+}
+
+async function learningBatch(env, userId, buildStatements) {
+  const execute = () => env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO learning_sync (user_id, generation) VALUES (?, 0) " +
+      "ON CONFLICT(user_id) DO NOTHING"
+    ).bind(userId),
+    ...buildStatements(),
+  ]);
+
+  try {
+    return await execute();
+  } catch (error) {
+    // schema.sql provisions the table for new databases. Workers Builds does
+    // not apply that file to an existing D1 database, so self-heal only the
+    // specific legacy-schema failure and retry the rolled-back batch once.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table:\s*(?:main\.)?learning_sync\b/i.test(message)) throw error;
+    await env.DB.prepare(LEARNING_SYNC_SCHEMA_SQL).run();
+    return execute();
+  }
+}
+
+async function loadGeneration(env, userId) {
+  const results = await learningBatch(env, userId, () => [
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+  ]);
+  const row = results[1].results[0];
+  if (!row) throw new Error("Learning sync state is missing");
+  return normalizeGeneration(row.generation);
+}
+
+async function mutationGeneration(request, env, userId) {
+  const raw = request.headers.get(GENERATION_HEADER);
+  if (raw === null || !/^(0|[1-9]\d*)$/.test(raw)) {
+    throwResetRequired(await loadGeneration(env, userId));
+  }
+  const generation = Number(raw);
+  if (!Number.isSafeInteger(generation) || generation < 0) {
+    throwResetRequired(await loadGeneration(env, userId));
+  }
+  return generation;
+}
+
+async function loadProgressSnapshot(env, userId) {
+  const results = await learningBatch(env, userId, () => [
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+    env.DB.prepare(
+      "SELECT model_id, done_json FROM progress WHERE user_id = ? ORDER BY model_id"
+    ).bind(userId),
+  ]);
+  const syncResult = results[1];
+  const progressResult = results[2];
+  const sync = syncResult.results[0];
+  if (!sync) throw new Error("Learning sync state is missing");
+  return {
+    generation: normalizeGeneration(sync.generation),
+    progress: progressFromRows(progressResult.results),
+  };
 }
 
 async function syncDerivedPoints(env, userId) {
@@ -194,6 +310,48 @@ async function syncDerivedPoints(env, userId) {
     "ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, " +
     "updated_at=MAX(COALESCE(stats.updated_at, 0), excluded.updated_at)"
   ).bind(JSON.stringify(COURSE_STAGE_POINTS), userId, userId, now).run();
+}
+
+async function loadStatsSnapshot(env, userId) {
+  const read = async () => {
+    const results = await learningBatch(env, userId, () => [
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+      env.DB.prepare(
+        "SELECT points, streak, last FROM stats WHERE user_id = ?"
+      ).bind(userId),
+    ]);
+    const syncResult = results[1];
+    const statsResult = results[2];
+    const sync = syncResult.results[0];
+    if (!sync) throw new Error("Learning sync state is missing");
+    return {
+      generation: normalizeGeneration(sync.generation),
+      row: statsResult.results[0] || null,
+    };
+  };
+
+  let snapshot = await read();
+  let storedLast = normalizeActivityDay(snapshot.row && snapshot.row.last);
+  if (snapshot.row && snapshot.row.last != null && !storedLast) {
+    const poisonedLast = String(snapshot.row.last);
+    const now = Date.now();
+    await env.DB.prepare(
+      "UPDATE stats SET streak=0, last=NULL, updated_at=MAX(COALESCE(updated_at, 0), ?) " +
+      "WHERE user_id=? AND last=?"
+    ).bind(now, userId, poisonedLast).run();
+    snapshot = await read();
+    storedLast = normalizeActivityDay(snapshot.row && snapshot.row.last);
+  }
+
+  const storedStreak = Number(snapshot.row && snapshot.row.streak);
+  return {
+    generation: snapshot.generation,
+    stats: {
+      points: Number(snapshot.row && snapshot.row.points) || 0,
+      streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
+      last: storedLast || null,
+    },
+  };
 }
 
 async function currentUser(request, env) {
@@ -372,8 +530,16 @@ async function route(request, env) {
   }
 
   if (path === "/auth/logout") {
-    requireMethod(request, ["GET"]);
-    return redirect(origin + "/lab/", 302, [cookie("session", "", { maxAge: 0 })]);
+    requireMethod(request, ["POST"]);
+    requireSessionSecret(env);
+    requireSameOrigin(request);
+    const user = await currentUser(request, env);
+    // If a valid session exists, bind the request to the exact account the
+    // page last verified. An expired/malformed session may still be cleared.
+    if (user) requireMutationOwner(request, user.id);
+    return json({ ok: true }, 200, {
+      "Set-Cookie": cookie("session", "", { maxAge: 0 }),
+    });
   }
 
   if (path.startsWith("/auth/")) {
@@ -387,30 +553,78 @@ async function route(request, env) {
   }
 
   if (path === "/api/progress") {
-    requireMethod(request, ["GET", "PUT"]);
+    requireMethod(request, ["GET", "PUT", "DELETE"]);
     requireSessionSecret(env);
     const user = await currentUser(request, env);
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
 
-    if (request.method === "GET") return json({ progress: await loadProgress(env, user.id) });
+    if (request.method === "GET") {
+      requireReadOwnerIfPresent(request, user.id);
+      const snapshot = await loadProgressSnapshot(env, user.id);
+      return json(snapshot, 200, generationHeaders(snapshot.generation));
+    }
 
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+
+    if (request.method === "DELETE") {
+      const now = Date.now();
+      const results = await learningBatch(env, user.id, () => [
+        env.DB.prepare(
+          "INSERT INTO learning_sync (user_id, generation) VALUES (?, 1) " +
+          "ON CONFLICT(user_id) DO UPDATE SET generation=" +
+            "CASE WHEN learning_sync.generation < ? THEN learning_sync.generation+1 ELSE NULL END " +
+          "RETURNING generation"
+        ).bind(user.id, MAX_SYNC_GENERATION),
+        env.DB.prepare("DELETE FROM progress WHERE user_id = ?").bind(user.id),
+        env.DB.prepare(
+          "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, 0, 0, NULL, ?) " +
+          "ON CONFLICT(user_id) DO UPDATE SET points=0, streak=0, last=NULL, updated_at=excluded.updated_at"
+        ).bind(user.id, now),
+      ]);
+      const generation = normalizeGeneration(results[1].results[0]?.generation);
+      return json({
+        ok: true,
+        progress: {},
+        stats: { points: 0, streak: 0, last: null },
+        generation,
+      }, 200, generationHeaders(generation));
+    }
+
+    const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const done = normalizeDone(body.model, body.done);
     if (!done) throw new HttpError(400, "invalid_progress", "Model and completed stages must be valid");
     const now = Date.now();
-    await env.DB.prepare(
-      "INSERT INTO progress (user_id, model_id, done_json, updated_at) VALUES (?, ?, json(?), ?) " +
-      "ON CONFLICT(user_id, model_id) DO UPDATE SET done_json=(" +
-        "SELECT json_group_array(value) FROM (" +
-          "SELECT DISTINCT CAST(value AS INTEGER) AS value FROM (" +
-            "SELECT value, type FROM json_each(CASE WHEN json_valid(progress.done_json) THEN progress.done_json ELSE '[]' END) " +
-            "UNION ALL SELECT value, type FROM json_each(excluded.done_json)" +
-          ") WHERE type='integer' AND value>=0 AND value<? ORDER BY value" +
-        ")" +
-      "), updated_at=MAX(COALESCE(progress.updated_at, 0), excluded.updated_at)"
-    ).bind(user.id, body.model, JSON.stringify(done), now, COURSE_STAGE_POINTS[body.model].length).run();
+    const results = await learningBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO progress (user_id, model_id, done_json, updated_at) " +
+        "SELECT ?, ?, json(?), ? WHERE EXISTS (" +
+          "SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?" +
+        ") " +
+        "ON CONFLICT(user_id, model_id) DO UPDATE SET done_json=(" +
+          "SELECT json_group_array(value) FROM (" +
+            "SELECT DISTINCT CAST(value AS INTEGER) AS value FROM (" +
+              "SELECT value, type FROM json_each(CASE WHEN json_valid(progress.done_json) THEN progress.done_json ELSE '[]' END) " +
+              "UNION ALL SELECT value, type FROM json_each(excluded.done_json)" +
+            ") WHERE type='integer' AND value>=0 AND value<? ORDER BY value" +
+          ")" +
+        "), updated_at=MAX(COALESCE(progress.updated_at, 0), excluded.updated_at) " +
+        "RETURNING done_json"
+      ).bind(
+        user.id, body.model, JSON.stringify(done), now,
+        user.id, generation, COURSE_STAGE_POINTS[body.model].length,
+      ),
+    ]);
+    const written = results[1].results[0];
+    if (!written) throwResetRequired(await loadGeneration(env, user.id));
+
     await syncDerivedPoints(env, user.id);
-    return json({ ok: true, done: (await loadProgress(env, user.id))[body.model].done });
+    const currentGeneration = await loadGeneration(env, user.id);
+    if (currentGeneration !== generation) throwResetRequired(currentGeneration);
+    const mergedDone = normalizeDone(body.model, JSON.parse(written.done_json || "[]"));
+    if (!mergedDone) throw new Error("Stored progress is invalid");
+    return json({ ok: true, done: mergedDone, generation }, 200, generationHeaders(generation));
   }
 
   if (path === "/api/stats") {
@@ -420,6 +634,9 @@ async function route(request, env) {
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
 
     if (request.method === "PUT") {
+      requireSameOrigin(request);
+      requireMutationOwner(request, user.id);
+      const generation = await mutationGeneration(request, env, user.id);
       const body = await readJSON(request);
       const streak = body.streak;
       const last = normalizeActivityDay(body.last);
@@ -428,50 +645,50 @@ async function route(request, env) {
       }
       const now = Date.now();
       const latestDay = new Date(now + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      await env.DB.prepare(
-        "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, 0, ?, ?, ?) " +
-        "ON CONFLICT(user_id) DO UPDATE SET " +
-          "streak=CASE " +
-            "WHEN stats.last IS NOT NULL AND stats.last > ? AND excluded.last IS NULL THEN 0 " +
-            "WHEN excluded.last IS NULL THEN stats.streak " +
-            "WHEN stats.last IS NULL OR stats.last > ? THEN excluded.streak " +
-            "WHEN excluded.last > stats.last AND julianday(excluded.last)=julianday(stats.last)+1 " +
-              "THEN MIN(100000, MAX(excluded.streak, stats.streak+1)) " +
-            "WHEN excluded.last > stats.last THEN excluded.streak " +
-            "WHEN excluded.last = stats.last THEN MIN(100000, MAX(stats.streak, excluded.streak)) " +
-            "ELSE stats.streak END, " +
-          "last=CASE " +
-            "WHEN excluded.last IS NULL THEN CASE WHEN stats.last IS NOT NULL AND stats.last > ? THEN NULL ELSE stats.last END " +
-            "WHEN stats.last IS NULL OR stats.last > ? OR excluded.last > stats.last THEN excluded.last " +
-            "ELSE stats.last END, " +
-          "updated_at=MAX(COALESCE(stats.updated_at, 0), excluded.updated_at)"
-      ).bind(user.id, streak, last, now, latestDay, latestDay, latestDay, latestDay).run();
+      const results = await learningBatch(env, user.id, () => [
+        env.DB.prepare(
+          "INSERT INTO stats (user_id, points, streak, last, updated_at) " +
+          "SELECT ?, 0, ?, ?, ? WHERE EXISTS (" +
+            "SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?" +
+          ") " +
+          "ON CONFLICT(user_id) DO UPDATE SET " +
+            "streak=CASE " +
+              "WHEN stats.last IS NOT NULL AND stats.last > ? AND excluded.last IS NULL THEN 0 " +
+              "WHEN excluded.last IS NULL THEN stats.streak " +
+              "WHEN stats.last IS NULL OR stats.last > ? THEN excluded.streak " +
+              "WHEN excluded.last > stats.last AND julianday(excluded.last)=julianday(stats.last)+1 " +
+                "THEN MIN(100000, MAX(excluded.streak, stats.streak+1)) " +
+              "WHEN excluded.last > stats.last THEN excluded.streak " +
+              "WHEN excluded.last = stats.last THEN MIN(100000, MAX(stats.streak, excluded.streak)) " +
+              "ELSE stats.streak END, " +
+            "last=CASE " +
+              "WHEN excluded.last IS NULL THEN CASE WHEN stats.last IS NOT NULL AND stats.last > ? THEN NULL ELSE stats.last END " +
+              "WHEN stats.last IS NULL OR stats.last > ? OR excluded.last > stats.last THEN excluded.last " +
+              "ELSE stats.last END, " +
+            "updated_at=MAX(COALESCE(stats.updated_at, 0), excluded.updated_at) " +
+          "RETURNING user_id"
+        ).bind(
+          user.id, streak, last, now, user.id, generation,
+          latestDay, latestDay, latestDay, latestDay,
+        ),
+      ]);
+      if (!results[1].results[0]) throwResetRequired(await loadGeneration(env, user.id));
+
+      await syncDerivedPoints(env, user.id);
+      const snapshot = await loadStatsSnapshot(env, user.id);
+      if (snapshot.generation !== generation) throwResetRequired(snapshot.generation);
+      return json(
+        { ok: true, stats: snapshot.stats, generation },
+        200,
+        generationHeaders(generation),
+      );
+    } else {
+      requireReadOwnerIfPresent(request, user.id);
     }
 
     await syncDerivedPoints(env, user.id);
-    let row = await env.DB.prepare(
-      "SELECT points, streak, last FROM stats WHERE user_id = ?"
-    ).bind(user.id).first();
-    let storedLast = normalizeActivityDay(row && row.last);
-    if (row && row.last != null && !storedLast) {
-      const poisonedLast = String(row.last);
-      const now = Date.now();
-      await env.DB.prepare(
-        "UPDATE stats SET streak=0, last=NULL, updated_at=MAX(COALESCE(updated_at, 0), ?) " +
-        "WHERE user_id=? AND last=?"
-      ).bind(now, user.id, poisonedLast).run();
-      row = await env.DB.prepare(
-        "SELECT points, streak, last FROM stats WHERE user_id = ?"
-      ).bind(user.id).first();
-      storedLast = normalizeActivityDay(row && row.last);
-    }
-    const storedStreak = Number(row && row.streak);
-    const stats = {
-      points: Number(row && row.points) || 0,
-      streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
-      last: storedLast || null,
-    };
-    return json(request.method === "PUT" ? { ok: true, stats } : { stats });
+    const snapshot = await loadStatsSnapshot(env, user.id);
+    return json(snapshot, 200, generationHeaders(snapshot.generation));
   }
 
   if (path.startsWith("/api/")) {
@@ -534,7 +751,7 @@ export default {
       return finalize(await route(request, env), request);
     } catch (error) {
       if (error instanceof HttpError) {
-        return finalize(apiError(error.status, error.code, error.message, error.headers), request);
+        return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request);
       }
       console.error(JSON.stringify({
         message: "request failed",

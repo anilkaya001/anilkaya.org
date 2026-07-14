@@ -49,11 +49,59 @@ async function points(page) {
   return page.evaluate(() => window.Gamify.get().points);
 }
 
+async function waitForAcademy(page) {
+  await page.waitForFunction(() => window.Auth && window.Auth.status() !== "checking" &&
+    document.querySelector("#academyDashboard")?.getAttribute("aria-busy") === "false");
+}
+
+async function waitForCourse(page, position) {
+  await page.waitForFunction((expected) => {
+    const current = document.querySelector("#cPos")?.textContent.trim();
+    return !!current && (!expected || current === expected);
+  }, position || null);
+}
+
+async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } = {}) {
+  const calls = [];
+  let generation = 0;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method();
+    calls.push({
+      path: url.pathname,
+      method,
+      owner: request.headers()["x-iewt-owner"] || null,
+      generation: request.headers()["x-iewt-generation"] || null,
+    });
+    const reply = (body, status = 200) => route.fulfill({
+      status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+    if (url.pathname === "/api/me") return reply({ user: { id: "g_browser", name: "Browser Learner", email: "" } });
+    if (url.pathname === "/api/progress" && method === "GET") return reply({ progress: { ols: { done: [0, 1] } }, generation });
+    if (url.pathname === "/api/stats" && method === "GET") return reply({ stats: { points: 15, streak: 2, last: "2026-07-13" }, generation });
+    if (url.pathname === "/api/progress" && method === "DELETE") {
+      if (deleteGate) await deleteGate;
+      if (deleteStatus === 200) generation++;
+      return deleteStatus === 200
+        ? reply({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, generation })
+        : reply({ error: { code: "temporary" } }, deleteStatus);
+    }
+    if (url.pathname === "/api/progress" && method === "PUT") return reply({ ok: true, generation });
+    if (url.pathname === "/api/stats" && method === "PUT") return reply({ stats: { points: 15, streak: 2, last: "2026-07-13" }, generation });
+    return reply({ error: { code: "not_found" } }, 404);
+  });
+  return calls;
+}
+
 async function solve(route, answer, expectedPoints, repeat) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const clean = watch(page);
   await page.goto(BASE + route, { waitUntil: "load" });
+  await waitForCourse(page);
   await answer(page);
   await page.click(".quiz__check");
   await page.waitForSelector(".quiz__feedback.ok");
@@ -61,12 +109,15 @@ async function solve(route, answer, expectedPoints, repeat) {
   await page.click(".quiz__check");
   assert.equal(await points(page), expectedPoints, `${route}: double-submit awarded twice`);
   if (repeat) {
+    await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.reload({ waitUntil: "load" });
+    await waitForCourse(page);
     await answer(page);
     await page.click(".quiz__check");
     await page.waitForSelector(".quiz__feedback.ok");
     assert.equal(await points(page), expectedPoints, `${route}: completed stage awarded after reload`);
   }
+  await page.evaluate(() => document.fonts && document.fonts.ready);
   clean();
   await context.close();
 }
@@ -80,6 +131,7 @@ try {
     const clean = watch(page);
     for (const route of PAGES) {
       await page.goto(BASE + route, { waitUntil: "load" });
+      if (route === courseRoute("ols")) await waitForCourse(page, "1 / 20");
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
@@ -96,6 +148,329 @@ try {
     const faint = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--ink-faint").trim());
     assert(contrast(faint, "#0a0a08") >= 4.5, `--ink-faint contrast is ${contrast(faint, "#0a0a08").toFixed(2)}`);
     await page.close();
+  }
+
+  // The academy dashboard, paths, and course discovery controls reflect real learner state.
+  {
+    const context = await browser.newContext();
+    await context.addInitScript(() => {
+      localStorage.setItem("iewt:progress", JSON.stringify({ ols: { done: [0, 1] } }));
+      localStorage.setItem("iewt:gamify", JSON.stringify({ points: 15, streak: 1, last: "2026-07-13" }));
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await waitForAcademy(page);
+
+    assert.equal(await page.locator("#learningPaths .path-card").count(), 4, "learning paths did not render");
+    assert.equal(await page.locator("#labGrid .model-card").count(), 7, "course catalogue did not render");
+    assert.match(await page.locator(".dashboard-resume").textContent(), /2 of 20 lessons complete/);
+    assert((await page.locator(".dashboard-resume a").getAttribute("href")).endsWith("#s2"), "resume link did not target the first unfinished lesson");
+    assert.equal(await page.locator("#academyDashboard [role=progressbar]").count(), 2);
+    assert.equal(await page.locator("#academyDashboard [role=progressbar]").first().getAttribute("aria-valuenow"), "10");
+
+    await page.fill("#courseSearch", "binary outcomes");
+    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "1 course");
+    assert.equal((await page.locator("#labGrid .model-card h3").textContent()).trim(), "Logit & Probit (Binary Outcomes)");
+
+    await page.fill("#courseSearch", "");
+    await page.selectOption("#levelFilter", "Advanced");
+    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "3 courses");
+    assert.equal(await page.locator('#labGrid .model-card [class="model-card__badge"]', { hasText: "Advanced" }).count(), 3);
+
+    await page.selectOption("#levelFilter", "all");
+    await page.selectOption("#statusFilter", "in-progress");
+    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "1 course");
+    assert.equal(await page.locator('#labGrid .model-card[data-status="in-progress"] h3').textContent(), "Ordinary Least Squares");
+
+    await page.fill("#courseSearch", "no-such-econometrics-method");
+    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "0 courses");
+    assert(await page.locator("#courseEmptyState").isVisible(), "empty search result was not announced visibly");
+    clean();
+    await context.close();
+  }
+
+  // Anonymous reset clears learning data, preserves layout preference, and returns focus to the dashboard.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await waitForAcademy(page);
+    await page.evaluate(() => {
+      window.IEWTStorage.setProgress({ ols: { done: [0, 1, 2] } });
+      window.IEWTStorage.setGamify({ points: 25, streak: 2, last: "2026-07-13" });
+      window.IEWTStorage.setGuideWidth(61.4);
+      document.dispatchEvent(new Event("iewt:synced"));
+    });
+    await page.waitForFunction(() => document.querySelector(".dashboard-resume")?.textContent.includes("3 of 20"));
+    await page.click("#resetProgressBtn");
+    assert(await page.locator("#resetDialog").evaluate((dialog) => dialog.open), "reset confirmation did not open");
+    assert.match(await page.locator("#resetScope").textContent(), /Only progress on this device/);
+    assert(await page.locator(".reset-cancel").evaluate((button) => button === document.activeElement), "safe cancel action did not receive initial focus");
+    await page.click("#resetConfirm");
+    await page.waitForFunction(() => !document.querySelector("#resetDialog").open);
+    const state = await page.evaluate(() => ({
+      progress: window.IEWTStorage.progress(),
+      gamify: window.Gamify.get(),
+      guideWidth: window.IEWTStorage.guideWidth(),
+      owner: window.IEWTStorage.owner(),
+      dashboardFocused: document.activeElement === document.querySelector("#dashboardTitle"),
+    }));
+    assert.deepEqual(state, {
+      progress: {},
+      gamify: { points: 0, streak: 0, last: null },
+      guideWidth: 61.4,
+      owner: null,
+      dashboardFocused: true,
+    });
+    assert.match(await page.locator(".dashboard-resume").textContent(), /0 of 20 lessons complete/);
+    clean();
+    await context.close();
+  }
+
+  // Signed-in reset is server-first and carries the verified owner binding.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const calls = await mockSignedInAPI(page);
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.isSignedIn() && window.IEWTStorage.progress().ols?.done?.length === 2);
+    await page.click("#resetProgressBtn");
+    assert.match(await page.locator("#resetScope").textContent(), /synced account record and this device/);
+    await page.click("#resetConfirm");
+    await page.waitForFunction(() => !document.querySelector("#resetDialog").open && Object.keys(window.IEWTStorage.progress()).length === 0);
+    const deletes = calls.filter((call) => call.path === "/api/progress" && call.method === "DELETE");
+    assert.deepEqual(deletes, [{ path: "/api/progress", method: "DELETE", owner: "g_browser", generation: null }]);
+    assert.equal(await page.evaluate(() => window.IEWTStorage.syncGeneration()), 1);
+    assert.deepEqual(await page.evaluate(() => window.Gamify.get()), { points: 0, streak: 0, last: null });
+    clean();
+    await context.close();
+  }
+
+  // A failed signed-in deletion leaves both owner-scoped progress and points intact.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let releaseDelete;
+    const deleteGate = new Promise((resolve) => { releaseDelete = resolve; });
+    const calls = await mockSignedInAPI(page, { deleteStatus: 503, deleteGate });
+    const clean = watch(page, (value) => value.includes("503 (Service Unavailable)"));
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && window.IEWTStorage.progress().ols?.done?.length === 2);
+    await page.click("#resetProgressBtn");
+    await page.click("#resetConfirm");
+    await page.waitForFunction(() => document.querySelector("#resetDialog")?.dataset.resetBusy === "true");
+    assert.equal(await page.locator("#resetDialog").getAttribute("aria-busy"), "true");
+    await page.keyboard.press("Escape");
+    assert(await page.locator("#resetDialog").evaluate((dialog) => dialog.open), "Escape dismissed a reset while DELETE was pending");
+    releaseDelete();
+    await page.waitForFunction(() => document.querySelector("#resetStatus")?.classList.contains("reset-dialog__status--error"));
+    assert(await page.locator("#resetDialog").evaluate((dialog) => dialog.open), "failed reset closed its confirmation dialog");
+    assert.match(await page.locator("#resetStatus").textContent(), /Nothing was removed from this device/);
+    assert.deepEqual(await page.evaluate(() => ({ progress: window.IEWTStorage.progress(), gamify: window.Gamify.get() })), {
+      progress: { ols: { done: [0, 1] } },
+      gamify: { points: 15, streak: 2, last: "2026-07-13" },
+    });
+    assert(await page.locator("#resetConfirm").isEnabled());
+    assert(await page.locator(".reset-cancel").evaluate((button) => button === document.activeElement));
+    assert.equal(await page.locator("#resetDialog").getAttribute("aria-busy"), "false");
+    assert.equal(calls.filter((call) => call.path === "/api/progress" && call.method === "DELETE" && call.owner === "g_browser").length, 1);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#resetDialog").open);
+    clean();
+    await context.close();
+  }
+
+  // Reset completion is bound to the account captured at confirmation time.
+  // Switching owners mid-request preserves the new scope, and a later sign-in
+  // cannot reupload state from before the server's reset generation.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const calls = [];
+    let generation = 0;
+    let serverProgress = { ols: { done: [0, 1] } };
+    let serverStats = { points: 15, streak: 2, last: "2026-07-13" };
+    let releaseDelete, markDeleteStarted;
+    const deleteGate = new Promise((resolve) => { releaseDelete = resolve; });
+    const deleteStarted = new Promise((resolve) => { markDeleteStarted = resolve; });
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const method = request.method();
+      calls.push({ path, method, generation: request.headers()["x-iewt-generation"] || null });
+      const reply = (body, status = 200) => route.fulfill({
+        status, contentType: "application/json", body: JSON.stringify(body),
+      });
+      if (path === "/api/me") return reply({ user: { id: "g_switch", name: "Switching Learner", email: "" } });
+      if (path === "/api/progress" && method === "GET") return reply({ progress: serverProgress, generation });
+      if (path === "/api/stats" && method === "GET") return reply({ stats: serverStats, generation });
+      if (path === "/api/progress" && method === "DELETE") {
+        markDeleteStarted();
+        await deleteGate;
+        generation = 1;
+        serverProgress = {};
+        serverStats = { points: 0, streak: 0, last: null };
+        return reply({ ok: true, progress: serverProgress, stats: serverStats, generation });
+      }
+      if (method === "PUT") return reply({ ok: true, stats: serverStats, generation });
+      return reply({ error: { code: "not_found" } }, 404);
+    });
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && window.IEWTStorage.progress().ols?.done?.length === 2);
+    await page.click("#resetProgressBtn");
+    await page.click("#resetConfirm");
+    await deleteStarted;
+    await page.evaluate(() => {
+      const marker = window.IEWTStorage.KEYS.activeOwner;
+      localStorage.setItem(marker, "user:g_other");
+      window.dispatchEvent(new StorageEvent("storage", { key: marker, newValue: "user:g_other" }));
+      window.IEWTStorage.setProgress({ ols: { done: [3] } });
+      window.IEWTStorage.setGamify({ points: 15, streak: 1, last: "2026-07-14" });
+    });
+    await page.waitForFunction(() => window.Auth?.status() === "account-changed" && window.IEWTStorage.owner() === null);
+    releaseDelete();
+    await page.waitForFunction(() => !document.querySelector("#resetDialog").open);
+    const switched = await page.evaluate(() => {
+      const account = "user:g_switch";
+      const suffix = encodeURIComponent(account);
+      return {
+        activeProgress: window.IEWTStorage.progress(),
+        activeGamify: window.IEWTStorage.gamify(),
+        capturedProgress: JSON.parse(localStorage.getItem(`iewt:progress:v2:${suffix}`)).value,
+        capturedGamify: JSON.parse(localStorage.getItem(`iewt:gamify:v2:${suffix}`)).value,
+        capturedGeneration: JSON.parse(localStorage.getItem(`iewt:sync:v2:${suffix}`)).generation,
+        status: window.Auth.status(),
+      };
+    });
+    assert.deepEqual(switched, {
+      activeProgress: { ols: { done: [3] } },
+      activeGamify: { points: 15, streak: 1, last: "2026-07-14" },
+      capturedProgress: {},
+      capturedGamify: { points: 0, streak: 0, last: null },
+      capturedGeneration: 1,
+      status: "account-changed",
+    });
+
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.user()?.id === "g_switch" &&
+      window.IEWTStorage.syncGeneration() === 1 && Object.keys(window.IEWTStorage.progress()).length === 0);
+    assert.deepEqual(calls.filter((call) => call.method === "PUT"), [], "pre-reset state was reuploaded after returning sign-in");
+    clean();
+    await context.close();
+  }
+
+  // Signed-in sign-out uses a same-owner POST, then reloads into an anonymous device scope.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let signedIn = true;
+    const logoutCalls = [];
+    await page.route("**/api/**", (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const body = path === "/api/me" ? { user: signedIn ? { id: "g_signout", name: "Sign-out Learner", email: "" } : null }
+        : path === "/api/progress" ? { progress: {}, generation: 0 }
+          : path === "/api/stats" ? { stats: { points: 0, streak: 0, last: null }, generation: 0 }
+            : { error: { code: "not_found" } };
+      return route.fulfill({ status: path.startsWith("/api/") ? 200 : 404, contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await page.route("**/auth/logout", (route) => {
+      const request = route.request();
+      logoutCalls.push({ method: request.method(), owner: request.headers()["x-iewt-owner"] || null });
+      signedIn = false;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+    });
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/", { waitUntil: "load" });
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.user()?.id === "g_signout");
+    const navigated = page.waitForNavigation({ waitUntil: "load" });
+    await page.click("#authBtn");
+    await navigated;
+    await page.waitForFunction(() => window.Auth?.status() === "ready" && !window.Auth?.isSignedIn() && window.IEWTStorage.owner() === null);
+    assert.deepEqual(logoutCalls, [{ method: "POST", owner: "g_signout" }]);
+    assert.equal(new URL(page.url()).pathname, "/lab/");
+    clean();
+    await context.close();
+  }
+
+  // The course shell exposes a real loading state and downloads only the selected topic payload.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const requested = [];
+    let releasePayload;
+    const payloadGate = new Promise((resolve) => { releasePayload = resolve; });
+    page.on("request", (request) => requested.push(new URL(request.url()).pathname));
+    await page.route("**/assets/data/courses/ols.json*", async (route) => {
+      await payloadGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "domcontentloaded" });
+    await page.locator(".course-loading").waitFor();
+    assert.equal(await page.locator("#course").getAttribute("aria-busy"), "true");
+    releasePayload();
+    await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "1 / 20");
+    assert.equal(await page.locator("#course").getAttribute("aria-busy"), "false");
+    assert.equal(requested.filter((path) => path === "/assets/data/courses/ols.json").length, 1, "selected course payload was not fetched exactly once");
+    for (const script of ["/assets/js/curriculum.js", "/assets/js/curriculum-data.js", "/assets/js/curriculum-questions.js"]) {
+      assert(!requested.includes(script), `course downloaded authoring bundle ${script}`);
+    }
+    assert(!requested.some((path) => /^\/assets\/data\/courses\/(?!ols\.json$)/.test(path)), "course downloaded another topic payload");
+    clean();
+    await context.close();
+  }
+
+  // Read lessons require an explicit completion action; stage arrows require Alt.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 0, "read-completion"), { waitUntil: "load" });
+    await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "1 / 20");
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), {}, "displaying a reading auto-completed it");
+    assert.match((await page.locator("#cNext").textContent()).trim(), /^Complete & next/);
+
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(80);
+    assert.equal((await page.locator("#cPos").textContent()).trim(), "1 / 20", "bare ArrowRight navigated stages");
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "2 / 20");
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), {}, "keyboard navigation completed a reading");
+    await page.keyboard.press("Alt+ArrowLeft");
+    await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "1 / 20");
+
+    await page.click("#cNext");
+    await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "2 / 20");
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), { ols: { done: [0] } });
+    assert.deepEqual(await page.locator("#cProgress").evaluate((node) => ({
+      role: node.getAttribute("role"),
+      min: node.getAttribute("aria-valuemin"),
+      max: node.getAttribute("aria-valuemax"),
+      now: node.getAttribute("aria-valuenow"),
+      label: node.getAttribute("aria-label"),
+    })), { role: "progressbar", min: "0", max: "100", now: "5", label: "Course completion" });
+    clean();
+    await context.close();
+  }
+
+  // Choice questions expose their answer set through fieldset/legend semantics.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "quiz-semantics"), { waitUntil: "load" });
+    await page.locator(".quiz__fieldset").waitFor();
+    assert.equal(await page.locator(".quiz__fieldset").count(), 1);
+    assert((await page.locator(".quiz__fieldset legend").textContent()).trim().length > 0, "quiz answer group has no legend");
+    assert.equal(await page.locator('.quiz__fieldset input[type="radio"]').count(), 2);
+    assert.equal(await page.locator('.quiz__fieldset input[type="radio"]').first().getAttribute("name"), await page.locator('.quiz__fieldset input[type="radio"]').last().getAttribute("name"));
+    clean();
+    await context.close();
   }
 
   // Pill tabs are equal and the indicator only translates.
@@ -123,6 +498,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
     const page = await context.newPage();
     await page.goto(BASE + stageRoute("ols", 1, "touch-code"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
     const editor = await page.evaluate(() => {
       const input = getComputedStyle(document.querySelector(".cell__editor"));
       const overlay = getComputedStyle(document.querySelector(".cell__hl"));
@@ -135,15 +511,19 @@ try {
       assert(box && box.width >= 44 && box.height >= 44, `${selector} is ${box?.width}×${box?.height}`);
     }
     await page.goto(BASE + stageRoute("ols", 2, "touch-range"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 20");
     const range = await page.locator(".control__range").first().boundingBox();
     assert(range && range.width >= 44 && range.height >= 44, `range input is ${range?.width}×${range?.height}`);
     await page.goto(BASE + stageRoute("ols", 4, "touch-choice"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
     const choice = await page.locator(".quiz__choice").first().boundingBox();
     assert(choice && choice.width >= 44 && choice.height >= 44, `quiz choice is ${choice?.width}×${choice?.height}`);
     await page.goto(BASE + stageRoute("ols", 13, "touch-numeric"), { waitUntil: "load" });
+    await waitForCourse(page, "14 / 20");
     const numeric = await page.locator(".q-num").boundingBox();
     assert(numeric && numeric.width >= 44 && numeric.height >= 44, `numeric input is ${numeric?.width}×${numeric?.height}`);
     await page.goto(BASE + stageRoute("iv2sls", 20, "touch-blank"), { waitUntil: "load" });
+    await waitForCourse(page, "21 / 31");
     const blank = await page.locator(".q-blank").boundingBox();
     assert(blank && blank.width >= 44 && blank.height >= 44, `blank input is ${blank?.width}×${blank?.height}`);
     await context.close();
@@ -151,6 +531,7 @@ try {
     const wideTouch = await browser.newContext({ viewport: { width: 1024, height: 768 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
     const widePage = await wideTouch.newPage();
     await widePage.goto(BASE + stageRoute("ols", 1, "touch-splitter"), { waitUntil: "load" });
+    await waitForCourse(widePage, "2 / 20");
     const splitter = await widePage.locator(".stage__handle").boundingBox();
     assert(splitter && splitter.width >= 44 && splitter.height >= 44, `splitter is ${splitter?.width}×${splitter?.height}`);
     await wideTouch.close();
@@ -160,6 +541,7 @@ try {
   {
     const page = await browser.newPage();
     await page.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
+    await waitForCourse(page, "1 / 20");
     assert.equal((await page.locator("#cPos").textContent()).trim(), "1 / 20");
     assert.equal(await page.locator('.course-nav__mod[aria-current="step"]').count(), 1);
     await page.click("#cNext"); await page.click("#cNext"); await page.click("#cNext");
@@ -176,6 +558,7 @@ try {
   {
     const page = await browser.newPage();
     await page.goto(BASE + stageRoute("ols", 13), { waitUntil: "load" });
+    await waitForCourse(page, "14 / 20");
     await page.fill(".q-num", "36");
     const state = await page.evaluate(() => {
       const input = document.querySelector(".q-num");
@@ -199,6 +582,8 @@ try {
     for (const [topic, count] of Object.entries(TOPICS)) {
       for (let index = 0; index < count; index++) {
         await page.goto(BASE + stageRoute(topic, index), { waitUntil: "load" });
+        await waitForCourse(page, `${index + 1} / ${count}`);
+        await page.evaluate(() => document.fonts && document.fonts.ready);
         const levels = await page.evaluate(() => [...document.querySelectorAll("h1,h2,h3,h4")].map((heading) => Number(heading.tagName[1])));
         assert(levels.length >= 2, `${topic}#s${index}: missing headings`);
         for (let i = 1; i < levels.length; i++) assert(levels[i] - levels[i - 1] <= 1, `${topic}#s${index}: heading skip ${levels.join("→")}`);
@@ -214,6 +599,7 @@ try {
     await context.addInitScript(() => localStorage.setItem("iewt:splitW", "61.4"));
     const page = await context.newPage();
     await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
     const migrated = await page.evaluate(() => ({
       width: document.querySelector(".stage__split").style.getPropertyValue("--guideW"),
       current: localStorage.getItem("iewt:guideW"), legacy: localStorage.getItem("iewt:splitW"),
@@ -228,6 +614,7 @@ try {
     assert.equal(await page.locator(".stage__handle").getAttribute("aria-valuenow"), "72");
     assert.equal((await page.locator("#cPos").textContent()).trim(), position);
     await page.reload({ waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
     assert.equal(await page.locator(".stage__handle").getAttribute("aria-valuenow"), "72");
     await context.close();
   }
@@ -243,6 +630,7 @@ try {
     const page = await blocked.newPage();
     const clean = watch(page);
     await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
     assert.equal((await page.locator("#cPos").textContent()).trim(), "2 / 20");
     assert(await page.locator(".cell__editor").isVisible());
     clean();
@@ -255,6 +643,7 @@ try {
     });
     const malformedPage = await malformed.newPage();
     await malformedPage.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
+    await waitForCourse(malformedPage, "1 / 20");
     const repaired = await malformedPage.evaluate(() => ({ progress: JSON.parse(localStorage.getItem("iewt:progress")), gamify: JSON.parse(localStorage.getItem("iewt:gamify")) }));
     assert.equal(typeof repaired.progress, "object");
     assert.deepEqual(Object.keys(repaired.gamify).sort(), ["last", "points", "streak"]);
@@ -268,6 +657,7 @@ try {
     });
     const quotaPage = await quota.newPage();
     await quotaPage.goto(BASE + stageRoute("ols", 4), { waitUntil: "load" });
+    await waitForCourse(quotaPage, "5 / 20");
     await quotaPage.check('input[value="false"]');
     await quotaPage.click(".quiz__check");
     const quotaState = await quotaPage.evaluate(() => ({
@@ -301,6 +691,7 @@ try {
     const page = await context.newPage();
     const clean = watch(page, (value) => value.includes("cdn.jsdelivr.net"));
     await page.goto(BASE + stageRoute("ols", 1), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
     await page.click(".cell__run");
     const boot = page.locator("#labBoot.show");
     await boot.waitFor();
@@ -323,8 +714,8 @@ try {
         const method = init.method || "GET";
         if (path === "/api/me") return Promise.resolve(reply({ user: { id: "g_partial", name: "Partial Sync", email: "" } }));
         if (path === "/api/progress") return Promise.resolve(reply({ error: { code: "temporary" } }, 500));
-        if (path === "/api/stats" && method === "GET") return Promise.resolve(reply({ stats: { points: 100, streak: 2, last: "2026-07-12" } }));
-        if (path === "/api/stats" && method === "PUT") return Promise.resolve(reply({ ok: true, stats: { points: 100, streak: 2, last: "2026-07-12" } }));
+        if (path === "/api/stats" && method === "GET") return Promise.resolve(reply({ stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
+        if (path === "/api/stats" && method === "PUT") return Promise.resolve(reply({ ok: true, stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));
         return nativeFetch(input, init);
       };
     });
@@ -354,6 +745,7 @@ try {
   {
     const page = await browser.newPage();
     await page.goto(BASE + stageRoute("ols", 13), { waitUntil: "load" });
+    await waitForCourse(page, "14 / 20");
     await page.fill(".q-num", "36abc"); await page.click(".quiz__check");
     assert(await page.locator(".quiz__feedback.err").isVisible());
     assert.equal(await points(page), 0);
@@ -362,7 +754,7 @@ try {
     await page.close();
   }
 
-  console.log("✓ browser: layouts, all headings, touch targets, storage, splitter, boot, grading, rewards");
+  console.log("✓ browser: academy, reset, payload isolation, layouts, accessibility, navigation, storage, splitter, boot, grading, rewards");
 } finally {
   if (browser) await browser.close();
   await server.stop();

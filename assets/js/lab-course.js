@@ -4,24 +4,46 @@
    stage at a time: a left module navigator, instructions on the
    left, the live workspace on the right, Prev/Next (+ arrow keys).
    ============================================================= */
-(() => {
+(async () => {
   "use strict";
 
   const root = document.getElementById("course");
   if (!root) return;
   const slug = location.pathname.split("/").filter(Boolean).pop();
-  const meta = (window.TOPIC_META || []).find((item) => item.slug === slug);
+  const queryId = new URLSearchParams(location.search).get("m");
+  const meta = (window.TOPIC_META || []).find((item) => item.slug === slug || item.id === queryId);
   // Query fallback keeps the backing template usable in a plain static preview;
   // production permanently redirects every legacy ?m= URL to a clean slug.
-  const topicId = meta ? meta.id : new URLSearchParams(location.search).get("m");
-  const topic = (window.CURRICULUM || {})[topicId];
-
-  if (!topic) {
+  const topicId = meta && meta.id;
+  if (!topicId) {
     root.innerHTML =
       '<div class="course-empty"><a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
-      "<h1>This module is being finalized</h1><p>It'll appear here shortly. Meanwhile, explore the other topics.</p></div>";
+      "<h1>Course not found</h1><p>Choose a verified course from the academy catalogue.</p></div>";
     return;
   }
+
+  root.setAttribute("aria-busy", "true");
+  root.innerHTML = '<div class="course-loading" role="status"><span class="course-loading__mark" aria-hidden="true">β</span><p>Loading the course workspace…</p></div>';
+  let topic;
+  try {
+    const version = document.documentElement.dataset.assetVersion;
+    const response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`course-payload-${response.status}`);
+    topic = await response.json();
+    if (!topic || topic.schemaVersion !== 1 || topic.id !== topicId || !Array.isArray(topic.modules) || !topic.modules.length ||
+        topic.modules.some((module) => !module || !Array.isArray(module.stages))) throw new Error("invalid-course-payload");
+  } catch {
+    root.setAttribute("aria-busy", "false");
+    root.innerHTML =
+      '<div class="course-empty"><a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
+      '<h1>The course could not load</h1><p>Your saved progress is safe. Check your connection and try again.</p>' +
+      '<button class="btn btn--gold" id="courseRetry" type="button">Try again</button></div>';
+    root.querySelector("#courseRetry").addEventListener("click", () => location.reload());
+    return;
+  }
+  root.setAttribute("aria-busy", "false");
   document.title = topic.title + " — Econometrics Lab";
 
   // ---- Flatten modules → stages -------------------------------
@@ -63,6 +85,13 @@
 
   const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
   const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
+  const topicById = window.TOPIC_BY_ID || Object.fromEntries((window.TOPIC_META || []).map((item) => [item.id, item]));
+  const prerequisites = (meta.prerequisites || []).map((id) => topicById[id]).filter(Boolean);
+  const prerequisiteHTML = prerequisites.length
+    ? prerequisites.map((item) => '<a href="/lab/' + encodeURIComponent(item.slug) + '/">' + esc(item.shortTitle || item.title) + "</a>").join(" · ")
+    : "No prior econometrics course required";
+  const outcomesHTML = (meta.outcomes || []).map((outcome) => "<li>" + esc(outcome) + "</li>").join("");
+  const outlineHTML = topic.modules.map((module) => "<li><b>" + esc(module.title) + "</b><span>" + esc(module.summary || "") + "</span></li>").join("");
 
   // ---- Shell --------------------------------------------------
   root.innerHTML =
@@ -70,9 +99,15 @@
     '<section class="course-main">' +
       '<div class="course-head">' +
         '<a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
+        '<div class="course-head__meta"><span class="model-card__badge">' + esc(meta.level) + '</span><span>' + N + " lessons · " + topic.modules.length + " modules</span></div>" +
         "<h1>" + esc(topic.title) + "</h1>" +
-        '<div class="course-progress"><div class="progress"><div class="progress__bar" id="cBar"></div></div>' +
+        '<div class="course-progress"><div class="progress" id="cProgress" role="progressbar" aria-label="Course completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress__bar" id="cBar"></div></div>' +
         '<span class="progress-label" id="cPctL"></span><span class="gamify" data-gamify></span></div>' +
+        '<details class="course-brief"><summary>Course guide</summary><div class="course-brief__grid">' +
+          '<section><h2>What you will be able to do</h2><ul>' + outcomesHTML + "</ul></section>" +
+          '<section><h2>Prerequisites</h2><p>' + prerequisiteHTML + '</p><h2>Learning design</h2><p>Read the intuition, run the model, manipulate it, then prove your understanding.</p></section>' +
+          '<section class="course-brief__outline"><h2>Module map</h2><ol>' + outlineHTML + "</ol></section>" +
+        "</div></details>" +
       "</div>" +
       '<div class="stage" id="cStage"></div>' +
       '<div class="course-foot">' +
@@ -88,8 +123,10 @@
   const nextBtn = root.querySelector("#cNext");
 
   function paintProgress() {
-    root.querySelector("#cBar").style.width = pct() + "%";
-    root.querySelector("#cPctL").textContent = pct() + "%";
+    const percent = pct();
+    root.querySelector("#cBar").style.width = percent + "%";
+    root.querySelector("#cPctL").textContent = percent + "%";
+    root.querySelector("#cProgress").setAttribute("aria-valuenow", String(percent));
     // refresh nav checkmarks
     const done = doneSet();
     navEl.querySelectorAll(".course-nav__mod").forEach((node) => {
@@ -245,9 +282,9 @@
   function buildQuestion(st, i) {
     const q = el("div", "quiz quiz--" + st.type);
     const name = "q_" + topic.id + "_" + i;
-    const radios = (items, type) => '<div class="quiz__choices' + (type === "tf" ? " quiz__choices--tf" : "") + '">' +
+    const radios = (items, type) => '<fieldset class="quiz__fieldset"><legend class="sr-only">' + esc(st.title || "Question") + ' answer choices</legend><div class="quiz__choices' + (type === "tf" ? " quiz__choices--tf" : "") + '">' +
       items.map((it) => '<label class="quiz__choice"><input type="' + (st.type === "multi" ? "checkbox" : "radio") +
-        '" name="' + name + '" value="' + it.v + '"><span>' + esc(it.label) + "</span></label>").join("") + "</div>";
+        '" name="' + name + '" value="' + it.v + '"><span>' + esc(it.label) + "</span></label>").join("") + "</div></fieldset>";
     let inputHTML = "";
     if (st.type === "quiz") inputHTML = radios(st.choices.map((c, k) => ({ v: k, label: c })));
     else if (st.type === "multi") inputHTML = radios(st.choices.map((c, k) => ({ v: k, label: c })));
@@ -353,10 +390,11 @@
     }
     stageEl.appendChild(body);
 
-    if (st.type === "read") mark(i);          // reading a page completes it
-
     prevBtn.disabled = i === 0;
-    nextBtn.textContent = i === N - 1 ? "Finish ✓" : "Next →";
+    const complete = doneSet().has(i);
+    nextBtn.textContent = i === N - 1
+      ? (st.type === "read" && !complete ? "Complete & finish ✓" : "Finish ✓")
+      : (st.type === "read" && !complete ? "Complete & next →" : "Next →");
     root.querySelector("#cPos").textContent = (i + 1) + " / " + N;
     renderNav(i);
   }
@@ -364,8 +402,15 @@
   function go(i) {
     if (i < 0 || i >= N) {
       if (i >= N) {
-        if (window.FX) window.FX.celebrate("Topic complete — superb work.");
-        else if (window.toast) window.toast("Topic complete — superb work. ✓");
+        const done = doneSet();
+        const firstOpen = stages.findIndex((_, index) => !done.has(index));
+        if (firstOpen >= 0) {
+          if (window.toast) window.toast((N - done.size) + " lessons remain — your progress is saved.");
+          go(firstOpen);
+          return;
+        }
+        if (window.FX) window.FX.celebrate("Course complete — superb work.");
+        else if (window.toast) window.toast("Course complete — superb work. ✓");
         setTimeout(() => { location.href = "/lab/"; }, window.FX ? 1900 : 0);
       }
       return;
@@ -385,15 +430,23 @@
   }
 
   prevBtn.addEventListener("click", () => go(cur - 1));
-  nextBtn.addEventListener("click", () => go(cur + 1));
+  nextBtn.addEventListener("click", () => {
+    if (stages[cur].type === "read") mark(cur, nextBtn);
+    go(cur + 1);
+  });
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
-    if (e.key === "ArrowRight") go(cur + 1);
-    if (e.key === "ArrowLeft") go(cur - 1);
+    if (!e.altKey) return;
+    if (e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); }
   });
 
-  const start = Math.max(0, Math.min(N - 1, parseInt((location.hash.match(/^#s(\d+)/) || [])[1], 10) || 0));
+  const hashMatch = location.hash.match(/^#s(\d+)/);
+  const firstOpen = stages.findIndex((_, index) => !doneSet().has(index));
+  const requestedStart = hashMatch ? Number(hashMatch[1]) : (firstOpen >= 0 ? firstOpen : 0);
+  const start = Math.max(0, Math.min(N - 1, Number.isInteger(requestedStart) ? requestedStart : 0));
   render(start);
   if (window.Gamify) window.Gamify.paint();
-  document.addEventListener("iewt:synced", () => { paintProgress(); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
 })();

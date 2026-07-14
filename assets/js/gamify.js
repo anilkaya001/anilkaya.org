@@ -11,6 +11,11 @@
   const day = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   let remotePointFloor = 0;
 
+  function emit(name, detail) {
+    if (typeof CustomEvent === "function") document.dispatchEvent(new CustomEvent(name, { detail }));
+    else document.dispatchEvent(new Event(name));
+  }
+
   function derivedPoints() {
     const manifest = window.COURSE_STAGE_POINTS;
     if (!manifest || typeof manifest !== "object") return null;
@@ -79,6 +84,19 @@
       });
       this.paint();
     },
+    // Reset both persisted stats and the in-memory server-point floor. The
+    // authenticated reset flow clears storage only after DELETE /api/progress
+    // succeeds and therefore passes { storageAlreadyCleared: true } here.
+    reset(options = {}) {
+      remotePointFloor = 0;
+      if (options.storageAlreadyCleared !== true) {
+        write({ points: 0, streak: 0, last: null });
+      }
+      this.paint();
+      const state = read();
+      emit("iewt:gamify-reset", { state });
+      return state;
+    },
     paint() {
       const s = read();
       document.querySelectorAll("[data-gamify]").forEach((el) => {
@@ -95,4 +113,11 @@
   };
   window.Gamify = Gamify;
   document.addEventListener("DOMContentLoaded", () => Gamify.paint());
+  // A server-derived floor is meaningful only for the account that supplied
+  // it. Never carry that closure state into an anonymous or different account
+  // scope on a shared browser.
+  document.addEventListener("iewt:owner-changed", () => {
+    remotePointFloor = 0;
+    Gamify.paint();
+  });
 })();
