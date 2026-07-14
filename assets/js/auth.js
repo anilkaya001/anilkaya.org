@@ -141,7 +141,7 @@
     if (options.invalidate === true) mutationEpoch++;
     if (active) {
       emit("iewt:progress-reset", { owner, generation, remote: true });
-      emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, reset: true, remote: true });
+      emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, remote: true });
     }
     return true;
   }
@@ -191,10 +191,62 @@
     return store.setGamify(state);
   }
 
+  function validMasteryItem(value) {
+    return typeof value === "string" && /^[a-z0-9][a-z0-9:_-]{0,127}$/i.test(value);
+  }
+
+  function newAttemptId() {
+    if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const bytes = new Uint32Array(4);
+    crypto.getRandomValues(bytes);
+    return "r_" + [...bytes].map((value) => value.toString(36)).join("_");
+  }
+
+  function validAttemptId(value) {
+    return typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
+  }
+
+  function localDay() {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function saveMasteryRecord(itemId, record) {
+    const mastery = store.mastery();
+    mastery[itemId] = record;
+    const saved = store.setMastery(mastery);
+    if (!saved[itemId]) throw new Error("invalid-mastery-record");
+    return saved[itemId];
+  }
+
+  async function flushMasteryOutbox(owner, epoch, generation) {
+    let complete = true;
+    for (const event of store.masteryOutbox()) {
+      if (!current(owner, epoch)) return false;
+      try {
+        const payload = await putJSON("/api/mastery", event, owner, generation);
+        if (!current(owner, epoch)) return false;
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) return false;
+        if (!payload.record || typeof payload.record !== "object" || Array.isArray(payload.record)) {
+          throw new Error("invalid-mastery-response");
+        }
+        saveMasteryRecord(event.itemId, payload.record);
+        store.removeMasteryAttempt(event.attemptId);
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
+        complete = false;
+        break;
+      }
+    }
+    return complete && store.masteryOutbox().length === 0;
+  }
+
   async function pullAll(epoch, owner) {
     return enqueue(async () => {
       if (!current(owner, epoch)) return false;
-      let progressComplete = false, statsComplete = false;
+      let progressComplete = false, statsComplete = false, masteryComplete = false;
 
       try {
         const payload = await getJSON("/api/progress", {
@@ -256,9 +308,26 @@
         if (current(owner, epoch)) emit("iewt:sync-error", { area: "stats", error: error.code || error.message });
       }
 
+      try {
+        if (!current(owner, epoch)) return false;
+        const payload = await getJSON("/api/mastery", {
+          headers: ownerHeaders(owner, { Accept: "application/json" }),
+        });
+        if (!current(owner, epoch)) return false;
+        const { generation, replaced } = acceptGeneration(payload, owner);
+        if (replaced) { progressComplete = false; statsComplete = false; }
+        const remote = payload.mastery;
+        if (!remote || typeof remote !== "object" || Array.isArray(remote)) throw new Error("invalid-mastery");
+        store.setMastery(remote);
+        masteryComplete = await flushMasteryOutbox(owner, epoch, generation);
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
+      }
+
       if (!current(owner, epoch)) return false;
-      emit("iewt:synced", { owner, progressComplete, statsComplete });
-      return progressComplete && statsComplete;
+      emit("iewt:synced", { owner, progressComplete, statsComplete, masteryComplete });
+      return progressComplete && statsComplete && masteryComplete;
     });
   }
 
@@ -296,7 +365,7 @@
         const result = { ok: true, signedIn, owner, generation, active, cleared };
         if (active) {
           emit("iewt:progress-reset", result);
-          emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, reset: true, generation });
+          emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, generation });
           setStatus("ready");
         } else if (authStatus === "resetting") {
           setStatus("account-changed");
@@ -314,7 +383,7 @@
       const result = { ok: true, signedIn, owner: null, generation, active, cleared };
       if (active) {
         emit("iewt:progress-reset", result);
-        emit("iewt:synced", { owner: null, progressComplete: true, statsComplete: true, reset: true, generation });
+        emit("iewt:synced", { owner: null, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, generation });
         setStatus(backend ? "ready" : "offline");
       } else if (authStatus === "resetting") {
         setStatus("account-changed");
@@ -334,6 +403,54 @@
       resetPromise = null;
     });
     return resetPromise;
+  }
+
+  async function recordMasteryAttempt(itemId, options = {}) {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    if (!validMasteryItem(itemId) || typeof options.correct !== "boolean" || typeof options.hinted !== "boolean") {
+      throw new TypeError("Invalid mastery attempt");
+    }
+    const day = store.normalizeDay(options.day || localDay());
+    const attemptId = options.attemptId || newAttemptId();
+    if (!day || !validAttemptId(attemptId)) throw new TypeError("Invalid mastery attempt");
+    const scheduler = window.MasteryScheduler;
+    if (!scheduler || typeof scheduler.apply !== "function") throw new Error("Review engine is unavailable.");
+
+    const event = { itemId, correct: options.correct, hinted: options.hinted, attemptId, day };
+    const previous = store.mastery()[itemId] || null;
+    const localRecord = saveMasteryRecord(itemId, scheduler.apply(previous, {
+      correct: event.correct,
+      hinted: event.hinted,
+      attemptId: event.attemptId,
+      today: event.day,
+    }));
+    store.queueMasteryAttempt(event);
+    emit("iewt:mastery-state", { itemId, record: localRecord, synced: false });
+
+    if (!backend || !user) return { record: localRecord, synced: false };
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) return { record: localRecord, synced: false };
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await putJSON("/api/mastery", event, owner, generation);
+        if (!current(owner, epoch)) return { record: localRecord, synced: false };
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) return { record: localRecord, synced: false };
+        if (!payload.record || typeof payload.record !== "object" || Array.isArray(payload.record)) {
+          throw new Error("invalid-mastery-response");
+        }
+        const record = saveMasteryRecord(itemId, payload.record);
+        store.removeMasteryAttempt(attemptId);
+        emit("iewt:mastery-state", { itemId, record, synced: true, duplicate: !!payload.duplicate });
+        return { record, synced: true, duplicate: !!payload.duplicate };
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
+        return { record: localRecord, synced: false };
+      }
+    });
   }
 
   const Auth = {
@@ -425,6 +542,7 @@
         }
       });
     },
+    recordMasteryAttempt,
     resetProgress,
     resetLearningData: resetProgress,
   };
@@ -472,7 +590,7 @@
     store.bindOwner(null, { claimAnonymous: false, announce: false });
     setStatus("account-changed");
     emit("iewt:auth-ready", { status: authStatus, user: null });
-    emit("iewt:synced", { owner: null, progressComplete: false, statsComplete: false });
+    emit("iewt:synced", { owner: null, progressComplete: false, statsComplete: false, masteryComplete: false });
   });
 
   window.Auth = Object.freeze(Auth);

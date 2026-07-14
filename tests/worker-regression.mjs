@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
+import { applyMastery } from "../shared/mastery.js";
 import { signSession } from "../shared/session.js";
 import { REPO_ROOT, SESSION_SECRET, startWorker } from "./worker-server.mjs";
 
@@ -54,6 +55,7 @@ try {
   assert.equal(root.headers.get("clear-site-data"), '"cache"');
   assert.match(root.headers.get("set-cookie") || "", /cachefix=1/);
   assertSecurity(root, true);
+  assert.match(root.headers.get("content-security-policy") || "", /https:\/\/static\.cloudflareinsights\.com/, "CSP must allow Cloudflare Web Analytics");
   assert.match(await root.text(), /In Econometrics We Trust/);
 
   const repeat = await fetch(base + "/", { headers: { Cookie: "cachefix=1" } });
@@ -100,7 +102,7 @@ try {
   const sitemap = await sitemapResponse.text();
   const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
   assert.deepEqual(sitemapURLs, [
-    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", SITE_ORIGIN + "/lab/review/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
   ]);
   for (const canonicalURL of sitemapURLs) {
     const path = new URL(canonicalURL).pathname;
@@ -210,12 +212,16 @@ try {
   assert.equal(method.headers.get("allow"), "GET");
   assert.equal(methodBody.error.code, "method_not_allowed");
   assert.equal((await json(await fetch(base + "/api/progress"), 401)).error.code, "unauthorized");
+  assert.equal((await json(await fetch(base + "/api/mastery"), 401)).error.code, "unauthorized");
   const progressMethod = await fetch(base + "/api/progress", { method: "POST" });
   assert.equal((await json(progressMethod, 405)).error.code, "method_not_allowed");
   assert.equal(progressMethod.headers.get("allow"), "GET, PUT, DELETE");
   const statsMethod = await fetch(base + "/api/stats", { method: "DELETE" });
   assert.equal((await json(statsMethod, 405)).error.code, "method_not_allowed");
   assert.equal(statsMethod.headers.get("allow"), "GET, PUT");
+  const masteryMethod = await fetch(base + "/api/mastery", { method: "DELETE" });
+  assert.equal((await json(masteryMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(masteryMethod.headers.get("allow"), "GET, PUT");
   assert.equal((await json(await fetch(base + "/api/progress", { method: "DELETE" }), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/not-a-route"), 404)).error.code, "not_found");
 
@@ -260,6 +266,8 @@ try {
   // Deployed databases created before the generation barrier do not have this
   // table. The first authenticated learning request must migrate them lazily.
   await server.d1("DROP TABLE learning_sync");
+  await server.d1("DROP TABLE mastery_attempts");
+  await server.d1("DROP TABLE mastery");
   for (const headers of [
     { Cookie: `session=${session}`, Accept: "application/json" },
     { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_test" },
@@ -274,8 +282,13 @@ try {
       { stats: { points: 0, streak: 0, last: null }, generation: 0 },
       "stats reads must allow an absent or matching owner",
     );
+    assert.deepEqual(
+      await learningJSON(await fetch(base + "/api/mastery", { headers }), 200, 0),
+      { mastery: {}, generation: 0 },
+      "mastery reads must allow an absent or matching owner",
+    );
   }
-  for (const apiPath of ["/api/progress", "/api/stats"]) {
+  for (const apiPath of ["/api/progress", "/api/stats", "/api/mastery"]) {
     const denied = await json(await fetch(base + apiPath, {
       headers: { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_other" },
     }), 409);
@@ -293,6 +306,7 @@ try {
     for (const [apiPath, init] of [
       ["/api/progress", { method: "PUT", headers, body: JSON.stringify({ model: "ols", done: [0] }) }],
       ["/api/stats", { method: "PUT", headers, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
+      ["/api/mastery", { method: "PUT", headers, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "owner-check", correct: true, hinted: false, day: "2026-07-14" }) }],
       ["/api/progress", { method: "DELETE", headers }],
     ]) {
       const denied = await json(await fetch(base + apiPath, init), 409);
@@ -303,6 +317,7 @@ try {
   for (const [apiPath, init] of [
     ["/api/progress", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ model: "ols", done: [0] }) }],
     ["/api/stats", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
+    ["/api/mastery", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "origin-check", correct: true, hinted: false, day: "2026-07-14" }) }],
     ["/api/progress", { method: "DELETE", headers: crossOriginAuth }],
   ]) {
     const denied = await json(await fetch(base + apiPath, init), 403);
@@ -322,6 +337,7 @@ try {
     for (const [apiPath, body] of [
       ["/api/progress", { model: "ols", done: [0] }],
       ["/api/stats", { streak: 1, last: "2026-07-12" }],
+      ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "generation-check", correct: true, hinted: false, day: "2026-07-14" }],
     ]) {
       const denied = await learningJSON(await fetch(base + apiPath, {
         method: "PUT", headers: generationHeaders, body: JSON.stringify(body),
@@ -372,6 +388,74 @@ try {
     method: "PUT", headers: auth, body: JSON.stringify({ streak: 100000, last: "9999-12-31" }),
   }), 400)).error.code, "invalid_stats", "far-future activity must be rejected");
 
+  const masteryAttempt = (attemptId, correct, hinted = false, itemId = "ols:ols-line-04", headers = auth, day = "2026-07-14") =>
+    fetch(base + "/api/mastery", {
+      method: "PUT", headers,
+      body: JSON.stringify({ itemId, attemptId, correct, hinted, day }),
+    });
+  const firstMastery = await learningJSON(await masteryAttempt("attempt-1", false), 200, 0);
+  assert.deepEqual(firstMastery.record, {
+    level: 0, dueDay: "2026-07-15", attempts: 1, correct: 0,
+    lastResult: false, lastAttemptId: "attempt-1", updatedAt: firstMastery.record.updatedAt,
+  }, "incorrect review must reset mastery and schedule tomorrow");
+  assert.equal(firstMastery.duplicate, false);
+  const retryMastery = await learningJSON(await masteryAttempt("attempt-1", false), 200, 0);
+  assert.equal(retryMastery.duplicate, true, "a retried attempt must be identified as a duplicate");
+  assert.equal(retryMastery.record.attempts, 1, "a retried attempt must not increment counters");
+  assert.equal((await json(await masteryAttempt("attempt-1", true), 409)).error.code, "attempt_conflict", "attempt ids must not be reusable for different data");
+  const secondMastery = await learningJSON(await masteryAttempt("attempt-2", true), 200, 0);
+  assert.equal(secondMastery.record.level, 1);
+  assert.equal(secondMastery.record.dueDay, "2026-07-15");
+  assert.equal(secondMastery.record.attempts, 2);
+  assert.equal(secondMastery.record.correct, 1);
+  const thirdMastery = await learningJSON(await masteryAttempt("attempt-3", true), 200, 0);
+  assert.equal(thirdMastery.record.level, 2);
+  assert.equal(thirdMastery.record.dueDay, "2026-07-17", "level two must use the three-day interval");
+  const hintedMastery = await learningJSON(await masteryAttempt("attempt-4", true, true), 200, 0);
+  assert.equal(hintedMastery.record.level, 1, "hinted recall must cap mastery at level one");
+  assert.equal(hintedMastery.record.dueDay, "2026-07-15");
+  const masterySnapshot = await learningJSON(await fetch(base + "/api/mastery", {
+    headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
+  }), 200, 0);
+  assert.deepEqual(masterySnapshot.mastery["ols:ols-line-04"], hintedMastery.record);
+  assert.equal((await json(await masteryAttempt("unknown-item", true, false, "constructor"), 400)).error.code, "invalid_mastery_attempt");
+
+  let parityRecord = null;
+  const paritySteps = [
+    { day: "2025-01-01", correct: true, hinted: false },
+    { day: "2025-01-02", correct: true, hinted: false },
+    { day: "2025-01-05", correct: true, hinted: false },
+    { day: "2025-01-12", correct: true, hinted: false },
+    { day: "2025-02-02", correct: true, hinted: false },
+    { day: "2025-04-03", correct: true, hinted: false },
+    { day: "2025-06-02", correct: true, hinted: true },
+    { day: "2025-06-03", correct: false, hinted: false },
+  ];
+  for (const [index, step] of paritySteps.entries()) {
+    const attemptId = `parity-${index + 1}`;
+    const payload = await learningJSON(
+      await masteryAttempt(attemptId, step.correct, step.hinted, "ols:ols-line-05", auth, step.day),
+      200,
+      0,
+    );
+    const expected = applyMastery(parityRecord, {
+      ...step,
+      attemptId,
+      today: step.day,
+      updatedAt: payload.record.updatedAt,
+    });
+    assert.deepEqual(payload.record, expected, `Worker mastery transition ${index + 1} drifted from the shared scheduler`);
+    parityRecord = payload.record;
+  }
+
+  const concurrentMastery = await Promise.all([
+    masteryAttempt("attempt-concurrent", true, false, "ols:ols-math-03"),
+    masteryAttempt("attempt-concurrent", true, false, "ols:ols-math-03"),
+  ]);
+  const concurrentPayloads = await Promise.all(concurrentMastery.map((response) => learningJSON(response, 200, 0)));
+  assert.deepEqual(concurrentPayloads.map((payload) => payload.duplicate).sort(), [false, true], "concurrent retry was applied more than once");
+  assert(concurrentPayloads.every((payload) => payload.record.attempts === 1), "concurrent retry incremented mastery twice");
+
   await server.d1("UPDATE stats SET points=999999 WHERE user_id='g_test'");
   const repairedPoints = await json(await fetch(base + "/api/stats", { headers: { Cookie: `session=${session}` } }), 200);
   assert.equal(repairedPoints.stats.points, 40, "legacy or forged stored points must be recomputed exactly");
@@ -415,6 +499,7 @@ try {
   await json(await fetch(base + "/api/stats", {
     method: "PUT", headers: otherAuth, body: JSON.stringify({ streak: 7, last: "2026-07-12" }),
   }), 200);
+  await learningJSON(await masteryAttempt("other-attempt", true, false, "ols:ols-line-04", otherAuth), 200, 0);
 
   const resetHeaders = {
     Cookie: `session=${session}`,
@@ -431,12 +516,14 @@ try {
     ok: true,
     progress: {},
     stats: { points: 0, streak: 0, last: null },
+    mastery: {},
     generation: 1,
   }, "reset response must expose the deterministic empty state");
 
   for (const [apiPath, body] of [
     ["/api/progress", { model: "ols", done: [8] }],
     ["/api/stats", { streak: 99, last: "2026-07-13" }],
+    ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "stale-attempt", correct: true, hinted: false, day: "2026-07-14" }],
   ]) {
     const staleWrite = await learningJSON(await fetch(base + apiPath, {
       method: "PUT", headers: auth, body: JSON.stringify(body),
@@ -454,8 +541,20 @@ try {
     { stats: { points: 0, streak: 0, last: null }, generation: 1 },
     "reset must atomically zero stats and stale writes must not restore them",
   );
+  assert.deepEqual(
+    await learningJSON(await fetch(base + "/api/mastery", { headers: { Cookie: `session=${session}` } }), 200, 1),
+    { mastery: {}, generation: 1 },
+    "reset must atomically delete mastery and its retry ledger",
+  );
 
   const generationOneAuth = { ...authWithoutGeneration, "X-IEWT-Generation": "1" };
+  const reusedAfterReset = await learningJSON(
+    await masteryAttempt("attempt-1", true, false, "ols:ols-line-04", generationOneAuth),
+    200,
+    1,
+  );
+  assert.equal(reusedAfterReset.duplicate, false, "reset did not clear the mastery retry ledger");
+  assert.equal(reusedAfterReset.record.attempts, 1, "post-reset mastery inherited deleted counters");
   await learningJSON(await fetch(base + "/api/progress", {
     method: "PUT",
     headers: generationOneAuth,
@@ -489,10 +588,14 @@ try {
     0,
   );
   assert.deepEqual(isolatedStats.stats, { points: 5, streak: 7, last: "2026-07-12" }, "reset must not affect another user's stats");
+  const isolatedMastery = await learningJSON(
+    await fetch(base + "/api/mastery", { headers: { Cookie: `session=${other}` } }), 200, 0,
+  );
+  assert.equal(isolatedMastery.mastery["ols:ols-line-04"].attempts, 1, "reset must not affect another user's mastery");
   const expired = await signSession({ sub: "g_expired", exp: Date.now() - 1 }, SESSION_SECRET);
   assert.equal((await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${expired}` } }), 401)).error.code, "unauthorized");
 
-  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, generation-fenced reset, derived points");
+  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery idempotency, generation-fenced reset, derived points");
 } finally {
   await server.stop();
 }

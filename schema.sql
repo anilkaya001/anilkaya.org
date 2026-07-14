@@ -31,3 +31,34 @@ CREATE TABLE IF NOT EXISTS learning_sync (
   generation INTEGER NOT NULL DEFAULT 0
              CHECK (generation BETWEEN 0 AND 9007199254740991)
 );
+
+-- Per-assessment spaced-repetition state. Item ids are generator-stable stage
+-- ids from shared/review-manifest.js; the Worker computes every transition.
+CREATE TABLE IF NOT EXISTS mastery (
+  user_id        TEXT NOT NULL,
+  item_id        TEXT NOT NULL,
+  level          INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5),
+  due_day        TEXT NOT NULL,
+  attempts       INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000),
+  correct        INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000),
+  last_result    INTEGER CHECK (last_result IN (0, 1)),
+  last_attempt_id TEXT,
+  updated_at     INTEGER NOT NULL,
+  PRIMARY KEY (user_id, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS mastery_due_by_user ON mastery (user_id, due_day, item_id);
+
+-- The short attempt ledger makes PUT /api/mastery idempotent even if a client
+-- retries after losing the response. It is cleared by the learning reset.
+CREATE TABLE IF NOT EXISTS mastery_attempts (
+  user_id     TEXT NOT NULL,
+  attempt_id  TEXT NOT NULL,
+  item_id     TEXT NOT NULL,
+  correct     INTEGER NOT NULL CHECK (correct IN (0, 1)),
+  hinted      INTEGER NOT NULL CHECK (hinted IN (0, 1)),
+  attempt_day TEXT NOT NULL,
+  applied     INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0, 1)),
+  received_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, attempt_id)
+);

@@ -297,7 +297,8 @@
       '<div class="quiz__feedback" role="status"></div>';
     const fb = q.querySelector(".quiz__feedback");
     const checkBtn = q.querySelector(".quiz__check");
-    if (st.hint) q.querySelector(".quiz__hint").addEventListener("click", () => { fb.className = "quiz__feedback hint"; fb.textContent = "Hint: " + st.hint; });
+    let hinted = false;
+    if (st.hint) q.querySelector(".quiz__hint").addEventListener("click", () => { hinted = true; fb.className = "quiz__feedback hint"; fb.textContent = "Hint: " + st.hint; });
     else q.querySelector(".quiz__hint").remove();
     q.querySelectorAll('input[type="text"]').forEach((inp) => inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); checkBtn.click(); } }));
 
@@ -305,6 +306,9 @@
       if (q.classList.contains("is-solved")) return;
       const r = grade(st, q, name);
       if (r.empty) { fb.className = "quiz__feedback hint"; fb.textContent = emptyMsg(st.type); return; }
+      if (typeof r.ok === "boolean" && st.id && window.Auth && typeof window.Auth.recordMasteryAttempt === "function") {
+        void window.Auth.recordMasteryAttempt(topic.id + ":" + st.id, { correct: r.ok, hinted });
+      }
       if (r.ok) {
         fb.className = "quiz__feedback ok"; fb.innerHTML = "Correct. " + (st.explain || "");
         q.classList.add("is-solved"); markCorrect(st, q, name);

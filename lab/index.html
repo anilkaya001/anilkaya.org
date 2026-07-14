@@ -24,16 +24,18 @@
 
   <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=22" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/css/base.css?v=22">
-  <link rel="stylesheet" href="/assets/css/lab.css?v=22">
+  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=23" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css?v=23">
+  <link rel="stylesheet" href="/assets/css/lab.css?v=23">
 
-  <script src="/assets/js/nav.js?v=22" defer></script>
-  <script src="/assets/js/course-catalog.js?v=22" defer></script>
-  <script src="/assets/js/storage.js?v=22" defer></script>
-  <script src="/assets/js/gamify.js?v=22" defer></script>
-  <script src="/assets/js/auth.js?v=22" defer></script>
-  <script src="/assets/js/lab-ui.js?v=22" defer></script>
+  <script src="/assets/js/nav.js?v=23" defer></script>
+  <script src="/assets/js/course-catalog.js?v=23" defer></script>
+  <script src="/assets/js/mastery.js?v=23" defer></script>
+  <script src="/assets/js/review-catalog.js?v=23" defer></script>
+  <script src="/assets/js/storage.js?v=23" defer></script>
+  <script src="/assets/js/gamify.js?v=23" defer></script>
+  <script src="/assets/js/auth.js?v=23" defer></script>
+  <script src="/assets/js/lab-ui.js?v=23" defer></script>
 
   <!-- Structured data: the course catalogue, for search engines. -->
   <script type="application/ld+json">
@@ -252,7 +254,11 @@
     <section class="lab-hero" aria-labelledby="academyTitle">
       <p class="lab-hero__kicker">Econometrics Lab</p>
       <h1 id="academyTitle">Learn econometrics by doing the real work.</h1>
-      <p>Build intuition, run estimators in Python, manipulate assumptions, and prove what you understand — from first regression to advanced moment methods.</p>
+      <p>Run real Python estimators, test assumptions, and prove your understanding — from first regression to advanced moment methods.</p>
+      <div class="lab-hero__actions" aria-label="Start learning">
+        <a class="btn btn--gold" id="heroPrimaryCta" href="/lab/ordinary-least-squares/">Start with OLS &rarr;</a>
+        <a class="lab-hero__browse" href="#courseLibrary">Explore all courses</a>
+      </div>
       <ul class="lab-hero__proof" aria-label="Platform features">
         <li><b>205</b> interactive lessons</li>
         <li><b>7</b> complete core courses</li>
@@ -260,27 +266,27 @@
       </ul>
     </section>
 
-    <div class="account account--loading" id="account" aria-live="polite">
-      <span class="account__txt">Checking account and saved progress…</span>
-    </div>
-
     <section class="academy-dashboard" id="academyDashboard" aria-labelledby="dashboardTitle" aria-busy="true">
       <div class="academy-section__head">
         <div><p class="academy-kicker">Your learning</p><h2 id="dashboardTitle">Continue with purpose</h2></div>
         <p id="dashboardSummary">Your progress stays on this device unless you sign in.</p>
       </div>
       <div class="dashboard-grid" id="dashboardGrid"></div>
-    </section>
-
-    <section class="academy-section" aria-labelledby="pathsTitle">
-      <div class="academy-section__head">
-        <div><p class="academy-kicker">Guided curricula</p><h2 id="pathsTitle">Choose a learning path</h2></div>
-        <p>Every route uses the same rigorous courses in a deliberate order. Switch routes whenever your goal changes.</p>
+      <div class="dashboard-command-grid">
+        <a class="dashboard-review" id="dailyReviewCta" href="/lab/review/">
+          <span class="academy-kicker">Daily mastery</span>
+          <strong id="dailyReviewCount">Build your review queue</strong>
+          <span id="dailyReviewSummary">Complete assessed lessons, then revisit them at the right time.</span>
+        </a>
+        <div class="dashboard-focus" id="dashboardFocus"></div>
       </div>
-      <div class="path-grid" id="learningPaths"></div>
     </section>
 
-    <section class="academy-section course-explorer" aria-labelledby="coursesTitle">
+    <div class="account account--loading" id="account" aria-live="polite">
+      <span class="account__txt">Checking account and saved progress…</span>
+    </div>
+
+    <section class="academy-section course-explorer" id="courseLibrary" aria-labelledby="coursesTitle">
       <div class="academy-section__head">
         <div><p class="academy-kicker">Course library</p><h2 id="coursesTitle">Explore the core methods</h2></div>
         <output id="courseResults" for="courseSearch levelFilter statusFilter">7 courses</output>
@@ -338,6 +344,14 @@
       </a>
     </div>
       <p class="course-empty-state" id="courseEmptyState" hidden>No courses match those filters. Try a broader search.</p>
+    </section>
+
+    <section class="academy-section" aria-labelledby="pathsTitle">
+      <div class="academy-section__head">
+        <div><p class="academy-kicker">Guided curricula</p><h2 id="pathsTitle">Choose a learning path</h2></div>
+        <p>Every route uses the same rigorous courses in a deliberate order. Switch routes whenever your goal changes.</p>
+      </div>
+      <div class="path-grid" id="learningPaths"></div>
     </section>
 
     <section class="academy-section academy-method" aria-labelledby="methodTitle">

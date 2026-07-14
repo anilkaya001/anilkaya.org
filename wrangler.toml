@@ -3,7 +3,7 @@
 
 name = "anilkaya"
 main = "worker.js"
-compatibility_date = "2026-07-12"
+compatibility_date = "2026-07-14"
 
 # Serve the repo root as the static site; .assetsignore keeps server/config
 # files out of the public bundle. Worker-first routing is required because

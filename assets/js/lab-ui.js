@@ -34,6 +34,47 @@
       '<div class="progress__bar" style="width:' + percent + '%"></div></div>';
   }
 
+  function focusSteps(states, active) {
+    const start = Math.max(0, states.indexOf(active));
+    const ordered = [...states.slice(start), ...states.slice(0, start)];
+    const steps = [];
+    for (const state of ordered) {
+      const completed = new Set(state.done);
+      for (let index = 0; index < state.topic.stages && steps.length < 3; index++) {
+        if (!completed.has(index)) steps.push({ state, index, review: false });
+      }
+      if (steps.length === 3) break;
+    }
+    // A fully completed curriculum still offers a deterministic review plan.
+    if (!steps.length && states[0]) {
+      for (let index = 0; index < Math.min(3, states[0].topic.stages); index++) {
+        steps.push({ state: states[0], index, review: true });
+      }
+    }
+    return steps;
+  }
+
+  function localDay() {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function reviewQueue(snapshot) {
+    const catalogue = Array.isArray(window.REVIEW_ITEMS) ? window.REVIEW_ITEMS : [];
+    const mastery = typeof store().mastery === "function" ? store().mastery() : {};
+    const today = localDay();
+    const eligible = catalogue.filter((item) => {
+      if (!item || typeof item.id !== "string" || typeof item.courseId !== "string" || !Number.isSafeInteger(item.stageIndex)) return false;
+      return Array.isArray(snapshot[item.courseId] && snapshot[item.courseId].done) && snapshot[item.courseId].done.includes(item.stageIndex);
+    });
+    const due = eligible.filter((item) => {
+      if (!Object.hasOwn(mastery, item.id)) return true;
+      const dueDay = mastery[item.id] && mastery[item.id].dueDay;
+      return typeof dueDay === "string" && dueDay <= today;
+    });
+    return { eligible: eligible.length, due: due.length };
+  }
+
   function renderAccount() {
     const container = document.getElementById("account");
     if (!container) return;
@@ -67,7 +108,8 @@
   function renderDashboard() {
     const section = document.getElementById("academyDashboard");
     const grid = document.getElementById("dashboardGrid");
-    if (!section || !grid) return;
+    const focus = document.getElementById("dashboardFocus");
+    if (!section || !grid || !focus) return;
     const snapshot = progress();
     const states = META.map((topic) => ({ topic, ...courseState(topic, snapshot) }));
     const totalLessons = META.reduce((sum, topic) => sum + topic.stages, 0);
@@ -76,19 +118,54 @@
     const active = states.find((state) => state.status === "in-progress") || states.find((state) => state.status === "not-started") || states[0];
     const overall = totalLessons ? Math.round((100 * completedLessons) / totalLessons) : 0;
     const gamify = window.Gamify ? window.Gamify.get() : { points: 0, streak: 0 };
+    const review = reviewQueue(snapshot);
     const resumeLabel = active.status === "not-started" ? "Start the foundations" : active.status === "completed" ? "Review any course" : "Resume where you stopped";
+    const activeHref = hrefFor(active.topic, active.firstOpen);
+    const activeVerb = active.status === "completed" ? "Review" : active.status === "not-started" ? "Start" : "Continue";
+
+    const heroCta = document.getElementById("heroPrimaryCta");
+    if (heroCta) {
+      const lesson = active.status === "completed" ? "" : ` · lesson ${active.firstOpen + 1}`;
+      heroCta.href = activeHref;
+      heroCta.textContent = `${activeVerb} ${active.topic.shortTitle || active.topic.title}${lesson} →`;
+      heroCta.setAttribute("aria-label", `${activeVerb} ${active.topic.title}${active.status === "completed" ? "" : ` at lesson ${active.firstOpen + 1}`}`);
+    }
+
+    const reviewCta = document.getElementById("dailyReviewCta");
+    const reviewCount = document.getElementById("dailyReviewCount");
+    const reviewSummary = document.getElementById("dailyReviewSummary");
+    if (reviewCta && reviewCount && reviewSummary) {
+      reviewCta.dataset.eligible = String(review.eligible);
+      reviewCta.dataset.due = String(review.due);
+      if (review.eligible === 0) {
+        reviewCount.textContent = "Build your review queue";
+        reviewSummary.textContent = "Complete assessed lessons, then revisit them at the right time.";
+        reviewCta.setAttribute("aria-label", "Build your daily mastery review queue");
+      } else {
+        reviewCount.textContent = `${review.due} ${review.due === 1 ? "review" : "reviews"} due now`;
+        reviewSummary.textContent = review.due
+          ? `${review.eligible} learned ${review.eligible === 1 ? "concept is" : "concepts are"} in your mastery queue.`
+          : `All ${review.eligible} learned ${review.eligible === 1 ? "concept is" : "concepts are"} on schedule.`;
+        reviewCta.setAttribute("aria-label", `Open daily mastery review: ${review.due} due now`);
+      }
+    }
 
     grid.innerHTML =
       '<article class="dashboard-resume"><p class="academy-kicker">' + resumeLabel + '</p><h3>' + esc(active.topic.title) + '</h3>' +
         '<p>' + active.done.length + " of " + active.topic.stages + " lessons complete · next: lesson " + (active.firstOpen + 1) + "</p>" +
         '<div class="dashboard-resume__progress">' + progressHTML(active.percent, active.topic.title + " completion") + '<span>' + active.percent + "%</span></div>" +
-        '<a class="btn btn--gold" href="' + hrefFor(active.topic, active.firstOpen) + '">' + (active.status === "not-started" ? "Begin course" : "Continue learning") + " &rarr;</a></article>" +
+        '<a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin course" : active.status === "completed" ? "Review course" : "Continue learning") + " &rarr;</a></article>" +
       '<div class="dashboard-metrics">' +
         '<article><span class="dashboard-metric__value">' + completedLessons + '</span><span class="dashboard-metric__label">Lessons completed</span><small>of ' + totalLessons + "</small></article>" +
         '<article><span class="dashboard-metric__value">' + completeCourses + '</span><span class="dashboard-metric__label">Courses complete</span><small>of ' + META.length + "</small></article>" +
         '<article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + " day streak</small></article>" +
         '<article class="dashboard-overall"><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Core curriculum</span>' + progressHTML(overall, "Core curriculum completion") + "</article>" +
       "</div>";
+
+    const steps = focusSteps(states, active);
+    focus.innerHTML = '<div class="dashboard-focus__head"><p class="academy-kicker">Focus plan</p><h3 id="focusPlanTitle">Your next three steps</h3></div>' +
+      '<ol aria-labelledby="focusPlanTitle">' + steps.map(({ state, index, review }, position) =>
+        '<li><a href="' + hrefFor(state.topic, index) + '"><span class="dashboard-focus__number" aria-hidden="true">' + String(position + 1).padStart(2, "0") + '</span><span><b>' + (review ? "Review lesson " : "Lesson ") + (index + 1) + '</b><small>' + esc(state.topic.shortTitle || state.topic.title) + "</small></span></a></li>").join("") + "</ol>";
     section.setAttribute("aria-busy", "false");
     const summary = document.getElementById("dashboardSummary");
     if (summary) summary.textContent = completedLessons
@@ -156,10 +233,10 @@
   }
 
   function renderAll() {
-    renderAccount();
     renderDashboard();
-    renderPaths();
+    renderAccount();
     renderGrid();
+    renderPaths();
   }
 
   function openResetDialog() {

@@ -6,6 +6,7 @@
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
+import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 const LEGACY_COURSE_PATHS = new Set([
@@ -21,6 +22,25 @@ const LEARNING_SYNC_SCHEMA_SQL =
     "generation INTEGER NOT NULL DEFAULT 0 " +
       "CHECK (generation BETWEEN 0 AND 9007199254740991)" +
   ")";
+const MASTERY_SCHEMA_SQL =
+  "CREATE TABLE IF NOT EXISTS mastery (" +
+    "user_id TEXT NOT NULL, item_id TEXT NOT NULL, " +
+    "level INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5), " +
+    "due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), " +
+    "correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), " +
+    "last_result INTEGER CHECK (last_result IN (0, 1)), last_attempt_id TEXT, " +
+    "updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, item_id)" +
+  ")";
+const MASTERY_ATTEMPTS_SCHEMA_SQL =
+  "CREATE TABLE IF NOT EXISTS mastery_attempts (" +
+    "user_id TEXT NOT NULL, attempt_id TEXT NOT NULL, item_id TEXT NOT NULL, " +
+    "correct INTEGER NOT NULL CHECK (correct IN (0, 1)), " +
+    "hinted INTEGER NOT NULL CHECK (hinted IN (0, 1)), attempt_day TEXT NOT NULL, " +
+    "applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0, 1)), " +
+    "received_at INTEGER NOT NULL, PRIMARY KEY (user_id, attempt_id)" +
+  ")";
+const MASTERY_INDEX_SQL =
+  "CREATE INDEX IF NOT EXISTS mastery_due_by_user ON mastery (user_id, due_day, item_id)";
 
 // Pyodide is loaded from jsDelivr and requires eval + WebAssembly evaluation.
 const CSP = [
@@ -31,8 +51,8 @@ const CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net",
-  "connect-src 'self' https://cdn.jsdelivr.net",
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com",
+  "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com",
   "worker-src 'self' blob:",
   "form-action 'self'",
   "upgrade-insecure-requests",
@@ -252,6 +272,65 @@ async function learningBatch(env, userId, buildStatements) {
     await env.DB.prepare(LEARNING_SYNC_SCHEMA_SQL).run();
     return execute();
   }
+}
+
+async function ensureMasterySchema(env) {
+  await env.DB.batch([
+    env.DB.prepare(MASTERY_SCHEMA_SQL),
+    env.DB.prepare(MASTERY_ATTEMPTS_SCHEMA_SQL),
+    env.DB.prepare(MASTERY_INDEX_SQL),
+  ]);
+}
+
+async function masteryBatch(env, userId, buildStatements) {
+  try {
+    return await learningBatch(env, userId, buildStatements);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table:\s*(?:main\.)?mastery(?:_attempts)?\b/i.test(message)) throw error;
+    await ensureMasterySchema(env);
+    return learningBatch(env, userId, buildStatements);
+  }
+}
+
+function masteryRecord(row) {
+  if (!row || !Object.hasOwn(REVIEW_ITEM_BY_ID, row.item_id)) return null;
+  const level = Number(row.level);
+  const attempts = Number(row.attempts);
+  const correct = Number(row.correct);
+  const updatedAt = Number(row.updated_at);
+  const dueDay = normalizeDay(row.due_day);
+  if (!Number.isSafeInteger(level) || level < 0 || level > 5 || !dueDay ||
+      !Number.isSafeInteger(attempts) || attempts < 0 || attempts > 1000000 ||
+      !Number.isSafeInteger(correct) || correct < 0 || correct > attempts ||
+      !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
+  return {
+    level,
+    dueDay,
+    attempts,
+    correct,
+    lastResult: row.last_result == null ? null : Number(row.last_result) === 1,
+    lastAttemptId: typeof row.last_attempt_id === "string" ? row.last_attempt_id : null,
+    updatedAt,
+  };
+}
+
+async function loadMasterySnapshot(env, userId) {
+  const results = await masteryBatch(env, userId, () => [
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+    env.DB.prepare(
+      "SELECT item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at " +
+      "FROM mastery WHERE user_id = ? ORDER BY item_id"
+    ).bind(userId),
+  ]);
+  const sync = results[1].results[0];
+  if (!sync) throw new Error("Learning sync state is missing");
+  const mastery = Object.create(null);
+  for (const row of results[2].results || []) {
+    const record = masteryRecord(row);
+    if (record) mastery[row.item_id] = record;
+  }
+  return { mastery, generation: normalizeGeneration(sync.generation) };
 }
 
 async function loadGeneration(env, userId) {
@@ -569,7 +648,7 @@ async function route(request, env) {
 
     if (request.method === "DELETE") {
       const now = Date.now();
-      const results = await learningBatch(env, user.id, () => [
+      const results = await masteryBatch(env, user.id, () => [
         env.DB.prepare(
           "INSERT INTO learning_sync (user_id, generation) VALUES (?, 1) " +
           "ON CONFLICT(user_id) DO UPDATE SET generation=" +
@@ -577,6 +656,8 @@ async function route(request, env) {
           "RETURNING generation"
         ).bind(user.id, MAX_SYNC_GENERATION),
         env.DB.prepare("DELETE FROM progress WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM mastery WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM mastery_attempts WHERE user_id = ?").bind(user.id),
         env.DB.prepare(
           "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, 0, 0, NULL, ?) " +
           "ON CONFLICT(user_id) DO UPDATE SET points=0, streak=0, last=NULL, updated_at=excluded.updated_at"
@@ -587,6 +668,7 @@ async function route(request, env) {
         ok: true,
         progress: {},
         stats: { points: 0, streak: 0, last: null },
+        mastery: {},
         generation,
       }, 200, generationHeaders(generation));
     }
@@ -689,6 +771,88 @@ async function route(request, env) {
     await syncDerivedPoints(env, user.id);
     const snapshot = await loadStatsSnapshot(env, user.id);
     return json(snapshot, 200, generationHeaders(snapshot.generation));
+  }
+
+  if (path === "/api/mastery") {
+    requireMethod(request, ["GET", "PUT"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    if (request.method === "GET") {
+      requireReadOwnerIfPresent(request, user.id);
+      const snapshot = await loadMasterySnapshot(env, user.id);
+      return json(snapshot, 200, generationHeaders(snapshot.generation));
+    }
+
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+    const body = await readJSON(request);
+    const itemId = body.itemId;
+    const attemptId = body.attemptId;
+    const day = normalizeActivityDay(body.day);
+    if (typeof itemId !== "string" || !Object.hasOwn(REVIEW_ITEM_BY_ID, itemId) ||
+        typeof attemptId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(attemptId) ||
+        typeof body.correct !== "boolean" || typeof body.hinted !== "boolean" || !day) {
+      throw new HttpError(400, "invalid_mastery_attempt", "Review item and attempt data must be valid");
+    }
+
+    const correct = body.correct ? 1 : 0;
+    const hinted = body.hinted ? 1 : 0;
+    const now = Date.now();
+    const results = await masteryBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO mastery_attempts " +
+          "(user_id, attempt_id, item_id, correct, hinted, attempt_day, applied, received_at) " +
+        "SELECT ?, ?, ?, ?, ?, ?, 0, ? WHERE EXISTS (" +
+          "SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?" +
+        ") ON CONFLICT(user_id, attempt_id) DO NOTHING RETURNING attempt_id"
+      ).bind(user.id, attemptId, itemId, correct, hinted, day, now, user.id, generation),
+      env.DB.prepare(
+        "INSERT INTO mastery " +
+          "(user_id, item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
+        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), 1, ?, ?, ?, ? " +
+        "WHERE EXISTS (" +
+          "SELECT 1 FROM mastery_attempts WHERE user_id=? AND attempt_id=? AND item_id=? AND applied=0" +
+        ") ON CONFLICT(user_id, item_id) DO UPDATE SET " +
+          "level=CASE WHEN ?=0 THEN 0 WHEN ?=1 THEN MIN(mastery.level, 1) ELSE MIN(5, mastery.level+1) END, " +
+          "due_day=date(?, '+' || CASE " +
+            "WHEN ?=0 OR ?=1 THEN 1 WHEN mastery.level<=0 THEN 1 WHEN mastery.level=1 THEN 3 " +
+            "WHEN mastery.level=2 THEN 7 WHEN mastery.level=3 THEN 21 ELSE 60 END || ' days'), " +
+          "attempts=MIN(1000000, mastery.attempts+1), " +
+          "correct=MIN(1000000, mastery.correct+?), last_result=?, last_attempt_id=?, " +
+          "updated_at=MAX(mastery.updated_at, excluded.updated_at) " +
+        "RETURNING item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at"
+      ).bind(
+        user.id, itemId, correct, hinted, day, correct, correct, attemptId, now,
+        user.id, attemptId, itemId,
+        correct, hinted, day, correct, hinted, correct, correct, attemptId,
+      ),
+      env.DB.prepare(
+        "UPDATE mastery_attempts SET applied=1 WHERE user_id=? AND attempt_id=? AND item_id=? AND applied=0 RETURNING attempt_id"
+      ).bind(user.id, attemptId, itemId),
+      env.DB.prepare(
+        "SELECT item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at " +
+        "FROM mastery WHERE user_id=? AND item_id=?"
+      ).bind(user.id, itemId),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+      env.DB.prepare(
+        "SELECT item_id, correct, hinted, attempt_day FROM mastery_attempts WHERE user_id=? AND attempt_id=?"
+      ).bind(user.id, attemptId),
+    ]);
+
+    const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
+    if (currentGeneration !== generation) throwResetRequired(currentGeneration);
+    const attempt = results[6].results[0];
+    if (!attempt) throw new Error("Mastery attempt was not recorded");
+    if (attempt.item_id !== itemId || Number(attempt.correct) !== correct || Number(attempt.hinted) !== hinted || attempt.attempt_day !== day) {
+      throw new HttpError(409, "attempt_conflict", "Review attempt id was already used for different data");
+    }
+    const record = masteryRecord(results[4].results[0]);
+    if (!record) throw new Error("Stored mastery state is invalid");
+    const duplicate = !results[1].results[0];
+    return json({ ok: true, record, duplicate, generation }, 200, generationHeaders(generation));
   }
 
   if (path.startsWith("/api/")) {
