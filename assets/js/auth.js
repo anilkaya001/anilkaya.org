@@ -13,7 +13,7 @@
   let resetting = false, resetPromise = null;
   const store = window.IEWTStorage;
   // Snapshot the anonymous profile before later deferred scripts can record a
-  // course interaction. If /api/me resolves to a returning account, only the
+  // course interaction. If the initial account probe resolves to a returning account, only the
   // post-snapshot delta is transferred; pre-existing anonymous work remains an
   // isolated device profile.
   const bootAnonymousProgress = store.progress();
@@ -106,6 +106,14 @@
     headers: ownerHeaders(owner, { Accept: "application/json" }),
   });
 
+  const deletePlacement = (owner, generation) => getJSON("/api/placement", {
+    method: "DELETE",
+    headers: ownerHeaders(owner, {
+      Accept: "application/json",
+      "X-IEWT-Generation": String(generation),
+    }),
+  });
+
   function enqueue(operation) {
     const result = mutationTail.catch(() => undefined).then(operation);
     // Keep the lane usable after one request fails while still returning the
@@ -141,7 +149,7 @@
     if (options.invalidate === true) mutationEpoch++;
     if (active) {
       emit("iewt:progress-reset", { owner, generation, remote: true });
-      emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, remote: true });
+      emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, placementComplete: true, reset: true, remote: true });
     }
     return true;
   }
@@ -211,6 +219,27 @@
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   }
 
+  const PLACEMENT_BANDS = new Set(["foundation", "applied", "advanced"]);
+  const PLACEMENT_TOPICS = new Set(["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"]);
+
+  function placementValue(value) {
+    if (value == null) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        !PLACEMENT_BANDS.has(value.band) || !PLACEMENT_TOPICS.has(value.recommendedTopic)) return undefined;
+    const completedDay = store.normalizeDay(value.completedDay);
+    const expectedBand = value.score <= 6 ? "foundation" : value.score <= 11 ? "applied" : "advanced";
+    const latestDay = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (!Number.isSafeInteger(value.score) || value.total !== 15 || value.score < 0 || value.score > value.total ||
+        value.band !== expectedBand || !completedDay || completedDay > latestDay) return undefined;
+    return {
+      band: value.band,
+      score: value.score,
+      total: value.total,
+      completedDay,
+      recommendedTopic: value.recommendedTopic,
+    };
+  }
+
   function saveMasteryRecord(itemId, record) {
     const mastery = store.mastery();
     mastery[itemId] = record;
@@ -243,13 +272,14 @@
     return complete && store.masteryOutbox().length === 0;
   }
 
-  async function pullAll(epoch, owner) {
+  async function pullAll(epoch, owner, bootstrapPayload = null) {
     return enqueue(async () => {
       if (!current(owner, epoch)) return false;
-      let progressComplete = false, statsComplete = false, masteryComplete = false;
+      let progressComplete = false, statsComplete = false, masteryComplete = false, placementComplete = false;
+      let progressUploaded = false;
 
       try {
-        const payload = await getJSON("/api/progress", {
+        const payload = bootstrapPayload || await getJSON("/api/progress", {
           headers: ownerHeaders(owner, { Accept: "application/json" }),
         });
         if (!current(owner, epoch)) return false;
@@ -271,6 +301,7 @@
         if (pending.length) {
           await Promise.all(pending.map(([model, value]) =>
             putJSON("/api/progress", { model, done: value.done }, owner, generation)));
+          progressUploaded = true;
         }
         if (!current(owner, epoch)) return false;
         progressComplete = true;
@@ -281,7 +312,10 @@
 
       try {
         if (!current(owner, epoch)) return false;
-        const payload = await getJSON("/api/stats", {
+        // The bootstrap snapshot precedes any local progress uploads made just
+        // above. Refresh stats only in that merge case so derived points match
+        // the newly unioned D1 progress; the usual hydration remains one read.
+        const payload = bootstrapPayload && !progressUploaded ? bootstrapPayload : await getJSON("/api/stats", {
           headers: ownerHeaders(owner, { Accept: "application/json" }),
         });
         if (!current(owner, epoch)) return false;
@@ -310,7 +344,7 @@
 
       try {
         if (!current(owner, epoch)) return false;
-        const payload = await getJSON("/api/mastery", {
+        const payload = bootstrapPayload || await getJSON("/api/mastery", {
           headers: ownerHeaders(owner, { Accept: "application/json" }),
         });
         if (!current(owner, epoch)) return false;
@@ -325,9 +359,36 @@
         if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
       }
 
+      try {
+        if (!current(owner, epoch)) return false;
+        const payload = bootstrapPayload || await getJSON("/api/placement", {
+          headers: ownerHeaders(owner, { Accept: "application/json" }),
+        });
+        if (!current(owner, epoch)) return false;
+        const { generation, replaced } = acceptGeneration(payload, owner);
+        if (replaced) { progressComplete = false; statsComplete = false; masteryComplete = false; }
+        const remote = placementValue(payload.placement);
+        if (remote === undefined) throw new Error("invalid-placement");
+        const local = store.placement();
+        let selected = remote;
+        if (local && (!remote || local.completedDay >= remote.completedDay)) {
+          const saved = await putJSON("/api/placement", local, owner, generation);
+          if (!current(owner, epoch)) return false;
+          const accepted = acceptGeneration(saved, owner);
+          if (accepted.generation !== generation || accepted.replaced) return false;
+          selected = placementValue(saved.placement);
+          if (selected === undefined || selected == null) throw new Error("invalid-placement-response");
+        }
+        store.setPlacement(selected);
+        placementComplete = true;
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "placement", error: error.code || error.message });
+      }
+
       if (!current(owner, epoch)) return false;
-      emit("iewt:synced", { owner, progressComplete, statsComplete, masteryComplete });
-      return progressComplete && statsComplete && masteryComplete;
+      emit("iewt:synced", { owner, progressComplete, statsComplete, masteryComplete, placementComplete });
+      return progressComplete && statsComplete && masteryComplete && placementComplete;
     });
   }
 
@@ -365,7 +426,7 @@
         const result = { ok: true, signedIn, owner, generation, active, cleared };
         if (active) {
           emit("iewt:progress-reset", result);
-          emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, generation });
+          emit("iewt:synced", { owner, progressComplete: true, statsComplete: true, masteryComplete: true, placementComplete: true, reset: true, generation });
           setStatus("ready");
         } else if (authStatus === "resetting") {
           setStatus("account-changed");
@@ -383,7 +444,7 @@
       const result = { ok: true, signedIn, owner: null, generation, active, cleared };
       if (active) {
         emit("iewt:progress-reset", result);
-        emit("iewt:synced", { owner: null, progressComplete: true, statsComplete: true, masteryComplete: true, reset: true, generation });
+        emit("iewt:synced", { owner: null, progressComplete: true, statsComplete: true, masteryComplete: true, placementComplete: true, reset: true, generation });
         setStatus(backend ? "ready" : "offline");
       } else if (authStatus === "resetting") {
         setStatus("account-changed");
@@ -453,6 +514,71 @@
     });
   }
 
+  async function savePlacement(value) {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    const placement = placementValue(value);
+    if (!placement) throw new TypeError("Invalid placement result");
+    const local = store.setPlacement(placement);
+    emit("iewt:placement-state", { placement: local, synced: false });
+    if (!backend || !user) return { placement: local, synced: false };
+
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) return { placement: local, synced: false };
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await putJSON("/api/placement", local, owner, generation);
+        if (!current(owner, epoch)) return { placement: local, synced: false };
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) return { placement: local, synced: false };
+        const saved = placementValue(payload.placement);
+        if (!saved) throw new Error("invalid-placement-response");
+        store.setPlacement(saved);
+        emit("iewt:placement-state", { placement: saved, synced: true });
+        return { placement: saved, synced: true };
+      } catch (error) {
+        const reset = handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "placement", error: error.code || error.message });
+        if (reset) return { placement: null, synced: false, saved: false, reset: true };
+        return { placement: local, synced: false, saved: true };
+      }
+    });
+  }
+
+  async function clearPlacement() {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    if (!backend || !user) {
+      store.setPlacement(null);
+      emit("iewt:placement-state", { placement: null, synced: false, cleared: true });
+      return { placement: null, synced: false };
+    }
+
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) throw new Error("account-changed");
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await deletePlacement(owner, generation);
+        if (!current(owner, epoch)) throw new Error("account-changed");
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) throw new Error("reset-required");
+        store.setPlacement(null);
+        emit("iewt:placement-state", { placement: null, synced: true, cleared: true });
+        return { placement: null, synced: true };
+      } catch (error) {
+        const reset = handleGenerationConflict(error, owner);
+        if (reset) {
+          emit("iewt:placement-state", { placement: null, synced: true, cleared: true, reset: true });
+          return { placement: null, synced: true, reset: true };
+        }
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "placement", error: error.code || error.message });
+        throw error;
+      }
+    });
+  }
+
   const Auth = {
     user() { return user; },
     isSignedIn() { return !!user; },
@@ -490,7 +616,7 @@
       }
     },
     async pushProgress(model, done) {
-      // A course interaction can land during the initial /api/me request. Wait
+      // A course interaction can land during the initial account request. Wait
       // for owner binding, then merge that exact interaction into the verified
       // account scope instead of leaking the whole anonymous/device profile.
       const waitedForOwner = authStatus === "checking" || authStatus === "syncing";
@@ -543,14 +669,35 @@
       });
     },
     recordMasteryAttempt,
+    savePlacement,
+    clearPlacement,
     resetProgress,
     resetLearningData: resetProgress,
   };
 
+  async function initialPayload() {
+    try {
+      return {
+        payload: await getJSON("/api/bootstrap", { headers: { Accept: "application/json" } }),
+        bootstrap: true,
+      };
+    } catch (error) {
+      // During a rolling deploy, an older Worker can serve a newly cached
+      // client. Only a route-level absence falls back; real backend failures
+      // remain visible instead of being masked by a second request sequence.
+      if (!error || (error.status !== 404 && error.status !== 405)) throw error;
+      return {
+        payload: await getJSON("/api/me", { headers: { Accept: "application/json" } }),
+        bootstrap: false,
+      };
+    }
+  }
+
   async function init() {
     setStatus("checking");
     try {
-      const payload = await getJSON("/api/me", { headers: { Accept: "application/json" } });
+      const initial = await initialPayload();
+      const payload = initial.payload;
       backend = true;
       if (!payload || typeof payload !== "object" || Array.isArray(payload) || !("user" in payload)) {
         throw new Error("invalid-user-response");
@@ -563,7 +710,7 @@
       store.bindOwner(user && user.id, { claimAnonymous: true, announce: true });
       if (user) {
         setStatus("syncing");
-        await pullAll(mutationEpoch, user.id);
+        await pullAll(mutationEpoch, user.id, initial.bootstrap ? payload : null);
       }
       if (authStatus !== "account-changed") setStatus("ready");
     } catch (error) {
@@ -584,13 +731,13 @@
     if (!user || observed === user.id) return;
     // Another tab verified a different account (or signed out). Stop using the
     // stale cookie/account association immediately; a navigation will perform
-    // a fresh /api/me check before this tab can sync again.
+    // a fresh account check before this tab can sync again.
     mutationEpoch++;
     user = null;
     store.bindOwner(null, { claimAnonymous: false, announce: false });
     setStatus("account-changed");
     emit("iewt:auth-ready", { status: authStatus, user: null });
-    emit("iewt:synced", { owner: null, progressComplete: false, statsComplete: false, masteryComplete: false });
+    emit("iewt:synced", { owner: null, progressComplete: false, statsComplete: false, masteryComplete: false, placementComplete: false });
   });
 
   window.Auth = Object.freeze(Auth);

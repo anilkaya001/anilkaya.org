@@ -19,6 +19,7 @@
     gamifyPrefix: "iewt:gamify:v2:",
     masteryPrefix: "iewt:mastery:v2:",
     masteryOutboxPrefix: "iewt:mastery-outbox:v2:",
+    placementPrefix: "iewt:placement:v2:",
     syncPrefix: "iewt:sync:v2:",
     activeOwner: "iewt:activeOwner",
     guideWidth: "iewt:guideW",
@@ -89,7 +90,8 @@
     const prefix = kind === "progress" ? KEYS.progressPrefix :
       kind === "gamify" ? KEYS.gamifyPrefix :
       kind === "mastery" ? KEYS.masteryPrefix :
-      kind === "masteryOutbox" ? KEYS.masteryOutboxPrefix : KEYS.syncPrefix;
+      kind === "masteryOutbox" ? KEYS.masteryOutboxPrefix :
+      kind === "placement" ? KEYS.placementPrefix : KEYS.syncPrefix;
     return prefix + encodeURIComponent(owner);
   }
 
@@ -206,16 +208,36 @@
     return clean;
   }
 
+  const PLACEMENT_BANDS = new Set(["foundation", "applied", "advanced"]);
+  const PLACEMENT_TOPICS = new Set(["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"]);
+
+  function cleanPlacement(value) {
+    if (value == null) return null;
+    if (!plainObject(value) || !PLACEMENT_BANDS.has(value.band) || !PLACEMENT_TOPICS.has(value.recommendedTopic)) return null;
+    const score = Number(value.score);
+    const total = Number(value.total);
+    const completedDay = normalizeDay(value.completedDay);
+    const expectedBand = score <= 6 ? "foundation" : score <= 11 ? "applied" : "advanced";
+    const latestDay = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (!Number.isSafeInteger(score) || total !== 15 || score < 0 || score > total || !completedDay ||
+        completedDay > latestDay || value.band !== expectedBand) {
+      return null;
+    }
+    return { band: value.band, score, total, completedDay, recommendedTopic: value.recommendedTopic };
+  }
+
   function cleanFor(kind, value) {
     if (kind === "progress") return cleanProgress(value);
     if (kind === "gamify") return cleanGamify(value);
     if (kind === "mastery") return cleanMastery(value);
+    if (kind === "placement") return cleanPlacement(value);
     return cleanMasteryOutbox(value);
   }
 
   function emptyFor(kind) {
     if (kind === "progress" || kind === "mastery") return {};
     if (kind === "masteryOutbox") return [];
+    if (kind === "placement") return null;
     return { points: 0, streak: 0, last: null };
   }
 
@@ -254,6 +276,7 @@
   function hasScopedState(owner) {
     return readRaw(scopedKey("progress", owner)) != null || readRaw(scopedKey("gamify", owner)) != null ||
       readRaw(scopedKey("mastery", owner)) != null || readRaw(scopedKey("masteryOutbox", owner)) != null ||
+      readRaw(scopedKey("placement", owner)) != null ||
       readRaw(scopedKey("sync", owner)) != null;
   }
 
@@ -262,10 +285,10 @@
     catch { return false; }
   }
 
-  function hasLearningState(progressValue, gamifyValue, masteryValue, masteryOutboxValue) {
+  function hasLearningState(progressValue, gamifyValue, masteryValue, masteryOutboxValue, placementValue) {
     return Object.values(progressValue).some((entry) => Array.isArray(entry.done) && entry.done.length) ||
       gamifyValue.points > 0 || gamifyValue.streak > 0 || gamifyValue.last != null ||
-      Object.keys(masteryValue).length > 0 || masteryOutboxValue.length > 0;
+      Object.keys(masteryValue).length > 0 || masteryOutboxValue.length > 0 || placementValue != null;
   }
 
   function bindOwner(ownerId, options = {}) {
@@ -281,15 +304,18 @@
       const anonymousGamify = readScoped("gamify", ANONYMOUS);
       const anonymousMastery = readScoped("mastery", ANONYMOUS);
       const anonymousMasteryOutbox = readScoped("masteryOutbox", ANONYMOUS);
-      if (hasLearningState(anonymousProgress, anonymousGamify, anonymousMastery, anonymousMasteryOutbox)) {
+      const anonymousPlacement = readScoped("placement", ANONYMOUS);
+      if (hasLearningState(anonymousProgress, anonymousGamify, anonymousMastery, anonymousMasteryOutbox, anonymousPlacement)) {
         writeScoped("progress", anonymousProgress, next);
         writeScoped("gamify", anonymousGamify, next);
         writeScoped("mastery", anonymousMastery, next);
         writeScoped("masteryOutbox", anonymousMasteryOutbox, next);
+        writeScoped("placement", anonymousPlacement, next);
         removeScoped("progress", ANONYMOUS);
         removeScoped("gamify", ANONYMOUS);
         removeScoped("mastery", ANONYMOUS);
         removeScoped("masteryOutbox", ANONYMOUS);
+        removeScoped("placement", ANONYMOUS);
       }
     }
 
@@ -370,6 +396,15 @@
     return setMasteryOutbox(masteryOutbox().filter((event) => event.attemptId !== attemptId));
   }
 
+  function placement() {
+    const clean = readScoped("placement");
+    return writeScoped("placement", clean);
+  }
+
+  function setPlacement(value) {
+    return writeScoped("placement", value);
+  }
+
   function syncGeneration(ownerId = publicOwner()) {
     return readSync(normalizeOwner(ownerId));
   }
@@ -386,17 +421,19 @@
     removeScoped("gamify", owner);
     removeScoped("mastery", owner);
     removeScoped("masteryOutbox", owner);
+    removeScoped("placement", owner);
     // Materialize clean owner-bound state immediately so subsequent reads and
     // other same-page components cannot observe a removed legacy value.
     const cleanProgress = writeScoped("progress", {}, owner);
     const cleanGamify = writeScoped("gamify", emptyFor("gamify"), owner);
     const cleanMastery = writeScoped("mastery", {}, owner);
     const cleanMasteryOutbox = writeScoped("masteryOutbox", [], owner);
+    const cleanPlacementState = writeScoped("placement", null, owner);
     writeSync(generation, owner);
     if (options.announce !== false) {
       emit("iewt:storage-reset", { owner: publicOwner(owner), anonymous: owner === ANONYMOUS, generation });
     }
-    return { progress: cleanProgress, gamify: cleanGamify, mastery: cleanMastery, masteryOutbox: cleanMasteryOutbox, generation };
+    return { progress: cleanProgress, gamify: cleanGamify, mastery: cleanMastery, masteryOutbox: cleanMasteryOutbox, placement: cleanPlacementState, generation };
   }
 
   function removeAnonymousProgress(model, indexes) {
@@ -463,6 +500,8 @@
     setMasteryOutbox,
     queueMasteryAttempt,
     removeMasteryAttempt,
+    placement,
+    setPlacement,
     syncGeneration,
     setSyncGeneration,
     resetLearning,

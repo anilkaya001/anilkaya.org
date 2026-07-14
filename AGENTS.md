@@ -16,7 +16,7 @@ and power verification.
 ```text
 Browser ──► Cloudflare Worker (worker.js; runs before assets)
               ├─ /auth/*  Google OAuth → HMAC-signed session cookie
-              ├─ /api/*   JSON API backed by D1 (SQLite)
+              ├─ /api/*   owner-scoped JSON API backed by D1 (SQLite)
               ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
               └─ everything else → ASSETS binding
 ```
@@ -51,6 +51,12 @@ As observed on 2026-07-12, the apex used the Worker API while
 The `CNAME` file therefore supports a live hybrid redirect path; do not remove
 it until `www` is attached to the Worker and verified.
 
+As verified on 2026-07-15, the zone-level `Security Headers` response transform
+no longer writes a second Content-Security-Policy. The live HTML CSP therefore
+comes from `worker.js` and permits the Cloudflare Web Analytics beacon. The
+remaining transform rows still overlap several Worker headers, so compare live
+header readback with this repository after any dashboard rule change.
+
 ## File map
 
 | Path | Role |
@@ -58,6 +64,7 @@ it until `www` is attached to the Worker and verified.
 | `index.html` | Landing page and particle-field hero. |
 | `articles/index.html`, `articles/_template/` | Articles index and article template. |
 | `lab/index.html` | Crawlable academy catalogue plus learner command center, daily-review entry point, guided paths, search, filters, and reset dialog. |
+| `lab/placement/index.html` | Crawlable, dependency-light 15-question placement diagnostic with a three-course recommended route; does not load Pyodide. |
 | `lab/review/index.html` | Dependency-light five-question Daily Mastery Review; does not load Pyodide. |
 | `lab/course.html` | Private routing template rewritten for canonical course-slug pages; loads only the selected course payload. |
 | `lab/lesson.html` | Noindexed static fallback for legacy lesson URLs. |
@@ -67,25 +74,28 @@ it until `www` is attached to the Worker and verified.
 | `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |
 | `shared/mastery.js` | Server-compatible mastery transition and review-selection contract used by tests. |
-| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, and per-owner `learning_sync` generation tables. |
+| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables. |
 | `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
 | `assets/js/curriculum.js` | Canonical OLS authoring source. |
 | `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
 | `assets/js/curriculum-questions.js` | Additional authored question stages applied before payload generation. |
 | `assets/data/courses/<topic>.json` | Committed, generated `schemaVersion: 1` payload loaded only for the selected course. |
 | `assets/data/review-bank.json` | Generated full assessment bank, loaded only by the Daily Mastery Review page. |
+| `assets/data/placement-bank.json` | Authored 15-item diagnostic bank balanced across five question formats and three difficulty bands. |
 | `scripts/generate-course-payloads.mjs` | Deterministically regenerates course payloads, stable stage IDs, the review bank, browser catalogue, and Worker manifest. |
-| `assets/js/storage.js` | Validated owner-scoped v2 progress/mastery persistence, retry outbox, legacy migration, reset, and in-memory fallback. |
+| `assets/js/storage.js` | Validated owner-scoped v2 progress/mastery/placement persistence, retry outbox, legacy migration, reset, and in-memory fallback. |
 | `assets/js/lab-core.js` | Pyodide loader, Python editor, execution, output, and figures. |
 | `assets/js/lab-course.js` | Course player, grading, progress, points, navigation, splitter. |
-| `assets/js/auth.js` | Account binding, serialized owner-checked synchronization, and server-first reset coordination. |
+| `assets/js/auth.js` | Account binding, one-request bootstrap hydration, serialized owner-checked synchronization, and server-first reset coordination. |
 | `assets/js/gamify.js` | Local points/streak state and rendering. |
 | `assets/js/mastery.js`, `review-catalog.js` | Browser mastery scheduler and lightweight answer-free dashboard catalogue. |
 | `assets/js/lab-review.js` | Review-bank loading, five assessment renderers, grading, feedback, and retry-safe persistence. |
+| `assets/js/placement.js` | Placement-bank loading, five accessible question renderers, deterministic scoring/routes, and minimal result persistence. |
 | `assets/js/lab-ui.js`, `lab-fx.js` | Academy command-center/path/search/reset UI and visual feedback. |
-| `assets/css/base.css`, `lab.css`, `review.css` | Design system and Lab/course/review UI. |
+| `assets/css/base.css`, `lab.css`, `review.css`, `placement.css` | Design system and Lab/course/review/placement UI. |
 | `assets/version.txt` | Canonical browser-asset cache version. |
 | `tests/contracts.mjs` | Curriculum/payload/scoring/storage/asset/session contracts. |
+| `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 
@@ -146,6 +156,7 @@ uses owner-scoped v2 envelopes:
 - `iewt:gamify:v2:<encoded-owner>` → `{ version: 2, owner, value: gamify }`
 - `iewt:mastery:v2:<encoded-owner>` → `{ version: 2, owner, value: mastery }`
 - `iewt:mastery-outbox:v2:<encoded-owner>` → pending idempotent review attempts
+- `iewt:placement:v2:<encoded-owner>` → `{ version: 2, owner, value: { band, score, total, completedDay, recommendedTopic } | null }`
 - `iewt:sync:v2:<encoded-owner>` → `{ version: 2, owner, generation }`
 - `iewt:activeOwner` → the account scope last verified and announced by this browser
 - `iewt:guideW` → device-wide guide-column width percentage
@@ -162,15 +173,17 @@ changes invalidate stale synchronization state.
 safe-integer synchronization generations. Every native
 `localStorage` operation is inside `try/catch`; an in-memory copy preserves the
 current page when storage is unavailable. `resetLearning()` clears progress,
-gamification, mastery, and its retry outbox for an explicit or active owner,
-records the confirmed reset generation, and deliberately preserves
+gamification, mastery, its retry outbox, and placement for an explicit or active
+owner, records the confirmed reset generation, and deliberately preserves
 `iewt:guideW`.
 
 When signed in, the client serializes mutations, binds them to the verified
 account and a mutation epoch, unions local and remote progress, uploads only
 missing work, then refreshes exact server-derived points and monotonic streak
-state. Every authenticated progress, stats, and mastery request carries
-`X-IEWT-Owner`. Their PUTs also carry the latest owner-scoped
+state. Initial signed-in hydration uses `/api/bootstrap`; granular endpoints
+remain the mutation and compatibility surface. Every authenticated progress,
+stats, mastery, and placement request carries `X-IEWT-Owner`. Their PUTs and the
+standalone placement DELETE also carry the latest owner-scoped
 `X-IEWT-Generation`. D1 uses an atomic JSON-union UPSERT guarded by that
 generation, so overlapping snapshots cannot delete completed stages and a
 delayed pre-reset write cannot recreate cleared data. Mastery attempts use a
@@ -187,13 +200,17 @@ Errors use:
 ```
 
 - `GET /api/me` → `200 { user: { id, email, name } | null }`
+- `GET /api/bootstrap` → signed-out `200 { user: null }`; signed-in `200 { user, progress, stats, mastery, placement, generation }`
 - `GET /api/progress` → `200 { progress, generation }`; signed-out → JSON 401
 - `PUT /api/progress` with `X-IEWT-Generation`, body `{ model, done }` → `{ ok: true, done, generation }`
-- `DELETE /api/progress` → `{ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, generation }`
+- `DELETE /api/progress` → `{ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation }`
 - `GET /api/stats` → `{ stats: { points, streak, last }, generation }`
 - `PUT /api/stats` with `X-IEWT-Generation`, body `{ streak, last }` → `{ ok: true, stats, generation }`
 - `GET /api/mastery` → `{ mastery, generation }`
 - `PUT /api/mastery` with `X-IEWT-Generation`, body `{ itemId, attemptId, correct, hinted, day }` → `{ ok: true, record, duplicate, generation }`
+- `GET /api/placement` → `{ placement: { band, score, total, completedDay, recommendedTopic } | null, generation }`
+- `PUT /api/placement` with `X-IEWT-Generation` and the five-field placement summary → `{ ok: true, placement, generation }`
+- `DELETE /api/placement` with `X-IEWT-Generation` → `{ ok: true, placement: null, generation }`
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
   `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
 
@@ -202,25 +219,28 @@ the verified session user. Conflicting `Origin` or `Sec-Fetch-Site` metadata is
 rejected, and browser cross-origin use is blocked by the custom owner header
 plus the absence of CORS permission. Missing or mismatched mutation ownership
 returns JSON `409 account_changed`; identified cross-origin mutation attempts
-return JSON 403. The three authenticated GET routes allow the owner header to be
-absent for compatibility, but reject a present mismatch with the same 409
-response.
+return JSON 403. The four authenticated granular GET routes allow the owner
+header to be absent for compatibility, but reject a present mismatch with the
+same 409 response.
 
 Missing, malformed, or stale `X-IEWT-Generation` values on PUT return JSON
 `409 reset_required` with the current generation in both the response body and
 header. The client discards the affected owner's stale local learning state
-before any later upload. DELETE deliberately does not require the old
-generation: it atomically increments the server value and returns the new one.
+before any later upload. Full reset through `DELETE /api/progress` deliberately
+does not require the old generation: it atomically increments the server value
+and returns the new one. Standalone placement deletion is generation-fenced.
 
 Progress models and indexes are allowlisted against the scoring manifest.
 Stats writes accept only a bounded streak and a valid activity date no more than
 one UTC day ahead. Older writes cannot replace newer activity, and a stale
 next-day device cannot reduce a known consecutive streak. Points are recomputed
-exactly from progress. Reset uses prepared statements in one D1 `batch()`
+exactly from progress. Placement accepts only the fixed 15-question total, its
+matching score band, a valid topic, and a completion date no more than one UTC
+day ahead; individual answers never enter the API or D1. Reset uses prepared statements in one D1 `batch()`
 transaction: it increments `learning_sync.generation`, deletes every progress,
-mastery, and mastery-attempt row for the verified user, and resets that user's
-points, streak, and last-activity value without touching another user. Mastery
-item IDs are allowlisted against the generated manifest; the attempt ledger
+mastery, mastery-attempt, and placement row for the verified user, and resets
+that user's points, streak, and last-activity value without touching another
+user. Mastery item IDs are allowlisted against the generated manifest; the attempt ledger
 prevents a retry from incrementing counters twice. `schema.sql` provisions the
 tables and the Worker has an idempotent first-use fallback for databases that
 predate them.
@@ -290,7 +310,8 @@ npm test
 The suites prove:
 
 - all seven curricula, four modules each, every stage schema, exact generated
-  per-course payloads and IDs, deterministic 96-item review artefacts,
+  per-course payloads and IDs, deterministic 96-item review artefacts, the
+  balanced 15-item placement bank and sanitized result contract,
   browser/server mastery-scheduler parity, payload-size budgets, scoring
   manifests, owner-scoped v2 migration/reset behavior, local asset
   existence/versioning, and hardened sessions;
@@ -301,8 +322,9 @@ The suites prove:
   concurrent progress union, owner-header and same-origin enforcement, mastery
   idempotency, generation-fenced transactional reset, stale-write rejection,
   and exact derived points;
-- academy command-center metrics, four learning paths, search/level/status
-  filters, all five Daily Mastery Review formats, single-course payload
+- academy cockpit fold visibility, placement routing, command-center metrics,
+  four learning paths, search/level/status filters, all five placement and
+  Daily Mastery Review formats, single-course payload
   isolation, anonymous and signed-in reset safety, no
   horizontal overflow or browser errors across 320/390/768/1440 widths,
   WCAG-AA faint text, pill geometry, 44×44 primary course targets (including
