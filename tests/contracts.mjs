@@ -455,6 +455,8 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
 for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
   assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
 }
+assert.match(read("assets/js/lab-ui.js"), /\n  init\(\);\n\}\)\(\);/, "academy must initialize before delayed DOMContentLoaded");
+assert.match(read("assets/js/gamify.js"), /\n  Gamify\.paint\(\);\n  \/\//, "gamification must paint before delayed DOMContentLoaded");
 
 let diffBase = process.env.ASSET_DIFF_BASE || "";
 if (!diffBase) {

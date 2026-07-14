@@ -114,9 +114,10 @@
   window.Gamify = Gamify;
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => Gamify.paint(), { once: true });
-  } else {
-    Gamify.paint();
   }
+  // Like the academy UI, gamify.js is deferred and can safely paint before a
+  // CSP-blocked third-party defer allows DOMContentLoaded to fire in Safari.
+  Gamify.paint();
   // A server-derived floor is meaningful only for the account that supplied
   // it. Never carry that closure state into an anonymous or different account
   // scope on a shared browser.
