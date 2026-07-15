@@ -7,6 +7,12 @@
 
   const META = window.TOPIC_META || [];
   const PATHS = window.LEARNING_PATHS || [];
+  const SKILLS = window.SKILL_CATALOG || [];
+  const PROJECTS = Object.freeze([
+    { id: "macro-forecasting-desk", title: "Macro Forecasting Desk", blurb: "Build a vintage-aware CPI, industrial production, and policy-rate forecasting brief.", tasks: ["inspect-vintage", "transform-series", "fit-benchmark", "estimate-system", "rolling-evaluation", "publish-brief"] },
+    { id: "fx-volatility-risk", title: "FX Volatility & Risk", blurb: "Model USD/EUR volatility, forecast tail risk, and backtest exceptions.", tasks: ["build-returns", "diagnose-volatility", "fit-garch", "forecast-var", "estimate-es", "backtest-risk"] },
+    { id: "factor-pricing-lab", title: "Factor Pricing Lab", blurb: "Estimate CAPM and factor exposures, test moments, and publish a tear sheet.", tasks: ["align-excess-returns", "estimate-capm", "estimate-three-factor", "rolling-exposures", "test-moments", "publish-tearsheet"] },
+  ]);
   const byId = window.TOPIC_BY_ID || Object.fromEntries(META.map((topic) => [topic.id, topic]));
   const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
   const store = () => window.IEWTStorage;
@@ -75,6 +81,13 @@
     return { eligible: eligible.length, due: due.length };
   }
 
+  function skillQueue() {
+    const mastery = typeof store().skillMastery === "function" ? store().skillMastery() : {};
+    const today = localDay();
+    const introduced = Object.keys(mastery).filter((skillId) => SKILLS.some((skill) => skill.id === skillId));
+    return { eligible: introduced.length, due: introduced.filter((skillId) => mastery[skillId].dueDay <= today).length };
+  }
+
   function renderAccount() {
     const container = document.getElementById("account");
     if (!container) return;
@@ -124,7 +137,7 @@
       (placementGuided ? placedState : null) || states.find((state) => state.status === "not-started") || states[0];
     const overall = totalLessons ? Math.round((100 * completedLessons) / totalLessons) : 0;
     const gamify = window.Gamify ? window.Gamify.get() : { points: 0, streak: 0 };
-    const review = reviewQueue(snapshot);
+    const review = skillQueue();
     const resumeLabel = placementGuided
       ? `${placement.band.charAt(0).toUpperCase() + placement.band.slice(1)} diagnostic route`
       : active.status === "not-started" ? "Start the foundations" : active.status === "completed" ? "Review any course" : "Resume where you stopped";
@@ -154,29 +167,21 @@
       reviewCta.dataset.eligible = String(review.eligible);
       reviewCta.dataset.due = String(review.due);
       if (review.eligible === 0) {
-        reviewCount.textContent = "Build your review queue";
-        reviewSummary.textContent = "Complete assessed lessons, then revisit them at the right time.";
+        reviewCount.textContent = "Start your mastery map";
+        reviewSummary.textContent = "Complete a checkpoint, case, match, or code challenge to introduce a skill.";
         reviewCta.setAttribute("aria-label", "Build your daily mastery review queue");
       } else {
-        reviewCount.textContent = `${review.due} ${review.due === 1 ? "review" : "reviews"} due now`;
+        reviewCount.textContent = `${review.due} ${review.due === 1 ? "skill" : "skills"} due now`;
         reviewSummary.textContent = review.due
-          ? `${review.eligible} learned ${review.eligible === 1 ? "concept is" : "concepts are"} in your mastery queue.`
-          : `All ${review.eligible} learned ${review.eligible === 1 ? "concept is" : "concepts are"} on schedule.`;
+          ? `A six-question challenge will target the three weakest eligible skills.`
+          : `All ${review.eligible} introduced ${review.eligible === 1 ? "skill is" : "skills are"} on schedule.`;
         reviewCta.setAttribute("aria-label", `Open daily mastery review: ${review.due} due now`);
       }
     }
 
     grid.innerHTML =
-      '<article class="dashboard-resume"><p class="academy-kicker">' + resumeLabel + '</p><h3>' + esc(active.topic.title) + '</h3>' +
-        '<p>' + active.done.length + " of " + active.topic.stages + " lessons complete · next: lesson " + (active.firstOpen + 1) + "</p>" +
-        '<div class="dashboard-resume__progress">' + progressHTML(active.percent, active.topic.title + " completion") + '<span>' + active.percent + "%</span></div>" +
-        '<a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin course" : active.status === "completed" ? "Review course" : "Continue learning") + " &rarr;</a></article>" +
-      '<div class="dashboard-metrics">' +
-        '<article><span class="dashboard-metric__value">' + completedLessons + '</span><span class="dashboard-metric__label">Lessons completed</span><small>of ' + totalLessons + "</small></article>" +
-        '<article><span class="dashboard-metric__value">' + completeCourses + '</span><span class="dashboard-metric__label">Courses complete</span><small>of ' + META.length + "</small></article>" +
-        '<article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + " day streak</small></article>" +
-        '<article class="dashboard-overall"><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Core curriculum</span>' + progressHTML(overall, "Core curriculum completion") + "</article>" +
-      "</div>";
+      '<article class="dashboard-resume"><div><p class="academy-kicker">' + resumeLabel + '</p><h3>' + esc(active.topic.title) + '</h3><p>' + active.done.length + " / " + active.topic.stages + " complete · next stage " + (active.firstOpen + 1) + '</p></div><a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin" : active.status === "completed" ? "Review" : "Continue") + " &rarr;</a></article>" +
+      '<div class="dashboard-metrics"><article><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Academy progress</span><small>' + completedLessons + ' / ' + totalLessons + ' stages</small></article><article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + ' day streak · ' + completeCourses + ' courses</small></article></div>';
 
     const steps = focusSteps(states, active);
     focus.innerHTML = '<div class="dashboard-focus__head"><p class="academy-kicker">Focus plan</p><h3 id="focusPlanTitle">Your next three steps</h3></div>' +
@@ -189,6 +194,46 @@
       : placementGuided
         ? `Your ${placement.band} diagnostic result recommends ${active.topic.shortTitle || active.topic.title} first.`
         : "Begin with OLS, or choose a path aligned to your goal.";
+  }
+
+  function renderSkillMap() {
+    const root = document.getElementById("skillMap");
+    if (!root) return;
+    const mastery = store().skillMastery();
+    const query = (document.getElementById("globalSearch")?.value || "").trim().toLowerCase();
+    const levels = ["Not started", "Introduced", "Developing", "Practicing", "Proficient", "Mastered"];
+    root.innerHTML = META.map((topic, courseIndex) => {
+      const skills = SKILLS.filter((skill) => skill.courseId === topic.id && (!query || [skill.title, skill.practice, skill.diagnostic, topic.title].join(" ").toLowerCase().includes(query)));
+      if (!skills.length) return "";
+      const mastered = skills.filter((skill) => (mastery[skill.id]?.level || 0) >= 5).length;
+      return '<details class="skill-course"' + (courseIndex < 2 || query ? " open" : "") + '><summary><span><b>' + esc(topic.shortTitle || topic.title) + '</b><small>' + mastered + " / " + skills.length + ' mastered</small></span><span aria-hidden="true">+</span></summary><div class="skill-course__items">' + skills.map((skill) => {
+        const level = mastery[skill.id]?.level || 0;
+        return '<article class="skill-chip" data-level="' + level + '"><span class="skill-chip__level">' + esc(levels[level] || levels[0]) + '</span><h3>' + esc(skill.title) + '</h3><p>' + esc(skill.practice) + '</p><div class="skill-chip__meter" aria-label="' + esc(skill.title) + " mastery " + level + ' of 5"><i style="--level:' + level + '"></i></div></article>';
+      }).join("") + "</div></details>";
+    }).join("");
+  }
+
+  function renderProjects() {
+    const root = document.getElementById("projectGrid");
+    if (!root) return;
+    const state = store().projects();
+    root.innerHTML = PROJECTS.map((project, index) => {
+      const saved = state[project.id] || { mode: "guided", done: [] };
+      const percent = Math.round(100 * saved.done.length / project.tasks.length);
+      return '<a class="project-card" href="/lab/projects/' + project.id + '/"><span class="project-card__num">0' + (index + 1) + '</span><div><p class="academy-kicker">' + esc(saved.mode) + ' capstone</p><h3>' + esc(project.title) + '</h3><p>' + esc(project.blurb) + '</p></div><div class="project-card__foot">' + progressHTML(percent, project.title + ' completion') + '<span>' + saved.done.length + " / " + project.tasks.length + " tasks</span></div></a>";
+    }).join("");
+    const next = PROJECTS.find((project) => (state[project.id]?.done || []).length < project.tasks.length) || PROJECTS[0];
+    const completed = state[next.id]?.done || [];
+    const task = next.tasks.find((taskId) => !completed.includes(taskId)) || next.tasks[0];
+    const cta = document.getElementById("nextProjectCta"), label = document.getElementById("nextProjectTask");
+    if (cta) cta.href = `/lab/projects/${next.id}/`;
+    if (label) label.textContent = `${next.title}: ${task.replace(/-/g, " ")}`;
+  }
+
+  function renderPreferences() {
+    const preferences = store().preferences();
+    const select = document.getElementById("sessionMinutes");
+    if (select) select.value = String(preferences.sessionMinutes);
   }
 
   function renderPaths() {
@@ -255,6 +300,9 @@
     renderAccount();
     renderGrid();
     renderPaths();
+    renderSkillMap();
+    renderProjects();
+    renderPreferences();
   }
 
   function openResetDialog() {
@@ -291,7 +339,7 @@
       dialog.setAttribute("aria-busy", "false");
       dialog.close();
       renderAll();
-      const dashboard = document.getElementById("dashboardTitle");
+      const dashboard = document.getElementById("academyTitle");
       if (dashboard) { dashboard.setAttribute("tabindex", "-1"); dashboard.focus(); }
     } catch (error) {
       delete dialog.dataset.resetBusy;
@@ -318,6 +366,21 @@
     document.getElementById("levelFilter")?.addEventListener("change", renderGrid);
     document.getElementById("statusFilter")?.addEventListener("change", renderGrid);
     document.getElementById("resetConfirm")?.addEventListener("click", confirmReset);
+    document.getElementById("settingsResetBtn")?.addEventListener("click", openResetDialog);
+    document.getElementById("sessionMinutes")?.addEventListener("change", (event) => {
+      const preferences = { ...store().preferences(), sessionMinutes: Number(event.currentTarget.value) };
+      if (window.Auth?.savePreferences) void window.Auth.savePreferences(preferences);
+      else store().setPreferences(preferences);
+    });
+    document.getElementById("globalSearch")?.addEventListener("input", (event) => {
+      const courseSearch = document.getElementById("courseSearch");
+      if (courseSearch) courseSearch.value = event.currentTarget.value;
+      renderGrid(); renderSkillMap();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.target.matches("input, textarea, select")) return;
+      event.preventDefault(); document.getElementById("globalSearch")?.focus();
+    });
     document.getElementById("resetDialog")?.addEventListener("cancel", (event) => {
       if (event.currentTarget.dataset.resetBusy === "true") event.preventDefault();
     });

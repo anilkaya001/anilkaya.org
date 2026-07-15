@@ -103,8 +103,10 @@ try {
   const sitemap = await sitemapResponse.text();
   const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
   assert.deepEqual(sitemapURLs, [
-    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", SITE_ORIGIN + "/lab/placement/",
-    SITE_ORIGIN + "/lab/review/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+    SITE_ORIGIN + "/", SITE_ORIGIN + "/lab/", ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+    SITE_ORIGIN + "/lab/projects/macro-forecasting-desk/",
+    SITE_ORIGIN + "/lab/projects/fx-volatility-risk/",
+    SITE_ORIGIN + "/lab/projects/factor-pricing-lab/",
   ]);
   for (const canonicalURL of sitemapURLs) {
     const path = new URL(canonicalURL).pathname;
@@ -210,6 +212,7 @@ try {
 
   assert.deepEqual(await json(await fetch(base + "/api/me", { headers: { Cookie: "session=%" } }), 200), { user: null });
   assert.deepEqual(await json(await fetch(base + "/api/bootstrap", { headers: { Cookie: "session=%" } }), 200), { user: null });
+  assert.deepEqual(await json(await fetch(base + "/api/v2/bootstrap", { headers: { Cookie: "session=%" } }), 200), { user: null });
   const method = await fetch(base + "/api/me", { method: "POST" });
   const methodBody = await json(method, 405);
   assert.equal(method.headers.get("allow"), "GET");
@@ -217,6 +220,13 @@ try {
   const bootstrapMethod = await fetch(base + "/api/bootstrap", { method: "POST" });
   assert.equal((await json(bootstrapMethod, 405)).error.code, "method_not_allowed");
   assert.equal(bootstrapMethod.headers.get("allow"), "GET");
+  const academyBootstrapMethod = await fetch(base + "/api/v2/bootstrap", { method: "POST" });
+  assert.equal((await json(academyBootstrapMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(academyBootstrapMethod.headers.get("allow"), "GET");
+  assert.equal((await json(await fetch(base + "/api/v2/progress", { method: "PUT" }), 401)).error.code, "unauthorized");
+  const academyProgressMethod = await fetch(base + "/api/v2/progress");
+  assert.equal((await json(academyProgressMethod, 405)).error.code, "method_not_allowed");
+  assert.equal(academyProgressMethod.headers.get("allow"), "PUT");
   assert.equal((await json(await fetch(base + "/api/progress"), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/mastery"), 401)).error.code, "unauthorized");
   assert.equal((await json(await fetch(base + "/api/placement"), 401)).error.code, "unauthorized");
@@ -315,7 +325,7 @@ try {
       "placement reads must allow an absent or matching owner",
     );
   }
-  for (const apiPath of ["/api/bootstrap", "/api/progress", "/api/stats", "/api/mastery", "/api/placement"]) {
+  for (const apiPath of ["/api/bootstrap", "/api/v2/bootstrap", "/api/progress", "/api/stats", "/api/mastery", "/api/placement"]) {
     const denied = await json(await fetch(base + apiPath, {
       headers: { Cookie: `session=${session}`, Accept: "application/json", "X-IEWT-Owner": "g_other" },
     }), 409);
@@ -335,6 +345,7 @@ try {
       ["/api/stats", { method: "PUT", headers, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
       ["/api/mastery", { method: "PUT", headers, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "owner-check", correct: true, hinted: false, day: "2026-07-14" }) }],
       ["/api/placement", { method: "PUT", headers, body: JSON.stringify({ band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }) }],
+      ["/api/v2/progress", { method: "PUT", headers, body: JSON.stringify({ courseId: "ols", stageId: "ols-line-01", complete: true }) }],
       ["/api/progress", { method: "DELETE", headers }],
     ]) {
       const denied = await json(await fetch(base + apiPath, init), 409);
@@ -347,6 +358,7 @@ try {
     ["/api/stats", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ streak: 1, last: "2026-07-12" }) }],
     ["/api/mastery", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ itemId: "ols:ols-line-04", attemptId: "origin-check", correct: true, hinted: false, day: "2026-07-14" }) }],
     ["/api/placement", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }) }],
+    ["/api/v2/progress", { method: "PUT", headers: crossOriginAuth, body: JSON.stringify({ courseId: "ols", stageId: "ols-line-01", complete: true }) }],
     ["/api/progress", { method: "DELETE", headers: crossOriginAuth }],
   ]) {
     const denied = await json(await fetch(base + apiPath, init), 403);
@@ -368,11 +380,14 @@ try {
       ["/api/stats", { streak: 1, last: "2026-07-12" }],
       ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "generation-check", correct: true, hinted: false, day: "2026-07-14" }],
       ["/api/placement", { band: "foundation", score: 3, total: 15, completedDay: "2026-07-14", recommendedTopic: "ols" }],
+      ["/api/v2/progress", { courseId: "ols", stageId: "ols-line-01", complete: true }],
     ]) {
-      const denied = await learningJSON(await fetch(base + apiPath, {
+      const response = await fetch(base + apiPath, {
         method: "PUT", headers: generationHeaders, body: JSON.stringify(body),
-      }), 409, 0);
+      });
+      const denied = await json(response, 409);
       assert.equal(denied.error.code, "reset_required", `${apiPath}: ${label} generation must refresh state`);
+      assert.equal(response.headers.get("x-iewt-generation"), "0", `${apiPath}: ${label} reset fence must return the current generation`);
     }
   }
 
@@ -530,6 +545,72 @@ try {
   assert.deepEqual(concurrentPayloads.map((payload) => payload.duplicate).sort(), [false, true], "concurrent retry was applied more than once");
   assert(concurrentPayloads.every((payload) => payload.record.attempts === 1), "concurrent retry incremented mastery twice");
 
+  // Academy v2 state is stable-id based, idempotent, owner scoped, and kept
+  // separate from code/output data. Completing a stage already present in the
+  // legacy snapshot proves the compatibility union without changing points.
+  const academyPut = (apiPath, body, headers = auth) => fetch(base + apiPath, {
+    method: "PUT", headers, body: JSON.stringify(body),
+  });
+  const stableStage = { courseId: "ols", stageId: "ols-line-01", complete: true };
+  const stableSaved = await learningJSON(await academyPut("/api/v2/progress", stableStage), 200, 0);
+  assert.deepEqual(stableSaved.done, ["ols-line-01"]);
+  const stableRetry = await learningJSON(await academyPut("/api/v2/progress", stableStage), 200, 0);
+  assert.deepEqual(stableRetry.done, ["ols-line-01"], "stable completion retry must be idempotent");
+  assert.equal((await json(await academyPut("/api/v2/progress", {
+    courseId: "ols", stageId: "not-a-stage", complete: true,
+  }), 400)).error.code, "invalid_progress");
+
+  const skillId = "foundations.probability-models";
+  const skillAttempt = (attemptId, correct, hinted, day) => academyPut("/api/v2/attempt", {
+    attemptId, skillId, itemId: `${skillId}:v1`, correct, hinted, day,
+  });
+  const skillClean = await learningJSON(await skillAttempt("skill-clean", true, false, "2026-07-14"), 200, 0);
+  assert.equal(skillClean.duplicate, false);
+  assert.deepEqual({ level: skillClean.record.level, dueDay: skillClean.record.dueDay, attempts: skillClean.record.attempts }, {
+    level: 1, dueDay: "2026-07-15", attempts: 1,
+  });
+  const skillDuplicate = await learningJSON(await skillAttempt("skill-clean", true, false, "2026-07-14"), 200, 0);
+  assert.equal(skillDuplicate.duplicate, true);
+  assert.equal(skillDuplicate.record.attempts, 1, "duplicate skill attempt incremented counters");
+  assert.equal((await json(await skillAttempt("skill-clean", false, false, "2026-07-14"), 409)).error.code, "attempt_conflict");
+  const skillHinted = await learningJSON(await skillAttempt("skill-hinted", true, true, "2026-07-15"), 200, 0);
+  assert.deepEqual({ level: skillHinted.record.level, dueDay: skillHinted.record.dueDay }, { level: 1, dueDay: "2026-07-16" });
+  const skillWrong = await learningJSON(await skillAttempt("skill-wrong", false, false, "2026-07-15"), 200, 0);
+  assert.deepEqual({ level: skillWrong.record.level, dueDay: skillWrong.record.dueDay }, { level: 0, dueDay: "2026-07-16" });
+
+  const preferences = { activePathId: "time-series", sessionMinutes: 45, weeklyGoalMinutes: 300 };
+  assert.deepEqual((await learningJSON(await academyPut("/api/v2/preferences", preferences), 200, 0)).preferences, preferences);
+  assert.equal((await json(await academyPut("/api/v2/preferences", {
+    activePathId: "unknown", sessionMinutes: 45, weeklyGoalMinutes: 300,
+  }), 400)).error.code, "invalid_preferences");
+
+  const projectId = "macro-forecasting-desk";
+  const projectBodies = ["inspect-vintage", "transform-series"].map((taskId) => ({
+    projectId, mode: "guided", completedTaskIds: [taskId],
+  }));
+  for (const response of await Promise.all(projectBodies.map((body) => academyPut("/api/v2/project", body)))) {
+    await learningJSON(response, 200, 0);
+  }
+  const projectSaved = await learningJSON(await academyPut("/api/v2/project", {
+    projectId, mode: "unguided", completedTaskIds: ["fit-benchmark"],
+  }), 200, 0);
+  assert.deepEqual(projectSaved.project, {
+    mode: "unguided", done: ["fit-benchmark", "inspect-vintage", "transform-series"],
+  }, "concurrent project task updates must union atomically");
+  assert.equal((await json(await academyPut("/api/v2/project", {
+    projectId, mode: "guided", completedTaskIds: ["not-a-task"],
+  }), 400)).error.code, "invalid_project");
+
+  const academyHydrated = await learningJSON(await fetch(base + "/api/v2/bootstrap", {
+    headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
+  }), 200, 0);
+  assert.deepEqual(academyHydrated.stableProgress.ols.done, ["ols-line-01", "ols-line-02", "ols-line-03", "ols-line-04"],
+    "legacy index completion was not projected through the stable manifest");
+  assert.deepEqual(academyHydrated.skillMastery[skillId], skillWrong.record);
+  assert.deepEqual(academyHydrated.preferences, preferences);
+  assert.deepEqual(academyHydrated.projects[projectId], projectSaved.project);
+  assert.deepEqual(academyHydrated.progress, hydrated.progress, "v2 bootstrap drifted from the legacy compatibility snapshot");
+
   await server.d1("UPDATE stats SET points=999999 WHERE user_id='g_test'");
   const repairedPoints = await json(await fetch(base + "/api/stats", { headers: { Cookie: `session=${session}` } }), 200);
   assert.equal(repairedPoints.stats.points, 40, "legacy or forged stored points must be recomputed exactly");
@@ -597,6 +678,9 @@ try {
     progress: {},
     stats: { points: 0, streak: 0, last: null },
     mastery: {},
+    stableProgress: {},
+    skillMastery: {},
+    projects: {},
     placement: null,
     generation: 1,
   }, "reset response must expose the deterministic empty state");
@@ -606,12 +690,27 @@ try {
     ["/api/stats", { streak: 99, last: "2026-07-13" }],
     ["/api/mastery", { itemId: "ols:ols-line-04", attemptId: "stale-attempt", correct: true, hinted: false, day: "2026-07-14" }],
     ["/api/placement", { band: "applied", score: 9, total: 15, completedDay: "2026-07-15", recommendedTopic: "did" }],
+    ["/api/v2/progress", { courseId: "ols", stageId: "ols-line-05", complete: true }],
+    ["/api/v2/attempt", { attemptId: "stale-skill", skillId: "foundations.probability-models", itemId: "foundations.probability-models:v1", correct: true, hinted: false, day: "2026-07-15" }],
+    ["/api/v2/preferences", { activePathId: "causal", sessionMinutes: 10, weeklyGoalMinutes: 60 }],
+    ["/api/v2/project", { projectId: "macro-forecasting-desk", mode: "guided", completedTaskIds: ["inspect-vintage"] }],
   ]) {
     const staleWrite = await learningJSON(await fetch(base + apiPath, {
       method: "PUT", headers: auth, body: JSON.stringify(body),
     }), 409, 1);
     assert.equal(staleWrite.error.code, "reset_required", `${apiPath}: a pre-reset write must be fenced out`);
   }
+
+  const academyAfterReset = await learningJSON(await fetch(base + "/api/v2/bootstrap", {
+    headers: { Cookie: `session=${session}`, "X-IEWT-Owner": "g_test" },
+  }), 200, 1);
+  assert.deepEqual(academyAfterReset.stableProgress, {}, "reset retained stable-id completion");
+  assert.deepEqual(academyAfterReset.skillMastery, {}, "reset retained conceptual mastery");
+  assert.deepEqual(academyAfterReset.projects, {}, "reset retained capstone task progress");
+  assert.deepEqual(academyAfterReset.preferences, preferences, "reset must preserve learning preferences");
+  assert.deepEqual({ progress: academyAfterReset.progress, mastery: academyAfterReset.mastery, placement: academyAfterReset.placement }, {
+    progress: {}, mastery: {}, placement: null,
+  }, "v2 bootstrap retained legacy learning state after reset");
 
   assert.deepEqual(
     await learningJSON(await fetch(base + "/api/progress", { headers: { Cookie: `session=${session}` } }), 200, 1),

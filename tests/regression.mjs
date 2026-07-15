@@ -6,7 +6,7 @@ import { startWorker } from "./worker-server.mjs";
 const server = await startWorker();
 const BASE = server.baseURL;
 let browser;
-const TOPICS = { ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33 };
+const TOPICS = { ols: 20, iv2sls: 31, did: 29, var: 30, panel: 30, logit: 32, gmm: 33, foundations: 32, mle: 32, forecast: 32, coint: 32, financial: 32 };
 const SLUGS = {
   ols: "ordinary-least-squares",
   iv2sls: "instrumental-variables-2sls",
@@ -15,9 +15,15 @@ const SLUGS = {
   panel: "panel-fixed-random-effects",
   logit: "logit-probit",
   gmm: "generalized-method-of-moments",
+  foundations: "statistical-foundations-simulation-asymptotics",
+  mle: "maximum-likelihood-numerical-econometrics",
+  forecast: "univariate-time-series-forecasting",
+  coint: "cointegration-vecm-state-space",
+  financial: "financial-econometrics-risk-factor-models",
 };
 const courseRoute = (topic) => `/lab/${SLUGS[topic]}/`;
-const PAGES = ["/", "/lab/", "/lab/placement/", "/lab/review/", courseRoute("ols"), "/articles/"];
+const PAGES = ["/", "/lab/", "/lab/placement/", "/lab/review/", "/lab/challenge/", courseRoute("ols"), courseRoute("foundations"),
+  "/lab/projects/macro-forecasting-desk/", "/lab/projects/fx-volatility-risk/", "/lab/projects/factor-pricing-lab/", "/articles/"];
 const stageRoute = (topic, index, nonce = index) => `${courseRoute(topic)}?test=${nonce}#s${index}`;
 
 function watch(page, ignored = () => false) {
@@ -29,7 +35,7 @@ function watch(page, ignored = () => false) {
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText || "unknown";
     const navigationAbortedAuthProbe = reason === "net::ERR_ABORTED" &&
-      ["/api/bootstrap", "/api/me"].includes(new URL(request.url()).pathname);
+      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me"].includes(new URL(request.url()).pathname);
     const detail = `request failed: ${request.url()} (${reason})`;
     if (!navigationAbortedAuthProbe && !ignored(detail)) errors.push(detail);
   });
@@ -48,6 +54,13 @@ const contrast = (a, b) => {
 
 async function points(page) {
   return page.evaluate(() => window.Gamify.get().points);
+}
+
+async function downloadText(download) {
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function waitForAcademy(page) {
@@ -80,11 +93,15 @@ async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } =
       contentType: "application/json",
       body: JSON.stringify(body),
     });
-    if (url.pathname === "/api/bootstrap") return reply({
+    if (url.pathname === "/api/v2/bootstrap") return reply({
       user: { id: "g_browser", name: "Browser Learner", email: "" },
       progress: { ols: { done: [0, 1] } },
       stats: { points: 15, streak: 2, last: "2026-07-13" },
       mastery: {},
+      stableProgress: { ols: { done: ["ols-line-01", "ols-line-02"] } },
+      skillMastery: {},
+      preferences: { activePathId: "complete-core", sessionMinutes: 20, weeklyGoalMinutes: 120 },
+      projects: {},
       placement: null,
       generation,
     });
@@ -96,8 +113,11 @@ async function mockSignedInAPI(page, { deleteStatus = 200, deleteGate = null } =
       if (deleteGate) await deleteGate;
       if (deleteStatus === 200) generation++;
       return deleteStatus === 200
-        ? reply({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation })
+        ? reply({ ok: true, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, stableProgress: {}, skillMastery: {}, projects: {}, placement: null, generation })
         : reply({ error: { code: "temporary" } }, deleteStatus);
+    }
+    if (url.pathname === "/api/v2/preferences" && method === "PUT") {
+      return reply({ ok: true, preferences: JSON.parse(request.postData() || "{}"), generation });
     }
     if (url.pathname === "/api/progress" && method === "PUT") return reply({ ok: true, generation });
     if (url.pathname === "/api/stats" && method === "PUT") return reply({ stats: { points: 15, streak: 2, last: "2026-07-13" }, generation });
@@ -135,47 +155,42 @@ async function solve(route, answer, expectedPoints, repeat) {
 try {
   browser = await chromium.launch();
   // Layout and console integrity at all supported viewports.
-  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [768, 1024, true], [1440, 900, false], [2048, 1152, false]]) {
+  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [768, 1024, true], [1024, 768, true], [1280, 720, false], [1440, 900, false], [2048, 1152, false]]) {
     const context = await browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 2 : 1 });
     const page = await context.newPage();
     const clean = watch(page);
     for (const route of PAGES) {
       await page.goto(BASE + route, { waitUntil: "load" });
       if (route === courseRoute("ols")) await waitForCourse(page, "1 / 20");
+      if (route === courseRoute("foundations")) await waitForCourse(page, "1 / 32");
       if (route === "/lab/") await waitForAcademy(page);
+      if (route === "/lab/review/") await page.locator("#reviewApp[aria-busy='false']").waitFor();
+      if (route === "/lab/challenge/") await page.locator(".review-form").waitFor();
+      if (route.startsWith("/lab/projects/")) await page.locator("#projectTasks input").first().waitFor();
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
-      if (route === "/lab/" && [320, 390, 1440, 2048].includes(width)) {
-        const cockpit = await page.locator(".academy-cockpit").boundingBox();
-        const hero = await page.locator(".lab-hero").boundingBox();
+      if (route === "/lab/") {
+        const today = await page.locator(".today").boundingBox();
         const heroAction = await page.locator("#heroPrimaryCta").boundingBox();
-        const diagnostic = await page.locator(".lab-hero__diagnostic").boundingBox();
+        const session = await page.locator(".session-control").boundingBox();
         const resumeCard = await page.locator(".dashboard-resume").boundingBox();
         const resumeAction = await page.locator(".dashboard-resume .btn").boundingBox();
-        assert(cockpit && hero && hero.y >= cockpit.y && hero.y + hero.height <= cockpit.y + cockpit.height,
-          `[${width}px] academy identity escaped the cockpit`);
+        const firstCourse = await page.locator("#labGrid .model-card").first().boundingBox();
+        assert(today && today.y + today.height <= height, `[${width}px] Today surface falls below the initial viewport`);
         assert(heroAction && heroAction.height >= 44, `[${width}px] hero action is not a 44px touch target`);
-        assert(diagnostic && diagnostic.height >= 44, `[${width}px] placement diagnostic is not a 44px touch target`);
+        assert(session && session.height >= 44, `[${width}px] session planner is not a 44px touch target`);
         assert(resumeAction && resumeAction.height >= 44, `[${width}px] resume action is not a 44px touch target`);
-        if (width !== 320) {
+        if (width >= 390) {
           assert(resumeCard && resumeCard.y + resumeCard.height <= height,
             `[${width}px] personalized next-action card falls below the fold at ${Math.round((resumeCard?.y || 0) + (resumeCard?.height || 0))}px`);
         }
-        if (width >= 1440) {
-          const account = await page.locator("#account").boundingBox();
-          const reset = await page.locator("#resetProgressBtn").boundingBox();
-          const metrics = await page.locator(".dashboard-metrics").boundingBox();
-          const firstCourse = await page.locator("#labGrid .model-card").first().boundingBox();
-          assert(cockpit.height <= 620, `[desktop] academy cockpit is ${Math.round(cockpit.height)}px tall; expected at most 620px`);
-          assert(account && account.y + account.height <= height, "[desktop] account and sync state are below the fold");
-          assert(reset && reset.height >= 44 && reset.y + reset.height <= height, "[desktop] reset control is not fully visible and touch-safe");
-          assert(metrics && metrics.y + metrics.height <= height, "[desktop] core progress metrics are below the fold");
-          const requiredIntersection = width === 2048 ? 96 : 40;
-          assert(firstCourse && firstCourse.y <= height - requiredIntersection,
-            `[desktop] course discovery begins too late at ${Math.round(firstCourse?.y || 0)}px`);
-          if (width === 2048) assert(cockpit.width >= 1320, `[wide desktop] cockpit underuses the viewport at ${Math.round(cockpit.width)}px`);
-        }
+        if ([390, 1024, 1280, 1440, 2048].includes(width)) assert(firstCourse && firstCourse.y <= height - 100,
+          `[${width}px] first course preview begins too late at ${Math.round(firstCourse?.y || 0)}px`);
+      }
+      if (route === courseRoute("foundations") && width === 1280) {
+        const stage = await page.locator(".stage").boundingBox();
+        assert(stage && stage.y <= 280, `[1280px] course content begins too late at ${Math.round(stage?.y || 0)}px`);
       }
     }
     clean();
@@ -189,11 +204,147 @@ try {
     const context = await browser.newContext({ javaScriptEnabled: false });
     const page = await context.newPage();
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
-    assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("ols"));
-    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start with OLS/);
+    assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("foundations"));
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start learning/);
     assert.equal(new URL(await page.locator(".lab-hero__diagnostic").getAttribute("href"), BASE).pathname, "/lab/placement/");
-    assert.equal(await page.locator("#labGrid .model-card").count(), 7, "no-JS course catalogue disappeared");
+    assert.equal(await page.locator("#labGrid .model-card").count(), 12, "no-JS course catalogue disappeared");
     await context.close();
+  }
+
+  // Academy-native interactions remain instant until a learner explicitly
+  // runs Python. Concept labs, cases, and matching complete through keyboard-
+  // accessible controls; code challenges call the lazy runtime once.
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await context.addInitScript(() => {
+      window.__pythonLoads = Number(sessionStorage.getItem("academy:test-python-loads") || 0);
+      window.loadPyodide = async () => {
+        window.__pythonLoads++;
+        sessionStorage.setItem("academy:test-python-loads", String(window.__pythonLoads));
+        return {
+          loadPackage: async () => {}, setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined,
+        };
+      };
+    });
+    const page = await context.newPage();
+    const requested = [];
+    page.on("request", (request) => requested.push(request.url()));
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("foundations", 1, "native-formats"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 32");
+    assert.equal(await page.locator(".concept-lab__plot title").count(), 1, "concept SVG has no accessible title");
+    assert.equal(await page.locator(".concept-lab__plot desc").count(), 1, "concept SVG has no accessible description");
+    const beforeCurve = await page.locator(".concept-lab__curve").getAttribute("d");
+    await page.locator(".concept-lab input[type=range]").fill("200");
+    assert.notEqual(await page.locator(".concept-lab__curve").getAttribute("d"), beforeCurve, "concept experiment did not react instantly");
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 0, "concept lab eagerly loaded Python");
+    await page.getByRole("button", { name: "Record insight" }).click();
+    assert((await page.evaluate(() => window.IEWTStorage.stableProgress().foundations.done)).includes("foundations-probability-lab"));
+
+    await page.goto(BASE + stageRoute("foundations", 3, "native-code"));
+    await waitForCourse(page, "4 / 32");
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 0, "code challenge loaded Python before Run");
+    await page.getByRole("button", { name: "Reveal hint 1" }).click();
+    assert(await page.locator(".quiz__feedback.hint").isVisible());
+    await page.locator(".cell__run").click();
+    await page.locator(".quiz__feedback.ok").waitFor();
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "code challenge did not use one lazy Python runtime");
+
+    await page.goto(BASE + stageRoute("foundations", 4, "native-case"));
+    await waitForCourse(page, "5 / 32");
+    await page.locator('.case-study__choice[data-answer="0"]').click();
+    await page.locator('.case-study__choice[data-answer="0"]').click();
+    await page.locator(".case-study__complete").waitFor();
+
+    await page.goto(BASE + stageRoute("foundations", 5, "native-match"));
+    await waitForCourse(page, "6 / 32");
+    await page.locator('.match-lab__rows label:has-text("Good practice") select').selectOption({ label: "Use expectations for location and variance for dispersion around the mean." });
+    await page.locator('.match-lab__rows label:has-text("Diagnostic evidence") select').selectOption({ label: "units, existence of moments, and covariance terms" });
+    await page.locator('.match-lab__rows label:has-text("Failure to guard against") select').selectOption({ label: "dropping dependence terms or confusing spread with level" });
+    await page.getByRole("button", { name: "Check map" }).click();
+    await page.locator(".match-lab .quiz__feedback.ok").waitFor();
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "non-code interactions loaded Python");
+    assert(requested.some((url) => url.includes("/assets/data/courses/foundations/manifest.json")), "course manifest did not load");
+    assert(requested.some((url) => url.includes("/assets/data/courses/foundations/probability.json")), "active module payload did not load");
+    assert(!requested.some((url) => /cdn\.jsdelivr\.net\/pyodide/.test(url)), "fake lazy runtime was bypassed by a CDN request");
+    clean();
+    await context.close();
+  }
+
+  // Capstones persist only task/mode state and export portable local artifacts.
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/projects/macro-forecasting-desk/", { waitUntil: "load" });
+    await page.locator("#projectTasks input").first().waitFor();
+    assert.equal(await page.locator("#projectTasks input").count(), 6);
+    await page.getByRole("button", { name: "Unguided" }).click();
+    assert.equal(await page.locator("#projectTasks small").count(), 0, "unguided mode exposed guided instructions");
+    await page.locator("#projectTasks input").first().check();
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.projects()["macro-forecasting-desk"]), {
+      mode: "unguided", done: ["inspect-vintage"],
+    });
+    const notebookEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export .ipynb" }).click();
+    const notebookDownload = await notebookEvent;
+    assert.equal(notebookDownload.suggestedFilename(), "macro-forecasting-desk.ipynb");
+    const notebook = JSON.parse(await downloadText(notebookDownload));
+    assert.equal(notebook.nbformat, 4);
+    assert.equal(notebook.metadata.academyProject, "macro-forecasting-desk");
+    assert.equal(notebook.cells.some((cell) => cell.cell_type === "code"), true);
+    const reportEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export HTML report" }).click();
+    const reportDownload = await reportEvent;
+    assert.equal(reportDownload.suggestedFilename(), "macro-forecasting-desk-report.html");
+    const report = await downloadText(reportDownload);
+    assert.match(report, /^<!doctype html>/i);
+    assert.match(report, /Dataset SHA-256:/);
+    assert.match(report, /no code or output was stored in D1/i);
+    clean();
+    await context.close();
+  }
+
+  // Mastery challenges use two deterministic variants for each of the three
+  // weakest skills; course challenges cover every course skill and award the
+  // documented badge at an 80% threshold.
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + "/lab/challenge/", { waitUntil: "load" });
+    for (let index = 0; index < 6; index++) {
+      await page.locator('.review-form input[name="answer"]').first().check();
+      await page.locator('.review-form button[type="submit"]').click();
+      await page.locator("#challengeFeedback:not([hidden])").waitFor();
+      await page.locator('.review-form button[type="submit"]').click();
+    }
+    await page.getByRole("heading", { name: /% correct/ }).waitFor();
+    const mastery = await page.evaluate(() => window.IEWTStorage.skillMastery());
+    assert.equal(Object.keys(mastery).length, 3, "weak-skill challenge did not target exactly three skills");
+    assert(Object.values(mastery).every((record) => record.attempts === 2), "weak-skill challenge did not use two variants per skill");
+    clean();
+    await context.close();
+
+    const courseContext = await browser.newContext();
+    const coursePage = await courseContext.newPage();
+    await coursePage.goto(BASE + "/lab/challenge/?course=ols", { waitUntil: "load" });
+    for (let index = 0; index < 7; index++) {
+      const answer = await coursePage.evaluate(async () => {
+        const payload = await (await fetch(`/assets/data/challenge-bank.json?v=${document.documentElement.dataset.assetVersion}`)).json();
+        const prompt = document.querySelector(".review-question__prompt")?.textContent;
+        return payload.items.find((item) => item.courseId === "ols" && item.prompt === prompt)?.answer;
+      });
+      assert(Number.isInteger(answer), "course challenge answer fixture could not match the rendered prompt");
+      await coursePage.locator(`.review-form input[name="answer"][value="${answer}"]`).check();
+      await coursePage.locator('.review-form button[type="submit"]').click();
+      await coursePage.locator("#challengeFeedback.is-correct").waitFor();
+      await coursePage.locator('.review-form button[type="submit"]').click();
+    }
+    await coursePage.getByRole("heading", { name: "100% correct" }).waitFor();
+    assert.match(await coursePage.locator(".review-empty").textContent(), /Course challenge badge earned/);
+    await courseContext.close();
   }
 
   // The faintest text token remains WCAG-AA on the base surface.
@@ -217,18 +368,16 @@ try {
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
     await waitForAcademy(page);
 
-    assert.equal(await page.locator("#learningPaths .path-card").count(), 4, "learning paths did not render");
-    assert.equal(await page.locator("#labGrid .model-card").count(), 7, "course catalogue did not render");
-    assert.match(await page.locator(".dashboard-resume").textContent(), /2 of 20 lessons complete/);
+    assert.equal(await page.locator("#learningPaths .path-card").count(), 5, "learning paths did not render");
+    assert.equal(await page.locator("#labGrid .model-card").count(), 12, "course catalogue did not render");
+    assert.match(await page.locator(".dashboard-resume").textContent(), /2 \/ 20 complete · next stage 3/);
     assert((await page.locator(".dashboard-resume a").getAttribute("href")).endsWith("#s2"), "resume link did not target the first unfinished lesson");
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Continue OLS · lesson 3/);
     assert((await page.locator("#heroPrimaryCta").getAttribute("href")).endsWith("#s2"), "hero action did not personalize to the next lesson");
     assert.equal(await page.locator("#dashboardFocus li").count(), 3, "focus plan did not render three steps");
     assert.deepEqual(await page.locator("#dashboardFocus li a").evaluateAll((links) => links.map((link) => link.hash)), ["#s2", "#s3", "#s4"]);
-    assert.match(await page.locator("#dailyReviewCount").textContent(), /Build your review queue/);
-    assert.equal(new URL(await page.locator("#dailyReviewCta").getAttribute("href"), BASE).pathname, "/lab/review/");
-    assert.equal(await page.locator("#academyDashboard [role=progressbar]").count(), 2);
-    assert.equal(await page.locator("#academyDashboard [role=progressbar]").first().getAttribute("aria-valuenow"), "10");
+    assert.match(await page.locator("#dailyReviewCount").textContent(), /Start your mastery map/);
+    assert.equal(new URL(await page.locator("#dailyReviewCta").getAttribute("href"), BASE).pathname, "/lab/challenge/");
     assert(await page.evaluate(() => {
       const dashboard = document.querySelector("#academyDashboard");
       const account = document.querySelector("#account");
@@ -244,8 +393,8 @@ try {
 
     await page.fill("#courseSearch", "");
     await page.selectOption("#levelFilter", "Advanced");
-    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "3 courses");
-    assert.equal(await page.locator('#labGrid .model-card [class="model-card__badge"]', { hasText: "Advanced" }).count(), 3);
+    await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "4 courses");
+    assert.equal(await page.locator('#labGrid .model-card [class="model-card__badge"]', { hasText: "Advanced" }).count(), 4);
 
     await page.selectOption("#levelFilter", "all");
     await page.selectOption("#statusFilter", "in-progress");
@@ -256,18 +405,17 @@ try {
     await page.waitForFunction(() => document.querySelector("#courseResults")?.textContent === "0 courses");
     assert(await page.locator("#courseEmptyState").isVisible(), "empty search result was not announced visibly");
     const queuedItem = await page.evaluate(() => {
-      const item = window.REVIEW_ITEMS[0];
-      const snapshot = window.IEWTStorage.progress();
-      const done = new Set((snapshot[item.courseId] || {}).done || []);
-      done.add(item.stageIndex);
-      snapshot[item.courseId] = { done: [...done].sort((a, b) => a - b) };
-      window.IEWTStorage.setProgress(snapshot);
+      const skill = window.SKILL_CATALOG[0];
+      window.IEWTStorage.setSkillMastery({ [skill.id]: {
+        level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1,
+        lastResult: true, lastAttemptId: "browser-due", updatedAt: Date.now(),
+      } });
       document.dispatchEvent(new Event("iewt:synced"));
-      return item.id;
+      return skill.id;
     });
-    assert(queuedItem, "review catalogue did not expose a deterministic first item");
+    assert(queuedItem, "skill catalogue did not expose a deterministic first item");
     await page.waitForFunction(() => document.querySelector("#dailyReviewCta")?.dataset.due === "1");
-    assert.equal((await page.locator("#dailyReviewCount").textContent()).trim(), "1 review due now");
+    assert.equal((await page.locator("#dailyReviewCount").textContent()).trim(), "1 skill due now");
     clean();
     await context.close();
   }
@@ -320,7 +468,7 @@ try {
     await page.route("**/assets/data/review-bank.json*", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ schemaVersion: 1, items: reviewItems }),
+      body: JSON.stringify({ schemaVersion: 2, items: reviewItems }),
     }));
     const clean = watch(page);
     await page.goto(BASE + "/lab/review/", { waitUntil: "load" });
@@ -387,7 +535,7 @@ try {
       window.IEWTStorage.setGuideWidth(61.4);
       document.dispatchEvent(new Event("iewt:synced"));
     });
-    await page.waitForFunction(() => document.querySelector(".dashboard-resume")?.textContent.includes("3 of 20"));
+    await page.waitForFunction(() => document.querySelector(".dashboard-resume")?.textContent.includes("3 / 20 complete"));
     await page.click("#resetProgressBtn");
     assert(await page.locator("#resetDialog").evaluate((dialog) => dialog.open), "reset confirmation did not open");
     assert.match(await page.locator("#resetScope").textContent(), /Only progress on this device/);
@@ -399,7 +547,7 @@ try {
       gamify: window.Gamify.get(),
       guideWidth: window.IEWTStorage.guideWidth(),
       owner: window.IEWTStorage.owner(),
-      dashboardFocused: document.activeElement === document.querySelector("#dashboardTitle"),
+      dashboardFocused: document.activeElement === document.querySelector("#academyTitle"),
     }));
     assert.deepEqual(state, {
       progress: {},
@@ -408,7 +556,7 @@ try {
       owner: null,
       dashboardFocused: true,
     });
-    assert.match(await page.locator(".dashboard-resume").textContent(), /0 of 20 lessons complete/);
+    assert.match(await page.locator(".dashboard-resume").textContent(), /0 \/ 20 complete/);
     clean();
     await context.close();
   }
@@ -442,7 +590,7 @@ try {
     await waitForAcademy(page);
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start DiD · lesson 1/, "placement route did not survive reload");
     await page.click("#resetProgressBtn");
-    assert.match(await page.locator("#resetDescription").textContent(), /placement result/);
+    assert.match(await page.locator("#resetDescription").textContent(), /placement/);
     await page.click("#resetConfirm");
     await page.waitForFunction(() => window.IEWTStorage.placement() === null && !document.querySelector("#resetDialog").open);
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start OLS · lesson 1/);
@@ -461,7 +609,7 @@ try {
     await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.isSignedIn() && window.IEWTStorage.progress().ols?.done?.length === 2);
     assert.deepEqual(
       calls.filter((call) => call.method === "GET").map((call) => call.path),
-      ["/api/bootstrap"],
+      ["/api/v2/bootstrap"],
       "signed-in hydration must use one read request without the legacy waterfall",
     );
     await page.click("#resetProgressBtn");
@@ -531,11 +679,14 @@ try {
       const reply = (body, status = 200) => route.fulfill({
         status, contentType: "application/json", body: JSON.stringify(body),
       });
-      if (path === "/api/bootstrap") return reply({
+      if (path === "/api/v2/bootstrap") return reply({
         user: { id: "g_switch", name: "Switching Learner", email: "" },
         progress: serverProgress,
         stats: serverStats,
         mastery: {},
+        stableProgress: generation === 0 ? { ols: { done: ["ols-line-01", "ols-line-02"] } } : {}, skillMastery: {},
+        preferences: { activePathId: "complete-core", sessionMinutes: 20, weeklyGoalMinutes: 120 },
+        projects: {},
         placement: null,
         generation,
       });
@@ -549,14 +700,16 @@ try {
         generation = 1;
         serverProgress = {};
         serverStats = { points: 0, streak: 0, last: null };
-        return reply({ ok: true, progress: serverProgress, stats: serverStats, mastery: {}, placement: null, generation });
+        return reply({ ok: true, progress: serverProgress, stats: serverStats, mastery: {}, stableProgress: {}, skillMastery: {}, projects: {}, placement: null, generation });
       }
+      if (path === "/api/v2/preferences" && method === "PUT") return reply({ ok: true, preferences: JSON.parse(request.postData() || "{}"), generation });
       if (method === "PUT") return reply({ ok: true, stats: serverStats, generation });
       return reply({ error: { code: "not_found" } }, 404);
     });
     const clean = watch(page);
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
     await page.waitForFunction(() => window.Auth?.status() === "ready" && window.IEWTStorage.progress().ols?.done?.length === 2);
+    const initialPutCount = calls.filter((call) => call.method === "PUT").length;
     await page.click("#resetProgressBtn");
     await page.click("#resetConfirm");
     await deleteStarted;
@@ -594,7 +747,7 @@ try {
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(() => window.Auth?.status() === "ready" && window.Auth?.user()?.id === "g_switch" &&
       window.IEWTStorage.syncGeneration() === 1 && Object.keys(window.IEWTStorage.progress()).length === 0);
-    assert.deepEqual(calls.filter((call) => call.method === "PUT"), [], "pre-reset state was reuploaded after returning sign-in");
+    assert.deepEqual(calls.filter((call) => call.method === "PUT").slice(initialPutCount), [], "pre-reset state was reuploaded after returning sign-in");
     clean();
     await context.close();
   }
@@ -609,11 +762,14 @@ try {
       const request = route.request();
       const path = new URL(request.url()).pathname;
       const signedInUser = signedIn ? { id: "g_signout", name: "Sign-out Learner", email: "" } : null;
-      const body = path === "/api/bootstrap" ? (signedInUser ? {
+      const body = path === "/api/v2/bootstrap" ? (signedInUser ? {
         user: signedInUser,
         progress: {},
         stats: { points: 0, streak: 0, last: null },
         mastery: {},
+        stableProgress: {}, skillMastery: {},
+        preferences: { activePathId: "complete-core", sessionMinutes: 20, weeklyGoalMinutes: 120 },
+        projects: {},
         placement: null,
         generation: 0,
       } : { user: null })
@@ -622,7 +778,8 @@ try {
           : path === "/api/stats" ? { stats: { points: 0, streak: 0, last: null }, generation: 0 }
             : path === "/api/mastery" ? { mastery: {}, generation: 0 }
               : path === "/api/placement" ? { placement: null, generation: 0 }
-                : { error: { code: "not_found" } };
+                : path === "/api/v2/preferences" ? { ok: true, preferences: JSON.parse(request.postData() || "{}"), generation: 0 }
+                  : { error: { code: "not_found" } };
       return route.fulfill({ status: path.startsWith("/api/") ? 200 : 404, contentType: "application/json", body: JSON.stringify(body) });
     });
     await page.route("**/auth/logout", (route) => {
@@ -644,7 +801,8 @@ try {
     await context.close();
   }
 
-  // The course shell exposes a real loading state and downloads only the selected topic payload.
+  // The course shell exposes a real loading state and downloads only the
+  // selected module payload, retaining the aggregate file only as fallback.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -652,7 +810,7 @@ try {
     let releasePayload;
     const payloadGate = new Promise((resolve) => { releasePayload = resolve; });
     page.on("request", (request) => requested.push(new URL(request.url()).pathname));
-    await page.route("**/assets/data/courses/ols.json*", async (route) => {
+    await page.route("**/assets/data/courses/ols/manifest.json*", async (route) => {
       await payloadGate;
       await route.continue();
     });
@@ -663,11 +821,14 @@ try {
     releasePayload();
     await page.waitForFunction(() => document.querySelector("#cPos")?.textContent.trim() === "1 / 20");
     assert.equal(await page.locator("#course").getAttribute("aria-busy"), "false");
-    assert.equal(requested.filter((path) => path === "/assets/data/courses/ols.json").length, 1, "selected course payload was not fetched exactly once");
+    assert.equal(requested.filter((path) => path === "/assets/data/courses/ols/manifest.json").length, 1, "course manifest was not fetched exactly once");
+    assert.equal(requested.filter((path) => path === "/assets/data/courses/ols/ols-line.json").length, 1, "selected module payload was not fetched exactly once");
+    assert(!requested.includes("/assets/data/courses/ols.json"), "course aggregate loaded despite a valid module manifest");
     for (const script of ["/assets/js/curriculum.js", "/assets/js/curriculum-data.js", "/assets/js/curriculum-questions.js"]) {
       assert(!requested.includes(script), `course downloaded authoring bundle ${script}`);
     }
-    assert(!requested.some((path) => /^\/assets\/data\/courses\/(?!ols\.json$)/.test(path)), "course downloaded another topic payload");
+    assert(!requested.some((path) => /^\/assets\/data\/courses\/(?!ols\/)/.test(path)), "course downloaded another topic payload");
+    assert(!requested.some((path) => /^\/assets\/data\/courses\/ols\/(?!manifest\.json$|ols-line\.json$)/.test(path)), "course downloaded an unrelated module payload");
     clean();
     await context.close();
   }
@@ -959,7 +1120,7 @@ try {
       window.fetch = (input, init = {}) => {
         const path = new URL(typeof input === "string" ? input : input.url, location.href).pathname;
         const method = init.method || "GET";
-        if (path === "/api/bootstrap") return Promise.resolve(reply({ error: { code: "not_found" } }, 404));
+        if (path === "/api/v2/bootstrap" || path === "/api/bootstrap") return Promise.resolve(reply({ error: { code: "not_found" } }, 404));
         if (path === "/api/me") return Promise.resolve(reply({ user: { id: "g_partial", name: "Partial Sync", email: "" } }));
         if (path === "/api/progress") return Promise.resolve(reply({ error: { code: "temporary" } }, 500));
         if (path === "/api/stats" && method === "GET") return Promise.resolve(reply({ stats: { points: 100, streak: 2, last: "2026-07-12" }, generation: 0 }));

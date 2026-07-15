@@ -12,6 +12,8 @@ articles/_template/
 assets/js/curriculum.js
 assets/js/curriculum-data.js
 assets/js/curriculum-questions.js
+assets/js/curriculum-academy.js
+assets/data/stage-id-map-v2.json
 worker.js
 wrangler.toml
 .assetsignore

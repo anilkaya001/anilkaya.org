@@ -114,10 +114,13 @@ const MIME = Object.freeze({
 function staticServer() {
   const server = createServer((request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
-    if (url.pathname === "/api/bootstrap" || url.pathname === "/api/me") {
+    if (url.pathname === "/api/v2/bootstrap" || url.pathname === "/api/bootstrap" || url.pathname === "/api/me") {
       response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       response.end(JSON.stringify({
         user: null, progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 0,
+        stableProgress: {}, skillMastery: {}, preferences: {
+          activePathId: "balanced", sessionMinutes: 20, weeklyGoalMinutes: 100,
+        }, projects: {},
       }));
       return;
     }
@@ -233,13 +236,16 @@ try {
   const conflictContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const conflictPage = await conflictContext.newPage();
   const conflictRequests = [];
-  await conflictPage.route("**/api/bootstrap", (route) => route.fulfill({
+  await conflictPage.route("**/api/v2/bootstrap", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     headers: { "Cache-Control": "no-store" },
     body: JSON.stringify({
       user: { id: "g_conflict", name: "Conflict Learner", email: "" },
       progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 0,
+      stableProgress: {}, skillMastery: {}, preferences: {
+        activePathId: "balanced", sessionMinutes: 20, weeklyGoalMinutes: 100,
+      }, projects: {},
     }),
   }));
   await conflictPage.route("**/api/placement", (route) => {

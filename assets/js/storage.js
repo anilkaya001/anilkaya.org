@@ -21,6 +21,11 @@
     masteryOutboxPrefix: "iewt:mastery-outbox:v2:",
     placementPrefix: "iewt:placement:v2:",
     syncPrefix: "iewt:sync:v2:",
+    stableProgressPrefix: "iewt:progress:v3:",
+    skillMasteryPrefix: "iewt:skill-mastery:v3:",
+    skillOutboxPrefix: "iewt:skill-outbox:v3:",
+    preferencesPrefix: "iewt:preferences:v3:",
+    projectsPrefix: "iewt:projects:v3:",
     activeOwner: "iewt:activeOwner",
     guideWidth: "iewt:guideW",
     legacyGuideWidth: "iewt:splitW",
@@ -91,9 +96,17 @@
       kind === "gamify" ? KEYS.gamifyPrefix :
       kind === "mastery" ? KEYS.masteryPrefix :
       kind === "masteryOutbox" ? KEYS.masteryOutboxPrefix :
-      kind === "placement" ? KEYS.placementPrefix : KEYS.syncPrefix;
+      kind === "placement" ? KEYS.placementPrefix :
+      kind === "stableProgress" ? KEYS.stableProgressPrefix :
+      kind === "skillMastery" ? KEYS.skillMasteryPrefix :
+      kind === "skillOutbox" ? KEYS.skillOutboxPrefix :
+      kind === "preferences" ? KEYS.preferencesPrefix :
+      kind === "projects" ? KEYS.projectsPrefix : KEYS.syncPrefix;
     return prefix + encodeURIComponent(owner);
   }
+
+  const v3Kind = (kind) => ["stableProgress", "skillMastery", "skillOutbox", "preferences", "projects"].includes(kind);
+  const envelopeVersion = (kind) => v3Kind(kind) ? 3 : FORMAT_VERSION;
 
   function cleanGeneration(value, fallback = null) {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
@@ -144,6 +157,20 @@
     return clean;
   }
 
+  function cleanStableProgress(value) {
+    const source = plainObject(value) ? value : {};
+    const catalogue = window.COURSE_STAGE_IDS || {};
+    const clean = {};
+    for (const [courseId, entry] of Object.entries(source)) {
+      const allowed = Array.isArray(catalogue[courseId]) ? new Set(catalogue[courseId]) : null;
+      if (!allowed || !plainObject(entry) || !Array.isArray(entry.done)) continue;
+      const done = [...new Set(entry.done.filter((stageId) => typeof stageId === "string" && allowed.has(stageId)))];
+      done.sort((a, b) => catalogue[courseId].indexOf(a) - catalogue[courseId].indexOf(b));
+      clean[courseId] = { done };
+    }
+    return clean;
+  }
+
   function normalizeDay(value) {
     if (value == null || value === "") return null;
     const match = String(value).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -163,7 +190,7 @@
     };
   }
 
-  const validItemId = (value) => typeof value === "string" && /^[a-z0-9][a-z0-9:_-]{0,127}$/i.test(value);
+  const validItemId = (value) => typeof value === "string" && /^[a-z0-9][a-z0-9:._-]{0,127}$/i.test(value);
   const validAttemptId = (value) => typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
 
   function cleanMastery(value) {
@@ -208,6 +235,42 @@
     return clean;
   }
 
+  function cleanSkillOutbox(value) {
+    if (!Array.isArray(value)) return [];
+    const clean = [];
+    const seen = new Set();
+    for (const event of value.slice(-500)) {
+      if (!plainObject(event) || !validItemId(event.skillId) || !validItemId(event.itemId) || !validAttemptId(event.attemptId) || seen.has(event.attemptId)) continue;
+      const day = normalizeDay(event.day);
+      if (!day || typeof event.correct !== "boolean" || typeof event.hinted !== "boolean") continue;
+      seen.add(event.attemptId);
+      clean.push({ attemptId: event.attemptId, skillId: event.skillId, itemId: event.itemId, correct: event.correct, hinted: event.hinted, day });
+    }
+    return clean;
+  }
+
+  const PROJECT_IDS = new Set(["macro-forecasting-desk", "fx-volatility-risk", "factor-pricing-lab"]);
+  const PROJECT_MODES = new Set(["guided", "unguided"]);
+  function cleanProjects(value) {
+    const source = plainObject(value) ? value : {};
+    const clean = {};
+    for (const [projectId, entry] of Object.entries(source)) {
+      if (!PROJECT_IDS.has(projectId) || !plainObject(entry) || !PROJECT_MODES.has(entry.mode) || !Array.isArray(entry.done)) continue;
+      clean[projectId] = { mode: entry.mode, done: [...new Set(entry.done.filter((taskId) => typeof taskId === "string" && /^[a-z0-9-]{2,64}$/.test(taskId)))].slice(0, 24) };
+    }
+    return clean;
+  }
+
+  const PATH_IDS = new Set(["complete-core", "causal", "applied-micro", "time-series", "markets-risk"]);
+  function cleanPreferences(value) {
+    const source = plainObject(value) ? value : {};
+    return {
+      activePathId: PATH_IDS.has(source.activePathId) ? source.activePathId : "complete-core",
+      sessionMinutes: [10, 20, 45].includes(Number(source.sessionMinutes)) ? Number(source.sessionMinutes) : 20,
+      weeklyGoalMinutes: Number.isSafeInteger(Number(source.weeklyGoalMinutes)) && Number(source.weeklyGoalMinutes) >= 30 && Number(source.weeklyGoalMinutes) <= 1200 ? Number(source.weeklyGoalMinutes) : 120,
+    };
+  }
+
   const PLACEMENT_BANDS = new Set(["foundation", "applied", "advanced"]);
   const PLACEMENT_TOPICS = new Set(["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"]);
 
@@ -228,22 +291,27 @@
 
   function cleanFor(kind, value) {
     if (kind === "progress") return cleanProgress(value);
+    if (kind === "stableProgress") return cleanStableProgress(value);
     if (kind === "gamify") return cleanGamify(value);
-    if (kind === "mastery") return cleanMastery(value);
+    if (kind === "mastery" || kind === "skillMastery") return cleanMastery(value);
     if (kind === "placement") return cleanPlacement(value);
+    if (kind === "skillOutbox") return cleanSkillOutbox(value);
+    if (kind === "preferences") return cleanPreferences(value);
+    if (kind === "projects") return cleanProjects(value);
     return cleanMasteryOutbox(value);
   }
 
   function emptyFor(kind) {
-    if (kind === "progress" || kind === "mastery") return {};
-    if (kind === "masteryOutbox") return [];
+    if (["progress", "stableProgress", "mastery", "skillMastery", "projects"].includes(kind)) return {};
+    if (kind === "masteryOutbox" || kind === "skillOutbox") return [];
     if (kind === "placement") return null;
+    if (kind === "preferences") return cleanPreferences({});
     return { points: 0, streak: 0, last: null };
   }
 
   function readScoped(kind, owner = activeOwner) {
     const envelope = parseRaw(scopedKey(kind, owner));
-    if (plainObject(envelope) && envelope.version === FORMAT_VERSION && envelope.owner === owner) {
+    if (plainObject(envelope) && envelope.version === envelopeVersion(kind) && envelope.owner === owner) {
       return cleanFor(kind, envelope.value);
     }
 
@@ -258,7 +326,7 @@
   function writeScoped(kind, value, owner = activeOwner) {
     const clean = cleanFor(kind, value);
     writeRaw(scopedKey(kind, owner), JSON.stringify({
-      version: FORMAT_VERSION,
+      version: envelopeVersion(kind),
       owner,
       value: clean,
     }));
@@ -276,7 +344,9 @@
   function hasScopedState(owner) {
     return readRaw(scopedKey("progress", owner)) != null || readRaw(scopedKey("gamify", owner)) != null ||
       readRaw(scopedKey("mastery", owner)) != null || readRaw(scopedKey("masteryOutbox", owner)) != null ||
-      readRaw(scopedKey("placement", owner)) != null ||
+      readRaw(scopedKey("placement", owner)) != null || readRaw(scopedKey("stableProgress", owner)) != null ||
+      readRaw(scopedKey("skillMastery", owner)) != null || readRaw(scopedKey("skillOutbox", owner)) != null ||
+      readRaw(scopedKey("preferences", owner)) != null || readRaw(scopedKey("projects", owner)) != null ||
       readRaw(scopedKey("sync", owner)) != null;
   }
 
@@ -285,10 +355,12 @@
     catch { return false; }
   }
 
-  function hasLearningState(progressValue, gamifyValue, masteryValue, masteryOutboxValue, placementValue) {
+  function hasLearningState(progressValue, gamifyValue, masteryValue, masteryOutboxValue, placementValue, stableValue = {}, skillValue = {}, skillOutboxValue = [], projectValue = {}) {
     return Object.values(progressValue).some((entry) => Array.isArray(entry.done) && entry.done.length) ||
       gamifyValue.points > 0 || gamifyValue.streak > 0 || gamifyValue.last != null ||
-      Object.keys(masteryValue).length > 0 || masteryOutboxValue.length > 0 || placementValue != null;
+      Object.keys(masteryValue).length > 0 || masteryOutboxValue.length > 0 || placementValue != null ||
+      Object.values(stableValue).some((entry) => Array.isArray(entry.done) && entry.done.length) ||
+      Object.keys(skillValue).length > 0 || skillOutboxValue.length > 0 || Object.keys(projectValue).length > 0;
   }
 
   function bindOwner(ownerId, options = {}) {
@@ -305,17 +377,32 @@
       const anonymousMastery = readScoped("mastery", ANONYMOUS);
       const anonymousMasteryOutbox = readScoped("masteryOutbox", ANONYMOUS);
       const anonymousPlacement = readScoped("placement", ANONYMOUS);
-      if (hasLearningState(anonymousProgress, anonymousGamify, anonymousMastery, anonymousMasteryOutbox, anonymousPlacement)) {
+      const anonymousStableProgress = readScoped("stableProgress", ANONYMOUS);
+      const anonymousSkillMastery = readScoped("skillMastery", ANONYMOUS);
+      const anonymousSkillOutbox = readScoped("skillOutbox", ANONYMOUS);
+      const anonymousProjects = readScoped("projects", ANONYMOUS);
+      const anonymousPreferences = readScoped("preferences", ANONYMOUS);
+      if (hasLearningState(anonymousProgress, anonymousGamify, anonymousMastery, anonymousMasteryOutbox, anonymousPlacement, anonymousStableProgress, anonymousSkillMastery, anonymousSkillOutbox, anonymousProjects)) {
         writeScoped("progress", anonymousProgress, next);
         writeScoped("gamify", anonymousGamify, next);
         writeScoped("mastery", anonymousMastery, next);
         writeScoped("masteryOutbox", anonymousMasteryOutbox, next);
         writeScoped("placement", anonymousPlacement, next);
+        writeScoped("stableProgress", anonymousStableProgress, next);
+        writeScoped("skillMastery", anonymousSkillMastery, next);
+        writeScoped("skillOutbox", anonymousSkillOutbox, next);
+        writeScoped("projects", anonymousProjects, next);
+        writeScoped("preferences", anonymousPreferences, next);
         removeScoped("progress", ANONYMOUS);
         removeScoped("gamify", ANONYMOUS);
         removeScoped("mastery", ANONYMOUS);
         removeScoped("masteryOutbox", ANONYMOUS);
         removeScoped("placement", ANONYMOUS);
+        removeScoped("stableProgress", ANONYMOUS);
+        removeScoped("skillMastery", ANONYMOUS);
+        removeScoped("skillOutbox", ANONYMOUS);
+        removeScoped("projects", ANONYMOUS);
+        removeScoped("preferences", ANONYMOUS);
       }
     }
 
@@ -359,6 +446,29 @@
     return writeScoped("progress", value);
   }
 
+  function stableFromLegacy(value = progress()) {
+    const ids = window.COURSE_STAGE_IDS || {};
+    const migrated = {};
+    for (const [courseId, entry] of Object.entries(value || {})) {
+      if (!Array.isArray(ids[courseId]) || !Array.isArray(entry && entry.done)) continue;
+      migrated[courseId] = { done: entry.done.map((index) => ids[courseId][index]).filter((stageId) => typeof stageId === "string") };
+    }
+    return cleanStableProgress(migrated);
+  }
+
+  function stableProgress() {
+    let clean = readScoped("stableProgress");
+    if (!Object.values(clean).some((entry) => entry.done.length)) {
+      const migrated = stableFromLegacy();
+      if (Object.values(migrated).some((entry) => entry.done.length)) clean = writeScoped("stableProgress", migrated);
+    }
+    return writeScoped("stableProgress", clean);
+  }
+
+  function setStableProgress(value) {
+    return writeScoped("stableProgress", value);
+  }
+
   function gamify() {
     const clean = readScoped("gamify");
     return writeScoped("gamify", clean);
@@ -396,6 +506,48 @@
     return setMasteryOutbox(masteryOutbox().filter((event) => event.attemptId !== attemptId));
   }
 
+  function skillMastery() {
+    return writeScoped("skillMastery", readScoped("skillMastery"));
+  }
+
+  function setSkillMastery(value) {
+    return writeScoped("skillMastery", value);
+  }
+
+  function skillOutbox() {
+    return writeScoped("skillOutbox", readScoped("skillOutbox"));
+  }
+
+  function setSkillOutbox(value) {
+    return writeScoped("skillOutbox", value);
+  }
+
+  function queueSkillAttempt(event) {
+    const pending = skillOutbox();
+    if (!pending.some((entry) => entry.attemptId === event.attemptId)) pending.push(event);
+    return setSkillOutbox(pending);
+  }
+
+  function removeSkillAttempt(attemptId) {
+    return setSkillOutbox(skillOutbox().filter((event) => event.attemptId !== attemptId));
+  }
+
+  function preferences() {
+    return writeScoped("preferences", readScoped("preferences"));
+  }
+
+  function setPreferences(value) {
+    return writeScoped("preferences", value);
+  }
+
+  function projects() {
+    return writeScoped("projects", readScoped("projects"));
+  }
+
+  function setProjects(value) {
+    return writeScoped("projects", value);
+  }
+
   function placement() {
     const clean = readScoped("placement");
     return writeScoped("placement", clean);
@@ -422,6 +574,10 @@
     removeScoped("mastery", owner);
     removeScoped("masteryOutbox", owner);
     removeScoped("placement", owner);
+    removeScoped("stableProgress", owner);
+    removeScoped("skillMastery", owner);
+    removeScoped("skillOutbox", owner);
+    removeScoped("projects", owner);
     // Materialize clean owner-bound state immediately so subsequent reads and
     // other same-page components cannot observe a removed legacy value.
     const cleanProgress = writeScoped("progress", {}, owner);
@@ -429,11 +585,15 @@
     const cleanMastery = writeScoped("mastery", {}, owner);
     const cleanMasteryOutbox = writeScoped("masteryOutbox", [], owner);
     const cleanPlacementState = writeScoped("placement", null, owner);
+    const cleanStableProgress = writeScoped("stableProgress", {}, owner);
+    const cleanSkillMastery = writeScoped("skillMastery", {}, owner);
+    const cleanSkillOutbox = writeScoped("skillOutbox", [], owner);
+    const cleanProjects = writeScoped("projects", {}, owner);
     writeSync(generation, owner);
     if (options.announce !== false) {
       emit("iewt:storage-reset", { owner: publicOwner(owner), anonymous: owner === ANONYMOUS, generation });
     }
-    return { progress: cleanProgress, gamify: cleanGamify, mastery: cleanMastery, masteryOutbox: cleanMasteryOutbox, placement: cleanPlacementState, generation };
+    return { progress: cleanProgress, stableProgress: cleanStableProgress, gamify: cleanGamify, mastery: cleanMastery, masteryOutbox: cleanMasteryOutbox, skillMastery: cleanSkillMastery, skillOutbox: cleanSkillOutbox, projects: cleanProjects, placement: cleanPlacementState, generation };
   }
 
   function removeAnonymousProgress(model, indexes) {
@@ -446,6 +606,18 @@
       else delete value[model];
     }
     return writeScoped("progress", value, ANONYMOUS);
+  }
+
+  function removeAnonymousStableProgress(courseId, stageIds) {
+    if (typeof courseId !== "string" || !Array.isArray(stageIds)) return readScoped("stableProgress", ANONYMOUS);
+    const removed = new Set(stageIds.filter((stageId) => typeof stageId === "string"));
+    const value = readScoped("stableProgress", ANONYMOUS);
+    if (value[courseId] && Array.isArray(value[courseId].done)) {
+      const done = value[courseId].done.filter((stageId) => !removed.has(stageId));
+      if (done.length) value[courseId] = { done };
+      else delete value[courseId];
+    }
+    return writeScoped("stableProgress", value, ANONYMOUS);
   }
 
   function setAnonymousGamify(value) {
@@ -492,6 +664,9 @@
     setOwner: bindOwner,
     progress,
     setProgress,
+    stableProgress,
+    setStableProgress,
+    stableFromLegacy,
     gamify,
     setGamify,
     mastery,
@@ -500,12 +675,23 @@
     setMasteryOutbox,
     queueMasteryAttempt,
     removeMasteryAttempt,
+    skillMastery,
+    setSkillMastery,
+    skillOutbox,
+    setSkillOutbox,
+    queueSkillAttempt,
+    removeSkillAttempt,
+    preferences,
+    setPreferences,
+    projects,
+    setProjects,
     placement,
     setPlacement,
     syncGeneration,
     setSyncGeneration,
     resetLearning,
     removeAnonymousProgress,
+    removeAnonymousStableProgress,
     setAnonymousGamify,
     guideWidth,
     setGuideWidth,

@@ -9,14 +9,6 @@
     <lastmod>2026-07-15</lastmod>
   </url>
   <url>
-    <loc>https://anilkaya.org/lab/placement/</loc>
-    <lastmod>2026-07-15</lastmod>
-  </url>
-  <url>
-    <loc>https://anilkaya.org/lab/review/</loc>
-    <lastmod>2026-07-15</lastmod>
-  </url>
-  <url>
     <loc>https://anilkaya.org/lab/ordinary-least-squares/</loc>
     <lastmod>2026-07-14</lastmod>
   </url>
@@ -42,6 +34,14 @@
   </url>
   <url>
     <loc>https://anilkaya.org/lab/generalized-method-of-moments/</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-07-15</lastmod>
   </url>
+  <url><loc>https://anilkaya.org/lab/statistical-foundations-simulation-asymptotics/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/maximum-likelihood-numerical-econometrics/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/univariate-time-series-forecasting/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/cointegration-vecm-state-space/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/financial-econometrics-risk-factor-models/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/projects/macro-forecasting-desk/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/projects/fx-volatility-risk/</loc><lastmod>2026-07-15</lastmod></url>
+  <url><loc>https://anilkaya.org/lab/projects/factor-pricing-lab/</loc><lastmod>2026-07-15</lastmod></url>
 </urlset>

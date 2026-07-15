@@ -26,6 +26,7 @@ head_sampling_rate = 1
 binding = "DB"
 database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
+migrations_dir = "migrations"
 
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:
