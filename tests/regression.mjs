@@ -164,6 +164,7 @@ try {
       if (route === courseRoute("ols")) await waitForCourse(page, "1 / 20");
       if (route === courseRoute("foundations")) await waitForCourse(page, "1 / 32");
       if (route === "/lab/") await waitForAcademy(page);
+      if (route === "/lab/review/") await page.locator("#reviewApp[aria-busy='false']").waitFor();
       if (route === "/lab/challenge/") await page.locator(".review-form").waitFor();
       if (route.startsWith("/lab/projects/")) await page.locator("#projectTasks input").first().waitFor();
       await page.evaluate(() => document.fonts && document.fonts.ready);
