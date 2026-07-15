@@ -24,18 +24,21 @@
 
   <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=24" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/css/base.css?v=24">
-  <link rel="stylesheet" href="/assets/css/lab.css?v=24">
+  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=25" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css?v=25">
+  <link rel="stylesheet" href="/assets/css/lab.css?v=25">
 
-  <script src="/assets/js/nav.js?v=24" defer></script>
-  <script src="/assets/js/course-catalog.js?v=24" defer></script>
-  <script src="/assets/js/mastery.js?v=24" defer></script>
-  <script src="/assets/js/review-catalog.js?v=24" defer></script>
-  <script src="/assets/js/storage.js?v=24" defer></script>
-  <script src="/assets/js/gamify.js?v=24" defer></script>
-  <script src="/assets/js/auth.js?v=24" defer></script>
-  <script src="/assets/js/lab-ui.js?v=24" defer></script>
+  <script src="/assets/js/nav.js?v=25" defer></script>
+  <script src="/assets/js/course-catalog.js?v=25" defer></script>
+  <script src="/assets/js/skill-catalog.js?v=25" defer></script>
+  <script src="/assets/js/stage-catalog.js?v=25" defer></script>
+  <script src="/assets/js/mastery.js?v=25" defer></script>
+  <script src="/assets/js/skill-mastery.js?v=25" defer></script>
+  <script src="/assets/js/review-catalog.js?v=25" defer></script>
+  <script src="/assets/js/storage.js?v=25" defer></script>
+  <script src="/assets/js/gamify.js?v=25" defer></script>
+  <script src="/assets/js/auth.js?v=25" defer></script>
+  <script src="/assets/js/lab-ui.js?v=25" defer></script>
 
   <!-- Structured data: the course catalogue, for search engines. -->
   <script type="application/ld+json">
@@ -206,7 +209,12 @@
                 "courseMode": "Online"
               }
             }
-          }
+          },
+          {"@type":"ListItem","position":8,"item":{"@type":"Course","@id":"https://anilkaya.org/lab/statistical-foundations-simulation-asymptotics/","url":"https://anilkaya.org/lab/statistical-foundations-simulation-asymptotics/","name":"Statistical Foundations, Simulation & Asymptotics","description":"Probability, sampling distributions, estimator properties, asymptotics, Monte Carlo, and bootstrap inference.","provider":{"@id":"https://anilkaya.org/#person"},"isAccessibleForFree":true,"inLanguage":"en","educationalLevel":"Beginner"}},
+          {"@type":"ListItem","position":9,"item":{"@type":"Course","@id":"https://anilkaya.org/lab/maximum-likelihood-numerical-econometrics/","url":"https://anilkaya.org/lab/maximum-likelihood-numerical-econometrics/","name":"Maximum Likelihood & Numerical Econometrics","description":"Likelihood construction, information, identification, robust inference, and numerical optimization.","provider":{"@id":"https://anilkaya.org/#person"},"isAccessibleForFree":true,"inLanguage":"en","educationalLevel":"Intermediate"}},
+          {"@type":"ListItem","position":10,"item":{"@type":"Course","@id":"https://anilkaya.org/lab/univariate-time-series-forecasting/","url":"https://anilkaya.org/lab/univariate-time-series-forecasting/","name":"Univariate Time Series & Forecasting","description":"Stationarity, ARMA, ARIMA, diagnostics, and rolling-origin forecast evaluation.","provider":{"@id":"https://anilkaya.org/#person"},"isAccessibleForFree":true,"inLanguage":"en","educationalLevel":"Intermediate"}},
+          {"@type":"ListItem","position":11,"item":{"@type":"Course","@id":"https://anilkaya.org/lab/cointegration-vecm-state-space/","url":"https://anilkaya.org/lab/cointegration-vecm-state-space/","name":"Cointegration, VECM & State-Space Models","description":"Unit roots, long-run systems, error correction, Kalman filtering, and nowcasting.","provider":{"@id":"https://anilkaya.org/#person"},"isAccessibleForFree":true,"inLanguage":"en","educationalLevel":"Advanced"}},
+          {"@type":"ListItem","position":12,"item":{"@type":"Course","@id":"https://anilkaya.org/lab/financial-econometrics-risk-factor-models/","url":"https://anilkaya.org/lab/financial-econometrics-risk-factor-models/","name":"Financial Econometrics, Risk & Factor Models","description":"Returns, GARCH, VaR, Expected Shortfall, factor pricing, GMM, and backtesting.","provider":{"@id":"https://anilkaya.org/#person"},"isAccessibleForFree":true,"inLanguage":"en","educationalLevel":"Expert"}}
         ]
       }
     },
@@ -251,54 +259,39 @@
   </header>
 
   <main class="lab lab--academy">
-    <div class="academy-cockpit">
-      <section class="lab-hero" aria-labelledby="academyTitle">
-        <div class="lab-hero__meta">
-          <p class="lab-hero__kicker">Econometrics Lab</p>
-          <a class="lab-hero__browse" href="#courseLibrary">Browse 7 courses <span aria-hidden="true">↓</span></a>
-        </div>
-        <h1 id="academyTitle">Learn econometrics by doing the real work.</h1>
-        <p>Run real Python estimators, test assumptions, and prove your understanding — from first regression to advanced moment methods.</p>
-        <div class="lab-hero__actions" aria-label="Start learning">
-          <a class="btn btn--gold" id="heroPrimaryCta" href="/lab/ordinary-least-squares/">Start with OLS &rarr;</a>
-          <a class="btn btn--ghost lab-hero__diagnostic" href="/lab/placement/">Find your level</a>
-        </div>
-        <ul class="lab-hero__proof" aria-label="Platform features">
-          <li><b>205</b><span>interactive lessons</span></li>
-          <li><b>7</b><span>core courses</span></li>
-          <li><b>0</b><span>installs required</span></li>
-        </ul>
-      </section>
-
-      <section class="academy-dashboard" id="academyDashboard" aria-labelledby="dashboardTitle" aria-busy="true">
-        <div class="academy-section__head">
-          <div><p class="academy-kicker">Your learning</p><h2 id="dashboardTitle">Continue with purpose</h2></div>
-          <p id="dashboardSummary">Your progress stays on this device unless you sign in.</p>
-        </div>
-        <div class="dashboard-grid" id="dashboardGrid"></div>
-        <div class="dashboard-command-grid">
-          <a class="dashboard-review" id="dailyReviewCta" href="/lab/review/">
-            <span class="academy-kicker">Daily mastery</span>
-            <strong id="dailyReviewCount">Build your review queue</strong>
-            <span id="dailyReviewSummary">Complete assessed lessons, then revisit them at the right time.</span>
-          </a>
-          <div class="dashboard-focus" id="dashboardFocus"></div>
-        </div>
-      </section>
-
-      <div class="account account--loading" id="account" aria-live="polite">
-        <span class="account__txt">Checking account and saved progress…</span>
+    <section class="today" id="academyDashboard" aria-labelledby="academyTitle" aria-busy="true">
+      <div class="today__heading">
+        <div><p class="academy-kicker">Quant Econometrics Academy</p><h1 id="academyTitle">Your econometrics desk</h1></div>
+        <p id="dashboardSummary">365 interactive stages · 84 skills · 12 complete courses</p>
       </div>
-    </div>
+      <div class="today__commands">
+        <div class="dashboard-grid" id="dashboardGrid"></div>
+        <div class="today__side">
+          <label class="session-control" for="sessionMinutes"><span>Today’s session</span><select id="sessionMinutes"><option value="10">10 min</option><option value="20" selected>20 min</option><option value="45">45 min</option></select></label>
+          <a class="dashboard-review" id="dailyReviewCta" href="/lab/challenge/">
+            <span class="academy-kicker">Mastery challenge</span><strong id="dailyReviewCount">Build your review queue</strong><span id="dailyReviewSummary">Six variants targeting your weakest eligible skills.</span>
+          </a>
+          <a class="today__project" id="nextProjectCta" href="/lab/projects/macro-forecasting-desk/"><span>Portfolio task</span><b id="nextProjectTask">Open the Macro Forecasting Desk</b></a>
+        </div>
+      </div>
+      <div class="dashboard-focus" id="dashboardFocus"></div>
+      <div class="today__bar">
+        <a class="btn btn--gold" id="heroPrimaryCta" href="/lab/statistical-foundations-simulation-asymptotics/">Start learning &rarr;</a>
+        <a class="btn btn--ghost lab-hero__diagnostic" href="/lab/placement/">Find your level</a>
+        <label class="global-search"><span aria-hidden="true">⌕</span><input id="globalSearch" type="search" placeholder="Search courses, skills, projects…" aria-label="Search the academy"><kbd>/</kbd></label>
+        <details class="today__settings"><summary class="btn btn--quiet">Settings</summary><div><button class="btn btn--danger" id="settingsResetBtn" type="button">Reset learning progress</button></div></details>
+      </div>
+      <div class="account account--loading" id="account" aria-live="polite"><span class="account__txt">Checking account and saved progress…</span></div>
+    </section>
 
     <section class="academy-section course-explorer" id="courseLibrary" aria-labelledby="coursesTitle">
       <div class="academy-section__head">
-        <div><p class="academy-kicker">Course library</p><h2 id="coursesTitle">Explore the core methods</h2></div>
-        <output id="courseResults" for="courseSearch levelFilter statusFilter">7 courses</output>
+        <div><p class="academy-kicker">Course library</p><h2 id="coursesTitle">From foundations to expert practice</h2></div>
+        <output id="courseResults" for="courseSearch levelFilter statusFilter">12 courses</output>
       </div>
       <div class="course-tools" role="search">
         <label class="course-search"><span class="sr-only">Search courses</span><span aria-hidden="true">⌕</span><input id="courseSearch" type="search" placeholder="Search methods, skills, or topics" autocomplete="off"></label>
-        <label><span>Level</span><select id="levelFilter"><option value="all">All levels</option><option value="Beginner">Beginner</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option></select></label>
+        <label><span>Level</span><select id="levelFilter"><option value="all">All levels</option><option value="Beginner">Beginner</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option><option value="Expert">Expert</option></select></label>
         <label><span>Status</span><select id="statusFilter"><option value="all">Any status</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="completed">Completed</option></select></label>
       </div>
 
@@ -347,8 +340,24 @@
         <p>Moment conditions as a unifying estimator, IV-GMM, over-identification, efficiency.</p>
         <div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">33 steps · 4 modules</span></div>
       </a>
+      <a class="model-card" href="/lab/statistical-foundations-simulation-asymptotics/"><div class="model-card__top"><span class="model-card__badge">Beginner</span><span class="model-card__num">08</span></div><h2>Statistical Foundations, Simulation &amp; Asymptotics</h2><p>Probability, sampling distributions, estimator properties, asymptotics, Monte Carlo, and bootstrap.</p><div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">32 steps · 5 modules</span></div></a>
+      <a class="model-card" href="/lab/maximum-likelihood-numerical-econometrics/"><div class="model-card__top"><span class="model-card__badge">Intermediate</span><span class="model-card__num">09</span></div><h2>Maximum Likelihood &amp; Numerical Econometrics</h2><p>Likelihood construction, information, identification, robust inference, and numerical optimization.</p><div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">32 steps · 5 modules</span></div></a>
+      <a class="model-card" href="/lab/univariate-time-series-forecasting/"><div class="model-card__top"><span class="model-card__badge">Intermediate</span><span class="model-card__num">10</span></div><h2>Univariate Time Series &amp; Forecasting</h2><p>Stationarity, ARMA, ARIMA, diagnostics, and rolling-origin forecast evaluation.</p><div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">32 steps · 5 modules</span></div></a>
+      <a class="model-card" href="/lab/cointegration-vecm-state-space/"><div class="model-card__top"><span class="model-card__badge">Advanced</span><span class="model-card__num">11</span></div><h2>Cointegration, VECM &amp; State-Space Models</h2><p>Unit roots, long-run systems, error correction, Kalman filtering, and nowcasting.</p><div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">32 steps · 5 modules</span></div></a>
+      <a class="model-card" href="/lab/financial-econometrics-risk-factor-models/"><div class="model-card__top"><span class="model-card__badge">Expert</span><span class="model-card__num">12</span></div><h2>Financial Econometrics, Risk &amp; Factor Models</h2><p>Returns, GARCH, VaR, Expected Shortfall, factor pricing, GMM, and backtesting.</p><div class="model-card__foot"><span class="model-card__cta">Start &rarr;</span><span class="model-card__num">32 steps · 5 modules</span></div></a>
     </div>
       <p class="course-empty-state" id="courseEmptyState" hidden>No courses match those filters. Try a broader search.</p>
+    </section>
+
+    <section class="academy-section" aria-labelledby="skillsTitle">
+      <div class="academy-section__head"><div><p class="academy-kicker">Skill map</p><h2 id="skillsTitle">84 connected capabilities</h2></div><p>Track durable mastery separately from lesson completion. Due skills return on a 1, 3, 7, 21, and 60-day schedule.</p></div>
+      <div class="skill-map" id="skillMap"></div>
+      <p><a class="btn btn--ghost" href="/lab/challenge/">Open mastery challenge &rarr;</a></p>
+    </section>
+
+    <section class="academy-section" aria-labelledby="projectsTitle">
+      <div class="academy-section__head"><div><p class="academy-kicker">Portfolio studio</p><h2 id="projectsTitle">Ship work an economist can inspect</h2></div><p>Three reproducible capstones with guided and unguided modes, local code, and notebook or HTML export.</p></div>
+      <div class="project-grid" id="projectGrid"></div>
     </section>
 
     <section class="academy-section" aria-labelledby="pathsTitle">
@@ -379,7 +388,7 @@
     <form method="dialog" class="reset-dialog__panel">
       <p class="academy-kicker">Fresh start</p>
       <h2 id="resetTitle">Reset all learning progress?</h2>
-      <p id="resetDescription">This removes completed lessons, mastery history, points, streak data, and your placement result. Your course layout preference stays unchanged.</p>
+      <p id="resetDescription">This removes completed lessons, skill mastery, points, streak data, placement, and project progress. Session length, weekly goal, layout, and active learning path are preserved.</p>
       <p class="reset-dialog__scope" id="resetScope"></p>
       <p class="reset-dialog__status" id="resetStatus" role="status" aria-live="polite"></p>
       <div class="reset-dialog__actions">

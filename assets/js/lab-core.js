@@ -192,7 +192,7 @@ def _grab_figs():
   }
 
   // ---- Editable, highlighted, runnable code cell --------------
-  function makeCell({ code = "", title = "python", onRun, figsEl = null } = {}) {
+  function makeCell({ code = "", title = "python", onRun, onResult, prepareCode, figsEl = null } = {}) {
     const cell = document.createElement("div"); cell.className = "cell";
     const bar = document.createElement("div"); bar.className = "cell__bar";
     bar.innerHTML = '<span class="cell__dot"></span><span class="cell__title"></span>' +
@@ -225,13 +225,16 @@ def _grab_figs():
       if (runBtn.disabled) return;    // Ctrl+Enter bypasses the disabled button; guard re-entry
       runBtn.disabled = true; const label = runBtn.textContent; runBtn.textContent = "Running…";
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "busy");
-      const ok = await run(editor.value, { out, figs });
+      const submitted = editor.value;
+      const executable = typeof prepareCode === "function" ? prepareCode(submitted) : submitted;
+      const ok = await run(executable, { out, figs });
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "done");
       runBtn.textContent = label; runBtn.disabled = false;
       if (ok) {
         if (window.FX && window.FX.landed) window.FX.landed((figs && figs.children && figs.children.length) ? figs : out);
         if (typeof onRun === "function") onRun(runBtn);
       }
+      if (typeof onResult === "function") onResult(ok, runBtn, out);
     }
     runBtn.addEventListener("click", doRun);
     resetBtn.addEventListener("click", () => { editor.value = initial; paint(); out.textContent = ""; figs.innerHTML = ""; });

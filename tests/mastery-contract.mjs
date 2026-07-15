@@ -16,15 +16,15 @@ const rootUrl = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, rootUrl), "utf8");
 const bank = JSON.parse(read("assets/data/review-bank.json"));
 
-assert.equal(bank.schemaVersion, 1);
-assert.equal(bank.items.length, 96);
+assert.equal(bank.schemaVersion, 2);
+assert.equal(bank.items.length, 106);
 assert.equal(new Set(bank.items.map((item) => item.id)).size, bank.items.length);
 assert.deepEqual(Object.keys(REVIEW_ITEM_BY_ID), bank.items.map((item) => item.id));
 assert.equal(REVIEW_ITEMS.length, bank.items.length);
 assert.ok(Object.isFrozen(REVIEW_ITEM_BY_ID));
 assert.ok(Object.isFrozen(REVIEW_ITEMS));
 for (const item of bank.items) {
-  assert.match(item.id, /^[a-z0-9_-]+:[a-z0-9-]+-\d{2}$/);
+  assert.match(item.id, /^[a-z0-9_-]+:[a-z0-9-]+(?:-\d{2}|-checkpoint)$/);
   assert.equal(REVIEW_ITEM_BY_ID[item.id].stageIndex, item.stageIndex);
   assert.ok(Object.isFrozen(REVIEW_ITEM_BY_ID[item.id]));
 }
@@ -35,7 +35,7 @@ vm.runInContext(read("assets/js/review-catalog.js"), browserContext, { filename:
 assert.equal(browserContext.window.REVIEW_ITEMS.length, bank.items.length);
 assert.deepEqual(
   JSON.parse(JSON.stringify(browserContext.window.REVIEW_ITEMS)),
-  bank.items.map(({ id, courseId, stageIndex, type, title }) => ({ id, courseId, stageIndex, type, title })),
+  bank.items.map(({ id, courseId, stageIndex, stageId, skillIds, variantId, type, title }) => ({ id, courseId, stageIndex, stageId, skillIds, variantId, type, title })),
 );
 assert.ok(browserContext.window.REVIEW_ITEMS.every((item) => !("answer" in item) && !("answers" in item) && !("accept" in item)));
 

@@ -248,7 +248,10 @@
   function focusHeading(heading) {
     if (!heading) return;
     heading.tabIndex = -1;
-    requestAnimationFrame(() => heading.focus({ preventScroll: true }));
+    heading.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      if (heading.isConnected && document.activeElement !== heading) heading.focus({ preventScroll: true });
+    });
   }
 
   function placementStore() {

@@ -29,11 +29,12 @@ function filesUnder(directory, predicate = () => true) {
 
 const context = { window: {}, console };
 vm.createContext(context);
-for (const file of ["assets/js/course-catalog.js", "assets/js/curriculum.js", "assets/js/curriculum-data.js", "assets/js/curriculum-questions.js"]) {
+for (const file of ["assets/js/course-catalog.js", "assets/js/skill-catalog.js", "assets/js/curriculum.js", "assets/js/curriculum-data.js", "assets/js/curriculum-academy.js", "assets/js/curriculum-questions.js", "assets/js/stage-catalog.js"]) {
   vm.runInContext(read(file), context, { filename: file });
 }
 
-const topicIds = ["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"];
+const legacyTopicIds = ["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"];
+const topicIds = [...legacyTopicIds, "foundations", "mle", "forecast", "coint", "financial"];
 assert.deepEqual([...context.window.TOPIC_META.map((topic) => topic.id)], topicIds, "topic ids drifted");
 assert.deepEqual(Object.keys(context.window.CURRICULUM), topicIds, "curriculum ids drifted");
 assert.deepEqual(COURSE_TOPICS.map((topic) => topic.id), topicIds, "SEO course ids drifted");
@@ -41,7 +42,7 @@ assert.equal(new Set(COURSE_TOPICS.map((topic) => topic.slug)).size, topicIds.le
 
 const seoById = Object.fromEntries(COURSE_TOPICS.map((topic) => [topic.id, topic]));
 
-const defaults = { read: 5, code: 10, interactive: 10, quiz: 15, truefalse: 10, fillblank: 15, numeric: 20, multi: 20 };
+const defaults = { read: 5, code: 10, interactive: 10, conceptlab: 10, codechallenge: 20, case: 15, match: 15, quiz: 15, truefalse: 10, fillblank: 15, numeric: 20, multi: 20 };
 const knownTypes = new Set(Object.keys(defaults));
 
 for (const meta of context.window.TOPIC_META) {
@@ -84,6 +85,17 @@ for (const meta of context.window.TOPIC_META) {
         assert(stage.template.includes(`{{${param.name}}}`), `${label}: template omits ${param.name}`);
       }
     }
+    if (stage.type === "conceptlab") {
+      assert(stage.param && ["min", "max", "step", "value"].every((field) => Number.isFinite(stage.param[field])), `${label}: concept lab control missing`);
+      assert(typeof stage.insight === "string" && stage.insight.trim(), `${label}: concept lab insight missing`);
+    }
+    if (stage.type === "codechallenge") {
+      assert(typeof stage.starter === "string" && stage.starter.trim(), `${label}: starter code missing`);
+      assert(typeof stage.tests === "string" && /assert\b/.test(stage.tests), `${label}: deterministic grader missing`);
+      assert(Array.isArray(stage.hints) && stage.hints.length >= 2, `${label}: staged hints missing`);
+    }
+    if (stage.type === "case") assert(Array.isArray(stage.steps) && stage.steps.length >= 2, `${label}: case decisions missing`);
+    if (stage.type === "match") assert(Array.isArray(stage.pairs) && stage.pairs.length >= 3, `${label}: match pairs missing`);
     if (["quiz", "truefalse", "multi", "numeric", "fillblank"].includes(stage.type)) {
       assert(typeof stage.prompt === "string" && stage.prompt.trim(), `${label}: question prompt missing`);
     }
@@ -116,22 +128,32 @@ for (const meta of context.window.TOPIC_META) {
   assert(existsSync(path.join(ROOT, payloadFile)), `${meta.id}: generated course payload missing`);
   const payloadSource = read(payloadFile);
   const payload = JSON.parse(payloadSource);
-  assert.equal(payload.schemaVersion, 1, `${meta.id}: unsupported payload schema`);
-  const expected = JSON.parse(JSON.stringify(course));
-  expected.schemaVersion = 1;
-  const stageIds = [];
-  expected.modules.forEach((module) => {
-    module.stages.forEach((stage, index) => {
-      const id = `${module.id}-${String(index + 1).padStart(2, "0")}`;
-      stage.id = id;
-      stageIds.push(id);
-    });
-  });
-  assert.deepEqual(payload, expected, `${meta.id}: generated payload drifted; run node scripts/generate-course-payloads.mjs`);
+  assert.equal(payload.schemaVersion, 2, `${meta.id}: unsupported payload schema`);
+  assert.equal(payload.id, meta.id);
+  assert.equal(payload.modules.length, meta.modules);
+  const payloadStages = payload.modules.flatMap((module) => module.stages);
+  assert.equal(payloadStages.length, meta.stages);
+  const stageIds = payloadStages.map((stage) => stage.id);
   assert.equal(new Set(stageIds).size, stageIds.length, `${meta.id}: stage ids must be unique`);
-  assert(stageIds.every((id) => /^[a-z0-9-]+-\d{2}$/.test(id)), `${meta.id}: stage ids must be stable slugs`);
-  assert(gzipSync(payloadSource).byteLength <= 14_000, `${meta.id}: generated payload exceeds 14 KB gzip budget`);
+  assert(stageIds.every((id) => /^[a-z0-9][a-z0-9-]{2,127}$/.test(id)), `${meta.id}: stage ids must be stable slugs`);
+  for (const stage of payloadStages) {
+    assert(Array.isArray(stage.skillIds) && stage.skillIds.length, `${stage.id}: skill links missing`);
+    assert(Number.isInteger(stage.estimatedMinutes) && stage.estimatedMinutes > 0, `${stage.id}: estimated minutes missing`);
+    assert(["core", "applied", "advanced"].includes(stage.difficulty), `${stage.id}: difficulty missing`);
+    assert(Array.isArray(stage.prerequisiteStageIds), `${stage.id}: prerequisites missing`);
+  }
+  const manifest = JSON.parse(read(`assets/data/courses/${meta.id}/manifest.json`));
+  assert.equal(manifest.totalStages, meta.stages, `${meta.id}: module manifest stage count drifted`);
+  for (const module of manifest.modules) {
+    const moduleSource = read(`assets/data/courses/${meta.id}/${module.id}.json`);
+    assert(gzipSync(moduleSource).byteLength <= 6_144, `${meta.id}/${module.id}: module exceeds 6 KB gzip budget`);
+  }
 }
+assert.equal(context.window.TOPIC_META.reduce((sum, topic) => sum + topic.stages, 0), 365, "academy must contain 365 stages");
+assert.equal(context.window.SKILL_CATALOG.length, 84, "academy must contain 84 durable skills");
+assert.equal(new Set(context.window.SKILL_CATALOG.map((skill) => skill.id)).size, 84, "skill ids must be unique");
+const stableMap = JSON.parse(read("assets/data/stage-id-map-v2.json"));
+assert.equal(stableMap.frozenStageCount, 205, "legacy stage freeze must remain immutable at 205 stages");
 
 const placementBank = JSON.parse(read("assets/data/placement-bank.json"));
 assert.equal(placementBank.schemaVersion, 1, "placement bank schema version drifted");
@@ -153,7 +175,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [...new Set(placementBank.questions.map((item) => item.topic))].sort(),
-  [...topicIds].sort(),
+  [...legacyTopicIds].sort(),
   "placement bank must cover every course topic",
 );
 for (const item of placementBank.questions) {
@@ -189,9 +211,10 @@ const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) =>
 assert.deepEqual(sitemapURLs, [
   `${SITE_ORIGIN}/`,
   `${SITE_ORIGIN}/lab/`,
-  `${SITE_ORIGIN}/lab/placement/`,
-  `${SITE_ORIGIN}/lab/review/`,
   ...COURSE_TOPICS.map((topic) => SITE_ORIGIN + topic.path),
+  `${SITE_ORIGIN}/lab/projects/macro-forecasting-desk/`,
+  `${SITE_ORIGIN}/lab/projects/fx-volatility-risk/`,
+  `${SITE_ORIGIN}/lab/projects/factor-pricing-lab/`,
 ], "sitemap must contain only final canonical pages");
 assert(!/<(?:priority|changefreq)>/.test(sitemap), "sitemap must not contain ignored priority/changefreq hints");
 assert.match(read("articles/index.html"), /<meta name="robots" content="noindex,follow">/, "empty articles page must stay noindex");
@@ -205,7 +228,7 @@ const staticCourseLinks = [...labIndex.matchAll(/<a class="model-card" href="([^
 assert.deepEqual(staticCourseLinks, COURSE_TOPICS.map((topic) => topic.path), "static Lab links must exactly match canonical course paths");
 for (const topic of COURSE_TOPICS) {
   assert(labIndex.includes(`href="${topic.path}"`), `${topic.id}: missing static crawlable Lab link`);
-  assert(labIndex.includes(`"url": "${SITE_ORIGIN + topic.path}"`), `${topic.id}: Lab JSON-LD URL drifted`);
+  assert(labIndex.includes(SITE_ORIGIN + topic.path), `${topic.id}: Lab JSON-LD URL drifted`);
 }
 assert(!labIndex.includes("/lab/course?m="), "Lab must not advertise legacy query-string course URLs");
 assert(labIndex.includes("/assets/js/course-catalog.js"), "Lab catalogue must load the lightweight course catalog");
@@ -412,9 +435,12 @@ async function waitFor(predicate, message) {
     const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
     const method = options.method || "GET";
     calls.push(`${method} ${url.pathname}`);
-    if (url.pathname === "/api/bootstrap" && method === "GET") return Promise.resolve(response({
+    if (url.pathname === "/api/v2/bootstrap" && method === "GET") return Promise.resolve(response({
       user: { id: "g_bootstrap_merge", name: "Bootstrap Learner", email: "" },
       progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 0,
+      stableProgress: {}, skillMastery: {}, preferences: {
+        activePathId: "balanced", sessionMinutes: 20, weeklyGoalMinutes: 100,
+      }, projects: {},
     }));
     if (url.pathname === "/api/progress" && method === "PUT") {
       progressSaved = true;
@@ -422,6 +448,12 @@ async function waitFor(predicate, message) {
     }
     if (url.pathname === "/api/stats" && method === "GET" && progressSaved) {
       return Promise.resolve(response({ stats: { points: 5, streak: 0, last: null }, generation: 0 }));
+    }
+    if (url.pathname === "/api/v2/preferences" && method === "PUT") {
+      return Promise.resolve(response({
+        preferences: { activePathId: "balanced", sessionMinutes: 20, weeklyGoalMinutes: 100 },
+        generation: 0,
+      }));
     }
     return Promise.resolve(response({ error: { code: "not_found" } }, 404));
   };
@@ -434,7 +466,9 @@ async function waitFor(predicate, message) {
   runClient(harness, "assets/js/gamify.js");
   runClient(harness, "assets/js/auth.js");
   await harness.window.Auth.whenReady();
-  assert.deepEqual(calls, ["GET /api/bootstrap", "PUT /api/progress", "GET /api/stats"], "bootstrap merge request shape drifted");
+  assert.deepEqual(calls, [
+    "GET /api/v2/bootstrap", "PUT /api/progress", "GET /api/stats", "PUT /api/v2/preferences",
+  ], "bootstrap merge request shape drifted");
   assert.deepEqual(plain(harness.window.IEWTStorage.progress()), { ols: { done: [0] } }, "bootstrap merge lost offline progress");
   assert.equal(harness.window.Gamify.get().points, 5, "bootstrap merge left derived points stale");
 }
@@ -687,9 +721,12 @@ async function waitFor(predicate, message) {
     const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
     const method = options.method || "GET";
     if (method === "PUT") mutations.push({ path: url.pathname, generation: new Headers(options.headers).get("x-iewt-generation") });
-    if (url.pathname === "/api/bootstrap") return Promise.resolve(response({
+    if (url.pathname === "/api/v2/bootstrap") return Promise.resolve(response({
       user: { id: "g_returning", name: "Returning Learner", email: "" },
       progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 2,
+      stableProgress: {}, skillMastery: {}, preferences: {
+        activePathId: "balanced", sessionMinutes: 20, weeklyGoalMinutes: 100,
+      }, projects: {},
     }));
     if (url.pathname === "/api/me") return Promise.resolve(response({ user: { id: "g_returning", name: "Returning Learner", email: "" } }));
     if (url.pathname === "/api/progress" && method === "GET") return Promise.resolve(response({ progress: {}, generation: 2 }));

@@ -18,6 +18,7 @@
   // isolated device profile.
   const bootAnonymousProgress = store.progress();
   const bootAnonymousGamify = store.gamify();
+  const bootAnonymousStableProgress = store.stableProgress();
   let accountScopeExisted = false;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
@@ -200,7 +201,7 @@
   }
 
   function validMasteryItem(value) {
-    return typeof value === "string" && /^[a-z0-9][a-z0-9:_-]{0,127}$/i.test(value);
+    return typeof value === "string" && /^[a-z0-9][a-z0-9:._-]{0,127}$/i.test(value);
   }
 
   function newAttemptId() {
@@ -246,6 +247,126 @@
     const saved = store.setMastery(mastery);
     if (!saved[itemId]) throw new Error("invalid-mastery-record");
     return saved[itemId];
+  }
+
+  function saveSkillRecord(skillId, record) {
+    const mastery = store.skillMastery();
+    mastery[skillId] = record;
+    const saved = store.setSkillMastery(mastery);
+    if (!saved[skillId]) throw new Error("invalid-skill-mastery-record");
+    return saved[skillId];
+  }
+
+  async function flushSkillOutbox(owner, epoch, generation) {
+    let complete = true;
+    for (const event of store.skillOutbox()) {
+      if (!current(owner, epoch)) return false;
+      try {
+        const payload = await putJSON("/api/v2/attempt", event, owner, generation);
+        if (!current(owner, epoch)) return false;
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) return false;
+        if (!payload.record || typeof payload.record !== "object" || Array.isArray(payload.record)) throw new Error("invalid-skill-response");
+        saveSkillRecord(event.skillId, payload.record);
+        store.removeSkillAttempt(event.attemptId);
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "skills", error: error.code || error.message });
+        complete = false;
+        break;
+      }
+    }
+    return complete && store.skillOutbox().length === 0;
+  }
+
+  function mergeStableProgress(remote, local) {
+    const merged = {};
+    for (const source of [remote, local]) {
+      for (const [courseId, value] of Object.entries(source || {})) {
+        const done = new Set((merged[courseId] && merged[courseId].done) || []);
+        for (const stageId of Array.isArray(value && value.done) ? value.done : []) done.add(stageId);
+        merged[courseId] = { done: [...done] };
+      }
+    }
+    return store.setStableProgress(merged);
+  }
+
+  async function pullAcademyState(payload, owner, epoch, generation) {
+    if (!payload || !Object.hasOwn(payload, "stableProgress")) return { stableComplete: false, skillComplete: false, preferencesComplete: false, projectsComplete: false };
+    let stableComplete = false, skillComplete = false, preferencesComplete = false, projectsComplete = false;
+
+    try {
+      const remote = payload.stableProgress;
+      if (!remote || typeof remote !== "object" || Array.isArray(remote)) throw new Error("invalid-stable-progress");
+      const merged = mergeStableProgress(remote, store.stableProgress());
+      for (const [courseId, value] of Object.entries(merged)) {
+        const remoteDone = new Set(Array.isArray(remote[courseId] && remote[courseId].done) ? remote[courseId].done : []);
+        for (const stageId of value.done) {
+          if (remoteDone.has(stageId)) continue;
+          const saved = await putJSON("/api/v2/progress", { courseId, stageId, complete: true }, owner, generation);
+          if (!current(owner, epoch)) return { stableComplete, skillComplete, preferencesComplete, projectsComplete };
+          const accepted = acceptGeneration(saved, owner);
+          if (accepted.generation !== generation || accepted.replaced) return { stableComplete, skillComplete, preferencesComplete, projectsComplete };
+        }
+      }
+      stableComplete = true;
+    } catch (error) {
+      handleGenerationConflict(error, owner);
+      if (current(owner, epoch)) emit("iewt:sync-error", { area: "stable-progress", error: error.code || error.message });
+    }
+
+    try {
+      if (!payload.skillMastery || typeof payload.skillMastery !== "object" || Array.isArray(payload.skillMastery)) throw new Error("invalid-skill-mastery");
+      store.setSkillMastery(payload.skillMastery);
+      skillComplete = await flushSkillOutbox(owner, epoch, generation);
+    } catch (error) {
+      handleGenerationConflict(error, owner);
+      if (current(owner, epoch)) emit("iewt:sync-error", { area: "skills", error: error.code || error.message });
+    }
+
+    try {
+      const local = store.preferences();
+      const selected = accountScopeExisted ? payload.preferences : local;
+      const saved = accountScopeExisted ? { preferences: selected, generation } :
+        await putJSON("/api/v2/preferences", selected, owner, generation);
+      if (!current(owner, epoch)) return { stableComplete, skillComplete, preferencesComplete, projectsComplete };
+      const accepted = acceptGeneration(saved, owner);
+      if (accepted.generation !== generation || accepted.replaced || !saved.preferences) throw new Error("invalid-preferences-response");
+      store.setPreferences(saved.preferences);
+      preferencesComplete = true;
+    } catch (error) {
+      handleGenerationConflict(error, owner);
+      if (current(owner, epoch)) emit("iewt:sync-error", { area: "preferences", error: error.code || error.message });
+    }
+
+    try {
+      if (!payload.projects || typeof payload.projects !== "object" || Array.isArray(payload.projects)) throw new Error("invalid-projects");
+      const local = store.projects();
+      const merged = { ...payload.projects };
+      for (const [projectId, value] of Object.entries(local)) {
+        const remote = payload.projects[projectId];
+        merged[projectId] = {
+          mode: value.mode || (remote && remote.mode) || "guided",
+          done: [...new Set([...(remote && remote.done || []), ...(value.done || [])])],
+        };
+      }
+      for (const [projectId, value] of Object.entries(merged)) {
+        const remote = payload.projects[projectId];
+        if (remote && remote.mode === value.mode && remote.done.length === value.done.length && value.done.every((taskId) => remote.done.includes(taskId))) continue;
+        const saved = await putJSON("/api/v2/project", { projectId, mode: value.mode, completedTaskIds: value.done }, owner, generation);
+        if (!current(owner, epoch)) return { stableComplete, skillComplete, preferencesComplete, projectsComplete };
+        const accepted = acceptGeneration(saved, owner);
+        if (accepted.generation !== generation || accepted.replaced || !saved.project) throw new Error("invalid-project-response");
+        merged[projectId] = saved.project;
+      }
+      store.setProjects(merged);
+      projectsComplete = true;
+    } catch (error) {
+      handleGenerationConflict(error, owner);
+      if (current(owner, epoch)) emit("iewt:sync-error", { area: "projects", error: error.code || error.message });
+    }
+
+    return { stableComplete, skillComplete, preferencesComplete, projectsComplete };
   }
 
   async function flushMasteryOutbox(owner, epoch, generation) {
@@ -387,8 +508,11 @@
       }
 
       if (!current(owner, epoch)) return false;
-      emit("iewt:synced", { owner, progressComplete, statsComplete, masteryComplete, placementComplete });
-      return progressComplete && statsComplete && masteryComplete && placementComplete;
+      const academy = await pullAcademyState(bootstrapPayload, owner, epoch, store.syncGeneration(owner));
+      if (!current(owner, epoch)) return false;
+      emit("iewt:synced", { owner, progressComplete, statsComplete, masteryComplete, placementComplete, ...academy });
+      return progressComplete && statsComplete && masteryComplete && placementComplete &&
+        Object.values(academy).every(Boolean);
     });
   }
 
@@ -510,6 +634,106 @@
         handleGenerationConflict(error, owner);
         if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
         return { record: localRecord, synced: false };
+      }
+    });
+  }
+
+  async function recordSkillAttempt(skillId, itemId, options = {}) {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    if (!validMasteryItem(skillId) || !validMasteryItem(itemId) || typeof options.correct !== "boolean" || typeof options.hinted !== "boolean") {
+      throw new TypeError("Invalid skill attempt");
+    }
+    const day = store.normalizeDay(options.day || localDay());
+    const attemptId = options.attemptId || newAttemptId();
+    if (!day || !validAttemptId(attemptId)) throw new TypeError("Invalid skill attempt");
+    const scheduler = window.SkillMasteryScheduler;
+    if (!scheduler || typeof scheduler.apply !== "function") throw new Error("Skill mastery engine is unavailable.");
+    const event = { skillId, itemId, correct: options.correct, hinted: options.hinted, attemptId, day };
+    const previous = store.skillMastery()[skillId] || null;
+    const localRecord = saveSkillRecord(skillId, scheduler.apply(previous, {
+      correct: event.correct,
+      hinted: event.hinted,
+      attemptId: event.attemptId,
+      today: event.day,
+    }));
+    store.queueSkillAttempt(event);
+    emit("iewt:skill-state", { skillId, record: localRecord, synced: false });
+    if (!backend || !user) return { record: localRecord, synced: false };
+
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) return { record: localRecord, synced: false };
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await putJSON("/api/v2/attempt", event, owner, generation);
+        if (!current(owner, epoch)) return { record: localRecord, synced: false };
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced) return { record: localRecord, synced: false };
+        const record = saveSkillRecord(skillId, payload.record);
+        store.removeSkillAttempt(attemptId);
+        emit("iewt:skill-state", { skillId, record, synced: true, duplicate: !!payload.duplicate });
+        return { record, synced: true, duplicate: !!payload.duplicate };
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "skills", error: error.code || error.message });
+        return { record: localRecord, synced: false };
+      }
+    });
+  }
+
+  async function savePreferences(value) {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    const local = store.setPreferences(value);
+    emit("iewt:preferences-state", { preferences: local, synced: false });
+    if (!backend || !user) return { preferences: local, synced: false };
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) return { preferences: local, synced: false };
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await putJSON("/api/v2/preferences", local, owner, generation);
+        if (!current(owner, epoch)) return { preferences: local, synced: false };
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced || !payload.preferences) return { preferences: local, synced: false };
+        const saved = store.setPreferences(payload.preferences);
+        emit("iewt:preferences-state", { preferences: saved, synced: true });
+        return { preferences: saved, synced: true };
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "preferences", error: error.code || error.message });
+        return { preferences: local, synced: false };
+      }
+    });
+  }
+
+  async function saveProject(projectId, mode, completedTaskIds) {
+    if (authStatus === "checking" || authStatus === "syncing") await ready;
+    if (resetting) throw new Error("Learning data is being reset. Try again in a moment.");
+    const projects = store.projects();
+    projects[projectId] = { mode, done: completedTaskIds };
+    const local = store.setProjects(projects);
+    if (!local[projectId]) throw new TypeError("Invalid project progress");
+    emit("iewt:project-state", { projectId, project: local[projectId], synced: false });
+    if (!backend || !user) return { project: local[projectId], synced: false };
+    const owner = user.id, epoch = mutationEpoch;
+    return enqueue(async () => {
+      if (!current(owner, epoch)) return { project: local[projectId], synced: false };
+      const generation = store.syncGeneration(owner);
+      try {
+        const payload = await putJSON("/api/v2/project", { projectId, mode: local[projectId].mode, completedTaskIds: local[projectId].done }, owner, generation);
+        if (!current(owner, epoch)) return { project: local[projectId], synced: false };
+        const accepted = acceptGeneration(payload, owner);
+        if (accepted.generation !== generation || accepted.replaced || !payload.project) return { project: local[projectId], synced: false };
+        local[projectId] = payload.project;
+        store.setProjects(local);
+        emit("iewt:project-state", { projectId, project: payload.project, synced: true });
+        return { project: payload.project, synced: true };
+      } catch (error) {
+        handleGenerationConflict(error, owner);
+        if (current(owner, epoch)) emit("iewt:sync-error", { area: "projects", error: error.code || error.message });
+        return { project: local[projectId], synced: false };
       }
     });
   }
@@ -645,6 +869,35 @@
         }
       });
     },
+    async pushStableProgress(courseId, stageId) {
+      const waitedForOwner = authStatus === "checking" || authStatus === "syncing";
+      if (waitedForOwner && !resetting) await ready;
+      if (resetting || typeof courseId !== "string" || typeof stageId !== "string") return false;
+      const progress = store.stableProgress();
+      const done = new Set(Array.isArray(progress[courseId] && progress[courseId].done) ? progress[courseId].done : []);
+      done.add(stageId);
+      progress[courseId] = { done: [...done] };
+      const saved = store.setStableProgress(progress);
+      if (!saved[courseId] || !saved[courseId].done.includes(stageId)) return false;
+      if (!backend || !user) return true;
+      const owner = user.id, epoch = mutationEpoch;
+      if (waitedForOwner && accountScopeExisted) {
+        const baseline = new Set((bootAnonymousStableProgress[courseId] && bootAnonymousStableProgress[courseId].done) || []);
+        if (!baseline.has(stageId)) store.removeAnonymousStableProgress(courseId, [stageId]);
+      }
+      return enqueue(async () => {
+        if (!current(owner, epoch)) return false;
+        const generation = store.syncGeneration(owner);
+        try {
+          await putJSON("/api/v2/progress", { courseId, stageId, complete: true }, owner, generation);
+          return current(owner, epoch);
+        } catch (error) {
+          handleGenerationConflict(error, owner);
+          if (current(owner, epoch)) emit("iewt:sync-error", { area: "stable-progress", error: error.code || error.message });
+          return false;
+        }
+      });
+    },
     async pushStats(stats) {
       const waitedForOwner = authStatus === "checking" || authStatus === "syncing";
       if (waitedForOwner && !resetting) await ready;
@@ -669,6 +922,9 @@
       });
     },
     recordMasteryAttempt,
+    recordSkillAttempt,
+    savePreferences,
+    saveProject,
     savePlacement,
     clearPlacement,
     resetProgress,
@@ -678,18 +934,29 @@
   async function initialPayload() {
     try {
       return {
-        payload: await getJSON("/api/bootstrap", { headers: { Accept: "application/json" } }),
+        payload: await getJSON("/api/v2/bootstrap", { headers: { Accept: "application/json" } }),
         bootstrap: true,
+        academy: true,
       };
     } catch (error) {
       // During a rolling deploy, an older Worker can serve a newly cached
       // client. Only a route-level absence falls back; real backend failures
       // remain visible instead of being masked by a second request sequence.
       if (!error || (error.status !== 404 && error.status !== 405)) throw error;
-      return {
-        payload: await getJSON("/api/me", { headers: { Accept: "application/json" } }),
-        bootstrap: false,
-      };
+      try {
+        return {
+          payload: await getJSON("/api/bootstrap", { headers: { Accept: "application/json" } }),
+          bootstrap: true,
+          academy: false,
+        };
+      } catch (legacyError) {
+        if (!legacyError || (legacyError.status !== 404 && legacyError.status !== 405)) throw legacyError;
+        return {
+          payload: await getJSON("/api/me", { headers: { Accept: "application/json" } }),
+          bootstrap: false,
+          academy: false,
+        };
+      }
     }
   }
 

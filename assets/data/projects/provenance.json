@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "datasets": [
+    {
+      "id": "macro-forecasting-desk",
+      "version": 1,
+      "file": "/assets/data/projects/macro-synthetic-v1.csv",
+      "sha256": "1ef5233ada6648b99e9b51d40ec9759b7098fcf74c19ae3ea51da94b79a4988b",
+      "generatedAt": "2026-07-15",
+      "synthetic": true,
+      "sourceObservationReuse": false,
+      "reuseTerms": "CC0-1.0 for this generated synthetic snapshot; no external observations are redistributed.",
+      "frequency": "monthly",
+      "rowCount": 180,
+      "transformations": [
+        "deterministic synthetic log-level CPI",
+        "synthetic industrial-production index",
+        "synthetic annualized policy rate"
+      ],
+      "methodologyReferences": [
+        {
+          "label": "FRED CPIAUCSL",
+          "url": "https://fred.stlouisfed.org/series/CPIAUCSL",
+          "verifiedFromPlan": true
+        },
+        {
+          "label": "FRED INDPRO",
+          "url": "https://fred.stlouisfed.org/series/INDPRO",
+          "verifiedFromPlan": true
+        },
+        {
+          "label": "FRED FEDFUNDS",
+          "url": "https://fred.stlouisfed.org/series/FEDFUNDS",
+          "verifiedFromPlan": true
+        }
+      ],
+      "note": "External observation reuse permission was not verified for this build, so the project uses a clearly identified deterministic synthetic dataset."
+    },
+    {
+      "id": "fx-volatility-risk",
+      "version": 1,
+      "file": "/assets/data/projects/fx-synthetic-v1.csv",
+      "sha256": "688a3a8194e4f37aea800dfc9a2ee0ec8e1e5decedaa45768928ea2a864c6f88",
+      "generatedAt": "2026-07-15",
+      "synthetic": true,
+      "sourceObservationReuse": false,
+      "reuseTerms": "CC0-1.0 for this generated synthetic snapshot; no external observations are redistributed.",
+      "frequency": "business daily",
+      "rowCount": 600,
+      "transformations": [
+        "deterministic synthetic USD per EUR levels",
+        "GARCH-like conditional variance"
+      ],
+      "methodologyReferences": [
+        {
+          "label": "ECB USD/EUR reference-rate series",
+          "url": "https://data.ecb.europa.eu/data/datasets/EXR/EXR.D.USD.EUR.SP00.A",
+          "verifiedFromPlan": true
+        }
+      ],
+      "note": "External observation reuse permission was not verified for this build, so the project uses a clearly identified deterministic synthetic dataset."
+    },
+    {
+      "id": "factor-pricing-lab",
+      "version": 1,
+      "file": "/assets/data/projects/factors-synthetic-v1.csv",
+      "sha256": "ffa93d535cb64baddb3ba6c99324893dfc3c0b95ac588ba5957d7e126b21ee6c",
+      "generatedAt": "2026-07-15",
+      "synthetic": true,
+      "sourceObservationReuse": false,
+      "reuseTerms": "CC0-1.0 for this generated synthetic snapshot; no external observations are redistributed.",
+      "frequency": "monthly",
+      "rowCount": 240,
+      "transformations": [
+        "deterministic synthetic decimal returns",
+        "portfolio excess return constructed from three synthetic factors"
+      ],
+      "methodologyReferences": [
+        {
+          "label": "Kenneth French Data Library",
+          "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html",
+          "verifiedFromPlan": true
+        }
+      ],
+      "note": "External observation reuse permission was not verified for this build, so the project uses a clearly identified deterministic synthetic dataset."
+    }
+  ]
+}

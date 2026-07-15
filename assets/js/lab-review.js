@@ -74,7 +74,7 @@
 
   function normalizeBank(payload) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
-        payload.schemaVersion !== 1 || !Array.isArray(payload.items)) {
+        payload.schemaVersion !== 2 || !Array.isArray(payload.items)) {
       throw new Error("invalid-review-bank");
     }
     const seen = new Set();

@@ -7,6 +7,9 @@ import { signSession, verifySession, getCookie, cookie } from "./shared/session.
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
+import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
+import { SKILL_BY_ID } from "./shared/skill-manifest.js";
+import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 const LEGACY_COURSE_PATHS = new Set([
@@ -54,6 +57,18 @@ const PLACEMENT_SCHEMA_SQL =
       "(band='applied' AND score BETWEEN 7 AND 11) OR " +
       "(band='advanced' AND score BETWEEN 12 AND 15))" +
   ")";
+const ACADEMY_SCHEMA_SQL = Object.freeze([
+  "CREATE TABLE IF NOT EXISTS progress_v3 (user_id TEXT NOT NULL, course_id TEXT NOT NULL, stage_id TEXT NOT NULL, completed_at INTEGER NOT NULL, source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web','migration')), PRIMARY KEY (user_id, course_id, stage_id))",
+  "CREATE INDEX IF NOT EXISTS progress_v3_by_user ON progress_v3 (user_id, course_id, completed_at)",
+  "CREATE TABLE IF NOT EXISTS skill_mastery (user_id TEXT NOT NULL, skill_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5), due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), last_result INTEGER CHECK (last_result IN (0,1)), last_attempt_id TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, skill_id))",
+  "CREATE INDEX IF NOT EXISTS skill_mastery_due_by_user ON skill_mastery (user_id, due_day, skill_id)",
+  "CREATE TABLE IF NOT EXISTS skill_attempts (user_id TEXT NOT NULL, attempt_id TEXT NOT NULL, skill_id TEXT NOT NULL, item_id TEXT NOT NULL, correct INTEGER NOT NULL CHECK (correct IN (0,1)), hinted INTEGER NOT NULL CHECK (hinted IN (0,1)), attempt_day TEXT NOT NULL, applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0,1)), received_at INTEGER NOT NULL, PRIMARY KEY (user_id, attempt_id))",
+  "CREATE TABLE IF NOT EXISTS learning_preferences (user_id TEXT PRIMARY KEY, active_path_id TEXT NOT NULL DEFAULT 'complete-core', session_minutes INTEGER NOT NULL DEFAULT 20 CHECK (session_minutes IN (10,20,45)), weekly_goal_minutes INTEGER NOT NULL DEFAULT 120 CHECK (weekly_goal_minutes BETWEEN 30 AND 1200), updated_at INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS project_progress (user_id TEXT NOT NULL, project_id TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('guided','unguided')), done_json TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, project_id))",
+]);
+const PATH_IDS = new Set(["complete-core", "causal", "applied-micro", "time-series", "markets-risk"]);
+const SESSION_MINUTES = new Set([10, 20, 45]);
+const STAGE_KEY_BY_COURSE = Object.freeze(Object.fromEntries(Object.entries(COURSE_STAGE_BY_ID).map(([key, stage]) => [key, stage])));
 
 // Pyodide is loaded from jsDelivr and requires eval + WebAssembly evaluation.
 const CSP = [
@@ -332,6 +347,21 @@ async function placementBatch(env, userId, buildStatements) {
   }
 }
 
+async function ensureAcademySchema(env) {
+  await env.DB.batch(ACADEMY_SCHEMA_SQL.map((statement) => env.DB.prepare(statement)));
+}
+
+async function academyBatch(env, userId, buildStatements) {
+  try {
+    return await placementBatch(env, userId, buildStatements);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table:\s*(?:main\.)?(?:progress_v3|skill_mastery|skill_attempts|learning_preferences|project_progress)\b/i.test(message)) throw error;
+    await ensureAcademySchema(env);
+    return placementBatch(env, userId, buildStatements);
+  }
+}
+
 function masteryRecord(row) {
   if (!row || !Object.hasOwn(REVIEW_ITEM_BY_ID, row.item_id)) return null;
   const level = Number(row.level);
@@ -352,6 +382,106 @@ function masteryRecord(row) {
     lastAttemptId: typeof row.last_attempt_id === "string" ? row.last_attempt_id : null,
     updatedAt,
   };
+}
+
+function skillMasteryRecord(row) {
+  if (!row || !Object.hasOwn(SKILL_BY_ID, row.skill_id)) return null;
+  const level = Number(row.level), attempts = Number(row.attempts), correct = Number(row.correct), updatedAt = Number(row.updated_at);
+  const dueDay = normalizeDay(row.due_day);
+  if (!Number.isSafeInteger(level) || level < 0 || level > 5 || !dueDay || !Number.isSafeInteger(attempts) || attempts < 0 || attempts > 1000000 || !Number.isSafeInteger(correct) || correct < 0 || correct > attempts || !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
+  return { level, dueDay, attempts, correct, lastResult: row.last_result == null ? null : Number(row.last_result) === 1, lastAttemptId: typeof row.last_attempt_id === "string" ? row.last_attempt_id : null, updatedAt };
+}
+
+function stableProgressFromRows(rows) {
+  const progress = Object.create(null);
+  for (const row of rows || []) {
+    const key = `${row.course_id}:${row.stage_id}`;
+    if (!Object.hasOwn(STAGE_KEY_BY_COURSE, key)) continue;
+    if (!progress[row.course_id]) progress[row.course_id] = { done: [] };
+    progress[row.course_id].done.push(row.stage_id);
+  }
+  for (const [courseId, value] of Object.entries(progress)) {
+    value.done.sort((a, b) => STAGE_KEY_BY_COURSE[`${courseId}:${a}`].index - STAGE_KEY_BY_COURSE[`${courseId}:${b}`].index);
+  }
+  return progress;
+}
+
+function projectLegacyProgress(progress) {
+  const stable = Object.create(null);
+  for (const [courseId, value] of Object.entries(progress || {})) {
+    if (!Array.isArray(value && value.done)) continue;
+    for (const index of value.done) {
+      const match = Object.values(COURSE_STAGE_BY_ID).find((stage) => stage.courseId === courseId && stage.index === index);
+      if (!match) continue;
+      if (!stable[courseId]) stable[courseId] = { done: [] };
+      if (!stable[courseId].done.includes(match.id)) stable[courseId].done.push(match.id);
+    }
+  }
+  return stable;
+}
+
+function unionStableProgress(primary, secondary) {
+  const merged = Object.create(null);
+  for (const source of [primary, secondary]) {
+    for (const [courseId, value] of Object.entries(source || {})) {
+      const set = new Set((merged[courseId] && merged[courseId].done) || []);
+      for (const stageId of value.done || []) if (Object.hasOwn(STAGE_KEY_BY_COURSE, `${courseId}:${stageId}`)) set.add(stageId);
+      merged[courseId] = { done: [...set].sort((a, b) => STAGE_KEY_BY_COURSE[`${courseId}:${a}`].index - STAGE_KEY_BY_COURSE[`${courseId}:${b}`].index) };
+    }
+  }
+  return merged;
+}
+
+function mergeProjectedSkillMastery(stored, legacy) {
+  const merged = { ...stored };
+  for (const [itemId, record] of Object.entries(legacy || {})) {
+    const item = REVIEW_ITEM_BY_ID[itemId];
+    for (const skillId of (item && item.skillIds) || []) {
+      if (!Object.hasOwn(SKILL_BY_ID, skillId)) continue;
+      const previous = merged[skillId];
+      if (!previous) { merged[skillId] = { ...record }; continue; }
+      merged[skillId] = {
+        level: Math.max(previous.level, record.level),
+        dueDay: [previous.dueDay, record.dueDay].filter(Boolean).sort()[0] || null,
+        attempts: Math.min(1000000, previous.attempts + record.attempts),
+        correct: Math.min(1000000, previous.correct + record.correct),
+        lastResult: previous.updatedAt >= record.updatedAt ? previous.lastResult : record.lastResult,
+        lastAttemptId: previous.updatedAt >= record.updatedAt ? previous.lastAttemptId : record.lastAttemptId,
+        updatedAt: Math.max(previous.updatedAt, record.updatedAt),
+      };
+    }
+  }
+  return merged;
+}
+
+function preferencesRecord(row) {
+  return {
+    activePathId: row && PATH_IDS.has(row.active_path_id) ? row.active_path_id : "complete-core",
+    sessionMinutes: row && SESSION_MINUTES.has(Number(row.session_minutes)) ? Number(row.session_minutes) : 20,
+    weeklyGoalMinutes: row && Number.isSafeInteger(Number(row.weekly_goal_minutes)) && Number(row.weekly_goal_minutes) >= 30 && Number(row.weekly_goal_minutes) <= 1200 ? Number(row.weekly_goal_minutes) : 120,
+  };
+}
+
+function projectsFromRows(rows) {
+  const projects = Object.create(null);
+  for (const row of rows || []) {
+    const project = PROJECT_BY_ID[row.project_id];
+    if (!project || !["guided", "unguided"].includes(row.mode)) continue;
+    try {
+      const done = JSON.parse(row.done_json || "[]");
+      if (!Array.isArray(done)) continue;
+      projects[row.project_id] = { mode: row.mode, done: [...new Set(done.filter((taskId) => project.taskIds.includes(taskId)))] };
+    } catch { /* Ignore malformed legacy project rows. */ }
+  }
+  return projects;
+}
+
+function validSkillItem(skillId, itemId) {
+  if (itemId === `${skillId}:v1` || itemId === `${skillId}:v2` || itemId === `${skillId}:v3`) return true;
+  const review = REVIEW_ITEM_BY_ID[itemId];
+  if (review && Array.isArray(review.skillIds) && review.skillIds.includes(skillId)) return true;
+  const stage = COURSE_STAGE_BY_ID[itemId];
+  return !!(stage && Array.isArray(stage.skillIds) && stage.skillIds.includes(skillId));
 }
 
 async function loadMasterySnapshot(env, userId) {
@@ -567,6 +697,31 @@ async function loadBootstrapSnapshot(env, user) {
   };
 }
 
+async function loadAcademyBootstrapSnapshot(env, user) {
+  const legacy = await loadBootstrapSnapshot(env, user);
+  const results = await academyBatch(env, user.id, () => [
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+    env.DB.prepare("SELECT course_id, stage_id FROM progress_v3 WHERE user_id=? ORDER BY course_id, completed_at, stage_id").bind(user.id),
+    env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? ORDER BY skill_id").bind(user.id),
+    env.DB.prepare("SELECT active_path_id, session_minutes, weekly_goal_minutes FROM learning_preferences WHERE user_id=?").bind(user.id),
+    env.DB.prepare("SELECT project_id, mode, done_json FROM project_progress WHERE user_id=? ORDER BY project_id").bind(user.id),
+  ]);
+  const generation = normalizeGeneration(results[1].results[0]?.generation);
+  if (generation !== legacy.generation) throwResetRequired(generation);
+  const storedSkills = Object.create(null);
+  for (const row of results[3].results || []) {
+    const record = skillMasteryRecord(row);
+    if (record) storedSkills[row.skill_id] = record;
+  }
+  return {
+    ...legacy,
+    stableProgress: unionStableProgress(stableProgressFromRows(results[2].results), projectLegacyProgress(legacy.progress)),
+    skillMastery: mergeProjectedSkillMastery(storedSkills, legacy.mastery),
+    preferences: preferencesRecord(results[4].results[0]),
+    projects: projectsFromRows(results[5].results),
+  };
+}
+
 async function currentUser(request, env) {
   const token = getCookie(request, "session");
   if (!token || !env.SESSION_SECRET) return null;
@@ -606,7 +761,7 @@ function courseFallback(meta) {
     '<nav class="course-breadcrumb" aria-label="Breadcrumb"><a href="/lab/">Econometrics Lab</a><span aria-hidden="true">/</span><span>' + escapeHTML(meta.name) + "</span></nav>" +
     "<h1>" + escapeHTML(meta.name) + "</h1>" +
     "<p>" + escapeHTML(meta.description) + "</p>" +
-    '<p class="course-fallback__meta">' + escapeHTML(meta.level) + " · 4 modules · Free and browser-based</p>" +
+    '<p class="course-fallback__meta">' + escapeHTML(meta.level) + " · " + meta.modules.length + " modules · Free and browser-based</p>" +
     '<p><a class="btn btn--gold" href="#courseModules">View the course outline</a></p>' +
     "</div>";
 }
@@ -621,7 +776,7 @@ function courseOverview(meta) {
   return '<section class="course-overview" aria-labelledby="courseOverviewTitle">' +
     '<p class="course-overview__kicker">Course overview</p>' +
     '<h2 id="courseOverviewTitle">Learn ' + escapeHTML(meta.name) + " interactively</h2>" +
-    "<p>This free course uses real Python and statsmodels in your browser. Work through the four modules below with explanations, executable examples, interactive controls, and questions.</p>" +
+    "<p>This free course uses real Python and statsmodels in your browser. Work through the modules below with explanations, executable examples, interactive controls, and questions.</p>" +
     '<div class="course-outline" id="courseModules">' + modules + "</div>" +
     '<p class="course-overview__byline">Course by <a href="/">Anıl Kaya</a> · ' + escapeHTML(meta.level) + " level</p>" +
     '<h2 class="course-overview__related-title">Explore other econometrics courses</h2>' +
@@ -765,6 +920,155 @@ async function route(request, env) {
     return json({ user: await currentUser(request, env) });
   }
 
+  if (path === "/api/v2/bootstrap") {
+    requireMethod(request, ["GET"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) return json({ user: null });
+    requireReadOwnerIfPresent(request, user.id);
+    const snapshot = await loadAcademyBootstrapSnapshot(env, user);
+    return json(snapshot, 200, generationHeaders(snapshot.generation));
+  }
+
+  if (path === "/api/v2/progress") {
+    requireMethod(request, ["PUT"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+    const body = await readJSON(request);
+    const key = `${body.courseId}:${body.stageId}`;
+    const stage = typeof body.courseId === "string" && typeof body.stageId === "string" ? STAGE_KEY_BY_COURSE[key] : null;
+    if (!stage || stage.courseId !== body.courseId || body.complete !== true) throw new HttpError(400, "invalid_progress", "Course and stable stage id must be valid");
+    const now = Date.now();
+    const results = await academyBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO progress_v3 (user_id, course_id, stage_id, completed_at, source) " +
+        "SELECT ?, ?, ?, ?, 'web' WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
+        "ON CONFLICT(user_id, course_id, stage_id) DO UPDATE SET completed_at=MIN(progress_v3.completed_at, excluded.completed_at) RETURNING stage_id"
+      ).bind(user.id, body.courseId, body.stageId, now, user.id, generation),
+      env.DB.prepare(
+        "INSERT INTO progress (user_id, model_id, done_json, updated_at) " +
+        "SELECT ?, ?, json(?), ? WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
+        "ON CONFLICT(user_id, model_id) DO UPDATE SET done_json=(SELECT json_group_array(value) FROM (" +
+          "SELECT DISTINCT CAST(value AS INTEGER) AS value FROM (" +
+            "SELECT value, type FROM json_each(CASE WHEN json_valid(progress.done_json) THEN progress.done_json ELSE '[]' END) " +
+            "UNION ALL SELECT value, type FROM json_each(excluded.done_json)" +
+          ") WHERE type='integer' AND value>=0 AND value<? ORDER BY value" +
+        ")), updated_at=MAX(COALESCE(progress.updated_at,0), excluded.updated_at) RETURNING done_json"
+      ).bind(user.id, body.courseId, JSON.stringify([stage.index]), now, user.id, generation, COURSE_STAGE_POINTS[body.courseId].length),
+      syncDerivedPointsStatement(env, user.id, now),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+      env.DB.prepare("SELECT course_id, stage_id FROM progress_v3 WHERE user_id=? AND course_id=? ORDER BY completed_at, stage_id").bind(user.id, body.courseId),
+    ]);
+    const currentGeneration = normalizeGeneration(results[4].results[0]?.generation);
+    if (currentGeneration !== generation || !results[1].results[0] || !results[2].results[0]) throwResetRequired(currentGeneration);
+    return json({ ok: true, courseId: body.courseId, done: stableProgressFromRows(results[5].results)[body.courseId]?.done || [], generation }, 200, generationHeaders(generation));
+  }
+
+  if (path === "/api/v2/attempt") {
+    requireMethod(request, ["PUT"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+    const body = await readJSON(request);
+    const day = normalizeActivityDay(body.day);
+    if (typeof body.skillId !== "string" || !Object.hasOwn(SKILL_BY_ID, body.skillId) || typeof body.itemId !== "string" || !validSkillItem(body.skillId, body.itemId) || typeof body.attemptId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(body.attemptId) || typeof body.correct !== "boolean" || typeof body.hinted !== "boolean" || !day) {
+      throw new HttpError(400, "invalid_skill_attempt", "Skill, item, and attempt data must be valid");
+    }
+    const correct = body.correct ? 1 : 0, hinted = body.hinted ? 1 : 0, now = Date.now();
+    const results = await academyBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO skill_attempts (user_id, attempt_id, skill_id, item_id, correct, hinted, attempt_day, applied, received_at) " +
+        "SELECT ?, ?, ?, ?, ?, ?, ?, 0, ? WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
+        "ON CONFLICT(user_id, attempt_id) DO NOTHING RETURNING attempt_id"
+      ).bind(user.id, body.attemptId, body.skillId, body.itemId, correct, hinted, day, now, user.id, generation),
+      env.DB.prepare(
+        "INSERT INTO skill_mastery (user_id, skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
+        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), 1, ?, ?, ?, ? " +
+        "WHERE EXISTS (SELECT 1 FROM skill_attempts WHERE user_id=? AND attempt_id=? AND skill_id=? AND applied=0) " +
+        "ON CONFLICT(user_id, skill_id) DO UPDATE SET " +
+          "level=CASE WHEN ?=1 AND ?=0 THEN MIN(5,skill_mastery.level+1) WHEN ?=1 THEN skill_mastery.level ELSE MAX(0,skill_mastery.level-1) END, " +
+          "due_day=date(?, '+' || CASE WHEN ?=1 AND ?=0 THEN CASE WHEN skill_mastery.level<=0 THEN 1 WHEN skill_mastery.level=1 THEN 3 WHEN skill_mastery.level=2 THEN 7 WHEN skill_mastery.level=3 THEN 21 ELSE 60 END ELSE 1 END || ' days'), " +
+          "attempts=MIN(1000000,skill_mastery.attempts+1), correct=MIN(1000000,skill_mastery.correct+?), last_result=?, last_attempt_id=?, updated_at=MAX(skill_mastery.updated_at,excluded.updated_at) " +
+        "RETURNING skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at"
+      ).bind(
+        user.id, body.skillId, correct, hinted, day, correct, correct, body.attemptId, now,
+        user.id, body.attemptId, body.skillId,
+        correct, hinted, correct, day, correct, hinted, correct, correct, body.attemptId,
+      ),
+      env.DB.prepare("UPDATE skill_attempts SET applied=1 WHERE user_id=? AND attempt_id=? AND skill_id=? AND applied=0 RETURNING attempt_id").bind(user.id, body.attemptId, body.skillId),
+      env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? AND skill_id=?").bind(user.id, body.skillId),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+      env.DB.prepare("SELECT skill_id, item_id, correct, hinted, attempt_day FROM skill_attempts WHERE user_id=? AND attempt_id=?").bind(user.id, body.attemptId),
+    ]);
+    const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
+    if (currentGeneration !== generation) throwResetRequired(currentGeneration);
+    const attempt = results[6].results[0];
+    if (!attempt) throw new Error("Skill attempt was not recorded");
+    if (attempt.skill_id !== body.skillId || attempt.item_id !== body.itemId || Number(attempt.correct) !== correct || Number(attempt.hinted) !== hinted || attempt.attempt_day !== day) throw new HttpError(409, "attempt_conflict", "Attempt id was already used for different data");
+    const record = skillMasteryRecord(results[4].results[0]);
+    if (!record) throw new Error("Stored skill mastery is invalid");
+    return json({ ok: true, record, duplicate: !results[1].results[0], generation }, 200, generationHeaders(generation));
+  }
+
+  if (path === "/api/v2/preferences") {
+    requireMethod(request, ["PUT"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+    const body = await readJSON(request);
+    if (!PATH_IDS.has(body.activePathId) || !SESSION_MINUTES.has(body.sessionMinutes) || !Number.isSafeInteger(body.weeklyGoalMinutes) || body.weeklyGoalMinutes < 30 || body.weeklyGoalMinutes > 1200) throw new HttpError(400, "invalid_preferences", "Learning preferences must be valid");
+    const results = await academyBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO learning_preferences (user_id, active_path_id, session_minutes, weekly_goal_minutes, updated_at) " +
+        "SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
+        "ON CONFLICT(user_id) DO UPDATE SET active_path_id=excluded.active_path_id, session_minutes=excluded.session_minutes, weekly_goal_minutes=excluded.weekly_goal_minutes, updated_at=MAX(learning_preferences.updated_at,excluded.updated_at) " +
+        "RETURNING active_path_id, session_minutes, weekly_goal_minutes"
+      ).bind(user.id, body.activePathId, body.sessionMinutes, body.weeklyGoalMinutes, Date.now(), user.id, generation),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+    ]);
+    const currentGeneration = normalizeGeneration(results[2].results[0]?.generation);
+    if (currentGeneration !== generation || !results[1].results[0]) throwResetRequired(currentGeneration);
+    return json({ ok: true, preferences: preferencesRecord(results[1].results[0]), generation }, 200, generationHeaders(generation));
+  }
+
+  if (path === "/api/v2/project") {
+    requireMethod(request, ["PUT"]);
+    requireSessionSecret(env);
+    const user = await currentUser(request, env);
+    if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
+    requireSameOrigin(request);
+    requireMutationOwner(request, user.id);
+    const generation = await mutationGeneration(request, env, user.id);
+    const body = await readJSON(request);
+    const project = typeof body.projectId === "string" ? PROJECT_BY_ID[body.projectId] : null;
+    const done = Array.isArray(body.completedTaskIds) ? [...new Set(body.completedTaskIds)] : null;
+    if (!project || !["guided", "unguided"].includes(body.mode) || !done || done.some((taskId) => typeof taskId !== "string" || !project.taskIds.includes(taskId))) throw new HttpError(400, "invalid_project", "Project mode and task completion must be valid");
+    const results = await academyBatch(env, user.id, () => [
+      env.DB.prepare(
+        "INSERT INTO project_progress (user_id, project_id, mode, done_json, updated_at) " +
+        "SELECT ?, ?, ?, json(?), ? WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
+        "ON CONFLICT(user_id, project_id) DO UPDATE SET mode=excluded.mode, done_json=(SELECT json_group_array(value) FROM (" +
+          "SELECT DISTINCT value FROM (SELECT value FROM json_each(CASE WHEN json_valid(project_progress.done_json) THEN project_progress.done_json ELSE '[]' END) UNION ALL SELECT value FROM json_each(excluded.done_json)) ORDER BY value" +
+        ")), updated_at=MAX(project_progress.updated_at,excluded.updated_at) RETURNING project_id, mode, done_json"
+      ).bind(user.id, body.projectId, body.mode, JSON.stringify(done), Date.now(), user.id, generation),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
+    ]);
+    const currentGeneration = normalizeGeneration(results[2].results[0]?.generation);
+    if (currentGeneration !== generation || !results[1].results[0]) throwResetRequired(currentGeneration);
+    const saved = projectsFromRows(results[1].results);
+    return json({ ok: true, project: saved[body.projectId], generation }, 200, generationHeaders(generation));
+  }
+
   if (path === "/api/bootstrap") {
     requireMethod(request, ["GET"]);
     requireSessionSecret(env);
@@ -792,7 +1096,7 @@ async function route(request, env) {
 
     if (request.method === "DELETE") {
       const now = Date.now();
-      const results = await placementBatch(env, user.id, () => [
+      const results = await academyBatch(env, user.id, () => [
         env.DB.prepare(
           "INSERT INTO learning_sync (user_id, generation) VALUES (?, 1) " +
           "ON CONFLICT(user_id) DO UPDATE SET generation=" +
@@ -803,6 +1107,10 @@ async function route(request, env) {
         env.DB.prepare("DELETE FROM mastery WHERE user_id = ?").bind(user.id),
         env.DB.prepare("DELETE FROM mastery_attempts WHERE user_id = ?").bind(user.id),
         env.DB.prepare("DELETE FROM placement WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM progress_v3 WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM skill_mastery WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM skill_attempts WHERE user_id = ?").bind(user.id),
+        env.DB.prepare("DELETE FROM project_progress WHERE user_id = ?").bind(user.id),
         env.DB.prepare(
           "INSERT INTO stats (user_id, points, streak, last, updated_at) VALUES (?, 0, 0, NULL, ?) " +
           "ON CONFLICT(user_id) DO UPDATE SET points=0, streak=0, last=NULL, updated_at=excluded.updated_at"
@@ -814,6 +1122,9 @@ async function route(request, env) {
         progress: {},
         stats: { points: 0, streak: 0, last: null },
         mastery: {},
+        stableProgress: {},
+        skillMastery: {},
+        projects: {},
         placement: null,
         generation,
       }, 200, generationHeaders(generation));

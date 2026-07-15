@@ -25,14 +25,21 @@
   root.setAttribute("aria-busy", "true");
   root.innerHTML = '<div class="course-loading" role="status"><span class="course-loading__mark" aria-hidden="true">β</span><p>Loading the course workspace…</p></div>';
   let topic;
+  let modular = false;
   try {
     const version = document.documentElement.dataset.assetVersion;
-    const response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, {
+    let response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}/manifest.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, {
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) throw new Error(`course-payload-${response.status}`);
-    topic = await response.json();
-    if (!topic || topic.schemaVersion !== 1 || topic.id !== topicId || !Array.isArray(topic.modules) || !topic.modules.length ||
+    if (response.ok) {
+      topic = await response.json();
+      modular = true;
+    } else {
+      response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`course-payload-${response.status}`);
+      topic = await response.json();
+    }
+    if (!topic || ![1, 2].includes(topic.schemaVersion) || topic.id !== topicId || !Array.isArray(topic.modules) || !topic.modules.length ||
         topic.modules.some((module) => !module || !Array.isArray(module.stages))) throw new Error("invalid-course-payload");
   } catch {
     root.setAttribute("aria-busy", "false");
@@ -51,11 +58,30 @@
   topic.modules.forEach((m, mi) => m.stages.forEach((s, si) =>
     stages.push({ ...s, mi, si, mTitle: m.title, mId: m.id, first: si === 0 })));
   const N = stages.length;
+  const modulePromises = new Map();
+  async function ensureModule(mi) {
+    if (!modular || topic.modules[mi]._loaded) return;
+    if (modulePromises.has(mi)) return modulePromises.get(mi);
+    const promise = (async () => {
+      const version = document.documentElement.dataset.assetVersion;
+      const moduleId = topic.modules[mi].id;
+      const response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}/${encodeURIComponent(moduleId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`module-payload-${response.status}`);
+      const payload = await response.json();
+      if (!payload || payload.schemaVersion !== 2 || payload.courseId !== topicId || !payload.module || payload.module.id !== moduleId || !Array.isArray(payload.module.stages)) throw new Error("invalid-module-payload");
+      const firstIndex = stages.findIndex((stage) => stage.mi === mi);
+      payload.module.stages.forEach((stage, si) => { stages[firstIndex + si] = { ...stage, mi, si, mTitle: payload.module.title, mId: moduleId, first: si === 0 }; });
+      topic.modules[mi] = { ...payload.module, _loaded: true };
+    })();
+    modulePromises.set(mi, promise);
+    try { await promise; }
+    finally { modulePromises.delete(mi); }
+  }
 
   // ---- Progress (on-device) -----------------------------------
   const store = window.IEWTStorage;
   const DEFAULT_POINTS = Object.freeze({
-    read: 5, code: 10, interactive: 10, quiz: 15,
+    read: 5, code: 10, interactive: 10, conceptlab: 10, codechallenge: 20, case: 15, match: 15, quiz: 15,
     truefalse: 10, fillblank: 15, numeric: 20, multi: 20,
   });
   const all = () => store.progress();
@@ -76,6 +102,7 @@
     if (window.FX && window.FX.coin) window.FX.coin(originEl, badge, pts);
     else if (window.FX) window.FX.floatPoints(pts, badge);
     if (window.Auth && typeof window.Auth.pushProgress === "function") void window.Auth.pushProgress(topic.id, [...d]);
+    if (stages[i].id && window.Auth && typeof window.Auth.pushStableProgress === "function") void window.Auth.pushStableProgress(topic.id, stages[i].id);
     // Module finished? quiet cheer. Whole topic? big one (also handled at Finish).
     const mi = stages[i].mi;
     const modIdxs = stages.map((s, k) => (s.mi === mi ? k : -1)).filter((k) => k >= 0);
@@ -178,8 +205,104 @@
       return window.Lab.makeCell({ code: st.code, title: (st.title || "python").toLowerCase().replace(/\s+/g, "_") + ".py", onRun: (el) => mark(i, el), figsEl }).el;
     }
     if (st.type === "interactive") return buildInteractive(st, i, figsEl);
+    if (st.type === "conceptlab") return buildConceptLab(st, i);
+    if (st.type === "codechallenge") return buildCodeChallenge(st, i, figsEl);
+    if (st.type === "case") return buildCase(st, i);
+    if (st.type === "match") return buildMatch(st, i);
     if (QUESTION[st.type]) return buildQuestion(st, i);
     return null;
+  }
+
+  function recordSkills(st, correct, hinted) {
+    if (!window.Auth || typeof window.Auth.recordSkillAttempt !== "function") return;
+    for (const skillId of st.skillIds || []) void window.Auth.recordSkillAttempt(skillId, st.variantId || st.id, { correct, hinted });
+  }
+
+  function buildCodeChallenge(st, i, figsEl) {
+    const wrap = el("div", "challenge-cell");
+    const feedback = el("div", "quiz__feedback"); feedback.setAttribute("role", "status");
+    const hint = el("button", "btn btn--ghost", "Reveal hint 1"); hint.type = "button";
+    let hintIndex = 0, hinted = false;
+    const cell = window.Lab.makeCell({
+      code: st.starter,
+      title: "graded_challenge.py",
+      figsEl,
+      prepareCode: (code) => `${code}\n\n# Deterministic local grader\n${st.tests}`,
+      onResult: (ok, button) => {
+        recordSkills(st, ok, hinted);
+        feedback.className = "quiz__feedback " + (ok ? "ok" : "err");
+        feedback.textContent = ok ? st.success : "The grader did not pass yet. Read the output, revise one line, and run again.";
+        if (ok) { mark(i, button); hint.disabled = true; }
+      },
+    });
+    hint.addEventListener("click", () => {
+      hinted = true;
+      const hints = st.hints || [];
+      feedback.className = "quiz__feedback hint";
+      feedback.textContent = "Hint: " + (hints[hintIndex] || "Compare each required variable with the task statement.");
+      hintIndex = Math.min(hints.length, hintIndex + 1);
+      hint.textContent = hintIndex < hints.length ? `Reveal hint ${hintIndex + 1}` : "All hints shown";
+      if (hintIndex >= hints.length) hint.disabled = true;
+    });
+    wrap.append(cell.el, hint, feedback);
+    return wrap;
+  }
+
+  function buildConceptLab(st, i) {
+    const lab = el("div", "concept-lab");
+    const id = `concept_${topic.id}_${i}`;
+    lab.innerHTML = '<label class="control" for="' + id + '"><span class="control__label">' + esc(st.param.label) + ' <b class="control__val"></b></span>' +
+      '<input class="control__range" id="' + id + '" type="range" min="' + st.param.min + '" max="' + st.param.max + '" step="' + st.param.step + '" value="' + st.param.value + '"></label>' +
+      '<svg class="concept-lab__plot" viewBox="0 0 640 260" role="img" aria-labelledby="' + id + '_title ' + id + '_desc"><title id="' + id + '_title">Live ' + esc(st.title) + '</title><desc id="' + id + '_desc">A curve that updates when the control changes.</desc><path class="concept-lab__axis" d="M44 218H620M44 18V218"></path><path class="concept-lab__curve"></path><circle class="concept-lab__point" r="6"></circle></svg>' +
+      '<p class="concept-lab__readout" role="status"></p><button class="btn btn--gold concept-lab__complete" type="button">Record insight</button>';
+    const range = lab.querySelector("input"), value = lab.querySelector(".control__val"), curve = lab.querySelector(".concept-lab__curve"), point = lab.querySelector(".concept-lab__point"), readout = lab.querySelector(".concept-lab__readout");
+    const update = () => {
+      const v = Number(range.value), lo = Number(range.min), hi = Number(range.max), normalized = (v - lo) / Math.max(1e-9, hi - lo);
+      value.textContent = range.value;
+      const points = Array.from({ length: 81 }, (_, k) => {
+        const x = k / 80, center = 0.18 + 0.64 * normalized;
+        const y = st.kind === "ar" || st.kind === "garch" ? Math.pow(Math.max(0, 1 - x), 0.35 + 3 * (1 - normalized)) : Math.exp(-Math.pow((x - center) / (0.11 + 0.13 * (1 - normalized)), 2));
+        return [44 + 576 * x, 218 - 178 * y];
+      });
+      curve.setAttribute("d", points.map((p, k) => (k ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" "));
+      const chosen = points[Math.round(normalized * 80)]; point.setAttribute("cx", chosen[0]); point.setAttribute("cy", chosen[1]);
+      readout.textContent = `${st.param.label}: ${range.value}. ${st.insight}`;
+    };
+    range.addEventListener("input", update); update();
+    lab.querySelector("button").addEventListener("click", (event) => { mark(i, event.currentTarget); event.currentTarget.textContent = "Insight recorded ✓"; event.currentTarget.disabled = true; });
+    return lab;
+  }
+
+  function buildCase(st, i) {
+    const box = el("div", "case-study");
+    let step = 0, clean = true;
+    const renderStep = () => {
+      const current = st.steps[step];
+      box.innerHTML = '<p class="academy-kicker">Decision ' + (step + 1) + ' of ' + st.steps.length + '</p><h3>' + esc(current.prompt) + '</h3><div class="quiz__choices">' + current.choices.map((choice, index) => '<button class="quiz__choice case-study__choice" type="button" data-answer="' + index + '"><span>' + esc(choice) + '</span></button>').join("") + '</div><div class="quiz__feedback" role="status"></div>';
+      box.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+        const ok = Number(button.dataset.answer) === current.answer;
+        if (!ok) clean = false;
+        const fb = box.querySelector(".quiz__feedback"); fb.className = "quiz__feedback " + (ok ? "ok" : "err"); fb.textContent = ok ? current.explain : "That action is not defensible here. Re-read the diagnostic risk and choose again.";
+        if (!ok) { recordSkills(st, false, false); return; }
+        setTimeout(() => { step++; if (step < st.steps.length) renderStep(); else { recordSkills(st, true, !clean); mark(i, button); box.innerHTML = '<div class="case-study__complete"><span aria-hidden="true">✓</span><h3>Case resolved</h3><p>' + esc(current.explain) + '</p></div>'; } }, 420);
+      }));
+    };
+    renderStep(); return box;
+  }
+
+  function buildMatch(st, i) {
+    const box = el("div", "match-lab");
+    const rights = st.pairs.map((pair) => pair.right).slice().reverse();
+    box.innerHTML = '<p>Use each select to build the evidence map. No dragging is required.</p><div class="match-lab__rows">' + st.pairs.map((pair, index) => '<label><span>' + esc(pair.left) + '</span><select data-match="' + index + '"><option value="">Choose evidence…</option>' + rights.map((right) => '<option value="' + esc(right) + '">' + esc(right) + '</option>').join("") + '</select></label>').join("") + '</div><button class="btn btn--gold" type="button">Check map</button><div class="quiz__feedback" role="status"></div>';
+    box.querySelector("button").addEventListener("click", (event) => {
+      const picks = [...box.querySelectorAll("select")].map((select) => select.value);
+      if (picks.some((value) => !value)) { const fb = box.querySelector(".quiz__feedback"); fb.className = "quiz__feedback hint"; fb.textContent = "Choose evidence for every role first."; return; }
+      const ok = picks.every((value, index) => value === st.pairs[index].right);
+      recordSkills(st, ok, false);
+      const fb = box.querySelector(".quiz__feedback"); fb.className = "quiz__feedback " + (ok ? "ok" : "err"); fb.textContent = ok ? "Evidence map complete. Each claim now has the right diagnostic role." : "Some roles are mismatched. Compare the good practice, diagnostic, and failure mode.";
+      if (ok) { mark(i, event.currentTarget); event.currentTarget.disabled = true; }
+    });
+    return box;
   }
 
   function buildInteractive(st, i, figsEl) {
@@ -309,6 +432,7 @@
       if (typeof r.ok === "boolean" && st.id && window.Auth && typeof window.Auth.recordMasteryAttempt === "function") {
         void window.Auth.recordMasteryAttempt(topic.id + ":" + st.id, { correct: r.ok, hinted });
       }
+      if (typeof r.ok === "boolean") recordSkills(st, r.ok, hinted);
       if (r.ok) {
         fb.className = "quiz__feedback ok"; fb.innerHTML = "Correct. " + (st.explain || "");
         q.classList.add("is-solved"); markCorrect(st, q, name);
@@ -366,7 +490,8 @@
 
   // ---- Render one stage ---------------------------------------
   let cur = 0;
-  function render(i) {
+  async function render(i) {
+    await ensureModule(stages[i].mi);
     cur = i;
     const st = stages[i];
     // Charts render in the LEFT guide column (under the prompt) so a tall code
@@ -403,7 +528,7 @@
     renderNav(i);
   }
 
-  function go(i) {
+  async function go(i) {
     if (i < 0 || i >= N) {
       if (i >= N) {
         const done = doneSet();
@@ -423,8 +548,9 @@
     cur = i;   // set NOW — render() runs after the page-turn delay, and rapid
                // Next/arrow presses must step from the target, not a stale index
     history.replaceState(null, "", "#s" + i);
-    const swap = () => {
-      render(i);
+    const swap = async () => {
+      try { await render(i); }
+      catch { if (window.toast) window.toast("This module could not load. Your progress is safe."); return; }
       stageEl.scrollIntoView({ block: "start", behavior: "auto" });
       const h = stageEl.querySelector(".stage__guide h2, .stage__guide h1, .stage__kicker");
       if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }   // focus follows the turn
@@ -449,7 +575,7 @@
   const firstOpen = stages.findIndex((_, index) => !doneSet().has(index));
   const requestedStart = hashMatch ? Number(hashMatch[1]) : (firstOpen >= 0 ? firstOpen : 0);
   const start = Math.max(0, Math.min(N - 1, Number.isInteger(requestedStart) ? requestedStart : 0));
-  render(start);
+  await render(start);
   if (window.Gamify) window.Gamify.paint();
   document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
   document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
