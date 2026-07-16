@@ -56,7 +56,10 @@ try {
   assert.equal(root.headers.get("clear-site-data"), null, "one-time cache purge is retired");
   assertSecurity(root, true);
   assert.match(root.headers.get("content-security-policy") || "", /https:\/\/static\.cloudflareinsights\.com/, "CSP must allow Cloudflare Web Analytics");
-  assert.match(await root.text(), /In Econometrics We Trust/);
+  const rootHtml = await root.text();
+  assert.match(rootHtml, /In Econometrics We Trust/);
+  assert.match(rootHtml, /id="marketBoard"/, "landing page must carry the market-clock mount point");
+  assert.match(rootHtml, new RegExp(`market-clock\\.js\\?v=${assetVersion}`), "market-clock script must be versioned to the asset version");
 
   const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");

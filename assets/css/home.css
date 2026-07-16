@@ -184,3 +184,117 @@
 .home-foot a:hover { color: var(--gold-celadon); }
 @media (max-height: 560px) { .home-foot { display: none; } }
 @media (prefers-reduced-motion: reduce) { .home-foot { animation: none; } }
+
+/* ---- World market board: live open-time countdowns, İstanbul perspective ---- */
+.market-board {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 2.6rem);
+  z-index: 6;
+  width: max-content;
+  max-width: calc(100vw - 1.4rem);
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+  padding: 0.3rem 0.35rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Dedicated keyframe: the shared `rise` sets transform: translateY(0), which
+     would clobber the translateX(-50%) centering. This one keeps both. */
+  animation: market-rise 1s var(--ease) 0.34s both;
+}
+.market-board::-webkit-scrollbar { display: none; }
+@keyframes market-rise {
+  from { opacity: 0; transform: translate(-50%, 14px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.market-board__label {
+  position: sticky;
+  left: 0;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.05rem;
+  padding: 0.1rem 0.55rem 0.1rem 0.35rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  line-height: 1.25;
+}
+.market-board__label span:first-child { color: var(--gold-harvest); }
+.market-board__label span:last-child { color: var(--ink-faint); }
+
+.market {
+  --market-live: #64c79a;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  padding: 0.2rem 0.44rem;
+  border-radius: 0.55rem;
+  white-space: nowrap;
+}
+.market + .market { border-left: 1px solid var(--hairline); }
+
+.market__top {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+}
+.market__dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ink-faint);
+  box-shadow: 0 0 0 0 transparent;
+}
+.market[data-open="true"] .market__dot {
+  background: var(--market-live);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--market-live) 80%, transparent);
+  animation: market-pulse 2.2s var(--ease) infinite;
+}
+.market__city {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.market__flag { font-size: 0.66rem; line-height: 1; }
+.market__status {
+  font-size: 0.65rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.market__status b {
+  font-weight: 700;
+  color: var(--gold-celadon);
+}
+.market[data-open="true"] .market__status b { color: var(--market-live); }
+
+@keyframes market-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Give the board room; on short screens the field + headline take priority. */
+@media (max-height: 640px) { .market-board { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .market-board { animation: none; }
+  .market[data-open="true"] .market__dot { animation: none; }
+}
