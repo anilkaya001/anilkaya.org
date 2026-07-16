@@ -96,6 +96,12 @@ const SECURITY_HEADERS = {
   "X-Permitted-Cross-Domain-Policies": "none",
 };
 
+// Idempotency ledgers (mastery_attempts, skill_attempts) only need to remember
+// an attempt long enough to absorb a client retry. The sync outbox flushes on
+// every sign-in and is capped, so 48h is a generous window; pruning past it on
+// each write keeps the tables bounded instead of growing O(lifetime attempts).
+const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
+
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
 class HttpError extends Error {
@@ -1006,6 +1012,9 @@ async function route(request, env) {
       env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? AND skill_id=?").bind(user.id, body.skillId),
       env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
       env.DB.prepare("SELECT skill_id, item_id, correct, hinted, attempt_day FROM skill_attempts WHERE user_id=? AND attempt_id=?").bind(user.id, body.attemptId),
+      // Bound the skill idempotency ledger to the retry window (see mastery). Rides
+      // this batch, never matches the just-inserted row, appended last for stable indices.
+      env.DB.prepare("DELETE FROM skill_attempts WHERE user_id=? AND received_at < ?").bind(user.id, now - ATTEMPT_LEDGER_TTL_MS),
     ]);
     const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
     if (currentGeneration !== generation) throwResetRequired(currentGeneration);
@@ -1360,6 +1369,13 @@ async function route(request, env) {
       env.DB.prepare(
         "SELECT item_id, correct, hinted, attempt_day FROM mastery_attempts WHERE user_id=? AND attempt_id=?"
       ).bind(user.id, attemptId),
+      // Bound the idempotency ledger: prune this user's attempts older than the
+      // retry window so the table can't grow O(lifetime attempts). Rides the
+      // existing batch (no extra round-trip); never matches the row just
+      // inserted (received_at = now). Appended last so result indices are stable.
+      env.DB.prepare(
+        "DELETE FROM mastery_attempts WHERE user_id=? AND received_at < ?"
+      ).bind(user.id, now - ATTEMPT_LEDGER_TTL_MS),
     ]);
 
     const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
