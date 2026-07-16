@@ -572,7 +572,11 @@ async function loadProgressSnapshot(env, userId) {
   };
 }
 
-function syncDerivedPointsStatement(env, userId, now = Date.now()) {
+// Points are a pure function of progress + per-stage weights, computed read-only
+// on every read path via this statement. Nothing writes or reads a materialized
+// stats.points column anymore, so a GET never bills a row-written and a progress
+// write never spends one keeping points in sync.
+function derivedPointsSelectStatement(env, userId) {
   return env.DB.prepare(
     "WITH weights(model_id, stage_index, points) AS (" +
       "SELECT courses.key, CAST(stages.key AS INTEGER), CAST(stages.value AS INTEGER) " +
@@ -581,35 +585,25 @@ function syncDerivedPointsStatement(env, userId, now = Date.now()) {
       "SELECT DISTINCT p.model_id, CAST(done.value AS INTEGER) " +
       "FROM progress AS p, json_each(CASE WHEN json_valid(p.done_json) THEN p.done_json ELSE '[]' END) AS done " +
       "WHERE p.user_id=? AND done.type='integer'" +
-    "), derived(points) AS (" +
-      "SELECT COALESCE(SUM(weights.points), 0) FROM completed " +
-      "JOIN weights USING (model_id, stage_index)" +
-    ") INSERT INTO stats (user_id, points, streak, last, updated_at) " +
-    "SELECT ?, derived.points, 0, NULL, ? FROM derived WHERE 1 " +
-    "ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, " +
-    "updated_at=MAX(COALESCE(stats.updated_at, 0), excluded.updated_at)"
-  ).bind(JSON.stringify(COURSE_STAGE_POINTS), userId, userId, now);
-}
-
-async function syncDerivedPoints(env, userId) {
-  await syncDerivedPointsStatement(env, userId).run();
+    ") SELECT COALESCE(SUM(weights.points), 0) AS points FROM completed JOIN weights USING (model_id, stage_index)"
+  ).bind(JSON.stringify(COURSE_STAGE_POINTS), userId);
 }
 
 async function loadStatsSnapshot(env, userId) {
   const read = async () => {
+    // One batch, zero writes: read generation + streak/last, and derive points
+    // read-only in the same round-trip (no more sync-write on the read path).
     const results = await learningBatch(env, userId, () => [
       env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
-      env.DB.prepare(
-        "SELECT points, streak, last FROM stats WHERE user_id = ?"
-      ).bind(userId),
+      env.DB.prepare("SELECT streak, last FROM stats WHERE user_id = ?").bind(userId),
+      derivedPointsSelectStatement(env, userId),
     ]);
-    const syncResult = results[1];
-    const statsResult = results[2];
-    const sync = syncResult.results[0];
+    const sync = results[1].results[0];
     if (!sync) throw new Error("Learning sync state is missing");
     return {
       generation: normalizeGeneration(sync.generation),
-      row: statsResult.results[0] || null,
+      row: results[2].results[0] || null,
+      points: Number(results[3].results[0]?.points) || 0,
     };
   };
 
@@ -630,72 +624,90 @@ async function loadStatsSnapshot(env, userId) {
   return {
     generation: snapshot.generation,
     stats: {
-      points: Number(snapshot.row && snapshot.row.points) || 0,
+      points: snapshot.points,
       streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
       last: storedLast || null,
     },
   };
 }
 
-async function loadBootstrapSnapshot(env, user) {
-  const read = async () => {
-    // D1 executes a batch in order and rolls it back as a unit on failure. The
-    // derived-points repair therefore lands before this response's consistent
-    // snapshot without adding four separate browser round trips.
-    const results = await placementBatch(env, user.id, () => [
-      syncDerivedPointsStatement(env, user.id),
-      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(user.id),
-      env.DB.prepare(
-        "SELECT model_id, done_json FROM progress WHERE user_id = ? ORDER BY model_id"
-      ).bind(user.id),
-      env.DB.prepare(
-        "SELECT points, streak, last FROM stats WHERE user_id = ?"
-      ).bind(user.id),
-      env.DB.prepare(
-        "SELECT item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at " +
-        "FROM mastery WHERE user_id = ? ORDER BY item_id"
-      ).bind(user.id),
-      env.DB.prepare(
-        "SELECT band, score, total, completed_day, recommended_topic FROM placement WHERE user_id = ?"
-      ).bind(user.id),
-    ]);
+// The six legacy hydration reads (points derived read-only, no write). Batch
+// wrappers prepend the learning_sync ensure at results[0], so these occupy
+// results[1..6].
+function bootstrapLegacyStatements(env, userId) {
+  return [
+    derivedPointsSelectStatement(env, userId),
+    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id = ?").bind(userId),
+    env.DB.prepare("SELECT model_id, done_json FROM progress WHERE user_id = ? ORDER BY model_id").bind(userId),
+    env.DB.prepare("SELECT streak, last FROM stats WHERE user_id = ?").bind(userId),
+    env.DB.prepare(
+      "SELECT item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at " +
+      "FROM mastery WHERE user_id = ? ORDER BY item_id"
+    ).bind(userId),
+    env.DB.prepare("SELECT band, score, total, completed_day, recommended_topic FROM placement WHERE user_id = ?").bind(userId),
+  ];
+}
+
+// The four academy hydration reads. When appended to the legacy set they occupy
+// results[7..10]. The generation is NOT re-read — the legacy set already has it.
+function bootstrapAcademyStatements(env, userId) {
+  return [
+    env.DB.prepare("SELECT course_id, stage_id FROM progress_v3 WHERE user_id=? ORDER BY course_id, completed_at, stage_id").bind(userId),
+    env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? ORDER BY skill_id").bind(userId),
+    env.DB.prepare("SELECT active_path_id, session_minutes, weekly_goal_minutes FROM learning_preferences WHERE user_id=?").bind(userId),
+    env.DB.prepare("SELECT project_id, mode, done_json FROM project_progress WHERE user_id=? ORDER BY project_id").bind(userId),
+  ];
+}
+
+// Run hydration in ONE D1 batch (legacy, or legacy+academy) with the poisoned-
+// last self-repair. Returns the parsed legacy fields plus the raw results so the
+// academy caller can read its own slice without a second round trip.
+async function runBootstrapBatch(env, user, academy) {
+  const build = () => academy
+    ? [...bootstrapLegacyStatements(env, user.id), ...bootstrapAcademyStatements(env, user.id)]
+    : bootstrapLegacyStatements(env, user.id);
+  const batch = academy ? academyBatch : placementBatch;
+  const parse = (results) => {
     const sync = results[2].results[0];
     if (!sync) throw new Error("Learning sync state is missing");
     return {
       generation: normalizeGeneration(sync.generation),
+      points: Number(results[1].results[0]?.points) || 0,
       progress: progressFromRows(results[3].results),
       statsRow: results[4].results[0] || null,
       masteryRows: results[5].results || [],
       placementRow: results[6].results[0] || null,
+      results,
     };
   };
-
-  let snapshot = await read();
+  let snapshot = parse(await batch(env, user.id, build));
   let storedLast = normalizeActivityDay(snapshot.statsRow && snapshot.statsRow.last);
   if (snapshot.statsRow && snapshot.statsRow.last != null && !storedLast) {
-    const poisonedLast = String(snapshot.statsRow.last);
     await env.DB.prepare(
       "UPDATE stats SET streak=0, last=NULL, updated_at=MAX(COALESCE(updated_at, 0), ?) " +
       "WHERE user_id=? AND last=?"
-    ).bind(Date.now(), user.id, poisonedLast).run();
-    snapshot = await read();
+    ).bind(Date.now(), user.id, String(snapshot.statsRow.last)).run();
+    snapshot = parse(await batch(env, user.id, build));
     storedLast = normalizeActivityDay(snapshot.statsRow && snapshot.statsRow.last);
   }
+  snapshot.storedLast = storedLast;
+  return snapshot;
+}
 
+function assembleLegacySnapshot(user, snapshot) {
   const storedStreak = Number(snapshot.statsRow && snapshot.statsRow.streak);
   const mastery = Object.create(null);
   for (const row of snapshot.masteryRows) {
     const record = masteryRecord(row);
     if (record) mastery[row.item_id] = record;
   }
-
   return {
     user,
     progress: snapshot.progress,
     stats: {
-      points: Number(snapshot.statsRow && snapshot.statsRow.points) || 0,
+      points: snapshot.points,
       streak: Number.isSafeInteger(storedStreak) && storedStreak >= 0 ? Math.min(100000, storedStreak) : 0,
-      last: storedLast || null,
+      last: snapshot.storedLast || null,
     },
     mastery,
     placement: placementRecord(snapshot.placementRow),
@@ -703,28 +715,25 @@ async function loadBootstrapSnapshot(env, user) {
   };
 }
 
+async function loadBootstrapSnapshot(env, user) {
+  return assembleLegacySnapshot(user, await runBootstrapBatch(env, user, false));
+}
+
 async function loadAcademyBootstrapSnapshot(env, user) {
-  const legacy = await loadBootstrapSnapshot(env, user);
-  const results = await academyBatch(env, user.id, () => [
-    env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
-    env.DB.prepare("SELECT course_id, stage_id FROM progress_v3 WHERE user_id=? ORDER BY course_id, completed_at, stage_id").bind(user.id),
-    env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? ORDER BY skill_id").bind(user.id),
-    env.DB.prepare("SELECT active_path_id, session_minutes, weekly_goal_minutes FROM learning_preferences WHERE user_id=?").bind(user.id),
-    env.DB.prepare("SELECT project_id, mode, done_json FROM project_progress WHERE user_id=? ORDER BY project_id").bind(user.id),
-  ]);
-  const generation = normalizeGeneration(results[1].results[0]?.generation);
-  if (generation !== legacy.generation) throwResetRequired(generation);
+  const snapshot = await runBootstrapBatch(env, user, true);
+  const legacy = assembleLegacySnapshot(user, snapshot);
+  const results = snapshot.results; // academy slice: results[7..10]
   const storedSkills = Object.create(null);
-  for (const row of results[3].results || []) {
+  for (const row of results[8].results || []) {
     const record = skillMasteryRecord(row);
     if (record) storedSkills[row.skill_id] = record;
   }
   return {
     ...legacy,
-    stableProgress: unionStableProgress(stableProgressFromRows(results[2].results), projectLegacyProgress(legacy.progress)),
+    stableProgress: unionStableProgress(stableProgressFromRows(results[7].results), projectLegacyProgress(legacy.progress)),
     skillMastery: mergeProjectedSkillMastery(storedSkills, legacy.mastery),
-    preferences: preferencesRecord(results[4].results[0]),
-    projects: projectsFromRows(results[5].results),
+    preferences: preferencesRecord(results[9].results[0]),
+    projects: projectsFromRows(results[10].results),
   };
 }
 
@@ -965,13 +974,14 @@ async function route(request, env) {
           ") WHERE type='integer' AND value>=0 AND value<? ORDER BY value" +
         ")), updated_at=MAX(COALESCE(progress.updated_at,0), excluded.updated_at) RETURNING done_json"
       ).bind(user.id, body.courseId, JSON.stringify([stage.index]), now, user.id, generation, COURSE_STAGE_POINTS[body.courseId].length),
-      syncDerivedPointsStatement(env, user.id, now),
       env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
       env.DB.prepare("SELECT course_id, stage_id FROM progress_v3 WHERE user_id=? AND course_id=? ORDER BY completed_at, stage_id").bind(user.id, body.courseId),
     ]);
-    const currentGeneration = normalizeGeneration(results[4].results[0]?.generation);
+    // Points are derived read-only on every read path, so no points row is
+    // written here — the stats.points column is no longer read anywhere.
+    const currentGeneration = normalizeGeneration(results[3].results[0]?.generation);
     if (currentGeneration !== generation || !results[1].results[0] || !results[2].results[0]) throwResetRequired(currentGeneration);
-    return json({ ok: true, courseId: body.courseId, done: stableProgressFromRows(results[5].results)[body.courseId]?.done || [], generation }, 200, generationHeaders(generation));
+    return json({ ok: true, courseId: body.courseId, done: stableProgressFromRows(results[4].results)[body.courseId]?.done || [], generation }, 200, generationHeaders(generation));
   }
 
   if (path === "/api/v2/attempt") {
@@ -1163,13 +1173,13 @@ async function route(request, env) {
         user.id, body.model, JSON.stringify(done), now,
         user.id, generation, COURSE_STAGE_POINTS[body.model].length,
       ),
+      env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
     ]);
+    // One round-trip: guarded upsert + generation read in the same batch. Points
+    // derive read-only on reads, so there is no points write here.
     const written = results[1].results[0];
-    if (!written) throwResetRequired(await loadGeneration(env, user.id));
-
-    await syncDerivedPoints(env, user.id);
-    const currentGeneration = await loadGeneration(env, user.id);
-    if (currentGeneration !== generation) throwResetRequired(currentGeneration);
+    const currentGeneration = normalizeGeneration(results[2].results[0]?.generation);
+    if (!written || currentGeneration !== generation) throwResetRequired(currentGeneration);
     const mergedDone = normalizeDone(body.model, JSON.parse(written.done_json || "[]"));
     if (!mergedDone) throw new Error("Stored progress is invalid");
     return json({ ok: true, done: mergedDone, generation }, 200, generationHeaders(generation));
@@ -1222,7 +1232,8 @@ async function route(request, env) {
       ]);
       if (!results[1].results[0]) throwResetRequired(await loadGeneration(env, user.id));
 
-      await syncDerivedPoints(env, user.id);
+      // A stats PUT changes streak/last only; points derive from progress and
+      // are computed read-only inside loadStatsSnapshot — no recompute-write here.
       const snapshot = await loadStatsSnapshot(env, user.id);
       if (snapshot.generation !== generation) throwResetRequired(snapshot.generation);
       return json(
@@ -1234,7 +1245,7 @@ async function route(request, env) {
       requireReadOwnerIfPresent(request, user.id);
     }
 
-    await syncDerivedPoints(env, user.id);
+    // GET derives points read-only in the snapshot batch — no write on a read.
     const snapshot = await loadStatsSnapshot(env, user.id);
     return json(snapshot, 200, generationHeaders(snapshot.generation));
   }
