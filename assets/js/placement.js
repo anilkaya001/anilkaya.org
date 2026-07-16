@@ -671,7 +671,7 @@
     const list = document.createElement("ul");
     TOPIC_ORDER.forEach((topic) => {
       const stats = outcome.topicStats[topic];
-      const percent = Math.round((stats.correct / stats.total) * 100);
+      const percent = stats.total ? Math.round((stats.correct / stats.total) * 100) : 0;
       const item = document.createElement("li");
       const label = el("div", "");
       label.append(el("span", "", COURSES[topic].short), el("strong", "", `${stats.correct}/${stats.total}`));

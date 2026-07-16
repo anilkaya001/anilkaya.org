@@ -169,13 +169,15 @@
       if (review.eligible === 0) {
         reviewCount.textContent = "Start your mastery map";
         reviewSummary.textContent = "Complete a checkpoint, case, match, or code challenge to introduce a skill.";
-        reviewCta.setAttribute("aria-label", "Build your daily mastery review queue");
+        // Accessible name must contain the visible "Mastery challenge" label
+        // and match the real /lab/challenge/ destination (WCAG 2.5.3).
+        reviewCta.setAttribute("aria-label", "Mastery challenge: start your mastery map");
       } else {
         reviewCount.textContent = `${review.due} ${review.due === 1 ? "skill" : "skills"} due now`;
         reviewSummary.textContent = review.due
           ? `A six-question challenge will target the three weakest eligible skills.`
           : `All ${review.eligible} introduced ${review.eligible === 1 ? "skill is" : "skills are"} on schedule.`;
-        reviewCta.setAttribute("aria-label", `Open daily mastery review: ${review.due} due now`);
+        reviewCta.setAttribute("aria-label", `Mastery challenge: ${review.due} ${review.due === 1 ? "skill" : "skills"} due now`);
       }
     }
 

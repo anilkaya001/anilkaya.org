@@ -513,7 +513,10 @@
 
   function finishSession() {
     if (!state || state.solved !== state.items.length) return;
-    if (state.items.length === 5 && window.Gamify && typeof window.Gamify.touch === "function") {
+    // Credit the streak for any fully-solved session, not only a full five —
+    // selectSession() returns up to five, so a diligent learner with a small
+    // due queue was previously denied credit for clearing it.
+    if (state.items.length >= 1 && window.Gamify && typeof window.Gamify.touch === "function") {
       try { void window.Gamify.touch(); }
       catch { /* Mastery is already saved; streak activity is non-critical. */ }
     }

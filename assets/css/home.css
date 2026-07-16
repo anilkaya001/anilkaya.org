@@ -160,7 +160,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero__eyebrow, .hero__title, .hero__lede, .hero__hint { animation: none; }
+  .hero__eyebrow, .hero__title, .hero__lede, .hero__cta, .hero__hint { animation: none; }
 }
 
 /* ---- Byline footer: quiet attribution + section links at the bottom ---- */
