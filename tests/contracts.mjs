@@ -795,7 +795,10 @@ if (diffBase) {
   const tracked = execFileSync("git", ["diff", "--name-only", diffBase, "--"], { cwd: ROOT, encoding: "utf8" });
   const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" });
   const changed = [...new Set((tracked + untracked).trim().split("\n").filter(Boolean))];
-  const browserAssetChanged = changed.some((file) => /^assets\/(?:css|js|fonts)\//.test(file));
+  // Course payloads and the review/placement/challenge banks under assets/data/
+  // are fetched with ?v=<version> and cached immutably for a year, so a content
+  // fix there is only picked up by returning learners after a version bump.
+  const browserAssetChanged = changed.some((file) => /^assets\/(?:css|js|fonts|data)\//.test(file));
   if (browserAssetChanged) {
     const previous = assetVersionAt(diffBase);
     assert(Number.isInteger(previous), `could not verify asset version at ${diffBase}`);

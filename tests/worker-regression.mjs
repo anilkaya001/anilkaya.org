@@ -100,6 +100,9 @@ try {
   const sitemapResponse = await fetch(base + "/sitemap.xml");
   assert.equal(sitemapResponse.status, 200);
   assert.match(sitemapResponse.headers.get("content-type") || "", /xml/i);
+  // A ?v on a non-/assets/ path must NOT pin an immutable year-long copy.
+  const sitemapVersioned = await fetch(base + "/sitemap.xml?v=9");
+  assert.notEqual(sitemapVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable", "only /assets/ paths may be cached immutably");
   const sitemap = await sitemapResponse.text();
   const sitemapURLs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
   assert.deepEqual(sitemapURLs, [

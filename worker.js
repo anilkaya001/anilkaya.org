@@ -1421,7 +1421,10 @@ function finalize(response, request) {
       out.headers.set("Clear-Site-Data", '"cache"');
       out.headers.append("Set-Cookie", cookie("cachefix", "1", { maxAge: 60 * 60 * 24 * 365 }));
     }
-  } else if (cacheableStatus && cacheableMethod && url.searchParams.has("v")) {
+  } else if (cacheableStatus && cacheableMethod && url.searchParams.has("v") && url.pathname.startsWith("/assets/")) {
+    // Only versioned assets are content-addressed by ?v and safe to pin for a
+    // year. Scoping to /assets/ stops a crafted ?v on a mutable path (e.g.
+    // /sitemap.xml?v=9) from caching a stale copy immutably.
     out.headers.set("Cache-Control", "public, max-age=31536000, immutable");
   } else if (cacheableStatus && cacheableMethod && contentType && !contentType.includes("application/json")) {
     out.headers.set("Cache-Control", "public, max-age=3600");
