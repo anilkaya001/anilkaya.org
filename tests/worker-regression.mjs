@@ -180,6 +180,9 @@ try {
     assert.equal(attr(html, 'property="og:image"'), SITE_ORIGIN + topic.image, `${topic.id}: image`);
     assert.equal(attr(html, 'name="twitter:image"'), SITE_ORIGIN + topic.image, `${topic.id}: Twitter image`);
     assert.match(html, new RegExp(`<h1>${topic.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&/g, "&amp;")}</h1>`), `${topic.id}: raw HTML H1`);
+    // The manifest preload must carry the exact fetch URL (matching ?v) and CORS
+    // mode, or the browser double-fetches instead of reusing it.
+    assert.match(html, new RegExp(`<link[^>]+rel="preload"[^>]+crossorigin="anonymous"[^>]+href="/assets/data/courses/${topic.id}/manifest\\.json\\?v=${assetVersion}"`), `${topic.id}: manifest preload missing, mis-versioned, or not CORS-matched`);
     for (const module of topic.modules) assert(pageText.includes(module.title), `${topic.id}: missing crawlable module ${module.title}`);
     for (const related of COURSE_TOPICS.filter((item) => item.id !== topic.id)) {
       assert(html.includes(`href="${related.path}"`), `${topic.id}: missing related link to ${related.id}`);

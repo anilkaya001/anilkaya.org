@@ -841,7 +841,20 @@ async function renderCourse(request, env, url, meta) {
   const imageUrl = SITE_ORIGIN + meta.image;
   const structured = courseStructuredData(pageUrl, meta);
 
+  // The player's first fetch is the per-course manifest, but its URL is built in
+  // JS behind twelve deferred scripts, so the preload scanner never sees it.
+  // Preload it here to overlap the ~8KB manifest with the JS download. The <html>
+  // start tag streams before <head>, so capture the asset version from it and
+  // reuse it verbatim: the preload URL (including ?v) must byte-match the fetch in
+  // lab-course.js, and crossorigin must match fetch()'s CORS mode, or the browser
+  // double-fetches instead of reusing the preload.
+  let assetVersion = "";
   const transformed = new HTMLRewriter()
+    .on("html", { element: (el) => { assetVersion = el.getAttribute("data-asset-version") || ""; } })
+    .on("head", { element: (el) => {
+      const query = assetVersion ? "?v=" + encodeURIComponent(assetVersion) : "";
+      el.prepend('<link rel="preload" as="fetch" crossorigin="anonymous" href="/assets/data/courses/' + meta.id + "/manifest.json" + query + '">', { html: true });
+    } })
     .on("title", { element: (el) => el.setInnerContent(meta.pageTitle) })
     .on('meta[name="description"]', setAttr("content", meta.description))
     .on('link[rel="canonical"]', setAttr("href", pageUrl))
