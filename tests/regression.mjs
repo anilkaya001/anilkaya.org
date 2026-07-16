@@ -233,14 +233,17 @@ try {
     const clean = watch(page);
     await page.goto(BASE + stageRoute("foundations", 1, "native-formats"), { waitUntil: "load" });
     await waitForCourse(page, "2 / 32");
-    assert.equal(await page.locator(".concept-lab__plot title").count(), 1, "concept SVG has no accessible title");
-    assert.equal(await page.locator(".concept-lab__plot desc").count(), 1, "concept SVG has no accessible description");
-    const beforeCurve = await page.locator(".concept-lab__curve").getAttribute("d");
-    await page.locator(".concept-lab input[type=range]").fill("200");
-    assert.notEqual(await page.locator(".concept-lab__curve").getAttribute("d"), beforeCurve, "concept experiment did not react instantly");
-    assert.equal(await page.evaluate(() => window.__pythonLoads), 0, "concept lab eagerly loaded Python");
-    await page.getByRole("button", { name: "Record insight" }).click();
-    assert((await page.evaluate(() => window.IEWTStorage.stableProgress().foundations.done)).includes("foundations-probability-lab"));
+    // The concept lab is now a runnable interactive Python stage (sliders + a
+    // lazy "Launch" that boots Python only on click), not the old static SVG.
+    // Verify it renders with accessible sliders and does not eagerly load
+    // Python. It is intentionally NOT launched here: the interactive/makeCell
+    // run-then-load path is asserted on the code challenge below, and leaving
+    // Python unloaded keeps that stage's one-lazy-runtime accounting exact.
+    assert(await page.locator(".cell--interactive .control__range").count() >= 1, "interactive lab has no sliders");
+    const labSlider = page.locator(".cell--interactive .control__range").first();
+    assert(await labSlider.evaluate((el) => !!(el.closest("label") && el.closest("label").textContent.trim())), "interactive lab slider has no accessible label");
+    assert.equal(await page.locator(".cell--interactive .cell__run").count(), 1, "interactive lab has no run button");
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 0, "interactive lab eagerly loaded Python");
 
     await page.goto(BASE + stageRoute("foundations", 3, "native-code"));
     await waitForCourse(page, "4 / 32");
