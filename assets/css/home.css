@@ -356,6 +356,7 @@
 .tk__chg { font-weight: 700; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 .tk[data-dir="up"] .tk__chg { color: var(--up); }
 .tk[data-dir="down"] .tk__chg { color: var(--down); }
+.tk[data-dir="flat"] .tk__chg { color: var(--ink-faint); }
 
 @media (max-height: 480px) { .market-ticker { display: none; } }
 @media (prefers-reduced-motion: reduce) {

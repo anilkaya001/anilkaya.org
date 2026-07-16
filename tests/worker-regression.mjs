@@ -63,12 +63,12 @@ try {
   assert.match(rootHtml, /id="marketTicker"/, "landing page must carry the price-ticker mount point");
   assert.match(rootHtml, new RegExp(`market-ticker\\.js\\?v=${assetVersion}`), "market-ticker script must be versioned to the asset version");
 
-  // Public market data: valid JSON shape, edge-cacheable, no upstream dependency
-  // in the sandbox (quotes may be empty — the client degrades gracefully).
+  // Public market data: valid JSON shape, browser-cacheable (not no-store), no
+  // upstream dependency in the sandbox (quotes may be empty — client degrades).
   const markets = await fetch(base + "/api/markets");
   assert.equal(markets.status, 200, "/api/markets must be reachable");
   assert.match(markets.headers.get("content-type") || "", /^application\/json\b/, "/api/markets must be JSON");
-  assert.equal(markets.headers.get("cache-control"), "public, max-age=300", "/api/markets must be edge-cacheable, not no-store");
+  assert.equal(markets.headers.get("cache-control"), "public, max-age=300", "/api/markets must be browser-cacheable, not no-store");
   assertSecurity(markets, false);
   const marketBody = await markets.json();
   assert(Array.isArray(marketBody.quotes), "/api/markets must return a quotes array");

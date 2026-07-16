@@ -115,8 +115,11 @@ const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
 // row, so the ticker degrades to stale-but-labelled data rather than blank.
 const MARKET_SNAPSHOT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
-const MARKET_FRESH_MS = 15 * 60 * 1000;   // cron cadence; newer than this is served straight from D1
-const MARKET_STALE_MS = 45 * 60 * 1000;   // older than this, a read repairs the snapshot inline
+// The cron (every 15 min) is the primary refresher; a read only repairs the
+// snapshot inline once it is older than this, and on a failed repair it touches
+// the row so the next inline attempt is a full window away (no per-request storm
+// during a sustained upstream outage).
+const MARKET_STALE_MS = 45 * 60 * 1000;
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
@@ -480,20 +483,20 @@ async function loadMarketSnapshot(env) {
     row = await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
   } catch { row = null; }
   const age = row ? Date.now() - Number(row.updated_at) : Infinity;
-  if (!row || age > MARKET_STALE_MS) {
+  if (age > MARKET_STALE_MS) {
     const refreshed = await refreshMarketSnapshot(env).catch(() => null);
     if (refreshed) return refreshed;
-    if (!row) {
-      // Bootstrap fetch failed (or upstream is down): park an empty, timestamped
-      // row so subsequent reads don't each pay the fetch timeout. DO NOTHING
-      // guards against clobbering a snapshot a concurrent refresh just wrote; the
-      // cron keeps retrying and fills it with real data once upstream recovers.
-      const empty = JSON.stringify({ quotes: [], updatedAt: Date.now() });
-      await marketOp(env, () => env.DB.prepare(
-        "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING",
-      ).bind(empty, Date.now()).run()).catch(() => {});
-      return empty;
-    }
+    // Repair failed. Touch the row's updated_at (keeping the last-known-good
+    // payload, or an empty one on cold start) so reads back off for a full
+    // window instead of re-firing the upstream fetch on every request; the cron
+    // keeps retrying in the background and fills real data once upstream recovers.
+    const now = Date.now();
+    const payload = row ? row.payload : JSON.stringify({ quotes: [], updatedAt: now });
+    await marketOp(env, () => env.DB.prepare(
+      "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
+    ).bind(payload, now).run()).catch(() => {});
+    return payload;
   }
   return row.payload;
 }
@@ -935,7 +938,7 @@ async function renderCourse(request, env, url, meta, ctx) {
   // canonical path (collapsing ?utm_source= &c) with a short TTL; the browser
   // still gets no-cache from finalize(), so this only shortens the edge's own
   // revalidation. A deploy is reflected within COURSE_EDGE_TTL_S.
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const cache = request.method === "GET" && typeof caches !== "undefined" && caches.default ? caches.default : null;
   const cacheKey = cache ? new Request(url.origin + meta.path) : null;
   if (cacheKey) {
     const hit = await cache.match(cacheKey).catch(() => null);
@@ -1102,9 +1105,10 @@ async function route(request, env, url, ctx) {
 
   if (path === "/api/markets") {
     requireMethod(request, ["GET", "HEAD"]);
-    // Public, non-personal data: cache briefly at the edge and in the browser so
-    // bursts of visitors don't each hit D1 (finalize preserves this Cache-Control
-    // for this one /api path).
+    // Public, non-personal data: mark it browser-cacheable for 5 min so a repeat
+    // visitor's browser doesn't refetch (finalize preserves this Cache-Control on
+    // the success path only). Distinct visitors still reach the worker, but only
+    // read one D1 row; the cron keeps that row warm.
     return new Response(await loadMarketSnapshot(env), {
       status: 200,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=300" },
@@ -1613,12 +1617,11 @@ async function route(request, env, url, ctx) {
     if (path !== meta.path) {
       return redirect(new URL(meta.path, url).toString(), 308);
     }
-    // A HEAD needs only the headers a GET would send. Course pages are always a
-    // 200 text/html document, so synthesize that directly instead of fetching
-    // and rewriting the asset just to discard the body.
-    if (request.method === "HEAD") {
-      return new Response(null, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
-    }
+    // GET and HEAD share renderCourse so a HEAD reports the same status a GET
+    // would (renderCourse passes a missing/misdeployed template through as its
+    // real error status — synthesizing a blind 200 would lie to uptime monitors).
+    // The HTMLRewriter is lazy, so a HEAD never pays the rewrite, and the edge
+    // memo is GET-only.
     return renderCourse(request, env, url, meta, ctx);
   }
 

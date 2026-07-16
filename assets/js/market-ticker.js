@@ -21,13 +21,18 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   function itemHTML(q) {
-    const up = Number(q.changePct) >= 0;
+    const pct = Number(q.changePct);
+    // Anything that rounds to 0.00% is shown neutral, so the arrow/colour never
+    // disagrees with the printed figure at the flat boundary.
+    const flat = Math.abs(pct) < 0.005;
+    const dir = flat ? "flat" : pct > 0 ? "up" : "down";
+    const arrow = flat ? "•" : pct > 0 ? "▲" : "▼";
     return (
-      '<span class="tk" data-dir="' + (up ? "up" : "down") + '">' +
+      '<span class="tk" data-dir="' + dir + '">' +
         '<span class="tk__name">' + esc(q.label) + "</span>" +
         '<span class="tk__price">' + priceFmt.format(Number(q.price)) + "</span>" +
         '<span class="tk__cur">' + esc(q.currency) + "</span>" +
-        '<span class="tk__chg">' + (up ? "▲" : "▼") + " " + pctFmt.format(Number(q.changePct)) + "%</span>" +
+        '<span class="tk__chg">' + arrow + " " + pctFmt.format(pct) + "%</span>" +
       "</span>"
     );
   }
@@ -52,9 +57,13 @@
     });
   }
 
+  // The tape is display:none under this height media query; don't poll for a
+  // widget the layout has removed (kept in sync with home.css).
+  const hiddenByViewport = () => typeof matchMedia === "function" && matchMedia("(max-height: 480px)").matches;
+
   let inFlight = false;
   async function load() {
-    if (inFlight) return;
+    if (inFlight || hiddenByViewport()) return;
     inFlight = true;
     try {
       const resp = await fetch("/api/markets", { headers: { Accept: "application/json" } });
