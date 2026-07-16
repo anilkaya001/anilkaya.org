@@ -93,28 +93,13 @@
     },
   ].map((topic) => Object.freeze({ ...topic, tags: Object.freeze(topic.tags), prerequisites: Object.freeze(topic.prerequisites), outcomes: Object.freeze(topic.outcomes) }));
 
-  const academyPoints = () => Object.freeze(Array.from({ length: 32 }, (_, index) => {
-    const stage = index % 6;
-    return stage === 0 ? 5 : stage === 1 || stage === 2 ? 10 : stage === 3 ? 20 : stage === 4 || stage === 5 ? 15 : 10;
-  }));
-  const points = {
-    ols: [5, 10, 10, 15, 10, 5, 10, 15, 15, 5, 10, 10, 15, 20, 20, 5, 10, 15, 10, 20],
-    iv2sls: [5, 5, 10, 10, 15, 15, 5, 5, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 10, 5, 5, 10, 10, 10, 15, 15, 20, 15],
-    did: [5, 5, 10, 10, 15, 15, 5, 5, 10, 10, 15, 15, 10, 5, 5, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 20],
-    var: [5, 5, 10, 10, 15, 15, 20, 5, 10, 10, 10, 15, 15, 15, 5, 10, 10, 10, 15, 15, 15, 10, 5, 10, 10, 10, 15, 15, 10, 20],
-    panel: [5, 5, 10, 15, 15, 15, 5, 10, 5, 10, 15, 15, 5, 10, 10, 10, 15, 15, 15, 10, 10, 5, 10, 10, 5, 10, 15, 15, 15, 10],
-    logit: [5, 5, 10, 10, 15, 15, 10, 5, 5, 10, 10, 15, 15, 10, 15, 5, 5, 10, 10, 15, 15, 20, 20, 20, 5, 5, 10, 10, 15, 15, 15, 10],
-    gmm: [5, 5, 10, 10, 15, 15, 15, 20, 5, 5, 10, 10, 10, 15, 15, 15, 5, 5, 10, 10, 10, 15, 15, 10, 20, 5, 5, 10, 10, 15, 15, 15, 10],
-    foundations: academyPoints(),
-    mle: academyPoints(),
-    forecast: academyPoints(),
-    coint: academyPoints(),
-    financial: academyPoints(),
-  };
-
+  // Per-stage point weights are authored in the curriculum and emitted to
+  // window.COURSE_STAGE_POINTS by the generated stage-catalog.js (the same
+  // source shared/course-points.js scores against server-side). This file used
+  // to carry a hand-maintained copy that silently disagreed with the authored
+  // weights for the five academy courses; it now defers to the single source.
   window.TOPIC_META = Object.freeze(topics);
   window.TOPIC_BY_ID = Object.freeze(Object.fromEntries(topics.map((topic) => [topic.id, topic])));
-  window.COURSE_STAGE_POINTS = Object.freeze(Object.fromEntries(Object.entries(points).map(([id, values]) => [id, Object.freeze(values)])));
   window.LEARNING_PATHS = Object.freeze([
     Object.freeze({ id: "complete-core", title: "Quant economist", eyebrow: "Complete academy", blurb: "Build statistical foundations, causal reasoning, forecasting, structural dynamics, risk, and modern estimation in one coherent sequence.", courses: Object.freeze(["foundations", "ols", "mle", "logit", "did", "iv2sls", "panel", "forecast", "var", "coint", "gmm", "financial"]) }),
     Object.freeze({ id: "causal", title: "Causal inference", eyebrow: "Policy & research", blurb: "Learn counterfactual reasoning, endogeneity, instruments, panel variation, and moment conditions.", courses: Object.freeze(["foundations", "ols", "did", "iv2sls", "panel", "gmm"]) }),
