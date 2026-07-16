@@ -34,10 +34,12 @@ function watch(page, ignored = () => false) {
   });
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText || "unknown";
-    const navigationAbortedAuthProbe = reason === "net::ERR_ABORTED" &&
-      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me"].includes(new URL(request.url()).pathname);
+    // Page-initiated fetches (auth probes, the market ticker) can still be in
+    // flight when the suite navigates to the next page; that abort is expected.
+    const navigationAborted = reason === "net::ERR_ABORTED" &&
+      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me", "/api/markets"].includes(new URL(request.url()).pathname);
     const detail = `request failed: ${request.url()} (${reason})`;
-    if (!navigationAbortedAuthProbe && !ignored(detail)) errors.push(detail);
+    if (!navigationAborted && !ignored(detail)) errors.push(detail);
   });
   return () => assert.deepEqual([...new Set(errors)], [], "unexpected browser errors");
 }
