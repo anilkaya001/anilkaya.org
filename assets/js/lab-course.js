@@ -328,13 +328,14 @@
     let launched = false, running = false, pending = false;
     const render = () => st.template.replace(/\{\{(\w+)\}\}/g, (_, k) => params[k]);
     async function exec() {
+      clearTimeout(schedule._t);   // cancel any pending scheduled run so it can't double-fire
       running = true;
       const ok = await window.Lab.run(render(), { out, figs });
       running = false;
       if (ok && !launched) { launched = true; runBtn.textContent = "↻ Re-run"; mark(i, runBtn); }
       if (pending) { pending = false; exec(); }
     }
-    function schedule() { if (!launched) return; if (running) { pending = true; return; } clearTimeout(schedule._t); schedule._t = setTimeout(exec, 180); }
+    function schedule() { if (!launched) return; if (running) { pending = true; return; } clearTimeout(schedule._t); schedule._t = setTimeout(() => { if (!running) exec(); }, 180); }
     runBtn.addEventListener("click", () => { if (!running) exec(); });
     return cell;
   }
@@ -365,7 +366,9 @@
       if (value == null) return { invalid: true };
       const absolute = Number.isFinite(st.tol) && st.tol >= 0 ? st.tol : 0;
       const relative = Number.isFinite(st.rtol) && st.rtol >= 0 ? st.rtol : 0;
-      const tolerance = Math.max(absolute, relative * Math.abs(st.answer));
+      // Match the daily-review grader: always allow a few float-epsilons so an
+      // exact-but-for-binary-rounding answer isn't marked wrong when tol/rtol=0.
+      const tolerance = Math.max(absolute, relative * Math.abs(st.answer), Number.EPSILON * Math.max(1, Math.abs(st.answer)) * 8);
       return { ok: Number.isFinite(st.answer) && Math.abs(value - st.answer) <= tolerance };
     }
     if (st.type === "fillblank") {
@@ -481,11 +484,15 @@
     const move = (e) => { if (!dragging) return; lastX = e.clientX; if (!raf) raf = requestAnimationFrame(apply); };
     handle.addEventListener("pointerdown", (e) => { dragging = true; handle.classList.add("drag"); handle.setPointerCapture(e.pointerId); e.preventDefault(); });
     handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", (e) => {
+    const endDrag = (e) => {
       dragging = false; handle.classList.remove("drag");
       persist();   // persist once, not per move
       try { handle.releasePointerCapture(e.pointerId); } catch {}
-    });
+    };
+    handle.addEventListener("pointerup", endDrag);
+    // pointercancel (scroll/gesture takeover) would otherwise leave dragging=true,
+    // so the panel keeps resizing on later moves with no button held.
+    handle.addEventListener("pointercancel", endDrag);
   }
 
   // ---- Render one stage ---------------------------------------

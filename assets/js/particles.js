@@ -99,6 +99,8 @@
         pEntangled[i] = i + 1; pEntangled[i + 1] = i; pSpin[i + 1] = -pSpin[i];
       } else if (i % 2 !== 0) {
         pEntangled[i] = i - 1;
+      } else {
+        pEntangled[i] = i;   // odd COUNT: the last particle self-pairs instead of latching onto particle 0
       }
       pColor[i] = Math.random() * PALETTE.length | 0;
       const orbitSpeed = 6.0 / pEnergyLevel[i];
@@ -130,6 +132,7 @@
     const cosX = Math.cos(state.pitch), sinX = Math.sin(state.pitch);
 
     ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;   // a particle's depthAlpha leaks in from the prior frame and would dilute the trail clear
     ctx.fillStyle = state.isObserved ? "rgba(8, 7, 4, 0.60)" : TRAIL_BG;
     ctx.fillRect(0, 0, state.width, state.height);
     ctx.globalCompositeOperation = FORCE_SRC_OVER ? "source-over" : "screen";
