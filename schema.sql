@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS mastery (
   correct        INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000),
   last_result    INTEGER CHECK (last_result IN (0, 1)),
   last_attempt_id TEXT,
+  last_day       TEXT,
   updated_at     INTEGER NOT NULL,
   PRIMARY KEY (user_id, item_id)
 );
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS skill_mastery (
   correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000),
   last_result INTEGER CHECK (last_result IN (0, 1)),
   last_attempt_id TEXT,
+  last_day TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, skill_id)
 );

@@ -32,6 +32,7 @@ const MASTERY_SCHEMA_SQL =
     "due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), " +
     "correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), " +
     "last_result INTEGER CHECK (last_result IN (0, 1)), last_attempt_id TEXT, " +
+    "last_day TEXT, " +
     "updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, item_id)" +
   ")";
 const MASTERY_ATTEMPTS_SCHEMA_SQL =
@@ -60,7 +61,7 @@ const PLACEMENT_SCHEMA_SQL =
 const ACADEMY_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS progress_v3 (user_id TEXT NOT NULL, course_id TEXT NOT NULL, stage_id TEXT NOT NULL, completed_at INTEGER NOT NULL, source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web','migration')), PRIMARY KEY (user_id, course_id, stage_id))",
   "CREATE INDEX IF NOT EXISTS progress_v3_by_user ON progress_v3 (user_id, course_id, completed_at)",
-  "CREATE TABLE IF NOT EXISTS skill_mastery (user_id TEXT NOT NULL, skill_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5), due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), last_result INTEGER CHECK (last_result IN (0,1)), last_attempt_id TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, skill_id))",
+  "CREATE TABLE IF NOT EXISTS skill_mastery (user_id TEXT NOT NULL, skill_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5), due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), last_result INTEGER CHECK (last_result IN (0,1)), last_attempt_id TEXT, last_day TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, skill_id))",
   "CREATE INDEX IF NOT EXISTS skill_mastery_due_by_user ON skill_mastery (user_id, due_day, skill_id)",
   "CREATE TABLE IF NOT EXISTS skill_attempts (user_id TEXT NOT NULL, attempt_id TEXT NOT NULL, skill_id TEXT NOT NULL, item_id TEXT NOT NULL, correct INTEGER NOT NULL CHECK (correct IN (0,1)), hinted INTEGER NOT NULL CHECK (hinted IN (0,1)), attempt_day TEXT NOT NULL, applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0,1)), received_at INTEGER NOT NULL, PRIMARY KEY (user_id, attempt_id))",
   "CREATE TABLE IF NOT EXISTS learning_preferences (user_id TEXT PRIMARY KEY, active_path_id TEXT NOT NULL DEFAULT 'complete-core', session_minutes INTEGER NOT NULL DEFAULT 20 CHECK (session_minutes IN (10,20,45)), weekly_goal_minutes INTEGER NOT NULL DEFAULT 120 CHECK (weekly_goal_minutes BETWEEN 30 AND 1200), updated_at INTEGER NOT NULL)",
@@ -331,11 +332,39 @@ async function ensureMasterySchema(env) {
   ]);
 }
 
+// The scheduling tables gained a `last_day` column (attempt-ordering guard) after
+// they first shipped. Workers Builds does not apply migrations to an existing D1,
+// so — like the missing-table heals — add the column on the specific "no such
+// column" failure and retry once. ALTER ADD COLUMN is O(1) metadata-only and
+// leaves existing rows NULL (treated as the oldest day). Idempotent: a duplicate
+// column or an absent table (created later with the column) is benign. The error
+// message does not name the table, and skill attempts also flow through
+// masteryBatch, so heal both scheduling tables.
+async function addDayColumn(env, table) {
+  try {
+    await env.DB.prepare("ALTER TABLE " + table + " ADD COLUMN last_day TEXT").run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column name|no such table/i.test(message)) throw error;
+  }
+}
+async function ensureDayColumns(env) {
+  await addDayColumn(env, "mastery");
+  await addDayColumn(env, "skill_mastery");
+}
+
 async function masteryBatch(env, userId, buildStatements) {
   try {
     return await learningBatch(env, userId, buildStatements);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // D1 reports the missing column two ways: "no such column: last_day" from an
+    // expression, and "table <t> has no column named last_day" from an INSERT
+    // column list (which the UPSERT hits first). Match either.
+    if (/(?:no such column|has no column named)[^\n]*\blast_day\b/i.test(message)) {
+      await ensureDayColumns(env);
+      return learningBatch(env, userId, buildStatements);
+    }
     if (!/no such table:\s*(?:main\.)?mastery(?:_attempts)?\b/i.test(message)) throw error;
     await ensureMasterySchema(env);
     return learningBatch(env, userId, buildStatements);
@@ -1004,16 +1033,24 @@ async function route(request, env, url) {
         "ON CONFLICT(user_id, attempt_id) DO NOTHING RETURNING attempt_id"
       ).bind(user.id, body.attemptId, body.skillId, body.itemId, correct, hinted, day, now, user.id, generation),
       env.DB.prepare(
-        "INSERT INTO skill_mastery (user_id, skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
-        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), 1, ?, ?, ?, ? " +
+        "INSERT INTO skill_mastery (user_id, skill_id, level, due_day, last_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
+        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), ?, 1, ?, ?, ?, ? " +
         "WHERE EXISTS (SELECT 1 FROM skill_attempts WHERE user_id=? AND attempt_id=? AND skill_id=? AND applied=0) " +
         "ON CONFLICT(user_id, skill_id) DO UPDATE SET " +
-          "level=CASE WHEN ?=1 AND ?=0 THEN MIN(5,skill_mastery.level+1) WHEN ?=1 THEN skill_mastery.level ELSE MAX(0,skill_mastery.level-1) END, " +
-          "due_day=date(?, '+' || CASE WHEN ?=1 AND ?=0 THEN CASE WHEN skill_mastery.level<=0 THEN 1 WHEN skill_mastery.level=1 THEN 3 WHEN skill_mastery.level=2 THEN 7 WHEN skill_mastery.level=3 THEN 21 ELSE 60 END ELSE 1 END || ' days'), " +
+          // Scheduling advances only for an attempt at least as recent as the last
+          // applied; a stale late-flushed attempt records counters but cannot rewind
+          // the interval (see the mastery path for the full rationale).
+          "level=CASE WHEN excluded.last_day >= COALESCE(skill_mastery.last_day, '') THEN " +
+            "(CASE WHEN ?=1 AND ?=0 THEN MIN(5,skill_mastery.level+1) WHEN ?=1 THEN skill_mastery.level ELSE MAX(0,skill_mastery.level-1) END) " +
+            "ELSE skill_mastery.level END, " +
+          "due_day=CASE WHEN excluded.last_day >= COALESCE(skill_mastery.last_day, '') THEN " +
+            "date(?, '+' || CASE WHEN ?=1 AND ?=0 THEN CASE WHEN skill_mastery.level<=0 THEN 1 WHEN skill_mastery.level=1 THEN 3 WHEN skill_mastery.level=2 THEN 7 WHEN skill_mastery.level=3 THEN 21 ELSE 60 END ELSE 1 END || ' days') " +
+            "ELSE skill_mastery.due_day END, " +
+          "last_day=CASE WHEN excluded.last_day >= COALESCE(skill_mastery.last_day, '') THEN excluded.last_day ELSE skill_mastery.last_day END, " +
           "attempts=MIN(1000000,skill_mastery.attempts+1), correct=MIN(1000000,skill_mastery.correct+?), last_result=?, last_attempt_id=?, updated_at=MAX(skill_mastery.updated_at,excluded.updated_at) " +
         "RETURNING skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at"
       ).bind(
-        user.id, body.skillId, correct, hinted, day, correct, correct, body.attemptId, now,
+        user.id, body.skillId, correct, hinted, day, day, correct, correct, body.attemptId, now,
         user.id, body.attemptId, body.skillId,
         correct, hinted, correct, day, correct, hinted, correct, correct, body.attemptId,
       ),
@@ -1350,21 +1387,30 @@ async function route(request, env, url) {
       ).bind(user.id, attemptId, itemId, correct, hinted, day, now, user.id, generation),
       env.DB.prepare(
         "INSERT INTO mastery " +
-          "(user_id, item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
-        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), 1, ?, ?, ?, ? " +
+          "(user_id, item_id, level, due_day, last_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
+        "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), ?, 1, ?, ?, ?, ? " +
         "WHERE EXISTS (" +
           "SELECT 1 FROM mastery_attempts WHERE user_id=? AND attempt_id=? AND item_id=? AND applied=0" +
         ") ON CONFLICT(user_id, item_id) DO UPDATE SET " +
-          "level=CASE WHEN ?=0 THEN 0 WHEN ?=1 THEN MIN(mastery.level, 1) ELSE MIN(5, mastery.level+1) END, " +
-          "due_day=date(?, '+' || CASE " +
-            "WHEN ?=0 OR ?=1 THEN 1 WHEN mastery.level<=0 THEN 1 WHEN mastery.level=1 THEN 3 " +
-            "WHEN mastery.level=2 THEN 7 WHEN mastery.level=3 THEN 21 ELSE 60 END || ' days'), " +
+          // The scheduling columns (level, due_day) advance only for an attempt at
+          // least as recent as the last one applied; a late-flushed stale attempt
+          // still records its counters but must not rewind the review interval.
+          // COALESCE treats rows created before last_day existed as the oldest day.
+          "level=CASE WHEN excluded.last_day >= COALESCE(mastery.last_day, '') THEN " +
+            "(CASE WHEN ?=0 THEN 0 WHEN ?=1 THEN MIN(mastery.level, 1) ELSE MIN(5, mastery.level+1) END) " +
+            "ELSE mastery.level END, " +
+          "due_day=CASE WHEN excluded.last_day >= COALESCE(mastery.last_day, '') THEN " +
+            "date(?, '+' || CASE " +
+              "WHEN ?=0 OR ?=1 THEN 1 WHEN mastery.level<=0 THEN 1 WHEN mastery.level=1 THEN 3 " +
+              "WHEN mastery.level=2 THEN 7 WHEN mastery.level=3 THEN 21 ELSE 60 END || ' days') " +
+            "ELSE mastery.due_day END, " +
+          "last_day=CASE WHEN excluded.last_day >= COALESCE(mastery.last_day, '') THEN excluded.last_day ELSE mastery.last_day END, " +
           "attempts=MIN(1000000, mastery.attempts+1), " +
           "correct=MIN(1000000, mastery.correct+?), last_result=?, last_attempt_id=?, " +
           "updated_at=MAX(mastery.updated_at, excluded.updated_at) " +
         "RETURNING item_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at"
       ).bind(
-        user.id, itemId, correct, hinted, day, correct, correct, attemptId, now,
+        user.id, itemId, correct, hinted, day, day, correct, correct, attemptId, now,
         user.id, attemptId, itemId,
         correct, hinted, day, correct, hinted, correct, correct, attemptId,
       ),

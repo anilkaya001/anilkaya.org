@@ -577,6 +577,47 @@ try {
   const skillWrong = await learningJSON(await skillAttempt("skill-wrong", false, false, "2026-07-15"), 200, 0);
   assert.deepEqual({ level: skillWrong.record.level, dueDay: skillWrong.record.dueDay }, { level: 0, dueDay: "2026-07-16" });
 
+  // Attempt-ordering guard: a late-flushed stale attempt (offline cross-device
+  // flush) still records its counters but must not rewind the item's review
+  // level or due day. Build an in-order streak, then replay an older attempt.
+  const orderSteps = [
+    { day: "2026-03-01", correct: true, hinted: false },
+    { day: "2026-03-02", correct: true, hinted: false },
+    { day: "2026-03-05", correct: true, hinted: false },
+  ];
+  const orderItem = "ols:ols-math-04";
+  let orderRecord = null;
+  for (const [index, step] of orderSteps.entries()) {
+    orderRecord = (await learningJSON(await masteryAttempt(`order-${index + 1}`, step.correct, step.hinted, orderItem, auth, step.day), 200, 0)).record;
+  }
+  assert(orderRecord.level >= 2, "an in-order correct streak should raise the review level");
+  const beforeStale = { level: orderRecord.level, dueDay: orderRecord.dueDay, attempts: orderRecord.attempts, correct: orderRecord.correct };
+  const staleMastery = (await learningJSON(await masteryAttempt("order-stale", false, false, orderItem, auth, "2026-01-01"), 200, 0)).record;
+  assert.equal(staleMastery.level, beforeStale.level, "a stale wrong attempt must not rewind the mastery level");
+  assert.equal(staleMastery.dueDay, beforeStale.dueDay, "a stale wrong attempt must not rewind the due day");
+  assert.equal(staleMastery.correct, beforeStale.correct, "a stale wrong attempt must not change the correct count");
+  assert.equal(staleMastery.attempts, beforeStale.attempts + 1, "a stale attempt must still record its counter");
+  assert.equal(staleMastery.lastResult, false, "the stale attempt is still the latest recorded result");
+  assert.equal(staleMastery.lastAttemptId, "order-stale");
+  const resumeMastery = (await learningJSON(await masteryAttempt("order-resume", false, false, orderItem, auth, "2026-03-20"), 200, 0)).record;
+  assert.equal(resumeMastery.level, 0, "an in-order wrong attempt must still reset the level");
+  assert.equal(resumeMastery.dueDay, "2026-03-21", "an in-order wrong attempt schedules tomorrow");
+
+  const orderSkill = "ols.least-squares-geometry";
+  const orderSkillAttempt = (attemptId, correct, hinted, day) => academyPut("/api/v2/attempt", {
+    attemptId, skillId: orderSkill, itemId: `${orderSkill}:v1`, correct, hinted, day,
+  });
+  let orderSkillRecord = null;
+  for (const [index, step] of orderSteps.entries()) {
+    orderSkillRecord = (await learningJSON(await orderSkillAttempt(`skill-order-${index + 1}`, step.correct, step.hinted, step.day), 200, 0)).record;
+  }
+  assert(orderSkillRecord.level >= 2, "an in-order skill streak should raise the level");
+  const beforeStaleSkill = { level: orderSkillRecord.level, dueDay: orderSkillRecord.dueDay, attempts: orderSkillRecord.attempts };
+  const staleSkill = (await learningJSON(await orderSkillAttempt("skill-order-stale", false, false, "2026-01-01"), 200, 0)).record;
+  assert.equal(staleSkill.level, beforeStaleSkill.level, "a stale skill attempt must not rewind the level");
+  assert.equal(staleSkill.dueDay, beforeStaleSkill.dueDay, "a stale skill attempt must not rewind the due day");
+  assert.equal(staleSkill.attempts, beforeStaleSkill.attempts + 1, "a stale skill attempt must still record its counter");
+
   const preferences = { activePathId: "time-series", sessionMinutes: 45, weeklyGoalMinutes: 300 };
   assert.deepEqual((await learningJSON(await academyPut("/api/v2/preferences", preferences), 200, 0)).preferences, preferences);
   assert.equal((await json(await academyPut("/api/v2/preferences", {
