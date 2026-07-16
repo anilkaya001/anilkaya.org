@@ -42,9 +42,22 @@ export async function verifySession(token, secret) {
   } catch { return null; }
 }
 
+const cookiePatternCache = new Map();
+function cookiePattern(name) {
+  let pattern = cookiePatternCache.get(name);
+  if (!pattern) {
+    // Escape the name (callers pass fixed literals, but this keeps a metacharacter
+    // from ever being interpreted) and cache the compiled matcher per name — the
+    // request path only ever asks for a couple of fixed cookies.
+    pattern = new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]+)");
+    cookiePatternCache.set(name, pattern);
+  }
+  return pattern;
+}
+
 export function getCookie(request, name) {
   const c = request.headers.get("Cookie") || "";
-  const m = c.match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
+  const m = c.match(cookiePattern(name));
   if (!m) return null;
   try { return decodeURIComponent(m[1]); } catch { return null; }
 }
