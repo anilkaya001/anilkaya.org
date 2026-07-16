@@ -53,14 +53,10 @@ try {
   const root = await fetch(base + "/");
   assert.equal(root.status, 200);
   assert.equal(root.headers.get("cache-control"), "no-cache");
-  assert.equal(root.headers.get("clear-site-data"), '"cache"');
-  assert.match(root.headers.get("set-cookie") || "", /cachefix=1/);
+  assert.equal(root.headers.get("clear-site-data"), null, "one-time cache purge is retired");
   assertSecurity(root, true);
   assert.match(root.headers.get("content-security-policy") || "", /https:\/\/static\.cloudflareinsights\.com/, "CSP must allow Cloudflare Web Analytics");
   assert.match(await root.text(), /In Econometrics We Trust/);
-
-  const repeat = await fetch(base + "/", { headers: { Cookie: "cachefix=1" } });
-  assert.equal(repeat.headers.get("clear-site-data"), null, "cache purge must happen once per browser");
 
   const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");

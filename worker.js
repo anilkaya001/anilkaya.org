@@ -835,8 +835,7 @@ async function renderCourse(request, env, url, meta) {
   return rewritten;
 }
 
-async function route(request, env) {
-  const url = new URL(request.url);
+async function route(request, env, url) {
   const path = url.pathname;
   const origin = url.origin;
 
@@ -1429,11 +1428,10 @@ async function route(request, env) {
 // Every route passes through this single mutator. When modifying an existing
 // response, preserve the response object itself as the init; rebuilding a
 // status/header dictionary can corrupt Content-Encoding at Cloudflare's edge.
-function finalize(response, request) {
+function finalize(response, request, url) {
   const out = new Response(response.body, response);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) out.headers.set(name, value);
 
-  const url = new URL(request.url);
   const contentType = out.headers.get("Content-Type") || "";
   const cacheableMethod = request.method === "GET" || request.method === "HEAD";
   const cacheableStatus = out.status === 200 || out.status === 304;
@@ -1443,11 +1441,11 @@ function finalize(response, request) {
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) {
     out.headers.set("Cache-Control", "no-store");
   } else if (contentType.includes("text/html")) {
+    // Documents always revalidate; ETags keep unchanged pages a cheap 304. (The
+    // one-time Clear-Site-Data purge from the 2026-07 encoding incident has been
+    // live long enough that every active browser is healed, so it is retired —
+    // it was forcing re-download of the immutable ?v assets on cookieless hits.)
     out.headers.set("Cache-Control", "no-cache");
-    if (request.method === "GET" && !getCookie(request, "cachefix")) {
-      out.headers.set("Clear-Site-Data", '"cache"');
-      out.headers.append("Set-Cookie", cookie("cachefix", "1", { maxAge: 60 * 60 * 24 * 365 }));
-    }
   } else if (cacheableStatus && cacheableMethod && url.searchParams.has("v") && url.pathname.startsWith("/assets/")) {
     // Only versioned assets are content-addressed by ?v and safe to pin for a
     // year. Scoping to /assets/ stops a crafted ?v on a mutable path (e.g.
@@ -1461,19 +1459,20 @@ function finalize(response, request) {
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url); // parse once; threaded into route + finalize
     try {
-      return finalize(await route(request, env), request);
+      return finalize(await route(request, env, url), request, url);
     } catch (error) {
       if (error instanceof HttpError) {
-        return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request);
+        return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);
       }
       console.error(JSON.stringify({
         message: "request failed",
         method: request.method,
-        path: new URL(request.url).pathname,
+        path: url.pathname,
         error: error instanceof Error ? error.message : String(error),
       }));
-      return finalize(apiError(500, "internal_error", "Internal server error"), request);
+      return finalize(apiError(500, "internal_error", "Internal server error"), request, url);
     }
   },
 };
