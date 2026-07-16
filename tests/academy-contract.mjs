@@ -85,4 +85,14 @@ const migration = read("migrations/0002_learning_v3.sql");
 for (const table of ["progress_v3", "skill_mastery", "skill_attempts", "learning_preferences", "project_progress"]) assert(migration.includes(`CREATE TABLE IF NOT EXISTS ${table}`));
 assert(!/\b(code|output|free_text|placement_answer)\b/i.test(migration), "D1 academy migration must not store code, outputs, free text, or placement answers");
 
+// The migrations directory must bootstrap a fresh D1 to the same tables as
+// schema.sql — the base tables live in 0001, the academy additions in 0002.
+const tablesIn = (sql) => new Set([...sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]));
+const baseline = read("migrations/0001_baseline.sql");
+for (const table of ["users", "progress", "stats", "learning_sync", "mastery", "mastery_attempts", "placement"]) assert(baseline.includes(`CREATE TABLE IF NOT EXISTS ${table}`), `0001 baseline must create ${table}`);
+const migrationTables = new Set([...tablesIn(baseline), ...tablesIn(migration)]);
+const schemaTables = tablesIn(read("schema.sql"));
+assert(migrationTables.size === schemaTables.size && [...schemaTables].every((t) => migrationTables.has(t)),
+  "migrations/ (0001+0002) must create exactly the tables in schema.sql");
+
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");

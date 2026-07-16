@@ -217,7 +217,13 @@
 
   function localDay() {
     const date = new Date();
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const local = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    // The server rejects any activity day beyond UTC-tomorrow (a local calendar
+    // can sit one day ahead of UTC near midnight). Clamp a fast clock to that
+    // ceiling so we never queue an attempt the server will permanently 400.
+    const max = new Date(Date.now() + 86400000);
+    const utcMax = `${max.getUTCFullYear()}-${String(max.getUTCMonth() + 1).padStart(2, "0")}-${String(max.getUTCDate()).padStart(2, "0")}`;
+    return local <= utcMax ? local : utcMax;
   }
 
   const PLACEMENT_BANDS = new Set(["foundation", "applied", "advanced"]);
@@ -257,6 +263,16 @@
     return saved[skillId];
   }
 
+  // A 4xx that is not a generation/reset conflict (e.g. a validation reject on a
+  // malformed day or an item dropped by payload regeneration) will never
+  // succeed on retry. Draining must drop it and move on, or one poison event
+  // blocks every attempt queued behind it forever. Missing/5xx status ⇒ network
+  // or server transient ⇒ keep and retry later.
+  function isPoison(error) {
+    if (!error || typeof error.status !== "number" || error.status < 400 || error.status >= 500) return false;
+    return error.code !== "reset_required" && error.code !== "invalid_generation" && error.code !== "stale_generation";
+  }
+
   async function flushSkillOutbox(owner, epoch, generation) {
     let complete = true;
     for (const event of store.skillOutbox()) {
@@ -273,6 +289,7 @@
         handleGenerationConflict(error, owner);
         if (current(owner, epoch)) emit("iewt:sync-error", { area: "skills", error: error.code || error.message });
         complete = false;
+        if (isPoison(error)) { store.removeSkillAttempt(event.attemptId); continue; }
         break;
       }
     }
@@ -387,6 +404,7 @@
         handleGenerationConflict(error, owner);
         if (current(owner, epoch)) emit("iewt:sync-error", { area: "mastery", error: error.code || error.message });
         complete = false;
+        if (isPoison(error)) { store.removeMasteryAttempt(event.attemptId); continue; }
         break;
       }
     }
