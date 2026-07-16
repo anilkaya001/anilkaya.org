@@ -28,6 +28,11 @@ database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 migrations_dir = "migrations"
 
+# Refresh the landing-page market snapshot every 15 minutes. The scheduled()
+# handler fetches index quotes and upserts one D1 row; /api/markets serves it.
+[triggers]
+crons = ["*/15 * * * *"]
+
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET

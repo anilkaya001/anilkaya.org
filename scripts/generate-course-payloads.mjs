@@ -263,7 +263,13 @@ for (const item of reviewItems) {
   if (!/^[a-z0-9_-]+:[a-z0-9-]+$/.test(item.id) || seenReviewIds.has(item.id)) throw new TypeError(`Duplicate or invalid review item id: ${item.id}`);
   seenReviewIds.add(item.id);
 }
-writeJSON("assets/data/review-bank.json", { schemaVersion: 2, items: reviewItems });
+// The browser bank drops courseTitle/courseSlug: both are 1:1 functions of
+// courseId that lab-review.js already resolves from window.TOPIC_BY_ID, so
+// shipping them per item is pure repetition. moduleTitle stays (no client-side
+// module-title map exists to derive it from). courseTitle/courseSlug remain on
+// the in-memory items for the server-side review manifest below.
+const publicReviewItems = reviewItems.map(({ courseTitle, courseSlug, ...rest }) => rest);
+writeJSON("assets/data/review-bank.json", { schemaVersion: 2, items: publicReviewItems });
 
 const challengeItems = [];
 for (const skill of skillCatalogue) {
@@ -308,5 +314,15 @@ const seoRows = courses.map((course) => {
   return { id: course.id, slug: meta.slug, number: meta.num, name: meta.title, pageTitle: `${meta.title} — Econometrics Lab`, description: meta.blurb, image: imageById[course.id], level: meta.level, modules: course.modules.map(({ title, summary }) => ({ title, summary })) };
 });
 writeFileSync(path.join(ROOT, "shared/course-seo.js"), `/* Generated search-facing course metadata. */\nexport const SITE_ORIGIN = "https://anilkaya.org";\nconst freezeTopic=(topic)=>Object.freeze({...topic,path:\`/lab/\${topic.slug}/\`,modules:Object.freeze(topic.modules.map((module)=>Object.freeze(module)))});\nexport const COURSE_TOPICS=Object.freeze(${JSON.stringify(seoRows)}.map(freezeTopic));\nexport const COURSE_BY_ID=Object.freeze(Object.fromEntries(COURSE_TOPICS.map((topic)=>[topic.id,topic])));\nexport const COURSE_BY_SLUG=Object.freeze(Object.fromEntries(COURSE_TOPICS.map((topic)=>[topic.slug,topic])));\n`);
+
+// Concatenate the shared lab scripts into one bundle so every lab surface loads
+// them in a single request (fewer Worker invocations per cold pageview) while
+// keeping the sources separate for authoring. The order MUST match the per-page
+// <script> order; a leading ";" per file guards against ASI splicing two IIFEs.
+// stage-catalog.js is regenerated just above, so all inputs are current on disk.
+const LAB_SUITE_FILES = ["course-catalog", "skill-catalog", "stage-catalog", "mastery", "skill-mastery", "storage", "gamify", "auth"];
+const suiteBundle = "/* Generated bundle of shared lab scripts. Do not edit; edit the sources and rerun generate-course-payloads.mjs. */\n" +
+  LAB_SUITE_FILES.map((name) => "\n;/* ---- " + name + ".js ---- */\n" + read("assets/js/" + name + ".js")).join("");
+writeFileSync(path.join(ROOT, "assets/js/lab-suite.bundle.js"), suiteBundle);
 
 console.log(`Generated ${courses.length} courses, ${totalStages} stages, ${skillCatalogue.length} skills, ${reviewItems.length} review items, and ${challengeItems.length} challenge variants`);

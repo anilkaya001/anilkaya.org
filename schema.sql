@@ -112,6 +112,14 @@ CREATE TABLE IF NOT EXISTS skill_mastery (
 
 CREATE INDEX IF NOT EXISTS skill_mastery_due_by_user ON skill_mastery (user_id, due_day, skill_id);
 
+-- Single-row cache for the landing-page market ticker. Refreshed by the Worker
+-- cron trigger; served (public, short-TTL) from /api/markets. No user data.
+CREATE TABLE IF NOT EXISTS market_snapshot (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  payload TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS skill_attempts (
   user_id TEXT NOT NULL,
   attempt_id TEXT NOT NULL,

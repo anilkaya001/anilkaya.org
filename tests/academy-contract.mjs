@@ -86,13 +86,16 @@ for (const table of ["progress_v3", "skill_mastery", "skill_attempts", "learning
 assert(!/\b(code|output|free_text|placement_answer)\b/i.test(migration), "D1 academy migration must not store code, outputs, free text, or placement answers");
 
 // The migrations directory must bootstrap a fresh D1 to the same tables as
-// schema.sql — the base tables live in 0001, the academy additions in 0002.
+// schema.sql — base tables in 0001, academy additions in 0002, the market
+// ticker snapshot in 0004. (0003 only ADD COLUMNs, so it creates no tables.)
 const tablesIn = (sql) => new Set([...sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]));
 const baseline = read("migrations/0001_baseline.sql");
 for (const table of ["users", "progress", "stats", "learning_sync", "mastery", "mastery_attempts", "placement"]) assert(baseline.includes(`CREATE TABLE IF NOT EXISTS ${table}`), `0001 baseline must create ${table}`);
-const migrationTables = new Set([...tablesIn(baseline), ...tablesIn(migration)]);
+const marketMigration = read("migrations/0004_market_snapshot.sql");
+assert(marketMigration.includes("CREATE TABLE IF NOT EXISTS market_snapshot"), "0004 must create market_snapshot");
+const migrationTables = new Set([...tablesIn(baseline), ...tablesIn(migration), ...tablesIn(marketMigration)]);
 const schemaTables = tablesIn(read("schema.sql"));
 assert(migrationTables.size === schemaTables.size && [...schemaTables].every((t) => migrationTables.has(t)),
-  "migrations/ (0001+0002) must create exactly the tables in schema.sql");
+  "migrations/ (0001+0002+0004) must create exactly the tables in schema.sql");
 
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");

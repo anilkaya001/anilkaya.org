@@ -60,6 +60,24 @@ try {
   assert.match(rootHtml, /In Econometrics We Trust/);
   assert.match(rootHtml, /id="marketBoard"/, "landing page must carry the market-clock mount point");
   assert.match(rootHtml, new RegExp(`market-clock\\.js\\?v=${assetVersion}`), "market-clock script must be versioned to the asset version");
+  assert.match(rootHtml, /id="marketTicker"/, "landing page must carry the price-ticker mount point");
+  assert.match(rootHtml, new RegExp(`market-ticker\\.js\\?v=${assetVersion}`), "market-ticker script must be versioned to the asset version");
+
+  // Public market data: valid JSON shape, edge-cacheable, no upstream dependency
+  // in the sandbox (quotes may be empty — the client degrades gracefully).
+  const markets = await fetch(base + "/api/markets");
+  assert.equal(markets.status, 200, "/api/markets must be reachable");
+  assert.match(markets.headers.get("content-type") || "", /^application\/json\b/, "/api/markets must be JSON");
+  assert.equal(markets.headers.get("cache-control"), "public, max-age=300", "/api/markets must be edge-cacheable, not no-store");
+  assertSecurity(markets, false);
+  const marketBody = await markets.json();
+  assert(Array.isArray(marketBody.quotes), "/api/markets must return a quotes array");
+  assert(Number.isFinite(marketBody.updatedAt), "/api/markets must return an updatedAt timestamp");
+  for (const quote of marketBody.quotes) {
+    assert(typeof quote.label === "string" && Number.isFinite(quote.price) && Number.isFinite(quote.changePct) && typeof quote.currency === "string",
+      "each quote must carry label/price/changePct/currency");
+  }
+  assert.equal((await fetch(base + "/api/markets", { method: "POST" })).status, 405, "/api/markets is read-only");
 
   const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");

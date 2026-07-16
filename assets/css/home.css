@@ -167,7 +167,7 @@
 .home-foot {
   position: fixed;
   left: 0; right: 0;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 0.8rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem);
   z-index: 5;
   text-align: center;
   font-size: 0.72rem;
@@ -190,7 +190,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 2.6rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 3.4rem);
   z-index: 6;
   width: max-content;
   max-width: calc(100vw - 1.4rem);
@@ -292,9 +292,74 @@
   50% { opacity: 0.45; }
 }
 
-/* Give the board room; on short screens the field + headline take priority. */
-@media (max-height: 640px) { .market-board { display: none; } }
+/* Give the bottom stack room; on short screens the field + headline take
+   priority, so the countdown board (then the byline) drop out first. */
+@media (max-height: 720px) { .market-board { display: none; } }
+@media (max-height: 600px) { .home-foot { display: none; } }
 @media (prefers-reduced-motion: reduce) {
   .market-board { animation: none; }
   .market[data-open="true"] .market__dot { animation: none; }
+}
+
+/* ---- Flowing price ticker: full-width tape pinned to the bottom edge ---- */
+.market-ticker {
+  --up: #4ec98a;
+  --down: #e5736b;
+  position: fixed;
+  left: 0; right: 0;
+  bottom: 0;
+  z-index: 6;
+  overflow: hidden;
+  padding: calc(env(safe-area-inset-bottom, 0px) + 0.3rem) 0 0.3rem;
+  border-top: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--bg-deep) 86%, transparent);
+  -webkit-backdrop-filter: blur(9px) saturate(1.1);
+  backdrop-filter: blur(9px) saturate(1.1);
+  /* Fade the tape into the page edges instead of a hard cut. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
+  animation: rise 1s var(--ease) 0.4s both;
+}
+.market-ticker[hidden] { display: none; }
+.market-ticker__row {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: ticker-flow var(--ticker-duration, 40s) linear infinite;
+}
+.market-ticker:hover .market-ticker__row,
+.market-ticker:focus-within .market-ticker__row { animation-play-state: paused; }
+.market-ticker__set { display: flex; flex: 0 0 auto; }
+@keyframes ticker-flow {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.tk {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.38rem;
+  padding: 0 1.05rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  border-right: 1px solid var(--hairline);
+}
+.tk__name {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.tk__price { color: var(--ink-dim); font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.tk__cur { color: var(--ink-faint); font-size: 0.6rem; letter-spacing: 0.05em; }
+.tk__chg { font-weight: 700; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.tk[data-dir="up"] .tk__chg { color: var(--up); }
+.tk[data-dir="down"] .tk__chg { color: var(--down); }
+
+@media (max-height: 480px) { .market-ticker { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .market-ticker { overflow-x: auto; animation: none; }
+  .market-ticker__row { animation: none; }
+  .market-ticker__set[aria-hidden="true"] { display: none; }
 }

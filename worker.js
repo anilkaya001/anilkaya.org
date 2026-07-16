@@ -10,8 +10,13 @@ import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
 import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
+import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
+// Edge-memoization window for rendered course pages. Kept short so a deploy
+// (which bumps the ?v asset refs embedded in the cached HTML) is reflected within
+// a minute, while still absorbing bursts (crawlers, a shared link) on repeat hits.
+const COURSE_EDGE_TTL_S = 60;
 const LEGACY_COURSE_PATHS = new Set([
   "/lab/course", "/lab/course.html", "/lab/course/",
   "/lab/lesson", "/lab/lesson.html", "/lab/lesson/",
@@ -102,6 +107,18 @@ const SECURITY_HEADERS = {
 // every sign-in and is capped, so 48h is a generous window; pruning past it on
 // each write keeps the tables bounded instead of growing O(lifetime attempts).
 const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
+
+// ---- Live market ticker -------------------------------------------------
+// Index quotes for the landing-page ticker are fetched server-side (the browser
+// only ever reads same-origin /api/markets), cached as one JSON row in D1, and
+// refreshed by the cron trigger. A failed refresh preserves the last-known-good
+// row, so the ticker degrades to stale-but-labelled data rather than blank.
+const MARKET_SNAPSHOT_SCHEMA_SQL =
+  "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
+const MARKET_FRESH_MS = 15 * 60 * 1000;   // cron cadence; newer than this is served straight from D1
+const MARKET_STALE_MS = 45 * 60 * 1000;   // older than this, a read repairs the snapshot inline
+const MARKET_FETCH_TIMEOUT_MS = 5000;
+const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
@@ -395,6 +412,90 @@ async function academyBatch(env, userId, buildStatements) {
     await ensureAcademySchema(env);
     return placementBatch(env, userId, buildStatements);
   }
+}
+
+// Self-heal the single-row snapshot table on the "no such table" failure, like
+// the learning tables (Workers Builds does not apply migrations to an existing
+// D1). Any market DB op runs through this.
+async function marketOp(env, op) {
+  try {
+    return await op();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table:\s*(?:main\.)?market_snapshot\b/i.test(message)) throw error;
+    await env.DB.prepare(MARKET_SNAPSHOT_SCHEMA_SQL).run();
+    return op();
+  }
+}
+
+// Fetch one index from Yahoo's public chart API, trying the query1/query2
+// mirrors in turn with a hard timeout. Returns a parsed quote or null; never
+// throws, so one bad symbol can't sink the batch.
+async function fetchIndexQuote(index) {
+  for (const host of YAHOO_HOSTS) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), MARKET_FETCH_TIMEOUT_MS);
+      let response;
+      try {
+        response = await fetch(
+          "https://" + host + "/v8/finance/chart/" + encodeURIComponent(index.yahoo) + "?range=5d&interval=1d",
+          { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; anilkaya.org market board)", "Accept": "application/json" } },
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!response.ok) continue;
+      const quote = parseIndexQuote(index, await response.json());
+      if (quote) return quote;
+    } catch { /* try the next mirror */ }
+  }
+  return null;
+}
+
+// Refresh all indices in parallel and persist the snapshot. A run that returns
+// zero quotes (total upstream failure) leaves the existing row untouched so the
+// ticker keeps showing the last good data. Returns the stored payload or null.
+async function refreshMarketSnapshot(env) {
+  const settled = await Promise.allSettled(MARKET_INDICES.map(fetchIndexQuote));
+  const quotes = settled.map((r) => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
+  if (!quotes.length) return null;
+  const now = Date.now();
+  const payload = JSON.stringify(buildSnapshot(quotes, now));
+  await marketOp(env, () =>
+    env.DB.prepare(
+      "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+    ).bind(payload, now).run(),
+  );
+  return payload;
+}
+
+// Serve the cached snapshot, repairing it inline only when it is missing or well
+// past the cron cadence (bootstrap and cron-outage recovery). Always resolves to
+// a valid body; an empty-quotes payload is the graceful floor.
+async function loadMarketSnapshot(env) {
+  let row = null;
+  try {
+    row = await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
+  } catch { row = null; }
+  const age = row ? Date.now() - Number(row.updated_at) : Infinity;
+  if (!row || age > MARKET_STALE_MS) {
+    const refreshed = await refreshMarketSnapshot(env).catch(() => null);
+    if (refreshed) return refreshed;
+    if (!row) {
+      // Bootstrap fetch failed (or upstream is down): park an empty, timestamped
+      // row so subsequent reads don't each pay the fetch timeout. DO NOTHING
+      // guards against clobbering a snapshot a concurrent refresh just wrote; the
+      // cron keeps retrying and fills it with real data once upstream recovers.
+      const empty = JSON.stringify({ quotes: [], updatedAt: Date.now() });
+      await marketOp(env, () => env.DB.prepare(
+        "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING",
+      ).bind(empty, Date.now()).run()).catch(() => {});
+      return empty;
+    }
+  }
+  return row.payload;
 }
 
 function masteryRecord(row) {
@@ -828,7 +929,19 @@ function courseOverview(meta) {
     "</section>";
 }
 
-async function renderCourse(request, env, url, meta) {
+async function renderCourse(request, env, url, meta, ctx) {
+  // The rendered document is deterministic per course URL, so memoize it at the
+  // edge to skip the ASSETS fetch + HTMLRewriter on repeat hits. Keyed by the
+  // canonical path (collapsing ?utm_source= &c) with a short TTL; the browser
+  // still gets no-cache from finalize(), so this only shortens the edge's own
+  // revalidation. A deploy is reflected within COURSE_EDGE_TTL_S.
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const cacheKey = cache ? new Request(url.origin + meta.path) : null;
+  if (cacheKey) {
+    const hit = await cache.match(cacheKey).catch(() => null);
+    if (hit) return hit;
+  }
+
   const headers = new Headers(request.headers);
   headers.set("Accept-Encoding", "identity");
   for (const name of ["If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "Range", "If-Range"]) {
@@ -874,10 +987,21 @@ async function renderCourse(request, env, url, meta) {
   for (const name of ["ETag", "Last-Modified", "Content-Length", "Content-Encoding", "Accept-Ranges"]) {
     rewritten.headers.delete(name);
   }
+
+  if (cacheKey && rewritten.status === 200) {
+    // Preserve the response object as init (never rebuild from a dict — that can
+    // corrupt Content-Encoding at the edge); the body comes from a tee'd clone so
+    // the returned response is untouched. The cached copy carries a short TTL for
+    // the edge only.
+    const copy = new Response(rewritten.clone().body, rewritten);
+    copy.headers.set("Cache-Control", "max-age=" + COURSE_EDGE_TTL_S);
+    const put = cache.put(cacheKey, copy).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+  }
   return rewritten;
 }
 
-async function route(request, env, url) {
+async function route(request, env, url, ctx) {
   const path = url.pathname;
   const origin = url.origin;
 
@@ -974,6 +1098,17 @@ async function route(request, env, url) {
     requireMethod(request, ["GET"]);
     requireSessionSecret(env);
     return json({ user: await currentUser(request, env) });
+  }
+
+  if (path === "/api/markets") {
+    requireMethod(request, ["GET", "HEAD"]);
+    // Public, non-personal data: cache briefly at the edge and in the browser so
+    // bursts of visitors don't each hit D1 (finalize preserves this Cache-Control
+    // for this one /api path).
+    return new Response(await loadMarketSnapshot(env), {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=300" },
+    });
   }
 
   if (path === "/api/v2/bootstrap") {
@@ -1478,7 +1613,13 @@ async function route(request, env, url) {
     if (path !== meta.path) {
       return redirect(new URL(meta.path, url).toString(), 308);
     }
-    return renderCourse(request, env, url, meta);
+    // A HEAD needs only the headers a GET would send. Course pages are always a
+    // 200 text/html document, so synthesize that directly instead of fetching
+    // and rewriting the asset just to discard the body.
+    if (request.method === "HEAD") {
+      return new Response(null, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    return renderCourse(request, env, url, meta, ctx);
   }
 
   return env.ASSETS.fetch(request);
@@ -1498,7 +1639,12 @@ function finalize(response, request, url) {
   else out.headers.delete("Content-Security-Policy");
 
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) {
-    out.headers.set("Cache-Control", "no-store");
+    // Personal API/auth data must never be cached. The one exception is a
+    // successful GET/HEAD on /api/markets — public, non-personal index data that
+    // sets its own short public Cache-Control. Errors (405, 500) still get
+    // no-store so a transient failure can't be cached.
+    const publicMarkets = url.pathname === "/api/markets" && cacheableMethod && out.status === 200;
+    if (!publicMarkets) out.headers.set("Cache-Control", "no-store");
   } else if (contentType.includes("text/html")) {
     // Documents always revalidate; ETags keep unchanged pages a cheap 304. (The
     // one-time Clear-Site-Data purge from the 2026-07 encoding incident has been
@@ -1517,10 +1663,21 @@ function finalize(response, request, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  // Cron trigger (wrangler.toml) keeps the market snapshot warm so /api/markets
+  // reads never block on the upstream fetch during normal traffic.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(refreshMarketSnapshot(env).catch((error) => {
+      console.error(JSON.stringify({
+        message: "market refresh failed",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }));
+  },
+
+  async fetch(request, env, ctx) {
     const url = new URL(request.url); // parse once; threaded into route + finalize
     try {
-      return finalize(await route(request, env, url), request, url);
+      return finalize(await route(request, env, url, ctx), request, url);
     } catch (error) {
       if (error instanceof HttpError) {
         return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);

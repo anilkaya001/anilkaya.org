@@ -231,9 +231,15 @@ for (const topic of COURSE_TOPICS) {
   assert(labIndex.includes(SITE_ORIGIN + topic.path), `${topic.id}: Lab JSON-LD URL drifted`);
 }
 assert(!labIndex.includes("/lab/course?m="), "Lab must not advertise legacy query-string course URLs");
-assert(labIndex.includes("/assets/js/course-catalog.js"), "Lab catalogue must load the lightweight course catalog");
-assert(labCourse.includes("/assets/js/course-catalog.js"), "Course shell must load the lightweight course catalog");
-for (const asset of ["course-catalog.js", "mastery.js", "storage.js", "gamify.js", "auth.js", "lab-review.js"]) {
+// The shared lab logic ships as one generated bundle (fewer Worker invocations);
+// the sources it concatenates must all be present, in order.
+const labBundle = read("assets/js/lab-suite.bundle.js");
+for (const source of ["course-catalog", "skill-catalog", "stage-catalog", "mastery", "skill-mastery", "storage", "gamify", "auth"]) {
+  assert(labBundle.includes(`/* ---- ${source}.js ---- */`), `lab bundle must include ${source}.js`);
+}
+assert(labIndex.includes("/assets/js/lab-suite.bundle.js"), "Lab catalogue must load the shared lab bundle");
+assert(labCourse.includes("/assets/js/lab-suite.bundle.js"), "Course shell must load the shared lab bundle");
+for (const asset of ["lab-suite.bundle.js", "lab-review.js"]) {
   assert(labReview.includes(`/assets/js/${asset}`), `Daily review must load ${asset}`);
 }
 for (const heavyweight of ["lab-core.js", "pyodide.js", "curriculum.js", "curriculum-data.js", "curriculum-questions.js"]) {
@@ -278,7 +284,9 @@ for (const file of referenceFiles) {
 assert(referenceCount >= 40, "too few versioned asset references were checked");
 
 for (const file of filesUnder("assets/js", (name) => name.endsWith(".js"))) {
-  if (file === "assets/js/storage.js") continue;
+  // storage.js is the sanctioned localStorage owner; the lab bundle is exempt
+  // because it concatenates storage.js verbatim.
+  if (file === "assets/js/storage.js" || file === "assets/js/lab-suite.bundle.js") continue;
   assert(!read(file).includes("localStorage"), `${file}: access storage only through IEWTStorage`);
 }
 
