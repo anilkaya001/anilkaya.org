@@ -426,11 +426,13 @@
 .tk[data-dir="down"] .tk__chg { color: var(--down); }
 .tk[data-dir="flat"] .tk__chg { color: var(--ink-faint); }
 
-/* Timestamp + standing caveat that closes each pass of the tape. */
+/* Timestamp + standing caveat that closes each pass of the tape. Deliberately
+   not italic: it is the only italic text on the landing page, and asking for it
+   pulls a whole extra 34KB Latin Modern face for one caption. Colour, size and
+   tracking already set it apart from the quotes. */
 .tk--note {
   color: var(--ink-faint);
   font-size: 0.64rem;
-  font-style: italic;
   letter-spacing: 0.04em;
 }
 

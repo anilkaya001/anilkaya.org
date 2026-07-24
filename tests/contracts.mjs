@@ -290,6 +290,16 @@ for (const file of filesUnder("assets/js", (name) => name.endsWith(".js"))) {
   assert(!read(file).includes("localStorage"), `${file}: access storage only through IEWTStorage`);
 }
 
+// Share cards are 1200x630 and must stay palette PNGs (scripts/optimize-og-images.py):
+// a truecolour re-export roughly doubles them for no visible gain. The IHDR chunk
+// is fixed-offset — width/height at 16, bit depth 24, colour type 25 (3 = palette).
+for (const file of filesUnder("assets/img", (name) => /^og.*\.png$/.test(name))) {
+  const header = readFileSync(path.join(ROOT, file)).subarray(0, 26);
+  assert.equal(header.readUInt32BE(16), 1200, `${file}: Open Graph width must be 1200`);
+  assert.equal(header.readUInt32BE(20), 630, `${file}: Open Graph height must be 630`);
+  assert.equal(header[25], 3, `${file}: run scripts/optimize-og-images.py — share cards must be palette PNGs`);
+}
+
 function clientHarness(seed = {}, fetchImpl = async () => { throw new Error("unexpected fetch"); }) {
   const values = new Map(Object.entries(seed));
   const listeners = new Map();
