@@ -37,10 +37,23 @@
     );
   }
 
-  function render(quotes) {
+  const stampFmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+
+  // Closing item of every set: when the snapshot was taken and the standing
+  // caveat, so the disclaimer travels with the numbers instead of living only in
+  // the footer panel. Both loop past the viewer on each pass.
+  function noteHTML(updatedAt) {
+    const stamp = Number(updatedAt);
+    const asOf = Number.isFinite(stamp) && stamp > 0 ? "As of " + stampFmt.format(stamp) + " İst · " : "";
+    return '<span class="tk tk--note">' + asOf + "Indicative only — not investment advice</span>";
+  }
+
+  function render(quotes, updatedAt) {
     const valid = (quotes || []).filter((q) => q && Number.isFinite(Number(q.price)) && Number.isFinite(Number(q.changePct)));
     if (!valid.length) { mount.hidden = true; return; }
-    const set = valid.map(itemHTML).join("");
+    const set = valid.map(itemHTML).join("") + noteHTML(updatedAt);
     // Two identical sets: animating the row to translateX(-50%) lands exactly on
     // the start of the second set, so the loop is seamless. The copy is hidden
     // from assistive tech to avoid double-reading.
@@ -69,7 +82,7 @@
       const resp = await fetch("/api/markets", { headers: { Accept: "application/json" } });
       if (!resp.ok) throw new Error("markets " + resp.status);
       const data = await resp.json();
-      render(Array.isArray(data.quotes) ? data.quotes : []);
+      render(Array.isArray(data.quotes) ? data.quotes : [], data.updatedAt);
     } catch {
       // Leave any prior render in place; hide only if nothing has rendered yet.
       if (!row.childElementCount) mount.hidden = true;
@@ -89,4 +102,22 @@
   }
   document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
   start();
+
+  // The market-data disclaimer is a plain <details>, so it already opens and
+  // closes with no JavaScript. Where JS runs, give the panel the dismissal an
+  // overlay is expected to have: Escape, or a click outside it.
+  const disclaimer = document.getElementById("marketDisclaimer");
+  if (disclaimer) {
+    const close = () => disclaimer.removeAttribute("open");
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && disclaimer.open) {
+        close();
+        const summary = disclaimer.querySelector("summary");
+        if (summary) summary.focus();
+      }
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (disclaimer.open && !disclaimer.contains(event.target)) close();
+    });
+  }
 })();

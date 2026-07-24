@@ -30,15 +30,15 @@
   <meta name="twitter:image" content="https://anilkaya.org/assets/img/og.png">
 
   <!-- Preconnect not needed: everything is same-origin. Preload the above-the-fold font. -->
-  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=33" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/LM-bold.woff2?v=34" as="font" type="font/woff2" crossorigin>
 
-  <link rel="stylesheet" href="/assets/css/base.css?v=33">
-  <link rel="stylesheet" href="/assets/css/home.css?v=33">
+  <link rel="stylesheet" href="/assets/css/base.css?v=34">
+  <link rel="stylesheet" href="/assets/css/home.css?v=34">
 
-  <script src="/assets/js/particles.js?v=33" defer></script>
-  <script src="/assets/js/nav.js?v=33" defer></script>
-  <script src="/assets/js/market-clock.js?v=33" defer></script>
-  <script src="/assets/js/market-ticker.js?v=33" defer></script>
+  <script src="/assets/js/particles.js?v=34" defer></script>
+  <script src="/assets/js/nav.js?v=34" defer></script>
+  <script src="/assets/js/market-clock.js?v=34" defer></script>
+  <script src="/assets/js/market-ticker.js?v=34" defer></script>
 
   <!-- Structured data: who this site is about and what it contains. -->
   <script type="application/ld+json">
@@ -113,8 +113,31 @@
     <div class="market-board__label" aria-hidden="true"><span>Market opens</span><span>İstanbul time</span></div>
   </section>
 
-  <footer class="home-foot">Anıl Kaya · <a href="/articles/">Articles</a> · <a href="/lab/">Econometrics Lab</a></footer>
+  <footer class="home-foot">
+    <span class="home-foot__byline">Anıl Kaya · <a href="/articles/">Articles</a> · <a href="/lab/">Econometrics Lab</a></span>
+    <details class="disclaimer" id="marketDisclaimer">
+      <summary class="disclaimer__summary">Data disclaimer</summary>
+      <div class="disclaimer__body">
+        <h2 class="disclaimer__title">Market data disclaimer</h2>
+        <p>The market figures and session times shown on this page are provided for general
+          information and educational purposes only. They are obtained from third-party sources,
+          are <strong>not real time</strong>, and may be delayed, interrupted, incomplete, or
+          inaccurate.</p>
+        <p>Nothing on this page is investment, financial, legal, or tax advice, nor an offer,
+          solicitation, or recommendation to buy or sell any security or other instrument. No
+          warranty of any kind, express or implied, is given as to the accuracy, completeness,
+          timeliness, or fitness for any purpose of this data.</p>
+        <p>Opening and closing times are the scheduled regular sessions and are shown for
+          reference only: they exclude public holidays, intraday breaks, auctions, and ad-hoc
+          changes, so a market shown as open may not be trading.</p>
+        <p>To the fullest extent permitted by law, Anıl Kaya and anilkaya.org accept no liability
+          for any loss or damage, direct or indirect, arising from use of, or reliance on, this
+          data. Verify every figure with the relevant exchange or your broker before acting on
+          it. Index names and marks are the property of their respective owners.</p>
+      </div>
+    </details>
+  </footer>
 
-  <div class="market-ticker" id="marketTicker" hidden aria-label="Live world index prices with one-day change"></div>
+  <div class="market-ticker" id="marketTicker" hidden role="region" aria-label="World index prices with one-day change, indicative only"></div>
 </body>
 </html>

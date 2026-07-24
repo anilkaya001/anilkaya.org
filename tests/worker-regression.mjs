@@ -63,6 +63,13 @@ try {
   assert.match(rootHtml, /id="marketTicker"/, "landing page must carry the price-ticker mount point");
   assert.match(rootHtml, new RegExp(`market-ticker\\.js\\?v=${assetVersion}`), "market-ticker script must be versioned to the asset version");
 
+  // The market-data disclaimer is a legal notice: it must ship in the static
+  // HTML (no JavaScript required to reach it) and keep its liability wording.
+  assert.match(rootHtml, /id="marketDisclaimer"/, "landing page must carry the data disclaimer");
+  assert.match(rootHtml, /information and educational purposes only/i, "disclaimer must state informational purpose");
+  assert.match(rootHtml, /investment, financial, legal, or tax advice/i, "disclaimer must decline to give advice");
+  assert.match(rootHtml, /accept no liability/i, "disclaimer must waive liability");
+
   // Public market data: valid JSON shape, browser-cacheable (not no-store), no
   // upstream dependency in the sandbox (quotes may be empty — client degrades).
   const markets = await fetch(base + "/api/markets");
