@@ -110,7 +110,10 @@ body { min-height: 100svh; display: flex; flex-direction: column; }
   font-size: 0.88rem;
 }
 
-/* Articles index listing */
+/* Articles index listing. These rules are the authoring template: the index
+   currently shows .post-empty instead, so nothing references .post-list__* yet
+   and a dead-class scan will flag them. Keep them — they are what each new
+   <li> in articles/index.html is styled by. */
 .post-list { list-style: none; padding: 0; }
 .post-list li + li { margin-top: 1.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
 .post-list a { text-decoration: none; color: var(--ink); display: block; }

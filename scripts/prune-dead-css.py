@@ -10,6 +10,21 @@ Rules:
   * A rule whose every selector is dead is removed entirely.
   * @media / @supports bodies are processed recursively; a block left empty is
     removed too.
+
+DEAD is hardcoded on purpose: never auto-derive it from "class not found in the
+repo". That scan produces false positives, and every one of these was hit while
+building this list:
+
+  * Dynamic construction — placement.js builds `placement-status--${tone}`, so
+    .placement-status--success/--error appear nowhere as literals but are live.
+  * Not a class at all — ".w3" matches inside the www.w3.org data-URI in
+    home.css's grain SVG.
+  * Authoring templates — article.css's .post-list__* style each future article
+    entry; the index just does not use them while it is empty.
+
+Confirm a candidate by hand (search for the literal, the prefix before `--`/`__`,
+and any template that will use it later), then pixel-diff every surface that
+loads the stylesheet before trusting the result.
 """
 import re
 import sys
