@@ -9,28 +9,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=35") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=36") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=35") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=36") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=35") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=36") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=35") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=36") format("woff2");
 }
 
 /* ---- Design tokens ---- */

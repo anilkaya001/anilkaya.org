@@ -120,3 +120,17 @@ body { min-height: 100svh; display: flex; flex-direction: column; }
 .post-list__title { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.01em; }
 .post-list__meta { color: var(--ink-faint); font-size: 0.9rem; margin-top: 0.25rem; }
 .post-list__excerpt { color: var(--ink-dim); margin-top: 0.4rem; }
+
+/* Empty state — the index is linked from every page's nav, so it must offer a
+   way onward instead of dead-ending on "coming soon". Remove with the
+   .post-empty block in articles/index.html once the first article ships. */
+.post-empty {
+  padding: 1.6rem 1.7rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+}
+.post-empty p { color: var(--ink-dim); }
+.post-empty p:first-child { color: var(--ink); font-weight: 700; }
+.post-empty p + p { margin-top: 0.7rem; }
+.post-empty .btn { margin-top: 1.2rem; }

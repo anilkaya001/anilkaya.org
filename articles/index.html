@@ -24,11 +24,11 @@
   <meta name="twitter:image" content="https://anilkaya.org/assets/img/og.png">
 
   <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
-  <link rel="preload" href="/assets/fonts/LM-regular.woff2?v=35" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/css/base.css?v=35">
-  <link rel="stylesheet" href="/assets/css/article.css?v=35">
-  <script src="/assets/js/nav.js?v=35" defer></script>
-  <script src="/assets/js/year.js?v=35" defer></script>
+  <link rel="preload" href="/assets/fonts/LM-regular.woff2?v=36" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css?v=36">
+  <link rel="stylesheet" href="/assets/css/article.css?v=36">
+  <script src="/assets/js/nav.js?v=36" defer></script>
+  <script src="/assets/js/year.js?v=36" defer></script>
 
   <!-- Structured data -->
   <script type="application/ld+json">
@@ -80,15 +80,16 @@
       <h1>Articles</h1>
     </div>
 
-    <!-- Add each new article as a <li> below. Newest first.
-         Copy /articles/_template/ to /articles/<slug>/ to start one. -->
-    <ul class="post-list">
-      <li>
-        <span class="post-list__title">Coming soon</span>
-        <span class="post-list__meta">—</span>
-        <span class="post-list__excerpt">The first article will appear here.</span>
-      </li>
-    </ul>
+    <!-- Add each new article as a <li> in a .post-list below. Newest first.
+         Copy /articles/_template/ to /articles/<slug>/ to start one, and delete
+         the .post-empty block once the first article is published. -->
+    <div class="post-empty">
+      <p>Nothing is published here yet.</p>
+      <p>The Econometrics Lab is where the material lives in the meantime: twelve
+        interactive courses that run real Python — estimation, inference, and the
+        assumptions behind each model — directly in your browser.</p>
+      <a class="btn btn--gold" href="/lab/">Enter the Econometrics Lab&nbsp;→</a>
+    </div>
   </main>
 
   <footer class="site-footer">
