@@ -182,11 +182,11 @@
     }
 
     grid.innerHTML =
-      '<article class="dashboard-resume"><div><p class="academy-kicker">' + resumeLabel + '</p><h3>' + esc(active.topic.title) + '</h3><p>' + active.done.length + " / " + active.topic.stages + " complete · next stage " + (active.firstOpen + 1) + '</p></div><a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin" : active.status === "completed" ? "Review" : "Continue") + " &rarr;</a></article>" +
+      '<article class="dashboard-resume"><div><p class="academy-kicker">' + resumeLabel + '</p><h2>' + esc(active.topic.title) + '</h2><p>' + active.done.length + " / " + active.topic.stages + " complete · next stage " + (active.firstOpen + 1) + '</p></div><a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin" : active.status === "completed" ? "Review" : "Continue") + " &rarr;</a></article>" +
       '<div class="dashboard-metrics"><article><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Academy progress</span><small>' + completedLessons + ' / ' + totalLessons + ' stages</small></article><article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + ' day streak · ' + completeCourses + ' courses</small></article></div>';
 
     const steps = focusSteps(states, active);
-    focus.innerHTML = '<div class="dashboard-focus__head"><p class="academy-kicker">Focus plan</p><h3 id="focusPlanTitle">Your next three steps</h3></div>' +
+    focus.innerHTML = '<div class="dashboard-focus__head"><p class="academy-kicker">Focus plan</p><h2 id="focusPlanTitle">Your next three steps</h2></div>' +
       '<ol aria-labelledby="focusPlanTitle">' + steps.map(({ state, index, review }, position) =>
         '<li><a href="' + hrefFor(state.topic, index) + '"><span class="dashboard-focus__number" aria-hidden="true">' + String(position + 1).padStart(2, "0") + '</span><span><b>' + (review ? "Review lesson " : "Lesson ") + (index + 1) + '</b><small>' + esc(state.topic.shortTitle || state.topic.title) + "</small></span></a></li>").join("") + "</ol>";
     section.setAttribute("aria-busy", "false");

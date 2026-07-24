@@ -586,7 +586,7 @@ try {
     await waitForAcademy(page);
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start DiD · lesson 1/);
     assert.equal(new URL(await page.locator("#heroPrimaryCta").getAttribute("href"), BASE).pathname, courseRoute("did"));
-    assert.match(await page.locator(".dashboard-resume h3").textContent(), /Difference-in-Differences/);
+    assert.match(await page.locator(".dashboard-resume h2").textContent(), /Difference-in-Differences/);
     assert.match(await page.locator("#dashboardSummary").textContent(), /applied diagnostic result recommends DiD first/i);
     assert.equal((await page.locator(".lab-hero__diagnostic").textContent()).trim(), "Retake diagnostic");
     assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), {}, "placement seeded course completion");
