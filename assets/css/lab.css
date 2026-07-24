@@ -494,7 +494,16 @@
 .today__bar > .btn { min-height: 2.75rem; padding-inline: 0.85rem; }
 .global-search { display: flex; min-width: 14rem; min-height: 2.75rem; flex: 1; align-items: center; gap: 0.45rem; padding: 0 0.65rem; border: 1px solid var(--hairline); border-radius: 10px; background: var(--bg-deep); }
 .global-search input { width: 100%; min-width: 0; border: 0; color: var(--ink); background: transparent; }
+/* The inner input drops its own ring so the whole search chrome reads as one
+   control — which means the wrapper has to show the focus, or tabbing into the
+   academy search gives a keyboard user no indication at all. Mirrors
+   .course-search:focus-within below. */
 .global-search input:focus { outline: 0; }
+.global-search:focus-within {
+  border-color: var(--gold-harvest);
+  outline: 2px solid color-mix(in srgb, var(--gold-harvest) 26%, transparent);
+  outline-offset: 2px;
+}
 .global-search kbd { padding: 0.12rem 0.38rem; border: 1px solid var(--hairline); border-radius: 5px; color: var(--ink-faint); font: 0.7rem var(--font-mono); }
 .today__settings { position: relative; }
 .today__settings summary { list-style: none; cursor: pointer; }

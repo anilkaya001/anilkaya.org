@@ -9,28 +9,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=39") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=40") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=39") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=40") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=39") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=40") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=39") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=40") format("woff2");
 }
 
 /* ---- Design tokens ---- */
@@ -266,6 +266,11 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   color: var(--ink); background: transparent; border-color: var(--hairline);
 }
 .btn:hover { transform: translateY(-2px); }
+/* No .btn:focus-visible here on purpose: the :where(a, button, [tabindex])
+   rule above already draws the gold ring, and it sits 3px outside the button
+   on the dark page, so it stays legible on the gold and danger fills. A
+   .btn-specific rule would also outrank .btn--gold's box-shadow and silently
+   drop that variant's glow while focused. */
 .btn[disabled], .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 /* Touch devices: buttons meet the 44px comfortable-tap minimum */
