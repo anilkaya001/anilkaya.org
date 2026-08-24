@@ -63,6 +63,7 @@
   };
   let lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
   let frameCount = 0;
+  let loopToken = 0;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -110,8 +111,7 @@
     }
   }
 
-  function frame(time) {
-    frameCount++;
+  function renderFrame(time) {
     let dt = time - lastTime;
     lastTime = time;
     if (dt > 50 || isNaN(dt)) dt = 16;
@@ -239,9 +239,28 @@
       ctx.arc(sX[i] + jx, sY[i] + jy, MAX_SIZE * rs * BOOST, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
 
+  // One bad frame must never kill the field. Previously an exception anywhere
+  // in the body escaped before the rAF re-schedule below, so the loop died
+  // with state.running still true — start() then early-returned forever and
+  // the watchdog, which only tested that flag, could never revive it. The
+  // field stayed frozen for the rest of the page's life while rAF itself kept
+  // ticking. Catching here guarantees the chain is always rescheduled.
+  //
+  // The token orphans a superseded loop: if the watchdog ever restarts while
+  // an old chain is somehow still pending, the stale chain returns on its next
+  // callback instead of running a second physics pass over the same buffers.
+  function frame(time, token) {
+    if (token !== loopToken) return;
+    frameCount++;
+    try {
+      renderFrame(time);
+    } catch (err) {
+      if (DEBUG) console.error("particles: frame error", err);
+    }
     if (!document.hidden) {
-      requestAnimationFrame(frame);
+      requestAnimationFrame((t) => frame(t, token));
     } else {
       state.running = false;
     }
@@ -251,7 +270,8 @@
     if (state.running) return;
     state.running = true;
     lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
-    requestAnimationFrame(frame);
+    const token = ++loopToken;
+    requestAnimationFrame((t) => frame(t, token));
   }
 
   function startDebug() {
@@ -302,7 +322,19 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) start(); });
     window.addEventListener("focus", () => { if (!document.hidden) start(); });
     window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
-    setInterval(() => { if (!document.hidden && !state.running) start(); }, 1000);  // watchdog
+    // Liveness watchdog. Testing state.running alone was the bug: a loop that
+    // died mid-frame left the flag set, so this was a permanent no-op. Compare
+    // the painted-frame counter instead, and clear the stale flag so start()
+    // can actually revive the field.
+    let seenFrames = -1;
+    setInterval(() => {
+      if (document.hidden) { seenFrames = frameCount; return; }
+      if (!state.running || frameCount === seenFrames) {
+        state.running = false;
+        start();
+      }
+      seenFrames = frameCount;
+    }, 1000);
 
     if (DEBUG) startDebug();
     start();
