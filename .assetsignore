@@ -9,6 +9,7 @@ shared/
 functions/
 scripts/
 articles/_template/
+flows/
 assets/js/curriculum.js
 assets/js/curriculum-data.js
 assets/js/curriculum-questions.js
@@ -22,4 +23,5 @@ wrangler.toml
 .env*
 CNAME
 schema.sql
+migrations/
 *.md

@@ -6,3 +6,12 @@
 node_modules/
 # OS
 .DS_Store
+
+# Scratch probes. Rendering checks and viewport measurements get written into
+# tests/ so they can resolve playwright from tests/node_modules, and `git add -A`
+# has swept them into a PUBLIC repository twice. They carry absolute paths and
+# no assertions; anything worth keeping becomes a real contract test instead.
+tests/*_tmp.mjs
+tests/.tmp-*
+tests/probe-*.mjs
+tests/cardshot-*.mjs

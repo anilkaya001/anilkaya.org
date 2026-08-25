@@ -4,6 +4,12 @@
    topic-specific course metadata, and handles Google auth + D1 sync.
    ============================================================= */
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
+import {
+  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, FLOWS_USERNAMES,
+  parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
+  isLearnAudience, isLocked, nextFailureState, sessionEpoch,
+} from "./shared/flows-auth.js";
+import { FLOWS_PAGES } from "./shared/flows-pages.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -119,6 +125,16 @@ const MARKET_SNAPSHOT_SCHEMA_SQL =
 // snapshot inline once it is older than this, and on a failed repair it touches
 // the row so the next inline attempt is a full window away (no per-request storm
 // during a sustained upstream outage).
+// Flows tables. Workers Builds does not apply migrations to an existing D1
+// database, so — exactly as for market_snapshot above — the Worker creates
+// these on first use. Without it a missed migration would leave the board
+// permanently showing its "pending" empty state and silently skip login
+// throttling, both of which fail quietly rather than loudly.
+const FLOWS_SCHEMA_SQL = [
+  "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0))",
+  "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))",
+];
+
 const MARKET_STALE_MS = 45 * 60 * 1000;
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
@@ -202,18 +218,22 @@ function requireGoogleConfig(env) {
   }
 }
 
-async function readJSON(request) {
-  const contentType = request.headers.get("Content-Type") || "";
-  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
-  if (mediaType !== "application/json") {
-    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
-  }
-
+/**
+ * Read a request body with a HARD byte cap, stopping the moment it is
+ * exceeded.
+ *
+ * Content-Length is a claim, not a fact: a chunked request simply omits it,
+ * and `Number(null || 0)` is 0, which passes any `> limit` guard. Checking the
+ * header alone therefore caps nothing at all — the body still materialises in
+ * full before anything truncates it. The header check below is kept only as a
+ * cheap early rejection; the loop is what actually enforces the limit.
+ */
+async function readBounded(request, maxBytes, message) {
   const declared = Number(request.headers.get("Content-Length"));
-  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) {
-    throw new HttpError(413, "payload_too_large", "JSON body is too large");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new HttpError(413, "payload_too_large", message);
   }
-  if (!request.body) throw new HttpError(400, "invalid_json", "A JSON body is required");
+  if (!request.body) return new Uint8Array(0);
 
   const reader = request.body.getReader();
   const chunks = [];
@@ -222,16 +242,33 @@ async function readJSON(request) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_JSON_BYTES) {
-      await reader.cancel();
-      throw new HttpError(413, "payload_too_large", "JSON body is too large");
+    if (total > maxBytes) {
+      // Stop reading and throw. Do NOT cancel the stream: cancelling a request
+      // body tears the connection down rather than delivering this 413, and a
+      // caller that gets a reset instead of a status learns nothing. Every
+      // other early-return route here abandons the body the same way, and the
+      // runtime discards the remainder when the request ends. The cap is
+      // enforced by not reading further, which is what actually bounds memory.
+      throw new HttpError(413, "payload_too_large", message);
     }
     chunks.push(value);
   }
-
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
+async function readJSON(request) {
+  const contentType = request.headers.get("Content-Type") || "";
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
+    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
+  }
+
+  if (!request.body) throw new HttpError(400, "invalid_json", "A JSON body is required");
+
+  const bytes = await readBounded(request, MAX_JSON_BYTES, "JSON body is too large");
   try {
     const value = JSON.parse(new TextDecoder().decode(bytes));
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
@@ -870,11 +907,173 @@ async function loadAcademyBootstrapSnapshot(env, user) {
   };
 }
 
+/* ---------- Flows helpers ---------------------------------------- */
+
+async function currentFlowsUser(request, env) {
+  const token = getCookie(request, FLOWS_COOKIE);
+  if (!token || !env.SESSION_SECRET) return null;
+  return verifyFlowsSession(token, env.SESSION_SECRET, sessionEpoch(env));
+}
+
+// Bounded form read. A login body is a few dozen bytes; anything larger
+// is not a login and is refused before it reaches the KDF.
+async function readFlowsForm(request) {
+  const bytes = await readBounded(request, 4096, "Request body too large");
+  return new URLSearchParams(new TextDecoder().decode(bytes));
+}
+
+function flowsLoginResponse(message) {
+  // Deliberately uniform: never reveals whether the username exists.
+  return new Response(FLOWS_PAGES.loginPage({ error: message }), {
+    status: 401,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
+ * The ingest cap is a READ-path CPU guarantee, not an arbitrary size guard.
+ *
+ * A "zero-parse byte passthrough" is not free: the stored value still crosses
+ * the D1 driver and the response body. Measured against local workerd,
+ * calibrated with PBKDF2-10k (5.09 ms of separately known CPU) as a ruler:
+ *
+ *      15 KB -> 1.60 ms      469 KB ->  6.08 ms
+ *     117 KB -> 3.03 ms     1174 KB -> 12.53 ms   (over the 10 ms budget)
+ *
+ * Least squares over those four points gives TWO terms, and both matter:
+ *
+ *      cost = 1.7 ms fixed + 1 ms per 108 KB
+ *
+ * The fixed term is the part that is easy to drop, and dropping it is how the
+ * earlier 2 MB cap looked acceptable and how this comment previously claimed a
+ * 256 KB read costs 2.4 ms. It does not — 2.4 ms is the marginal term alone;
+ * the real figure is 4.1 ms, or 41% of the budget rather than 24%.
+ *
+ * At 128 KB the bound is 2.9 ms, under a third of the 10 ms Workers Free
+ * allowance, which leaves the isolate's burst tolerance as an actual margin
+ * instead of something the design leans on. Nothing larger than the cap can be
+ * stored, so nothing larger can be served: the cap is what makes that bound
+ * hold. A 50-row board measures 29 KB and a per-ticker card 20-40 KB, so this
+ * is still three to four times the largest payload either produces.
+ */
+const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;
+
+function timingSafeEqualStr(a, b) {
+  const x = String(a ?? ""), y = String(b ?? "");
+  const n = Math.max(x.length, y.length);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
+/** The one ticker pattern. Both the ingest key check and the card read use it. */
+const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
+
+/** Fetch a stored blob by key. Returns {payload, updatedAt}, or null if absent. */
+async function readFlowsPayload(env, key) {
+  if (!env.DB) return null;
+  await ensureFlowsTables(env);
+  const row = await env.DB.prepare(
+    "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
+  ).bind(key).first().catch(() => null);
+  return row && row.payload ? { payload: row.payload, updatedAt: row.updated_at } : null;
+}
+
+/**
+ * Serve a stored blob without parsing it. The value was validated as JSON at
+ * ingest, so parsing here would only burn CPU proportional to its size — the
+ * one cost this design exists to avoid.
+ *
+ * X-Payload-Updated is how a reader detects a STALE card without the Worker
+ * having to look inside. Once a card has been written once, a later pipeline
+ * failure leaves the old row in place and this route would answer 200 with
+ * month-old gamma levels beside a board showing today's date — and the Worker
+ * structurally cannot notice, because not parsing is the whole architecture.
+ * The write timestamp is already a column, so surfacing it costs one field in
+ * the SELECT and no CPU at all.
+ */
+function passthrough(stored) {
+  return new Response(stored.payload, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Payload-Updated": String(stored.updatedAt || 0),
+    },
+  });
+}
+
+let flowsSchemaReady = false;
+async function ensureFlowsTables(env) {
+  if (flowsSchemaReady || !env.DB) return;
+  try {
+    await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+    flowsSchemaReady = true;
+  } catch { /* a read will simply return nothing; never fail a request on this */ }
+}
+
+/**
+ * The throttle key.
+ *
+ * Keying on the username alone was wrong twice over. The roster is hardcoded
+ * in a PUBLIC repository, so anyone can read all eleven names: eight wrong
+ * passwords would lock a real user out of the section for fifteen minutes,
+ * repeatable indefinitely. And the raw submitted string was used as a primary
+ * key, so an attacker could mint unbounded rows in a database whose free-tier
+ * write budget is shared with the live learning app.
+ *
+ * Both are fixed by scoping the key to the CALLER as well as the account, and
+ * by refusing to store anything for a username that is not on the roster — an
+ * off-roster attempt can never succeed, so there is nothing worth counting.
+ */
+function flowsThrottleKey(request, username) {
+  if (!FLOWS_USERNAMES.includes(username)) return null;
+  // CF-Connecting-IP is set by the edge and cannot be spoofed by the client.
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  return username + "|" + ip;
+}
+
+async function flowsLockRecord(env, username) {
+  if (!username || !env.DB) return null;
+  await ensureFlowsTables(env);
+  try {
+    return await env.DB.prepare(
+      "SELECT failures, first_at FROM flows_login_failures WHERE username = ?"
+    ).bind(username).first();
+  } catch { return null; }
+}
+
+async function recordFlowsFailure(env, username, previous) {
+  // username here is a throttle key from flowsThrottleKey(); a null one means
+  // the attempt was off-roster and must not create a row.
+  if (!username || !env.DB) return;
+  await ensureFlowsTables(env);
+  const next = nextFailureState(previous);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO flows_login_failures (username, failures, first_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, first_at = excluded.first_at"
+    ).bind(username, next.failures, next.first_at).run();
+  } catch { /* throttling is best-effort; never block a login on it */ }
+}
+
+async function clearFlowsFailures(env, username) {
+  if (!username || !env.DB) return;
+  try {
+    await env.DB.prepare("DELETE FROM flows_login_failures WHERE username = ?").bind(username).run();
+  } catch { /* best-effort */ }
+}
+
 async function currentUser(request, env) {
   const token = getCookie(request, "session");
   if (!token || !env.SESSION_SECRET) return null;
   const payload = await verifySession(token, env.SESSION_SECRET);
-  return payload ? { id: payload.sub, email: payload.email || "", name: payload.name || "" } : null;
+  // Cookie NAME is not a security boundary — a caller chooses which cookie
+  // carries which token, and both audiences are signed with SESSION_SECRET.
+  // The audience claim is the boundary. A token minted for /flows is refused
+  // here; a legacy token predating audiences (no aud at all) is still
+  // honoured so nobody signed in today gets logged out.
+  if (!payload || !isLearnAudience(payload)) return null;
+  return { id: payload.sub, email: payload.email || "", name: payload.name || "" };
 }
 
 const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
@@ -1064,7 +1263,8 @@ async function route(request, env, url, ctx) {
       ).bind(user.sub, user.email, user.name, Date.now()).run();
 
       const session = await signSession(
-        { sub: user.sub, email: user.email, name: user.name, exp: Date.now() + 1000 * 60 * 60 * 24 * 30 },
+        { sub: user.sub, email: user.email, name: user.name, aud: LEARN_AUDIENCE,
+          exp: Date.now() + 1000 * 60 * 60 * 24 * 30 },
         env.SESSION_SECRET
       );
       return redirect(origin + "/lab/?auth=ok", 302, [
@@ -1599,6 +1799,179 @@ async function route(request, env, url, ctx) {
     return json({ ok: true, record, duplicate, generation }, 200, generationHeaders(generation));
   }
 
+  /* ---------- Flows: credential-gated options-flow section ----------
+     The HTML lives in shared/flows-pages.js, never in the asset bundle
+     (flows/ is in .assetsignore). A path this block fails to match can
+     therefore only 404 — there is no file for a percent-encoded or
+     case-varied path to leak past the gate. */
+
+  if (path === "/flows") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return redirect(new URL("/flows/", url).toString(), 308);
+  }
+
+  if (path === "/flows/login") {
+    requireMethod(request, ["POST"]);
+    requireSameOrigin(request);
+    if (!env.SESSION_SECRET) throw new HttpError(503, "unavailable", "Sign-in is not configured");
+
+    const credentials = parseCredentials(env.FLOWS_CREDENTIALS);
+    /* A missing credential map or pepper is a CONFIGURATION fault, and it must
+       not masquerade as a wrong password. Without this, a deploy that forgot
+       either secret rejects all eleven accounts with "those credentials were
+       not recognised" — indistinguishable from a typo, so the operator retries
+       the password instead of checking the secret store. The two neighbouring
+       secrets already fail loudly this way. */
+    if (!credentials || !env.FLOWS_PEPPER) {
+      throw new HttpError(503, "unavailable", "Sign-in is not configured");
+    }
+    const form = await readFlowsForm(request);
+    const username = String(form.get("username") || "").trim().toLowerCase();
+    const password = String(form.get("password") || "");
+
+    const throttleKey = flowsThrottleKey(request, username);
+    const locked = await flowsLockRecord(env, throttleKey);
+    if (isLocked(locked)) {
+      return flowsLoginResponse("Too many attempts. Try again shortly.");
+    }
+
+    const verified = await verifyCredential(username, password, credentials, env.FLOWS_PEPPER);
+    if (!verified) {
+      // Write only on failure, and only for a roster username from a known
+      // caller: the happy path costs no D1 rows, and an off-roster attempt
+      // costs none either.
+      await recordFlowsFailure(env, throttleKey, locked);
+      return flowsLoginResponse("Those credentials were not recognised.");
+    }
+
+    await clearFlowsFailures(env, throttleKey);
+    const session = await signFlowsSession(
+      verified, env.SESSION_SECRET, FLOWS_SESSION_TTL_SECONDS, sessionEpoch(env),
+    );
+    return redirect(origin + "/flows/", 303, [
+      cookie(FLOWS_COOKIE, session, { maxAge: FLOWS_SESSION_TTL_SECONDS }),
+    ]);
+  }
+
+  if (path === "/flows/logout") {
+    requireMethod(request, ["POST"]);
+    requireSameOrigin(request);
+    return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
+  }
+
+  if (path === "/flows/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    const session = await currentFlowsUser(request, env);
+    const body = session
+      ? FLOWS_PAGES.boardPage({ username: session.username })
+      : FLOWS_PAGES.loginPage();
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  if (path === "/api/flows/ingest") {
+    // The pipeline runs in GitHub Actions and POSTs finished payloads here.
+    // GitHub deliberately holds NO Cloudflare API token: Cloudflare's KV:Edit
+    // and D1:Edit permissions are ACCOUNT-scoped, so a CI credential could
+    // reach the live learning database. A bearer token scoped to this one
+    // route cannot.
+    requireMethod(request, ["GET", "POST"]);
+    if (!env.FLOWS_INGEST_TOKEN) throw new HttpError(503, "unavailable", "Ingest is not configured");
+
+    const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    // Constant-time: a length-leaking early return would let an attacker
+    // narrow the token one byte at a time.
+    if (!offered || !timingSafeEqualStr(offered, env.FLOWS_INGEST_TOKEN)) {
+      throw new HttpError(401, "unauthorized", "Authentication required");
+    }
+
+    const key = url.searchParams.get("key") || "";
+    // flows_payload is a keyed blob store, so a per-ticker card is just another
+    // key. The ticker pattern is deliberately strict: this string becomes a
+    // primary key, and the read path builds the same key from a query
+    // parameter, so anything the two sides could disagree about is a bug.
+    const card = key.startsWith("card:") ? key.slice(5) : null;
+    const validKey = card !== null
+      ? FLOWS_TICKER_RE.test(card)
+      : /^board:(long|short)$|^meta$/.test(key);
+    if (!validKey) {
+      throw new HttpError(400, "invalid_key", "Unknown payload key");
+    }
+
+    /* GET returns what is currently stored, under the same bearer.
+
+       The pipeline needs it for hysteresis: a name already on the board should
+       stay until it falls out of the exit band, and that needs yesterday's
+       ticker list. previousIds was a hardcoded empty array, so the mechanism
+       had nothing to hold and the wider enrichment buffer it justified — ten
+       extra names of API cost per run — bought nothing. */
+    if (request.method === "GET") {
+      const stored = await readFlowsPayload(env, key);
+      if (!stored) return json({ key, status: "pending" });
+      return passthrough(stored);
+    }
+
+    const payload = new TextDecoder().decode(
+      await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"),
+    );
+    // Parse once, here, purely to reject malformed JSON at the door — the
+    // read path must never parse, so a bad payload would otherwise be served
+    // verbatim to the browser and fail there instead.
+    try { JSON.parse(payload); }
+    catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
+
+    await ensureFlowsTables(env);
+    await env.DB.prepare(
+      "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
+    ).bind(key, payload, Date.now()).run();
+
+    return json({ ok: true, key, bytes: payload.length });
+  }
+
+  if (path.startsWith("/api/flows/")) {
+    requireMethod(request, ["GET"]);
+    const session = await currentFlowsUser(request, env);
+    if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    if (path === "/api/flows/board") {
+      const side = url.searchParams.get("side") === "short" ? "short" : "long";
+      const stored = await readFlowsPayload(env, "board:" + side);
+      if (stored === null) {
+        return json({ side, rows: [], generatedAt: null, status: "pending" });
+      }
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/card") {
+      // The ticker is validated against the SAME pattern the ingest route
+      // enforces on the key it stores. If the two ever disagree, a card that
+      // was written could not be read, which is the kind of failure that looks
+      // like missing data rather than like a bug.
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      const stored = await readFlowsPayload(env, "card:" + ticker);
+      if (stored === null) {
+        // A valid ticker with no card yet is "not built", not an error: the
+        // board and the cards are published by separate POSTs, so a card can
+        // legitimately lag its row. Answering 404 here would paint the whole
+        // board with errors the first time a card publish fails.
+        return json({ ticker, status: "pending" });
+      }
+      return passthrough(stored);
+    }
+
+    throw new HttpError(404, "not_found", "API route not found");
+  }
+
+  if (path.startsWith("/flows/")) {
+    throw new HttpError(404, "not_found", "Not found");
+  }
+
   if (path.startsWith("/api/")) {
     throw new HttpError(404, "not_found", "API route not found");
   }
@@ -1641,7 +2014,12 @@ function finalize(response, request, url) {
   if (contentType.includes("text/html")) out.headers.set("Content-Security-Policy", CSP);
   else out.headers.delete("Content-Security-Policy");
 
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) {
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/") ||
+      url.pathname === "/flows" || url.pathname.startsWith("/flows/")) {
+    // Gated documents join the no-store set. "no-cache" would still permit a
+    // shared cache to STORE the board (it only forces revalidation), and the
+    // board is per-account data behind a credential. Assets under /assets/
+    // are unaffected and stay immutably cacheable.
     // Personal API/auth data must never be cached. The one exception is a
     // successful GET/HEAD on /api/markets — public, non-personal index data that
     // sets its own short public Cache-Control. Errors (405, 500) still get

@@ -9,28 +9,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=40") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=47") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=40") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=47") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=40") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=47") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=40") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=47") format("woff2");
 }
 
 /* ---- Design tokens ---- */
@@ -217,6 +217,25 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   box-shadow: 0 6px 20px color-mix(in srgb, var(--gold-harvest) 30%, transparent);
 }
 
+/* The long "Econometrics Lab" label is the widest tab, and nav.js equalises
+   EVERY tab to the widest so the sliding indicator never resizes — so that one
+   label sets the width of all four. With three tabs the full label fitted down
+   to 481px; the fourth tab made it overflow from 793px all the way down.
+
+   Measured with Playwright against the real pages before and after. Before:
+   /lab/ and /lab/review/ clipped 207px at 481px, 148px at 640px and 25px at
+   768px, with the Flows tab itself entirely off-screen — its right edge at
+   628px inside a 481px viewport. body{overflow-x:hidden} swallowed it, so the
+   suite's scrollWidth assertion stayed green while half the nav was invisible.
+
+   Swapping to the short label saves roughly four times the difference, because
+   all four tabs shrink together. The cutoff is 800px because 794px is the
+   narrowest width that still fitted the full label. */
+@media (max-width: 800px) {
+  .lab-full { display: none; }
+  .lab-short { display: inline; }     /* "Lab" instead of "Econometrics Lab" */
+}
+
 @media (max-width: 600px) {
   .topbar__brand { display: none; }
   /* keep grid placement when the brand leaves the flow: pill stays centered,
@@ -226,13 +245,28 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   .pill a { padding: 0.5rem 0.7rem; font-size: 0.82rem; }
 }
 @media (max-width: 480px) {
-  .lab-full { display: none; }
-  .lab-short { display: inline; }     /* "Lab" instead of "Econometrics Lab" */
   .pill a { padding: 0.46rem 0.6rem; font-size: 0.78rem; }
   .social-btn { width: 2.1rem; height: 2.1rem; }
   .social-btn::after { inset: -7px; }
   .topbar { gap: 0.5rem; }
 }
+
+/* A fourth pill tab (Flows) overflows the topbar on the narrowest phones.
+   Measured with Playwright against the real pages: with three tabs the social
+   button's right edge lands at exactly 302px in a 320px viewport — it fits with
+   nothing to spare. The fourth tab pushes it to 333px, clipping 13px, and on
+   /articles/ to 361px because .pill a.is-current sets font-weight:700 and there
+   the bold tab is ALSO the longest label, so nav.js equalizes every tab to the
+   wider bold metric. body{overflow-x:hidden} swallows it, so the suite's
+   scrollWidth assertion does not catch it.
+   Dropping the weight change below 400px makes tab width independent of which
+   page is active; the sliding gold indicator and colour still mark "current".
+   Verified clip-free at 320/360/390 on all eleven pages. */
+@media (max-width: 400px) {
+  .pill a { padding: 0.46rem 0.44rem; }
+  .pill a.is-current { font-weight: 400; }
+}
+
 
 /* ---- Toast (auth scaffold + notices) ---- */
 .toast {

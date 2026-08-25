@@ -1,0 +1,771 @@
+/* =============================================================
+   flows.css — the credential-gated Flows section.
+   Loaded only by /flows/, alongside base.css. Every token comes
+   from base.css; the only new custom properties here are the two
+   semantic directional colours, which are deliberately NOT the
+   site's gold accent so "up/down" never reads as "emphasis".
+   ============================================================= */
+
+:root {
+  /* Directional pair, checked against --bg-elev (#12110d):
+     jade  #6f9f78 -> 6.9:1, brick #d1685a -> 5.4:1. Both clear AA
+     for body text, and neither collides with the gold accent. */
+  --flow-up:   #6f9f78;
+  --flow-down: #d1685a;
+  --flow-flat: var(--ink-faint);
+  --flow-surface: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+}
+
+.flows-body {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.flows-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-mystic);
+}
+
+/* ---------- sign-in ------------------------------------------- */
+
+.flows-auth {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 6rem var(--pad) 3rem;
+}
+
+.flows-auth__card {
+  width: min(26rem, 100%);
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: clamp(1.4rem, 5vw, 2.2rem);
+}
+
+.flows-auth__card h1 {
+  font-size: clamp(1.8rem, 1.4rem + 1.6vw, 2.4rem);
+  line-height: 1.1;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.flows-auth__lede {
+  color: var(--ink-dim);
+  font-size: 0.96rem;
+  margin-bottom: 1.4rem;
+}
+
+.flows-alert {
+  border-left: 2px solid var(--flow-down);
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.92rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.2rem;
+}
+
+.flows-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.flows-form label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-top: 0.7rem;
+}
+
+.flows-form input {
+  /* 16px minimum prevents iOS zooming the viewport on focus. */
+  font-family: var(--font-mono);
+  font-size: 16px;
+  min-height: 44px;
+  padding: 0.6rem 0.75rem;
+  color: var(--ink);
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+}
+
+.flows-form input:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+.flows-submit {
+  margin-top: 1.4rem;
+  min-height: 44px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #1a1407;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: filter 0.2s var(--ease);
+}
+
+.flows-submit:hover { filter: brightness(1.08); }
+
+/* ---------- board shell --------------------------------------- */
+
+.flows-main {
+  max-width: 78rem;
+  margin-inline: auto;
+  padding: 6rem var(--pad) 4rem;
+}
+
+.flows-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.flows-head h1 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.4rem);
+  line-height: 1.1;
+  margin-top: 0.25rem;
+}
+
+.flows-session {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.flows-user {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+}
+
+.flows-signout {
+  min-height: 44px;
+  padding: 0 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.flows-signout:hover { color: var(--ink); border-color: var(--gold-mystic); }
+
+.flows-status {
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+  padding: 0.9rem 0;
+}
+
+/* ---------- long / short ---------------------------------------
+   The selected side is marked by weight, a filled ground AND the
+   aria-pressed state, never by colour alone. */
+
+.flows-sides {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.28rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--flow-surface);
+  margin-bottom: 1.1rem;
+}
+
+.flows-side {
+  min-height: 44px;
+  min-width: 6.5rem;
+  padding: 0 1.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.flows-side:hover { color: var(--ink); }
+
+.flows-side.is-on {
+  color: #1a1407;
+  font-weight: 700;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+}
+
+.flows-side:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 3px;
+}
+
+/* ---------- table ----------------------------------------------
+   The WRAPPER scrolls, never the page. A tested invariant: the
+   suite asserts zero horizontal overflow at 320px. */
+
+.flows-tablewrap {
+  overflow-x: auto;
+  /* The wrapper is focusable (tabindex="0" in the markup) so a keyboard user
+     can scroll it. Give that focus a visible ring. */
+  outline-offset: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--bg-elev);
+}
+
+.flows-table {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.flows-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  font-size: 0.84rem;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.flows-table th,
+.flows-table td {
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.flows-table thead th {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--bg-deep);
+}
+
+.flows-table thead abbr { text-decoration: none; border-bottom: 0; cursor: help; }
+
+.flows-table tbody tr:last-child td { border-bottom: 0; }
+.flows-table tbody tr:hover { background: var(--bg-deep); }
+
+.c-rank { width: 3rem; }
+
+.c-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb-tk {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.fb-pos { color: var(--flow-up); }
+.fb-neg { color: var(--flow-down); }
+.fb-flat { color: var(--flow-flat); }
+
+/* Score cell: a proportional fill behind a signed number. The JS
+   sets --w (0..1) inline; style-src permits 'unsafe-inline'. */
+.fb-score {
+  position: relative;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fb-bar {
+  position: absolute;
+  inset: 0.28rem auto 0.28rem 0;
+  width: calc(var(--w, 0) * 100%);
+  border-radius: 2px;
+  /* 12%, not 22%. The label is painted in the same hue as its own fill, so the
+     tint sets the label's contrast. Measured against both grounds: at 22% the
+     negative case is 3.99:1 and the positive 4.49:1 — both under the 4.5:1
+     WCAG AA floor, and worst on exactly the top-ranked rows, where the bar
+     covers most of the cell. At 12% they are 4.61:1 and 5.33:1 over --bg-elev
+     and 4.92:1 / 5.71:1 over the --bg-deep row hover. */
+  background: color-mix(in srgb, var(--flow-up) 12%, transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.fb-neg .fb-bar,
+.fb-score.is-neg .fb-bar {
+  background: color-mix(in srgb, var(--flow-down) 12%, transparent);
+}
+
+.fb-score > span { position: relative; z-index: 1; }
+
+/* Five family sub-scores as a compact glyph.
+
+   Bars grow UP from a centre line for positive and DOWN for negative, so the
+   sign is carried by geometry. It used to be height: |value| with the sign
+   conveyed only by a colour swap, which meant +70 and -70 were pixel-identical
+   and a red/green-blind reader saw a unanimous decomposition on a name whose
+   positioning family was maximally bearish (WCAG 1.4.1, "Use of Color").
+   Colour now reinforces the direction rather than carrying it. */
+.fb-fam {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 1rem;
+  /* the zero line, so an absent bar reads as zero rather than as nothing */
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px), var(--hairline) calc(50% - 0.5px),
+    var(--hairline) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+}
+
+.fb-fam i {
+  position: relative;
+  display: block;
+  width: 3px;
+}
+
+.fb-fam i::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 50%;
+  height: calc(var(--h, 0) * 0.5rem);
+  border-radius: 1px;
+  background: var(--gold-mystic);
+}
+
+.fb-fam i.is-neg::before {
+  bottom: auto;
+  top: 50%;
+  background: var(--flow-down);
+}
+
+/* Missing is not zero and is certainly not positive: a hollow tick on the
+   centre line, distinguishable from a real bar at any length. */
+.fb-fam i.is-null::before {
+  top: calc(50% - 1px);
+  bottom: auto;
+  height: 2px;
+  background: var(--ink-dim);
+  opacity: 0.55;
+}
+
+.fb-empty {
+  padding: 2.2rem 1rem;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 0.94rem;
+}
+
+.flows-foot {
+  margin-top: 1.4rem;
+  max-width: var(--measure);
+  font-size: 0.86rem;
+  color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flows-submit,
+  .flows-side,
+  .flows-signout { transition: none; }
+}
+
+/* =============================================================
+   Card reader — a modal dialog over the board.
+
+   Below 640px it is a full-bleed sheet rather than a centred box,
+   which is the correct mobile detail-view idiom, and it uses dvh so
+   the iOS URL bar cannot clip the footer.
+   ============================================================= */
+
+.fc {
+  /* The UA centres a dialog with margin:auto; restate it because the
+     shorthand reset below would otherwise leave it pinned left. */
+  margin: auto;
+  width: min(52rem, 94vw);
+  max-width: none;
+  max-height: 90dvh;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.fc::backdrop { background: rgba(0, 0, 0, 0.62); }
+
+.fc-inner { padding: clamp(1rem, 3vw, 1.7rem); }
+
+.fc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fc-id { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+
+.fc-id h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+}
+
+.fc-id h2:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 3px; }
+
+.fc-score {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.fc-score.is-pos { color: var(--flow-up); }
+.fc-score.is-neg { color: var(--flow-down); }
+
+.fc-meta { color: var(--ink-dim); font-size: 0.86rem; }
+
+.fc-close {
+  flex: none;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.15rem 0.5rem 0.3rem;
+  cursor: pointer;
+}
+
+.fc-close:hover { color: var(--ink); border-color: var(--gold-mystic); }
+
+/* A persistent band, not a toast: a reader scrolls past a toast, and a card
+   whose numbers are two days old must keep saying so. */
+.fc-staleband {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--flow-down);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+/* Staleness is marked on the chrome, NOT by dimming text.
+   opacity:0.62 over --bg-elev pushed --ink-dim body copy to roughly 2.9:1,
+   below the 4.5:1 floor — and it dimmed the very sentence explaining why the
+   card was dimmed. The band says it in words; a rule down the left edge says
+   it visually without touching a single glyph's contrast. */
+.fc.is-stale .fc-panel {
+  border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
+  padding-left: 0.8rem;
+}
+
+.fc.is-stale .gp,
+.fc.is-stale .fp { opacity: 0.72; }
+
+.fc-panel { margin-top: 1.5rem; }
+
+.fc-panel h3 {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* The question the panel answers, stated before its chart. A panel that
+   cannot say what it is for does not belong on the card. */
+.fc-q {
+  margin: 0 0 0.7rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.fc-note {
+  margin: 0.6rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.fc-dead {
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px dashed var(--hairline);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+.fc-prov {
+  margin: 1.6rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+/* ---------- gamma profile ---------------------------------------- */
+
+.gp { display: block; width: 100%; height: auto; }
+
+/* currentColor inside a <pattern> resolves against the pattern element's own
+   computed colour, not the referencing shape's — so the hue is set here. */
+.gp-negpat { color: var(--flow-down); }
+
+.gp-zero { stroke: var(--hairline); stroke-width: 1; }
+.gp-bar.is-pos { fill: var(--gold-mystic); }
+.gp-bar.is-neg { stroke: none; }
+
+.gp-cum { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+.gp-cum.is-pos { stroke: var(--gold-celadon); }
+.gp-cum.is-neg { stroke: var(--flow-down); stroke-dasharray: 4 3; }
+
+.gp-spot { stroke: var(--ink); stroke-width: 1.5; }
+.gp-flip { stroke: var(--gold-harvest); stroke-width: 1.5; stroke-dasharray: 6 4; }
+
+.gp-plate rect { fill: var(--bg-elev); stroke: var(--hairline); }
+/* Drawn when a plate had to be nudged off its rule to avoid a collision, so
+   the label is never silently detached from the level it names. */
+.gp-leader { stroke: var(--hairline); stroke-width: 1; }
+.gp-plate-k { fill: var(--ink); font-family: var(--font-mono); font-size: 10.5px; }
+.gp-plate-s { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 9.5px; }
+.gp-plate.is-flip .gp-plate-k { fill: var(--gold-harvest); }
+
+.gp-price { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.gp-price.is-spot { fill: var(--ink); }
+.gp-price.is-flip { fill: var(--gold-harvest); }
+.gp-axis { fill: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
+
+/* ---------- session path ------------------------------------------ */
+
+.fp { display: block; width: 100%; height: auto; }
+.fp-zero { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 3 3; }
+.fp-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
+.fp-line.is-pos { stroke: var(--flow-up); }
+.fp-line.is-neg { stroke: var(--flow-down); }
+
+.fc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.2rem 1rem;
+  margin: 0.8rem 0 0;
+}
+
+.fc-stats dt { color: var(--ink-dim); font-size: 0.78rem; }
+.fc-stats dd {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+/* ---------- tables ------------------------------------------------- */
+
+.fc-levels,
+.fc-congress {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.fc-levels th,
+.fc-congress th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink-dim);
+  font-weight: 500;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fc-levels td,
+.fc-congress td {
+  padding: 0.38rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent);
+}
+
+.fc-levels .c-num,
+.fc-congress .c-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Above and below spot is geometry, not a bullish or bearish opinion, so it
+   deliberately does not borrow the directional palette. */
+.fc-levels .is-above { color: var(--ink); }
+.fc-levels .is-below { color: var(--ink-dim); }
+
+.fc-member { display: block; }
+.fc-issuer,
+.fc-chamber {
+  display: inline-block;
+  margin-right: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fc-side.is-buy { color: var(--flow-up); }
+.fc-side.is-sell { color: var(--flow-down); }
+.fc-amt { color: var(--ink-dim); font-size: 0.8rem; }
+
+/* Past 45 days the STOCK Act window has lapsed and the move is usually gone.
+   Marked with weight as well as colour, so the signal is not colour-only. */
+.fc-congress .is-late { color: var(--flow-down); font-weight: 600; }
+
+/* ---------- score derivation --------------------------------------- */
+
+.fc-fam { list-style: none; margin: 0; padding: 0; }
+
+.fc-fam li {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(4rem, 8rem) 3rem 1fr;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.32rem 0;
+}
+
+.fc-fam-k {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.fc-fam-track {
+  position: relative;
+  display: block;
+  height: 0.55rem;
+  background: color-mix(in srgb, var(--hairline) 60%, transparent);
+  border-radius: 2px;
+}
+
+/* Positive grows right of centre, negative left: the sign is geometric, so a
+   colour-blind reader gets it from position rather than hue. */
+.fc-fam-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: calc(var(--w, 0) * 50%);
+  border-radius: 2px;
+  background: var(--gold-mystic);
+}
+
+.fc-fam li.is-neg .fc-fam-track i {
+  left: auto;
+  right: 50%;
+  background: var(--flow-down);
+}
+
+.fc-fam li.is-null .fc-fam-track i {
+  left: calc(50% - 1px);
+  width: 2px;
+  background: var(--ink-dim);
+  opacity: 0.55;
+}
+
+.fc-fam-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 0.85rem;
+}
+
+.fc-fam-l { color: var(--ink-dim); font-size: 0.78rem; }
+
+/* ---------- the ticker button -------------------------------------- */
+
+.fb-open {
+  all: unset;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  border-bottom: 1px solid transparent;
+}
+
+.fb-open:hover { color: var(--gold-celadon); border-bottom-color: currentColor; }
+.fb-open:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .fc {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .fc-fam li { grid-template-columns: 1.2rem minmax(3rem, 1fr) 2.6rem; }
+  .fc-fam-l { grid-column: 1 / -1; padding-left: 1.8rem; }
+  .fc-congress .fc-amt { font-size: 0.72rem; }
+}
+
+/* Board staleness. A band, for the same reason the card uses one: a reader
+   scrolls past a toast, and a board whose data stopped advancing must keep
+   saying so on every visit. */
+.flows-stale {
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--flow-down);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+/* Same reasoning as the card: mark the chrome, never the text. */
+body.is-stale .flows-tablewrap {
+  border-color: color-mix(in srgb, var(--flow-down) 55%, transparent);
+}
+
+/* Card tables scroll inside their own box so the DIALOG never scrolls
+   sideways — at 320px that would take the header and the close button
+   off-screen with it. */
+.fc-tablewrap {
+  overflow-x: auto;
+  outline-offset: 2px;
+}
+
+.fc-tablewrap .fc-levels,
+.fc-tablewrap .fc-congress { min-width: 22rem; }
