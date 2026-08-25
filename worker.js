@@ -17,6 +17,7 @@ import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
+import { rankChain, RANK_KEYS, crossesEarnings } from "./shared/flows-premium.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 // Edge-memoization window for rendered course pages. Kept short so a deploy
@@ -1002,6 +1003,298 @@ function passthrough(stored) {
   });
 }
 
+/* =============================================================
+   THE ON-DEMAND CHAIN
+
+   Everything else under /api/flows streams a blob the pipeline
+   already computed. This route does not: the whole point is that a
+   user types a ticker nobody chose in advance, so there is nothing
+   precomputed to stream. The Worker has to call the vendor and do
+   arithmetic on the request path, which is the thing this
+   architecture was built to avoid.
+
+   It is affordable, and that was MEASURED rather than assumed. Auth
+   HMAC + parse 250KB + price 500 contracts + emit the top 120 costs
+   2.29ms of a roughly 10ms budget; a second chain page takes it to
+   about 4.4ms. Three or four external subrequests of a limit of 50 —
+   and the 50 is per INVOCATION, while one invocation prices one
+   ticker, so a twenty-symbol desk is twenty invocations rather than
+   one at 60 subrequests. The expensive half — screening a universe, ranking a
+   cross-section, fitting anything — stays in Actions where it
+   belongs.
+
+   THE CACHE IS NOT AN OPTIMISATION, it is the quota. The vendor key
+   now lives on a request path, so an authenticated user holding down
+   refresh is spending a shared API budget. caches.default is the
+   right store for it: edge-local, free, no D1 write, and NOT counted
+   as a subrequest — which matters because D1's write budget is shared
+   with the learning app and a chain lookup must never be able to
+   starve it.
+
+   Auth is checked before the cache is touched, and what is cached is
+   market data identical for every viewer — the gate is on access, not
+   on content. The key is built from normalised parameters at the route
+   below, never from the raw request.
+   ============================================================= */
+
+/* Overridable for the same reason FLOWS_INGEST_URL is: the contract tests
+   stand a stub upstream on localhost and drive the real route against it,
+   which is the only way to test the cache, the refresh floor and the spot
+   selection rather than just the gate in front of them. An operator who can
+   set this can already read the key it is sent with, so this widens nothing. */
+const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
+
+/* Long enough that a refresh-happy user costs one call, short enough that
+   "refresh" means something during a session. Quotes move faster than this;
+   the response carries its own age so the reader can say so out loud rather
+   than implying it is live. */
+const CHAIN_TTL_SECONDS = 120;
+
+/* The vendor documents `limit` on /option-contracts as maximum=500. Named
+   rather than inlined because the truncation test below compares against it,
+   and a page size that disagrees with the ceiling reports truncation wrong. */
+const CHAIN_PAGE_SIZE = 500;
+
+/* An earnings date is a daily-cadence fact, not a quote. It gets its own cache
+   entry keyed on TICKER ALONE at a long TTL — the chain's key carries strategy
+   and rank (3 x 4 = up to 12 variants), so a per-ticker fact fetched inside the
+   chain would be re-fetched a dozen times per ticker per window for toggles
+   that cannot change it. */
+const INFO_TTL_SECONDS = 6 * 3600;
+
+/* How stale a copy has to be before an explicit refresh is allowed to spend a
+   vendor call. Short enough that pressing refresh feels like it did something,
+   long enough that holding it down cannot drain a shared API budget. */
+const CHAIN_REFRESH_FLOOR_SECONDS = 15;
+
+async function uwFetch(env, path, params) {
+  if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
+  const url = new URL((env.UW_BASE || UW_BASE_DEFAULT) + path);
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: "Bearer " + env.UW_API_KEY, Accept: "application/json" },
+    });
+  } catch {
+    throw new HttpError(502, "chain_upstream", "Market data provider unreachable");
+  }
+  if (response.status === 429) throw new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting");
+  if (!response.ok) throw new HttpError(502, "chain_upstream", "Market data provider returned an error");
+  /* PARSE FAILURES ARE UPSTREAM FAILURES, not 500s. A vendor sending HTML
+     where JSON was promised is their outage being reported as ours. */
+  try {
+    return await response.json();
+  } catch {
+    throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+  }
+}
+
+/**
+ * Fetch and price one ticker's sellable chain.
+ *
+ * THREE CONCURRENT SUBREQUESTS, and a fourth sequentially when the first
+ * chain page fills: the chain, a daily candle, and the live stock state.
+ *
+ * THE BINDING LIMIT IS NOT THE ONE EVERYONE QUOTES. Workers Free allows 50
+ * external subrequests per invocation, and at three or four this route is
+ * nowhere near it — but it also allows only SIX SIMULTANEOUS OPEN
+ * CONNECTIONS per invocation, which is eight times tighter and is what a
+ * Promise.all actually spends. This one opens three of six. Anything added
+ * here goes in that same array, so the count to watch is the width of the
+ * Promise.all, not the total call count.
+ *
+ * One invocation prices ONE ticker — flows-desk.js fans out one request per
+ * symbol — so neither ceiling is per desk. A twenty-symbol desk is twenty
+ * invocations, and what it actually spends is the shared vendor quota.
+ *
+ * Spot is NOT optional and is not defaulted — a covered call's collateral is
+ * the shares at spot, and moneyness is measured against it, so a missing spot
+ * makes every number on the page wrong in a way that still renders. It fails
+ * loudly instead.
+ */
+/**
+ * A per-ticker reference fact, cached on its own key.
+ *
+ * Returns null on ANY failure. That is load-bearing rather than lazy: uwFetch
+ * throws on 429 and on every non-ok status, and this endpoint 404s for symbols
+ * it does not cover — so an uncaught leg would turn a missing earnings date
+ * into "data provider unavailable" for the whole symbol, withholding a priced
+ * table over a marker.
+ */
+async function cachedTickerInfo(env, ctx, ticker) {
+  const key = new Request(`https://flows-info.internal/${ticker}`, { method: "GET" });
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (cache) {
+    const hit = await cache.match(key).catch(() => null);
+    if (hit) return hit.json().catch(() => null);
+  }
+  const raw = await uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/info`, {})
+    .catch(() => null);
+  if (raw === null) return null;
+  /* THE ENVELOPE IS AMBIGUOUS IN THE VENDOR'S OWN SPEC: the schema declares
+     these fields at top level while its example nests them under `data`. Both
+     are unwrapped rather than one being guessed at. */
+  const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
+  if (!d || typeof d !== "object") return null;
+  const out = {
+    nextEarningsDate: typeof d.next_earnings_date === "string" ? d.next_earnings_date : null,
+    announceTime: typeof d.announce_time === "string" ? d.announce_time : null,
+    /* Why a null date is null. "Empty if unknown or not applicable such as
+       ETF/Index" — so an ETF having no earnings and a name whose date is merely
+       unknown are different facts, and the page can say which. */
+    issueType: typeof d.issue_type === "string" ? d.issue_type : null,
+  };
+  if (cache) {
+    const store = new Response(JSON.stringify(out), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `max-age=${INFO_TTL_SECONDS}`,
+      },
+    });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    else await cache.put(key, store).catch(() => {});
+  }
+  return out;
+}
+
+async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
+  const t = encodeURIComponent(ticker);
+  const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+    /* The sellable universe rather than the whole book: out-of-the-money
+       contracts that somebody already holds. Both filters are the vendor's,
+       applied upstream, so they cost nothing here. */
+    maybe_otm_only: "true",
+    exclude_zero_oi_chains: "true",
+    limit: CHAIN_PAGE_SIZE,
+    ...(page > 1 ? { page } : {}),
+  });
+
+  const [firstPage, candles, state, info] = await Promise.all([
+    chainPage(1),
+    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    /* THE DAILY CANDLE IS NOT A LIVE PRICE, and this desk is priced against
+       spot twice over: a covered call's collateral IS the shares at spot, and
+       every moneyness on the page is measured from it. During a session the
+       latest 1d bar is yesterday's close, so a name that has moved 4% since
+       the open was having its whole table priced against a number nobody could
+       trade at. /stock-state is one parameter and nine fields and answers it
+       directly. It is allowed to fail: the candle is still there, and a desk
+       priced off the close and SAYING so beats no desk at all. */
+    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
+    /* The fourth leg of the Promise.all, which is FOUR OF SIX simultaneous
+       connections — the ceiling that actually binds here, eight times tighter
+       than the 50-subrequest cap. Two slots spare. */
+    cachedTickerInfo(env, ctx, ticker),
+  ]);
+
+  const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
+  const rows = unwrap(firstPage);
+  const bars = unwrap(candles);
+  if (!rows.length) throw new HttpError(404, "chain_empty", "No listed options found for that symbol");
+
+  /* THE PAGE SIZE IS A CEILING, NOT A CHAIN.
+  
+     `limit` on this endpoint is documented maximum=500, and the ticker-scoped
+     route has NO `order` parameter — only the sibling screener does. So a
+     single call on any name with more than 500 out-of-the-money contracts
+     carrying open interest returns an arbitrary vendor-ordered slice, and
+     those names are AAPL, SPY, NVDA: exactly the ones a premium desk is for.
+  
+     Two failures followed, and both rendered perfectly. The footer said "N of
+     500 quoted contracts are sellable" as though 500 were the chain. And in a
+     MERGED table a truncated slice of a huge chain was ranked head to head
+     against a complete small-cap chain, so cross-symbol ordering depended on
+     which 500 the vendor happened to send.
+  
+     A second page doubles the reach for one subrequest and roughly 2ms — the
+     route measures 2.29ms at 500 contracts and about 4.4ms at 1000, against a
+     10ms budget. Three pages would be 6.5ms and four 8.5ms, which is too close
+     to spend on a tail. So: two pages, and when even that fills, the payload
+     says `truncated` and the page says so rather than implying it saw
+     everything. Disclosure is what makes a bounded fetch honest; the bound
+     itself is just arithmetic. */
+  let truncated = false;
+  if (rows.length >= CHAIN_PAGE_SIZE) {
+    const second = unwrap(await chainPage(2).catch(() => []));
+    for (const r of second) rows.push(r);
+    /* A full second page means there is a third we did not ask for. A short
+       one means the chain ended inside it, which is the only case where the
+       screened count IS the chain. */
+    truncated = second.length >= CHAIN_PAGE_SIZE;
+  }
+
+  /* The most recent close the vendor will admit to. Bars arrive newest-first
+     on some endpoints and oldest-first on others, so the date is compared
+     rather than an index trusted. */
+  let dailyClose = null, dailyDate = null;
+  for (const b of bars) {
+    const close = Number(b && (b.close ?? b.c));
+    const date = b && (b.date || b.start_time || b.timestamp);
+    if (!Number.isFinite(close) || close <= 0 || !date) continue;
+    const day = String(date).slice(0, 10);
+    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
+  }
+
+  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
+  const liveClose = live ? Number(live.close) : NaN;
+  const useLive = Number.isFinite(liveClose) && liveClose > 0;
+
+  /* WHICH PRICE, AND HOW OLD, both ship. A desk that renders a live quote and
+     a stale close identically is the same omission as one that renders a
+     two-minute-old cached row as live. */
+  const spot = useLive ? liveClose : dailyClose;
+  const spotSource = useLive ? "stock-state" : "daily-close";
+  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
+
+  /* asOf DATES THE DAYS-TO-EXPIRY COUNT, so it must be the trading session,
+     not the wall clock. tape_time is the last print and carries a UTC offset;
+     across the whole US session (13:30-20:00 UTC) its UTC date equals the
+     Eastern trading date, and after the close it stays frozen at the close
+     rather than rolling with the clock — so its date is the session's without
+     needing a timezone rule, which would be a free parameter. Falls back to
+     the candle's own date. */
+  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
+  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
+  const asOf = tapeDay || dailyDate;
+  if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
+
+  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit });
+
+  /* MARKED AFTER THE GATES, so this is ~120 string comparisons rather than
+     1000. A cushion is a diffusion number and an earnings report is not a
+     diffusion, so a contract that outlives one is a different trade at the
+     same premium and the same cushion. */
+  const earnDate = info ? info.nextEarningsDate : null;
+  for (const row of ranked.rows) {
+    row.crossesEarnings = info ? crossesEarnings(row.expiry, earnDate, info.announceTime) : null;
+  }
+  return {
+    ticker, spot, asOf,
+    spotSource,
+    /* "regular", "pre", "post" or whatever else the vendor names a session.
+       Passed through verbatim rather than mapped: an enum this code does not
+       control is not one it should be inventing members of. */
+    marketTime: live && live.market_time ? String(live.market_time) : null,
+    tapeTime,
+    prevClose: live && Number(live.prev_close) > 0 ? Number(live.prev_close) : dailyClose,
+    strategy, ...ranked,
+    /* Whether `screened` is the chain or a ceiling. A reader ranking across
+       symbols needs to know that one of them was cut off. */
+    truncated,
+    pageSize: CHAIN_PAGE_SIZE,
+    /* null when the lookup failed OR the vendor has no date for this symbol —
+       and issueType separates those, because an ETF with no earnings and an
+       equity whose date is merely unknown are different facts. */
+    earnings: info
+      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
+      : null,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 let flowsSchemaReady = false;
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
@@ -1871,6 +2164,27 @@ async function route(request, env, url, ctx) {
     });
   }
 
+  if (path === "/flows/desk" ) {
+    requireMethod(request, ["GET", "HEAD"]);
+    return redirect(new URL("/flows/desk/", url).toString(), 308);
+  }
+
+  if (path === "/flows/desk/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    /* Anonymous visitors get the LOGIN page, not a redirect and not a 404.
+       Same as /flows/: the section's existence is not the secret, and a
+       redirect would bounce a signed-out user to the board rather than back
+       here after signing in. */
+    const session = await currentFlowsUser(request, env);
+    const body = session
+      ? FLOWS_PAGES.deskPage({ username: session.username })
+      : FLOWS_PAGES.loginPage();
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   if (path === "/api/flows/ingest") {
     // The pipeline runs in GitHub Actions and POSTs finished payloads here.
     // GitHub deliberately holds NO Cloudflare API token: Cloudflare's KV:Edit
@@ -1963,6 +2277,78 @@ async function route(request, env, url, ctx) {
         return json({ ticker, status: "pending" });
       }
       return passthrough(stored);
+    }
+
+    if (path === "/api/flows/chain") {
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      /* NORMALISED BEFORE THEY REACH THE CACHE KEY. An unvalidated parameter in
+         a cache key hands an authenticated user unbounded distinct keys to fill
+         the edge cache with, and every miss is a vendor call. */
+      const rawStrategy = url.searchParams.get("strategy");
+      const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
+      const rawRank = url.searchParams.get("rank");
+      const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
+      const wantsRefresh = url.searchParams.get("refresh") === "1";
+
+      const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+      /* Built HERE from the normalised parameters, never from the raw request.
+         A gated response keyed by an attacker-shaped URL is how a cache turns
+         into a bypass. */
+      const cacheKey = new Request(
+        `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
+        { method: "GET" });
+
+      const hit = cache ? await cache.match(cacheKey) : null;
+      const storedAt = hit ? Number(hit.headers.get("X-Chain-Stored")) : NaN;
+      const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
+
+      /* THE REFRESH FLOOR, and it is the quota control rather than a nicety.
+         The vendor key now lives on a request path, so refresh has to actually
+         refresh without also being an unmetered proxy to it. A first draft let
+         refresh=1 skip the cache read outright, which is exactly that: hold the
+         button down and every press is a vendor call.
+
+         So refresh skips the cache only once the copy is older than the floor.
+         Below it the cached body is served and SAYS it was throttled, which
+         bounds vendor traffic to one call per ticker per floor globally, no
+         matter how many users press how hard. Stateless — no D1 write, whose
+         budget is shared with the learning app and must not be spendable from
+         an unauthenticated-adjacent path. */
+      const serveCached = hit && (wantsRefresh ? ageSeconds < CHAIN_REFRESH_FLOOR_SECONDS : true);
+      if (serveCached) {
+        const out = new Response(hit.body, hit);
+        out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
+        out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
+        /* The wrapper below forces no-store on every /api/ response, so this is
+           belt and braces rather than the enforcement. Set anyway: the stored
+           copy carries a real max-age and this is the line that says the copy
+           leaving here does not. */
+        out.headers.set("Cache-Control", "no-store");
+        return out;
+      }
+
+      const payload = await buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 });
+      const body = JSON.stringify(payload);
+
+      if (cache) {
+        const store = new Response(body, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
+            "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
+          },
+        });
+        /* waitUntil so the caller is not waiting on the write. The synthetic
+           key never passes through the response wrapper, so the stored copy
+           keeps its max-age while every served copy gets no-store. */
+        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
+        else await cache.put(cacheKey, store);
+      }
+
+      return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
     }
 
     throw new HttpError(404, "not_found", "API route not found");

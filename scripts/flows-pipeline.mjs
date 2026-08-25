@@ -28,9 +28,9 @@ import {
   gammaDecayCalendar, positioningQuality, effectiveBreadth,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
-  boundedScore, conviction, applyHysteresis,
+  boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
 } from "../shared/flows-features.js";
-import { buildCard } from "../shared/flows-card.js";
+import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -108,7 +108,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function uw(path, params = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+    if (v === undefined || v === null || v === "") continue;
+    /* ARRAYS GET ONE OCCURRENCE EACH. `set(k, String(["a","b"]))` yields the
+       single parameter `a,b`, which expirations[] reads as one malformed date
+       rather than as two good ones — a 422, or worse an empty 200 that looks
+       like a name with no gamma. */
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item !== undefined && item !== null && item !== "") url.searchParams.append(k, String(item));
+      }
+      continue;
+    }
+    url.searchParams.set(k, String(v));
   }
 
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
@@ -316,8 +327,13 @@ function daysToEarnings(row, today) {
 async function verifyDating(sessionDate) {
   if (!sessionDate || DRY_RUN) return { date: !!sessionDate, endDate: !!sessionDate };
 
+  /* THROUGH THE SAME LEG READERS THE CARD USES. Asking a different question
+     than the consumer asks is how a probe reports healthy against a panel that
+     is empty: this one passed `date` while every card printed "no expiry
+     gamma", because both sides read the documented names and the wire sends
+     call_gex / put_gex. */
   const usable = (rows) => (rows || []).some(
-    (r) => r && r.expiry && (num(r.call_gamma) !== 0 || num(r.put_gamma) !== 0));
+    (r) => r && r.expiry && (num(callGammaLeg(r)) !== 0 || num(putGammaLeg(r)) !== 0));
 
   /* A SINGLE-NAME EQUITY, not SPY. The first version probed SPY because it is
      the most liquid thing listed — and got no usable expiry gamma from it
@@ -1301,6 +1317,62 @@ function fakeScreener(count) {
   return rows;
 }
 
+/** Does this row carry none of the four gamma legs buildSurface reads? */
+function card0Unusable(row) {
+  if (!row || typeof row !== "object") return true;
+  return !["call_gamma_ask", "call_gamma_bid", "put_gamma_ask", "put_gamma_bid"]
+    .some((k) => row[k] !== undefined && row[k] !== null && row[k] !== "");
+}
+
+/**
+ * The strike x expiry gamma surface, in the shape /spot-exposures/expiry-strike
+ * returns: one row per (strike, expiry) pair carrying the SAME aggressor-split
+ * leg names the strike ladder uses.
+ *
+ * The names are the load-bearing part. A fixture that invents its own has now
+ * hidden three separate live failures in this repository — call_gamma against
+ * call_gamma_ask, a gamma ladder that could not change sign, and call_gamma
+ * against the wire's call_gex — each of which passed every dry run while the
+ * published panel was empty or wrong. These are the documented ones, and they
+ * match what buildSurface reads.
+ *
+ * The shape is the textbook one and it is deliberately NOT separable: the
+ * front expiry is concentrated near the money and the back expiries spread
+ * out, so summing across expiries does not reproduce any single column. A
+ * separable fixture would let an outer product of the two marginals pass for
+ * the real joint, which is exactly the substitution this panel exists to
+ * refuse.
+ */
+function fakeSurface(ticker, spot, expiries) {
+  if (!(spot > 0) || !expiries || !expiries.length) return [];
+  const rnd = mulberry(ticker.length * 421 + Math.round(spot * 7));
+  const rows = [];
+  const pivot = spot * (0.97 + rnd() * 0.06);
+  expiries.forEach((expiry, j) => {
+    // Later expiries are wider and lighter: gamma concentrates in the front.
+    const width = spot * (0.04 + j * 0.035);
+    const weight = 1 / (j + 1);
+    for (let i = 0; i < 25; i++) {
+      const k = Math.round(spot * (0.78 + i * 0.018) * 100) / 100;
+      const bell = Math.exp(-Math.pow((k - spot) / width, 2));
+      if (bell < 0.01) continue;                    // real responses are sparse in the wings
+      const lean = (k - pivot) / spot;
+      const scale = bell * weight * 3.2e6 * (0.7 + rnd() * 0.6);
+      const callLeg = scale * Math.max(0, lean) * 9;
+      const putLeg = -scale * Math.max(0, -lean) * 9;
+      rows.push({
+        strike: k.toFixed(2),
+        expiry,
+        call_gamma_ask: String(callLeg * (0.4 + rnd() * 0.3)),
+        call_gamma_bid: String(callLeg * (0.3 + rnd() * 0.3)),
+        put_gamma_ask: String(putLeg * (0.4 + rnd() * 0.3)),
+        put_gamma_bid: String(putLeg * (0.3 + rnd() * 0.3)),
+      });
+    }
+  });
+  return rows;
+}
+
 /** Max pain per expiry, nearest first — the shape /max-pain returns. */
 function fakeMaxPain(ticker, spot) {
   const rnd = mulberry(ticker.length * 977 + Math.round(spot));
@@ -1405,10 +1477,16 @@ function fakeEnrichment(ticker, spot, seed) {
     };
   });
 
+  /* THE WIRE NAMES, call_gex / put_gex — not the documented call_gamma /
+     put_gamma. This fixture emitted the documented pair, so every dry run
+     built a healthy roll-off calendar while every live card printed
+     "unavailable: no expiry gamma". Third time a fixture has agreed with the
+     code's guess instead of with the vendor; a fixture that does that tests
+     nothing. */
   const expiries = Array.from({ length: 6 }, (_, i) => ({
     expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-    call_gamma: String(9e6 / (i + 1) * (0.6 + rnd())),
-    put_gamma: String(-7e6 / (i + 1) * (0.6 + rnd())),
+    call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
+    put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
   }));
 
   let px = spot;
@@ -1705,20 +1783,88 @@ async function main() {
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
+  // The surface shape is reported once per run, not once per card.
+  let surfaceReported = false;
   const deadline = stats.startedAt + DEADLINE_MS;
   for (const ticker of onBoard.keys()) {
     if (Date.now() > deadline) { cardsSkipped++; continue; }
     const e = byTicker.get(ticker);
     if (!e) { cardsSkipped++; continue; }
     try {
-      const [maxPain, congress] = DRY_RUN
-        ? [fakeMaxPain(ticker, num(e.row.close)), fakeCongress(ticker)]
+      /* THE HORIZON FOR THE GAMMA SURFACE, taken from the expiry rows already
+         in hand. /spot-exposures/expiry-strike requires expirations[] — it
+         will not infer a window — so the near end of this name's own term
+         structure is what gets asked for. Dated expiries that have already
+         passed are dropped: the vendor's expiry window runs ahead of and
+         behind the session, and asking for last Friday returns a column of
+         zeros that reads as a book with no gamma rather than as a book that
+         already expired. */
+      const surfaceExpiries = (e.raw.expiries || [])
+        .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
+        .filter((d) => d && (!sessionDate || d >= sessionDate))
+        .sort()
+        .slice(0, SURFACE_EXPIRIES);
+
+      const spotPx = num(e.row.close);
+      const [maxPain, congress, surface] = DRY_RUN
+        ? [fakeMaxPain(ticker, spotPx), fakeCongress(ticker), fakeSurface(ticker, spotPx, surfaceExpiries)]
         : await Promise.all([
           // The one per-name source the dating commit left undated. The
           // endpoint takes a `date`, and its window spans 120 days of expiries.
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
           uw("/api/congress/recent-trades", { ticker, limit: 50 }).catch(() => []),
+          /* ONE call for the whole strike x expiry joint, not one per expiry.
+             expirations[] is an array parameter, so the horizon is a choice
+             rather than a call count. Banded on strike for the same reason the
+             ladder is: a surface running from $5 to $900 on a $180 name is
+             mostly empty cells. */
+          surfaceExpiries.length
+            ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
+              "expirations[]": surfaceExpiries,
+              ...(sessionDate ? { date: sessionDate } : {}),
+              /* min_strike / max_strike are documented as INTEGERS, so on a $3
+                 name a +-25% band rounds to 2..4 and throws away most of the
+                 chain — the band is narrower than the tick. Below $20 the
+                 bounds are dropped and `limit` does the work instead; the
+                 surface builder windows on strike again anyway. */
+              ...(spotPx >= 20
+                ? { min_strike: Math.floor(spotPx * 0.75), max_strike: Math.ceil(spotPx * 1.25) }
+                : {}),
+              limit: 500,
+            }).catch(() => [])
+            : Promise.resolve([]),
         ]);
+
+      /* SAY WHAT CAME BACK WHEN NOTHING USABLE DID.
+      
+         The roll-off calendar shipped "unavailable" on twelve consecutive
+         cards because three readers asked for call_gamma and the wire sends
+         call_gex. A `.catch(() => [])` cannot tell an endpoint that 404s from
+         one that returns healthy rows under names nobody read, and both look
+         identical on the card: an empty panel. That mystery was solved in one
+         run by printing a row.
+
+         Bounded to the FIRST card of the run and to one row's keys, so a
+         systematic failure is reported once rather than twelve times, and a
+         working run costs one line. */
+      if (!surfaceReported && !DRY_RUN) {
+        surfaceReported = true;
+        const rows = Array.isArray(surface) ? surface : (surface && surface.data) || [];
+        if (!rows.length) {
+          console.warn(
+            `  NOTE: ${ticker} /spot-exposures/expiry-strike returned no rows for ` +
+            `${surfaceExpiries.length} expiries (${surfaceExpiries.slice(0, 3).join(", ")}...). ` +
+            "The gamma surface will be unavailable on every card until it does.");
+        } else if (card0Unusable(rows[0])) {
+          console.warn(
+            `  NOTE: ${ticker} /spot-exposures/expiry-strike returned ${rows.length} rows ` +
+            "carrying no readable gamma leg. First row: " +
+            Object.entries(rows[0]).slice(0, 12)
+              .map(([k, v]) => `${k}=${String(v).slice(0, 18)}`).join(" "));
+        } else {
+          console.log(`  surface: ${ticker} ${rows.length} rows over ${surfaceExpiries.length} expiries`);
+        }
+      }
 
       const card = buildCard({
         ticker,
@@ -1729,6 +1875,7 @@ async function main() {
         // The expiry gamma was fetched for the score and thrown away at the
         // card boundary; the roll-off staircase costs nothing to add.
         expiries: e.raw.expiries,
+        surface,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
       });

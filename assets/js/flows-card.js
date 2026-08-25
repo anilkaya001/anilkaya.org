@@ -450,9 +450,19 @@
     }
 
     /* The caption sits AT the zero rule it labels rather than at the far left
-       of the canvas, where it was 303px away from the thing it described. */
-    const axis = svgEl("text", { class: "gp-axis", x: x0, y: H - 3, "text-anchor": "middle" });
-    axis.textContent = "◀ short   net dealer Γ   long ▶";
+       of the canvas, where it was 303px away from the thing it described —
+       but CLAMPED, because the zero rule floats between 18% and 82% of the
+       plot and a centred caption hung off the canvas when it sat near an edge.
+       Measured on an emitted card at a 320px viewport: a 166px caption centred
+       at x=85 overhung the left edge, and SVG clips silently so the leading
+       glyph simply vanished. The half-width is estimated from the string
+       rather than measured — SVG offers no pre-layout metric — at roughly
+       0.5em per character for this face and size, which errs wide. */
+    const axisText = "◀ short   net dealer Γ   long ▶";
+    const axisHalf = axisText.length * 0.5 * 9 * 0.5;
+    const axisX = Math.min(plotR - axisHalf, Math.max(plotL + axisHalf, x0));
+    const axis = svgEl("text", { class: "gp-axis", x: axisX, y: H - 3, "text-anchor": "middle" });
+    axis.textContent = axisText;
     svg.append(axis);
 
     svg.setAttribute("aria-label",
@@ -509,6 +519,17 @@
       band +
       `The gamma axis is symlog with decade rules: read magnitude off the labelled powers of ten, not off bar length. ` +
       `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
+      /* THE CURVE AND THE BARS DO NOT SHARE A SCALE, and sharing the zero rule
+         makes them look as though they do. A running total is the SUM of the
+         bars, so it routinely exceeds the largest of them by an order of
+         magnitude and has to be normalised separately or it leaves the plot —
+         measured at 12.4x on a realistic 40-strike ladder. The two agree at
+         exactly one place, the zero rule, which is the only place they must:
+         it is where the crossing is the flip. Saying so is cheaper than a
+         second axis nobody would read, but leaving it unsaid invites a reader
+         to compare a curve height against a bar length, which means nothing. */
+      `The cumulative curve is normalised separately from the bars — only its ZERO CROSSING is ` +
+      `comparable to them, which is the flip. Read the curve for shape, not height. ` +
       `σ is ATR(14).` +
       (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
     host.append(note);
@@ -572,18 +593,31 @@
       svg.append(t);
     }
 
+    /* THE NUMBER STAYS IN THE SVG; THE SENTENCE DOES NOT.
+
+       This was one centred <text> carrying the whole reading — "gap −0.76σ —
+       new gamma is building BELOW the standing book" — and SVG text cannot
+       wrap. Measured at a 320px viewport, where the dialog's inner width is
+       288: the sentence drew 334px wide and overhung its own canvas by 23px on
+       each side. SVG clipping is silent, so both ends were simply missing and
+       the panel looked fine. A quantity is an axis label; a sentence is prose,
+       and prose belongs in HTML that reflows. */
     const gapAtr = isNum(panel.gapAtr);
     const cap = svgEl("text", { class: "bd-axis-lab", x: W / 2, y: H - 4, "text-anchor": "middle" });
-    cap.textContent = gapAtr === null
-      ? "gap " + px2(panel.gapPx) + " (no ATR, so no sigma reading)"
-      : "gap " + sigma(gapAtr) + " — new gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book";
+    cap.textContent = gapAtr === null ? "gap " + px2(panel.gapPx) : "gap " + sigma(gapAtr);
     svg.append(cap);
+    const reading = gapAtr === null
+      ? "The gap is " + px2(panel.gapPx) + ", with no ATR to state it in, so there is no sigma reading."
+      : "New gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book, " +
+        sigma(gapAtr) + " away from it.";
 
     svg.setAttribute("aria-label",
       `The standing gamma book is centred at ${px2(oi)} and today's traded gamma at ${px2(vol)}` +
       (spot !== null ? `, with spot at ${px2(spot)}` : "") +
       (gapAtr === null ? "." : `, a gap of ${gapAtr.toFixed(2)} ATR.`));
     host.append(svg);
+
+    host.append(el("p", "fc-reading", reading));
 
     host.append(el("p", "fc-note",
       "Open interest is the book that already exists; today's volume is what was " +
@@ -605,6 +639,210 @@
    * and "it's pinned until Friday, and then it isn't". These rows were already
    * being fetched for the score and thrown away at the card boundary.
    */
+  /* ---------- the gamma surface: strike x expiry ------------------- */
+
+  /**
+   * The heatmap.
+   *
+   * The profile answers "where is the book long or short" and collapses the
+   * term structure to do it. The calendar answers "when does it expire" and
+   * collapses the strikes. This draws the joint the two are marginals of,
+   * which is where the tradeable statement lives: a put wall that evaporates
+   * on Friday and one that runs to January are the same bar on the profile
+   * and completely different positions.
+   *
+   * FOUR ENCODINGS, IN THIS ORDER. Sign by hatch, magnitude by opacity, price
+   * by row position, time by column. Hue is LAST and carries nothing the other
+   * three do not already carry, so a greyscale print and a deuteranope reader
+   * both keep every reading. A diverging red/green heatmap where hue is the
+   * only channel is the single most common way this chart is drawn and the
+   * single most common way it fails.
+   */
+  function renderSurface(host, panel, card) {
+    const question =
+      "Where is dealer gamma concentrated, and when does it expire?";
+    if (!panel || panel.status !== "ok" || !Array.isArray(panel.grid) || !panel.grid.length) {
+      return deadPanel(host, question, panel && panel.reason);
+    }
+    panelHead(host, question);
+
+    const { grid, strikes, expiries, scaleCap, spot, atSpot, callWall, putWall } = panel;
+    const W = panelWidth(host);
+    const labelW = 46, padT = 30, padB = 34, padR = 8;
+    const plotL = labelW;
+    const plotW = Math.max(60, W - labelW - padR);
+    const colW = plotW / expiries.length;
+    /* A cell shorter than 7px is a line, not a cell. The grid is capped at 21
+       strikes upstream so this stays inside a sensible panel height. */
+    const rowH = Math.max(7, Math.min(18, 320 / strikes.length));
+    const H = padT + strikes.length * rowH + padB;
+
+    const svg = svgEl("svg", {
+      class: "gs", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    /* The hatch that carries SIGN independently of hue, at the centre of its
+       tile for the reason the profile's pattern documents: a stroke on the
+       tile edge is half clipped by patternUnits and renders at a fraction of
+       its intended weight. */
+    const defs = svgEl("defs");
+    const pat = svgEl("pattern", {
+      id: "gsNeg", width: 5, height: 5, patternUnits: "userSpaceOnUse",
+      patternTransform: "rotate(45)", class: "gs-negpat",
+    });
+    pat.append(svgEl("line", { x1: 2.5, y1: 0, x2: 2.5, y2: 5, stroke: "currentColor", "stroke-width": 1.6 }));
+    defs.append(pat);
+    svg.append(defs);
+
+    // Rows run high price at the top, the way a price ladder is read.
+    const yOfRow = (i) => padT + (strikes.length - 1 - i) * rowH;
+
+    strikes.forEach((k, i) => {
+      const y = yOfRow(i);
+      expiries.forEach((e, j) => {
+        const v = grid[i][j];
+        const x = plotL + j * colW;
+        if (v === null) {
+          /* NOT MEASURED is drawn as an explicit void, not as a zero-intensity
+             cell. A pair the vendor never returned and a pair carrying no
+             gamma are different facts and only one of them is tradeable. */
+          svg.append(svgEl("rect", {
+            class: "gs-void", x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
+          }));
+          return;
+        }
+        const mag = scaleCap > 0 ? Math.min(1, Math.abs(v) / scaleCap) : 0;
+        const neg = v < 0;
+        const cell = svgEl("rect", {
+          class: "gs-cell " + (neg ? "is-neg" : "is-pos"),
+          x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
+          /* A floor on opacity so a small-but-real cell is still visible as a
+             cell; zero opacity and "no data" must not look alike. */
+          "fill-opacity": (0.12 + 0.88 * mag).toFixed(3),
+        });
+        svg.append(cell);
+        if (neg && rowH >= 9 && colW >= 9) {
+          svg.append(svgEl("rect", {
+            class: "gs-hatch", x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
+            fill: "url(#gsNeg)",
+          }));
+        }
+        /* Cells beyond the cap are marked rather than silently flattened
+           against everything else at full saturation. */
+        if (Math.abs(v) > scaleCap) {
+          svg.append(svgEl("line", {
+            class: "gs-clip", x1: x + 1, y1: y + 1,
+            x2: x + Math.max(1, colW - 2), y2: y + Math.max(1, rowH - 2),
+          }));
+        }
+      });
+    });
+
+    /* PRICE LABELS ARE EARNED. Every strike labelled at 7px rows is a wall of
+       digits; spot, both walls and the two ends always get one, and the rest
+       are filled in at whatever stride leaves them legible. */
+    const mustLabel = new Set([0, strikes.length - 1]);
+    const idxOf = (price) => {
+      if (price === null || price === undefined) return -1;
+      let best = -1, d = Infinity;
+      strikes.forEach((k, i) => { const dd = Math.abs(k - price); if (dd < d) { d = dd; best = i; } });
+      return best;
+    };
+    const spotRow = idxOf(atSpot);
+    if (spotRow >= 0) mustLabel.add(spotRow);
+    const callRow = callWall ? idxOf(callWall.strike) : -1;
+    const putRow = putWall ? idxOf(putWall.strike) : -1;
+    if (callRow >= 0) mustLabel.add(callRow);
+    if (putRow >= 0) mustLabel.add(putRow);
+
+    const stride = Math.max(1, Math.ceil(13 / rowH));
+    strikes.forEach((k, i) => {
+      if (!mustLabel.has(i) && i % stride !== 0) return;
+      const y = yOfRow(i) + rowH / 2 + 3;
+      // Never let an earned label collide with a guaranteed one.
+      if (!mustLabel.has(i) && [...mustLabel].some((m) => Math.abs(m - i) * rowH < 12)) return;
+      const t = svgEl("text", {
+        class: "gs-price" + (i === spotRow ? " is-spot" : ""),
+        x: labelW - 6, y, "text-anchor": "end",
+      });
+      t.textContent = px2(k);
+      svg.append(t);
+    });
+
+    /* EXPIRY LABELS. Month-day only; the year is the same across an eight-week
+       horizon and repeating it four times costs the width the labels need. */
+    expiries.forEach((e, j) => {
+      const x = plotL + j * colW + colW / 2;
+      const t = svgEl("text", { class: "gs-exp", x, y: padT - 10, "text-anchor": "middle" });
+      t.textContent = String(e).slice(5);
+      svg.append(t);
+      if (j > 0) {
+        svg.append(svgEl("line", {
+          class: "gs-colrule", x1: plotL + j * colW - 0.5, x2: plotL + j * colW - 0.5,
+          y1: padT, y2: padT + strikes.length * rowH,
+        }));
+      }
+    });
+
+    /* MARKER RULES. Spot is a line across the grid at its TRUE price rather
+       than snapped to a row centre: the nearest strike and spot are different
+       numbers and the panel is read for exactly that gap. */
+    const lo = strikes[0], hi = strikes[strikes.length - 1];
+    const s = isNum(spot);
+    if (s !== null && strikes.length > 1 && s >= lo && s <= hi) {
+      const t = (s - lo) / (hi - lo);
+      const y = padT + (1 - t) * (strikes.length - 1) * rowH + rowH / 2;
+      svg.append(svgEl("line", { class: "gs-spot", x1: plotL, x2: plotL + plotW, y1: y, y2: y }));
+    }
+    const markRow = (rowIndex, cls) => {
+      if (rowIndex < 0) return;
+      const y = yOfRow(rowIndex);
+      svg.append(svgEl("rect", {
+        class: cls, x: plotL, y, width: plotW, height: Math.max(1, rowH - 1),
+      }));
+    };
+    markRow(callRow, "gs-callwall");
+    markRow(putRow, "gs-putwall");
+
+    host.append(svg);
+
+    /* THE LEGEND SAYS WHAT THE PICTURE CANNOT. Which row is spot, which are
+       the walls, that the scale is capped, and how much of the book is on
+       screen — a surface showing 8 of 40 expiries is a window, and a window
+       that does not say so reads as the whole book. */
+    const pairs = [];
+    if (s !== null) pairs.push(["Spot", px2(s)]);
+    if (callWall) pairs.push(["Call wall", px2(callWall.strike)]);
+    if (putWall) pairs.push(["Put wall", px2(putWall.strike)]);
+    const regime = card && card.regime && card.regime.label;
+    if (regime) pairs.push(["Regime", String(regime).replace(/_/g, " ")]);
+    host.append(statList(pairs));
+
+    const notes = [];
+    notes.push("Colour is capped at " + compact(scaleCap) +
+      (panel.clipped > 0
+        ? "; " + (panel.clipped === 1
+          ? "one cell runs past it (peak " + compact(panel.peak) + ") and is marked"
+          : panel.clipped + " cells run past it (peak " + compact(panel.peak) + ") and are marked") +
+          " with a slash"
+        : ""));
+    /* Only the dimension that is actually windowed is mentioned. "Showing 6 of
+       6 expiries" is noise that trains a reader to skip the sentence, and the
+       sentence exists so that "8 of 40" is not skipped. */
+    const windowed = [];
+    if (panel.expiriesShown < panel.expiriesTotal) {
+      windowed.push(panel.expiriesShown + " of " + panel.expiriesTotal + " expiries");
+    }
+    if (panel.strikesShown < panel.strikesTotal) {
+      windowed.push(panel.strikesShown + " of " + panel.strikesTotal + " strikes");
+    }
+    if (windowed.length) notes.push("Showing " + windowed.join(" and "));
+    notes.push("Short-gamma cells are hatched as well as coloured; blank cells are strikes " +
+      "the vendor returned no gamma for, which is not the same as none");
+    host.append(el("p", "fc-note", notes.join(". ") + "."));
+  }
+
   function renderCalendar(host, panel) {
     const question = "When does this dealer positioning expire, and what is left after it does?";
     if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
@@ -1168,6 +1406,7 @@
     renderGamma($("fcGamma"), panels.gamma, card);
     renderLevels($("fcLevels"), panels.levels);
     renderDisplacement($("fcDisp"), panels.displacement);
+    renderSurface($("fcSurface"), panels.surface, card);
     renderCalendar($("fcCal"), panels.calendar);
     renderMove($("fcMove"), panels.pricedMove);
     renderContext($("fcCtx"), panels.context);
@@ -1194,7 +1433,7 @@
     // failed to load — and then never cleared at all.
     dialog.classList.remove("is-stale");
     $("fcProv").textContent = "Loading…";
-    for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+    for (const id of ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
       $(id).replaceChildren(el("p", "fc-note", "Loading…"));
     }
   }
@@ -1247,7 +1486,7 @@
       if (!v || current !== ticker) return;
       if (v.body && v.body.status === "pending") {
         $("fcProv").textContent = "";
-        for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+        for (const id of ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
           deadPanel($(id), "", "No card has been built for this name yet. Cards are " +
             "published after the boards, so one can briefly lag its row.");
         }
@@ -1258,7 +1497,7 @@
       if (e && e.name === "AbortError") return;
       // Every panel still said "Loading…", so a failed card was
       // indistinguishable from a slow one and the reader waited forever.
-      for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+      for (const id of ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
         deadPanel($(id), "", "This card could not be loaded. Close and try again.");
       }
       $("fcProv").textContent = "This card could not be loaded.";

@@ -54,10 +54,12 @@
  */
 export const CARD_SCHEMA_VERSION = 2;
 
-/* The only import in this module, and it is a pure one: the square-root-of-time
-   scaling and the horizon it is stated in are shared with the scorer, and two
-   copies of a convention are two chances to disagree about it. */
-import { horizonMove, HORIZON_SESSIONS } from "./flows-features.js";
+/* Every import here is pure, and each is shared rather than copied for the
+   same reason: the square-root-of-time scaling and the horizon it is stated in
+   belong to the scorer too, and the expiry-gamma leg names have already been
+   wrong once in two places at once. Two copies of a convention are two chances
+   to disagree about it. */
+import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg } from "./flows-features.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -185,8 +187,9 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
 
      /spot-exposures/strike returns call_gamma_ask, call_gamma_bid,
      call_gamma_oi and call_gamma_vol — and the put equivalents. It does NOT
-     return call_gamma or put_gamma; those belong to /greek-exposure/expiry,
-     a different endpoint with a different shape.
+     return an unsplit call or put leg; the whole-expiry aggregate belongs to
+     /greek-exposure/expiry, a different endpoint with a different shape, which
+     names its legs call_gex and put_gex (see callGammaLeg in flows-features).
 
      Reading the wrong names cost nothing loudly and everything quietly: every
      strike summed to exactly 0, so the published cards carried 54 correctly
@@ -262,8 +265,8 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
  */
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
   const rows = (expiryRows || []).map((r) => {
-    const c = numOrNull(r.call_gamma);
-    const p = numOrNull(r.put_gamma);
+    const c = numOrNull(callGammaLeg(r));
+    const p = numOrNull(putGammaLeg(r));
     if (c === null && p === null) return null;
     return { expiry: r.expiry || null, gamma: Math.abs(c ?? 0) + Math.abs(p ?? 0) };
   }).filter((r) => r && r.expiry && r.gamma > 0)
@@ -593,7 +596,7 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * live gamma panel, and no panel failure can remove the name from the board.
  */
 export function buildCard({
-  ticker, row, features, strikes, ticks, expiries, maxPain, congress,
+  ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   generatedAt, sessionDate, weights,
 }) {
   const f = features || {};
@@ -656,6 +659,11 @@ export function buildCard({
     atr: numOrNull(features && features.atr),
     panels: {
       gamma,
+      /* The joint the profile and the calendar are both marginals of. It is
+         built from its own endpoint rather than derived: an outer product of
+         two marginals is a model of a surface, not a measurement of one, and
+         this project does not publish the difference silently. */
+      surface: buildSurface(surface, { spot, asOf: sessionDate }),
       levels: buildLevels({
         spot,
         atr: features && features.atr,
@@ -725,4 +733,150 @@ export function pickMaxPainRow(rows, { asOf = null } = {}) {
 export function pickMaxPain(rows, options) {
   const row = pickMaxPainRow(rows, options);
   return row ? row.px : null;
+}
+
+/* =============================================================
+   THE SPOT GAMMA SURFACE — strike x expiry
+
+   The gamma profile answers "where is the dealer book long or
+   short" and collapses the term structure to do it. The roll-off
+   calendar answers "when does that book expire" and collapses the
+   strikes. Both are marginals of the same joint distribution, and
+   the joint is the thing worth looking at: a put wall that
+   evaporates on Friday and one that runs to January are the same
+   number on the profile and completely different trades.
+
+   /spot-exposures/expiry-strike returns that joint in ONE call —
+   "Spot GEX exposures by strike & expiry", with expirations[] as an
+   array parameter, so the horizon is a choice rather than a call
+   count. Its legs carry the SAME names the strike ladder uses:
+   call_gamma_ask, call_gamma_bid, call_gamma_oi, call_gamma_vol and
+   the put equivalents. That is why this reuses buildGammaProfile's
+   summing convention exactly rather than inventing a second one —
+   the put legs arrive ALREADY dealer-signed, so all four are SUMMED,
+   and summing this surface across expiries has to reproduce the
+   profile. The tests assert that reconciliation, because two views
+   of one book that disagree are worse than one view.
+
+   THE COLOUR SCALE IS CAPPED, AND SAYS SO. A single ATM cell on the
+   front expiry routinely carries more gamma than the rest of the
+   grid combined; scaling to the maximum paints one red square on a
+   field of grey and hides the structure the panel exists to show.
+   The cap is a high quantile of the non-zero magnitudes, cells
+   beyond it are drawn at full saturation, and `scaleCap` and
+   `clipped` both ship so the renderer can mark them rather than
+   quietly flattening them.
+   ============================================================= */
+
+/** Rows per side of spot to keep. An odd total, so spot's own row is centred. */
+const SURFACE_STRIKES = 21;
+export const SURFACE_EXPIRIES = 8;
+
+export function buildSurface(rows, {
+  spot, maxStrikes = SURFACE_STRIKES, maxExpiries = SURFACE_EXPIRIES, asOf = null,
+} = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return unavailable("no expiry-strike gamma");
+  const s = numOrNull(spot);
+  if (s === null || !(s > 0)) return unavailable("no spot");
+
+  /* THE SAME FOUR LEGS, SUMMED, as buildGammaProfile. A row with none of them
+     measured is dropped rather than counted as a zero cell: an unmeasured
+     strike-expiry pair and one carrying no gamma look identical once a
+     fallback zero is written into the grid, and only one of them is a fact. */
+  const cells = new Map();                 // expiry -> Map(strike -> gamma)
+  const strikeTotals = new Map();
+  const expirySeen = new Map();            // expiry -> gross magnitude, for ranking
+
+  for (const r of list) {
+    const strike = numOrNull(r.strike ?? r.price);
+    const expiry = r.expiry ? String(r.expiry).slice(0, 10) : null;
+    if (strike === null || !expiry) continue;
+    const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
+    if (!legs.some((v) => numOrNull(v) !== null)) continue;
+    const g = legs.reduce((a, v) => a + (numOrNull(v) ?? 0), 0);
+
+    if (!cells.has(expiry)) cells.set(expiry, new Map());
+    const col = cells.get(expiry);
+    col.set(strike, (col.get(strike) ?? 0) + g);
+    strikeTotals.set(strike, (strikeTotals.get(strike) ?? 0) + g);
+    expirySeen.set(expiry, (expirySeen.get(expiry) ?? 0) + Math.abs(g));
+  }
+  if (!cells.size) return unavailable("no measured gamma legs");
+
+  /* EXPIRIES ARE TAKEN IN DATE ORDER, NOT BY SIZE. Keeping the eight largest
+     would produce a column axis with holes in it that still reads as
+     consecutive — a January LEAP drawn next to this Friday, with nothing
+     saying six weeks were skipped. The horizon is the near end of the term
+     structure, which is also where the hedging happens. */
+  const expiries = Array.from(cells.keys()).sort().slice(0, maxExpiries);
+
+  /* STRIKES ARE TAKEN AROUND SPOT, not by size either, and for the same
+     reason: the grid's vertical axis is a price ladder and a ladder with
+     rungs missing is not a ladder. */
+  const allStrikes = Array.from(strikeTotals.keys()).sort((a, b) => a - b);
+  let nearest = 0;
+  for (let i = 1; i < allStrikes.length; i++) {
+    if (Math.abs(allStrikes[i] - s) < Math.abs(allStrikes[nearest] - s)) nearest = i;
+  }
+  const half = Math.floor(maxStrikes / 2);
+  let from = Math.max(0, nearest - half);
+  let to = Math.min(allStrikes.length, from + maxStrikes);
+  from = Math.max(0, to - maxStrikes);                 // refill when spot sits at an edge
+  const strikes = allStrikes.slice(from, to);
+  if (!strikes.length || !expiries.length) return unavailable("no strikes in band");
+
+  const grid = strikes.map((k) => expiries.map((e) => {
+    const col = cells.get(e);
+    const v = col ? col.get(k) : undefined;
+    return v === undefined ? null : v;     // null is "not measured", never 0
+  }));
+
+  /* The capped colour scale. Quantile over NON-ZERO magnitudes: a grid that is
+     mostly empty would otherwise put the quantile at zero and saturate every
+     cell that carries anything at all. */
+  const mags = [];
+  for (const row of grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
+  mags.sort((a, b) => a - b);
+  const peak = mags.length ? mags[mags.length - 1] : 0;
+  const q = (p) => {
+    if (!mags.length) return 0;
+    const i = (mags.length - 1) * p;
+    const lo = Math.floor(i), hi = Math.ceil(i);
+    return mags[lo] + (mags[hi] - mags[lo]) * (i - lo);
+  };
+  const scaleCap = mags.length ? Math.max(q(0.95), peak / 100) : 0;
+  let clipped = 0;
+  for (const row of grid) for (const v of row) if (v !== null && Math.abs(v) > scaleCap) clipped++;
+
+  /* WALLS ARE READ OFF THE ROW MARGINAL, over the strikes actually drawn.
+     Taking them from the full ladder would name a call wall the grid does not
+     contain, which is a label pointing off the edge of its own picture. */
+  let callWall = null, putWall = null;
+  for (const k of strikes) {
+    const total = strikeTotals.get(k) ?? 0;
+    if (total > 0 && (callWall === null || total > callWall.gamma)) callWall = { strike: k, gamma: total };
+    if (total < 0 && (putWall === null || total < putWall.gamma)) putWall = { strike: k, gamma: total };
+  }
+
+  return ok({
+    spot: s,
+    expiries,
+    strikes,
+    grid,
+    rowTotals: strikes.map((k) => strikeTotals.get(k) ?? 0),
+    atSpot: allStrikes[nearest],
+    callWall,
+    putWall,
+    scaleCap,
+    peak,
+    clipped,
+    /* How much of the term structure is on screen. A surface showing 8 of 40
+       expiries is a window, and a window that does not say so reads as the
+       whole book. */
+    expiriesShown: expiries.length,
+    expiriesTotal: cells.size,
+    strikesShown: strikes.length,
+    strikesTotal: allStrikes.length,
+  }, asOf);
 }
