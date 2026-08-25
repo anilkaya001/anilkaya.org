@@ -325,14 +325,23 @@ export function flowPurity(greekFlowRows) {
  * Returns the strike ladder with cumulative dealer gamma, plus the
  * interpolated zero crossing: a measured gamma flip.
  */
-export function aggressorGamma(strikeRows, { spot = null } = {}) {
+export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } = {}) {
   const ladder = (strikeRows || [])
-    .map((r) => ({
-      strike: num(r.strike),
-      gamma: num(r.call_gamma_ask) + num(r.call_gamma_bid) +
-             num(r.put_gamma_ask) + num(r.put_gamma_bid),
-    }))
-    .filter((r) => Number.isFinite(r.strike) && r.strike > 0)
+    .map((r) => {
+      /* A ROW WITH NO MEASURED LEGS IS NOT A MEASURED ZERO. num() defaults to
+         0, so a strike carrying none of the four aggressor fields used to enter
+         the ladder as a rung of exactly zero gamma — and the card's
+         buildGammaProfile, which applies this same present-legs test, dropped
+         it. One card therefore carried two different bands: the chart's, and
+         the sentence underneath it quoting the features'. */
+      const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
+      const present = legs.some((v) => v !== null && v !== undefined && v !== "");
+      return {
+        strike: num(r.strike),
+        gamma: present ? legs.reduce((a, v) => a + num(v), 0) : null,
+      };
+    })
+    .filter((r) => Number.isFinite(r.strike) && r.strike > 0 && r.gamma !== null)
     .sort((a, b) => a.strike - b.strike);
 
   let cum = 0, peak = 0;
@@ -342,7 +351,7 @@ export function aggressorGamma(strikeRows, { spot = null } = {}) {
     peak = Math.max(peak, Math.abs(cum));
   }
 
-  const crossings = gammaCrossings(ladder);
+  const crossings = gammaCrossings(ladder, { materiality });
   const chosen = pickCrossing(crossings, spot);
 
   return {
@@ -351,11 +360,20 @@ export function aggressorGamma(strikeRows, { spot = null } = {}) {
     peak,
     crossings,
     flip: chosen ? chosen.strike : null,
-    /* Which side of the flip the dealers are SHORT on. The card's copy used to
-       assert "short below, long above" as a hardcoded string; whether that is
-       true depends on the sign of the cumulative on the low side of the
-       crossing the code actually picked, which is data, not a constant. */
+    /* Which side of the flip the dealers are SHORT on, read from the DOMINANT
+       BOOK below the crossing rather than from the sign of the one rung beside
+       it. The card renders this as a statement about everything below the
+       level — "dealers are short gamma below X" — and on the pipeline's own
+       emitted ladders the adjacent rung disagreed with the book it stood in
+       front of on two of the published crossings. */
     flipSide: chosen ? chosen.side : null,
+    /* HOW MUCH BOOK THE CHOSEN CROSSING ACTUALLY SEPARATES, as a share of the
+       ladder's peak |cumulative|. This is the number that says whether a flip
+       is a regime boundary or a technicality: on the live INTC ladder the sign
+       genuinely changes at 86.10, but the long-gamma side carries under 5% of
+       the book, and a reader told only "the flip is 86.10" would size against a
+       boundary that is barely there. Published so the card can qualify it. */
+    flipSeparation: chosen ? chosen.separation : null,
     /* Dealer gamma AT SPOT as a share of the ladder's largest |cumulative|.
        Unit-free, so it is comparable across a $35 name and a $900 one, and it
        answers the question the flip was being used as a proxy for: are dealers
@@ -368,10 +386,11 @@ export function aggressorGamma(strikeRows, { spot = null } = {}) {
 }
 
 /**
- * EVERY zero crossing of the cumulative dealer gamma, materiality-gated.
+ * EVERY zero crossing of the cumulative dealer gamma that separates a material
+ * book of EACH SIGN, scored by how much book it separates.
  *
- * Three things made the old "first sign change scanning up from the bottom"
- * wrong, and all three were live on the published board:
+ * Four things made the naive "first sign change scanning up from the bottom"
+ * wrong, and the first three were live on the published board:
  *
  *   1. `cum` opens at the first rung's OWN gamma, so a rung with no measured
  *      aggressor gamma has cum === 0 exactly, and an `if (a.cum === 0) return
@@ -380,67 +399,133 @@ export function aggressorGamma(strikeRows, { spot = null } = {}) {
  *   2. Scanning upward and returning the FIRST crossing is biased by
  *      construction: |cum| starts near zero and ends at |netGamma|, so a sign
  *      change is nearly free at the bottom of the ladder and costs a whole
- *      book at the top. On the live board twelve of thirty-four names sat
- *      within 4% of the band floor.
- *   3. A ladder that opens near zero and wobbles produces sign changes that
- *      are float noise, not a regime boundary.
+ *      book at the top. Twelve of thirty-four live names sat within 4% of the
+ *      band floor.
+ *   3. A crossing between two rungs that each carry a negligible share of the
+ *      book is float noise, not a regime boundary.
+ *   4. And the fix for (3) has its own trap. Asserting materiality on the two
+ *      rungs ADJACENT to the crossing is exactly backwards — a clean crossing
+ *      passes through zero, so its immediate shoulders are small by definition
+ *      — but asserting it on running maxima that still INCLUDE those shoulders
+ *      is not the documented rule either, and on the real INTC ladder the sole
+ *      surviving crossing cleared a 10% floor on the strength of its own
+ *      shoulder while the book it separated carried 4.8%.
  *
- * Materiality is therefore asserted on the BOOK EITHER SIDE of the crossing,
- * not on the two rungs adjacent to it. Testing the adjacent rungs would be
- * exactly backwards: a clean crossing passes through zero, so its immediate
- * shoulders are SMALL by definition, and requiring them to be large rejects
- * the good crossings and keeps the noisy ones. What separates a real flip from
- * an artefact is whether there is a material book of each sign somewhere below
- * and somewhere above it. That test also subsumes the edge case — a crossing
- * at the first or last rung has nothing behind it — so no separate edge rule
- * is needed.
+ * So the windows are STRICTLY outside the crossing, and the test is not on
+ * magnitude alone: the dominant book below and the dominant book above must
+ * carry OPPOSITE SIGNS, which is what "the regime changes here" means. A
+ * crossing between two same-signed books is a wobble, however large the
+ * numbers on either side of it.
+ *
+ * `separation` is min(|dominant below|, |dominant above|) over peak: the
+ * thinner of the two regimes the crossing divides. `materiality` is a NOISE
+ * FLOOR on that quantity and nothing more — the strength of a boundary is
+ * reported rather than thresholded, because a 5% side is a real but weak
+ * boundary and a binary gate would either hide it or dress it up.
  */
-export function gammaCrossings(ladder, { materiality = 0.1 } = {}) {
+export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
   const rows = ladder || [];
   const n = rows.length;
   if (n < 3) return [];
   let peak = 0;
   for (const r of rows) peak = Math.max(peak, Math.abs(r.cum));
   if (!(peak > 0)) return [];
+
+  /* THE LADDER IS A SEQUENCE OF RUNS — maximal stretches over which the
+     cumulative holds one sign — and a crossing is the boundary between two
+     adjacent runs. That framing is what makes "how much book does this
+     crossing separate" a LOCAL question with a different answer per crossing.
+     A running maximum over everything below and everything above is global, so
+     it hands every crossing in one book the same score and cannot tell a
+     regime boundary from a wobble sitting between two large books.
+
+     Measured on the case that motivated this: a cumulative of
+     -100, -60, -2, +1, -2, -50, +100, +120 (millions) has three crossings. All
+     three score identically under global windows. Under runs, the two around
+     the +1 blip score 0.8% and the real boundary between -50 and +100 scores
+     41.7%. With spot inside the blip, the global version published the blip —
+     and inverted the regime sentence with it, because the blip's sides are the
+     opposite way round from the book's. */
+  const runs = [];
+  let sign = 0, extreme = 0, startIdx = 0;
+  for (let i = 0; i < n; i++) {
+    const c = rows[i].cum;
+    const sgn = Math.sign(c);
+    // A cumulative that touches exactly zero and returns to its own sign is
+    // not a crossing; a zero rung belongs to whatever run surrounds it.
+    if (sgn === 0) { extreme = Math.abs(c) > Math.abs(extreme) ? c : extreme; continue; }
+    if (sign === 0) { sign = sgn; extreme = c; startIdx = i; continue; }
+    if (sgn === sign) { if (Math.abs(c) > Math.abs(extreme)) extreme = c; continue; }
+    runs.push({ sign, extreme, from: startIdx, to: i - 1 });
+    sign = sgn; extreme = c; startIdx = i;
+  }
+  if (sign !== 0) runs.push({ sign, extreme, from: startIdx, to: n - 1 });
+  if (runs.length < 2) return [];
+
   const floor = peak * materiality;
-
-  // Running extremes of |cum| below and above each index, in two passes.
-  const below = new Array(n).fill(0);
-  const above = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) below[i] = Math.max(below[i - 1], Math.abs(rows[i - 1].cum));
-  for (let i = n - 2; i >= 0; i--) above[i] = Math.max(above[i + 1], Math.abs(rows[i + 1].cum));
-
   const out = [];
-  for (let i = 1; i < n; i++) {
-    const a = rows[i - 1], b = rows[i];
-    if ((a.cum < 0) === (b.cum < 0)) continue;
-    if (!(below[i] >= floor) || !(above[i - 1] >= floor)) continue;
+  for (let k = 1; k < runs.length; k++) {
+    const lo = runs[k - 1], hi = runs[k];
+    /* `separation` is the THINNER of the two regimes the crossing divides.
+       materiality is a NOISE FLOOR on it and nothing more: the strength of a
+       boundary is reported rather than thresholded, because a 5% side is a
+       real but weak boundary — the live INTC book is exactly that — and a
+       binary gate would either hide it or dress it up as a strong one. */
+    const separation = Math.min(Math.abs(lo.extreme), Math.abs(hi.extreme));
+    if (!(separation >= floor)) continue;
+
+    // The crossing sits between the last rung of the low run and the first of
+    // the high run; interpolate across whatever lies between them.
+    const a = rows[lo.to], b = rows[hi.from];
     const span = Math.abs(a.cum) + Math.abs(b.cum);
     const strike = span > 0
       ? a.strike + (b.strike - a.strike) * (Math.abs(a.cum) / span)
       : a.strike;
-    out.push({ strike, side: a.cum < 0 ? "short_below" : "long_below" });
+    out.push({
+      strike,
+      // The side is a statement about the RUN below, which is what the card's
+      // sentence is about — not about the sign of the single rung beside it.
+      side: lo.sign < 0 ? "short_below" : "long_below",
+      separation: separation / peak,
+    });
   }
   return out;
 }
 
-/** The surviving crossing nearest spot — the level a trader would act on. */
+/**
+ * The crossing that separates the most book — that is the gamma flip.
+ *
+ * Distance to spot only breaks ties. Ranking by proximity instead was its own
+ * failure: because the windows are non-local, a sign change inside a near-zero
+ * region between two large books passes the materiality test, and when spot
+ * sits inside that region the published flip is the wobble rather than the
+ * boundary four points away — with the regime sentence inverted, because the
+ * wobble's sides are the opposite way round from the book's.
+ */
 function pickCrossing(crossings, spot) {
   if (!crossings || !crossings.length) return null;
-  if (!(spot > 0)) return crossings[crossings.length - 1];
   let best = crossings[0];
   for (const c of crossings) {
-    if (Math.abs(c.strike - spot) < Math.abs(best.strike - spot)) best = c;
+    if (c.separation > best.separation) { best = c; continue; }
+    if (c.separation === best.separation && spot > 0 &&
+        Math.abs(c.strike - spot) < Math.abs(best.strike - spot)) best = c;
   }
   return best;
 }
 
-/** Cumulative dealer gamma interpolated at spot, as a share of peak |cum|. */
+/**
+ * Cumulative dealer gamma interpolated at spot, as a share of peak |cum|.
+ *
+ * null — never an edge value — when spot lies outside the measured band or the
+ * ladder is too short to interpolate across. Clamping to the edge rung returned
+ * a confident +-1 for a stock trading nowhere near the strikes on file, and the
+ * SIGN of that number is what the card prints as its "short Γ" / "long Γ" badge
+ * and what the quality gate reads as the amplification axis.
+ */
 function spotGammaShare(ladder, spot, peak) {
-  if (!ladder.length || !(spot > 0) || !(peak > 0)) return null;
-  if (spot <= ladder[0].strike) return ladder[0].cum / peak;
-  const last = ladder[ladder.length - 1];
-  if (spot >= last.strike) return last.cum / peak;
+  if (ladder.length < 3 || !(spot > 0) || !(peak > 0)) return null;
+  const first = ladder[0], last = ladder[ladder.length - 1];
+  if (spot < first.strike || spot > last.strike) return null;
   for (let i = 1; i < ladder.length; i++) {
     const a = ladder[i - 1], b = ladder[i];
     if (spot <= b.strike) {
@@ -454,7 +539,8 @@ function spotGammaShare(ladder, spot, peak) {
 
 /**
  * Backwards-compatible single-value flip. Prefer aggressorGamma(), which
- * returns the crossing set, the side and the spot-relative regime together.
+ * returns the crossing set, the side, the separation and the spot-relative
+ * regime together.
  */
 export function gammaFlip(ladder, { spot = null, ...opts } = {}) {
   const chosen = pickCrossing(gammaCrossings(ladder, opts), spot);

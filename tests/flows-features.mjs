@@ -24,6 +24,7 @@ import {
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
+const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const near = (a, b, tol, msg) => {
   assert.ok(Math.abs(a - b) <= tol, `${msg} — got ${a}, want ${b} ±${tol}`);
   checks++;
@@ -673,10 +674,87 @@ const near = (a, b, tol, msg) => {
   ok(inverted.flipSide === "long_below",
      `a book LONG below and short above reports long_below (got ${inverted.flipSide})`);
 
+  /* 6. THE WOBBLE. A sign change inside a near-zero region between two large
+     books passes any test built on running maxima over "everything below" and
+     "everything above" — those windows are global, so every crossing in one
+     book scores identically. With spot sitting inside the wobble, the published
+     flip was the wobble and the regime sentence came out backwards, because the
+     wobble's sides are the opposite way round from the book's.
+
+     A crossing is the boundary between two RUNS of constant sign, and its
+     strength is the thinner of the two runs it divides. That is a local
+     quantity with a different answer per crossing. */
+  const fromCum = (pairs) => {
+    let prev = 0;
+    return pairs.map(([k, cumM]) => {
+      const cum = cumM * 1e6, g = cum - prev;
+      prev = cum;
+      return { strike: String(k), call_gamma_ask: String(g), call_gamma_bid: "0",
+               put_gamma_ask: "0", put_gamma_bid: "0" };
+    });
+  };
+  // -100, -60, -2, +1, -2, -50, +100, +120 : a +1M blip between two big books.
+  const wobbly = aggressorGamma(
+    fromCum([[90, -100], [95, -60], [99, -2], [100, 1], [101, -2], [103, -50], [105, 100], [110, 120]]),
+    { spot: 100.5 });
+  ok(wobbly.flip > 103 && wobbly.flip < 105,
+     `the flip is the boundary between the -50M and +100M books, not the blip at spot ` +
+     `(got ${wobbly.flip})`);
+  eq(wobbly.flipSide, "short_below",
+     "and the side is read from the book below it, which is short");
+  ok(wobbly.flipSeparation > 0.3,
+     `a boundary dividing 50M from 120M is strong (got ${(wobbly.flipSeparation * 100).toFixed(1)}%)`);
+  ok(wobbly.crossings.every((c) => Math.abs(c.strike - 100.33) > 0.5),
+     "and the sub-1% blip does not survive the noise floor at all");
+
+  /* 7. THE STRENGTH IS REPORTED, NOT THRESHOLDED. A crossing whose thinner side
+     carries 5% of the book is a real boundary and a weak one; a binary gate
+     would either hide it or dress it up. */
+  const weak = aggressorGamma(fromCum([[90, 1], [95, 3], [100, -40], [110, -60]]), { spot: 97 });
+  ok(weak.flip !== null, "a thin-but-real long side still publishes a flip");
+  ok(weak.flipSeparation < 0.15,
+     `and reports how thin it is (got ${(weak.flipSeparation * 100).toFixed(1)}%)`);
+  const strong = aggressorGamma(fromCum([[90, 50], [95, 60], [100, -40], [110, -60]]), { spot: 97 });
+  ok(strong.flipSeparation > weak.flipSeparation,
+     "a boundary with real book on both sides reports a larger separation");
+
+  // 8. A cumulative that touches zero and returns to its own sign is NOT a
+  //    crossing. `(a.cum < 0) !== (b.cum < 0)` called zero positive and emitted
+  //    two crossings at one strike, with opposite sides.
+  const zeroTouch = aggressorGamma(fromCum([[100, -5], [110, 0], [120, -5]]), { spot: 110 });
+  eq(zeroTouch.crossings.length, 0, "a zero touch without a sign change is not a crossing");
+  eq(zeroTouch.flip, null, "and publishes no flip");
+
+  /* 9. A ROW WITH NO MEASURED LEGS IS NOT A MEASURED ZERO. num() defaults to 0,
+     so a strike carrying none of the four aggressor fields entered the ladder
+     as a rung of exactly zero — while the card's buildGammaProfile dropped it,
+     so one card carried two different bands. */
+  const withEmpty = aggressorGamma(
+    [{ strike: "80" }, { strike: "85" }, ...fromCum([[100, -5], [110, 5], [120, 6]])],
+    { spot: 110 });
+  eq(withEmpty.bandMin, 100, "a strike with no measured exposure is dropped, not banded in");
+  eq(withEmpty.bandMax, 120, "and the top of the band is unaffected");
+
   // 6. Dealer gamma AT SPOT, unit-free and comparable across names.
   ok(deadTail.spotGammaShare < 0, "spot above a short_below flip is still short gamma here");
   ok(Math.abs(deadTail.spotGammaShare) <= 1, "spotGammaShare is bounded by construction");
   ok(aggressorGamma([], { spot: 100 }).spotGammaShare === null, "no ladder means no reading");
+
+  /* NULL, NEVER AN EDGE VALUE, outside the measured band. Clamping to the edge
+     rung returned a confident +-1 for a stock trading nowhere near the strikes
+     on file — and the SIGN of that number is what the card prints as its
+     "short Γ" / "long Γ" badge and what the quality gate reads as its
+     amplification axis. */
+  const banded = fromCum([[100, -5], [110, 5], [120, 6]]);
+  eq(aggressorGamma(banded, { spot: 1000 }).spotGammaShare, null,
+     "spot far above the band has no reading, rather than a confident +1");
+  eq(aggressorGamma(banded, { spot: 10 }).spotGammaShare, null,
+     "and neither does spot far below it");
+  ok(aggressorGamma(banded, { spot: 110 }).spotGammaShare !== null,
+     "while spot inside the band does");
+  eq(aggressorGamma([{ strike: "100", call_gamma_ask: "-5e6", call_gamma_bid: "0",
+                       put_gamma_ask: "0", put_gamma_bid: "0" }], { spot: 100 }).spotGammaShare, null,
+     "a one-rung ladder cannot be interpolated across, so it reports nothing");
 }
 
 /* ---------- weighting refuses to pay for dead columns ----------- */

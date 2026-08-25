@@ -537,6 +537,9 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     gammaFlip: gamma.flip,
     flipSide: gamma.flipSide,
     flipCount: gamma.crossings.length,
+    // The thinner of the two regimes the published flip divides, as a share of
+    // the ladder's peak. A weak boundary is still a boundary; the card says so.
+    flipSeparation: gamma.flipSeparation,
     spotGammaShare: gamma.spotGammaShare,
     bandMin: gamma.bandMin,
     bandMax: gamma.bandMax,

@@ -454,11 +454,17 @@
     const band = isNum(regime.bandMin) !== null && isNum(regime.bandMax) !== null
       ? `Measured over strikes ${px2(regime.bandMin)}–${px2(regime.bandMax)} only, so this is net dealer gamma inside that band, not the whole book. `
       : "";
+    const sep = isNum(regime.flipSeparation);
     note.textContent =
       (flip !== null
-        ? `Dealers are ${below} gamma below ${px2(flip)} — ${amplifies(below)} — and ${above} above it. ` +
+        ? `Dealers are ${below} gamma immediately below ${px2(flip)} — ${amplifies(below)} — ` +
+          `and ${above} immediately above it. ` +
+          (sep !== null
+            ? `The thinner of the two sides carries ${(sep * 100).toFixed(0)}% of the book's peak ` +
+              `exposure, so this is a ${sep < 0.15 ? "weak" : sep < 0.4 ? "moderate" : "strong"} boundary. `
+            : "") +
           (isNum(regime.crossings) !== null && regime.crossings > 1
-            ? `The book crosses zero ${regime.crossings} times; this is the crossing nearest spot. `
+            ? `The book crosses zero ${regime.crossings} times; this is the one separating the most exposure. `
             : "")
         : "Net gamma does not change sign materially inside the drawn band, so no flip level is published here. ") +
       band +

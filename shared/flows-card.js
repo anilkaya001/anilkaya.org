@@ -656,6 +656,12 @@ export function buildCard({
         // How many material crossings the ladder has. More than one means
         // "the gamma flip" is a simplification, and the card should say so.
         crossings: numOrNull(f.flipCount),
+        /* How much book the published flip separates, as a share of the
+           ladder's peak cumulative. On the live INTC book the sign genuinely
+           changes 1.3% from spot, and the long-gamma side carries a tenth of
+           the exposure — a reader told only the level would size against a
+           boundary that is barely there. */
+        flipSeparation: numOrNull(f.flipSeparation),
         bandMin: numOrNull(f.bandMin),
         bandMax: numOrNull(f.bandMax),
       }
