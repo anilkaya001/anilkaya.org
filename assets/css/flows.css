@@ -224,6 +224,9 @@
 
 .flows-tablewrap {
   overflow-x: auto;
+  /* The wrapper is focusable (tabindex="0" in the markup) so a keyboard user
+     can scroll it. Give that focus a visible ring. */
+  outline-offset: 2px;
   border: 1px solid var(--hairline);
   border-radius: 4px;
   background: var(--bg-elev);
@@ -302,35 +305,76 @@
   inset: 0.28rem auto 0.28rem 0;
   width: calc(var(--w, 0) * 100%);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--flow-up) 22%, transparent);
+  /* 12%, not 22%. The label is painted in the same hue as its own fill, so the
+     tint sets the label's contrast. Measured against both grounds: at 22% the
+     negative case is 3.99:1 and the positive 4.49:1 — both under the 4.5:1
+     WCAG AA floor, and worst on exactly the top-ranked rows, where the bar
+     covers most of the cell. At 12% they are 4.61:1 and 5.33:1 over --bg-elev
+     and 4.92:1 / 5.71:1 over the --bg-deep row hover. */
+  background: color-mix(in srgb, var(--flow-up) 12%, transparent);
   pointer-events: none;
   z-index: 0;
 }
 
 .fb-neg .fb-bar,
 .fb-score.is-neg .fb-bar {
-  background: color-mix(in srgb, var(--flow-down) 22%, transparent);
+  background: color-mix(in srgb, var(--flow-down) 12%, transparent);
 }
 
 .fb-score > span { position: relative; z-index: 1; }
 
-/* Five family sub-scores as a compact glyph. */
+/* Five family sub-scores as a compact glyph.
+
+   Bars grow UP from a centre line for positive and DOWN for negative, so the
+   sign is carried by geometry. It used to be height: |value| with the sign
+   conveyed only by a colour swap, which meant +70 and -70 were pixel-identical
+   and a red/green-blind reader saw a unanimous decomposition on a name whose
+   positioning family was maximally bearish (WCAG 1.4.1, "Use of Color").
+   Colour now reinforces the direction rather than carrying it. */
 .fb-fam {
   display: inline-flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 2px;
   height: 1rem;
+  /* the zero line, so an absent bar reads as zero rather than as nothing */
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px), var(--hairline) calc(50% - 0.5px),
+    var(--hairline) calc(50% + 0.5px), transparent calc(50% + 0.5px));
 }
 
 .fb-fam i {
+  position: relative;
   display: block;
   width: 3px;
-  border-radius: 1px;
-  background: var(--gold-mystic);
-  height: calc(0.2rem + var(--h, 0) * 0.8rem);
 }
 
-.fb-fam i.is-neg { background: var(--flow-down); }
+.fb-fam i::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 50%;
+  height: calc(var(--h, 0) * 0.5rem);
+  border-radius: 1px;
+  background: var(--gold-mystic);
+}
+
+.fb-fam i.is-neg::before {
+  bottom: auto;
+  top: 50%;
+  background: var(--flow-down);
+}
+
+/* Missing is not zero and is certainly not positive: a hollow tick on the
+   centre line, distinguishable from a real bar at any length. */
+.fb-fam i.is-null::before {
+  top: calc(50% - 1px);
+  bottom: auto;
+  height: 2px;
+  background: var(--ink-dim);
+  opacity: 0.55;
+}
 
 .fb-empty {
   padding: 2.2rem 1rem;

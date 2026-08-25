@@ -934,22 +934,29 @@ function flowsLoginResponse(message) {
  * The ingest cap is a READ-path CPU guarantee, not an arbitrary size guard.
  *
  * A "zero-parse byte passthrough" is not free: the stored value still crosses
- * the D1 driver and the response body, and the cost is linear in its size.
- * Measured against local workerd, calibrated with PBKDF2-10k (5.09 ms of known
- * CPU) as a ruler, the read path costs roughly 1 ms of CPU per 106 KB served:
+ * the D1 driver and the response body. Measured against local workerd,
+ * calibrated with PBKDF2-10k (5.09 ms of separately known CPU) as a ruler:
  *
  *      15 KB -> 1.60 ms      469 KB ->  6.08 ms
  *     117 KB -> 3.03 ms     1174 KB -> 12.53 ms   (over the 10 ms budget)
  *
- * Workers Free allows 10 ms of CPU per invocation. Capping ingest at 256 KB is
- * what makes every read provably cheap — nothing larger can be stored, so
- * nothing larger can be served, so no read can exceed ~2.4 ms. The previous
- * 2 MB cap accepted payloads the read path could not serve within budget.
+ * Least squares over those four points gives TWO terms, and both matter:
  *
- * A board of 50 rows measures ~29 KB and a per-ticker card ~20-40 KB, so this
- * leaves roughly an order of magnitude of headroom for both.
+ *      cost = 1.7 ms fixed + 1 ms per 108 KB
+ *
+ * The fixed term is the part that is easy to drop, and dropping it is how the
+ * earlier 2 MB cap looked acceptable and how this comment previously claimed a
+ * 256 KB read costs 2.4 ms. It does not — 2.4 ms is the marginal term alone;
+ * the real figure is 4.1 ms, or 41% of the budget rather than 24%.
+ *
+ * At 128 KB the bound is 2.9 ms, under a third of the 10 ms Workers Free
+ * allowance, which leaves the isolate's burst tolerance as an actual margin
+ * instead of something the design leans on. Nothing larger than the cap can be
+ * stored, so nothing larger can be served: the cap is what makes that bound
+ * hold. A 50-row board measures 29 KB and a per-ticker card 20-40 KB, so this
+ * is still three to four times the largest payload either produces.
  */
-const FLOWS_MAX_PAYLOAD_BYTES = 256 * 1024;
+const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;
 
 function timingSafeEqualStr(a, b) {
   const x = String(a ?? ""), y = String(b ?? "");

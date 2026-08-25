@@ -478,7 +478,7 @@ try {
      served, so no read can exceed roughly 2.4 ms of the 10 ms budget. The cap
      was 2 MB, which accepted payloads the read path could not serve. */
   {
-    const big = JSON.stringify({ side: "long", rows: [], pad: "x".repeat(300 * 1024) });
+    const big = JSON.stringify({ side: "long", rows: [], pad: "x".repeat(200 * 1024) });
     const res = await fetch(url("/api/flows/ingest?key=board:long"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
@@ -487,7 +487,7 @@ try {
     eq(res.status, 413, "a payload beyond the read-path CPU bound is refused at ingest");
 
     const fine = JSON.stringify({ side: "long", generatedAt: new Date().toISOString(),
-                                  status: "ok", rows: [], pad: "x".repeat(200 * 1024) });
+                                  status: "ok", rows: [], pad: "x".repeat(100 * 1024) });
     const ok200 = await fetch(url("/api/flows/ingest?key=board:long"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },

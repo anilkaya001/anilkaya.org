@@ -50,7 +50,20 @@ jobs:
           node-version: 22
 
       # Two schedules fire, so one of them is always an hour wrong. Resolve it
-      # by asking for the real Eastern hour rather than assuming an offset.
+      # by asking which OFFSET is currently in effect and matching that against
+      # which cron actually fired.
+      #
+      # Not by reading the wall-clock hour at execution time. GitHub delays
+      # scheduled workflows under load, and the previous version accepted only
+      # Eastern hour "05" — a 45-minute tolerance. A firing queued past the top
+      # of the hour made BOTH schedules evaluate to false: no board, no error,
+      # a green check, and the only symptom a generatedAt that stops advancing.
+      # That is the same silent symptom as the 60-day schedule disable below,
+      # which makes it exactly the kind of failure this job cannot afford.
+      #
+      # github.event.schedule is the cron expression that fired, so comparing
+      # it against date +%Z is delay-proof: a run that starts three hours late
+      # still knows which firing it was.
       #
       # This sets an OUTPUT rather than exiting. GitHub Actions dropped the
       # neutral exit code when it moved off HCL: `exit 78` was neutral in v1
@@ -59,14 +72,20 @@ jobs:
       - name: Resolve whether this firing is the intended one
         id: gate
         run: |
+          ZONE="$(TZ=America/New_York date +%Z)"
+          FIRED="${{ github.event.schedule }}"
+          echo "Eastern zone is $ZONE; cron that fired: '${FIRED:-none}'"
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "Manual run — proceeding."
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$(TZ=America/New_York date +%H)" = "05" ]; then
-            echo "Eastern hour is 05 — this is the intended firing."
+          elif [ "$FIRED" = "15 9 * * 1-5" ] && [ "$ZONE" = "EDT" ]; then
+            echo "09:15 UTC during EDT is 05:15 Eastern — this firing owns today."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$FIRED" = "15 10 * * 1-5" ] && [ "$ZONE" = "EST" ]; then
+            echo "10:15 UTC during EST is 05:15 Eastern — this firing owns today."
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Eastern hour is $(TZ=America/New_York date +%H) — the other schedule owns today. Skipping."
+            echo "The other schedule owns today under $ZONE. Skipping."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 

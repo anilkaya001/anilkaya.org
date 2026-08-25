@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "43";
+export const ASSET_VERSION = "44";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -103,7 +103,11 @@ ${topbar(true)}
     <button type="button" class="flows-side" data-side="short" aria-pressed="false">Short</button>
   </div>
 
-  <div class="flows-tablewrap">
+  <!-- tabindex + role: the table is wider than any phone viewport, so this
+       wrapper always scrolls horizontally. Without a tabindex a keyboard-only
+       user tabs straight past it and seven of the ten columns are unreachable;
+       without role and a name it is not announced as a scrollable region. -->
+  <div class="flows-tablewrap" tabindex="0" role="region" aria-label="Ranked candidates">
     <table class="flows-table" id="flowsTable">
       <caption class="flows-caption">Ranked candidates. Every score decomposes into its contributing families.</caption>
       <thead>

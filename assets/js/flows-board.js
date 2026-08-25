@@ -21,6 +21,9 @@
   const cache = new Map();           // side -> payload
   const inflight = new Map();        // side -> { promise, controller }
   let side = initialSide();
+  // Which side's rows are actually on screen right now, as opposed to which
+  // side the controls claim. They diverge for the duration of every fetch.
+  let painted = null;
 
   /* ---------- formatting -----------------------------------------
      One place for every number. The rule throughout: never print a
@@ -118,7 +121,11 @@
       const n = isNum(fam && fam[k]);
       const i = document.createElement("i");
       i.style.setProperty("--h", n === null ? 0 : Math.min(Math.abs(n) / 100, 1));
-      if (n !== null && n < 0) i.className = "is-neg";
+      // Sign is drawn as direction from a centre line, not as a colour swap.
+      // A MISSING family gets its own mark: it used to render as a short
+      // positive stub, which read as a small bullish contribution.
+      if (n === null) i.className = "is-null";
+      else if (n < 0) i.className = "is-neg";
       wrap.append(i);
       parts.push(k + " " + (n === null ? DASH : fmtSignedInt(n)));
     }
@@ -214,6 +221,20 @@
 
   function render(which) {
     statusEl.textContent = "Loading the " + which + " board…";
+
+    /* Clear the table whenever the side being requested is not the one on
+       screen. select() flips the button fill, aria-pressed and the ?side= URL
+       synchronously, but the tbody was only ever replaced inside the success
+       handler — so on a slow connection the page presented the LONG rows under
+       a Short label, styled and announced as Short, for the whole fetch. Rows
+       from the wrong day's cross-section under the wrong heading are worse
+       than no rows. */
+    if (painted !== null && painted !== which) {
+      body.replaceChildren();
+      painted = null;
+    }
+    body.setAttribute("aria-busy", "true");
+
     // Cancel a superseded request so a slow response cannot land after
     // the user has already switched sides.
     for (const [key, entry] of inflight) {
@@ -236,6 +257,7 @@
       const frag = document.createDocumentFragment();
       rows.forEach((row, i) => frag.append(rowFor(row, i)));
       body.replaceChildren(frag);                 // one insertion, 50 rows
+      painted = which;
 
       const when = payload.generatedAt
         ? new Date(payload.generatedAt).toLocaleString()
@@ -246,6 +268,8 @@
       if (error && error.name === "AbortError") return;
       showMessage("The board could not be loaded. Refresh to try again.");
       statusEl.textContent = "Could not reach the board service.";
+    }).finally(() => {
+      body.removeAttribute("aria-busy");
     });
   }
 
@@ -253,6 +277,7 @@
 
   function select(which) {
     if (which !== "long" && which !== "short") return;
+    if (which === side && painted === side) return;
     side = which;
     for (const button of sideButtons) {
       const on = button.dataset.side === which;
