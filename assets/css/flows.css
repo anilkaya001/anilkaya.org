@@ -541,6 +541,17 @@ p.fb-empty {
   line-height: 1.5;
 }
 
+/* The panel's actual READING, as opposed to the note explaining the method
+   below it. It carries a sentence that used to live inside the SVG, where it
+   could not wrap and was silently clipped at both ends on a phone. Sized and
+   weighted above the note so the finding is not buried in the methodology. */
+.fc-reading {
+  margin: 0.55rem 0 0;
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .fc-dead {
   margin: 0;
   padding: 0.8rem;

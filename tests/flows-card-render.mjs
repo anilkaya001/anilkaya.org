@@ -24,13 +24,24 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { buildSurface } from "../shared/flows-card.js";
 import { FLOWS_PAGES } from "../shared/flows-pages.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/* THE SUITE EMITS ITS OWN CARDS rather than depending on a directory some
+   earlier npm script may or may not have filled. A test whose fixture is a
+   side effect of another test passes locally and finds nothing in CI. */
+const SCRATCH = await mkdtemp(path.join(os.tmpdir(), "flows-render-"));
+execFileSync(process.execPath, [
+  path.join(ROOT, "scripts/flows-pipeline.mjs"),
+  "--dry-run", "--emit", path.join(SCRATCH, "dry.json"),
+], { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
@@ -64,7 +75,9 @@ ok(panel.status === "ok", "the fixture builds a surface");
 let src = fs.readFileSync(path.join(ROOT, "assets/js/flows-card.js"), "utf8");
 const close = src.lastIndexOf("})();");
 assert.ok(close > 0, "flows-card.js is still an IIFE");
-src = src.slice(0, close) + "  window.__renderSurface = renderSurface;\n" + src.slice(close);
+src = src.slice(0, close) +
+  "  window.__renderSurface = renderSurface;\n" +
+  "  window.__paint = paint;\n" + src.slice(close);
 
 const browser = await chromium.launch();
 try {
@@ -166,6 +179,118 @@ try {
      "two clipped cells are described in the plural");
   ok(many.clips >= 2, "and both are actually marked on the grid");
 
+  /* ---------- EVERY PANEL, from a real emitted card -------------- */
+
+  /* The surface assertions above are specific. This sweep is general, and it
+     is the part that scales: paint() dispatches ten renderers, and the bugs
+     this repository has actually shipped — type scaled to 4.6 CSS px, a mark
+     that landed on none of 109 cards, 54 bars of zero — were all invisible to
+     every numeric test and all visible the moment something drew them.
+
+     A real emitted dry-run card is used rather than a hand-built one, so the
+     panels see the shapes the pipeline actually produces, including the ones
+     that come back "unavailable". */
+  {
+    const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
+    ok(emitted.length > 0, `the dry run emitted cards to sweep (${SCRATCH})`);
+
+    /* SEVERAL CARDS, NOT ONE. Label length is a function of the DATA — the
+       clipped sentence this sweep first caught was 334px wide only because
+       that card's reading happened to be the long branch. A one-card sweep
+       measures one set of strings. */
+    const sample = emitted.slice(0, 5);
+    for (const file of sample) {
+    const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, file), "utf8"));
+
+    const swept = await page.evaluate(({ card }) => {
+      const errors = [];
+      /* THE DIALOG MUST BE OPEN. A closed <dialog> is display:none, so every
+         child measures zero and the sweep would confirm a card is fine while
+         measuring nothing at all — the exact failure mode it exists to catch,
+         reproduced in the test itself. */
+      const dlg = document.getElementById("flowsCard");
+      try { dlg.showModal(); } catch { errors.push("dialog would not open"); }
+      try { window.__paint(card, Date.now()); }
+      catch (e) { return { threw: String(e) }; }
+
+      const HOSTS = ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal",
+                     "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"];
+      const out = [];
+      for (const id of HOSTS) {
+        const host = document.getElementById(id);
+        if (!host) { errors.push(id + ": no host element"); continue; }
+        const dead = !!host.querySelector(".fc-dead");
+        const svgs = Array.from(host.querySelectorAll("svg"));
+        // The smallest rendered text height anywhere in this panel.
+        let minText = Infinity;
+        for (const t of host.querySelectorAll("text")) {
+          const h = t.getBoundingClientRect().height;
+          if (h > 0 && h < minText) minText = h;
+        }
+        // Does any svg draw outside its own box? SVG clips silently.
+        let clipped = false;
+        for (const svg of svgs) {
+          const box = svg.getBoundingClientRect();
+          for (const t of svg.querySelectorAll("text")) {
+            const r = t.getBoundingClientRect();
+            if (r.width === 0) continue;
+            /* TWO PIXELS, not zero. Text metrics carry sub-pixel rounding and
+               a glyph's ink box is not its advance box, so a strict edge test
+               reports overhang on captions that are visually flush. Two pixels
+               is below anything a reader can see and far below the 23px
+               overhang this sweep was written after. */
+            if (r.left < box.left - 2 || r.right > box.right + 2) { clipped = true; break; }
+          }
+        }
+        out.push({
+          id, dead, svgs: svgs.length,
+          empty: host.childElementCount === 0,
+          minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
+          clipped,
+          widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
+        });
+      }
+      return { panels: out, errors, overflow: document.documentElement.scrollWidth > 320 };
+    }, { card });
+
+    const who = card.ticker || file;
+    ok(!swept.threw, `${who}: painting a real emitted card does not throw (${swept.threw || ""})`);
+    eq((swept.errors || []).length, 0,
+       `${who}: every panel the renderer targets exists in the board markup (${(swept.errors || []).join("; ")})`);
+
+    for (const p of swept.panels) {
+      /* NO PANEL IS SILENTLY BLANK. A host with no children is neither a chart
+         nor an explanation — it is the state a reader cannot distinguish from
+         a broken page, and it is what an unhandled tagged-union branch
+         produces. Either it drew something or it said why it could not. */
+      ok(!p.empty, `${who} ${p.id}: renders either content or an explicit unavailable notice`);
+
+      if (p.dead) continue;                    // an unavailable panel has no chart to measure
+
+      /* THE FOUR-PANEL BUG, swept across all ten. A viewBox fixed in absolute
+         units with width="100%" scales the type down with the drawing: 9px
+         became 4.6 CSS px at this viewport, silently, because nothing
+         overflows. */
+      if (p.minText !== null) {
+        ok(p.minText >= 8,
+           `${who} ${p.id}: axis type renders at its intended size, not scaled down (${p.minText}px)`);
+      }
+      /* SVG CLIPPING IS SILENT. A label that runs off its own canvas simply
+         is not there, and the panel looks fine. */
+      eq(p.clipped, false, `${who} ${p.id}: draws no text outside its own canvas`);
+
+      for (const w of p.widths) {
+        ok(w > 0 && w <= 320,
+           `${who} ${p.id}: sizes its drawing to the viewport rather than past it (${w}px)`);
+      }
+    }
+    eq(swept.overflow, false, `${who}: a fully painted card overflows nothing at 320px`);
+
+    const drew = swept.panels.filter((p) => !p.dead).length;
+    ok(drew >= 4, `${who}: the sweep measured panels rather than skipping them all (${drew} live)`);
+    }
+  }
+
   /* A CARD FROM BEFORE THIS PANEL EXISTED must degrade, not throw. Published
      cards outlive the code that reads them. */
   const legacy = await page.evaluate(() => {
@@ -184,4 +309,5 @@ try {
     `and a pre-surface card degrades`);
 } finally {
   await browser.close();
+  await rm(SCRATCH, { recursive: true, force: true });
 }

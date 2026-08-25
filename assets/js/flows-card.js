@@ -450,9 +450,19 @@
     }
 
     /* The caption sits AT the zero rule it labels rather than at the far left
-       of the canvas, where it was 303px away from the thing it described. */
-    const axis = svgEl("text", { class: "gp-axis", x: x0, y: H - 3, "text-anchor": "middle" });
-    axis.textContent = "◀ short   net dealer Γ   long ▶";
+       of the canvas, where it was 303px away from the thing it described —
+       but CLAMPED, because the zero rule floats between 18% and 82% of the
+       plot and a centred caption hung off the canvas when it sat near an edge.
+       Measured on an emitted card at a 320px viewport: a 166px caption centred
+       at x=85 overhung the left edge, and SVG clips silently so the leading
+       glyph simply vanished. The half-width is estimated from the string
+       rather than measured — SVG offers no pre-layout metric — at roughly
+       0.5em per character for this face and size, which errs wide. */
+    const axisText = "◀ short   net dealer Γ   long ▶";
+    const axisHalf = axisText.length * 0.5 * 9 * 0.5;
+    const axisX = Math.min(plotR - axisHalf, Math.max(plotL + axisHalf, x0));
+    const axis = svgEl("text", { class: "gp-axis", x: axisX, y: H - 3, "text-anchor": "middle" });
+    axis.textContent = axisText;
     svg.append(axis);
 
     svg.setAttribute("aria-label",
@@ -583,18 +593,31 @@
       svg.append(t);
     }
 
+    /* THE NUMBER STAYS IN THE SVG; THE SENTENCE DOES NOT.
+
+       This was one centred <text> carrying the whole reading — "gap −0.76σ —
+       new gamma is building BELOW the standing book" — and SVG text cannot
+       wrap. Measured at a 320px viewport, where the dialog's inner width is
+       288: the sentence drew 334px wide and overhung its own canvas by 23px on
+       each side. SVG clipping is silent, so both ends were simply missing and
+       the panel looked fine. A quantity is an axis label; a sentence is prose,
+       and prose belongs in HTML that reflows. */
     const gapAtr = isNum(panel.gapAtr);
     const cap = svgEl("text", { class: "bd-axis-lab", x: W / 2, y: H - 4, "text-anchor": "middle" });
-    cap.textContent = gapAtr === null
-      ? "gap " + px2(panel.gapPx) + " (no ATR, so no sigma reading)"
-      : "gap " + sigma(gapAtr) + " — new gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book";
+    cap.textContent = gapAtr === null ? "gap " + px2(panel.gapPx) : "gap " + sigma(gapAtr);
     svg.append(cap);
+    const reading = gapAtr === null
+      ? "The gap is " + px2(panel.gapPx) + ", with no ATR to state it in, so there is no sigma reading."
+      : "New gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book, " +
+        sigma(gapAtr) + " away from it.";
 
     svg.setAttribute("aria-label",
       `The standing gamma book is centred at ${px2(oi)} and today's traded gamma at ${px2(vol)}` +
       (spot !== null ? `, with spot at ${px2(spot)}` : "") +
       (gapAtr === null ? "." : `, a gap of ${gapAtr.toFixed(2)} ATR.`));
     host.append(svg);
+
+    host.append(el("p", "fc-reading", reading));
 
     host.append(el("p", "fc-note",
       "Open interest is the book that already exists; today's volume is what was " +
