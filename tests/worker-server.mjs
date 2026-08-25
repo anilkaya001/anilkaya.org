@@ -10,6 +10,12 @@ export const REPO_ROOT = path.resolve(TEST_DIR, "..");
 const WRANGLER = path.join(TEST_DIR, "node_modules", "wrangler", "bin", "wrangler.js");
 export const SESSION_SECRET = "test-session-secret-abcdefghijklmnopqrstuvwxyz";
 
+// Flows gate test fixtures. Real values live in Worker secrets; these exist so
+// the local harness can exercise the credential path end to end.
+export const FLOWS_PEPPER = "test-flows-pepper-abcdefghijklmnopqrstuvwxyz";
+export const FLOWS_PASSWORD = "test-flows-password";
+export const FLOWS_TEST_USER = "anilkaya";
+
 function capture(child) {
   let output = "";
   const add = (chunk) => { output = (output + chunk.toString()).slice(-30000); };
@@ -76,6 +82,15 @@ async function stopProcess(child) {
   ]);
 }
 
+async function flowsCredentialsJSON() {
+  const { FLOWS_USERNAMES, deriveHash } = await import("../shared/flows-auth.js");
+  const map = {};
+  for (const username of FLOWS_USERNAMES) {
+    map[username] = await deriveHash(username, FLOWS_PASSWORD, FLOWS_PEPPER);
+  }
+  return JSON.stringify(map);
+}
+
 export async function startWorker() {
   const port = await freePort();
   const persist = await mkdtemp(path.join(os.tmpdir(), "anilkaya-worker-test-"));
@@ -92,6 +107,8 @@ export async function startWorker() {
     "--var", "GOOGLE_CLIENT_ID:test-client",
     "--var", "GOOGLE_CLIENT_SECRET:test-secret",
     "--var", `SESSION_SECRET:${SESSION_SECRET}`,
+    "--var", `FLOWS_PEPPER:${FLOWS_PEPPER}`,
+    "--var", `FLOWS_CREDENTIALS:${await flowsCredentialsJSON()}`,
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {
     cwd: REPO_ROOT,

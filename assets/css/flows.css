@@ -1,0 +1,351 @@
+/* =============================================================
+   flows.css — the credential-gated Flows section.
+   Loaded only by /flows/, alongside base.css. Every token comes
+   from base.css; the only new custom properties here are the two
+   semantic directional colours, which are deliberately NOT the
+   site's gold accent so "up/down" never reads as "emphasis".
+   ============================================================= */
+
+:root {
+  /* Directional pair, checked against --bg-elev (#12110d):
+     jade  #6f9f78 -> 6.9:1, brick #d1685a -> 5.4:1. Both clear AA
+     for body text, and neither collides with the gold accent. */
+  --flow-up:   #6f9f78;
+  --flow-down: #d1685a;
+  --flow-flat: var(--ink-faint);
+  --flow-surface: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+}
+
+.flows-body {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.flows-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-mystic);
+}
+
+/* ---------- sign-in ------------------------------------------- */
+
+.flows-auth {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 6rem var(--pad) 3rem;
+}
+
+.flows-auth__card {
+  width: min(26rem, 100%);
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: clamp(1.4rem, 5vw, 2.2rem);
+}
+
+.flows-auth__card h1 {
+  font-size: clamp(1.8rem, 1.4rem + 1.6vw, 2.4rem);
+  line-height: 1.1;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.flows-auth__lede {
+  color: var(--ink-dim);
+  font-size: 0.96rem;
+  margin-bottom: 1.4rem;
+}
+
+.flows-alert {
+  border-left: 2px solid var(--flow-down);
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.92rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.2rem;
+}
+
+.flows-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.flows-form label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-top: 0.7rem;
+}
+
+.flows-form input {
+  /* 16px minimum prevents iOS zooming the viewport on focus. */
+  font-family: var(--font-mono);
+  font-size: 16px;
+  min-height: 44px;
+  padding: 0.6rem 0.75rem;
+  color: var(--ink);
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+}
+
+.flows-form input:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+.flows-submit {
+  margin-top: 1.4rem;
+  min-height: 44px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #1a1407;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: filter 0.2s var(--ease);
+}
+
+.flows-submit:hover { filter: brightness(1.08); }
+
+/* ---------- board shell --------------------------------------- */
+
+.flows-main {
+  max-width: 78rem;
+  margin-inline: auto;
+  padding: 6rem var(--pad) 4rem;
+}
+
+.flows-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.flows-head h1 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.4rem);
+  line-height: 1.1;
+  margin-top: 0.25rem;
+}
+
+.flows-session {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.flows-user {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+}
+
+.flows-signout {
+  min-height: 44px;
+  padding: 0 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.flows-signout:hover { color: var(--ink); border-color: var(--gold-mystic); }
+
+.flows-status {
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+  padding: 0.9rem 0;
+}
+
+/* ---------- long / short ---------------------------------------
+   The selected side is marked by weight, a filled ground AND the
+   aria-pressed state, never by colour alone. */
+
+.flows-sides {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.28rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--flow-surface);
+  margin-bottom: 1.1rem;
+}
+
+.flows-side {
+  min-height: 44px;
+  min-width: 6.5rem;
+  padding: 0 1.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.flows-side:hover { color: var(--ink); }
+
+.flows-side.is-on {
+  color: #1a1407;
+  font-weight: 700;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+}
+
+.flows-side:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 3px;
+}
+
+/* ---------- table ----------------------------------------------
+   The WRAPPER scrolls, never the page. A tested invariant: the
+   suite asserts zero horizontal overflow at 320px. */
+
+.flows-tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--bg-elev);
+}
+
+.flows-table {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.flows-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  font-size: 0.84rem;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.flows-table th,
+.flows-table td {
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.flows-table thead th {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--bg-deep);
+}
+
+.flows-table tbody tr:last-child td { border-bottom: 0; }
+.flows-table tbody tr:hover { background: var(--bg-deep); }
+
+.c-rank { width: 3rem; }
+
+.c-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb-tk {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.fb-pos { color: var(--flow-up); }
+.fb-neg { color: var(--flow-down); }
+.fb-flat { color: var(--flow-flat); }
+
+/* Score cell: a proportional fill behind a signed number. The JS
+   sets --w (0..1) inline; style-src permits 'unsafe-inline'. */
+.fb-score {
+  position: relative;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fb-bar {
+  position: absolute;
+  inset: 0.28rem auto 0.28rem 0;
+  width: calc(var(--w, 0) * 100%);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--flow-up) 22%, transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.fb-neg .fb-bar,
+.fb-score.is-neg .fb-bar {
+  background: color-mix(in srgb, var(--flow-down) 22%, transparent);
+}
+
+.fb-score > span { position: relative; z-index: 1; }
+
+/* Five family sub-scores as a compact glyph. */
+.fb-fam {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 1rem;
+}
+
+.fb-fam i {
+  display: block;
+  width: 3px;
+  border-radius: 1px;
+  background: var(--gold-mystic);
+  height: calc(0.2rem + var(--h, 0) * 0.8rem);
+}
+
+.fb-fam i.is-neg { background: var(--flow-down); }
+
+.fb-empty {
+  padding: 2.2rem 1rem;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 0.94rem;
+}
+
+.flows-foot {
+  margin-top: 1.4rem;
+  max-width: var(--measure);
+  font-size: 0.86rem;
+  color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flows-submit,
+  .flows-side,
+  .flows-signout { transition: none; }
+}

@@ -125,6 +125,16 @@ const MARKET_SNAPSHOT_SCHEMA_SQL =
 // snapshot inline once it is older than this, and on a failed repair it touches
 // the row so the next inline attempt is a full window away (no per-request storm
 // during a sustained upstream outage).
+// Flows tables. Workers Builds does not apply migrations to an existing D1
+// database, so — exactly as for market_snapshot above — the Worker creates
+// these on first use. Without it a missed migration would leave the board
+// permanently showing its "pending" empty state and silently skip login
+// throttling, both of which fail quietly rather than loudly.
+const FLOWS_SCHEMA_SQL = [
+  "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0))",
+  "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))",
+];
+
 const MARKET_STALE_MS = 45 * 60 * 1000;
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
@@ -903,8 +913,18 @@ function flowsLoginResponse(message) {
   });
 }
 
+let flowsSchemaReady = false;
+async function ensureFlowsTables(env) {
+  if (flowsSchemaReady || !env.DB) return;
+  try {
+    await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+    flowsSchemaReady = true;
+  } catch { /* a read will simply return nothing; never fail a request on this */ }
+}
+
 async function flowsLockRecord(env, username) {
   if (!username || !env.DB) return null;
+  await ensureFlowsTables(env);
   try {
     return await env.DB.prepare(
       "SELECT failures, first_at FROM flows_login_failures WHERE username = ?"
@@ -914,6 +934,7 @@ async function flowsLockRecord(env, username) {
 
 async function recordFlowsFailure(env, username, previous) {
   if (!username || !env.DB) return;
+  await ensureFlowsTables(env);
   const next = nextFailureState(previous);
   try {
     await env.DB.prepare(
@@ -1732,6 +1753,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/board") {
       const side = url.searchParams.get("side") === "short" ? "short" : "long";
+      await ensureFlowsTables(env);
       const row = await env.DB.prepare(
         "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
       ).bind("board:" + side).first().catch(() => null);

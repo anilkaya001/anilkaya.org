@@ -376,11 +376,15 @@ const near = (a, b, tol, msg) => {
    invisible to the HTML sweep in contracts.mjs. Pin it here instead,
    or a version bump silently leaves the gated pages on stale CSS. */
 {
-  const { readFileSync } = await import("node:fs");
+  const { readFileSync, existsSync } = await import("node:fs");
   const { ASSET_VERSION } = await import("../shared/flows-pages.js");
   const onDisk = readFileSync(new URL("../assets/version.txt", import.meta.url), "utf8").trim();
   ok(ASSET_VERSION === onDisk,
      `flows-pages ASSET_VERSION (${ASSET_VERSION}) matches assets/version.txt (${onDisk})`);
+
+  for (const asset of ["../assets/css/flows.css", "../assets/js/flows-board.js"]) {
+    ok(existsSync(new URL(asset, import.meta.url)), `${asset} exists`);
+  }
 }
 
 console.log(`✓ flows-features: ${checks} assertions — robust stats, rank-normal transform, neutralization, dealer-gamma sign, path signature, dispersion-invariant calibration, reachable conviction`);
