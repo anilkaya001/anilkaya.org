@@ -36,6 +36,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 /* ---------- the stub upstream ---------------------------------- */
 let upstreamCalls = 0;
 let upstreamMode = "ok";
+let pagesAsked = [];
 const chainRows = [
   /* the one real line */
   { option_symbol: "AAPL260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60",
@@ -63,8 +64,28 @@ const upstream = http.createServer((req, res) => {
   if (upstreamMode === "garbage") { res.writeHead(200); res.end("<html>not json</html>"); return; }
   if (upstreamMode === "rate") { res.writeHead(429); res.end("{}"); return; }
   if (path.endsWith("/option-contracts")) {
+    const page = Number(new URL(req.url, "http://x").searchParams.get("page") || 1);
+    pagesAsked.push(page);
     res.writeHead(200);
-    res.end(JSON.stringify({ data: upstreamMode === "emptyChain" ? [] : chainRows }));
+    if (upstreamMode === "emptyChain") { res.end(JSON.stringify({ data: [] })); return; }
+    /* A FULL PAGE MEANS THERE MAY BE MORE. The vendor caps limit at 500 and
+       offers no ordering on this route, so a full page is the only signal that
+       the chain was cut. "big" returns two full pages (still truncated);
+       "part" returns one full page then a short one (complete). */
+    if (upstreamMode === "big" || upstreamMode === "part") {
+      const full = Array.from({ length: 500 }, (_, i) => ({
+        option_symbol: `PAG260918P${String((100 + i) * 1000).padStart(8, "0")}`,
+        nbbo_bid: "2.00", nbbo_ask: "2.05", implied_volatility: "0.30",
+        open_interest: "900", volume: "50",
+      }));
+      if (page >= 2 && upstreamMode === "part") {
+        res.end(JSON.stringify({ data: full.slice(0, 3) }));
+        return;
+      }
+      res.end(JSON.stringify({ data: full }));
+      return;
+    }
+    res.end(JSON.stringify({ data: chainRows }));
     return;
   }
   if (path.includes("/ohlc/")) {
@@ -291,6 +312,62 @@ try {
       ok(body.error && body.error.code, "and answers in the project error envelope");
     }
     upstreamMode = "ok";
+  }
+
+  /* ---------- the page size is a CEILING, not a chain ------------- */
+  {
+    /* `limit` is documented maximum=500 and this route has no `order`
+       parameter, so a single call on a liquid name returns an arbitrary
+       vendor-ordered slice. The footer used to call that slice the chain, and
+       in a merged table it was ranked head to head against complete ones. */
+    upstreamMode = "ok";
+    pagesAsked = [];
+    const small = await get("/api/flows/chain?t=SMALL");
+    eq(small.status, 200);
+    const sBody = await small.json();
+    eq(sBody.truncated, false, "a chain that fits in one page is not truncated");
+    assert.deepEqual(pagesAsked, [1], "and costs exactly one page"); checks++;
+
+    upstreamMode = "big";
+    pagesAsked = [];
+    const big = await get("/api/flows/chain?t=BIG");
+    eq(big.status, 200);
+    const bBody = await big.json();
+    assert.deepEqual(pagesAsked, [1, 2], "a full first page buys a second"); checks++;
+    eq(bBody.screened, 1000, "both pages reach the ranker");
+    eq(bBody.truncated, true, "a full SECOND page means a third exists, and says so");
+    eq(bBody.pageSize, 500, "the ceiling ships so the claim can be checked");
+
+    upstreamMode = "part";
+    pagesAsked = [];
+    const part = await get("/api/flows/chain?t=PART");
+    const pBody = await part.json();
+    assert.deepEqual(pagesAsked, [1, 2], "a full first page always buys a second"); checks++;
+    eq(pBody.screened, 503, "the short second page completes the chain");
+    eq(pBody.truncated, false,
+       "a short second page means the chain ENDED — the only case where screened is the chain");
+
+    /* AND IT NEVER GOES FURTHER. Three pages is 6.5ms of a 10ms budget and
+       four is 8.5ms; the bound is deliberate and the disclosure is what makes
+       it honest. */
+    upstreamMode = "big";
+    pagesAsked = [];
+    await get("/api/flows/chain?t=BIG2");
+    eq(pagesAsked.length, 2, "two pages is the ceiling, whatever the chain holds");
+    upstreamMode = "ok";
+  }
+
+  /* ---------- the cushion is only as fresh as its vol ------------- */
+  {
+    /* implied_volatility is the LAST TRANSACTION's, per the vendor's own
+       schema ref. A contract that has not traded today carries one of unknown
+       age, and the cushion divides by it. */
+    upstreamMode = "ok";
+    const res = await get("/api/flows/chain?t=IVAGE&refresh=1");
+    const body = await res.json();
+    const traded = body.rows.find((r) => r.volume > 0);
+    ok(traded && traded.ivTraded === true, "a contract that traded today carries a fresh fill IV");
+    ok(traded.cushionSigmas !== null, "and its cushion is published");
   }
 
   /* ---------- the live price is allowed to fail ------------------ */

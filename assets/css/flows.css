@@ -1423,3 +1423,14 @@ body.is-stale .flows-tablewrap {
   font-size: 9px;
   letter-spacing: 0.04em;
 }
+
+/* A cushion computed from an implied vol that is the LAST TRANSACTION's rather
+   than today's. Dimmed and dotted-underlined rather than coloured: it is not a
+   good or bad reading, it is one of unknown age, and the distinction has to
+   survive a greyscale render. */
+.desk-table td.is-stale-iv {
+  color: var(--ink-dim);
+  text-decoration: underline dotted var(--hairline);
+  text-underline-offset: 3px;
+  cursor: help;
+}

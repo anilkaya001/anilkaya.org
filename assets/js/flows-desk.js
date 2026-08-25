@@ -200,7 +200,7 @@
              as showing a cached row as live. */
           parts.push("$" + fmt2(p.spot) + (p.spotSource === "daily-close" ? " close" : ""));
         }
-        parts.push(fmtInt(p.priced) + " sellable");
+        parts.push(fmtInt(p.priced) + " sellable" + (p.truncated ? " of a partial chain" : ""));
         if (p.__age !== undefined) {
           const age = fmtAge(p.__age);
           if (age) parts.push(age);
@@ -394,10 +394,27 @@
        usually has a hopeless spread and no open interest either. Saying so
        costs one clause and stops "900 too wide" being read as "900 whose only
        problem is the spread". */
-    foot.textContent = dropped.length
-      ? priced + " of " + screened + " quoted contracts are sellable. The rest fail a gate: " +
-        dropped.join(", ") + " — each counted once, under the first gate it failed."
-      : priced + " of " + screened + " quoted contracts are sellable.";
+    /* A TRUNCATED CHAIN IS NOT A CHAIN, and saying "N of 1000" when 1000 was a
+       ceiling rather than a count misrepresents the universe this ranking was
+       taken over — most damagingly in a merged table, where a cut-off slice of
+       a huge chain sits beside a complete small one. */
+    const cut = chosen.filter((s) => {
+      const p = (book.get(s) || {}).payload;
+      return p && p.truncated;
+    });
+    const universe = cut.length
+      ? priced + " of at least " + screened + " quoted contracts are sellable"
+      : priced + " of " + screened + " quoted contracts are sellable";
+    foot.textContent = universe +
+      (dropped.length
+        ? ". The rest fail a gate: " + dropped.join(", ") +
+          " — each counted once, under the first gate it failed."
+        : ".") +
+      (cut.length
+        ? " " + cut.join(", ") + " " + (cut.length === 1 ? "has" : "have") +
+          " more contracts than this desk fetches, so " +
+          (cut.length === 1 ? "its" : "their") + " ranking is taken over a partial chain."
+        : "");
     updateStatus(oldest);
   }
 
@@ -450,7 +467,19 @@
     }
     tr.append(ann);
 
-    tr.append(cell(fmtSigmas(r.cushionSigmas), "c-num"));
+    /* THE CUSHION IS ONLY AS FRESH AS THE VOL IT DIVIDES BY, and that vol is
+       the LAST TRANSACTION's, not a quote. A contract that has not traded
+       today carries an IV of unknown age, and this is the page's flagship
+       honest number — rendering a four-session-old cushion identically to one
+       from a line that traded all morning is the same omission as showing a
+       cached row as live. Marked, not withheld: it is still the best reading
+       available, and hiding it would be the worse lie. */
+    const cushion = cell(fmtSigmas(r.cushionSigmas), "c-num" + (r.ivTraded === false ? " is-stale-iv" : ""));
+    if (r.ivTraded === false) {
+      cushion.title = "This contract has not traded today, so its implied volatility is the " +
+        "last transaction's — of unknown age. The cushion is as old as that print.";
+    }
+    tr.append(cushion);
     tr.append(cell(fmt2(r.breakeven), "c-num"));
     tr.append(cell(fmtPct(r.spread, 1), "c-num"));
 

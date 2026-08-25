@@ -198,7 +198,20 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1 } = {}) {
 
   /* The move to breakeven, in units of the move THIS option's own implied
      vol prices over its OWN remaining life. A ratio of two quoted numbers,
-     so it clears the identification bar. It is not a probability. */
+     so it clears the identification bar. It is not a probability.
+
+     BUT THE VOL IS A FILL, NOT A QUOTE. The vendor's schema names this field
+     `Option Contract Last Transaction IV` and describes it as "the implied
+     volatility for the last transaction". On a contract that last traded four
+     sessions ago it is a four-session-old number, and a cushion computed from
+     it is that stale too — rendered, until now, in the same typeface as a
+     cushion on a line that traded twenty thousand times this morning.
+
+     Today's volume dates it, and the desk was already parsing volume and
+     throwing it away. `ivTraded` is that evidence, carried so the renderer can
+     mark the cell. The cushion is NOT withheld when the vol is old: it is
+     still the best available reading and withholding it would be a worse lie
+     than showing it unqualified. It is qualified instead. */
   const ivRaw = numOrNull(row.implied_volatility);
   const iv = ivRaw !== null && ivRaw > 0 ? ivRaw / ivDivisor : null;
   const sigma = iv !== null && days > 0 ? iv * Math.sqrt(days / DAYS_PER_YEAR) : null;
@@ -241,6 +254,14 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1 } = {}) {
     assignedReturn,
     moneyness: parsed.strike / spot - 1,
     iv,
+    /* Did this contract trade today? If so the IV above is today's fill. If
+       not, it is the last one, of unknown age. null when volume is absent
+       rather than false, because "no volume field" and "zero volume" are
+       different facts. */
+    ivTraded: (() => {
+      const v = numOrNull(row.volume);
+      return v === null ? null : v > 0;
+    })(),
     oi,
     oiChange: oi !== null && prevOi !== null ? oi - prevOi : null,
     volume: numOrNull(row.volume),

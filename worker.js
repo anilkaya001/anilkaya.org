@@ -1015,8 +1015,11 @@ function passthrough(stored) {
 
    It is affordable, and that was MEASURED rather than assumed. Auth
    HMAC + parse 250KB + price 500 contracts + emit the top 120 costs
-   2.29ms of a roughly 10ms budget. Two external subrequests of a
-   limit of 50. The expensive half — screening a universe, ranking a
+   2.29ms of a roughly 10ms budget; a second chain page takes it to
+   about 4.4ms. Three or four external subrequests of a limit of 50 —
+   and the 50 is per INVOCATION, while one invocation prices one
+   ticker, so a twenty-symbol desk is twenty invocations rather than
+   one at 60 subrequests. The expensive half — screening a universe, ranking a
    cross-section, fitting anything — stays in Actions where it
    belongs.
 
@@ -1046,6 +1049,11 @@ const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
    the response carries its own age so the reader can say so out loud rather
    than implying it is live. */
 const CHAIN_TTL_SECONDS = 120;
+
+/* The vendor documents `limit` on /option-contracts as maximum=500. Named
+   rather than inlined because the truncation test below compares against it,
+   and a page size that disagrees with the ceiling reports truncation wrong. */
+const CHAIN_PAGE_SIZE = 500;
 
 /* How stale a copy has to be before an explicit refresh is allowed to spend a
    vendor call. Short enough that pressing refresh feels like it did something,
@@ -1088,15 +1096,18 @@ async function uwFetch(env, path, params) {
  */
 async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
-  const [contracts, candles, state] = await Promise.all([
-    uwFetch(env, `/api/stock/${t}/option-contracts`, {
-      /* The sellable universe in one call rather than the whole book in ten:
-         out-of-the-money contracts that somebody already holds. Both filters
-         are the vendor's, applied upstream, so they cost nothing here. */
-      maybe_otm_only: "true",
-      exclude_zero_oi_chains: "true",
-      limit: 500,
-    }),
+  const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+    /* The sellable universe rather than the whole book: out-of-the-money
+       contracts that somebody already holds. Both filters are the vendor's,
+       applied upstream, so they cost nothing here. */
+    maybe_otm_only: "true",
+    exclude_zero_oi_chains: "true",
+    limit: CHAIN_PAGE_SIZE,
+    ...(page > 1 ? { page } : {}),
+  });
+
+  const [firstPage, candles, state] = await Promise.all([
+    chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
     /* THE DAILY CANDLE IS NOT A LIVE PRICE, and this desk is priced against
        spot twice over: a covered call's collateral IS the shares at spot, and
@@ -1109,9 +1120,41 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
   ]);
 
-  const rows = Array.isArray(contracts) ? contracts : (contracts && contracts.data) || [];
-  const bars = Array.isArray(candles) ? candles : (candles && candles.data) || [];
+  const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
+  const rows = unwrap(firstPage);
+  const bars = unwrap(candles);
   if (!rows.length) throw new HttpError(404, "chain_empty", "No listed options found for that symbol");
+
+  /* THE PAGE SIZE IS A CEILING, NOT A CHAIN.
+  
+     `limit` on this endpoint is documented maximum=500, and the ticker-scoped
+     route has NO `order` parameter — only the sibling screener does. So a
+     single call on any name with more than 500 out-of-the-money contracts
+     carrying open interest returns an arbitrary vendor-ordered slice, and
+     those names are AAPL, SPY, NVDA: exactly the ones a premium desk is for.
+  
+     Two failures followed, and both rendered perfectly. The footer said "N of
+     500 quoted contracts are sellable" as though 500 were the chain. And in a
+     MERGED table a truncated slice of a huge chain was ranked head to head
+     against a complete small-cap chain, so cross-symbol ordering depended on
+     which 500 the vendor happened to send.
+  
+     A second page doubles the reach for one subrequest and roughly 2ms — the
+     route measures 2.29ms at 500 contracts and about 4.4ms at 1000, against a
+     10ms budget. Three pages would be 6.5ms and four 8.5ms, which is too close
+     to spend on a tail. So: two pages, and when even that fills, the payload
+     says `truncated` and the page says so rather than implying it saw
+     everything. Disclosure is what makes a bounded fetch honest; the bound
+     itself is just arithmetic. */
+  let truncated = false;
+  if (rows.length >= CHAIN_PAGE_SIZE) {
+    const second = unwrap(await chainPage(2).catch(() => []));
+    for (const r of second) rows.push(r);
+    /* A full second page means there is a third we did not ask for. A short
+       one means the chain ended inside it, which is the only case where the
+       screened count IS the chain. */
+    truncated = second.length >= CHAIN_PAGE_SIZE;
+  }
 
   /* The most recent close the vendor will admit to. Bars arrive newest-first
      on some endpoints and oldest-first on others, so the date is compared
@@ -1159,6 +1202,10 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
     tapeTime,
     prevClose: live && Number(live.prev_close) > 0 ? Number(live.prev_close) : dailyClose,
     strategy, ...ranked,
+    /* Whether `screened` is the chain or a ceiling. A reader ranking across
+       symbols needs to know that one of them was cut off. */
+    truncated,
+    pageSize: CHAIN_PAGE_SIZE,
     generatedAt: new Date().toISOString(),
   };
 }

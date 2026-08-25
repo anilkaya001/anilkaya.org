@@ -60,8 +60,12 @@ const CHAINS = {
   BBB: {
     spot: 400,
     rows: [
+      /* NO VOLUME TODAY. implied_volatility is the LAST TRANSACTION's per the
+         vendor's own schema ref, so this contract's cushion is as old as a
+         print nobody can date. The page must mark it rather than render it
+         beside AAA's — which traded — in the same typeface. */
       { option_symbol: "BBB260918P00380000", nbbo_bid: "6.00", nbbo_ask: "6.20",
-        implied_volatility: "0.30", open_interest: "2000", prev_oi: "1500", volume: "500" },
+        implied_volatility: "0.30", open_interest: "2000", prev_oi: "1500", volume: "0" },
       // junk: eleven contracts of open interest
       { option_symbol: "BBB260904P00300000", nbbo_bid: "0.05", nbbo_ask: "0.60",
         implied_volatility: "0.95", open_interest: "11", volume: "2" },
@@ -211,6 +215,23 @@ try {
        concatenation cannot produce under any ordering of the two payloads. */
     assert.deepEqual(syms, ["AAA", "BBB", "AAA"],
       "the merged table is re-ranked across symbols, not concatenated"); checks++;
+  }
+
+  /* ---------- a cushion is only as fresh as the vol it divides by -- */
+  {
+    const stale = page.locator("#deskBody td.is-stale-iv");
+    ok(await stale.count() >= 1,
+       "a contract that has not traded today has its cushion marked");
+    const title = await stale.first().getAttribute("title");
+    ok(title && /not traded today/.test(title),
+       `and says why on hover (${title})`);
+    ok((await stale.first().textContent()).trim() !== "—",
+       "the cushion is MARKED, not withheld — it is still the best reading available");
+
+    /* And a contract that DID trade is not marked, or the mark means nothing. */
+    const cells = await page.locator("#deskBody tr").count();
+    const marked = await stale.count();
+    ok(marked < cells, "contracts that traded today are not marked");
   }
 
   /* ---------- switching the ranking key re-sorts LOCALLY ---------- */
