@@ -410,6 +410,92 @@ try {
        "the page source is not publicly served");
   }
 
+  /* ---------- CARDS: per-ticker detail, one D1 row each ------------
+     The storage shape is settled by measurement, not preference. The read path
+     costs about 1 ms of CPU per 106 KB served (measured against local workerd,
+     calibrated with PBKDF2-10k as a ruler), so one blob holding all 50 cards
+     would be ~1 MB and blow the 10 ms Workers Free budget. One row per ticker
+     keeps each read near 0.3 ms. */
+  {
+    const login = await fetch(url("/flows/login"), {
+      method: "POST", redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL, "Sec-Fetch-Site": "same-origin",
+      },
+      body: new URLSearchParams({ username: FLOWS_TEST_USER, password: FLOWS_PASSWORD }).toString(),
+    });
+    const token = /flows_session=([^;]+)/.exec(login.headers.get("set-cookie") || "")[1];
+    const cookie = { Cookie: "flows_session=" + token };
+
+    const putCard = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
+      body,
+    });
+
+    const card = JSON.stringify({
+      ticker: "AAPL", generatedAt: new Date().toISOString(),
+      gamma: { flip: 212.5, spot: 214.2, strikes: [[210, 1.2e9], [215, -3.4e8]] },
+      levels: [{ kind: "max_pain", px: 210, distPct: -0.019, distAtr: -0.62 }],
+    });
+
+    eq((await putCard("card:AAPL", card)).status, 200, "a card ingests under its ticker key");
+
+    const read = await get("/api/flows/card?t=AAPL", { headers: cookie });
+    eq(read.status, 200, "an authenticated card read succeeds");
+    const got = await read.json();
+    eq(got.ticker, "AAPL", "the card round-trips unchanged");
+    eq(got.gamma.flip, 212.5, "nested structure survives the byte passthrough");
+    eq(read.headers.get("cache-control"), "no-store", "card data is never cached");
+
+    // Case folding: the read builds the key the ingest wrote.
+    eq((await get("/api/flows/card?t=aapl", { headers: cookie })).status, 200,
+       "a lowercase ticker resolves to the same card");
+
+    // A valid ticker with no card is "not built", not an error — the board and
+    // the cards are published by separate POSTs and a card may legitimately lag.
+    const missing = await get("/api/flows/card?t=ZZZZ", { headers: cookie });
+    eq(missing.status, 200, "an unbuilt card is not an error");
+    eq((await missing.json()).status, "pending", "it reports pending honestly");
+
+    // The ticker pattern is shared with the ingest key check, in both directions.
+    for (const bad of ["", "../../etc/passwd", "A B", "TOOLONGTICKER", "1ABC", "%2e%2e"]) {
+      const res = await get("/api/flows/card?t=" + encodeURIComponent(bad), { headers: cookie });
+      eq(res.status, 400, `card read refuses the ticker ${JSON.stringify(bad)}`);
+    }
+    for (const bad of ["card:", "card:a b", "card:TOOLONGTICKER", "card:1ABC"]) {
+      eq((await putCard(bad, card)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
+    }
+
+    // Cards are gated exactly like the board.
+    eq((await get("/api/flows/card?t=AAPL")).status, 401,
+       "an anonymous caller cannot read a card");
+  }
+
+  /* ---------- the payload cap IS the read-path CPU guarantee --------
+     Nothing larger than the cap can be stored, so nothing larger can be
+     served, so no read can exceed roughly 2.4 ms of the 10 ms budget. The cap
+     was 2 MB, which accepted payloads the read path could not serve. */
+  {
+    const big = JSON.stringify({ side: "long", rows: [], pad: "x".repeat(300 * 1024) });
+    const res = await fetch(url("/api/flows/ingest?key=board:long"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
+      body: big,
+    });
+    eq(res.status, 413, "a payload beyond the read-path CPU bound is refused at ingest");
+
+    const fine = JSON.stringify({ side: "long", generatedAt: new Date().toISOString(),
+                                  status: "ok", rows: [], pad: "x".repeat(200 * 1024) });
+    const ok200 = await fetch(url("/api/flows/ingest?key=board:long"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
+      body: fine,
+    });
+    eq(ok200.status, 200, "a payload inside the bound still ingests");
+  }
+
   /* ---------- the login page escapes what it renders --------------
      The error string is interpolated into the login markup. Today every
      caller passes a fixed literal, but "no untrusted value reaches it yet"

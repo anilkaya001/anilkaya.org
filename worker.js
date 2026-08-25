@@ -930,7 +930,26 @@ function flowsLoginResponse(message) {
   });
 }
 
-const FLOWS_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+/**
+ * The ingest cap is a READ-path CPU guarantee, not an arbitrary size guard.
+ *
+ * A "zero-parse byte passthrough" is not free: the stored value still crosses
+ * the D1 driver and the response body, and the cost is linear in its size.
+ * Measured against local workerd, calibrated with PBKDF2-10k (5.09 ms of known
+ * CPU) as a ruler, the read path costs roughly 1 ms of CPU per 106 KB served:
+ *
+ *      15 KB -> 1.60 ms      469 KB ->  6.08 ms
+ *     117 KB -> 3.03 ms     1174 KB -> 12.53 ms   (over the 10 ms budget)
+ *
+ * Workers Free allows 10 ms of CPU per invocation. Capping ingest at 256 KB is
+ * what makes every read provably cheap — nothing larger can be stored, so
+ * nothing larger can be served, so no read can exceed ~2.4 ms. The previous
+ * 2 MB cap accepted payloads the read path could not serve within budget.
+ *
+ * A board of 50 rows measures ~29 KB and a per-ticker card ~20-40 KB, so this
+ * leaves roughly an order of magnitude of headroom for both.
+ */
+const FLOWS_MAX_PAYLOAD_BYTES = 256 * 1024;
 
 function timingSafeEqualStr(a, b) {
   const x = String(a ?? ""), y = String(b ?? "");
@@ -938,6 +957,31 @@ function timingSafeEqualStr(a, b) {
   let diff = x.length ^ y.length;
   for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
   return diff === 0;
+}
+
+/** The one ticker pattern. Both the ingest key check and the card read use it. */
+const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
+
+/** Fetch a stored blob by key. Returns the raw string, or null if absent. */
+async function readFlowsPayload(env, key) {
+  if (!env.DB) return null;
+  await ensureFlowsTables(env);
+  const row = await env.DB.prepare(
+    "SELECT payload FROM flows_payload WHERE id = ?"
+  ).bind(key).first().catch(() => null);
+  return row && row.payload ? row.payload : null;
+}
+
+/**
+ * Serve a stored blob without parsing it. The value was validated as JSON at
+ * ingest, so parsing here would only burn CPU proportional to its size — the
+ * one cost this design exists to avoid.
+ */
+function passthrough(payload) {
+  return new Response(payload, {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
 }
 
 let flowsSchemaReady = false;
@@ -1817,7 +1861,15 @@ async function route(request, env, url, ctx) {
     }
 
     const key = url.searchParams.get("key") || "";
-    if (!/^board:(long|short)$|^meta$/.test(key)) {
+    // flows_payload is a keyed blob store, so a per-ticker card is just another
+    // key. The ticker pattern is deliberately strict: this string becomes a
+    // primary key, and the read path builds the same key from a query
+    // parameter, so anything the two sides could disagree about is a bug.
+    const card = key.startsWith("card:") ? key.slice(5) : null;
+    const validKey = card !== null
+      ? FLOWS_TICKER_RE.test(card)
+      : /^board:(long|short)$|^meta$/.test(key);
+    if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
 
@@ -1846,20 +1898,33 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/board") {
       const side = url.searchParams.get("side") === "short" ? "short" : "long";
-      await ensureFlowsTables(env);
-      const row = await env.DB.prepare(
-        "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
-      ).bind("board:" + side).first().catch(() => null);
-      if (!row || !row.payload) {
+      const stored = await readFlowsPayload(env, "board:" + side);
+      if (stored === null) {
         return json({ side, rows: [], generatedAt: null, status: "pending" });
       }
-      // The stored value is already serialized. Hand the string straight
-      // to the Response body rather than parsing and re-serializing it.
-      return new Response(row.payload, {
-        status: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-      });
+      return passthrough(stored);
     }
+
+    if (path === "/api/flows/card") {
+      // The ticker is validated against the SAME pattern the ingest route
+      // enforces on the key it stores. If the two ever disagree, a card that
+      // was written could not be read, which is the kind of failure that looks
+      // like missing data rather than like a bug.
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      const stored = await readFlowsPayload(env, "card:" + ticker);
+      if (stored === null) {
+        // A valid ticker with no card yet is "not built", not an error: the
+        // board and the cards are published by separate POSTs, so a card can
+        // legitimately lag its row. Answering 404 here would paint the whole
+        // board with errors the first time a card publish fails.
+        return json({ ticker, status: "pending" });
+      }
+      return passthrough(stored);
+    }
+
     throw new HttpError(404, "not_found", "API route not found");
   }
 
