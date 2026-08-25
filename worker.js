@@ -969,25 +969,36 @@ function timingSafeEqualStr(a, b) {
 /** The one ticker pattern. Both the ingest key check and the card read use it. */
 const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
-/** Fetch a stored blob by key. Returns the raw string, or null if absent. */
+/** Fetch a stored blob by key. Returns {payload, updatedAt}, or null if absent. */
 async function readFlowsPayload(env, key) {
   if (!env.DB) return null;
   await ensureFlowsTables(env);
   const row = await env.DB.prepare(
-    "SELECT payload FROM flows_payload WHERE id = ?"
+    "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
   ).bind(key).first().catch(() => null);
-  return row && row.payload ? row.payload : null;
+  return row && row.payload ? { payload: row.payload, updatedAt: row.updated_at } : null;
 }
 
 /**
  * Serve a stored blob without parsing it. The value was validated as JSON at
  * ingest, so parsing here would only burn CPU proportional to its size — the
  * one cost this design exists to avoid.
+ *
+ * X-Payload-Updated is how a reader detects a STALE card without the Worker
+ * having to look inside. Once a card has been written once, a later pipeline
+ * failure leaves the old row in place and this route would answer 200 with
+ * month-old gamma levels beside a board showing today's date — and the Worker
+ * structurally cannot notice, because not parsing is the whole architecture.
+ * The write timestamp is already a column, so surfacing it costs one field in
+ * the SELECT and no CPU at all.
  */
-function passthrough(payload) {
-  return new Response(payload, {
+function passthrough(stored) {
+  return new Response(stored.payload, {
     status: 200,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Payload-Updated": String(stored.updatedAt || 0),
+    },
   });
 }
 
@@ -1857,7 +1868,7 @@ async function route(request, env, url, ctx) {
     // and D1:Edit permissions are ACCOUNT-scoped, so a CI credential could
     // reach the live learning database. A bearer token scoped to this one
     // route cannot.
-    requireMethod(request, ["POST"]);
+    requireMethod(request, ["GET", "POST"]);
     if (!env.FLOWS_INGEST_TOKEN) throw new HttpError(503, "unavailable", "Ingest is not configured");
 
     const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -1878,6 +1889,19 @@ async function route(request, env, url, ctx) {
       : /^board:(long|short)$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
+    }
+
+    /* GET returns what is currently stored, under the same bearer.
+
+       The pipeline needs it for hysteresis: a name already on the board should
+       stay until it falls out of the exit band, and that needs yesterday's
+       ticker list. previousIds was a hardcoded empty array, so the mechanism
+       had nothing to hold and the wider enrichment buffer it justified — ten
+       extra names of API cost per run — bought nothing. */
+    if (request.method === "GET") {
+      const stored = await readFlowsPayload(env, key);
+      if (!stored) return json({ key, status: "pending" });
+      return passthrough(stored);
     }
 
     const payload = new TextDecoder().decode(

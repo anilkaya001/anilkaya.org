@@ -28,6 +28,7 @@ import {
   gammaDecayCalendar, positioningQuality, effectiveBreadth,
   calibrateScoreScale, boundedScore, conviction, applyHysteresis,
 } from "../shared/flows-features.js";
+import { buildCard } from "../shared/flows-card.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -66,7 +67,18 @@ const UNIVERSE = {
    conservative, obey Retry-After when offered, back off on 429, and
    record the achieved rate so the real ceiling can be discovered
    from the logs. */
-const RATE = { startDelayMs: 120, minDelayMs: 60, maxDelayMs: 5000, maxRetries: 4 };
+const RATE = {
+  startDelayMs: 120, minDelayMs: 60, maxDelayMs: 5000, maxRetries: 4,
+  maxRetryAfterMs: 30_000,   // the ceiling on a vendor-supplied Retry-After
+};
+
+/* The wall-clock budget.
+   GitHub kills the job at 45 minutes. The backoff above has no notion of that,
+   so a sustained 429 regime just walks into the timeout — and because cards
+   are built before the boards publish, a slow day would take the RANKING down
+   with the cards. Boards publish first, and card building abandons at this
+   deadline and reports how many it managed. */
+const DEADLINE_MS = 30 * 60 * 1000;
 
 const stats = { calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now() };
 let delayMs = RATE.startDelayMs;
@@ -100,8 +112,13 @@ async function uw(path, params = {}) {
     if (response.status === 429) {
       stats.rateLimited++;
       const retryAfter = Number(response.headers.get("Retry-After"));
+      // CAPPED. Retry-After is a value the vendor controls, and honouring it
+      // literally hands them a lever on this job's 45-minute budget: a single
+      // `Retry-After: 3600` would sleep one hour inside one call and guarantee
+      // a timeout with no board published. Above the cap, back off on our own
+      // schedule and let the retry limit end it.
       const wait = Number.isFinite(retryAfter) && retryAfter > 0
-        ? retryAfter * 1000
+        ? Math.min(retryAfter * 1000, RATE.maxRetryAfterMs)
         : Math.min(delayMs * 4, RATE.maxDelayMs);
       // Raise the floor permanently: hitting 429 once means the
       // starting guess was wrong for this key's tier.
@@ -232,7 +249,18 @@ async function enrich(ticker, spot) {
   if (!ohlc.length) missing.push("ohlc/1d");
   if (missing.length) throw new Error(`no data from ${missing.join(", ")}`);
 
-  return computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc });
+  /* The raw arrays are RETAINED, not discarded.
+
+     computeFeatures reduces four multi-hundred-row responses to twenty-odd
+     scalars and the arrays were thrown away — so the card reader looked like
+     it needed a twelve-call-per-name fan-out when in fact the gamma ladder,
+     the tick tape, the expiry gamma and the candles are already paid for. The
+     highest-value panels cost nothing extra; only max-pain and the congress
+     filings are new. */
+  return {
+    features: computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc }),
+    raw: { greekFlow, ticks, strikes, expiries, ohlc },
+  };
 }
 
 /**
@@ -488,6 +516,48 @@ function partitionSides(scored) {
  * not TICKER-disjoint, so it does not cover this. At 55 survivors five names
  * duplicated; at 50, ten did.
  */
+/**
+ * The trading session the DATA describes, which is not the day the job runs.
+ *
+ * The pipeline fires 05:15 Eastern, before the open, and every endpoint called
+ * without a `date` returns the most recent COMPLETED session — yesterday's. A
+ * card headed with today's date would be mislabelled on day one, before any
+ * failure occurs. The newest candle IS that session, so read it rather than
+ * computing it from a clock and a holiday calendar.
+ */
+function sessionDateFrom(enrichedRecords) {
+  let newest = null;
+  for (const e of enrichedRecords) {
+    for (const c of (e.raw && e.raw.ohlc) || []) {
+      const t = Date.parse(c.start_time || c.end_time || c.date || "");
+      if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
+    }
+  }
+  return newest === null ? null : new Date(newest).toISOString().slice(0, 10);
+}
+
+/**
+ * The tickers on the currently published board, for hysteresis.
+ *
+ * Non-fatal by design: if this cannot be read, the board is simply built with
+ * no incumbents, which is exactly what shipped before hysteresis was wired up.
+ * A stale-board read must never stop today's board from publishing.
+ */
+async function fetchPublishedTickers(key) {
+  if (DRY_RUN || !process.env.FLOWS_INGEST_URL) return [];
+  try {
+    const response = await fetch(
+      process.env.FLOWS_INGEST_URL + "?key=" + encodeURIComponent(key),
+      { headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN } },
+    );
+    if (!response.ok) return [];
+    const body = await response.json();
+    return Array.isArray(body.rows) ? body.rows.map((r) => r.t).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 function selectExtremes(ranked, n) {
   const picked = new Map();
   for (const p of [...ranked.slice(0, n), ...ranked.slice(-n)]) {
@@ -531,7 +601,9 @@ async function publish(key, payload) {
       const { writeFileSync } = await import("node:fs");
       writeFileSync(EMIT.replace(/\.json$/, "") + "-" + key.replace(":", "-") + ".json", body);
     }
-    console.log(`  [dry-run] ${key}: ${payload.rows.length} rows, ${body.length} bytes`);
+    // Not every payload is a board: cards and meta carry no rows.
+    const shape = Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
+    console.log(`  [dry-run] ${key}: ${shape}, ${body.length} bytes`);
     return;
   }
   const response = await fetch(
@@ -606,6 +678,36 @@ function fakeScreener(count) {
   return rows;
 }
 
+/** Max pain per expiry, nearest first — the shape /max-pain returns. */
+function fakeMaxPain(ticker, spot) {
+  const rnd = mulberry(ticker.length * 977 + Math.round(spot));
+  return Array.from({ length: 5 }, (_, i) => ({
+    expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
+    max_pain: (spot * (0.94 + rnd() * 0.12)).toFixed(0),
+  }));
+}
+
+/** Disclosed congressional filings, including a deliberately late one. */
+function fakeCongress(ticker) {
+  const rnd = mulberry(ticker.length * 613);
+  const n = Math.floor(rnd() * 5);
+  return Array.from({ length: n }, (_, i) => {
+    const txn = Date.UTC(2026, 6, 5 + i * 4);
+    // Lags of 3 to 80 days, because that spread is the point of the panel.
+    const lag = Math.round(3 + rnd() * 77);
+    return {
+      name: `Member ${String.fromCharCode(65 + i)}`,
+      member_type: i % 2 ? "senate" : "house",
+      issuer: i % 3 === 0 ? "spouse" : "self",
+      txn_type: rnd() > 0.4 ? "Purchase" : "Sale",
+      transaction_date: new Date(txn).toISOString().slice(0, 10),
+      filed_at_date: new Date(txn + lag * 86400000).toISOString().slice(0, 10),
+      amounts: ["$1,001 - $15,000", "$15,001 - $50,000", "$50,001 - $100,000"][i % 3],
+      ticker,
+    };
+  });
+}
+
 function fakeEnrichment(ticker, spot, seed) {
   const rnd = mulberry(seed);
   const bias = rnd() - 0.5;
@@ -621,11 +723,19 @@ function fakeEnrichment(ticker, spot, seed) {
     };
   });
 
+  /* PER-TICK increments, matching the vendor's own definition — every field
+     on a /net-prem-ticks row is that tick's value, not a running total. This
+     fixture used to accumulate before storing, which pinned the opposite
+     convention and hid the fact that pathSignature was differencing its input. */
   const t0 = Date.UTC(2026, 7, 24, 13, 30);
-  let acc = 0;
   const ticks = Array.from({ length: 390 }, (_, i) => {
-    acc += (rnd() - 0.5 + bias * 0.6) * 900;
-    return { tape_time: new Date(t0 + i * 60000).toISOString(), net_delta: String(acc) };
+    const step = (rnd() - 0.5 + bias * 0.6) * 900;
+    return {
+      tape_time: new Date(t0 + i * 60000).toISOString(),
+      net_delta: String(step),
+      net_call_premium: String(step * 120 * (0.5 + rnd())),
+      net_put_premium: String(-step * 80 * (0.5 + rnd())),
+    };
   });
 
   const strikes = Array.from({ length: 41 }, (_, i) => {
@@ -648,10 +758,14 @@ function fakeEnrichment(ticker, spot, seed) {
   }));
 
   let px = spot;
-  const ohlc = Array.from({ length: 42 }, () => {
+  const day0 = Date.UTC(2026, 5, 24, 13, 30);
+  const ohlc = Array.from({ length: 42 }, (_, i) => {
     const move = (rnd() - 0.5) * spot * 0.03;
     const open = px; px = Math.max(1, px + move);
     return {
+      // A real candle carries a timestamp; without one the fixture would not
+      // exercise either candlesAscending or the session-date derivation.
+      start_time: new Date(day0 + i * 86400000).toISOString(),
       open: open.toFixed(2), close: px.toFixed(2),
       high: (Math.max(open, px) * 1.008).toFixed(2),
       low: (Math.min(open, px) * 0.992).toFixed(2),
@@ -733,13 +847,15 @@ async function main() {
     const ticker = pick.row.ticker;
     const spot = num(pick.row.close);
     try {
-      enriched.push({
-        features: DRY_RUN
-          ? computeFeatures(fakeEnrichment(ticker, spot, 1000 + i))
-          : await enrich(ticker, spot),
-        tilt: pick.tilt,
-        row: pick.row,
-      });
+      let features, raw;
+      if (DRY_RUN) {
+        const fake = fakeEnrichment(ticker, spot, 1000 + i);
+        features = computeFeatures(fake);
+        raw = fake;
+      } else {
+        ({ features, raw } = await enrich(ticker, spot));
+      }
+      enriched.push({ features, raw, tilt: pick.tilt, row: pick.row });
     } catch (error) {
       failed++;
       console.warn(`  ${ticker}: enrichment failed — ${error.message}`);
@@ -779,6 +895,9 @@ async function main() {
     );
   }
 
+  const sessionDate = sessionDateFrom(liquid);
+  console.log(`session date (from the newest candle): ${sessionDate || "unknown"}`);
+
   // 6. Score.
   const scored = scoreBoard(
     liquid.map((e) => e.features),
@@ -799,15 +918,99 @@ async function main() {
     }
   }
 
+  /* Hysteresis needs a yesterday. previousIds was a hardcoded [], so
+     applyHysteresis had nothing to hold and the enrichPerSide buffer — 30 a
+     side instead of 25, ten extra names of API cost every run — bought
+     nothing. Read the currently published board and pass its tickers. One
+     request per side, and a failure is non-fatal: no incumbents simply means
+     the plain top-N, which is what shipped anyway. */
+  const previous = {};
   for (const side of ["long", "short"]) {
-    const rows = toRows(sides[side], screenerByTicker, []);
+    previous[side] = await fetchPublishedTickers("board:" + side);
+  }
+
+  const published = {};
+  for (const side of ["long", "short"]) {
+    const rows = toRows(sides[side], screenerByTicker, previous[side]);
+    published[side] = rows;
     await publish("board:" + side, {
-      side, generatedAt, rows,
+      side, generatedAt, sessionDate, rows,
       universe: universe.length,
       enriched: enriched.length,
       status: rows.length ? "ok" : "pending",
     });
   }
+
+  /* 8. CARDS — after the boards are safely committed, and best-effort.
+
+     Ordering is deliberate. Cards are the decorative half; the ranking is the
+     product. Building them first would mean a slow vendor day takes the board
+     down with the cards, turning a survivable degradation into a total
+     outage. Published first, cards can fail freely.
+
+     The deadline is what makes "best effort" true rather than aspirational.
+     GitHub kills the job at 45 minutes and the backoff has no notion of that,
+     so a sustained 429 regime would otherwise walk straight into the timeout.
+     At the 5s ceiling this loop abandons at 30 minutes and reports how many
+     it managed. */
+  const onBoard = new Map();
+  for (const side of ["long", "short"]) {
+    for (const row of published[side]) onBoard.set(row.t, side);
+  }
+  const byTicker = new Map(liquid.map((e) => [e.features.ticker, e]));
+  const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
+
+  let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
+  const deadline = stats.startedAt + DEADLINE_MS;
+  for (const ticker of onBoard.keys()) {
+    if (Date.now() > deadline) { cardsSkipped++; continue; }
+    const e = byTicker.get(ticker);
+    if (!e) { cardsSkipped++; continue; }
+    try {
+      const [maxPain, congress] = DRY_RUN
+        ? [fakeMaxPain(ticker, num(e.row.close)), fakeCongress(ticker)]
+        : await Promise.all([
+          uw(`/api/stock/${ticker}/max-pain`).catch(() => []),
+          uw("/api/congress/recent-trades", { ticker, limit: 50 }).catch(() => []),
+        ]);
+
+      const card = buildCard({
+        ticker,
+        row: e.row,
+        features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
+        strikes: e.raw.strikes,
+        ticks: e.raw.ticks,
+        maxPain, congress, generatedAt, sessionDate,
+      });
+
+      const body = JSON.stringify(card);
+      // Fail loudly at the source rather than as an opaque 413 from the
+      // Worker, and never let one fat card abort the rest of the loop.
+      if (body.length > 100 * 1024) {
+        throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB, over the ingest cap`);
+      }
+      await publish("card:" + ticker, card);
+      cardsBuilt++;
+    } catch (error) {
+      cardsFailed++;
+      console.warn(`  card ${ticker}: ${error.message}`);
+    }
+  }
+  console.log(
+    `cards: ${cardsBuilt}/${onBoard.size} built` +
+    (cardsFailed ? `, ${cardsFailed} failed` : "") +
+    (cardsSkipped ? `, ${cardsSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline` : ""),
+  );
+
+  // The board tells the reader how much of itself is real.
+  await publish("meta", {
+    generatedAt, sessionDate,
+    universe: universe.length,
+    enriched: enriched.length,
+    liquid: liquid.length,
+    cardsBuilt, cardsFailed, cardsSkipped,
+    apiCalls: stats.calls,
+  });
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;
   console.log(
@@ -821,7 +1024,7 @@ async function main() {
 
 export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
-  candlesAscending, selectExtremes, scoreBoard,
+  candlesAscending, selectExtremes, scoreBoard, sessionDateFrom,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

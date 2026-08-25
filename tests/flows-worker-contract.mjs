@@ -249,7 +249,39 @@ try {
     const receipt = await good.json();
     ok(receipt.ok === true && receipt.key === "board:long", "ingest returns a receipt");
 
-    eq((await get("/api/flows/ingest")).status, 405, "ingest is POST-only");
+    /* GET on the ingest route reads back what is stored, under the same
+       bearer. The pipeline needs it for hysteresis — holding a name on the
+       board until it falls out of the exit band requires yesterday's ticker
+       list, and previousIds was a hardcoded empty array. */
+    eq((await get("/api/flows/ingest?key=board:long")).status, 401,
+       "ingest GET still requires the bearer");
+    eq((await fetch(url("/api/flows/ingest?key=board:long"), {
+      headers: { Authorization: "Bearer " + INGEST_TOKEN },
+    })).status, 200, "an authenticated ingest GET reads the stored board");
+
+    const readBack = await fetch(url("/api/flows/ingest?key=board:long"), {
+      headers: { Authorization: "Bearer " + INGEST_TOKEN },
+    });
+    const rb = await readBack.json();
+    eq(rb.rows[0].t, "TEST", "and returns exactly what was written");
+
+    const absent = await fetch(url("/api/flows/ingest?key=card:NOTHERE"), {
+      headers: { Authorization: "Bearer " + INGEST_TOKEN },
+    });
+    eq(absent.status, 200, "an unwritten key is not an error");
+    eq((await absent.json()).status, "pending", "it reports pending");
+
+    eq((await fetch(url("/api/flows/ingest?key=board:long"), { method: "DELETE" })).status, 405,
+       "other methods are still refused");
+
+    /* X-Payload-Updated is how a reader detects a stale card. Once a card has
+       been written, a later pipeline failure leaves the old row in place and
+       the route answers 200 with old numbers — the Worker cannot notice,
+       because not parsing is the architecture. The write timestamp can. */
+    const stamp = readBack.headers.get("x-payload-updated");
+    ok(stamp && Number(stamp) > 0, `the read carries its write timestamp (${stamp})`);
+    ok(Math.abs(Date.now() - Number(stamp)) < 5 * 60 * 1000,
+       "and the timestamp is the real write time, not a placeholder");
 
     // Round trip: what was ingested is what an authenticated reader gets.
     const login = await fetch(url("/flows/login"), {
