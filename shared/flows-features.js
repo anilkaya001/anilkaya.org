@@ -282,13 +282,36 @@ function solveSymmetric(A, b) {
  * 1 = clean directional conviction. 0 = the premium headline is hedging.
  */
 export function flowPurity(greekFlowRows) {
-  let dir = 0, tot = 0;
+  let dirNet = 0, dirAbs = 0, tot = 0;
   for (const r of greekFlowRows || []) {
-    dir += num(r.dir_delta_flow);
+    const d = num(r.dir_delta_flow);
+    dirNet += d;
+    dirAbs += Math.abs(d);
     tot += Math.abs(num(r.total_delta_flow));
   }
-  if (tot <= 0) return { purity: 0, dirDelta: 0, totalAbs: 0 };
-  return { purity: Math.min(1, Math.abs(dir) / tot), dirDelta: dir, totalAbs: tot };
+  if (tot <= 0) {
+    return { purity: null, dirDelta: 0, dirAbs: 0, dirShare: null, totalAbs: 0 };
+  }
+  /* GROSS over GROSS. The old form was |SUM dir| / SUM |total|: a net divided
+     by a gross, so two different cancellations fought each other and the
+     result measured sign-persistence as much as directionality. On the live
+     board that produced 0.003-0.008 on names whose flow was overwhelmingly
+     directional — the numerator had cancelled, not the signal.
+
+     |dir_delta_flow| <= |total_delta_flow| holds row by row, so SUM|dir| /
+     SUM|total| is bounded in [0,1] BY CONSTRUCTION and Math.min is a guard
+     against float error rather than the operative clamp. Sign-persistence is
+     measured separately and honestly by pathSignature. */
+  return {
+    purity: Math.min(1, dirAbs / tot),
+    dirDelta: dirNet,
+    dirAbs,
+    // Signed, unit-free directional share. This — not the raw dollar delta —
+    // is what a cross-section can compare: the raw figure scales with the
+    // name's size, so z-scoring it ranks market caps.
+    dirShare: Math.max(-1, Math.min(1, dirNet / tot)),
+    totalAbs: tot,
+  };
 }
 
 /**
@@ -302,7 +325,7 @@ export function flowPurity(greekFlowRows) {
  * Returns the strike ladder with cumulative dealer gamma, plus the
  * interpolated zero crossing: a measured gamma flip.
  */
-export function aggressorGamma(strikeRows) {
+export function aggressorGamma(strikeRows, { spot = null } = {}) {
   const ladder = (strikeRows || [])
     .map((r) => ({
       strike: num(r.strike),
@@ -312,29 +335,130 @@ export function aggressorGamma(strikeRows) {
     .filter((r) => Number.isFinite(r.strike) && r.strike > 0)
     .sort((a, b) => a.strike - b.strike);
 
-  let cum = 0;
-  for (const row of ladder) { cum += row.gamma; row.cum = cum; }
+  let cum = 0, peak = 0;
+  for (const row of ladder) {
+    cum += row.gamma;
+    row.cum = cum;
+    peak = Math.max(peak, Math.abs(cum));
+  }
 
-  return { ladder, netGamma: cum, flip: gammaFlip(ladder) };
+  const crossings = gammaCrossings(ladder);
+  const chosen = pickCrossing(crossings, spot);
+
+  return {
+    ladder,
+    netGamma: cum,
+    peak,
+    crossings,
+    flip: chosen ? chosen.strike : null,
+    /* Which side of the flip the dealers are SHORT on. The card's copy used to
+       assert "short below, long above" as a hardcoded string; whether that is
+       true depends on the sign of the cumulative on the low side of the
+       crossing the code actually picked, which is data, not a constant. */
+    flipSide: chosen ? chosen.side : null,
+    /* Dealer gamma AT SPOT as a share of the ladder's largest |cumulative|.
+       Unit-free, so it is comparable across a $35 name and a $900 one, and it
+       answers the question the flip was being used as a proxy for: are dealers
+       short gamma where the stock is actually trading? Negative = short =
+       hedging amplifies moves. */
+    spotGammaShare: spotGammaShare(ladder, spot, peak),
+    bandMin: ladder.length ? ladder[0].strike : null,
+    bandMax: ladder.length ? ladder[ladder.length - 1].strike : null,
+  };
 }
 
 /**
- * Linear interpolation of the strike at which cumulative dealer gamma
- * crosses zero. Returns null when the book never changes sign — a
- * name that is long-gamma or short-gamma across its whole ladder has
- * no flip, and inventing one would be a fabricated level.
+ * EVERY zero crossing of the cumulative dealer gamma, materiality-gated.
+ *
+ * Three things made the old "first sign change scanning up from the bottom"
+ * wrong, and all three were live on the published board:
+ *
+ *   1. `cum` opens at the first rung's OWN gamma, so a rung with no measured
+ *      aggressor gamma has cum === 0 exactly, and an `if (a.cum === 0) return
+ *      a.strike` short-circuit published the bottom of the band — roughly
+ *      -30% from spot — as a measured gamma flip.
+ *   2. Scanning upward and returning the FIRST crossing is biased by
+ *      construction: |cum| starts near zero and ends at |netGamma|, so a sign
+ *      change is nearly free at the bottom of the ladder and costs a whole
+ *      book at the top. On the live board twelve of thirty-four names sat
+ *      within 4% of the band floor.
+ *   3. A ladder that opens near zero and wobbles produces sign changes that
+ *      are float noise, not a regime boundary.
+ *
+ * Materiality is therefore asserted on the BOOK EITHER SIDE of the crossing,
+ * not on the two rungs adjacent to it. Testing the adjacent rungs would be
+ * exactly backwards: a clean crossing passes through zero, so its immediate
+ * shoulders are SMALL by definition, and requiring them to be large rejects
+ * the good crossings and keeps the noisy ones. What separates a real flip from
+ * an artefact is whether there is a material book of each sign somewhere below
+ * and somewhere above it. That test also subsumes the edge case — a crossing
+ * at the first or last rung has nothing behind it — so no separate edge rule
+ * is needed.
  */
-export function gammaFlip(ladder) {
+export function gammaCrossings(ladder, { materiality = 0.1 } = {}) {
+  const rows = ladder || [];
+  const n = rows.length;
+  if (n < 3) return [];
+  let peak = 0;
+  for (const r of rows) peak = Math.max(peak, Math.abs(r.cum));
+  if (!(peak > 0)) return [];
+  const floor = peak * materiality;
+
+  // Running extremes of |cum| below and above each index, in two passes.
+  const below = new Array(n).fill(0);
+  const above = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) below[i] = Math.max(below[i - 1], Math.abs(rows[i - 1].cum));
+  for (let i = n - 2; i >= 0; i--) above[i] = Math.max(above[i + 1], Math.abs(rows[i + 1].cum));
+
+  const out = [];
+  for (let i = 1; i < n; i++) {
+    const a = rows[i - 1], b = rows[i];
+    if ((a.cum < 0) === (b.cum < 0)) continue;
+    if (!(below[i] >= floor) || !(above[i - 1] >= floor)) continue;
+    const span = Math.abs(a.cum) + Math.abs(b.cum);
+    const strike = span > 0
+      ? a.strike + (b.strike - a.strike) * (Math.abs(a.cum) / span)
+      : a.strike;
+    out.push({ strike, side: a.cum < 0 ? "short_below" : "long_below" });
+  }
+  return out;
+}
+
+/** The surviving crossing nearest spot — the level a trader would act on. */
+function pickCrossing(crossings, spot) {
+  if (!crossings || !crossings.length) return null;
+  if (!(spot > 0)) return crossings[crossings.length - 1];
+  let best = crossings[0];
+  for (const c of crossings) {
+    if (Math.abs(c.strike - spot) < Math.abs(best.strike - spot)) best = c;
+  }
+  return best;
+}
+
+/** Cumulative dealer gamma interpolated at spot, as a share of peak |cum|. */
+function spotGammaShare(ladder, spot, peak) {
+  if (!ladder.length || !(spot > 0) || !(peak > 0)) return null;
+  if (spot <= ladder[0].strike) return ladder[0].cum / peak;
+  const last = ladder[ladder.length - 1];
+  if (spot >= last.strike) return last.cum / peak;
   for (let i = 1; i < ladder.length; i++) {
     const a = ladder[i - 1], b = ladder[i];
-    if (a.cum === 0) return a.strike;
-    if ((a.cum < 0) !== (b.cum < 0)) {
-      const span = Math.abs(a.cum) + Math.abs(b.cum);
-      if (span <= 0) return a.strike;
-      return a.strike + (b.strike - a.strike) * (Math.abs(a.cum) / span);
+    if (spot <= b.strike) {
+      const span = b.strike - a.strike;
+      const w = span > 0 ? (spot - a.strike) / span : 0;
+      return (a.cum + w * (b.cum - a.cum)) / peak;
     }
   }
-  return null;
+  return last.cum / peak;
+}
+
+/**
+ * Backwards-compatible single-value flip. Prefer aggressorGamma(), which
+ * returns the crossing set, the side and the spot-relative regime together.
+ */
+export function gammaFlip(ladder, { spot = null, ...opts } = {}) {
+  const chosen = pickCrossing(gammaCrossings(ladder, opts), spot);
+  return chosen ? chosen.strike : null;
 }
 
 /**
@@ -440,7 +564,7 @@ export function pathSignature(tickRows) {
  * halfLifeExpiry is the first expiry at which cumulative roll-off
  * passes 50% of the total book.
  */
-export function gammaDecayCalendar(expiryRows) {
+export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
   const rows = (expiryRows || [])
     .map((r) => ({
       expiry: r.expiry,
@@ -457,18 +581,49 @@ export function gammaDecayCalendar(expiryRows) {
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
 
   const total = rows.reduce((a, r) => a + r.gamma, 0);
-  if (!(total > 0)) return { schedule: [], halfLifeExpiry: null, frontLoad: 0 };
+  if (!(total > 0)) {
+    return {
+      schedule: [], halfLifeExpiry: null, halfLifeDays: null,
+      meanLifeDays: null, frontLoad: null,
+    };
+  }
 
-  let cum = 0, halfLifeExpiry = null;
+  const base = asOf ? Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z") : NaN;
+  const daysTo = (expiry) => {
+    if (!Number.isFinite(base)) return null;
+    const t = Date.parse(String(expiry).slice(0, 10) + "T00:00:00Z");
+    return Number.isFinite(t) ? Math.round((t - base) / 86400000) : null;
+  };
+
+  let cum = 0, halfLifeExpiry = null, halfLifeDays = null;
+  let lifeWeighted = 0, lifeWeight = 0;
   const schedule = rows.map((r) => {
     cum += r.gamma;
     const share = r.gamma / total;
     const cumShare = cum / total;
-    if (halfLifeExpiry === null && cumShare >= 0.5) halfLifeExpiry = r.expiry;
-    return { expiry: r.expiry, share, cumShare };
+    const days = daysTo(r.expiry);
+    if (halfLifeExpiry === null && cumShare >= 0.5) {
+      halfLifeExpiry = r.expiry;
+      halfLifeDays = days;
+    }
+    if (days !== null) { lifeWeighted += days * r.gamma; lifeWeight += r.gamma; }
+    return { expiry: r.expiry, share, cumShare, days };
   });
 
-  return { schedule, halfLifeExpiry, frontLoad: schedule.length ? schedule[0].share : 0 };
+  /* frontLoad — schedule[0].share — is PARTITION-DEPENDENT: it measures the
+     first listed expiry's share, so a name with weeklies and a name with
+     monthlies are not comparable, and adding one expiry to the chain changes
+     it without anything about the book changing. The gamma-weighted mean life
+     IS identified: it is E[days to expiry] under the gross-gamma measure, a
+     quantity with a unit (days) that survives any repartition of the chain.
+     frontLoad is kept for the card, which shows the schedule beside it. */
+  return {
+    schedule,
+    halfLifeExpiry,
+    halfLifeDays,
+    meanLifeDays: lifeWeight > 0 ? lifeWeighted / lifeWeight : null,
+    frontLoad: schedule.length ? schedule[0].share : null,
+  };
 }
 
 /**
@@ -485,18 +640,29 @@ export function gammaDecayCalendar(expiryRows) {
  * flow is "no directional view", never infinite vol conviction.
  */
 export function positioningQuality(greekFlowRows, { floor = 1e-6 } = {}) {
-  let dir = 0, otmDir = 0, vega = 0, delta = 0;
+  let dirNet = 0, dirAbs = 0, otmAbs = 0, vega = 0, delta = 0;
   for (const r of greekFlowRows || []) {
-    dir += num(r.dir_delta_flow);
-    otmDir += num(r.otm_dir_delta_flow);
+    const d = num(r.dir_delta_flow);
+    dirNet += d;
+    dirAbs += Math.abs(d);
+    otmAbs += Math.abs(num(r.otm_dir_delta_flow));
     vega += Math.abs(num(r.total_vega_flow));
     delta += Math.abs(num(r.total_delta_flow));
   }
-  const dirAbs = Math.abs(dir);
+  /* GROSS over GROSS, for the same reason as flowPurity. The old form divided
+     SUM(otm_dir) by |SUM(dir)| — two different cancellations — so the ratio
+     had no bounded distribution and Math.min(1, ...) was the operative clamp
+     rather than a guard: the column was censored at 1 on exactly the names
+     where the denominator had cancelled hardest. |otm_dir| <= |dir| holds row
+     by row, so the gross ratio lives in [0,1] by construction.
+
+     null, not 0, when there is nothing to measure. Zero is the TOP of this
+     column once it is oriented, so imputing it rewarded a name for having no
+     data — the same failure the enrich() docstring already argues against. */
   return {
-    otmShare: dirAbs > floor ? Math.min(1, Math.abs(otmDir) / dirAbs) : 0,
-    vegaTilt: delta > floor ? vega / delta : 0,
-    hasDirectionalView: dirAbs > floor,
+    otmShare: dirAbs > floor ? Math.min(1, otmAbs / dirAbs) : null,
+    vegaTilt: delta > floor ? vega / delta : null,
+    hasDirectionalView: Math.abs(dirNet) > floor,
   };
 }
 
@@ -516,17 +682,63 @@ export function positioningQuality(greekFlowRows, { floor = 1e-6 } = {}) {
  *   n_eff = n / (1 + (n - 1) * rhoBar)
  */
 export function effectiveBreadth(columns) {
-  const n = columns.length;
-  if (n <= 1) return n;
+  /* A column with no cross-sectional dispersion carries no information and
+     must not be paid for. The old form never looked at the values: a single
+     all-zero column hit `if (n <= 1) return n` and was awarded a full unit of
+     weight, which is exactly how a dead family V drew the same weight as a
+     live one on the published board. Two or more dead columns were worse —
+     pearson returns NaN when a column has zero variance, so rhoBar fell to 0
+     and the family was awarded its FULL raw count as if perfectly
+     independent. */
+  const live = (columns || []).filter(isLiveColumn);
+  const n = live.length;
+  if (n === 0) return 0;
+  if (n === 1) return 1;
   let sum = 0, pairs = 0;
   for (let a = 0; a < n; a++) {
     for (let b = a + 1; b < n; b++) {
-      const r = pearson(columns[a], columns[b]);
+      const r = pearson(live[a], live[b]);
       if (Number.isFinite(r)) { sum += Math.abs(r); pairs++; }
     }
   }
   const rhoBar = pairs ? sum / pairs : 0;
   return n / (1 + (n - 1) * rhoBar);
+}
+
+/** A column is live when at least two finite entries differ. */
+export function isLiveColumn(column) {
+  const xs = (column || []).filter(Number.isFinite);
+  if (xs.length < 2) return false;
+  const first = xs[0];
+  return xs.some((v) => v !== first);
+}
+
+/**
+ * The same n_eff algebra applied one level up: how much of a family is
+ * already said by the OTHER families.
+ *
+ * effectiveBreadth was only ever called with one family's own columns, so it
+ * could see redundancy INSIDE a family and was structurally incapable of
+ * seeing it BETWEEN them — which is where the most redundant pair on the
+ * board actually lived. Returns a divisor >= 1 per key.
+ */
+export function crossFamilyRedundancy(familyColumns) {
+  const keys = Object.keys(familyColumns);
+  const k = keys.length;
+  const out = {};
+  for (const key of keys) out[key] = 1;
+  if (k <= 1) return out;
+  for (const key of keys) {
+    let sum = 0, pairs = 0;
+    for (const other of keys) {
+      if (other === key) continue;
+      const r = pearson(familyColumns[key], familyColumns[other]);
+      if (Number.isFinite(r)) { sum += Math.abs(r); pairs++; }
+    }
+    const rhoBar = pairs ? sum / pairs : 0;
+    out[key] = 1 + (k - 1) * rhoBar;
+  }
+  return out;
 }
 
 export function pearson(a, b) {
@@ -567,6 +779,116 @@ export function calibrateScoreScale(zs, { refQuantile = 0.95, refScore = 80 } = 
   return Math.atanh(target) / ref;
 }
 
+/**
+ * THE PUBLISHED SCORE'S UNIT, fixed once and for all.
+ *
+ * The score used to be `boundedScore(vanDerWaerden(residual)[i], scale)` with
+ * `scale` calibrated from that same rank ladder. Both halves of that discard
+ * magnitude: van der Waerden maps rank -> normal quantile by construction, and
+ * calibrateScoreScale then normalised by the 0.95 quantile of |those rank
+ * scores|. The composition is therefore a deterministic function of RANK and
+ * POOL SIZE only. Measured: a 34-name board always printed exactly
+ * 84 77 71 65 60 55 50 45 40 35 30 26 21 16 12 7 2 and its mirror, whatever
+ * the data — residuals scaled by 1e-9 and by 1e9 produced byte-identical
+ * ladders — and a name's score moved by 15 points when the pool grew from 30
+ * names to 48 with its own data held fixed.
+ *
+ * A FIXED scale makes the number mean something: a residual two robust sigma
+ * from the cross-sectional median scores 80, on every session and at every
+ * pool size. A flat day then prints flat scores, which is the information the
+ * rank ladder was destroying. Ordering is unaffected — tanh is monotone — so
+ * this changes what the magnitude claims, not who is ranked where.
+ */
+export const SCORE_SCALE = Math.atanh(0.80) / 2.0;
+
+/**
+ * Cross-sectional percentile in (0,1), ties averaged.
+ *
+ * The same avgRank / (m + 1) plotting position van der Waerden uses, without
+ * the normal quantile step: bounded, unit-free, and with a mean of exactly
+ * 1/2 by construction, which is what makes a product of them a gate with a
+ * mean of one. Non-finite entries are returned as null and simply do not
+ * participate — an unmeasured axis casts no vote instead of the worst one.
+ */
+export function percentileRank(values) {
+  const xs = values || [];
+  const idx = [];
+  for (let i = 0; i < xs.length; i++) if (Number.isFinite(xs[i])) idx.push(i);
+  const m = idx.length;
+  const out = xs.map(() => null);
+  if (!m) return out;
+  if (m === 1) { out[idx[0]] = 0.5; return out; }
+
+  idx.sort((a, b) => xs[a] - xs[b]);
+  let i = 0;
+  while (i < m) {
+    let j = i;
+    while (j + 1 < m && xs[idx[j + 1]] === xs[idx[i]]) j++;
+    const avgRank = (i + j) / 2 + 1;          // 1-based, ties averaged
+    for (let k = i; k <= j; k++) out[idx[k]] = avgRank / (m + 1);
+    i = j + 1;
+  }
+  return out;
+}
+
+/**
+ * THE QUALITY GATE — a multiplier, never a vote.
+ *
+ * A magnitude that carries no direction of its own cannot be ADDED to a
+ * signed composite: doing so turns "this name's flow is high quality" into
+ * "this name is bullish". The previous fix for that signed each magnitude by
+ * sign(dirDelta) and kept it additive, which reintroduced the same inversion
+ * one level down — three of the ten scoring columns became restatements of
+ * sign(dirDelta), they carried the NEGATIVE sign and a quarter of the weight,
+ * and the measured result was corr(composite, dirDelta) = -0.07: the board was
+ * net SHORT its own directional flow signal.
+ *
+ * Modifiers multiply. Each axis is reduced to its cross-sectional percentile,
+ * so no axis needs a unit or a hand-set coefficient and a near-constant axis
+ * contributes almost nothing; the mean of the percentiles is then doubled, so
+ * the gate is bounded in (0,2) with a cross-sectional mean of one by
+ * construction. A near-constant modifier therefore does nothing, and no
+ * modifier can flip the sign of the signal it modifies.
+ *
+ * `axes` is an array of equal-length columns, each ORIENTED so that larger is
+ * more trustworthy. Returns one multiplier per name.
+ */
+export function qualityGate(axes, { floor = 0.2 } = {}) {
+  const live = (axes || []).filter(isLiveColumn);
+  const n = live.length ? live[0].length : 0;
+  if (!live.length) return new Array(n).fill(1);
+
+  const ranks = live.map(percentileRank);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let sum = 0, k = 0;
+    for (const r of ranks) {
+      if (r[i] === null) continue;
+      sum += r[i]; k++;
+    }
+    out.push(k ? Math.max(floor, 2 * (sum / k)) : 1);
+  }
+  return out;
+}
+
+/**
+ * Annualized close-to-close realized volatility over the last `window`
+ * returns. The denominator of the variance risk premium, computed from
+ * candles this pipeline has already paid for.
+ */
+export function realizedVol(closes, { window = 30, periodsPerYear = 252 } = {}) {
+  const xs = (closes || []).filter((c) => Number.isFinite(c) && c > 0);
+  if (xs.length < 3) return null;
+  const rets = [];
+  for (let i = Math.max(1, xs.length - window); i < xs.length; i++) {
+    rets.push(Math.log(xs[i] / xs[i - 1]));
+  }
+  if (rets.length < 2) return null;
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const varr = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rets.length - 1);
+  return Math.sqrt(Math.max(varr, 0) * periodsPerYear);
+}
+
 export function boundedScore(z, scale) {
   if (!Number.isFinite(z)) return 0;
   return Math.round(100 * Math.tanh(z * (Number.isFinite(scale) && scale > 0 ? scale : 1)));
@@ -581,7 +903,14 @@ export function boundedScore(z, scale) {
  * no absolute threshold can strand it at zero.
  */
 export function conviction({ familyScores = [], coverage = 1, persistence = 0 }) {
-  const present = familyScores.filter((s) => Number.isFinite(s) && s !== 0);
+  /* `s !== 0` used to do double duty: it dropped a genuinely ABSENT family
+     from the agreement denominator, which is right, and it also dropped a
+     family that was measured and landed neutral, which is wrong — and the
+     coverage term went on paying full price for the absent one either way, so
+     losing a family RAISED conviction. Absent is now null at the source, so
+     presence is a null test and a measured 0 counts as a family that agrees
+     with nothing. */
+  const present = familyScores.filter((s) => Number.isFinite(s));
   if (!present.length) return { conviction: 0, agreement: 0, breadth: 0 };
 
   const sign = Math.sign(present.reduce((a, b) => a + b, 0)) || 1;

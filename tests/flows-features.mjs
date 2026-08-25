@@ -17,7 +17,9 @@ import {
   neutralize, flowPurity, aggressorGamma, gammaFlip, bookDisplacement,
   pathSignature, gammaDecayCalendar, positioningQuality,
   effectiveBreadth, pearson, calibrateScoreScale, boundedScore,
-  conviction, applyHysteresis,
+  conviction, applyHysteresis, gammaCrossings, isLiveColumn,
+  crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
+  SCORE_SCALE,
 } from "../shared/flows-features.js";
 
 let checks = 0;
@@ -273,15 +275,31 @@ const near = (a, b, tol, msg) => {
   ]);
   near(mixed.purity, 0.5, 1e-9, "purity aggregates across minutes");
 
-  // Directional flow that cancels across the session is NOT conviction.
+  /* PURITY AND DIRECTION ARE DIFFERENT QUESTIONS, and conflating them is
+     what produced purity 0.003-0.008 on a live board of names whose flow was
+     overwhelmingly directional. A session that runs hard long and then hard
+     short is 100% directional and 0% net — the old |SUM| / SUM|..| form
+     reported it as unmeasurably impure. */
   const cancelling = flowPurity([
     { dir_delta_flow: "1000", total_delta_flow: "1000" },
     { dir_delta_flow: "-1000", total_delta_flow: "1000" },
   ]);
-  near(cancelling.purity, 0, 1e-9, "flow that reverses within the day nets to no conviction");
+  near(cancelling.purity, 1, 1e-9, "a reversing session is still WHOLLY directional flow");
+  near(cancelling.dirShare, 0, 1e-9, "...and its NET direction is zero");
+  near(cancelling.dirDelta, 0, 1e-9, "dirDelta stays the net, for the signed column");
 
-  ok(flowPurity([]).purity === 0, "empty flow is safe");
+  const oneWay = flowPurity([
+    { dir_delta_flow: "1000", total_delta_flow: "1000" },
+    { dir_delta_flow: "1000", total_delta_flow: "1000" },
+  ]);
+  near(oneWay.dirShare, 1, 1e-9, "a one-way session has dirShare 1");
+  ok(oneWay.purity === cancelling.purity,
+     "purity cannot distinguish the two — that is pathSignature's job, not its own");
+
+  ok(flowPurity([]).purity === null, "an empty flow is UNMEASURED, not zero");
   ok(flowPurity([{ dir_delta_flow: "5", total_delta_flow: "1" }]).purity <= 1, "purity is bounded at 1");
+  ok(Math.abs(flowPurity([{ dir_delta_flow: "-5", total_delta_flow: "1" }]).dirShare) <= 1,
+     "dirShare is bounded in [-1, 1]");
 }
 
 /* ---------- positioning quality --------------------------------- */
@@ -297,8 +315,18 @@ const near = (a, b, tol, msg) => {
   const none = positioningQuality([
     { dir_delta_flow: "0", otm_dir_delta_flow: "0", total_vega_flow: "9999", total_delta_flow: "0" },
   ]);
-  ok(Number.isFinite(none.otmShare) && none.otmShare === 0, "zero delta flow yields no OTM share, not NaN");
-  ok(Number.isFinite(none.vegaTilt) && none.vegaTilt === 0, "zero delta flow yields no vega tilt, not Infinity");
+  ok(none.otmShare === null, "zero delta flow yields an UNMEASURED OTM share, not the best possible one");
+
+  /* Gross over gross, so the ratio is bounded by construction rather than by
+     the Math.min clamp. Two minutes whose directional flows cancel used to
+     drive the denominator to zero and the ratio to its censored maximum. */
+  const cancelled = positioningQuality([
+    { dir_delta_flow: "1000", otm_dir_delta_flow: "100", total_vega_flow: "1", total_delta_flow: "1000" },
+    { dir_delta_flow: "-1000", otm_dir_delta_flow: "-100", total_vega_flow: "1", total_delta_flow: "1000" },
+  ]);
+  near(cancelled.otmShare, 0.1, 1e-9,
+       "a cancelling session reports its true OTM share, not the clamp");
+  ok(none.vegaTilt === null, "zero delta flow yields an UNMEASURED vega tilt, not Infinity and not zero");
   ok(!none.hasDirectionalView, "zero delta flow reports no directional view");
 }
 
@@ -379,13 +407,36 @@ const near = (a, b, tol, msg) => {
   ok(Math.min(...scored) <= -80, "the weak tail actually reaches the bottom band");
   ok(scored.every((s) => s >= -100 && s <= 100), "scores stay bounded");
 
-  // The failure this replaces: a compressed cross-section must STILL
-  // fill the range, because the scale adapts to the day's dispersion.
+  /* THE ASSERTION THAT BLESSED THE BUG.
+
+     This block used to require that a cross-section compressed to a twentieth
+     of its dispersion produce scores within three points of the loud day's,
+     and called that property "calibration is dispersion-invariant". It is the
+     defect stated as a requirement: a per-session scale makes the published
+     number a function of rank and pool size alone, so a flat day and a violent
+     one print the same +84. The requirement is now the opposite. */
   const quiet = zs.map((z) => z * 0.05);
-  const quietScale = calibrateScoreScale(quiet, { refQuantile: 0.95, refScore: 80 });
-  const quietScores = quiet.map((z) => boundedScore(z, quietScale));
-  ok(Math.max(...quietScores) >= 80, "a quiet session still reaches the top band");
-  ok(Math.abs(Math.max(...quietScores) - Math.max(...scored)) <= 3, "calibration is dispersion-invariant");
+  const loudFixed = zs.map((z) => boundedScore(z, SCORE_SCALE));
+  const quietFixed = quiet.map((z) => boundedScore(z, SCORE_SCALE));
+  ok(Math.max(...quietFixed) < Math.max(...loudFixed) - 20,
+     `a compressed cross-section must score LOWER under the fixed unit ` +
+     `(quiet ${Math.max(...quietFixed)} vs loud ${Math.max(...loudFixed)})`);
+
+  // The unit itself, stated: two robust sigma is 80.
+  near(boundedScore(2, SCORE_SCALE), 80, 1, "the fixed unit puts z = 2 at score 80");
+  near(boundedScore(-2, SCORE_SCALE), -80, 1, "and is antisymmetric");
+  ok(boundedScore(1, SCORE_SCALE) < boundedScore(2, SCORE_SCALE),
+     "the fixed unit is monotone in the composite, not in the rank");
+
+  /* THE COMPOSITION, which nothing tested: the score must not be recoverable
+     from rank and pool size alone. Two 34-name cross-sections with the same
+     ORDER and different SHAPES must publish different scores. */
+  const shapeA = Array.from({ length: 34 }, (_, i) => (34 - i) * 0.01);
+  const shapeB = Array.from({ length: 34 }, (_, i) => (34 - i) * 1.00);
+  const a = shapeA.map((z) => boundedScore(z, SCORE_SCALE));
+  const b = shapeB.map((z) => boundedScore(z, SCORE_SCALE));
+  ok(JSON.stringify(a) !== JSON.stringify(b),
+     "identical ranks with different dispersions must NOT produce the same ladder");
 
   // Degenerate input must not divide by zero.
   ok(calibrateScoreScale([0, 0, 0]) === 1, "a flat cross-section falls back to unit scale");
@@ -411,7 +462,22 @@ const near = (a, b, tol, msg) => {
      `broad weak agreement outranks one loud family (${broad.conviction} vs ${thin.conviction})`);
 
   ok(conviction({ familyScores: [] }).conviction === 0, "no data means no conviction");
-  ok(conviction({ familyScores: [0, 0] }).conviction === 0, "all-zero families mean no conviction");
+
+  /* ABSENT IS NOT NEUTRAL, and the old `s !== 0` presence filter conflated
+     them in the direction that flattered the number: a family that produced
+     nothing was silently dropped from the agreement denominator while the
+     coverage term went on paying for it in full, so LOSING a family RAISED
+     conviction. Presence is now a null test. */
+  ok(conviction({ familyScores: [null, null], coverage: 0 }).conviction === 0,
+     "families that are absent, with no coverage, mean no conviction");
+
+  const neutralPair = conviction({ familyScores: [0, 0], coverage: 1, persistence: 0 });
+  ok(neutralPair.agreement === 0,
+     "two families measured and neutral agree with nothing");
+  const oneDead = conviction({ familyScores: [40, 30, null], coverage: 1, persistence: 0 });
+  const allLive = conviction({ familyScores: [40, 30, 20], coverage: 1, persistence: 0 });
+  ok(oneDead.breadth === 2 && allLive.breadth === 3, "breadth counts only present families");
+  ok(oneDead.conviction <= allLive.conviction, "losing a family must never RAISE conviction");
 
   // Every input in range must produce an in-range output.
   for (const cov of [0, 0.5, 1]) for (const per of [0, 0.5, 1]) {
@@ -529,12 +595,179 @@ const near = (a, b, tol, msg) => {
     near(medianDollarVolume(null), 0, 0, "null candles are safe");
   }
 
-  const scored = Array.from({ length: 60 }, (_, i) => ({ ticker: "T" + i, score: 100 - i * 4 }));
-  const { long, short } = partitionSides(scored);
+  const scored = Array.from({ length: 60 }, (_, i) =>
+    ({ ticker: "T" + i, score: 100 - i * 4, residual: (100 - i * 4) / 50 }));
+  const { long, short, neutral, deadBand } = partitionSides(scored);
   ok(long[0].score > long[long.length - 1].score, "the long side is ordered best-first");
   ok(short[0].score < short[short.length - 1].score, "the short side is ordered most-negative-first");
   ok(long[0].score === 100, "the long side starts at the highest score");
   ok(short[0].score === 100 - 59 * 4, "the short side starts at the lowest score");
+
+  /* THE DEAD BAND. A median split made the board's length a constant and its
+     contents a formality: rank 18 of 34 was published as a short candidate at
+     a score of -2, while its own share class sat fourth on the long board. */
+  ok(long.every((r) => r.score >= deadBand), "no long-board name is inside the dead band");
+  ok(short.every((r) => r.score <= -deadBand), "no short-board name is inside the dead band");
+  ok(long.length + short.length + neutral === scored.length, "every name is accounted for");
+  const tickers = new Set([...long, ...short].map((r) => r.ticker));
+  ok(tickers.size === long.length + short.length, "the two sides are ticker-disjoint");
+
+  const flatDay = Array.from({ length: 40 }, (_, i) => ({ ticker: "F" + i, score: i - 20, residual: (i - 20) / 50 }));
+  const flat = partitionSides(flatDay);
+  ok(flat.long.length + flat.short.length < flatDay.length,
+     "a quiet session yields a SHORTER board, not a full one made of noise");
 }
 
-console.log(`✓ flows-features: ${checks} assertions — robust stats, rank-normal transform, neutralization, dealer-gamma sign, path signature, dispersion-invariant calibration, reachable conviction`);
+/* ---------- the gamma flip, on the failures that shipped -------- */
+{
+  /* 1. A DEAD TAIL IS NOT A LEVEL. The band floor sits ~30% below spot; rungs
+     down there carry no aggressor volume, so the cumulative opens at exactly
+     zero and the old `if (a.cum === 0) return a.strike` short-circuit
+     published the bottom of the band as a measured gamma flip. Twelve of
+     thirty-four live names sat within 4% of that floor. */
+  const zeroRung = (k) => ({ strike: String(k), call_gamma_ask: "0", call_gamma_bid: "0",
+                             put_gamma_ask: "0", put_gamma_bid: "0" });
+  const rung = (k, g) => ({ strike: String(k), call_gamma_ask: String(g), call_gamma_bid: "0",
+                            put_gamma_ask: "0", put_gamma_bid: "0" });
+
+  const deadTail = aggressorGamma([
+    zeroRung(61), zeroRung(62), zeroRung(63), zeroRung(64),
+    rung(70, -5e6), rung(80, -5e6), rung(90, 6e6), rung(100, 6e6), rung(110, 1e6),
+  ], { spot: 88 });
+  ok(deadTail.flip !== 61 && deadTail.flip !== 62,
+     `a rung with no measured gamma is not a flip (got ${deadTail.flip})`);
+  ok(deadTail.flip > 80 && deadTail.flip < 100,
+     `the flip is the real crossing in the middle of the book (got ${deadTail.flip})`);
+
+  // 2. AN ALL-ZERO LADDER HAS NO FLIP, and must not invent one.
+  ok(aggressorGamma([zeroRung(10), zeroRung(20), zeroRung(30)], { spot: 20 }).flip === null,
+     "a book with no measured gamma has no flip");
+
+  /* 3. THE NEAREST CROSSING, not the first from the bottom. |cum| starts near
+     zero and ends at |netGamma|, so scanning up and returning the first
+     crossing is biased toward the bottom of the ladder by construction. */
+  const twoCrossings = aggressorGamma([
+    rung(50, -1e7), rung(60, 2e7), rung(70, -2e7), rung(80, -1e6),
+    rung(90, 3e7), rung(100, 1e6), rung(110, 1e6),
+  ], { spot: 88 });
+  ok(twoCrossings.crossings.length >= 2, "every crossing is collected, not just the first");
+  const nearest = twoCrossings.crossings.reduce(
+    (a, b) => (Math.abs(b.strike - 88) < Math.abs(a.strike - 88) ? b : a));
+  ok(twoCrossings.flip === nearest.strike, "the published flip is the crossing nearest spot");
+
+  /* 4. MATERIALITY IS ASSERTED EITHER SIDE, not on the two adjacent rungs. A
+     clean crossing passes through zero, so its immediate shoulders are SMALL
+     by definition — testing them would reject exactly the good crossings. */
+  const clean = [];
+  let cum = 0;
+  for (let k = 70; k <= 130; k++) { cum += (k - 95) * 1e5; clean.push({ strike: k, cum }); }
+  const found = gammaCrossings(clean, { materiality: 0.1 });
+  ok(found.length >= 1, "a textbook single-crossing book yields its crossing");
+
+  // 5. THE SIDE IS DATA, not a hardcoded sentence.
+  ok(deadTail.flipSide === "short_below",
+     `a book short below and long above reports short_below (got ${deadTail.flipSide})`);
+  const inverted = aggressorGamma([
+    rung(50, 1e7), rung(60, 1e6), rung(70, -3e7), rung(80, -1e6), rung(90, -1e6),
+  ], { spot: 75 });
+  ok(inverted.flipSide === "long_below",
+     `a book LONG below and short above reports long_below (got ${inverted.flipSide})`);
+
+  // 6. Dealer gamma AT SPOT, unit-free and comparable across names.
+  ok(deadTail.spotGammaShare < 0, "spot above a short_below flip is still short gamma here");
+  ok(Math.abs(deadTail.spotGammaShare) <= 1, "spotGammaShare is bounded by construction");
+  ok(aggressorGamma([], { spot: 100 }).spotGammaShare === null, "no ladder means no reading");
+}
+
+/* ---------- weighting refuses to pay for dead columns ----------- */
+{
+  ok(isLiveColumn([1, 2, 3]), "a varying column is live");
+  ok(!isLiveColumn([0, 0, 0, 0]), "an all-zero column is dead");
+  ok(!isLiveColumn([7, 7, 7]), "a constant column is dead");
+  ok(!isLiveColumn([5]), "a single value cannot have dispersion");
+
+  /* The live board awarded family V — identically zero on all 34 names — the
+     same unit of weight as a live family, because effectiveBreadth returned
+     `n` without ever looking at a value. Two dead columns were worse: pearson
+     returns NaN on zero variance, so rhoBar fell to 0 and the family drew its
+     FULL raw count as if perfectly independent. */
+  ok(effectiveBreadth([[0, 0, 0, 0]]) === 0, "one dead column earns no weight");
+  ok(effectiveBreadth([[0, 0, 0, 0], [0, 0, 0, 0]]) === 0, "two dead columns earn no weight");
+  ok(effectiveBreadth([[1, 2, 3, 4]]) === 1, "one live column earns one unit");
+  ok(effectiveBreadth([[1, 2, 3, 4], [0, 0, 0, 0]]) === 1,
+     "a dead column beside a live one adds nothing");
+
+  const dup = [1, 2, 3, 4, 5];
+  near(effectiveBreadth([dup, dup.slice()]), 1, 1e-6, "two identical columns are one signal");
+  ok(effectiveBreadth([[1, 2, 3, 4, 5], [5, 1, 4, 2, 3]]) > 1.2,
+     "two unrelated columns are more than one signal");
+
+  /* BETWEEN families, which effectiveBreadth was structurally blind to: it was
+     only ever called with one family's own columns. */
+  const a = [1, 2, 3, 4, 5, 6];
+  const red = crossFamilyRedundancy({ A: a, B: a.slice(), C: [3, 1, 4, 1, 5, 9] });
+  ok(red.A > 1 && red.B > 1, "a family restated by another is discounted");
+  ok(red.A > red.C, "the redundant pair is discounted harder than the independent one");
+  const solo = crossFamilyRedundancy({ A: a });
+  ok(solo.A === 1, "a lone family has nothing to be redundant with");
+}
+
+/* ---------- percentiles and the multiplicative gate ------------- */
+{
+  const pr = percentileRank([10, 20, 30, 40]);
+  ok(pr.every((p) => p > 0 && p < 1), "percentiles live strictly inside (0,1)");
+  ok(pr[0] < pr[3], "percentiles are monotone in the value");
+  near(pr.reduce((x, y) => x + y, 0) / pr.length, 0.5, 1e-9, "their mean is one half by construction");
+
+  const tied = percentileRank([5, 5, 5, 5]);
+  ok(tied.every((p) => Math.abs(p - tied[0]) < 1e-12), "ties share one averaged rank");
+  ok(percentileRank([1, NaN, 3])[1] === null, "an unmeasured entry casts no vote");
+
+  /* THE GATE. Modifiers multiply, because adding an unsigned magnitude to a
+     signed sum turns "this name's flow is clean" into "this name is bullish".
+     The previous fix signed each magnitude by sign(dirDelta) and kept it
+     additive, which reintroduced the inversion one level down: three of ten
+     scoring columns became restatements of sign(dirDelta), carried the
+     NEGATIVE sign and a quarter of the weight, and the composite came out
+     with corr(blend, dirDelta) = -0.07. */
+  const g = qualityGate([[1, 2, 3, 4, 5], [5, 4, 3, 2, 1]]);
+  near(g.reduce((x, y) => x + y, 0) / g.length, 1, 1e-9, "the gate has a cross-sectional mean of one");
+  ok(g.every((v) => v > 0 && v <= 2), "the gate is bounded in (0,2]");
+  ok(g.every((v) => Math.abs(v - 1) < 1e-9), "two exactly opposed axes cancel to a neutral gate");
+
+  const oneAxis = qualityGate([[1, 2, 3, 4, 5]]);
+  ok(oneAxis[4] > oneAxis[0], "a better name gets a larger multiplier");
+  ok(oneAxis.every((v) => v > 0), "no name is ever gated to zero");
+
+  // A near-constant modifier must do almost nothing — the whole point.
+  const flat = qualityGate([[1, 1, 1, 1, 1]]);
+  ok(flat.every((v) => v === 1), "a modifier with no dispersion changes nothing");
+
+  // And a gate can never flip a sign, which the additive form could.
+  const signal = [-3, -1, 1, 3, 5];
+  const gated = signal.map((v, i) => v * oneAxis[i]);
+  ok(gated.every((v, i) => Math.sign(v) === Math.sign(signal[i])),
+     "the gate scales conviction and never reverses it");
+}
+
+/* ---------- realized vol, the VRP denominator ------------------- */
+{
+  const flat = realizedVol(new Array(40).fill(100));
+  near(flat, 0, 1e-9, "a flat series has no realized vol");
+
+  // A deterministic +-1% alternation: |log return| = log(1.01) each step, so
+  // the annualized figure is recoverable in closed form.
+  const alt = [100];
+  for (let i = 0; i < 40; i++) alt.push(alt[alt.length - 1] * (i % 2 ? 1 / 1.01 : 1.01));
+  const rv = realizedVol(alt, { window: 30 });
+  ok(rv > 0.1 && rv < 0.5, `an alternating 1% series annualizes into a plausible band (got ${rv.toFixed(3)})`);
+
+  ok(realizedVol([100]) === null, "one close cannot have a vol");
+  ok(realizedVol(null) === null, "a null series is safe");
+  ok(realizedVol([100, 0, -5, 110]) === null,
+     "dropping non-positive closes can leave too few returns — null, never NaN");
+  ok(realizedVol([100, 0, 101, -5, 99, 102, 98]) !== null,
+     "a bad print in the middle does not destroy the series");
+}
+
+console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction`);
