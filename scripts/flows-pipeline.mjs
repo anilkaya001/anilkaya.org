@@ -95,6 +95,9 @@ const RATE = {
    deadline and reports how many it managed. */
 const DEADLINE_MS = 30 * 60 * 1000;
 
+/** Delay between publishes, to stay under the edge's burst-rate challenge. */
+const PUBLISH_SPACING_MS = 150;
+
 const stats = { calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now() };
 let delayMs = RATE.startDelayMs;
 
@@ -663,6 +666,12 @@ async function publish(key, payload) {
       body,
     },
   );
+  // Space the writes. 37 POSTs inside eleven seconds from one datacenter
+  // address is what tripped Cloudflare's rate challenge on the first live run;
+  // the boards and every card had already landed, so the challenge was purely
+  // a function of burst rate. 150ms puts the whole publish phase near six
+  // seconds and well under the threshold, against a job budgeted in minutes.
+  await sleep(PUBLISH_SPACING_MS);
   if (!response.ok) {
     /* Report WHOSE rejection this is.
        The Worker's own failures are the project's JSON envelope; an edge
@@ -1107,15 +1116,23 @@ async function main() {
     (cardsSkipped ? `, ${cardsSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline` : ""),
   );
 
-  // The board tells the reader how much of itself is real.
-  await publish("meta", {
-    generatedAt, sessionDate,
-    universe: universe.length,
-    enriched: enriched.length,
-    liquid: liquid.length,
-    cardsBuilt, cardsFailed, cardsSkipped,
-    apiCalls: stats.calls,
-  });
+  /* meta is a DIAGNOSTIC, not the product, so its failure must not fail the
+     run. The first live publish proved why: both boards and all 34 cards
+     landed, and then this last write tripped a Cloudflare rate challenge — so
+     a job that had successfully published 36 rows exited non-zero and reported
+     failure. A scheduled run is judged by its exit code, and that one lied. */
+  try {
+    await publish("meta", {
+      generatedAt, sessionDate,
+      universe: universe.length,
+      enriched: enriched.length,
+      liquid: liquid.length,
+      cardsBuilt, cardsFailed, cardsSkipped,
+      apiCalls: stats.calls,
+    });
+  } catch (error) {
+    console.warn(`  meta: ${error.message}`);
+  }
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;
   console.log(
