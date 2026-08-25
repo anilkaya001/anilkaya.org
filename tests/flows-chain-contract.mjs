@@ -31,6 +31,7 @@ import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mj
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 
 /* ---------- the stub upstream ---------------------------------- */
 let upstreamCalls = 0;
@@ -69,6 +70,26 @@ const upstream = http.createServer((req, res) => {
   if (path.includes("/ohlc/")) {
     res.writeHead(200);
     res.end(JSON.stringify({ data: upstreamMode === "noSpot" ? [] : candles }));
+    return;
+  }
+  if (path.endsWith("/stock-state")) {
+    /* The live print is DELIBERATELY different from the latest daily close
+       (183.40 against 180.00). If the route still prices off the candle, every
+       moneyness and every covered-call collateral on the page is measured
+       against a number nobody can trade at, and the two are indistinguishable
+       unless the fixture makes them differ. */
+    /* "noSpot" means NO usable price from ANY source. With two price sources
+       the case has to fail both, or it only proves the fallback works — which
+       is what a separate case below is for. */
+    if (upstreamMode === "noState" || upstreamMode === "noSpot") {
+      res.writeHead(404); res.end("{}"); return;
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      close: "183.40", prev_close: "179.10", open: "180.20",
+      high: "184.00", low: "179.80", market_time: "regular",
+      tape_time: "2026-08-25 18:06:00+00:00", total_volume: 23132119, volume: 12348,
+    }));
     return;
   }
   res.writeHead(404); res.end("{}");
@@ -156,8 +177,17 @@ try {
     const body = await res.json();
 
     eq(body.ticker, "AAPL");
-    eq(body.spot, 180, "spot is the LATEST close by date, not the first or last row");
-    eq(body.asOf, "2026-08-24", "and the date it came from ships with it");
+    /* THE LIVE PRINT WINS OVER THE DAILY CLOSE. A covered call's collateral is
+       the shares at spot and every moneyness is measured from it, so during a
+       session the previous close is simply the wrong number. */
+    eq(body.spot, 183.4, "spot is the live print, not the latest daily close");
+    eq(body.spotSource, "stock-state", "and the payload says which price it used");
+    eq(body.marketTime, "regular", "the vendor's session name is passed through verbatim");
+    eq(body.prevClose, 179.1, "the previous close ships alongside rather than as spot");
+    /* asOf dates the days-to-expiry count, so it is the SESSION, taken from the
+       last print's UTC date — which equals the Eastern trading date across the
+       whole US session and stays frozen after the close. */
+    eq(body.asOf, "2026-08-25", "the session comes from the tape time, not the candle");
 
     eq(body.screened, 3, "the chain's true size is reported");
     eq(body.priced, 2, "the lottery ticket does not survive the gates");
@@ -171,11 +201,19 @@ try {
     eq(put.breakeven, 167.5);
     ok(put.annualizedIsConvention === true,
        "annualized ships flagged as a convention so no reader prints it as a return");
-    ok(put.cushionSigmas > 0.9 && put.cushionSigmas < 1.1,
-       `breakeven sits about one implied sigma out (${put.cushionSigmas})`);
+    /* DERIVED FROM THE PAYLOAD'S OWN SPOT, not from a hardcoded band. Both of
+       these were pinned to spot = 180 and broke the moment the route started
+       pricing against the live print — which is the fix working, not a
+       regression. An assertion that restates the relation survives a fixture
+       change; one that hardcodes its output does not. */
+    const sigma = put.iv * Math.sqrt(put.days / 365);
+    near(put.cushionSigmas, Math.log(body.spot / put.breakeven) / sigma, 1e-9,
+         "cushion is the move to breakeven in the option's own implied sigmas");
+    ok(put.cushionSigmas > 0, "and it is positive for a breakeven below spot");
 
     const call = body.rows.find((r) => r.type === "C");
-    eq(call.collateral, 18000, "a covered call's collateral is the shares at spot");
+    eq(call.collateral, Math.round(body.spot * 100 * 1e6) / 1e6,
+       "a covered call's collateral is the shares at the SPOT the payload used");
     ok(call.capSigmas > 0, "and its upside cap is measured, not omitted");
   }
 
@@ -239,7 +277,7 @@ try {
       ["garbage", 502, "HTML where JSON was promised is their outage, reported as theirs"],
       ["rate", 429, "an upstream rate limit is passed through as one"],
       ["emptyChain", 404, "a symbol with no listed options is a 404, not an empty success"],
-      ["noSpot", 502, "no usable price is a failure, not a chain priced against zero"],
+      ["noSpot", 502, "no usable price from EITHER source is a failure, not a chain priced against zero"],
     ];
     let n = 0;
     for (const [mode, status, msg] of cases) {
@@ -252,6 +290,27 @@ try {
          `the ${mode} path never echoes the vendor credential`);
       ok(body.error && body.error.code, "and answers in the project error envelope");
     }
+    upstreamMode = "ok";
+  }
+
+  /* ---------- the live price is allowed to fail ------------------ */
+  {
+    /* /stock-state is one extra subrequest and it must never be able to take
+       the desk down: a table priced off the close and SAYING so beats no table.
+       The candle is still fetched, so the fallback is already in hand. */
+    upstreamMode = "noState";
+    /* A FRESH TICKER, because refresh=1 is floored: moments after the earlier
+       AAPL fetch it is throttled and serves the cached, live-priced body, so
+       this block would silently assert against the wrong response. The stub
+       keys on the path, not the symbol, so any unused ticker misses the cache. */
+    const res = await get("/api/flows/chain?t=FALLB");
+    eq(res.status, 200, "a missing live price does not fail the request");
+    const body = await res.json();
+    eq(body.spot, 180, "it falls back to the latest daily close");
+    eq(body.spotSource, "daily-close", "and says so, rather than passing a close off as a print");
+    eq(body.asOf, "2026-08-24", "dating falls back to the candle's own date");
+    eq(body.marketTime, null, "with no session claimed that was not observed");
+    ok(body.rows.length > 0, "and the chain still prices");
     upstreamMode = "ok";
   }
 

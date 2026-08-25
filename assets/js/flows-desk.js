@@ -192,7 +192,14 @@
       else if (entryState.payload) {
         const p = entryState.payload;
         const parts = [];
-        if (isNum(p.spot) !== null) parts.push("$" + fmt2(p.spot));
+        if (isNum(p.spot) !== null) {
+          /* WHICH PRICE THIS WAS PRICED AGAINST. A covered call's collateral IS
+             the shares at spot and every moneyness is measured from it, so a
+             table built on yesterday's close and one built on a live print are
+             different tables. Rendering them identically is the same omission
+             as showing a cached row as live. */
+          parts.push("$" + fmt2(p.spot) + (p.spotSource === "daily-close" ? " close" : ""));
+        }
         parts.push(fmtInt(p.priced) + " sellable");
         if (p.__age !== undefined) {
           const age = fmtAge(p.__age);
@@ -467,10 +474,29 @@
     if (!chosen.length) { statusEl.textContent = "Select a symbol to price it."; return; }
     const failed = chosen.filter((s) => (book.get(s) || {}).state === "error");
     const age = oldestAge === undefined || oldestAge === null ? "" : " · quotes " + fmtAge(oldestAge);
-    statusEl.textContent = failed.length
+
+    /* THE SESSION, and any symbol not priced against a live print. The vendor
+       names the session ("regular", "pre", "post"); it is passed through
+       rather than mapped, because an enum this page does not control is not
+       one it should invent members of. */
+    const sessions = new Set();
+    const stale = [];
+    for (const sym of chosen) {
+      const p = (book.get(sym) || {}).payload;
+      if (!p) continue;
+      if (p.marketTime) sessions.add(String(p.marketTime));
+      if (p.spotSource === "daily-close") stale.push(sym);
+    }
+    const session = sessions.size === 1 ? " · " + [...sessions][0] + " session" : "";
+    const staleNote = stale.length
+      ? " · " + stale.join(", ") + " priced off the last close, not a live print"
+      : "";
+
+    statusEl.textContent = (failed.length
       ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " +
-        failed.join(", ") + " unavailable" + age
-      : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced" + age;
+        failed.join(", ") + " unavailable"
+      : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") +
+      session + age + staleNote;
   }
 
   function showEmpty(text) {

@@ -81,6 +81,21 @@ const upstream = http.createServer((req, res) => {
   if (url.pathname.endsWith("/option-contracts")) {
     res.writeHead(200); res.end(JSON.stringify({ data: chain.rows })); return;
   }
+  if (url.pathname.endsWith("/stock-state")) {
+    /* AAA gets a LIVE print above its daily close; BBB gets no live price at
+       all. One desk therefore carries both cases at once, which is the only
+       way to assert that the page distinguishes them instead of rendering a
+       stale close and a live quote identically. */
+    if (ticker !== "AAA") { res.writeHead(404); res.end("{}"); return; }
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      close: String(chain.spot * 1.02), prev_close: String(chain.spot),
+      open: String(chain.spot), high: String(chain.spot * 1.03), low: String(chain.spot * 0.99),
+      market_time: "regular", tape_time: "2026-08-25 18:06:00+00:00",
+      total_volume: 1000000, volume: 5000,
+    }));
+    return;
+  }
   if (url.pathname.includes("/ohlc/")) {
     res.writeHead(200);
     res.end(JSON.stringify({ data: [
@@ -150,6 +165,19 @@ try {
        "the zero-bid contract is absent — no bid is no sale, not a cheap one");
   }
 
+  /* ---------- the page says WHICH price it priced against -------- */
+  {
+    /* A covered call's collateral IS the shares at spot and every moneyness is
+       measured from it, so a table built on yesterday's close and one built on
+       a live print are different tables. Rendering them identically is the
+       same omission as showing a cached row as live. */
+    const note = await page.locator(".desk-chip__note").first().textContent();
+    ok(/\$51\.00/.test(note), `AAA is priced against the live print, not its 50.00 close (${note})`);
+    ok(!/close/.test(note), "and a live print is not labelled a close");
+    const status = await page.locator("#deskStatus").textContent();
+    ok(/regular session/.test(status), `the vendor's session name reaches the page (${status})`);
+  }
+
   /* ---------- the watchlist lives in the URL --------------------- */
   {
     const u = new URL(page.url());
@@ -167,6 +195,15 @@ try {
 
     const syms = (await page.locator("#deskBody th").allTextContents()).map((s) => s.trim());
     ok(syms.includes("AAA") && syms.includes("BBB"), "both symbols are in one table");
+
+    /* BBB HAS NO LIVE PRICE, and the page must say so rather than quietly
+       pricing it off yesterday's close beside a symbol that is live. */
+    const notes = await page.locator(".desk-chip__note").allTextContents();
+    const bbbNote = notes[1] || "";
+    ok(/close/.test(bbbNote), `BBB is marked as priced off the last close (${bbbNote})`);
+    const status = await page.locator("#deskStatus").textContent();
+    ok(/BBB priced off the last close/.test(status),
+       `and the status names it rather than averaging the two states away (${status})`);
 
     /* THE DEFECT THIS FILE EXISTS FOR. Each payload arrives ranked within its
        own symbol, so concatenating them groups by insertion. The fixture is

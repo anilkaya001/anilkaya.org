@@ -1087,8 +1087,9 @@ async function uwFetch(env, path, params) {
  * fails loudly instead.
  */
 async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
-  const [contracts, candles] = await Promise.all([
-    uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/option-contracts`, {
+  const t = encodeURIComponent(ticker);
+  const [contracts, candles, state] = await Promise.all([
+    uwFetch(env, `/api/stock/${t}/option-contracts`, {
       /* The sellable universe in one call rather than the whole book in ten:
          out-of-the-money contracts that somebody already holds. Both filters
          are the vendor's, applied upstream, so they cost nothing here. */
@@ -1096,7 +1097,16 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
       exclude_zero_oi_chains: "true",
       limit: 500,
     }),
-    uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/ohlc/1d`, { timeframe: "5D" }),
+    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    /* THE DAILY CANDLE IS NOT A LIVE PRICE, and this desk is priced against
+       spot twice over: a covered call's collateral IS the shares at spot, and
+       every moneyness on the page is measured from it. During a session the
+       latest 1d bar is yesterday's close, so a name that has moved 4% since
+       the open was having its whole table priced against a number nobody could
+       trade at. /stock-state is one parameter and nine fields and answers it
+       directly. It is allowed to fail: the candle is still there, and a desk
+       priced off the close and SAYING so beats no desk at all. */
+    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
   ]);
 
   const rows = Array.isArray(contracts) ? contracts : (contracts && contracts.data) || [];
@@ -1106,19 +1116,48 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
   /* The most recent close the vendor will admit to. Bars arrive newest-first
      on some endpoints and oldest-first on others, so the date is compared
      rather than an index trusted. */
-  let spot = null, asOf = null;
+  let dailyClose = null, dailyDate = null;
   for (const b of bars) {
     const close = Number(b && (b.close ?? b.c));
     const date = b && (b.date || b.start_time || b.timestamp);
     if (!Number.isFinite(close) || close <= 0 || !date) continue;
     const day = String(date).slice(0, 10);
-    if (asOf === null || day > asOf) { asOf = day; spot = close; }
+    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
   }
+
+  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
+  const liveClose = live ? Number(live.close) : NaN;
+  const useLive = Number.isFinite(liveClose) && liveClose > 0;
+
+  /* WHICH PRICE, AND HOW OLD, both ship. A desk that renders a live quote and
+     a stale close identically is the same omission as one that renders a
+     two-minute-old cached row as live. */
+  const spot = useLive ? liveClose : dailyClose;
+  const spotSource = useLive ? "stock-state" : "daily-close";
   if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
+
+  /* asOf DATES THE DAYS-TO-EXPIRY COUNT, so it must be the trading session,
+     not the wall clock. tape_time is the last print and carries a UTC offset;
+     across the whole US session (13:30-20:00 UTC) its UTC date equals the
+     Eastern trading date, and after the close it stays frozen at the close
+     rather than rolling with the clock — so its date is the session's without
+     needing a timezone rule, which would be a free parameter. Falls back to
+     the candle's own date. */
+  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
+  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
+  const asOf = tapeDay || dailyDate;
+  if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
   const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit });
   return {
     ticker, spot, asOf,
+    spotSource,
+    /* "regular", "pre", "post" or whatever else the vendor names a session.
+       Passed through verbatim rather than mapped: an enum this code does not
+       control is not one it should be inventing members of. */
+    marketTime: live && live.market_time ? String(live.market_time) : null,
+    tapeTime,
+    prevClose: live && Number(live.prev_close) > 0 ? Number(live.prev_close) : dailyClose,
     strategy, ...ranked,
     generatedAt: new Date().toISOString(),
   };
