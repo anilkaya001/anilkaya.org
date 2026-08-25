@@ -103,8 +103,11 @@ jobs:
           # Never echoed, never interpolated into a log line. Actions logs are
           # PUBLIC on a public repository.
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
-          FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_INGEST_TOKEN: ${{ secrets.FLOWS_INGEST_TOKEN }}
+          # Optional. The endpoint is public — the bearer token protects it —
+          # so the pipeline defaults to production and this only needs setting
+          # to aim a run at a staging Worker.
+          FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
         run: node scripts/flows-pipeline.mjs
 
       # Deliberately NO actions/upload-artifact. On a public repository,
