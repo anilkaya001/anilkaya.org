@@ -288,3 +288,126 @@ List versions and roll back to the last verified version:
 After rollback, rerun the API, course metadata, cache, encoding, auth, and D1
 smoke tests. A code rollback does not automatically undo D1 data migrations or
 dashboard Transform Rules; treat those as separate rollback items.
+
+---
+
+## 10. Flows section (credential-gated options-flow board)
+
+The Flows section is deliberately isolated from the learning platform. It has
+its own cookie, its own audience claim, its own D1 tables, and its own secrets.
+Nothing about it can grant access to `/api/*`, and nothing about the Google
+OAuth path can grant access to `/flows/`.
+
+### 10.1 Apply the schema
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0005_flows.sql
+```
+
+Confirm both tables exist before deploying the Worker, or every board request
+falls back to the "pending" empty state and every failed login silently skips
+throttling:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote \
+  --command="SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'flows_%';"
+```
+
+### 10.2 Set the three secrets
+
+`SESSION_SECRET` is already set and is shared with the learning session — the
+audience claim, not the secret, is what separates the two.
+
+```bash
+# A high-entropy pepper. Generate it once; never commit it, never reuse it
+# elsewhere. Folded into every password before derivation, so a leaked
+# credential map cannot be attacked offline without it.
+openssl rand -base64 48 | ./tests/node_modules/.bin/wrangler secret put FLOWS_PEPPER
+
+# The per-user hash map. Generate locally with the same pepper:
+node scripts/generate-flows-credentials.mjs
+# then paste its single-line JSON output into:
+./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS
+```
+
+**The repository is public.** Neither the pepper nor the credential map may ever
+be committed, echoed into CI logs, or pasted into an issue. `generate-flows-credentials.mjs`
+writes nothing to disk for exactly this reason.
+
+Rotating the shared password means regenerating `FLOWS_CREDENTIALS` with the
+same pepper and re-putting the secret. Every existing session survives, because
+sessions are signed tokens rather than password material — force a sign-out by
+rotating `FLOWS_PEPPER` as well, which invalidates nothing but stops the old
+password working.
+
+### 10.3 Verify the gate before announcing it
+
+```bash
+BASE=https://anilkaya.org
+
+# The login page is public and noindex; the board is not reachable without a session.
+curl -s "$BASE/flows/" | grep -c 'name="robots" content="noindex'      # expect 1
+curl -s "$BASE/flows/" | grep -c 'flowsBody'                            # expect 0
+
+# The JSON surface refuses anonymous callers with the project error envelope.
+curl -s -o /dev/null -w '%{http_code}\n' "$BASE/api/flows/board"        # expect 401
+curl -sI "$BASE/api/flows/board" | grep -i '^cache-control'             # expect no-store
+
+# Gated documents must not be storable by a shared cache.
+curl -sI "$BASE/flows/" | grep -i '^cache-control'                      # expect no-store
+
+# THE BYPASS CHECKS. The gated HTML lives in shared/flows-pages.js and `flows/`
+# is in .assetsignore, so there is no file in the bundle for a mangled path to
+# reach. Each of these must fail to return board markup.
+for p in '/%66lows/index.html' '//flows/index.html' '/FLOWS/index.html' '/flows/index.html'; do
+  printf '%s -> %s\n' "$p" "$(curl -s "$BASE$p" | grep -c 'flowsBody')"   # expect 0 for each
+done
+
+# Sign-in is POST-only.
+curl -s -o /dev/null -w '%{http_code}\n' "$BASE/flows/login"            # expect 405
+```
+
+### 10.4 Confirm the learning platform is unaffected
+
+The audience claim is new. Sessions issued before it exists carry no `aud` at
+all and are still accepted, so **no signed-in learner is logged out** by this
+deployment. Verify with a real signed-in browser session:
+
+```bash
+curl -s -H "Cookie: session=<existing token>" "$BASE/api/me"   # expect the user, not null
+```
+
+If this returns `null` for a session that worked before the deploy, stop and
+roll back — the legacy allowance in `isLearnAudience()` has regressed.
+
+### 10.5 The data pipeline
+
+Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
+allows 10 ms of CPU per invocation including cron, and the daily job is 600–800
+Unusual Whales calls. The Worker only verifies a cookie and hands back a stored
+string.
+
+Repository secrets required (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+|---|---|
+| `UW_API_KEY` | Unusual Whales API bearer token |
+| `FLOWS_INGEST_URL` | The Worker ingest endpoint the pipeline POSTs to |
+| `FLOWS_INGEST_TOKEN` | Bearer token authenticating that POST |
+
+GitHub is deliberately given **no Cloudflare API token**: Cloudflare's `KV: Edit`
+and `D1: Edit` permissions are account-scoped, so a CI credential could reach the
+live `iewt` learning database. The pipeline posts to the Worker instead.
+
+Two failure modes to watch:
+
+- **Scheduled workflows are disabled after 60 days** of repository inactivity.
+  This is the most likely way the board silently goes stale. Check the Actions
+  tab if `generatedAt` stops advancing.
+- **Unusual Whales publishes no rate limits.** The pipeline discovers the real
+  limit empirically with adaptive backoff and logs the achieved rate. Read that
+  number after the first few runs and size the universe against it.
+
+A run that cannot complete its enrichment publishes **nothing** and exits
+non-zero, by design: a partially ingested day must never quietly produce a
+ranking that looks complete.

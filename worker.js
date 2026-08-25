@@ -4,6 +4,12 @@
    topic-specific course metadata, and handles Google auth + D1 sync.
    ============================================================= */
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
+import {
+  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE,
+  parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
+  isLearnAudience, isLocked, nextFailureState,
+} from "./shared/flows-auth.js";
+import { FLOWS_PAGES } from "./shared/flows-pages.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -870,11 +876,71 @@ async function loadAcademyBootstrapSnapshot(env, user) {
   };
 }
 
+/* ---------- Flows helpers ---------------------------------------- */
+
+async function currentFlowsUser(request, env) {
+  const token = getCookie(request, FLOWS_COOKIE);
+  if (!token || !env.SESSION_SECRET) return null;
+  return verifyFlowsSession(token, env.SESSION_SECRET);
+}
+
+// Bounded form read. A login body is a few dozen bytes; anything larger
+// is not a login and is refused before it reaches the KDF.
+async function readFlowsForm(request) {
+  const declared = Number(request.headers.get("Content-Length") || 0);
+  if (Number.isFinite(declared) && declared > 4096) {
+    throw new HttpError(413, "payload_too_large", "Request body too large");
+  }
+  const text = (await request.text()).slice(0, 4096);
+  return new URLSearchParams(text);
+}
+
+function flowsLoginResponse(message) {
+  // Deliberately uniform: never reveals whether the username exists.
+  return new Response(FLOWS_PAGES.loginPage({ error: message }), {
+    status: 401,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+async function flowsLockRecord(env, username) {
+  if (!username || !env.DB) return null;
+  try {
+    return await env.DB.prepare(
+      "SELECT failures, first_at FROM flows_login_failures WHERE username = ?"
+    ).bind(username).first();
+  } catch { return null; }
+}
+
+async function recordFlowsFailure(env, username, previous) {
+  if (!username || !env.DB) return;
+  const next = nextFailureState(previous);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO flows_login_failures (username, failures, first_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, first_at = excluded.first_at"
+    ).bind(username, next.failures, next.first_at).run();
+  } catch { /* throttling is best-effort; never block a login on it */ }
+}
+
+async function clearFlowsFailures(env, username) {
+  if (!username || !env.DB) return;
+  try {
+    await env.DB.prepare("DELETE FROM flows_login_failures WHERE username = ?").bind(username).run();
+  } catch { /* best-effort */ }
+}
+
 async function currentUser(request, env) {
   const token = getCookie(request, "session");
   if (!token || !env.SESSION_SECRET) return null;
   const payload = await verifySession(token, env.SESSION_SECRET);
-  return payload ? { id: payload.sub, email: payload.email || "", name: payload.name || "" } : null;
+  // Cookie NAME is not a security boundary — a caller chooses which cookie
+  // carries which token, and both audiences are signed with SESSION_SECRET.
+  // The audience claim is the boundary. A token minted for /flows is refused
+  // here; a legacy token predating audiences (no aud at all) is still
+  // honoured so nobody signed in today gets logged out.
+  if (!payload || !isLearnAudience(payload)) return null;
+  return { id: payload.sub, email: payload.email || "", name: payload.name || "" };
 }
 
 const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({
@@ -1064,7 +1130,8 @@ async function route(request, env, url, ctx) {
       ).bind(user.sub, user.email, user.name, Date.now()).run();
 
       const session = await signSession(
-        { sub: user.sub, email: user.email, name: user.name, exp: Date.now() + 1000 * 60 * 60 * 24 * 30 },
+        { sub: user.sub, email: user.email, name: user.name, aud: LEARN_AUDIENCE,
+          exp: Date.now() + 1000 * 60 * 60 * 24 * 30 },
         env.SESSION_SECRET
       );
       return redirect(origin + "/lab/?auth=ok", 302, [
@@ -1599,6 +1666,92 @@ async function route(request, env, url, ctx) {
     return json({ ok: true, record, duplicate, generation }, 200, generationHeaders(generation));
   }
 
+  /* ---------- Flows: credential-gated options-flow section ----------
+     The HTML lives in shared/flows-pages.js, never in the asset bundle
+     (flows/ is in .assetsignore). A path this block fails to match can
+     therefore only 404 — there is no file for a percent-encoded or
+     case-varied path to leak past the gate. */
+
+  if (path === "/flows") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return redirect(new URL("/flows/", url).toString(), 308);
+  }
+
+  if (path === "/flows/login") {
+    requireMethod(request, ["POST"]);
+    requireSameOrigin(request);
+    if (!env.SESSION_SECRET) throw new HttpError(503, "unavailable", "Sign-in is not configured");
+
+    const credentials = parseCredentials(env.FLOWS_CREDENTIALS);
+    const form = await readFlowsForm(request);
+    const username = String(form.get("username") || "").trim().toLowerCase();
+    const password = String(form.get("password") || "");
+
+    const locked = await flowsLockRecord(env, username);
+    if (isLocked(locked)) {
+      return flowsLoginResponse("Too many attempts. Try again shortly.");
+    }
+
+    const verified = await verifyCredential(username, password, credentials, env.FLOWS_PEPPER);
+    if (!verified) {
+      // Write only on failure: the happy path costs no D1 rows, which
+      // matters against a free-tier budget shared with the learning app.
+      await recordFlowsFailure(env, username, locked);
+      return flowsLoginResponse("Those credentials were not recognised.");
+    }
+
+    await clearFlowsFailures(env, verified);
+    const session = await signFlowsSession(verified, env.SESSION_SECRET);
+    return redirect(origin + "/flows/", 303, [
+      cookie(FLOWS_COOKIE, session, { maxAge: FLOWS_SESSION_TTL_SECONDS }),
+    ]);
+  }
+
+  if (path === "/flows/logout") {
+    requireMethod(request, ["POST"]);
+    requireSameOrigin(request);
+    return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
+  }
+
+  if (path === "/flows/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    const session = await currentFlowsUser(request, env);
+    const body = session
+      ? FLOWS_PAGES.boardPage({ username: session.username })
+      : FLOWS_PAGES.loginPage();
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  if (path.startsWith("/api/flows/")) {
+    requireMethod(request, ["GET"]);
+    const session = await currentFlowsUser(request, env);
+    if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    if (path === "/api/flows/board") {
+      const side = url.searchParams.get("side") === "short" ? "short" : "long";
+      const row = await env.DB.prepare(
+        "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
+      ).bind("board:" + side).first().catch(() => null);
+      if (!row || !row.payload) {
+        return json({ side, rows: [], generatedAt: null, status: "pending" });
+      }
+      // The stored value is already serialized. Hand the string straight
+      // to the Response body rather than parsing and re-serializing it.
+      return new Response(row.payload, {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+    }
+    throw new HttpError(404, "not_found", "API route not found");
+  }
+
+  if (path.startsWith("/flows/")) {
+    throw new HttpError(404, "not_found", "Not found");
+  }
+
   if (path.startsWith("/api/")) {
     throw new HttpError(404, "not_found", "API route not found");
   }
@@ -1641,7 +1794,12 @@ function finalize(response, request, url) {
   if (contentType.includes("text/html")) out.headers.set("Content-Security-Policy", CSP);
   else out.headers.delete("Content-Security-Policy");
 
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) {
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/") ||
+      url.pathname === "/flows" || url.pathname.startsWith("/flows/")) {
+    // Gated documents join the no-store set. "no-cache" would still permit a
+    // shared cache to STORE the board (it only forces revalidation), and the
+    // board is per-account data behind a credential. Assets under /assets/
+    // are unaffected and stay immutably cacheable.
     // Personal API/auth data must never be cached. The one exception is a
     // successful GET/HEAD on /api/markets — public, non-personal index data that
     // sets its own short public Cache-Control. Errors (405, 500) still get
