@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "47";
+export const ASSET_VERSION = "49";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -99,16 +99,26 @@ ${topbar(true)}
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
-  <div class="flows-sides" role="group" aria-label="Board side">
-    <button type="button" class="flows-side is-on" data-side="long" aria-pressed="true">Long</button>
-    <button type="button" class="flows-side" data-side="short" aria-pressed="false">Short</button>
+  <div class="flows-controls">
+    <div class="flows-sides" role="group" aria-label="Board side">
+      <button type="button" class="flows-side is-on" data-side="long" aria-pressed="true">Long</button>
+      <button type="button" class="flows-side" data-side="short" aria-pressed="false">Short</button>
+    </div>
+    <div class="flows-views" role="group" aria-label="Layout">
+      <button type="button" class="flows-view is-on" data-view="deck" aria-pressed="true">Deck</button>
+      <button type="button" class="flows-view" data-view="table" aria-pressed="false">Table</button>
+    </div>
   </div>
+
+  <!-- One payload, two renderers, exactly one mounted at a time. The deck is
+       the default because the table's ten columns are wider than any phone. -->
+  <div class="flows-deck" id="flowsDeck" role="list" aria-label="Ranked candidates"></div>
 
   <!-- tabindex + role: the table is wider than any phone viewport, so this
        wrapper always scrolls horizontally. Without a tabindex a keyboard-only
        user tabs straight past it and seven of the ten columns are unreachable;
        without role and a name it is not announced as a scrollable region. -->
-  <div class="flows-tablewrap" tabindex="0" role="region" aria-label="Ranked candidates">
+  <div class="flows-tablewrap" id="flowsTableWrap" tabindex="0" role="region" aria-label="Ranked candidates" hidden>
     <table class="flows-table" id="flowsTable">
       <caption class="flows-caption">Ranked candidates. Select a ticker for its gamma profile, key levels and disclosed congressional trades. Every score decomposes into its contributing families.</caption>
       <thead>
@@ -118,7 +128,7 @@ ${topbar(true)}
           <th scope="col" class="c-num">Last</th>
           <th scope="col" class="c-num">Score</th>
           <th scope="col" class="c-num">Conv</th>
-          <th scope="col" class="c-num"><abbr title="Family sub-scores: Flow, Positioning, Path, Vol, Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Three signed axes — Flow, Positioning, Path — then two unsigned gauges: Vol regime and Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
           <th scope="col" class="c-num">&Pi;</th>
           <th scope="col" class="c-num">&Gamma; regime</th>
           <th scope="col" class="c-num">&Gamma;&#8320; dist</th>
@@ -156,6 +166,26 @@ ${topbar(true)}
     <section class="fc-panel" aria-labelledby="fcLevelsH">
       <h3 id="fcLevelsH">Key levels &amp; distance to spot</h3>
       <div id="fcLevels"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcDispH">
+      <h3 id="fcDispH">Where the book is moving</h3>
+      <div id="fcDisp"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcCalH">
+      <h3 id="fcCalH">Gamma roll-off</h3>
+      <div id="fcCal"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcMoveH">
+      <h3 id="fcMoveH">The priced move</h3>
+      <div id="fcMove"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcCtxH">
+      <h3 id="fcCtxH">Price context</h3>
+      <div id="fcCtx"></div>
     </section>
 
     <section class="fc-panel" aria-labelledby="fcPathH">

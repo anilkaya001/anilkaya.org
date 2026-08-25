@@ -12,7 +12,10 @@ import assert from "node:assert/strict";
 import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
+  collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
+  screenerTilt,
 } from "../scripts/flows-pipeline.mjs";
+import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -100,39 +103,60 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- THE SIGN RULE ---------------------------------------
+/* ---------- MODIFIERS MULTIPLY, THEY DO NOT VOTE ------------------
    The composite means long when positive and short when negative, so every
-   column must carry a direction. A magnitude — how clean the positioning is,
-   how durable the regime is — has none, and adding it to a signed sum turns
-   "high quality flow" into "bullish". Two names with IDENTICAL bearish flow
-   used to separate by 3.8 z purely on positioning quality, sending the clean
-   one to the LONG board. */
+   ADDED column must carry a direction of its own. A magnitude — how clean the
+   positioning is, how durable the regime is — has none.
+
+   The first version of this test caught the first version of the bug: two
+   names with identical bearish flow separated by 3.8 z on positioning quality
+   alone, sending the CLEAN one to the long board. The fix at the time signed
+   each magnitude by sign(dirDelta) so it could stay in the additive sum, and
+   that reintroduced the same inversion one level down. Measured on the
+   pipeline's own cross-section afterwards: three of ten scoring columns were
+   ~95% sign(dirDelta) by correlation, they carried the NEGATIVE sign and a
+   quarter of the total weight, and the finished composite came out at
+   corr(blend, dirDelta) = -0.07 — the long board ranking AGAINST its own
+   directional flow signal.
+
+   So the contract is now structural, not cosmetic: unsigned quantities leave
+   the additive sum entirely and become a bounded multiplier. */
 {
-  // A neutral cross-section, plus two names that differ ONLY in quality.
   const base = (i) => ({
     ticker: "N" + i,
     dirDelta: (i % 2 ? 1 : -1) * (500 + i * 10),
-    purity: 0.6,
+    dirShare: (i % 2 ? 1 : -1) * (0.1 + (i % 9) * 0.05),
+    purity: 0.4 + (i % 6) * 0.08,
     otmShare: 0.3 + (i % 7) * 0.05,
     vegaTilt: (i % 5) * 0.6,
     netGamma: (i % 3 - 1) * 1e9,
+    spotGammaShare: ((i % 7) - 3) / 4,
     flipDist: (i % 11 - 5) / 100,
-    displacement: (i % 9 - 4) / 2,
+    displacement: (i % 2 ? 1 : -1) * 0.6 + (i % 9 - 4) / 6,
     displacementWeight: 1,
     persistence: 0.6,
     concentration: 0.2,
     pathNet: (i % 2 ? 1 : -1) * 1000,
-    gammaFrontLoad: 0.3,
+    pathBars: 390,
+    gammaFrontLoad: 0.2 + (i % 5) * 0.08,
+    vrp: (i % 13 - 6) / 100,
+    ivRank: (i % 17) / 17,
+    ivMomentum: (i % 11 - 5) / 100,
     coverage: 1,
   });
   const features = Array.from({ length: 46 }, (_, i) => base(i + 2));
 
   // Both are strongly BEARISH. A is clean near-money; B is OTM lottery on vega.
-  const clean = { ...base(0), ticker: "CLEAN", dirDelta: -1000, otmShare: 0.10, vegaTilt: 0.05, pathNet: -1000 };
-  const lotto = { ...base(1), ticker: "LOTTO", dirDelta: -1000, otmShare: 0.95, vegaTilt: 5.0, pathNet: -1000 };
+  const clean = { ...base(0), ticker: "CLEAN", dirDelta: -1000, dirShare: -0.8,
+                  purity: 0.9, otmShare: 0.10, vegaTilt: 0.05, pathNet: -1000 };
+  const lotto = { ...base(1), ticker: "LOTTO", dirDelta: -1000, dirShare: -0.8,
+                  purity: 0.2, otmShare: 0.95, vegaTilt: 5.0, pathNet: -1000 };
   const all = [clean, lotto, ...features];
 
-  const tilts = all.map(() => ({ premiumTilt: 0, netTilt: 0, oiTilt: 0, surpriseTilt: 0 }));
+  const tilts = all.map((f) => ({
+    premiumTilt: f.dirShare * 0.5, netTilt: f.dirShare * 0.3,
+    volTilt: f.dirShare * 0.4, oiTilt: f.dirShare * 0.2, surpriseTilt: 0,
+  }));
   const sectors = all.map((_, i) => ["tech", "energy", "health", "fins"][i % 4]);
   const caps = all.map(() => 5e9);
 
@@ -141,27 +165,93 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const c = byTicker.get("CLEAN");
   const l = byTicker.get("LOTTO");
 
-  ok(c.fam.O <= 0,
-     `THE FIX: clean BEARISH flow gets a non-positive quality vote (O = ${c.fam.O})`);
-  ok(c.fam.O <= l.fam.O,
-     `and the clean bearish name is no less bearish than the lottery one (${c.fam.O} vs ${l.fam.O})`);
-  ok(c.score < 0, `the clean bearish name scores short overall (${c.score})`);
+  /* O IS A GAUGE, NOT A VOTE. It reports the multiplier the name earned, on a
+     0..100 scale with no sign, so the card must never draw it on the same
+     centre-origin axis as F, P and D. */
+  ok(scored.every((r) => r.fam.O >= 0 && r.fam.O <= 100), "the quality gauge is unsigned, 0..100");
+  const meanO = scored.reduce((a, r) => a + r.fam.O, 0) / scored.length;
+  ok(Math.abs(meanO - 50) < 6, `the gate averages one across the board (gauge mean ${meanO.toFixed(1)})`);
 
-  // The gamma regime must actually reach the score, not just the payload.
-  const shortGamma = scored.filter((r) => r.netGamma < 0 && r.dirDelta > 0);
-  const longGamma = scored.filter((r) => r.netGamma > 0 && r.dirDelta > 0);
-  ok(shortGamma.length && longGamma.length, "the fixture covers both gamma regimes");
-  const meanP = (rows) => rows.reduce((a, r) => a + r.fam.P, 0) / rows.length;
-  ok(meanP(shortGamma) > meanP(longGamma),
-     `THE FIX: bullish flow into SHORT gamma scores above the same flow into long gamma ` +
-     `(${meanP(shortGamma).toFixed(1)} vs ${meanP(longGamma).toFixed(1)})`);
+  ok(c.fam.O > l.fam.O,
+     `THE FIX: the clean name earns a LARGER multiplier than the lottery one (${c.fam.O} vs ${l.fam.O})`);
+  ok(c.score < 0 && l.score < 0,
+     `both bearish names score short (clean ${c.score}, lotto ${l.score})`);
+  ok(c.score < l.score,
+     `and quality AMPLIFIES the bearish read rather than reversing it (${c.score} vs ${l.score})`);
+  ok(Math.sign(c.gate) === 1 && Math.sign(l.gate) === 1,
+     "no gate is ever negative, so no modifier can flip a sign");
 
-  // Every family is reported for the UI decomposition.
-  for (const k of ["F", "P", "D", "V", "O"]) {
-    ok(scored.every((r) => Number.isFinite(r.fam[k])), `family ${k} is finite for every row`);
+  /* THE MEASUREMENT THAT CAUGHT THE SECOND VERSION. Before the fix this came
+     out at -0.07 on the pipeline's own cross-section: the long board was
+     ranking AGAINST its own directional flow signal. */
+  const r = pearson(scored.map((x) => x.residual), scored.map((x) => x.dirShare));
+  ok(r > 0.2, `the composite is LONG its own directional flow signal (corr = ${r.toFixed(3)})`);
+  const rF = pearson(scored.map((x) => x.fam.F), scored.map((x) => x.dirShare));
+  ok(rF > 0.8, `and the flow axis itself tracks flow (corr = ${rF.toFixed(3)})`);
+
+  /* THE SHARPER TEST, because a correlation is only as strong as the fixture's
+     other columns. Take one name, reverse ONLY its direction, and rescore the
+     same cross-section: the residual must follow. This is the exact property
+     that failed — a name whose flow turned bullish got pushed DOWN, because
+     three unsigned magnitudes signed by sign(dirDelta) outweighed the signed
+     column they were modifying. */
+  const flipped = all.map((f) => (f.ticker !== "CLEAN" ? f : {
+    ...f, dirDelta: +1000, dirShare: +0.8, pathNet: +1000, displacement: +0.6,
+  }));
+  const flippedTilts = flipped.map((f) => ({
+    premiumTilt: f.dirShare * 0.5, netTilt: f.dirShare * 0.3,
+    volTilt: f.dirShare * 0.4, oiTilt: f.dirShare * 0.2, surpriseTilt: 0,
+  }));
+  const after = scoreBoard(flipped, flippedTilts, sectors, caps)
+    .find((x) => x.ticker === "CLEAN");
+  ok(after.residual > c.residual,
+     `reversing a name's flow must move its composite the SAME way ` +
+     `(${c.residual.toFixed(3)} -> ${after.residual.toFixed(3)})`);
+  ok(after.score > c.score, `and its published score with it (${c.score} -> ${after.score})`);
+  ok(Math.abs(after.fam.O - c.fam.O) < 25,
+     `while the quality gauge, which has no direction, stays put ` +
+     `(${c.fam.O} -> ${after.fam.O})`);
+
+  /* The gamma regime must reach the score, and it now does so through the
+     gate: dealers short gamma at spot amplify whatever the flow is pushing.
+     Measured at spot, not summed over the whole band. */
+  const shortAtSpot = scored.filter((x) => x.spotGammaShare < -0.2);
+  const longAtSpot = scored.filter((x) => x.spotGammaShare > 0.2);
+  ok(shortAtSpot.length && longAtSpot.length, "the fixture covers both gamma regimes");
+  const meanGate = (rows) => rows.reduce((a, x) => a + x.gate, 0) / rows.length;
+  ok(meanGate(shortAtSpot) > meanGate(longAtSpot),
+     `THE FIX: short gamma at spot amplifies, long gamma damps ` +
+     `(${meanGate(shortAtSpot).toFixed(3)} vs ${meanGate(longAtSpot).toFixed(3)})`);
+
+  // Signed axes are signed; gauges are gauges; absent is null, never zero.
+  for (const k of ["F", "P", "D"]) {
+    ok(scored.every((x) => x.fam[k] === null || (x.fam[k] >= -100 && x.fam[k] <= 100)),
+       `signed axis ${k} is a bounded score or explicitly absent`);
   }
-  ok(scored.every((r) => r.score >= -100 && r.score <= 100), "scores stay inside the band");
-  ok(scored.every((r) => r.conviction >= 0 && r.conviction <= 100), "conviction stays inside the band");
+  ok(scored.every((x) => x.fam.V === null || (x.fam.V >= 0 && x.fam.V <= 100)),
+     "the vol gauge is unsigned, 0..100, or explicitly absent");
+
+  /* A DEAD SOURCE MUST NOT DRAW WEIGHT. Family V was identically zero on all
+     34 live names and still counted as a fifth of the board. */
+  const noPath = all.map((f) => ({ ...f, pathNet: 0, persistence: 0, pathBars: 0 }));
+  const withoutD = scoreBoard(noPath, tilts, sectors, caps);
+  ok(withoutD.every((x) => x.fam.D === null),
+     "a family with no usable input reports absent, not neutral");
+  ok(withoutD.every((x) => !("D" in x.weights)), "and draws no weight at all");
+
+  ok(scored.every((x) => x.score >= -100 && x.score <= 100), "scores stay inside the band");
+  ok(scored.every((x) => x.conviction >= 0 && x.conviction <= 100), "conviction stays inside the band");
+
+  /* THE SCORE'S UNIT. Under the old rank ladder a 34-name board always printed
+     84 77 71 65 ... whatever the data; scores must now move with dispersion
+     and must NOT move with pool size at fixed rank. */
+  const half = scoreBoard(all.slice(0, 24), tilts.slice(0, 24), sectors.slice(0, 24), caps.slice(0, 24));
+  const ladder = (rows) => rows.map((x) => x.score).sort((a, b) => b - a);
+  ok(JSON.stringify(ladder(scored).slice(0, 8)) !== JSON.stringify(ladder(half).slice(0, 8)),
+     "the top of the board is not a fixed function of pool size");
+  const uniq = new Set(scored.map((x) => x.score));
+  ok(uniq.size < scored.length,
+     "a fixed unit lets names tie, which a rank relabeling could never do");
 }
 
 /* ---------- liquidity and gating -------------------------------- */
@@ -171,6 +261,30 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   quiet[20] = { close: "10", volume: 500_000_000 };                                      // one $5B day
   ok(medianDollarVolume(quiet) < 5e7, "a single volume spike cannot clear the floor");
   ok(medianDollarVolume([]) === 0, "no candles reports no volume rather than a guess");
+
+  /* THE RECENT WINDOW, not the whole series. The candle request went from two
+     months to a year — for the sparkline, the 52-week range and the realized-vol
+     baseline, all free in the same call — and silently took the liquidity floor
+     with it. A year-old median is more robust statistically and less true
+     operationally: the floor exists to say whether a name can be traded at these
+     costs TODAY. */
+  const day = (i, volume) => ({
+    start_time: new Date(Date.UTC(2026, 0, 1) + i * 86400000).toISOString(),
+    close: "10", volume,
+  });
+  // $100M a day for most of the year, collapsed to $1M a quarter ago.
+  const faded = [
+    ...Array.from({ length: 190 }, (_, i) => day(i, 10_000_000)),
+    ...Array.from({ length: 62 }, (_, i) => day(190 + i, 100_000)),
+  ];
+  ok(medianDollarVolume(faded) < 5e7,
+     `a name whose liquidity collapsed a quarter ago fails the floor ` +
+     `(got $${(medianDollarVolume(faded) / 1e6).toFixed(1)}M)`);
+  ok(medianDollarVolume(faded, { window: 1e9 }) > 5e7,
+     "while the whole-series median would still wave it through, which is the bug");
+  // Order must not matter: the window is the last N SESSIONS, not the last N rows.
+  ok(medianDollarVolume(faded.slice().reverse()) === medianDollarVolume(faded),
+     "and the window is taken by date, so a newest-first response reads the same");
 
   ok(eligible({ close: "50", marketcap: "5e9", call_volume: 800, put_volume: 800,
                 total_open_interest: 20000, issue_type: "Common Stock" }),
@@ -252,4 +366,173 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, ticker dedupe, board disjointness, the signed-column rule, gamma regime in the score, liquidity floor`);
+/* ---------- one row per ISSUER, not per listing ------------------
+   GOOG entered fourth on the live long board while GOOGL — the same company —
+   sat on the short side of the median. Nothing in the pipeline knew they were
+   one issuer: the screener union, the earnings gate, the liquidity floor and
+   the scorer all key on the raw ticker string, and neutralize() cannot help,
+   because an OLS projection on sector and log-cap PRESERVES in full exactly
+   the idiosyncratic difference that split them. */
+{
+  const candles = (seed, n = 40) => {
+    let px = 100, out = [];
+    for (let i = 0; i < n; i++) {
+      px *= 1 + Math.sin((i + seed) * 1.7) * 0.01;
+      out.push({ start_time: `2026-0${1 + Math.floor(i / 28)}-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`,
+                 close: px.toFixed(4), volume: 1e6 });
+    }
+    return out;
+  };
+  const shared = candles(0);
+  // The B line: same returns plus a whisper of its own liquidity noise.
+  const bLine = shared.map((c, i) => ({ ...c, close: (Number(c.close) * (1 + (i % 5) * 1e-4)).toFixed(4) }));
+
+  const rec = (ticker, cap, sector, dv, ohlc) => ({
+    features: { ticker, dollarVolume: dv }, raw: { ohlc },
+    row: { ticker, marketcap: String(cap), sector },
+  });
+  const records = [
+    rec("GOOG", 2.1e12, "Communication Services", 9e9, shared),
+    rec("GOOGL", 2.1e12, "Communication Services", 4e9, bLine),
+    rec("MSFT", 3.0e12, "Technology", 8e9, candles(11)),
+    rec("NVDA", 3.0e12, "Technology", 3e10, candles(23)),   // same cap band, different issuer
+  ];
+
+  const { kept, dropped } = collapseShareClasses(records);
+  const tickers = kept.map((e) => e.features.ticker).sort();
+  ok(!tickers.includes("GOOGL"), `the thinner share class is dropped (kept ${tickers.join(",")})`);
+  ok(tickers.includes("GOOG"), "the more liquid line survives");
+  ok(dropped.length === 1 && dropped[0].kept === "GOOG" && dropped[0].dropped === "GOOGL",
+     "and the collapse is reported, not silent");
+  ok(dropped[0].corr >= 0.97, `on a measured return correlation (${dropped[0].corr.toFixed(4)})`);
+
+  /* BOTH CONDITIONS MUST HOLD. Two unrelated companies can share a sector and
+     round to the same market cap; only the return correlation separates them
+     from a share-class pair. */
+  ok(tickers.includes("MSFT") && tickers.includes("NVDA"),
+     "same sector and same cap is NOT enough to collapse two real issuers");
+
+  ok(collapseShareClasses([]).kept.length === 0, "an empty pool is safe");
+  const noCap = [rec("X", 0, "Tech", 1e9, shared), rec("Y", 0, "Tech", 1e9, shared)];
+  ok(collapseShareClasses(noCap).kept.length === 2, "a missing market cap groups nothing");
+
+  ok(Number.isNaN(returnCorrelation(shared, candles(5, 4))),
+     "too few overlapping dates reports NaN rather than a confident number");
+}
+
+/* ---------- the deck's sparkline costs 84 bytes ------------------ */
+{
+  const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i / 4) * 8);
+  const packed = packSpark(closes);
+  ok(packed.length === 84, `42 sessions at two characters each (got ${packed.length})`);
+  ok(/^[A-Za-z0-9+/]+$/.test(packed), "and it is plain base-64 alphabet, safe in JSON");
+
+  // The shape must survive the round trip: decode and check monotone segments.
+  const decode = (str) => {
+    const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const out = [];
+    for (let i = 0; i < str.length; i += 2) out.push((B64.indexOf(str[i]) << 6) | B64.indexOf(str[i + 1]));
+    return out;
+  };
+  const back = decode(packed);
+  ok(back.length === 42, "decodes back to 42 samples");
+  ok(Math.min(...back) === 0 && Math.max(...back) === 4095,
+     "the window is normalised to its own extremes");
+  const tail = closes.slice(-42);
+  for (let i = 1; i < 42; i++) {
+    ok(Math.sign(back[i] - back[i - 1]) === Math.sign(Math.round((tail[i] - tail[i - 1]) * 1e6)) ||
+       Math.abs(back[i] - back[i - 1]) <= 1,
+       "every step keeps its direction through the quantisation");
+  }
+
+  ok(packSpark([100]) === null, "one close is not a sparkline");
+  ok(packSpark(null) === null, "a null series is safe");
+  const flatPack = packSpark(new Array(42).fill(50));
+  ok(flatPack !== null && decode(flatPack).every((v) => v === 2048),
+     "a flat series draws down the middle rather than dividing by zero");
+
+  // Period returns, from the full series rather than the retained window.
+  const rising = Array.from({ length: 60 }, (_, i) => 100 * 1.01 ** i);
+  ok(Math.abs(ret(rising, 5) - (1.01 ** 5 - 1)) < 1e-9, "the 5-session return is exact");
+  ok(ret(rising, 42) !== null, "a 42-session return resolves when the series is long enough");
+  ok(ret(rising.slice(-42), 42) === null,
+     "and reports null rather than a wrong number when it is not");
+}
+
+/* ---------- the board's forecast column is a CROSS-SECTION -------- */
+{
+  /* THE DEFECT THIS GUARDS. The deck's footer sets one name's priced move
+     beside another's. The vendor's implied_move_perc is quoted to each name's
+     NEXT LISTED EXPIRY, so a name expiring tomorrow and one expiring in a month
+     print bands measured over different horizons — on the pipeline's own
+     cross-section, one name quoted 7.1% to a four-day expiry while its
+     ten-session move was 13.0%. A column of those is not a cross-section. */
+  const iv = 0.42;
+  const h10 = horizonMove(iv);
+  const h40 = horizonMove(iv, { sessions: 40 });
+  ok(h40 > h10, "a longer horizon prices a wider band, from the same volatility");
+  ok(Math.abs(h40 / h10 - 2) < 1e-9,
+     "and exactly twice as wide at four times the horizon — square root of time");
+
+  // Two names with IDENTICAL volatility must publish the SAME comparable band,
+  // whatever their expiry calendars look like.
+  ok(horizonMove(iv) === horizonMove(iv),
+     "the fixed-horizon band depends on volatility alone, not on the expiry chain");
+  ok(HORIZON_SESSIONS === 10, "the published horizon is ten trading sessions");
+}
+
+/* ---------- iv_rank is a percentile, not a fraction --------------- */
+{
+  /* THE VENDOR'S OWN SCHEMA IS WRONG HERE, and the generated reference inherits
+     the error: iv_rank is declared `$ref: 'Stock IV 30d 1M'`, so every doc
+     shows iv30d_1m's description ("The 30 day implied volatility from 1 month
+     ago") and iv30d_1m's example (0.2136...). The screener's EXAMPLE OBJECT is
+     the only place the truth appears, and it is unambiguous:
+     `iv_rank: '13.52369891956068210400'` sitting beside `iv30d: '0.2038...'`
+     in the same response.
+
+     Read as a fraction, 13.52 would have printed "1352% of its year" on the
+     card. The scoring was unharmed either way — percentileRank is
+     scale-invariant — which is exactly why only the display would have shown
+     it, and why the fixture had to carry the real scale to catch it. */
+  const tilt = (v) => screenerTilt({
+    ticker: "T", close: "100", prev_close: "100", iv_rank: v,
+    bullish_premium: "1", bearish_premium: "1", call_premium: "1", put_premium: "1",
+    call_volume: 1, put_volume: 1, total_open_interest: 10,
+  });
+  ok(Math.abs(tilt("13.52369891956068210400").ivRank - 0.1352369891956068) < 1e-12,
+     "the vendor's own example value reads as a fraction of its year");
+  ok(Math.abs(tilt("88.9").ivRank - 0.889) < 1e-12, "and so does a high percentile");
+  ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
+  ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
+  /* A value at or below 1 is ambiguous between the two conventions; treating it
+     as already-a-fraction is the reading that cannot produce a nonsense
+     number. */
+  ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
+  ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
+  ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
+}
+
+/* ---------- the session is resolved, not inferred ---------------- */
+{
+  // 09:00 New York on a summer weekday is 13:00 UTC (EDT, UTC-4).
+  const morning = easternNow(new Date("2026-08-25T13:00:00Z"));
+  ok(morning.date === "2026-08-25", `the Eastern calendar date (got ${morning.date})`);
+  ok(morning.minutes === 9 * 60, `and the minute of the Eastern day (got ${morning.minutes})`);
+  ok(morning.minutes < 16 * 60, "before the close, so today's candle is a partial session");
+
+  const evening = easternNow(new Date("2026-08-25T21:30:00Z"));   // 17:30 EDT
+  ok(evening.minutes >= 16 * 60, "after the close, so today's candle is complete");
+
+  // Winter is EST, UTC-5: the same UTC instant is an hour earlier locally.
+  const winter = easternNow(new Date("2026-01-15T13:00:00Z"));
+  ok(winter.minutes === 8 * 60, `daylight saving is handled by the zone, not by arithmetic (got ${winter.minutes})`);
+
+  // Midnight must never render as minute 1440.
+  const midnight = easternNow(new Date("2026-08-25T04:00:00Z"));
+  ok(midnight.minutes === 0, `midnight is minute zero, not 1440 (got ${midnight.minutes})`);
+
+  ok(DEAD_BAND > 0 && DEAD_BAND < 100, "the dead band is a publishable threshold");
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor`);

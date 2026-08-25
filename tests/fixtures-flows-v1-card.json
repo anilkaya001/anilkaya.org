@@ -1,0 +1,222 @@
+{
+ "v": 1,
+ "ticker": "INTC",
+ "generatedAt": "2026-08-25T12:01:14.992Z",
+ "sessionDate": "2026-08-25",
+ "score": -84,
+ "conviction": 79,
+ "fam": {
+  "F": -73,
+  "P": -78,
+  "D": -69,
+  "V": 0,
+  "O": 53
+ },
+ "regime": {
+  "netGamma": -10365572.5,
+  "label": "short"
+ },
+ "gammaFlip": 77.77159900548025,
+ "atr": 3.230258388427696,
+ "panels": {
+  "gamma": {
+   "status": "ok",
+   "asOf": null,
+   "bars": [
+    {
+     "k": 62.5,
+     "g": 32844.29
+    },
+    {
+     "k": 71,
+     "g": -39.22
+    },
+    {
+     "k": 74,
+     "g": 3224.07
+    },
+    {
+     "k": 77.5,
+     "g": -10089.91
+    },
+    {
+     "k": 81,
+     "g": 25592.75
+    },
+    {
+     "k": 84,
+     "g": -131003.15
+    },
+    {
+     "k": 87.5,
+     "g": -139443.63
+    },
+    {
+     "k": 91,
+     "g": -28531.61
+    },
+    {
+     "k": 94,
+     "g": -41109.21
+    },
+    {
+     "k": 97.5,
+     "g": 11721.07
+    },
+    {
+     "k": 101,
+     "g": -322870.4
+    },
+    {
+     "k": 105,
+     "g": 86785.2
+    },
+    {
+     "k": 109,
+     "g": -2477.67
+    },
+    {
+     "k": 113,
+     "g": 66010.77
+    }
+   ],
+   "callWall": 88,
+   "putWall": 87,
+   "spot": 87.26,
+   "strikes": 54,
+   "bucketed": false
+  },
+  "levels": {
+   "status": "ok",
+   "asOf": null,
+   "spot": 87.26,
+   "atr": 3.230258388427696,
+   "levels": [
+    {
+     "kind": "put_wall",
+     "label": "Put wall",
+     "px": 87,
+     "distPct": -0.0029796011918405353,
+     "distAtr": -0.08048891721214853
+    },
+    {
+     "kind": "call_wall",
+     "label": "Call wall",
+     "px": 88,
+     "distPct": 0.008480403392161297,
+     "distAtr": 0.22908384129610893
+    },
+    {
+     "kind": "max_pain",
+     "label": "Max pain",
+     "px": 90,
+     "distPct": 0.031400412560164966,
+     "distAtr": 0.8482293583126238
+    },
+    {
+     "kind": "gamma_flip",
+     "label": "Gamma flip",
+     "px": 77.77159900548025,
+     "distPct": -0.10873711889204389,
+     "distAtr": -2.9373504697059727
+    }
+   ]
+  },
+  "path": {
+   "status": "ok",
+   "asOf": "2026-08-25",
+   "series": [
+    [
+     -38140,
+     190602
+    ],
+    [
+     -518515,
+     -5481249
+    ],
+    [
+     -275955,
+     -7133699
+    ],
+    [
+     -199977,
+     -9973958
+    ],
+    [
+     161228,
+     -6555085
+    ],
+    [
+     208193,
+     -7237959
+    ],
+    [
+     -95138,
+     -11369329
+    ],
+    [
+     -16315,
+     -11574846
+    ],
+    [
+     236746,
+     -8892732
+    ],
+    [
+     129362,
+     -10259717
+    ]
+   ],
+   "netDelta": -60277,
+   "netPremium": -13171892,
+   "minutes": 390,
+   "startedAt": "2026-08-24T13:30:00.000Z"
+  },
+  "congress": {
+   "status": "ok",
+   "asOf": "2026-08-25",
+   "trades": [
+    {
+     "member": "Nancy Pelosi",
+     "chamber": "house",
+     "issuer": "spouse",
+     "side": "buy",
+     "txnDate": "2026-07-24",
+     "filedDate": "2026-08-24",
+     "disclosureLagDays": 31,
+     "amountRange": "$500,001 - $1,000,000",
+     "amountLow": 500001,
+     "amountHigh": 1000000
+    },
+    {
+     "member": "Shelley Capito",
+     "chamber": "senate",
+     "issuer": "spouse",
+     "side": "sell",
+     "txnDate": "2026-07-21",
+     "filedDate": "2026-08-04",
+     "disclosureLagDays": 14,
+     "amountRange": "$1,001 - $15,000",
+     "amountLow": 1001,
+     "amountHigh": 15000
+    },
+    {
+     "member": "Matthew Robert Van Epps",
+     "chamber": "house",
+     "issuer": "undisclosed",
+     "side": "sell",
+     "txnDate": "2026-06-16",
+     "filedDate": "2026-06-17",
+     "disclosureLagDays": 1,
+     "amountRange": "$1,001 - $15,000",
+     "amountLow": 1001,
+     "amountHigh": 15000
+    }
+   ],
+   "total": 50,
+   "buys": 5,
+   "sells": 6,
+   "medianLagDays": 31
+  }
+ }
+}

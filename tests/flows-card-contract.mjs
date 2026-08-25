@@ -16,8 +16,11 @@
 import assert from "node:assert/strict";
 import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
-  numOrNull, polarityOf, POLARITY, pickMaxPain, CARD_SCHEMA_VERSION,
+  buildCalendar, buildDisplacement, buildPricedMove, buildContext,
+  numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
+  HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
+import { horizonMove } from "../shared/flows-features.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -197,12 +200,36 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   const full = {
     ticker: "TEST",
     row: { close: "100" },
-    features: { spot: 100, atr: 4, gammaFlip: 96, netGamma: -8e8, gRegime: "short",
-                score: 71, conviction: 64, fam: { F: 60, P: -20, D: 30, V: 5, O: -5 } },
+    features: {
+      spot: 100, atr: 4, gammaFlip: 96, netGamma: -8e8, gRegime: "short",
+      flipSide: "short_below", spotGammaShare: -0.4, flipCount: 1,
+      bandMin: 70, bandMax: 130,
+      score: 71, conviction: 64, agreement: 1, breadth: 3, coverage: 1, gate: 1.2,
+      fam: { F: 60, P: -20, D: 30, V: 55, O: 62 },
+      iv30: 0.42, rv30: 0.31, vrp: 0.11, ivRank: 0.66, ivMomentum: 0.03,
+      impliedMovePerc: 0.048,
+      closes: Array.from({ length: 42 }, (_, i) => 90 + i * 0.25),
+      r5: 0.012, r21: 0.05, r42: 0.11, week52Pos: 0.72,
+    },
+    weights: { F: 2.1, P: 0.9, D: 0.8 },
+    expiries: [
+      { expiry: "2026-08-28", call_gamma: "6e8", put_gamma: "-2e8" },
+      { expiry: "2026-09-18", call_gamma: "2e8", put_gamma: "-1e8" },
+      { expiry: "2026-12-18", call_gamma: "5e7", put_gamma: "-5e7" },
+    ],
+    /* All EIGHT gamma fields /spot-exposures/strike returns, not just the four
+       the gamma panel reads. A fixture that carries only the fields the code
+       under test happens to use cannot fail when a second consumer reads a
+       different set — which is how the aggressor-split field names shipped
+       inverted, and how the displacement panel would have shipped blank. */
     strikes: [{ strike: "95", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
-                put_gamma_ask: "-2.4e8", put_gamma_bid: "-1.6e8" },
+                put_gamma_ask: "-2.4e8", put_gamma_bid: "-1.6e8",
+                call_gamma_oi: "1.2e8", put_gamma_oi: "-3.1e8",
+                call_gamma_vol: "0.3e8", put_gamma_vol: "-0.9e8" },
               { strike: "105", call_gamma_ask: "4e8", call_gamma_bid: "3e8",
-                put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" }],
+                put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8",
+                call_gamma_oi: "6.4e8", put_gamma_oi: "-0.8e8",
+                call_gamma_vol: "2.1e8", put_gamma_vol: "-0.2e8" }],
     ticks: Array.from({ length: 60 }, (_, i) => ({
       tape_time: new Date(t0 + i * 60000).toISOString(),
       net_delta: "50", net_call_premium: "800", net_put_premium: "300",
@@ -217,6 +244,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const complete = buildCard(full);
   eq(complete.v, CARD_SCHEMA_VERSION, "the card carries its schema version");
+  /* THE VERSION IS A CONTRACT WITH THE RENDERER, not decoration. It moved to 2
+     when fam.V and fam.O stopped being signed votes and became unsigned gauges.
+     Pinning the literal here means a future change to those semantics cannot
+     ship without also moving the number the renderer switches on — which is the
+     only thing standing between a reader and a published 53 redrawn as a
+     53%-full gauge it never meant. */
+  eq(CARD_SCHEMA_VERSION, 2,
+     "schema version 2 is where V and O became unsigned gauges; bump it again " +
+     "if any published field changes MEANING, and teach the renderer the new floor");
   eq(complete.sessionDate, "2026-08-24",
      "THE SESSION, not the run date: a pre-open job reads the previous completed session");
   ok(complete.generatedAt !== complete.sessionDate, "the two dates are distinct fields");
@@ -226,12 +262,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildCard({ ...full, features: null }).gammaFlip, null,
      "with no features the flip is null, never 0 — 'spot is exactly at the flip' " +
      "is the most actionable state on the card and must never be manufactured");
-  for (const key of ["gamma", "levels", "path", "congress"]) {
+  for (const key of ["gamma", "levels", "path", "congress", "calendar",
+                     "displacement", "pricedMove", "context"]) {
     eq(complete.panels[key].status, "ok", `panel ${key} resolves when every source is present`);
   }
 
-  const SOURCES = ["strikes", "ticks", "maxPain", "congress", "features", "row"];
-  const PANEL_OF = { strikes: "gamma", ticks: "path", congress: "congress" };
+  const SOURCES = ["strikes", "ticks", "maxPain", "congress", "features", "row", "expiries"];
+  const PANEL_OF = {
+    strikes: "gamma", ticks: "path", congress: "congress", expiries: "calendar",
+  };
 
   for (const source of SOURCES) {
     for (const empty of [[], null, undefined]) {
@@ -299,4 +338,198 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "a failed congress fetch reports unavailable, never '0 congressional buyers'");
 }
 
-console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, honest congress panel, and a full source-ablation sweep`);
+/* ---------- the panels added after the live board was read -------- */
+{
+  /* GAMMA ROLL-OFF. put_gamma arrives ALREADY dealer-signed, so gross roll-off
+     sums the magnitudes; a front week of 1e9 call against -999e6 put is 2.0e9
+     of gamma about to expire, not the 1e6 their signed sum leaves. Every
+     fixture in the older block passes put_gamma "0", which is precisely why
+     that convention shipped inverted once already. */
+  const signed = buildCalendar([
+    { expiry: "2026-08-28", call_gamma: "1e9", put_gamma: "-999000000" },
+    { expiry: "2026-09-18", call_gamma: "5e6", put_gamma: "0" },
+  ], { asOf: "2026-08-24" });
+  ok(signed.schedule[0].share > 0.99,
+     `the front week carries the book: gross, not the signed residual (got ${signed.schedule[0].share})`);
+  eq(signed.halfLifeExpiry, "2026-08-28", "and it is the half-life");
+  eq(signed.schedule[0].days, 4, "days to expiry are measured from the SESSION, not the clock");
+  eq(signed.halfLifeDays, 4, "the half-life carries its own horizon in days");
+
+  const cal = buildCalendar([
+    { expiry: "2026-08-28", call_gamma: "600", put_gamma: "0" },
+    { expiry: "2026-09-25", call_gamma: "400", put_gamma: "0" },
+  ], { asOf: "2026-08-24" });
+  // Mean life is gamma-weighted E[days]: 0.6*4 + 0.4*32 = 15.2.
+  ok(Math.abs(cal.meanLifeDays - 15.2) < 0.05,
+     `mean life is the gamma-weighted average horizon (got ${cal.meanLifeDays})`);
+  /* AND IT IS PARTITION-INVARIANT, which frontLoad is not. Splitting the front
+     expiry's gamma across two same-day rows must not move it. */
+  const split = buildCalendar([
+    { expiry: "2026-08-28", call_gamma: "300", put_gamma: "0" },
+    { expiry: "2026-08-28", call_gamma: "300", put_gamma: "0" },
+    { expiry: "2026-09-25", call_gamma: "400", put_gamma: "0" },
+  ], { asOf: "2026-08-24" });
+  ok(Math.abs(split.meanLifeDays - cal.meanLifeDays) < 1e-9,
+     "mean life survives a repartition of the chain");
+  ok(split.frontLoad !== cal.frontLoad,
+     "while frontLoad does not — which is why it is not the comparable number");
+
+  ok(buildCalendar([], { asOf: "2026-08-24" }).status === "unavailable", "an empty chain is unavailable");
+  ok(buildCalendar([{ expiry: "2026-08-28", call_gamma: null, put_gamma: null }]).status === "unavailable",
+     "rows the vendor returned with null greeks are NOT a measured zero — this is " +
+     "the exact shape that made family V identically zero on all 34 live names");
+  eq(buildCalendar(cal.schedule.length ? [] : []).asOf, null, "an unavailable calendar carries no date");
+
+  /* THE PRICED MOVE is a price, never a forecast, and its horizon is the
+     expiry the vendor quoted rather than a round number of days. */
+  const pm = buildPricedMove({
+    spot: 100, impliedMovePerc: 0.05, vrp: 0.11, iv30: 0.42, rv30: 0.31,
+    asOf: "2026-08-24", sessions: 10,
+  });
+  eq(pm.low, 95, "the band's low is spot times one minus the implied move");
+  eq(pm.high, 105, "and its high the mirror");
+  /* THE VENDOR'S QUOTE IS NOT DATED, because its date cannot be observed. The
+     schema behind implied_move says the figure is "for the nearest end of the
+     week expiration" when no expiry is supplied, and the screener accepts no
+     expiry parameter. This panel used to name that horizon from the max-pain
+     chain's nearest row — the same date only when the nearest listed expiry
+     happens to be the coming Friday. It is labelled by the RULE now. */
+  eq(pm.horizonRule, "the nearest end-of-week expiry",
+     "the quote is labelled by the vendor's stated rule, not by an inferred date");
+  ok(!("horizonExpiry" in pm) && !("horizonDays" in pm),
+     "and carries no date at all, so no renderer can print one");
+
+  /* THE FIXED HORIZON, which is the only one of the two bands that is a
+     cross-section. The vendor's implied_move_perc is quoted to each name's own
+     next listed expiry, so a column of those compares different horizons. */
+  eq(pm.sessions, 10, "the horizon is published beside the numbers derived from it");
+  /* 0.42 * sqrt(10/252) = 0.0836662..., published rounded to five decimals, so
+     the tolerance is the rounding granularity and not tighter. */
+  ok(Math.abs(pm.impliedMove - 0.42 * Math.sqrt(10 / 252)) < 1e-5,
+     `the fixed-horizon move is the square-root-of-time scaling (got ${pm.impliedMove})`);
+  ok(Math.abs(pm.realizedMove - 0.31 * Math.sqrt(10 / 252)) < 1e-5,
+     "and the realized band uses the same rule, so the two are comparable");
+  ok(pm.impliedMove > pm.realizedMove,
+     "a positive variance risk premium means the priced band is wider than the delivered one");
+  ok(Math.abs((pm.impliedHigh - pm.impliedLow) / 2 / 100 - pm.impliedMove) < 1e-4,
+     "the published prices agree with the published fraction");
+
+  ok(Math.abs(horizonMove(0.42, { sessions: 252 }) - 0.42) < 1e-12,
+     "a full year of sessions returns the annual figure unchanged");
+  ok(horizonMove(0.42, { sessions: 40 }) > horizonMove(0.42, { sessions: 10 }),
+     "and a longer horizon is a wider band");
+  ok(horizonMove(null) === null && horizonMove(0) === null && horizonMove(-1) === null,
+     "a missing or non-positive vol has no horizon move, rather than zero");
+  ok(horizonMove(0.4, { sessions: 0 }) === null, "and neither does a zero horizon");
+  ok(HORIZON_SESSIONS > 0, "the default horizon is a positive number of sessions");
+
+  /* THE TWO BANDS ARE INDEPENDENT. A name with no vendor quote still gets the
+     comparable band, and a name with no implied vol still gets the quote. */
+  const noQuote = buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.42, rv30: 0.2, asOf: "2026-08-24" });
+  eq(noQuote.status, "ok", "no vendor quote is not a dead panel when implied vol is present");
+  eq(noQuote.movePerc, null, "the quoted band is withheld");
+  ok(noQuote.impliedMove > 0, "while the fixed-horizon band is published");
+  const noIv = buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: null, rv30: null, asOf: "2026-08-24" });
+  eq(noIv.status, "ok", "and the reverse");
+  eq(noIv.impliedMove, null, "with the fixed-horizon band withheld");
+  ok(noIv.movePerc > 0, "and the quote published");
+  ok(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: null }).status === "unavailable",
+     "neither band means no panel");
+  eq(pm.richness, "rich", "a positive variance risk premium is a rich band");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: -0.04, asOf: "2026-08-24" }).richness,
+     "cheap", "and a negative one a cheap band");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: null, asOf: "2026-08-24" }).richness,
+     null, "with no realized-vol baseline there is no richness claim, not a default one");
+  ok(buildPricedMove({ spot: 100, impliedMovePerc: null }).status === "unavailable",
+     "no quoted move means no band — never a zero-width one at spot");
+  ok(buildPricedMove({ spot: 0, impliedMovePerc: 0.05 }).status === "unavailable",
+     "and no spot means no band either");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.4, asOf: "2026-08-24" }).horizonRule, null,
+     "with no vendor quote there is no rule to state either");
+
+  /* THE VOLATILITY SURFACE. Nothing in it is directional, and the polarity
+     table must say so — a renderer that green-tints a rich option market is
+     inventing a forecast the data does not support. */
+  for (const k of ["iv30", "rv30", "vrp", "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
+    eq(polarityOf(k), 0, `${k} carries no direction`);
+  }
+  /* IT TRAVELS WITH THE BAND, not in a panel of its own. A separate `vol` panel
+     was built, serialised and published on every card, and no renderer drew it
+     — bytes on the read path that nothing could read. */
+  const surf = buildPricedMove({
+    spot: 100, impliedMovePerc: 0.05, iv30: 0.4, rv30: null, vrp: null,
+    ivRank: 0.5, ivMomentum: 0.02, asOf: "2026-08-24",
+  });
+  eq(surf.rv30, null, "a missing realized vol stays null beside a live implied one");
+  eq(surf.ivRank, 0.5, "IV rank travels with the band it qualifies");
+  eq(surf.ivMomentum, 0.02, "and so does the week's IV change");
+
+  /* BOOK DISPLACEMENT, in ATR units, and null rather than Infinity without one. */
+  const disp = buildDisplacement([
+    { strike: "90", call_gamma_oi: "100", put_gamma_oi: "-100", call_gamma_vol: "0", put_gamma_vol: "0" },
+    { strike: "110", call_gamma_oi: "0", put_gamma_oi: "0", call_gamma_vol: "100", put_gamma_vol: "-100" },
+  ], { atr: 4, spot: 100 });
+  eq(disp.oiCentroid, 90, "the standing book's gamma centroid");
+  eq(disp.volCentroid, 110, "and today's");
+  eq(disp.gapAtr, 5, "the gap is expressed in ATR units, which is what compares across names");
+  eq(polarityOf("displacement"), +1, "displacement is signed: positive means gamma building ABOVE");
+  eq(buildDisplacement([
+    { strike: "90", call_gamma_oi: "100", put_gamma_oi: "0", call_gamma_vol: "100", put_gamma_vol: "0" },
+  ], { atr: 0, spot: 100 }).gapAtr, null,
+     "a distance in sigma units with no sigma is no number, not a small one");
+  ok(buildDisplacement([], { atr: 4 }).status === "unavailable", "no ladder, no displacement");
+
+  /* PRICE CONTEXT is descriptive and says so; none of it enters the score. */
+  const ctx = buildContext({ closes: [10, 11, 12], r5: 0.01, r21: null, r42: 0.2, week52Pos: 0.5, changePct: 0.02 });
+  eq(ctx.r21, null, "a window too short to measure stays null");
+  eq(ctx.closes.length, 3, "the closes travel for the card's own chart");
+  ok(buildContext({ closes: [], r5: null, r21: null, r42: null, week52Pos: null, changePct: null })
+     .status === "unavailable", "no history at all is unavailable");
+
+  /* MAX PAIN carries its expiry, because the priced move's horizon is read
+     from it — and it is a level computed from today's open interest, not a
+     target the price is pulled toward. */
+  const mp = pickMaxPainRow([
+    { expiry: "2026-09-18", max_pain: "120" },
+    { expiry: "2026-08-28", max_pain: "102" },
+  ]);
+  eq(mp.expiry, "2026-08-28", "the NEAREST expiry, whatever order the vendor returned");
+  eq(mp.px, 102, "with its level");
+  eq(pickMaxPain([]), null, "an empty chain has no max pain");
+  eq(pickMaxPainRow([{ expiry: "2026-08-28", max_pain: null }]), null,
+     "and a null level is dropped rather than parsed to zero");
+
+  /* THE NEAREST LIVE EXPIRY, not the first row. The vendor documents /max-pain
+     as returning "all expirations ... for the last 120 days", so the array can
+     carry expiries that have already passed; sorting ascending and taking
+     rows[0] took the OLDEST and drew it on the levels rail beside spot as
+     though it still existed. No fixture supplied a past expiry, which is why
+     nothing caught it. */
+  const stale = [
+    { expiry: "2026-05-15", max_pain: "70" },
+    { expiry: "2026-08-28", max_pain: "102" },
+    { expiry: "2026-09-18", max_pain: "120" },
+  ];
+  eq(pickMaxPainRow(stale, { asOf: "2026-08-24" }).expiry, "2026-08-28",
+     "an expired row is skipped, not published as the nearest level");
+  eq(pickMaxPainRow(stale).expiry, "2026-05-15",
+     "and with no session date the old behaviour is unchanged, so the guard is the date");
+  eq(pickMaxPainRow([{ expiry: "2026-05-15", max_pain: "70" }], { asOf: "2026-08-24" }), null,
+     "a chain whose every expiry has passed reports NO max pain, never a stale one");
+  eq(pickMaxPainRow(stale, { asOf: "2026-08-28" }).expiry, "2026-08-28",
+     "an expiry on the session date itself is still live");
+
+  const staleCard = buildCard({
+    ticker: "STALE",
+    row: { close: "100" },
+    features: { spot: 100, atr: 4, gammaFlip: 96 },
+    strikes: [], ticks: [], expiries: [], congress: [],
+    maxPain: [{ expiry: "2026-05-15", max_pain: "70" }],
+    generatedAt: "2026-08-25T09:15:00Z", sessionDate: "2026-08-24",
+  });
+  ok(staleCard.panels.levels.status === "unavailable"
+     || staleCard.panels.levels.levels.every((l) => l.kind !== "max_pain"),
+     "so a four-month-stale chain puts no max-pain level on the rail");
+}
+
+console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, and a full source-ablation sweep`);

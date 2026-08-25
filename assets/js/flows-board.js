@@ -16,6 +16,9 @@
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
   const sideButtons = Array.from(document.querySelectorAll(".flows-side"));
+  const viewButtons = Array.from(document.querySelectorAll(".flows-view"));
+  const deck = document.getElementById("flowsDeck");
+  const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl || !sideButtons.length) return;
 
   const COLUMNS = 10;                // keep in sync with the <thead> in flows-pages.js
@@ -111,6 +114,14 @@
     return td;
   }
 
+  /* Set from the payload on every render. Before version 2, fam.V and fam.O
+     were SIGNED votes rather than unsigned gauges, so a v1 board's V and O must
+     not be drawn on the signed glyph as though nothing had changed. */
+  let legacyFamilies = false;
+  // The horizon every `hm` on the board is stated in, read from the payload
+  // rather than assumed, so the tooltip cannot outlive a change to it.
+  let horizonSessions = null;
+
   function familyCell(fam) {
     const td = document.createElement("td");
     td.className = "c-num";
@@ -119,7 +130,8 @@
     wrap.className = "fb-fam";
     const parts = [];
     for (const k of keys) {
-      const n = isNum(fam && fam[k]);
+      const gauge = k === "V" || k === "O";
+      const n = legacyFamilies && gauge ? null : isNum(fam && fam[k]);
       const i = document.createElement("i");
       i.style.setProperty("--h", n === null ? 0 : Math.min(Math.abs(n) / 100, 1));
       // Sign is drawn as direction from a centre line, not as a colour swap.
@@ -137,6 +149,172 @@
     wrap.title = parts.join("  ");
     td.append(wrap);
     return td;
+  }
+
+  /* ---------- the deck ---------------------------------------------
+     One payload, two renderers, exactly one mounted at a time.
+
+     The deck is the default because the table's ten columns are wider than
+     any phone viewport — the table lives inside a horizontally scrolling
+     region for precisely that reason, and seven of its columns are off-screen
+     on a phone before a finger touches it.
+
+     A card is ONE tab stop and the whole card is the target. Splitting it into
+     a ticker button plus decorative regions would put five stops on every card
+     and make a 25-name board a 125-stop obstacle. */
+
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  /** Unpack the 84-character sparkline: two base-64 characters a session. */
+  function unpackSpark(str) {
+    if (typeof str !== "string" || str.length < 4 || str.length % 2) return null;
+    const out = [];
+    for (let i = 0; i < str.length; i += 2) {
+      const hi = B64.indexOf(str[i]), lo = B64.indexOf(str[i + 1]);
+      if (hi < 0 || lo < 0) return null;
+      out.push((hi << 6) | lo);
+    }
+    return out;
+  }
+
+  function sparkSvg(values, up) {
+    const W = 120, H = 30, pad = 2;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "fd-spark " + (up ? "is-pos" : "is-neg"));
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const xOf = (i) => pad + (i / (values.length - 1)) * (W - pad * 2);
+    // The samples are already normalised to the window's own extremes, so
+    // 0 is the window low and 4095 the high — no rescaling here.
+    const yOf = (v) => pad + (1 - v / 4095) * (H - pad * 2);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("class", "fd-sparkline");
+    path.setAttribute("d", values.map((v, i) =>
+      (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yOf(v).toFixed(1)).join(" "));
+    svg.append(path);
+    return svg;
+  }
+
+  /** One period-return chip. Basis points in, a signed percent out. */
+  function retChip(label, bp) {
+    const n = isNum(bp);
+    const chip = document.createElement("div");
+    chip.className = "fd-ret " + (n === null ? "is-flat" : n > 0 ? "is-pos" : n < 0 ? "is-neg" : "is-flat");
+    const k = document.createElement("span");
+    k.className = "fd-ret-k";
+    k.textContent = label;
+    const v = document.createElement("span");
+    v.className = "fd-ret-v";
+    v.textContent = n === null ? DASH : (n >= 0 ? "+" : MINUS) + (Math.abs(n) / 100).toFixed(1) + "%";
+    chip.append(k, v);
+    return chip;
+  }
+
+  function deckCard(row, index) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "fd-card";
+    card.dataset.t = String(row.t || "");
+    card.setAttribute("role", "listitem");
+    card.setAttribute("aria-haspopup", "dialog");
+    card.addEventListener("pointerenter", () => {
+      if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
+    });
+
+    const score = isNum(row.s);
+
+    const head = document.createElement("div");
+    head.className = "fd-head";
+    const rank = document.createElement("span");
+    rank.className = "fd-rank";
+    rank.textContent = fmtInt(row.r != null ? row.r : index + 1);
+    const tk = document.createElement("span");
+    tk.className = "fd-tk";
+    tk.textContent = String(row.t || DASH);
+    const sc = document.createElement("span");
+    sc.className = "fd-score " + toneClass(score);
+    sc.textContent = score === null ? DASH : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
+    head.append(rank, tk, sc);
+    card.append(head);
+
+    const price = document.createElement("div");
+    price.className = "fd-price";
+    const px = document.createElement("span");
+    px.className = "fd-px";
+    px.textContent = fmtPrice(row.px);
+    const chg = document.createElement("span");
+    chg.className = "fd-chg " + toneClass(row.chg);
+    chg.textContent = fmtPct(row.chg, 2);
+    price.append(px, chg);
+    card.append(price);
+
+    const spark = unpackSpark(row.spark);
+    if (spark && spark.length >= 2) {
+      card.append(sparkSvg(spark, spark[spark.length - 1] >= spark[0]));
+    } else {
+      const gap = document.createElement("div");
+      gap.className = "fd-spark is-empty";
+      card.append(gap);
+    }
+
+    const rets = document.createElement("div");
+    rets.className = "fd-rets";
+    const pr = Array.isArray(row.pr) ? row.pr : [];
+    rets.append(retChip("5D", pr[0]), retChip("21D", pr[1]), retChip("42D", pr[2]));
+    card.append(rets);
+
+    /* The score bar grows from the CENTRE, so the sign is geometric and a
+       colour-blind reader gets it from position rather than hue — the same
+       rule the card's own family track follows. */
+    const track = document.createElement("div");
+    track.className = "fd-track";
+    const zero = document.createElement("b");
+    zero.className = "fd-zero";
+    const bar = document.createElement("i");
+    bar.className = score !== null && score < 0 ? "is-neg" : "is-pos";
+    bar.style.setProperty("--w", score === null ? 0 : Math.min(Math.abs(score) / 100, 1));
+    track.append(zero, bar);
+    card.append(track);
+
+    const foot = document.createElement("div");
+    foot.className = "fd-foot";
+    const conv = document.createElement("span");
+    conv.textContent = isNum(row.cnv) === null ? DASH : row.cnv + " conv";
+    /* The move priced over a FIXED horizon — the same number of sessions for
+       every card on the board. The vendor's own implied_move_perc is quoted to
+       each name's next listed expiry, so a column of those is a column of
+       different horizons: on this board one name quoted 7.1% to an expiry four
+       days out while its ten-session move was 13.0%. Setting two such numbers
+       side by side is a category error, so `im` stays on the card, where its
+       expiry is named, and the deck shows `hm`.
+
+       It is a price, not a prediction, and it is labelled "priced" for exactly
+       that reason. */
+    const move = document.createElement("span");
+    move.className = "fd-move";
+    move.textContent = isNum(row.hm) === null ? "" : "\u00b1" + (row.hm * 100).toFixed(1) + "% priced";
+    if (isNum(row.hm) !== null) {
+      move.title = horizonSessions
+        ? `The option market prices ±${(row.hm * 100).toFixed(1)}% over ${horizonSessions} trading sessions` +
+          (isNum(row.hr) !== null ? `; this name has delivered ±${(row.hr * 100).toFixed(1)}% over the same horizon.` : ".")
+        : "";
+    }
+    const reg = document.createElement("span");
+    reg.className = row.gRegime === "short" ? "fb-neg" : "";
+    reg.textContent = regimeText(row.gRegime);
+    foot.append(conv, move, reg);
+    card.append(foot);
+
+    card.setAttribute("aria-label",
+      `${row.t}, rank ${row.r != null ? row.r : index + 1}, score ${score === null ? "unavailable" : score}, ` +
+      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}. ` +
+      (isNum(row.hm) === null ? ""
+        : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
+          `${horizonSessions || 10} trading sessions. `) +
+      `Open the detail card.`);
+    return card;
   }
 
   function regimeText(v) {
@@ -181,7 +359,14 @@
     tr.append(scoreCell(row.s));
     tr.append(cell(fmtInt(row.cnv), "c-num"));
     tr.append(familyCell(row.fam));
-    tr.append(cell(fmtRatio(row.purity), "c-num"));
+    /* PURITY CHANGED MEANING AT VERSION 2, from |SUM dir| / SUM|total| — a net
+       over a gross, where two different cancellations fought each other — to
+       SUM|dir| / SUM|total|. The live v1 board printed 0.003 to 0.008 on names
+       whose flow was overwhelmingly directional; v2 prints about 0.6 for the
+       same tape. Both render in this column as "Π", so a v1 board drawn by a v2
+       renderer shows a number whose definition silently moved. Withheld for the
+       same reason fam.V and fam.O are. */
+    tr.append(cell(legacyFamilies ? DASH : fmtRatio(row.purity), "c-num"));
     tr.append(cell(regimeText(row.gRegime), "c-num " + (row.gRegime === "short" ? "fb-neg" : "fb-flat")));
     tr.append(cell(row.gFlipDist == null ? DASH : fmtPct(row.gFlipDist, 1), "c-num"));
     tr.append(cell(fmtMoney(row.netPrem), "c-num " + toneClass(row.netPrem)));
@@ -232,6 +417,15 @@
     document.body.classList.toggle("is-stale", Boolean(message));
   }
 
+  /**
+   * An empty-state message, in BOTH renderers.
+   *
+   * This used to write only a <tr> into the table body — and the table is
+   * `hidden` in the deck view, which is the default. Every explanation this
+   * function produces ("no board is available", "the board could not be
+   * loaded", "no name cleared the band") was therefore invisible to a reader
+   * in the default view: they saw an empty grid and no reason for it.
+   */
   function showMessage(text) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -240,6 +434,13 @@
     td.textContent = text;
     tr.append(td);
     body.replaceChildren(tr);
+
+    if (deck) {
+      const note = document.createElement("p");
+      note.className = "fb-empty";
+      note.textContent = text;
+      deck.replaceChildren(note);
+    }
   }
 
   /* ---------- data ------------------------------------------------ */
@@ -303,6 +504,7 @@
        than no rows. */
     if (painted !== null && painted !== which) {
       body.replaceChildren();
+      if (deck) deck.replaceChildren();
       painted = null;
     }
     body.setAttribute("aria-busy", "true");
@@ -317,6 +519,28 @@
       if (which !== side || !payload) return;     // user moved on, or redirected
 
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
+
+      /* AN EMPTY SIDE IS NOT AN EMPTY STORE. Under the dead band a side can
+         legitimately hold nothing — no name cleared the bar on this side of
+         the market — and telling that reader "the pipeline has not published
+         its first session yet" reports a working quiet day as an outage. The
+         published `scored` count separates the two: a board that scored names
+         and placed none here is a reading, not a failure. */
+      if (!rows.length && isNum(payload.scored) > 0) {
+        showMessage(
+          "No name on this side cleared the ±" + (payload.deadBand ?? "") + " band this session. " +
+          (isNum(payload.scored) + " names were scored; " +
+           (isNum(payload.neutral) ?? "all") + " of them landed inside the band, which is what a " +
+           "quiet session looks like. The other side may still have candidates."),
+        );
+        statusEl.textContent =
+          "No " + which + " candidates this session · session " +
+          (payload.sessionDate || "unknown") + ".";
+        setStale(assessAge(payload));
+        painted = which;
+        return;
+      }
+
       if (payload.status === "pending" || !rows.length) {
         /* "pending" from the API means the row is genuinely absent. It is also
            what the Worker returns when the D1 read THREW — the catch there
@@ -333,9 +557,17 @@
         return;
       }
 
-      const frag = document.createDocumentFragment();
-      rows.forEach((row, i) => frag.append(rowFor(row, i)));
-      body.replaceChildren(frag);                 // one insertion, 50 rows
+      legacyFamilies = (isNum(payload.v) ?? 1) < 2;
+      horizonSessions = isNum(payload.horizonSessions);
+
+      const tableFrag = document.createDocumentFragment();
+      rows.forEach((row, i) => tableFrag.append(rowFor(row, i)));
+      body.replaceChildren(tableFrag);            // one insertion, 50 rows
+      if (deck) {
+        const deckFrag = document.createDocumentFragment();
+        rows.forEach((row, i) => deckFrag.append(deckCard(row, i)));
+        deck.replaceChildren(deckFrag);
+      }
       painted = which;
 
       const when = payload.generatedAt
@@ -344,9 +576,30 @@
       // Two dates, because the job runs pre-open and the vendor returns the
       // previous COMPLETED session. Showing only the build time would let a
       // board built this morning from four-day-old data look current.
-      statusEl.textContent =
-        rows.length + " " + which + " candidates · session " +
-        (payload.sessionDate || "unknown") + " · built " + when + ".";
+      /* WHAT THE SCORE MEANS, beside the board.
+
+         The score is now a FIXED unit — two robust sigma from the
+         cross-sectional median is 80, at any board size — so a short board and
+         a low dispersion are the readings that say "quiet session" rather than
+         "something broke". Under the old rank ladder both printed +84 and
+         there was nothing to report. */
+      const parts = [
+        rows.length + " " + which + " candidate" + (rows.length === 1 ? "" : "s"),
+        "session " + (payload.sessionDate || "unknown"),
+      ];
+      if (isNum(payload.neutral) !== null && isNum(payload.deadBand) !== null) {
+        parts.push(payload.neutral + " of " + (payload.scored || "?") +
+          " inside the ±" + payload.deadBand + " band");
+      }
+      if (isNum(payload.dispersion) !== null) {
+        /* This is the 95th percentile of |composite| across the scored pool, not
+           a standard deviation, so it does not get a sigma suffix — a quantile
+           wearing a σ invites a reader to reach for a normal table that does not
+           apply to it. */
+        parts.push("spread " + payload.dispersion.toFixed(2) + " (95th pct)");
+      }
+      parts.push("built " + when);
+      statusEl.textContent = parts.join(" · ") + ".";
       setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;
@@ -379,6 +632,50 @@
   for (const button of sideButtons) {
     button.addEventListener("click", () => select(button.dataset.side));
   }
+
+  /* THE VIEW TOGGLE. Both renderers are fed from the same payload on every
+     render, so switching is a visibility change and never a refetch — and the
+     hidden one carries no rows a screen reader could announce twice, because
+     `hidden` removes it from the accessibility tree.
+
+     The choice lives in the URL, exactly as `side` already does, rather than
+     in browser storage. Three reasons, in order: this page is credential-gated
+     and per-user, so nothing it writes should outlive a sign-out on a shared
+     browser; storage.js is this site's sanctioned owner of browser-local
+     persistence and the Flows page does not load it, so writing there directly
+     would be the one place on the site that bypasses it; and a URL is
+     shareable and bookmarkable where a per-browser flag is neither. */
+  function readView() {
+    try {
+      const v = new URL(location.href).searchParams.get("view");
+      return v === "table" ? "table" : "deck";
+    } catch { return "deck"; }
+  }
+
+  function selectView(which) {
+    const view = which === "table" ? "table" : "deck";
+    if (deck) deck.hidden = view !== "deck";
+    if (tableWrap) tableWrap.hidden = view !== "table";
+    for (const button of viewButtons) {
+      const on = button.dataset.view === view;
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    try {
+      const url = new URL(location.href);
+      // The deck is the default, so it is spelled by the parameter's ABSENCE.
+      // Stamping ?view=deck on every visit would make the common URL longer
+      // and turn a default into a decision the reader has to have made.
+      if (view === "table") url.searchParams.set("view", "table");
+      else url.searchParams.delete("view");
+      history.replaceState(null, "", url);
+    } catch { /* deep-linking is a convenience, never a requirement */ }
+  }
+
+  for (const button of viewButtons) {
+    button.addEventListener("click", () => selectView(button.dataset.view));
+  }
+  selectView(readView());
 
   select(side);
 })();

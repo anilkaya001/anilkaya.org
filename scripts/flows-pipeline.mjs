@@ -23,10 +23,12 @@
    ============================================================= */
 
 import {
-  num, winsorize, robustZ, vanDerWaerden, neutralize,
+  num, quantile, winsorize, robustZ, neutralize,
   flowPurity, aggressorGamma, bookDisplacement, pathSignature,
   gammaDecayCalendar, positioningQuality, effectiveBreadth,
-  calibrateScoreScale, boundedScore, conviction, applyHysteresis,
+  crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
+  isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
+  boundedScore, conviction, applyHysteresis,
 } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 
@@ -198,8 +200,17 @@ function screenerTilt(row) {
   const netPut = num(row.net_put_premium);
 
   const gross = Math.abs(bull) + Math.abs(bear);
-  const premiumTilt = gross > 0 ? (bull - bear) / gross : 0;
-  const netTilt = (netCall - netPut);
+  const premiumTilt = gross > 0 ? (bull - bear) / gross : null;
+
+  /* EVERY tilt is made unit-free here, against the name's own scale.
+     robustZ normalises a column across the cross-section but cannot undo the
+     fact that a mega-cap's ordinary session carries a hundred times the raw
+     dollars of a mid-cap's event: z-scoring a dollar column ranks market caps
+     with a flow-shaped wobble on top. neutralize() removes the LINEAR log-cap
+     component from the blend afterwards, which is a much weaker instrument
+     than never letting the size in. */
+  const grossPremium = Math.abs(num(row.call_premium)) + Math.abs(num(row.put_premium));
+  const netTilt = grossPremium > 0 ? (netCall - netPut) / grossPremium : null;
 
   // Volume surprise relative to the name's own 30-day norm, so a
   // mega-cap's ordinary Tuesday does not outrank a real event.
@@ -208,18 +219,73 @@ function screenerTilt(row) {
   const putSurprise = num(row.avg_30_day_put_volume) > 0
     ? num(row.put_volume) / num(row.avg_30_day_put_volume) : 1;
 
-  // Open-interest change: what actually stuck from yesterday.
+  // Open-interest change: what actually stuck from yesterday, as a share of
+  // the standing book rather than in raw contracts.
   const callOiChange = num(row.call_open_interest) - num(row.prev_call_oi);
   const putOiChange = num(row.put_open_interest) - num(row.prev_put_oi);
+  const oiBase = num(row.total_open_interest) ||
+    (num(row.call_open_interest) + num(row.put_open_interest));
 
+  /* AGGRESSOR-SIDE VOLUME, in contracts. The premium tilts are size-weighted
+     by option price, so one deep-ITM print can outweigh ten thousand cheap
+     ones; the contract count is a genuinely different view of the same tape
+     and the screener has been returning it, unread, all along. */
+  const callVol = num(row.call_volume);
+  const putVol = num(row.put_volume);
+  const volBase = callVol + putVol;
+  const volTilt = volBase > 0
+    ? ((num(row.call_volume_ask_side) - num(row.call_volume_bid_side)) -
+       (num(row.put_volume_ask_side) - num(row.put_volume_bid_side))) / volBase
+    : null;
+
+  const iv30 = num(row.iv30d, NaN);
   return {
     premiumTilt,
     netTilt,
+    volTilt,
     surpriseTilt: Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
-    oiTilt: callOiChange - putOiChange,
-    ivMomentum: num(row.iv30d) - num(row.iv30d_1w),
-    relVolume: num(row.relative_volume),
+    oiTilt: oiBase > 0 ? (callOiChange - putOiChange) / oiBase : null,
+
+    /* The volatility surface, all of it already paid for by the one screener
+       call and all of it previously computed and thrown away. */
+    iv30: Number.isFinite(iv30) ? iv30 : null,
+    ivMomentum: Number.isFinite(iv30) ? iv30 - num(row.iv30d_1w, NaN) : null,
+    ivRank: ivRankFraction(row.iv_rank),
+    impliedMovePerc: num(row.implied_move_perc, NaN),
+    impliedMove: num(row.implied_move, NaN),
+    atmVol: num(row.volatility, NaN),
+    relVolume: num(row.relative_volume, NaN),
+    putCallRatio: num(row.put_call_ratio, NaN),
+    week52High: num(row.week_52_high, NaN),
+    week52Low: num(row.week_52_low, NaN),
   };
+}
+
+/**
+ * iv_rank as a FRACTION, because the vendor publishes it as a percentile.
+ *
+ * The endpoint reference documents iv_rank as "The 30 day implied volatility
+ * from 1 month ago", example 0.2136848270893097 — which is iv30d_1m's
+ * description and iv30d_1m's example, not iv_rank's. The vendor's own OpenAPI
+ * schema explains why: iv_rank is declared as `$ref: 'Stock IV 30d 1M'`, so
+ * every generated doc inherits the wrong field's text.
+ *
+ * The screener's own EXAMPLE OBJECT is the only place the truth appears, and it
+ * is unambiguous: `iv_rank: '13.52369891956068210400'` sits beside
+ * `iv30d: '0.2038...'` in the same response. iv_rank is on 0..100.
+ *
+ * Read as a fraction it would have printed "1352% of its year" on the card.
+ * The scoring was unharmed either way — percentileRank is scale-invariant —
+ * which is exactly why only the display would have shown it.
+ *
+ * The <= 1 branch is not defensive clutter: a percentile of 0.5 is ambiguous
+ * between the two conventions, and treating it as already-a-fraction is the
+ * reading that cannot produce a nonsense number.
+ */
+function ivRankFraction(raw) {
+  const v = num(raw, NaN);
+  if (!Number.isFinite(v) || v < 0) return NaN;
+  return v > 1 ? v / 100 : v;
 }
 
 /** Days until earnings, or null. Used to gate, never to predict. */
@@ -232,19 +298,81 @@ function daysToEarnings(row, today) {
 
 /* ---------- per-name enrichment --------------------------------- */
 
-async function enrich(ticker, spot) {
+/**
+ * PROVE THE NEW PARAMETERS WORK BEFORE BETTING THE RUN ON THEM.
+ *
+ * Dating every per-name call is the fix for a board stamped with the wrong
+ * session and a family that measured nothing — and it is also a way to lose
+ * the whole run. A date the vendor will not accept, or a session it has no
+ * data for, does not error: it returns an empty array. Every name then fails
+ * the required-source gate, the 80% completeness gate throws, and nothing
+ * publishes at all. The undated behaviour was wrong but it was not an outage.
+ *
+ * Two calls against SPY settle it. `date` is checked for USABLE output rather
+ * than a 200, because the exact failure that started this was a 200 carrying
+ * rows whose greeks were null. When a probe fails the run continues with that
+ * parameter dropped, loudly, rather than publishing nothing.
+ */
+async function verifyDating(sessionDate) {
+  if (!sessionDate || DRY_RUN) return { date: !!sessionDate, endDate: !!sessionDate };
+
+  const usable = (rows) => (rows || []).some(
+    (r) => r && r.expiry && (num(r.call_gamma) !== 0 || num(r.put_gamma) !== 0));
+
+  const [dated, undated, capped] = await Promise.all([
+    uw("/api/stock/SPY/greek-exposure/expiry", { date: sessionDate }).catch(() => []),
+    uw("/api/stock/SPY/greek-exposure/expiry").catch(() => []),
+    uw("/api/stock/SPY/ohlc/1d", { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+  ]);
+
+  const date = usable(dated);
+  const endDate = Array.isArray(capped) && capped.length > 0;
+  if (!date) {
+    console.warn(
+      `WARNING: /greek-exposure/expiry?date=${sessionDate} returns no usable gamma for SPY` +
+      (usable(undated) ? ", while the undated call does" : ", and neither does the undated call") +
+      " — dropping `date` for this run. The board will carry whatever session the " +
+      "vendor defaults to, which is the behaviour that mislabelled it before.");
+  }
+  if (!endDate) {
+    console.warn(
+      `WARNING: /ohlc/1d?end_date=${sessionDate} returned no candles for SPY — ` +
+      "dropping `end_date` for this run. Candles will include the session in progress.");
+  }
+  return { date, endDate };
+}
+
+async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate: true }) {
   const band = spot > 0
-    ? { min_strike: Math.floor(spot * 0.7), max_strike: Math.ceil(spot * 1.3) }
+    ? { min_strike: Math.round(spot * 0.7), max_strike: Math.round(spot * 1.3) }
     : {};
+
+  /* ONE SESSION, named explicitly, for all five sources.
+     Every call used to go out undated, and the five endpoints did not agree
+     about which day that meant: /net-prem-ticks returned a complete prior
+     session while /ohlc/1d returned a candle stamped for a day that had not
+     opened, so the board was headed with the wrong date. Worse,
+     /greek-exposure/expiry is an end-of-day open-interest aggregate — asked
+     for a session that has not happened it returns rows with null greeks,
+     which is exactly how family V came out identically zero on all thirty-four
+     published names while coverage went on reporting five sources of five. */
+  const dated = sessionDate && dating.date ? { date: sessionDate } : {};
 
   // Bounding the strike ladder is what makes per-name enrichment
   // affordable: an unbanded ladder is ~600 KB, a banded one a fraction.
   const [greekFlow, ticks, strikes, expiries, ohlc] = await Promise.all([
-    uw(`/api/stock/${ticker}/greek-flow`).catch(() => []),
-    uw(`/api/stock/${ticker}/net-prem-ticks`).catch(() => []),
-    uw(`/api/stock/${ticker}/spot-exposures/strike`, { ...band, limit: 500 }).catch(() => []),
-    uw(`/api/stock/${ticker}/greek-exposure/expiry`).catch(() => []),
-    uw(`/api/stock/${ticker}/ohlc/1d`, { timeframe: "2M" }).catch(() => []),
+    uw(`/api/stock/${ticker}/greek-flow`, dated).catch(() => []),
+    uw(`/api/stock/${ticker}/net-prem-ticks`, dated).catch(() => []),
+    uw(`/api/stock/${ticker}/spot-exposures/strike`, { ...band, ...dated, limit: 500 }).catch(() => []),
+    uw(`/api/stock/${ticker}/greek-exposure/expiry`, dated).catch(() => []),
+    /* A YEAR of candles rather than two months, for no extra call: the
+       sparkline, the 5/21/42-session returns, the 30-day realized vol behind
+       the variance risk premium and the 52-week position all come out of this
+       one response. end_date pins it to the same session as the rest. */
+    uw(`/api/stock/${ticker}/ohlc/1d`, {
+      timeframe: "1Y",
+      ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
+    }).catch(() => []),
   ]);
 
   /* A missing source is NOT a zero.
@@ -276,8 +404,54 @@ async function enrich(ticker, spot) {
      highest-value panels cost nothing extra; only max-pain and the congress
      filings are new. */
   return {
-    features: computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc }),
+    features: computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc, sessionDate }),
     raw: { greekFlow, ticks, strikes, expiries, ohlc },
+  };
+}
+
+/**
+ * THE TRADING SESSION THE DATA DESCRIBES, resolved once and pinned.
+ *
+ * This used to be read back out of whatever the enrichment happened to
+ * return — the newest parseable candle across every name — on the stated
+ * premise that "every endpoint called without a date returns the most recent
+ * COMPLETED session". That premise is false for /ohlc/1d, which returns a
+ * candle stamped for the day in progress. The published INTC card proved it:
+ * generated 08:01 Eastern, stamped sessionDate 2026-08-25, carrying a tick
+ * tape of 390 minutes beginning 2026-08-24 09:30 — a complete prior session
+ * under the wrong date.
+ *
+ * Resolve it FIRST, from one call, so the same date can be handed to every
+ * per-name source; then all five describe one session by construction rather
+ * than by hope. A candle stamped for today is a partial session until the
+ * 16:00 Eastern close, so it is not eligible before then.
+ */
+async function resolveSessionDate() {
+  const candles = await uw("/api/stock/SPY/ohlc/1d", { timeframe: "1M" }).catch(() => []);
+  const dates = candlesAscending(candles)
+    .map((c) => String(c.start_time || c.end_time || c.date || "").slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (!dates.length) return null;
+
+  const now = easternNow();
+  const complete = dates.filter((d) => d < now.date || (d === now.date && now.minutes >= 16 * 60));
+  if (complete.length) return complete[complete.length - 1];
+  // Every candle we have is for a session still in progress. Step back one.
+  return dates.length > 1 ? dates[dates.length - 2] : null;
+}
+
+/** Today's Eastern calendar date and minutes-since-midnight, DST included. */
+function easternNow(at = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(at).map((x) => [x.type, x.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    // Some ICU builds render midnight as hour 24 under hour12:false.
+    minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
   };
 }
 
@@ -286,8 +460,25 @@ async function enrich(ticker, spot) {
  * so a single earnings-day volume spike cannot lift an otherwise illiquid
  * name over the floor.
  */
-function medianDollarVolume(candles) {
-  const values = (candles || [])
+function medianDollarVolume(candles, { window = 60 } = {}) {
+  /* THE RECENT WINDOW, not the whole series.
+
+     This used to take the median over every candle it was handed, which was a
+     two-month request. The candle window then went to a year — for the
+     sparkline, the 52-week range and the realized-vol baseline, all free in the
+     same call — and silently took the liquidity floor with it.
+
+     That is the wrong direction for THIS measure. A year-old median is more
+     robust statistically and less true operationally: the floor exists to say
+     whether a name can be traded at these costs TODAY, and a name whose volume
+     halved six months ago would still clear it on the strength of what it used
+     to do. Sixty sessions is about a quarter — long enough that one event week
+     cannot carry it, recent enough to describe the book a reader would actually
+     be trading into.
+
+     Median rather than mean for the same reason as before: a single
+     halt-and-resume spike must not lift an illiquid name over the floor. */
+  const values = candlesAscending(candles).slice(-window)
     .map((c) => num(c.close) * num(c.volume))
     .filter((v) => v > 0)
     .sort((a, b) => a - b);
@@ -338,160 +529,331 @@ function atr14(candles) {
   return atr;
 }
 
-function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc }) {
+function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc, sessionDate, tilt }) {
   const purity = flowPurity(greekFlow);
   const quality = positioningQuality(greekFlow);
-  const gamma = aggressorGamma(strikes);
+  const gamma = aggressorGamma(strikes, { spot });
   const atr = atr14(ohlc);
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
-  const calendar = gammaDecayCalendar(expiries);
-  const dollarVolume = medianDollarVolume(ohlc);
+  const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
+  const dollarVolume = medianDollarVolume(ohlc);   // last 60 sessions, not the year
+
+  const closes = candlesAscending(ohlc).map((c) => num(c.close));
+  /* 21 SESSIONS, NOT 30, because the implied leg is a THIRTY-CALENDAR-DAY
+     figure. Both are annualized, so the units already agree; what did not
+     agree was the window — 30 trading sessions spans about 42 calendar days,
+     so the premium was comparing six weeks of delivered volatility against
+     four weeks of priced volatility. Twenty-one sessions is the usual count
+     in thirty calendar days. */
+  const rv30 = realizedVol(closes, { window: 21 });
+  const iv30 = tilt && Number.isFinite(tilt.iv30) ? tilt.iv30 : null;
 
   const flipDist = gamma.flip && spot > 0 ? (gamma.flip - spot) / spot : null;
+
+  /* COVERAGE counts USABLE OUTPUT, not array length.
+     enrich()'s own docstring commits to "a missing source is NOT a zero"; a
+     source that returns rows which every downstream filter then drops defeats
+     that in exactly the same way, and did — the vendor returned expiry rows
+     with null greeks, gammaDecayCalendar dropped all of them, family V was
+     identically zero on all 34 published names, and coverage still reported
+     5/5 so conviction paid full price for a source that produced nothing. */
+  const usable = [
+    greekFlow.length > 0,
+    path.bars > 0,
+    gamma.ladder.length > 0,
+    calendar.schedule.length > 0,
+    ohlc.length > 0,
+  ];
 
   return {
     ticker,
     spot,
     atr,
     dollarVolume,
+    sessionDate: sessionDate || null,
+
+    // --- flow, unit-free ---
     purity: purity.purity,
     dirDelta: purity.dirDelta,
+    dirShare: purity.dirShare,
     otmShare: quality.otmShare,
     vegaTilt: quality.vegaTilt,
     hasView: quality.hasDirectionalView,
+
+    // --- dealer positioning ---
     netGamma: gamma.netGamma,
+    gammaPeak: gamma.peak,
     gammaFlip: gamma.flip,
+    flipSide: gamma.flipSide,
+    flipCount: gamma.crossings.length,
+    // The thinner of the two regimes the published flip divides, as a share of
+    // the ladder's peak. A weak boundary is still a boundary; the card says so.
+    flipSeparation: gamma.flipSeparation,
+    spotGammaShare: gamma.spotGammaShare,
+    bandMin: gamma.bandMin,
+    bandMax: gamma.bandMax,
     flipDist,
-    gRegime: gamma.netGamma >= 0 ? "long" : "short",
+    flipDistAtr: gamma.flip && atr > 0 ? (gamma.flip - spot) / atr : null,
+    /* The regime AT SPOT, which is the question the netGamma sign was being
+       asked to answer. netGamma is the whole band's total; what a hedger
+       responds to is the gamma where the stock actually is. */
+    gRegime: gamma.spotGammaShare === null
+      ? (gamma.netGamma >= 0 ? "long" : "short")
+      : (gamma.spotGammaShare >= 0 ? "long" : "short"),
     displacement: displacement.displacement,
     displacementWeight: displacement.weight,
+
+    // --- path ---
     persistence: path.persistence,
     concentration: path.concentration,
     centroid: path.centroid,
     pathNet: path.net,
+    pathBars: path.bars,
+
+    // --- gamma term structure ---
     gammaHalfLife: calendar.halfLifeExpiry,
+    gammaHalfLifeDays: calendar.halfLifeDays,
+    gammaMeanLifeDays: calendar.meanLifeDays,
     gammaFrontLoad: calendar.frontLoad,
-    coverage: [greekFlow.length, ticks.length, strikes.length, expiries.length, ohlc.length]
-      .filter((n) => n > 0).length / 5,
+
+    // --- volatility, entirely from data already fetched ---
+    iv30,
+    rv30,
+    /* THE VARIANCE RISK PREMIUM. iv30d is the 30-day implied vol the screener
+       already returns; rv30 is close-to-close realized vol over the same 30
+       sessions, from the candles fetched for ATR. Both are annualized vols of
+       the same underlying over the same horizon, so the difference is
+       identified with no free parameter and no extra API call: positive means
+       the option market is charging more than the stock has been delivering. */
+    vrp: iv30 !== null && rv30 !== null ? iv30 - rv30 : null,
+    ivMomentum: tilt && tilt.ivMomentum !== null ? tilt.ivMomentum : null,
+    ivRank: tilt && Number.isFinite(tilt.ivRank) ? tilt.ivRank : null,
+    impliedMovePerc: tilt && Number.isFinite(tilt.impliedMovePerc) ? tilt.impliedMovePerc : null,
+
+    // The last 42 sessions of closes, retained so the deck's sparkline and
+    // its 5/21/42-session returns cost nothing: these candles were already
+    // fetched for ATR, the liquidity floor and the realized-vol baseline.
+    closes: closes.slice(-42),
+    /* Computed from the FULL year, not from the 42 retained for the
+       sparkline: a 42-session return needs 43 closes, so reading it back out
+       of the 42-element slice resolved to null on every name. */
+    r5: ret(closes, 5),
+    r21: ret(closes, 21),
+    r42: ret(closes, 42),
+    week52Pos: week52Position(closes),
+
+    coverage: usable.filter(Boolean).length / usable.length,
+    sources: {
+      greekFlow: greekFlow.length,
+      ticks: path.bars,
+      strikes: gamma.ladder.length,
+      expiries: calendar.schedule.length,
+      candles: ohlc.length,
+    },
   };
 }
 
 /* ---------- scoring ---------------------------------------------
-   Five families. Each is normalized across the enriched cross-section
-   before combining, so a family cannot dominate by having larger raw
-   units than another. */
+   THREE SIGNED AXES and TWO GAUGES, not five families of votes.
+
+   The five-family blend that shipped had a structural fault that its own
+   comment describes and does not fix. Three of its ten columns were unsigned
+   magnitudes multiplied by sign(dirDelta) so they could be ADDED to a signed
+   sum. Measured on the pipeline's own cross-section, those columns were 95%
+   sign(dirDelta) by correlation, they carried the negative sign and a quarter
+   of the weight, and the composite came out with corr(blend, dirDelta) =
+   -0.07: the long board was ranking AGAINST its own directional flow signal.
+
+   A magnitude that carries no direction of its own is a MODIFIER. Modifiers
+   multiply. So:
+
+     signed axes   F (flow), P (positioning), D (path)   -- added, z-scored
+     gate          O (quality)                           -- multiplies
+     context       V (vol regime)                        -- published, unscored
+
+   V is published and not scored on purpose. There is no identified sign that
+   turns "implied vol is rich" into "this name goes up", and the family that
+   used to be called "vol" contained no volatility at all — its single column
+   was the first expiry's share of gross dealer gamma. Rather than keep a
+   directional claim nobody can defend, the volatility surface is measured
+   properly (variance risk premium, IV rank, IV innovation) and shown as
+   regime context beside the score.
+*/
 
 const FAMILIES = {
-  F: "flow",          // directional flow: purity-weighted delta
-  P: "positioning",   // dealer gamma regime and displacement
-  D: "path",          // intraday accumulation shape
-  V: "vol",           // gamma calendar / regime durability
-  O: "quality",       // lottery vs considered, vol-vs-direction
+  F: "flow",          // SIGNED — directional flow, unit-free
+  P: "positioning",   // SIGNED — where new dealer gamma is building
+  D: "path",          // SIGNED — intraday accumulation shape
+  V: "vol",           // GAUGE  — volatility regime, 0..100, no direction
+  O: "quality",       // GAUGE  — the multiplicative gate, 0..100
 };
+
+/** The signed axes. Only these three enter the composite additively. */
+const SIGNED = ["F", "P", "D"];
+
+/**
+ * The dead band, in published score points.
+ *
+ * partitionSides used to split at the MEDIAN, unconditionally, so exactly half
+ * the pool was labelled long and half short whatever the day looked like: on
+ * the live board GOOGL scored -2 and was published as a short candidate
+ * because rank 18 of 34 fell on the short side of the median. A board with no
+ * neutral state cannot report a quiet session.
+ *
+ * This is a PRESENTATION threshold, not an identification claim: a name whose
+ * score is inside +-20 is not shown on either board. Published in the payload
+ * so the reader can see the bar that was applied.
+ */
+const DEAD_BAND = 20;
+
+/**
+ * THE BOARD PAYLOAD'S SCHEMA VERSION, on the same rule as the card's: bump when
+ * a field's MEANING changes. Version 2 is where fam.V and fam.O stopped being
+ * signed votes and became unsigned gauges, and where `s` stopped being a rank
+ * relabeling and became a fixed-unit score. A board published before this
+ * renders its family glyph without those two, rather than drawing a gauge as
+ * though it were a direction.
+ */
+const BOARD_SCHEMA_VERSION = 2;
 
 function scoreBoard(features, tilts, sectors, caps) {
   const n = features.length;
   if (!n) return [];
 
-  const col = (fn) => winsorize(features.map(fn), 0.02);
-  const z = (fn) => robustZ(col(fn));
+  // A column is built from a per-name accessor that may return null for
+  // "not measured". null becomes NaN, robustZ ignores it when finding the
+  // median and the MAD, and emits 0 for it — the neutral vote, not the worst.
+  const raw = (fn) => features.map((f, i) => {
+    const v = fn(f, tilts[i], i);
+    return v === null || v === undefined || !Number.isFinite(v) ? NaN : v;
+  });
+  const z = (fn) => robustZ(winsorize(raw(fn), 0.02));
 
-  // Family F — directional flow, purity-weighted. A large delta flow
-  // that is mostly spreads is not conviction, so purity multiplies.
-  const fDelta = z((f, i) => f.dirDelta * (0.25 + 0.75 * f.purity));
-  const fTilt = z((f, i) => tilts[i].premiumTilt);
-  const fNet = z((f, i) => tilts[i].netTilt);
-  const fOi = z((f, i) => tilts[i].oiTilt);
+  /* ---- F, flow. Every column is a RATIO, bounded and unit-free, so the
+     cross-section compares flow rather than market capitalisation. ---- */
+  const fDelta = z((f) => f.dirShare);          // net directional delta / gross delta
+  const fTilt = z((f, t) => t.premiumTilt);     // bullish vs bearish premium
+  const fNet = z((f, t) => t.netTilt);          // net premium / gross premium
+  const fOi = z((f, t) => t.oiTilt);            // OI change / standing book
+  const fVol = z((f, t) => t.volTilt);          // aggressor-side contract count
 
-  /* THE SIGN RULE for this blend: every column must be SIGNED, because the
-     composite means "long" when positive and "short" when negative. A column
-     that measures a magnitude — how clean the positioning is, how durable the
-     regime is — carries no direction of its own, and adding it to a signed sum
-     converts "this name's flow is high quality" into "this name is bullish".
+  /* ---- P, positioning. Displacement is already in ATR units and is the one
+     genuinely SIGNED quantity in the gamma block: it says which way today's
+     flow is moving the book relative to where the book already is. ---- */
+  const pDisp = z((f) => (f.displacementWeight > 0 ? f.displacement : null));
 
-     Measured before the fix, on two names with IDENTICAL strongly bearish flow:
-     the clean near-money one scored z = +1.91 and the OTM-lottery one z = -1.89,
-     so the clean BEARISH name was pushed toward the LONG board. Magnitudes are
-     therefore signed by the direction of the name's own flow, which is what
-     makes them modifiers rather than votes. */
-  const dir = (f) => Math.sign(f.dirDelta) || 0;
-
-  // Family P — dealer positioning. Short gamma amplifies whatever direction
-  // flow is pushing; long gamma suppresses it. Displacement is signed toward
-  // where new gamma is building.
-  const pDisp = z((f) => (f.displacementWeight > 0 ? f.displacement : 0));
-  const pFlip = z((f) => (f.flipDist === null ? 0 : -f.flipDist));
-  // The measured regime itself. netGamma was computed, surfaced to the UI as
-  // gRegime, and then never scored — family P's own comment described an
-  // amplification mechanism that existed nowhere in the code. Short gamma
-  // (netGamma < 0) amplifies the flow's direction, long gamma damps it, and
-  // the cross-sectional z below supplies the scale so no constant is invented.
-  const pRegime = z((f) => dir(f) * -f.netGamma);
-
-  // Family D — path shape. Persistent accumulation in the day's
-  // direction, discounted when it all arrived in one spike.
-  const dPath = z((f) => Math.sign(f.pathNet) * f.persistence * (1 - f.concentration));
-
-  // Family V — regime durability. A front-loaded gamma book means the current
-  // regime expires soon, so whatever the flow is pushing has less time to act.
-  const vFront = z((f) => dir(f) * -f.gammaFrontLoad);
-
-  // Family O — quality. High OTM share is lottery positioning; a high vega
-  // tilt means they are trading vol, not direction. Both discount the
-  // conviction of the flow they belong to, in that flow's own direction.
-  const oQuality = z((f) => dir(f) * (-(f.otmShare) - Math.min(f.vegaTilt, 5) * 0.2));
+  /* ---- D, path. Signed by the day's own net direction, discounted when all
+     of it arrived in one spike. ---- */
+  const dPath = z((f) =>
+    (f.pathBars > 0 ? Math.sign(f.pathNet) * f.persistence * (1 - f.concentration) : null));
 
   const familyCols = {
-    F: [fDelta, fTilt, fNet, fOi],
-    P: [pDisp, pFlip, pRegime],
+    F: [fDelta, fTilt, fNet, fOi, fVol],
+    P: [pDisp],
     D: [dPath],
-    V: [vFront],
-    O: [oQuality],
   };
 
-  // Correlation-clustered weighting: naive equal weighting silently
-  // overweights whichever family has the most members, so weight each
-  // by its EFFECTIVE breadth rather than its raw count.
+  /* ---- weights. Two levels of the same n_eff algebra.
+
+     Within a family, effectiveBreadth discounts columns that restate each
+     other — and now refuses to pay for a column with no dispersion at all,
+     which is how a dead family drew a live family's weight.
+
+     BETWEEN families, crossFamilyRedundancy does the same thing one level up.
+     effectiveBreadth was only ever called with one family's own columns, so
+     it was structurally incapable of seeing that the two most correlated
+     columns on the board lived in different families. ---- */
   const familyScores = {};
-  const weights = {};
-  let weightTotal = 0;
   for (const [key, cols] of Object.entries(familyCols)) {
-    const nEff = effectiveBreadth(cols);
-    weights[key] = nEff;
-    weightTotal += nEff;
-    familyScores[key] = features.map((_, i) =>
-      cols.reduce((a, c) => a + c[i], 0) / cols.length);
+    const live = cols.filter(isLiveColumn);
+    familyScores[key] = live.length
+      ? features.map((_, i) => live.reduce((a, c) => a + c[i], 0) / live.length)
+      : null;                                   // absent, not neutral
   }
 
-  // Neutralize the blend against sector and size: the board should rank
-  // names against their peers, not rediscover "semis were strong today".
-  const logCap = caps.map((c) => (c > 0 ? Math.log(c) : 0));
-  const blended = features.map((_, i) =>
-    Object.keys(familyCols).reduce((a, k) => a + (weights[k] / weightTotal) * familyScores[k][i], 0));
-  const residual = neutralize(blended, { numeric: [logCap], groups: sectors });
+  const liveKeys = SIGNED.filter((k) => familyScores[k] !== null);
+  const redundancy = crossFamilyRedundancy(
+    Object.fromEntries(liveKeys.map((k) => [k, familyScores[k]])));
 
-  // Rank-to-normal, then calibrate the score scale FROM this session's
-  // dispersion so the top band is reachable on a quiet day too.
-  const ranked = vanDerWaerden(residual);
-  const scale = calibrateScoreScale(ranked, { refQuantile: 0.95, refScore: 80 });
+  const weights = {};
+  let weightTotal = 0;
+  for (const key of liveKeys) {
+    const w = effectiveBreadth(familyCols[key]) / redundancy[key];
+    weights[key] = w;
+    weightTotal += w;
+  }
+
+  const blended = features.map((_, i) =>
+    (weightTotal > 0
+      ? liveKeys.reduce((a, k) => a + (weights[k] / weightTotal) * familyScores[k][i], 0)
+      : 0));
+
+  /* ---- O, the quality gate. Each axis is ORIENTED so larger is more
+     trustworthy, then reduced to its cross-sectional percentile, so no axis
+     needs a unit or a hand-set coefficient and a near-constant axis
+     contributes almost nothing. The gate is bounded in (0,2) with a mean of
+     one by construction, so it reallocates conviction across the board
+     without inventing a scale — and it cannot flip a sign. ---- */
+  const gateAxes = [
+    raw((f) => f.purity),                          // directional share of the tape
+    raw((f) => (f.otmShare === null ? null : -f.otmShare)),      // lottery tickets discount
+    raw((f) => (f.vegaTilt === null ? null : -f.vegaTilt)),      // trading vol, not direction
+    raw((f) => (f.gammaFrontLoad === null ? null : -f.gammaFrontLoad)), // regime expires soon
+    /* Dealers SHORT gamma at spot amplify whatever the flow is pushing; long
+       gamma damps it. Measured at spot rather than summed over the whole band,
+       and expressed as a share of the ladder's peak so it is comparable across
+       names. This is the amplification mechanism family P's old comment
+       described and the code never contained. */
+    raw((f) => (f.spotGammaShare === null ? null : -f.spotGammaShare)),
+  ];
+  const gate = qualityGate(gateAxes);
+
+  const composite = blended.map((b, i) => b * gate[i]);
+
+  // Neutralize against sector and size: the board should rank names against
+  // their peers, not rediscover "semis were strong today".
+  const logCap = caps.map((c) => (c > 0 ? Math.log(c) : 0));
+  const residual = neutralize(composite, { numeric: [logCap], groups: sectors });
+
+  /* ---- V, the volatility regime gauge. Published, never scored. Three
+     percentiles averaged: how rich options are against delivered vol, where
+     30-day IV sits in its own year, and whether it is rising. ---- */
+  const volAxes = [
+    raw((f) => f.vrp),
+    raw((f) => f.ivRank),
+    raw((f) => f.ivMomentum),
+  ].filter(isLiveColumn).map(percentileRank);
+
+  const dispersion = quantile(residual.map(Math.abs), 0.95);
 
   return features.map((f, i) => {
     const subs = {};
-    for (const k of Object.keys(familyCols)) {
-      subs[k] = boundedScore(familyScores[k][i], scale);
+    for (const k of SIGNED) {
+      subs[k] = familyScores[k] === null ? null : boundedScore(familyScores[k][i], SCORE_SCALE);
     }
+    // Both gauges are 0..100 and carry NO sign. The card must not draw them
+    // on the same centre-origin axis as F, P and D.
+    subs.O = Math.round(50 * Math.min(gate[i], 2));
+    const vs = volAxes.map((c) => c[i]).filter((v) => v !== null);
+    subs.V = vs.length ? Math.round(100 * (vs.reduce((a, b) => a + b, 0) / vs.length)) : null;
+
     const conv = conviction({
-      familyScores: Object.values(subs),
+      familyScores: SIGNED.map((k) => subs[k]),
       coverage: f.coverage,
       persistence: f.persistence,
     });
     return {
       ...f,
-      score: boundedScore(ranked[i], scale),
+      residual: residual[i],
+      gate: gate[i],
+      score: boundedScore(residual[i], SCORE_SCALE),
       fam: subs,
       conviction: conv.conviction,
       agreement: conv.agreement,
+      breadth: conv.breadth,
+      dispersion,
+      weights,
     };
   });
 }
@@ -513,13 +875,101 @@ function scoreBoard(features, tilts, sectors, caps) {
  * any pool size, and a shrunken pool then yields a SHORTER board rather than
  * an incoherent one.
  */
-function partitionSides(scored) {
-  const sorted = scored.slice().sort((a, b) => b.score - a.score);
-  const half = Math.floor(sorted.length / 2);
+function partitionSides(scored, { deadBand = DEAD_BAND } = {}) {
+  /* Order on the FULL-PRECISION residual, not the rounded score. Under the old
+     rank ladder two names could never tie — a 34-name board had 34 distinct
+     values by construction — so sorting on `score` was safe by accident. Under
+     a fixed unit two names round to the same integer routinely, and sorting on
+     the rounded value hands the tie to Array.prototype.sort's stability rather
+     than to the data. `score` is for display; `residual` decides. */
+  const sorted = scored.slice().sort((a, b) => b.residual - a.residual);
+  /* A DEAD BAND, not a median split.
+
+     Splitting at the median made the board's length a constant and its
+     contents a formality: exactly half the pool was labelled long and half
+     short whatever the session looked like. On the live board that published
+     GOOGL at -2 — the median name of thirty-four — as a short candidate,
+     while its own share class GOOG sat fourth on the long board.
+
+     Filtering on the score instead makes the two slices disjoint by
+     construction at any pool size (the old comment's requirement is met a
+     fortiori), and a quiet session now yields a SHORT board rather than a
+     full one made of noise. */
   return {
-    long: sorted.slice(0, half),
-    short: sorted.slice(sorted.length - half).reverse(),   // most negative first
+    long: sorted.filter((r) => r.score >= deadBand),
+    short: sorted.filter((r) => r.score <= -deadBand).reverse(),   // most negative first
+    neutral: sorted.filter((r) => Math.abs(r.score) < deadBand).length,
+    deadBand,
   };
+}
+
+/**
+ * Collapse share classes of one issuer to a single row BEFORE scoring.
+ *
+ * GOOG and GOOGL are one company's cash flows with different voting rights.
+ * Nothing in the pipeline knew that: the screener union keys on the raw
+ * ticker string, the earnings gate, the liquidity floor and the scorer all
+ * key on ticker, and neutralize() cannot help — an OLS projection on sector
+ * and log-cap removes what the two share, and PRESERVES in full exactly the
+ * idiosyncratic difference that put them on opposite boards.
+ *
+ * Identification: two listings of one issuer have the same company market
+ * capitalisation, sit in the same sector, and their daily log returns differ
+ * only by the liquidity of the two lines. Both conditions must hold. The
+ * survivor is the more liquid line, which is the one a reader can trade.
+ */
+function collapseShareClasses(records, { minCorr = 0.97 } = {}) {
+  const key = (e) => {
+    const cap = num(e.row.marketcap);
+    if (!(cap > 0)) return null;
+    return (e.row.sector || "") + "|" + cap.toPrecision(6);
+  };
+  const groups = new Map();
+  for (const e of records) {
+    const k = key(e);
+    if (k === null) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+
+  const dropped = [];
+  const remove = new Set();
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const ranked = members.slice()
+      .sort((a, b) => b.features.dollarVolume - a.features.dollarVolume);
+    const keeper = ranked[0];
+    for (const other of ranked.slice(1)) {
+      const r = returnCorrelation(keeper.raw.ohlc, other.raw.ohlc);
+      if (Number.isFinite(r) && r >= minCorr) {
+        remove.add(other.features.ticker);
+        dropped.push({ kept: keeper.features.ticker, dropped: other.features.ticker, corr: r });
+      }
+    }
+  }
+  return { kept: records.filter((e) => !remove.has(e.features.ticker)), dropped };
+}
+
+/** Pearson correlation of daily log returns over the overlapping dates. */
+function returnCorrelation(a, b) {
+  const series = (candles) => {
+    const map = new Map();
+    for (const c of candlesAscending(candles)) {
+      const d = String(c.start_time || c.end_time || c.date || "").slice(0, 10);
+      const close = num(c.close);
+      if (d && close > 0) map.set(d, close);
+    }
+    return map;
+  };
+  const A = series(a), B = series(b);
+  const dates = [...A.keys()].filter((d) => B.has(d)).sort();
+  if (dates.length < 10) return NaN;
+  const ra = [], rb = [];
+  for (let i = 1; i < dates.length; i++) {
+    ra.push(Math.log(A.get(dates[i]) / A.get(dates[i - 1])));
+    rb.push(Math.log(B.get(dates[i]) / B.get(dates[i - 1])));
+  }
+  return pearson(ra, rb);
 }
 
 /**
@@ -534,24 +984,48 @@ function partitionSides(scored) {
  * not TICKER-disjoint, so it does not cover this. At 55 survivors five names
  * duplicated; at 50, ten did.
  */
+/* ---------- deck encoding ---------------------------------------- */
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 /**
- * The trading session the DATA describes, which is not the day the job runs.
+ * Forty-two sessions of closes as a base-64 string, two characters a session.
  *
- * The pipeline fires 05:15 Eastern, before the open, and every endpoint called
- * without a `date` returns the most recent COMPLETED session — yesterday's. A
- * card headed with today's date would be mislabelled on day one, before any
- * failure occurs. The newest candle IS that session, so read it rather than
- * computing it from a clock and a holiday calendar.
+ * Each close is quantised to twelve bits across the window's OWN min and max,
+ * which is all a sparkline needs: the shape is scale-free and the levels are
+ * published separately as px and pr. Eighty-four bytes a card, against a card
+ * that already measures in kilobytes, and no API call that was not already
+ * being made.
  */
-function sessionDateFrom(enrichedRecords) {
-  let newest = null;
-  for (const e of enrichedRecords) {
-    for (const c of (e.raw && e.raw.ohlc) || []) {
-      const t = Date.parse(c.start_time || c.end_time || c.date || "");
-      if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
-    }
+function packSpark(closes, { window = 42 } = {}) {
+  const xs = (closes || []).filter((c) => Number.isFinite(c) && c > 0).slice(-window);
+  if (xs.length < 2) return null;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of xs) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const span = hi - lo;
+  let out = "";
+  for (const v of xs) {
+    const q = span > 0 ? Math.round(4095 * ((v - lo) / span)) : 2048;
+    out += B64[(q >> 6) & 63] + B64[q & 63];
   }
-  return newest === null ? null : new Date(newest).toISOString().slice(0, 10);
+  return out;
+}
+
+/** Where the last close sits in its own 52-week range, 0 at the low, 1 at the high. */
+function week52Position(closes) {
+  const xs = (closes || []).filter((c) => Number.isFinite(c) && c > 0).slice(-252);
+  if (xs.length < 20) return null;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of xs) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  return hi > lo ? (xs[xs.length - 1] - lo) / (hi - lo) : 0.5;
+}
+
+/** Simple return over the last n sessions, or null when the window is short. */
+function ret(closes, n) {
+  const xs = (closes || []).filter((c) => Number.isFinite(c) && c > 0);
+  if (xs.length < n + 1) return null;
+  const a = xs[xs.length - 1 - n];
+  return a > 0 ? xs[xs.length - 1] / a - 1 : null;
 }
 
 /**
@@ -587,6 +1061,9 @@ function selectExtremes(ranked, n) {
   return [...picked.values()];
 }
 
+/** Round a horizon move for publication, or pass null straight through. */
+const hz = (v) => (v === null ? null : Number(v.toFixed(4)));
+
 function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
     pool.map((r) => r.ticker), previousIds,
@@ -606,11 +1083,29 @@ function toRows(pool, screenerByTicker, previousIds) {
       cnv: r.conviction,
       px: close || r.spot,
       chg: prev > 0 ? (close - prev) / prev : null,
-      purity: Number(r.purity.toFixed(3)),
+      purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
       gRegime: r.gRegime,
       gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
       netPrem: num(s.net_call_premium) - num(s.net_put_premium),
       fam: r.fam,
+      // 42 sessions of closes, base-64 packed: two characters a session, so
+      // the whole sparkline costs 84 bytes on a card that already measures in
+      // kilobytes, and it needs no API call the pipeline was not making.
+      spark: packSpark(r.closes),
+      // Period returns in basis points, so the deck can rank without decoding
+      // the sparkline.
+      pr: [r.r5, r.r21, r.r42].map((x) => (x === null ? null : Math.round(x * 10000))),
+      w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
+      vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
+      ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
+      /* im is the VENDOR'S quote, to this name's own next listed expiry — a
+         different horizon for every row, so it is carried for the card and
+         never set beside another name's. hm is the same volatility scaled to a
+         FIXED number of sessions, which is what makes a column of them a
+         cross-section rather than a list of unrelated numbers. */
+      im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
+      hm: hz(horizonMove(r.iv30)),
+      hr: hz(horizonMove(r.rv30)),
     };
   });
 }
@@ -737,8 +1232,25 @@ function fakeScreener(count) {
       bearish_premium: String(Math.round(bear)),
       net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)),
       net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)),
+      call_premium: String(Math.round(bull + rnd() * 2e7)),
+      put_premium: String(Math.round(bear + rnd() * 2e7)),
+      call_volume_ask_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
+      call_volume_bid_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
+      put_volume_ask_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
+      put_volume_bid_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
       iv30d: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4),
+      iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
+      iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4),
+      // 0..100, matching the screener's own example object rather than the
+      // schema $ref that points at the wrong field.
+      iv_rank: (rnd() * 100).toFixed(4),
+      implied_move: (price * (0.02 + rnd() * 0.06)).toFixed(4),
+      implied_move_perc: (0.02 + rnd() * 0.06).toFixed(6),
+      volatility: (0.18 + rnd() * 0.5).toFixed(4),
+      put_call_ratio: (putVol / callVol).toFixed(4),
+      week_52_high: (price * (1.05 + rnd() * 0.6)).toFixed(2),
+      week_52_low: (price * (0.4 + rnd() * 0.4)).toFixed(2),
       relative_volume: (0.5 + rnd() * 3).toFixed(2),
       next_earnings_date: rnd() > 0.85
         ? new Date(Date.now() + Math.floor(rnd() * 20) * 86400000).toISOString().slice(0, 10)
@@ -808,16 +1320,47 @@ function fakeEnrichment(ticker, spot, seed) {
     };
   });
 
+  /* A BOOK THAT CAN ACTUALLY FLIP.
+
+     The previous fixture drew every rung from `w * 4e6 * (rnd() - 0.45)` and
+     then summed four legs whose expectation was negative, so the cumulative
+     was monotone by construction and no ladder it produced could ever change
+     sign. gammaFlip therefore had NOTHING to exercise in the dry run — the
+     same shape of blindness that let the call_gamma / call_gamma_ask field
+     names ship: a fixture that avoids the input the function exists for.
+
+     The realistic shape is the textbook one: put gamma dominates below spot
+     and call gamma above, so the cumulative starts negative, crosses once near
+     the money and ends positive. `tilt` moves the crossing off spot and, on
+     roughly one name in six, pushes it out of the band entirely so the
+     no-flip path is exercised too. */
+  /* Pivot near the money and a wide envelope, which is what a real ladder
+     looks like: measured on the live INTC book, the cumulative carries 5% of
+     its peak by four strikes below spot. A narrow envelope starves the lower
+     lobe and every name comes back with no flip — which is a property of the
+     fixture, not of the market. One name in eight is drawn one-signed so the
+     genuine no-flip path is exercised too. */
+  const tilt = 0.94 + rnd() * 0.12;
+  const oneSided = rnd() < 0.125;
   const strikes = Array.from({ length: 41 }, (_, i) => {
     const k = spot * (0.7 + i * 0.015);
-    const w = Math.exp(-Math.pow((k - spot) / (spot * 0.12), 2));
-    const g = w * 4e6 * (rnd() - 0.45);
+    const w = Math.exp(-Math.pow((k - spot) / (spot * 0.3), 2));
+    const lean = oneSided
+      ? Math.abs((k - spot * tilt) / spot)
+      : (k - spot * tilt) / spot;                   // negative below the pivot
+    const scale = w * 4e6 * (0.6 + rnd() * 0.8);
+    const callLeg = scale * Math.max(0, lean) * 8;
+    const putLeg = -scale * Math.max(0, -lean) * 8;
     return {
       strike: k.toFixed(2),
-      call_gamma_ask: String(-Math.abs(g)), call_gamma_bid: String(Math.abs(g) * rnd()),
-      put_gamma_ask: String(-Math.abs(g) * rnd()), put_gamma_bid: String(Math.abs(g) * rnd()),
-      call_gamma_oi: String(Math.abs(g) * 2), put_gamma_oi: String(Math.abs(g) * 1.6),
-      call_gamma_vol: String(Math.abs(g) * rnd() * 2), put_gamma_vol: String(Math.abs(g) * rnd() * 1.4),
+      call_gamma_ask: String(callLeg * (0.4 + rnd() * 0.3)),
+      call_gamma_bid: String(callLeg * (0.3 + rnd() * 0.3)),
+      put_gamma_ask: String(putLeg * (0.4 + rnd() * 0.3)),
+      put_gamma_bid: String(putLeg * (0.3 + rnd() * 0.3)),
+      call_gamma_oi: String(Math.abs(callLeg) * 2 + scale * 0.2),
+      put_gamma_oi: String(-Math.abs(putLeg) * 1.6 - scale * 0.2),
+      call_gamma_vol: String(Math.abs(callLeg) * rnd() * 2),
+      put_gamma_vol: String(-Math.abs(putLeg) * rnd() * 1.4),
     };
   });
 
@@ -829,7 +1372,7 @@ function fakeEnrichment(ticker, spot, seed) {
 
   let px = spot;
   const day0 = Date.UTC(2026, 5, 24, 13, 30);
-  const ohlc = Array.from({ length: 42 }, (_, i) => {
+  const ohlc = Array.from({ length: 252 }, (_, i) => {
     const move = (rnd() - 0.5) * spot * 0.03;
     const open = px; px = Math.max(1, px + move);
     return {
@@ -866,6 +1409,13 @@ async function main() {
     }
     console.log(`publishing to ${ingestURL()}`);
   }
+
+  /* 0. THE SESSION, resolved before anything else is fetched, so every
+        per-name call can be pinned to it. */
+  const sessionDate = DRY_RUN ? "2026-08-24" : await resolveSessionDate();
+  console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
+  const dating = await verifyDating(sessionDate);
+  console.log(`dating: date=${dating.date} end_date=${dating.endDate}`);
 
   // 1. Universe, from a single screener call.
   /* THE UNIVERSE IS FETCHED IN MARKET-CAP BANDS, because one call cannot
@@ -939,7 +1489,13 @@ async function main() {
 
   const composite = tilted.map(({ row, tilt }) => ({
     row, tilt,
-    rough: tilt.premiumTilt + Math.tanh(tilt.netTilt / 2e7) + Math.tanh(tilt.surpriseTilt),
+    /* netTilt is now net premium divided by GROSS premium, a ratio in
+       [-1,1]; it used to be raw dollars, which is why it was squashed through
+       tanh(x / 2e7). Dividing a ratio by twenty million made the term
+       identically zero, so the selection composite silently lost a third of
+       itself the moment the column was made unit-free. */
+    rough: (tilt.premiumTilt || 0) + (tilt.netTilt || 0) + (tilt.volTilt || 0) +
+           Math.tanh(tilt.surpriseTilt),
   })).sort((a, b) => b.rough - a.rough);
 
   // 3. Enrich only the extremes. This two-stage split is the entire
@@ -964,10 +1520,11 @@ async function main() {
       let features, raw;
       if (DRY_RUN) {
         const fake = fakeEnrichment(ticker, spot, 1000 + i);
-        features = computeFeatures(fake);
+        features = computeFeatures({ ...fake, sessionDate, tilt: pick.tilt });
         raw = fake;
       } else {
-        ({ features, raw } = await enrich(ticker, spot));
+        ({ features, raw } = await enrich(ticker, spot, sessionDate, dating));
+        features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
       }
       enriched.push({ features, raw, tilt: pick.tilt, row: pick.row });
     } catch (error) {
@@ -1009,27 +1566,44 @@ async function main() {
     );
   }
 
-  const sessionDate = sessionDateFrom(liquid);
-  console.log(`session date (from the newest candle): ${sessionDate || "unknown"}`);
+  /* 5b. ONE ROW PER ISSUER, before scoring rather than after, so the
+     cross-section the scorer normalises against is not double-counting a
+     company and n is right. GOOG entered fourth on the long board while
+     GOOGL — the same company — sat on the short side of the median. */
+  const { kept: unique, dropped: shareClasses } = collapseShareClasses(liquid);
+  for (const d of shareClasses) {
+    console.log(
+      `share class: kept ${d.kept}, dropped ${d.dropped} ` +
+      `(same sector and market cap, return correlation ${d.corr.toFixed(3)})`);
+  }
 
   // 6. Score.
   const scored = scoreBoard(
-    liquid.map((e) => e.features),
-    liquid.map((e) => e.tilt),
-    liquid.map((e) => e.row.sector || ""),
-    liquid.map((e) => num(e.row.marketcap)),
+    unique.map((e) => e.features),
+    unique.map((e) => e.tilt),
+    unique.map((e) => e.row.sector || ""),
+    unique.map((e) => num(e.row.marketcap)),
   );
 
   // 7. Publish both sides.
   const generatedAt = new Date().toISOString();
   const sides = partitionSides(scored);
-  for (const side of ["long", "short"]) {
-    if (sides[side].length < MIN_ROWS) {
-      throw new Error(
-        `${side} side has only ${sides[side].length} candidates after partitioning ` +
-        `(minimum ${MIN_ROWS}) — publishing nothing rather than a board too thin to rank`,
-      );
-    }
+  console.log(
+    `sides: ${sides.long.length} long, ${sides.short.length} short, ` +
+    `${sides.neutral} inside the +-${sides.deadBand} dead band ` +
+    `(dispersion ${(scored[0] && scored[0].dispersion || 0).toFixed(3)})`);
+
+  /* A THIN side is information, not a failure. The old gate threw the whole
+     run away when either side held fewer than MIN_ROWS — which, under a
+     median split, could only ever mean the pool itself was tiny. Under a dead
+     band a short side of four means four names cleared the bar, and refusing
+     to publish that would misreport a quiet session as an outage. Both sides
+     empty is still a failure: that is a scoring fault, not a quiet day. */
+  if (!sides.long.length && !sides.short.length) {
+    throw new Error(
+      `no name on either side cleared the +-${sides.deadBand} dead band across ` +
+      `${scored.length} scored names — publishing nothing rather than an empty board`,
+    );
   }
 
   /* Hysteresis needs a yesterday. previousIds was a hardcoded [], so
@@ -1044,14 +1618,29 @@ async function main() {
   }
 
   const published = {};
+  const first = scored[0] || {};
   for (const side of ["long", "short"]) {
     const rows = toRows(sides[side], screenerByTicker, previous[side]);
     published[side] = rows;
     await publish("board:" + side, {
+      v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
       universe: universe.length,
       enriched: enriched.length,
-      status: rows.length ? "ok" : "pending",
+      /* WHAT THE SCORE MEANS, published beside it. The score is now a fixed
+         unit — a residual two robust sigma from the cross-sectional median
+         scores 80, at any pool size — so `scored` and `dispersion` are what
+         let a reader tell a genuinely wide session from a flat one. Under the
+         old rank ladder both printed the same +84. */
+      scored: scored.length,
+      dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
+      deadBand: sides.deadBand,
+      neutral: sides.neutral,
+      // The horizon every `hm` and `hr` on this board is stated in.
+      horizonSessions: HORIZON_SESSIONS,
+      weights: first.weights || null,
+      shareClasses,
+      status: rows.length ? "ok" : "thin",
     });
   }
 
@@ -1084,7 +1673,9 @@ async function main() {
       const [maxPain, congress] = DRY_RUN
         ? [fakeMaxPain(ticker, num(e.row.close)), fakeCongress(ticker)]
         : await Promise.all([
-          uw(`/api/stock/${ticker}/max-pain`).catch(() => []),
+          // The one per-name source the dating commit left undated. The
+          // endpoint takes a `date`, and its window spans 120 days of expiries.
+          uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
           uw("/api/congress/recent-trades", { ticker, limit: 50 }).catch(() => []),
         ]);
 
@@ -1094,6 +1685,10 @@ async function main() {
         features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
         strikes: e.raw.strikes,
         ticks: e.raw.ticks,
+        // The expiry gamma was fetched for the score and thrown away at the
+        // card boundary; the roll-off staircase costs nothing to add.
+        expiries: e.raw.expiries,
+        weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
       });
 
@@ -1146,7 +1741,9 @@ async function main() {
 
 export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
-  candlesAscending, selectExtremes, scoreBoard, sessionDateFrom, publish, summarize,
+  candlesAscending, selectExtremes, scoreBoard, publish, summarize,
+  collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
+  computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —
