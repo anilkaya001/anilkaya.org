@@ -1261,7 +1261,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
   const asOf = tapeDay || dailyDate;
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
-  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit });
+  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker });
 
   /* MARKED AFTER THE GATES, so this is ~120 string comparisons rather than
      1000. A cushion is a diffusion number and an earnings report is not a

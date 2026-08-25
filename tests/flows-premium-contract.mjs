@@ -274,6 +274,44 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c("bad-expiry", "2026-08-20", "premarket"), null, "an unusable expiry is null too");
 }
 
+/* ---------- adjusted series cannot be priced ------------------- */
+{
+  /* Every dollar on this desk multiplies by 100 — premium, collateral,
+     breakeven, and everything derived. That is the STANDARD deliverable, and
+     after a split, merger or special dividend the OCC issues an adjusted
+     series whose contract may deliver a different share count, or shares plus
+     cash. Those carry a suffixed root: AAPL1, AAPL2.
+
+     The vendor exposes no deliverable field, so an adjusted contract's
+     economics are not recoverable from this response at all. Pricing it
+     anyway would put a confidently wrong figure in every money column of that
+     row, and nothing on the page could reveal it. */
+  const standard = { option_symbol: "AAPL260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60",
+                     implied_volatility: "0.28", open_interest: "1200", volume: "9" };
+  const adjusted = { ...standard, option_symbol: "AAPL1260918P00170000" };
+
+  const r = rankChain([standard, adjusted], { spot: 180, asOf: "2026-08-25", ticker: "AAPL" });
+  eq(r.priced, 1, "the adjusted series is excluded");
+  eq(r.gated.nonStandard, 1, "and counted under its own reason, not hidden in unpriceable");
+  eq(r.rows[0].symbol, "AAPL260918P00170000", "only the standard contract is ranked");
+
+  /* The exclusion still reconciles — every screened contract is ranked or
+     attributed, which is what makes the footer's counts trustworthy. */
+  const excluded = Object.values(r.gated).reduce((a, b) => a + b, 0);
+  eq(excluded + r.priced, r.screened, "the gate partition still accounts for everything");
+
+  /* Case and whitespace do not create a false mismatch. */
+  eq(rankChain([standard], { spot: 180, asOf: "2026-08-25", ticker: " aapl " }).priced, 1,
+     "the comparison normalises case and padding rather than dropping a good row");
+
+  /* WITHOUT A TICKER THERE IS NO CHECK, and that is stated rather than
+     silently skipped — a caller that forgets to pass it gets the old
+     behaviour, not a false sense of a guard. */
+  const unchecked = rankChain([standard, adjusted], { spot: 180, asOf: "2026-08-25" });
+  eq(unchecked.priced, 2, "with nothing to compare against, no contract is excluded");
+  eq(unchecked.gated.nonStandard, 0, "and none is claimed to be");
+}
+
 /* ---------- buying power: what you can actually collect --------- */
 {
   /* THE WHOLE POINT, in one fixture. Two lines at IDENTICAL 3.0% yield. Yield

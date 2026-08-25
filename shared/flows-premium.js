@@ -295,6 +295,29 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1 } = {}) {
    omission about how thin the real opportunity set is.
    ============================================================= */
 
+/* =============================================================
+   ADJUSTED CONTRACTS CANNOT BE PRICED, so they are not priced.
+
+   Every dollar on this desk multiplies by 100 — premium, collateral,
+   breakeven, and everything derived from them. That multiplier is the
+   standard deliverable, and it is NOT universal: after a split, a
+   merger or a special dividend, the OCC issues an adjusted series
+   whose contract may deliver a different share count, or shares plus
+   cash. Those series carry a suffixed root — AAPL1, AAPL2 — while the
+   ordinary ones carry the bare ticker.
+
+   The vendor exposes no deliverable field and no shares-per-contract,
+   so an adjusted contract's economics are not recoverable from this
+   response at all. Multiplying it by 100 anyway would put a
+   confidently wrong dollar figure in every money column of that row,
+   and nothing on the page could reveal it.
+
+   So the root is compared against the ticker that was ASKED FOR, and
+   a mismatch is excluded and counted like any other gate. Dropping a
+   row the desk cannot price is the small cost; the alternative is
+   pricing it wrongly, which is not a cost the reader can see.
+   ============================================================= */
+
 export const DEFAULT_GATES = Object.freeze({
   /* Wider than this and the bid is not a price, it is a placeholder. 15% of
      mid is loose for SPY and tight for a $3 biotech; it is a starting gate,
@@ -330,17 +353,28 @@ export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollate
  */
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
+  ticker = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
   const { divisor, basis } = ivConvention(list.map((r) => r && r.implied_volatility));
 
-  const gated = { unpriceable: 0, spread: 0, openInterest: 0, premium: 0, expiry: 0, strategy: 0 };
+  const gated = {
+    unpriceable: 0, nonStandard: 0, spread: 0, openInterest: 0,
+    premium: 0, expiry: 0, strategy: 0,
+  };
+  /* Only checkable when the caller says what it asked for. No ticker, no
+     check — asserted rather than assumed, because a silent skip here is the
+     same wrong number arriving by a different route. */
+  const want = typeof ticker === "string" && ticker ? ticker.trim().toUpperCase() : null;
   const rows = [];
 
   for (const raw of list) {
     const p = priceSale(raw, { spot, asOf, ivDivisor: divisor });
     if (!p) { gated.unpriceable++; continue; }
+    /* An adjusted series — AAPL1 against a request for AAPL — delivers an
+       unknown share count, so its every dollar figure would be fiction. */
+    if (want !== null && p.ticker !== want) { gated.nonStandard++; continue; }
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
     if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
     if (p.premium < g.minPremium) { gated.premium++; continue; }
