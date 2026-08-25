@@ -375,6 +375,20 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "while frontLoad does not — which is why it is not the comparable number");
 
   ok(buildCalendar([], { asOf: "2026-08-24" }).status === "unavailable", "an empty chain is unavailable");
+  /* THE WIRE NAMES, which is the whole reason this panel shipped empty.
+     buildCalendar read the documented call_gamma / put_gamma; /greek-exposure
+     /expiry sends call_gex / put_gex. Every fixture in this file used the
+     documented pair, so the contract passed and all twelve published cards
+     carried panels.calendar = "unavailable: no expiry gamma". */
+  const wireCal = buildCalendar([
+    { expiry: "2026-08-28", call_gex: "6e8", put_gex: "-2e8" },
+    { expiry: "2026-09-18", call_gex: "2e8", put_gex: "-1e8" },
+  ], { asOf: "2026-08-24" });
+  ok(wireCal.status === "ok", "buildCalendar reads the wire's call_gex / put_gex legs");
+  ok(wireCal.schedule.length === 2, "both wire-named expiries reach the schedule");
+  ok(wireCal.schedule[0].share > 0.7,
+     "put_gex is dealer-signed, so the gross front-week share sums the legs");
+
   ok(buildCalendar([{ expiry: "2026-08-28", call_gamma: null, put_gamma: null }]).status === "unavailable",
      "rows the vendor returned with null greeks are NOT a measured zero — this is " +
      "the exact shape that made family V identically zero on all 34 live names");

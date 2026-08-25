@@ -670,6 +670,28 @@ export function pathSignature(tickRows) {
   return { persistence, concentration, centroid, net, bars: rows.length };
 }
 
+/* THE EXPIRY GAMMA LEGS ARE NAMED `call_gex` / `put_gex` ON THE WIRE.
+ *
+ * The vendor's field list for /greek-exposure/expiry documents `call_gamma`
+ * and `put_gamma`. A dated probe against AAPL returned neither -- it returned
+ * 23 rows carrying `call_gex=175414.5369  put_gex=-83920.3551`. Every card
+ * shipped with the gamma roll-off panel reading "unavailable: no expiry gamma"
+ * because the readers asked for the documented names and got undefined.
+ *
+ * Both are accepted, wire name first: the live response is evidence and the
+ * field list is a claim, but a vendor that renamed once can rename back, and
+ * falling back costs one `??`.
+ *
+ * The put leg arrives ALREADY dealer-signed under either name -- put_gex is
+ * negative against a positive call_gex above -- so callers still SUM the
+ * magnitudes for a gross figure. */
+export function callGammaLeg(row) {
+  return row ? (row.call_gex ?? row.call_gamma) : undefined;
+}
+export function putGammaLeg(row) {
+  return row ? (row.put_gex ?? row.put_gamma) : undefined;
+}
+
 /**
  * TGamma — Gamma Expiry Decay Calendar, from greek-exposure/expiry.
  *
@@ -686,13 +708,13 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
     .map((r) => ({
       expiry: r.expiry,
       /* GROSS gamma rolling off, so magnitudes are summed rather than the sum
-         taken in magnitude. put_gamma arrives ALREADY dealer-signed (negative
-         against a positive call_gamma), the convention this module's header
+         taken in magnitude. The put leg arrives ALREADY dealer-signed (negative
+         against a positive call leg), the convention this module's header
          calls load-bearing, so |call + put| cancels the two legs and reports
          the net residual. A front-week book of 1e9 call against -999e6 put --
          2.0e9 of gross gamma about to expire -- reported as 1e6 and lost the
          roll-off schedule entirely. */
-      gamma: Math.abs(num(r.call_gamma)) + Math.abs(num(r.put_gamma)),
+      gamma: Math.abs(num(callGammaLeg(r))) + Math.abs(num(putGammaLeg(r))),
     }))
     .filter((r) => r.expiry && r.gamma > 0)
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));

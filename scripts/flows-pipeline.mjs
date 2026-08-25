@@ -28,7 +28,7 @@ import {
   gammaDecayCalendar, positioningQuality, effectiveBreadth,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
-  boundedScore, conviction, applyHysteresis,
+  boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
 } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 
@@ -316,8 +316,13 @@ function daysToEarnings(row, today) {
 async function verifyDating(sessionDate) {
   if (!sessionDate || DRY_RUN) return { date: !!sessionDate, endDate: !!sessionDate };
 
+  /* THROUGH THE SAME LEG READERS THE CARD USES. Asking a different question
+     than the consumer asks is how a probe reports healthy against a panel that
+     is empty: this one passed `date` while every card printed "no expiry
+     gamma", because both sides read the documented names and the wire sends
+     call_gex / put_gex. */
   const usable = (rows) => (rows || []).some(
-    (r) => r && r.expiry && (num(r.call_gamma) !== 0 || num(r.put_gamma) !== 0));
+    (r) => r && r.expiry && (num(callGammaLeg(r)) !== 0 || num(putGammaLeg(r)) !== 0));
 
   /* A SINGLE-NAME EQUITY, not SPY. The first version probed SPY because it is
      the most liquid thing listed — and got no usable expiry gamma from it
@@ -1405,10 +1410,16 @@ function fakeEnrichment(ticker, spot, seed) {
     };
   });
 
+  /* THE WIRE NAMES, call_gex / put_gex — not the documented call_gamma /
+     put_gamma. This fixture emitted the documented pair, so every dry run
+     built a healthy roll-off calendar while every live card printed
+     "unavailable: no expiry gamma". Third time a fixture has agreed with the
+     code's guess instead of with the vendor; a fixture that does that tests
+     nothing. */
   const expiries = Array.from({ length: 6 }, (_, i) => ({
     expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-    call_gamma: String(9e6 / (i + 1) * (0.6 + rnd())),
-    put_gamma: String(-7e6 / (i + 1) * (0.6 + rnd())),
+    call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
+    put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
   }));
 
   let px = spot;

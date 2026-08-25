@@ -54,10 +54,12 @@
  */
 export const CARD_SCHEMA_VERSION = 2;
 
-/* The only import in this module, and it is a pure one: the square-root-of-time
-   scaling and the horizon it is stated in are shared with the scorer, and two
-   copies of a convention are two chances to disagree about it. */
-import { horizonMove, HORIZON_SESSIONS } from "./flows-features.js";
+/* Every import here is pure, and each is shared rather than copied for the
+   same reason: the square-root-of-time scaling and the horizon it is stated in
+   belong to the scorer too, and the expiry-gamma leg names have already been
+   wrong once in two places at once. Two copies of a convention are two chances
+   to disagree about it. */
+import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg } from "./flows-features.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -185,8 +187,9 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
 
      /spot-exposures/strike returns call_gamma_ask, call_gamma_bid,
      call_gamma_oi and call_gamma_vol — and the put equivalents. It does NOT
-     return call_gamma or put_gamma; those belong to /greek-exposure/expiry,
-     a different endpoint with a different shape.
+     return an unsplit call or put leg; the whole-expiry aggregate belongs to
+     /greek-exposure/expiry, a different endpoint with a different shape, which
+     names its legs call_gex and put_gex (see callGammaLeg in flows-features).
 
      Reading the wrong names cost nothing loudly and everything quietly: every
      strike summed to exactly 0, so the published cards carried 54 correctly
@@ -262,8 +265,8 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
  */
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
   const rows = (expiryRows || []).map((r) => {
-    const c = numOrNull(r.call_gamma);
-    const p = numOrNull(r.put_gamma);
+    const c = numOrNull(callGammaLeg(r));
+    const p = numOrNull(putGammaLeg(r));
     if (c === null && p === null) return null;
     return { expiry: r.expiry || null, gamma: Math.abs(c ?? 0) + Math.abs(p ?? 0) };
   }).filter((r) => r && r.expiry && r.gamma > 0)

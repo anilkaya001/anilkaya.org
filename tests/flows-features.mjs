@@ -372,6 +372,39 @@ const near = (a, b, tol, msg) => {
   ]);
   ok(balanced.schedule.length === 2,
      "an expiry whose legs net to zero still carries gross gamma and stays on the schedule");
+
+  /* THE WIRE NAMES. Every fixture above uses the DOCUMENTED call_gamma /
+     put_gamma, which is why the roll-off panel could pass every test here and
+     still report "unavailable: no expiry gamma" on all twelve live cards. A
+     dated AAPL probe returned these values under call_gex / put_gex:
+
+       date=2026-08-24 expiry=2026-08-24 call_gex=175414.5369 put_gex=-83920.3551
+
+     Both names are read, wire first. This is the case the suite was missing. */
+  const wire = gammaDecayCalendar([
+    { expiry: "2026-08-28", call_gex: "600", put_gex: "0" },
+    { expiry: "2026-09-18", call_gex: "300", put_gex: "0" },
+    { expiry: "2026-12-18", call_gex: "100", put_gex: "0" },
+  ]);
+  near(wire.schedule[0].share, 0.6, 1e-9, "call_gex is read as the call gamma leg");
+  assert.equal(wire.halfLifeExpiry, "2026-08-28"); checks++;
+
+  // put_gex is pre-signed on the wire exactly as put_gamma is: gross still sums.
+  const wireSigned = gammaDecayCalendar([
+    { expiry: "2026-08-28", call_gex: "1e9", put_gex: "-999000000" },
+    { expiry: "2026-09-18", call_gex: "5000000", put_gex: "0" },
+  ]);
+  ok(wireSigned.frontLoad > 0.99,
+     `put_gex is dealer-signed too, so gross roll-off sums magnitudes (${wireSigned.frontLoad})`);
+
+  /* The wire name WINS when a row carries both, so a vendor that starts
+     sending the documented pair alongside the real one cannot silently swap
+     which number the panel plots. */
+  const bothNames = gammaDecayCalendar([
+    { expiry: "2026-08-28", call_gex: "900", call_gamma: "100", put_gex: "0", put_gamma: "0" },
+    { expiry: "2026-09-18", call_gex: "100", call_gamma: "900", put_gex: "0", put_gamma: "0" },
+  ]);
+  near(bothNames.frontLoad, 0.9, 1e-9, "call_gex takes precedence over call_gamma");
 }
 
 /* ---------- effective breadth ----------------------------------- */
