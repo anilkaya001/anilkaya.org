@@ -47,7 +47,12 @@ const BASE = "https://api.unusualwhales.com";
 const UNIVERSE = {
   minPrice: 5,               // sub-$5 names have percentage spreads that eat the spread
   minMarketCap: 1e9,         // below this, options are too thin to exit
-  minDollarVolume: 5e7,      // the $50M ADV floor the cost model depends on
+  // The $50M ADV floor the cost model depends on. It canNOT be applied here:
+  // /api/screener/stocks returns options volume only and never absolute stock
+  // volume, so there is no way to compute dollar ADV from the one universe
+  // call. It is enforced after enrichment instead, from the ohlc/1d candles
+  // that are fetched anyway for ATR. See dollarVolume in computeFeatures.
+  minDollarVolume: 5e7,
   minOptionVolume: 1000,     // fewer contracts than this and per-name greeks are noise
   minOpenInterest: 5000,
   excludeIssueTypes: ["ETF", "Index", "ADR"],   // index flow is not single-name conviction
@@ -210,6 +215,21 @@ async function enrich(ticker, spot) {
   return computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc });
 }
 
+/**
+ * Median daily dollar volume over the candle window. Median rather than mean
+ * so a single earnings-day volume spike cannot lift an otherwise illiquid
+ * name over the floor.
+ */
+function medianDollarVolume(candles) {
+  const values = (candles || [])
+    .map((c) => num(c.close) * num(c.volume))
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  if (!values.length) return 0;
+  const mid = values.length >> 1;
+  return values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+}
+
 /** Wilder's ATR(14) — the sigma unit for distance-to-spot. */
 function atr14(candles) {
   const rows = (candles || []).slice(-40).map((c) => ({
@@ -236,6 +256,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries);
+  const dollarVolume = medianDollarVolume(ohlc);
 
   const flipDist = gamma.flip && spot > 0 ? (gamma.flip - spot) / spot : null;
 
@@ -243,6 +264,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     ticker,
     spot,
     atr,
+    dollarVolume,
     purity: purity.purity,
     dirDelta: purity.dirDelta,
     otmShare: quality.otmShare,
@@ -549,6 +571,7 @@ function fakeEnrichment(ticker, spot, seed) {
       open: open.toFixed(2), close: px.toFixed(2),
       high: (Math.max(open, px) * 1.008).toFixed(2),
       low: (Math.min(open, px) * 0.992).toFixed(2),
+      volume: Math.round((3e6 + rnd() * 2e7)),
     };
   });
 
@@ -627,22 +650,40 @@ async function main() {
     );
   }
 
-  // 5. Score.
+  // A board thinner than this is not worth showing: the cross-section it was
+  // ranked against is no longer meaningful.
+  const MIN_ROWS = 10;
+
+  // 5. THE LIQUIDITY FLOOR, applied here because the screener cannot supply it.
+  //    Below ~$50M median daily dollar volume, round-trip cost is 40-100 bp
+  //    against a gross 10-day decile spread of 30-80 bp — the edge is gone.
+  //    A name with no usable candles reports 0 and is dropped rather than
+  //    waved through, because an unknown liquidity is not a passing one.
+  const liquid = enriched.filter((e) => e.features.dollarVolume >= UNIVERSE.minDollarVolume);
+  const dropped = enriched.length - liquid.length;
+  console.log(
+    `liquidity floor: ${liquid.length}/${enriched.length} clear ` +
+    `$${(UNIVERSE.minDollarVolume / 1e6).toFixed(0)}M median daily dollar volume` +
+    (dropped ? ` (${dropped} dropped)` : ""),
+  );
+  if (liquid.length < 2 * MIN_ROWS) {
+    throw new Error(
+      `only ${liquid.length} names clear the liquidity floor — publishing nothing ` +
+      `rather than a board of names that cannot be traded at these costs`,
+    );
+  }
+
+  // 6. Score.
   const scored = scoreBoard(
-    enriched.map((e) => e.features),
-    enriched.map((e) => e.tilt),
-    enriched.map((e) => e.row.sector || ""),
-    enriched.map((e) => num(e.row.marketcap)),
+    liquid.map((e) => e.features),
+    liquid.map((e) => e.tilt),
+    liquid.map((e) => e.row.sector || ""),
+    liquid.map((e) => num(e.row.marketcap)),
   );
 
-  // 6. Publish both sides.
+  // 7. Publish both sides.
   const generatedAt = new Date().toISOString();
   const sides = partitionSides(scored);
-
-  // A board thinner than this is not worth showing: it means enrichment
-  // degraded badly enough that the cross-section it was ranked against is
-  // no longer meaningful.
-  const MIN_ROWS = 10;
   for (const side of ["long", "short"]) {
     if (sides[side].length < MIN_ROWS) {
       throw new Error(
@@ -672,7 +713,7 @@ async function main() {
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 }
 
-export { partitionSides, screenerTilt, eligible, atr14, daysToEarnings };
+export { partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume };
 
 // Only run when invoked directly. Without this guard, importing the module —
 // which the contract tests do, to exercise partitionSides — would fire the

@@ -407,6 +407,33 @@ const near = (a, b, tol, msg) => {
     ok(long.length + short.length <= n, `pool of ${n} is not double-counted`);
   }
 
+  /* The liquidity floor. It is declared in the pipeline's UNIVERSE block and
+     was, for a while, declared and never applied — the screener returns
+     options volume only and never absolute stock volume, so it cannot be
+     enforced at universe-construction time. It is enforced after enrichment
+     instead, from the ohlc candles fetched anyway for ATR. */
+  {
+    const { medianDollarVolume } = await import("../scripts/flows-pipeline.mjs");
+
+    near(medianDollarVolume([{ close: "10", volume: 100 }]), 1000, 1e-9,
+         "a single candle yields its own dollar volume");
+    near(medianDollarVolume([
+      { close: "10", volume: 100 }, { close: "10", volume: 300 },
+    ]), 2000, 1e-9, "an even count averages the middle pair");
+
+    // Median, not mean: one earnings-day spike must not lift an illiquid name.
+    const spiky = [
+      ...Array.from({ length: 20 }, () => ({ close: "10", volume: 1000 })),
+      { close: "10", volume: 100000000 },
+    ];
+    near(medianDollarVolume(spiky), 10000, 1e-9,
+         "a single volume spike cannot drag the median over the floor");
+
+    near(medianDollarVolume([]), 0, 0, "no candles reports zero, not a pass");
+    near(medianDollarVolume([{ close: "0", volume: 0 }]), 0, 0, "zero volume reports zero");
+    near(medianDollarVolume(null), 0, 0, "null candles are safe");
+  }
+
   const scored = Array.from({ length: 60 }, (_, i) => ({ ticker: "T" + i, score: 100 - i * 4 }));
   const { long, short } = partitionSides(scored);
   ok(long[0].score > long[long.length - 1].score, "the long side is ordered best-first");
