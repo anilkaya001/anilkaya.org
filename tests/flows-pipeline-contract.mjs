@@ -262,6 +262,30 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(medianDollarVolume(quiet) < 5e7, "a single volume spike cannot clear the floor");
   ok(medianDollarVolume([]) === 0, "no candles reports no volume rather than a guess");
 
+  /* THE RECENT WINDOW, not the whole series. The candle request went from two
+     months to a year — for the sparkline, the 52-week range and the realized-vol
+     baseline, all free in the same call — and silently took the liquidity floor
+     with it. A year-old median is more robust statistically and less true
+     operationally: the floor exists to say whether a name can be traded at these
+     costs TODAY. */
+  const day = (i, volume) => ({
+    start_time: new Date(Date.UTC(2026, 0, 1) + i * 86400000).toISOString(),
+    close: "10", volume,
+  });
+  // $100M a day for most of the year, collapsed to $1M a quarter ago.
+  const faded = [
+    ...Array.from({ length: 190 }, (_, i) => day(i, 10_000_000)),
+    ...Array.from({ length: 62 }, (_, i) => day(190 + i, 100_000)),
+  ];
+  ok(medianDollarVolume(faded) < 5e7,
+     `a name whose liquidity collapsed a quarter ago fails the floor ` +
+     `(got $${(medianDollarVolume(faded) / 1e6).toFixed(1)}M)`);
+  ok(medianDollarVolume(faded, { window: 1e9 }) > 5e7,
+     "while the whole-series median would still wave it through, which is the bug");
+  // Order must not matter: the window is the last N SESSIONS, not the last N rows.
+  ok(medianDollarVolume(faded.slice().reverse()) === medianDollarVolume(faded),
+     "and the window is taken by date, so a newest-first response reads the same");
+
   ok(eligible({ close: "50", marketcap: "5e9", call_volume: 800, put_volume: 800,
                 total_open_interest: 20000, issue_type: "Common Stock" }),
      "a liquid common stock is eligible");

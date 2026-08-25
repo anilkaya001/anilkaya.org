@@ -460,8 +460,25 @@ function easternNow(at = new Date()) {
  * so a single earnings-day volume spike cannot lift an otherwise illiquid
  * name over the floor.
  */
-function medianDollarVolume(candles) {
-  const values = (candles || [])
+function medianDollarVolume(candles, { window = 60 } = {}) {
+  /* THE RECENT WINDOW, not the whole series.
+
+     This used to take the median over every candle it was handed, which was a
+     two-month request. The candle window then went to a year — for the
+     sparkline, the 52-week range and the realized-vol baseline, all free in the
+     same call — and silently took the liquidity floor with it.
+
+     That is the wrong direction for THIS measure. A year-old median is more
+     robust statistically and less true operationally: the floor exists to say
+     whether a name can be traded at these costs TODAY, and a name whose volume
+     halved six months ago would still clear it on the strength of what it used
+     to do. Sixty sessions is about a quarter — long enough that one event week
+     cannot carry it, recent enough to describe the book a reader would actually
+     be trading into.
+
+     Median rather than mean for the same reason as before: a single
+     halt-and-resume spike must not lift an illiquid name over the floor. */
+  const values = candlesAscending(candles).slice(-window)
     .map((c) => num(c.close) * num(c.volume))
     .filter((v) => v > 0)
     .sort((a, b) => a - b);
@@ -520,7 +537,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
-  const dollarVolume = medianDollarVolume(ohlc);
+  const dollarVolume = medianDollarVolume(ohlc);   // last 60 sessions, not the year
 
   const closes = candlesAscending(ohlc).map((c) => num(c.close));
   /* 21 SESSIONS, NOT 30, because the implied leg is a THIRTY-CALENDAR-DAY
