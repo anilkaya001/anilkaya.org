@@ -743,6 +743,22 @@ const near = (a, b, tol, msg) => {
   const flat = qualityGate([[1, 1, 1, 1, 1]]);
   ok(flat.every((v) => v === 1), "a modifier with no dispersion changes nothing");
 
+  /* AND WHEN EVERY AXIS IS DEAD, the gate must still have ONE ENTRY PER NAME.
+     Deriving the length from the surviving columns returned [] in that case, so
+     the caller's `blended.map((b, i) => b * gate[i])` multiplied by undefined
+     and every composite on the board became NaN. boundedScore turns each NaN
+     into 0, so the symptom is not a visible NaN: it is a board where every
+     score is zero, every name falls inside the dead band, and the run publishes
+     nothing. Reachable — gammaFrontLoad was null on all 34 live names once. */
+  const allDead = qualityGate([[null, null, null, null, null], [7, 7, 7, 7, 7]]);
+  ok(allDead.length === 5, `a dead gate still has one entry per name (got ${allDead.length})`);
+  ok(allDead.every((v) => v === 1), "and every entry is neutral, so the composite passes through");
+  const blendedDark = [0.5, -0.3, 1.2, -0.9, 0.1];
+  ok(blendedDark.map((b, i) => b * allDead[i]).every(Number.isFinite),
+     "so no composite becomes NaN when the quality axes go dark");
+  ok(qualityGate([]).length === 0, "no axes at all is still an empty cross-section");
+  ok(qualityGate([[], []]).length === 0, "and so are empty columns");
+
   // And a gate can never flip a sign, which the additive form could.
   const signal = [-3, -1, 1, 3, 5];
   const gated = signal.map((v, i) => v * oneAxis[i]);

@@ -550,46 +550,115 @@
   /* ---------- the priced move ---------------------------------------- */
 
   /**
-   * The band the option market has already quoted.
+   * WHAT THE OPTION MARKET PRICES OVER A FIXED HORIZON, against what the stock
+   * has been delivering over the same one.
    *
    * This is a PRICE, not a prediction, and the panel is built so it cannot be
-   * read as one: no point target, no direction, no probability. The horizon is
-   * the expiry the vendor quoted rather than a round number of days, because
-   * relabelling a quoted-expiry number as a fixed horizon silently rescales it
-   * by the ratio of the two maturities, differently for every name.
+   * read as one: no point target, no direction, no probability.
+   *
+   * TWO BANDS, and only the fixed-horizon one is a cross-section. The vendor's
+   * own implied_move_perc is quoted to each name's NEXT LISTED EXPIRY, so it is
+   * a different horizon for every name — measured on this board, one name quoted
+   * 7.1% to an expiry four days out while its ten-session move was 13.0%. Two
+   * such numbers side by side on a board are not comparable, so the headline
+   * band scales 30-day implied volatility to a stated number of trading
+   * sessions, which is the same horizon for everyone. The vendor's quote is
+   * still drawn, marked with its own expiry, because it is a real quote.
+   *
+   * The gap between the implied band and the realized band IS the variance risk
+   * premium, in the units a reader sizes in rather than in vol points.
    */
   function renderMove(host, panel) {
-    const question = "What move has the option market already priced, and is that band rich or cheap?";
+    const question =
+      "What move is priced over a fixed horizon, and is that band rich against " +
+      "what this stock has actually been delivering?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
     panelHead(host, question);
 
-    const W = 560, H = 92, padL = 16, padR = 16;
-    const plotW = W - padL - padR;
+    const spot = isNum(panel.spot);
+    const imp = isNum(panel.impliedMove);
+    const real = isNum(panel.realizedMove);
+    const quoted = isNum(panel.movePerc);
+    const sessions = isNum(panel.sessions) ?? 10;
+
+    // The widest band sets the scale; everything else is drawn against it, so
+    // the implied and realized bands are directly comparable by ink.
+    const widest = Math.max(imp ?? 0, real ?? 0, quoted ?? 0);
+    if (!(widest > 0) || spot === null) {
+      return deadPanel(host, question, "no band could be measured");
+    }
+
+    const W = 560, H = 118, padX = 16;
+    const plotW = W - padX * 2;
+    const mid = padX + plotW / 2;
+    // 0.44 rather than 0.5 leaves room for the price labels at each extreme.
+    const halfOf = (m) => (m / widest) * (plotW * 0.44);
+
     const svg = svgEl("svg", {
       class: "pm", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
       role: "img", preserveAspectRatio: "xMidYMid meet",
     });
 
-    const mid = padL + plotW / 2;
-    const half = plotW * 0.42;
-    svg.append(svgEl("rect", { class: "pm-band", x: mid - half, y: 26, width: half * 2, height: 22, rx: 3 }));
-    svg.append(svgEl("line", { class: "pm-spot", x1: mid, x2: mid, y1: 18, y2: 56 }));
-    for (const [x, txt, cls] of [
-      [mid - half, px2(panel.low), "is-low"],
-      [mid, px2(panel.spot), "is-spot"],
-      [mid + half, px2(panel.high), "is-high"],
-    ]) {
-      const t = svgEl("text", { class: "pm-lab " + cls, x, y: 16, "text-anchor": "middle" });
-      t.textContent = txt;
+    if (imp !== null) {
+      const h = halfOf(imp);
+      svg.append(svgEl("rect", { class: "pm-band is-implied", x: mid - h, y: 34, width: h * 2, height: 30, rx: 3 }));
+      for (const [x, txt] of [[mid - h, px2(panel.impliedLow)], [mid + h, px2(panel.impliedHigh)]]) {
+        const t = svgEl("text", { class: "pm-lab", x, y: 26, "text-anchor": "middle" });
+        t.textContent = txt;
+        svg.append(t);
+      }
+    }
+
+    /* The realized band is drawn INSIDE the implied one. The visible gap is the
+       variance risk premium; when the realized band overflows the implied one,
+       the premium is negative and the reader sees that directly. */
+    if (real !== null) {
+      const h = halfOf(real);
+      svg.append(svgEl("rect", { class: "pm-band is-realized", x: mid - h, y: 41, width: h * 2, height: 16, rx: 2 }));
+    }
+
+    // The vendor's own quote, as a reference pair rather than a band, because
+    // its horizon is not this panel's horizon.
+    if (quoted !== null && panel.horizonExpiry) {
+      const h = halfOf(quoted);
+      for (const x of [mid - h, mid + h]) {
+        svg.append(svgEl("line", { class: "pm-quote", x1: x, x2: x, y1: 30, y2: 68 }));
+      }
+      /* Anchored to the plot's right edge rather than to the tick it labels.
+         halfOf() caps a band at 44% of the plot, so a tick can sit at x = 528
+         on a 560-unit canvas and a label starting there runs clean off the
+         viewBox — silently, because the SVG clips it. */
+      const t = svgEl("text", { class: "pm-quotelab", x: W - padX, y: 78, "text-anchor": "end" });
+      t.textContent = "quoted to " + panel.horizonExpiry;
       svg.append(t);
     }
-    const cap = svgEl("text", { class: "pm-axis", x: mid, y: 72, "text-anchor": "middle" });
-    cap.textContent = "±" + (panel.movePerc * 100).toFixed(1) + "% to " + (panel.horizonExpiry || "the quoted expiry") +
-      (isNum(panel.horizonDays) !== null ? "  ·  " + panel.horizonDays + " calendar days" : "");
+
+    svg.append(svgEl("line", { class: "pm-spot", x1: mid, x2: mid, y1: 28, y2: 70 }));
+    const st = svgEl("text", { class: "pm-lab is-spot", x: mid, y: 26, "text-anchor": "middle" });
+    st.textContent = px2(spot);
+    svg.append(st);
+
+    const cap = svgEl("text", { class: "pm-axis", x: mid, y: H - 8, "text-anchor": "middle" });
+    cap.textContent = imp !== null
+      ? `±${(imp * 100).toFixed(1)}% priced over ${sessions} sessions` +
+        (real !== null ? `  ·  ±${(real * 100).toFixed(1)}% delivered` : "")
+      : `±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonExpiry || "the next expiry"}`;
     svg.append(cap);
+
     svg.setAttribute("aria-label",
-      `The option market prices a move of plus or minus ${(panel.movePerc * 100).toFixed(1)} percent ` +
-      `to ${panel.horizonExpiry || "the quoted expiry"}, a band from ${px2(panel.low)} to ${px2(panel.high)}.`);
+      (imp !== null
+        ? `Over ${sessions} trading sessions the option market prices a move of plus or ` +
+          `minus ${(imp * 100).toFixed(1)} percent, a band from ${px2(panel.impliedLow)} to ` +
+          `${px2(panel.impliedHigh)}. `
+        : "") +
+      (real !== null
+        ? `This stock has delivered plus or minus ${(real * 100).toFixed(1)} percent over the ` +
+          `same horizon. `
+        : "") +
+      (quoted !== null && panel.horizonExpiry
+        ? `The vendor separately quotes plus or minus ${(quoted * 100).toFixed(1)} percent to ` +
+          `${panel.horizonExpiry}, a different horizon.`
+        : ""));
     host.append(svg);
 
     host.append(statList([
@@ -601,15 +670,18 @@
     ]));
 
     host.append(el("p", "fc-note",
-      "THIS IS A PRICE, NOT A FORECAST. The implied move is what the at-the-money " +
-      "contracts cost, so it is what someone would have to pay to be long that move " +
-      "— a risk-neutral quantity, not an expectation of where the stock goes. " +
-      "The variance risk premium beside it is the one comparative statement the data " +
-      "supports: implied 30-day volatility minus the volatility this stock has " +
-      "actually delivered over the last 30 sessions. Positive means the band is " +
-      "expensive against recent history. " +
-      "NOT CLAIMED: a direction, a probability, a point target, or that the stock " +
-      "will stay inside the band."));
+      `THIS IS A PRICE, NOT A FORECAST. The wide band is 30-day implied volatility ` +
+      `scaled to ${sessions} trading sessions by the square-root-of-time rule, which ` +
+      `is exact whenever successive returns are uncorrelated — no fitted parameter, ` +
+      `every input observable, and an assumption the term structure of implied ` +
+      `volatility openly disagrees with. The inner band is the ` +
+      `volatility this stock has actually delivered over its last 30 sessions, scaled ` +
+      `the same way, so the gap between them is the variance risk premium in price ` +
+      `units. The vendor's own quote is marked separately because it is priced to ` +
+      `this name's next listed expiry, which is a different horizon for every name and ` +
+      `therefore not comparable across the board. ` +
+      `NOT CLAIMED: a direction, a probability, a point target, or that the stock will ` +
+      `stay inside any of these bands.`));
   }
 
   /* ---------- price context ------------------------------------------ */
@@ -837,9 +909,16 @@
     const weights = card.weights || {};
     const wTotal = Object.values(weights).reduce((a, w) => a + (isNum(w) || 0), 0);
 
+    /* A CARD FROM BEFORE THE GAUGES EXISTED must not have its numbers redrawn
+       under the new meaning. In v1, fam.V and fam.O were signed votes; drawn as
+       gauges, a published 53 becomes a 53%-full bar labelled "no direction" and
+       a published -22 becomes a negative width under the number -22. F, P and D
+       did not change meaning and still render. */
+    const legacy = (isNum(card.v) ?? 1) < 2;
+
     const list = el("ul", "fc-fam");
     for (const axis of AXES) {
-      const v = isNum(card.fam[axis.k]);
+      const v = legacy && !axis.signed ? null : isNum(card.fam[axis.k]);
       const li = el("li", (axis.signed ? "is-signed " : "is-gauge ") +
         (v === null ? "is-null" : !axis.signed ? "is-pos" : v < 0 ? "is-neg" : "is-pos"));
       li.append(el("span", "fc-fam-k", axis.k));
@@ -865,7 +944,8 @@
         w.textContent = " " + Math.round((weights[axis.k] / wTotal) * 100) + "% of the blend";
         lab.append(w);
       } else if (!axis.signed) {
-        lab.append(el("span", "fc-fam-w", " gauge — no direction"));
+        lab.append(el("span", "fc-fam-w",
+          legacy ? " not published on this card" : " gauge — no direction"));
       }
       lab.title = axis.blurb;
       li.append(lab);
@@ -884,15 +964,25 @@
       ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
     ]));
 
+    if (legacy) {
+      host.append(el("p", "fc-note",
+        "This card was built before the volatility and quality readings became " +
+        "gauges, so those two are shown as unavailable rather than redrawn under " +
+        "a meaning they did not have. They return on the next published session."));
+    }
+
     host.append(el("p", "fc-note",
       "The three signed axes are blended by EFFECTIVE breadth — a family of five " +
       "columns that all restate the same tape counts as one signal, not five — and " +
       "the blend is then multiplied by the quality gate, which is bounded above by " +
       "two and averages one across the board, so it can amplify or damp a reading " +
       "but never reverse it. The result is neutralised against sector and market cap, " +
-      "then scored against a FIXED unit: two robust sigma from the cross-sectional " +
-      "median is 80, on every session and at every board size. A quiet day therefore " +
-      "prints quiet scores. This is a ranked attention signal, not a return forecast."));
+      "then mapped through a FIXED scale — score = 100·tanh(composite × 0.5493) — so " +
+      "a composite of 2.0 scores 80 on every session and at every board size, and a " +
+      "quiet day prints quiet scores. The composite is a weighted mean of columns each " +
+      "measured in its own median-absolute-deviation units, so 2.0 is two of those, " +
+      "not two standard deviations of anything. This is a ranked attention signal, " +
+      "not a return forecast."));
   }
 
   /* ---------- assembly ---------------------------------------------- */

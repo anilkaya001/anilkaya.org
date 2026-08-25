@@ -605,10 +605,6 @@
 /* ---------- the priced move --------------------------------------- */
 
 .pm { display: block; width: 100%; height: auto; }
-.pm-band {
-  fill: color-mix(in srgb, var(--gold-mystic) 16%, transparent);
-  stroke: var(--hairline);
-}
 .pm-spot { stroke: var(--ink); stroke-width: 1.5; }
 .pm-lab { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 11px; }
 .pm-lab.is-spot { fill: var(--ink); font-weight: 600; }
@@ -1055,3 +1051,20 @@ body.is-stale .flows-tablewrap {
 }
 
 .fd-move { color: var(--ink-dim); white-space: nowrap; }
+
+/* Two bands, one scale. The realized band is drawn inside the implied one, so
+   the visible gap between them IS the variance risk premium. */
+.pm-band.is-implied {
+  fill: color-mix(in srgb, var(--gold-mystic) 16%, transparent);
+  stroke: var(--hairline);
+}
+
+.pm-band.is-realized {
+  fill: color-mix(in srgb, var(--gold-celadon) 30%, transparent);
+  stroke: color-mix(in srgb, var(--gold-celadon) 55%, transparent);
+}
+
+/* The vendor's own quote is a reference pair, not a band: its horizon is not
+   this panel's horizon, so it must not read as a third comparable range. */
+.pm-quote { stroke: var(--ink-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.pm-quotelab { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }

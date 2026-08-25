@@ -27,7 +27,7 @@ import {
   flowPurity, aggressorGamma, bookDisplacement, pathSignature,
   gammaDecayCalendar, positioningQuality, effectiveBreadth,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
-  isLiveColumn, pearson, SCORE_SCALE,
+  isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
   boundedScore, conviction, applyHysteresis,
 } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
@@ -654,6 +654,16 @@ const SIGNED = ["F", "P", "D"];
  */
 const DEAD_BAND = 20;
 
+/**
+ * THE BOARD PAYLOAD'S SCHEMA VERSION, on the same rule as the card's: bump when
+ * a field's MEANING changes. Version 2 is where fam.V and fam.O stopped being
+ * signed votes and became unsigned gauges, and where `s` stopped being a rank
+ * relabeling and became a fixed-unit score. A board published before this
+ * renders its family glyph without those two, rather than drawing a gauge as
+ * though it were a direction.
+ */
+const BOARD_SCHEMA_VERSION = 2;
+
 function scoreBoard(features, tilts, sectors, caps) {
   const n = features.length;
   if (!n) return [];
@@ -998,6 +1008,9 @@ function selectExtremes(ranked, n) {
   return [...picked.values()];
 }
 
+/** Round a horizon move for publication, or pass null straight through. */
+const hz = (v) => (v === null ? null : Number(v.toFixed(4)));
+
 function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
     pool.map((r) => r.ticker), previousIds,
@@ -1032,7 +1045,14 @@ function toRows(pool, screenerByTicker, previousIds) {
       w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
       vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
       ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
+      /* im is the VENDOR'S quote, to this name's own next listed expiry — a
+         different horizon for every row, so it is carried for the card and
+         never set beside another name's. hm is the same volatility scaled to a
+         FIXED number of sessions, which is what makes a column of them a
+         cross-section rather than a list of unrelated numbers. */
       im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
+      hm: hz(horizonMove(r.iv30)),
+      hr: hz(horizonMove(r.rv30)),
     };
   });
 }
@@ -1548,6 +1568,7 @@ async function main() {
     const rows = toRows(sides[side], screenerByTicker, previous[side]);
     published[side] = rows;
     await publish("board:" + side, {
+      v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
       universe: universe.length,
       enriched: enriched.length,
@@ -1560,6 +1581,8 @@ async function main() {
       dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
       deadBand: sides.deadBand,
       neutral: sides.neutral,
+      // The horizon every `hm` and `hr` on this board is stated in.
+      horizonSessions: HORIZON_SESSIONS,
       weights: first.weights || null,
       shareClasses,
       status: rows.length ? "ok" : "thin",
@@ -1663,7 +1686,7 @@ export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
   candlesAscending, selectExtremes, scoreBoard, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
-  computeFeatures, DEAD_BAND,
+  computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

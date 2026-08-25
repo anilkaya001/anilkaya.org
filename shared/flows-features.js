@@ -854,8 +854,23 @@ export function percentileRank(values) {
  * more trustworthy. Returns one multiplier per name.
  */
 export function qualityGate(axes, { floor = 0.2 } = {}) {
-  const live = (axes || []).filter(isLiveColumn);
-  const n = live.length ? live[0].length : 0;
+  const cols = axes || [];
+  /* THE CROSS-SECTION'S SIZE COMES FROM THE INPUT, never from the survivors.
+     Deriving it from the live columns meant that when EVERY axis was dead there
+     was nothing left to measure the length against, so this returned a
+     zero-length array — and the caller's `blended.map((b, i) => b * gate[i])`
+     then multiplied by undefined and produced NaN for every name on the board.
+     boundedScore's own guard turns each NaN into 0, so the symptom is not a
+     visible NaN but a board where every score is zero, every name falls inside
+     the dead band, and the run refuses to publish anything at all.
+
+     Every axis dead is reachable: gammaFrontLoad was null on all thirty-four
+     live names for exactly one such reason, and a thin cross-section can make
+     the rest constant. A neutral gate of one is the right answer there — the
+     composite passes through unmodified — but only if it has one entry per
+     name. */
+  const n = cols.reduce((m, c) => Math.max(m, (c || []).length), 0);
+  const live = cols.filter(isLiveColumn);
   if (!live.length) return new Array(n).fill(1);
 
   const ranks = live.map(percentileRank);
@@ -887,6 +902,48 @@ export function realizedVol(closes, { window = 30, periodsPerYear = 252 } = {}) 
   const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
   const varr = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rets.length - 1);
   return Math.sqrt(Math.max(varr, 0) * periodsPerYear);
+}
+
+/**
+ * THE FORECAST HORIZON, in trading sessions, and the year it is scaled against.
+ *
+ * Ten sessions is two calendar weeks of trading. It is a CHOICE — the data does
+ * not pick it — so it is named once here and published beside every number
+ * derived from it, rather than left implicit in an arithmetic constant.
+ */
+export const HORIZON_SESSIONS = 10;
+export const TRADING_YEAR = 252;
+
+/**
+ * A one-sigma move over `sessions`, from an ANNUALIZED volatility.
+ *
+ * sigma_h = sigma_annual * sqrt(h / 252)
+ *
+ * This is the square-root-of-time rule. It is exact under exactly one
+ * assumption, and it is worth stating the WEAKEST one that suffices rather than
+ * the familiar stronger one: variance must accumulate linearly in time, which
+ * needs only UNCORRELATED increments. Independent and identically distributed
+ * returns give that, but are far more than is required — returns may be
+ * heteroskedastic and non-normal and the rule still holds, provided successive
+ * increments are uncorrelated.
+ *
+ * The assumption is still false in detail: volatility clusters, and a term
+ * structure in implied vol is the option market saying so in its own prices.
+ * But it introduces no fitted parameter, every input is observable, and the
+ * alternative — reading a vol off a different maturity for each name — is the
+ * incomparability this function exists to remove.
+ *
+ * WHY THIS EXISTS BESIDE THE VENDOR'S OWN implied_move_perc. That figure is
+ * quoted to each name's NEXT LISTED EXPIRY, which is a different horizon for
+ * every name: a name expiring tomorrow and one expiring in a month print bands
+ * that are not comparable, and putting them side by side on a board is a
+ * category error. A fixed horizon is what makes a cross-section a cross-section.
+ * Both are published; only this one is comparable.
+ */
+export function horizonMove(annualVol, { sessions = HORIZON_SESSIONS, periodsPerYear = TRADING_YEAR } = {}) {
+  if (!Number.isFinite(annualVol) || annualVol <= 0) return null;
+  if (!(sessions > 0) || !(periodsPerYear > 0)) return null;
+  return annualVol * Math.sqrt(sessions / periodsPerYear);
 }
 
 export function boundedScore(z, scale) {

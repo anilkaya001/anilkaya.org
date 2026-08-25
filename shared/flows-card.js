@@ -35,7 +35,30 @@
       sign.
    ============================================================= */
 
-export const CARD_SCHEMA_VERSION = 1;
+/**
+ * THE CARD'S SCHEMA VERSION, and the one rule for bumping it.
+ *
+ * Bump when a field's MEANING changes, not when a field is added — a renderer
+ * can ignore a field it does not know, but it cannot detect that a number it
+ * already reads now means something else.
+ *
+ * 1 -> 2: fam.V and fam.O were SIGNED family votes in [-100, 100]. They are now
+ * UNSIGNED gauges in [0, 100] — V the volatility regime, O the quality
+ * multiplier — because neither carries a direction and adding an unsigned
+ * magnitude to a signed sum is what made the board rank against its own flow.
+ * The live board carried `"O": 53` under the old meaning and `"O": -22` on
+ * another name; drawn by a v2 renderer those become a 53%-full gauge and a
+ * negative-width bar under the number -22. Cards published before this change
+ * therefore render V and O as absent rather than as numbers whose meaning
+ * silently moved. F, P and D are unchanged and keep rendering.
+ */
+export const CARD_SCHEMA_VERSION = 2;
+
+/* The only import in this module, and it is a pure one: the square-root-of-time
+   scaling and the horizon it is stated in are shared with the scorer, and two
+   copies of a convention are two chances to disagree about it. */
+import { horizonMove, HORIZON_SESSIONS } from "./flows-features.js";
+export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
 export function numOrNull(value) {
@@ -379,27 +402,58 @@ export function buildVol({ iv30, rv30, vrp, ivRank, ivMomentum, impliedMovePerc 
  *    against what this stock has actually been delivering.
  *
  * `horizonExpiry` comes from the max-pain chain, which is the nearest listed
- * expiry — the same one implied_move is quoted to. When it cannot be resolved
- * the band is still published and the horizon reads "unresolved", because a
- * band with an unknown maturity is degraded, not fabricated.
+ * expiry. When it cannot be resolved the quoted band is still published and the
+ * horizon reads "unresolved", because a band with an unknown maturity is
+ * degraded, not fabricated.
+ *
+ * TWO BANDS, and only one of them is a cross-section.
+ *
+ * The vendor's implied_move_perc is quoted to each name's own next listed
+ * expiry, so it is a different horizon for every name — a name expiring
+ * tomorrow and one expiring in a month print bands that cannot be compared, and
+ * setting them side by side on a board is a category error. The FIXED-HORIZON
+ * band scales 30-day implied volatility to a stated number of trading sessions
+ * by the square-root-of-time rule, which is the same horizon for every name.
+ * The realized band does the same to the volatility the stock has actually been
+ * delivering, so the gap between them is the variance risk premium expressed in
+ * the units a reader sizes in.
  */
-export function buildPricedMove({ spot, impliedMovePerc, vrp, iv30, rv30, horizonExpiry, asOf }) {
+export function buildPricedMove({
+  spot, impliedMovePerc, vrp, iv30, rv30, horizonExpiry, asOf,
+  sessions = HORIZON_SESSIONS,
+}) {
   const s = numOrNull(spot);
   const m = numOrNull(impliedMovePerc);
-  if (s === null || !(s > 0) || m === null || !(m > 0)) return unavailable("no quoted implied move");
+  const impliedH = horizonMove(numOrNull(iv30), { sessions });
+  const realizedH = horizonMove(numOrNull(rv30), { sessions });
+  // Either band alone is worth publishing; only both missing is unavailable.
+  if (s === null || !(s > 0)) return unavailable("no spot price");
+  if ((m === null || !(m > 0)) && impliedH === null) return unavailable("no implied volatility");
 
   const days = horizonExpiry && asOf
     ? Math.round((Date.parse(String(horizonExpiry).slice(0, 10) + "T00:00:00Z") -
                   Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z")) / 86400000)
     : null;
 
+  const quoted = m !== null && m > 0;
   return ok({
-    movePerc: Number(m.toFixed(5)),
-    low: Number((s * (1 - m)).toFixed(2)),
-    high: Number((s * (1 + m)).toFixed(2)),
-    spot: s,
+    // --- the vendor's quote, to its own expiry: real, but not comparable ---
+    movePerc: quoted ? Number(m.toFixed(5)) : null,
+    low: quoted ? Number((s * (1 - m)).toFixed(2)) : null,
+    high: quoted ? Number((s * (1 + m)).toFixed(2)) : null,
     horizonExpiry: horizonExpiry || null,
     horizonDays: Number.isFinite(days) ? days : null,
+
+    // --- the fixed horizon, which IS comparable across the board ---
+    sessions,
+    impliedMove: impliedH === null ? null : Number(impliedH.toFixed(5)),
+    impliedLow: impliedH === null ? null : Number((s * (1 - impliedH)).toFixed(2)),
+    impliedHigh: impliedH === null ? null : Number((s * (1 + impliedH)).toFixed(2)),
+    realizedMove: realizedH === null ? null : Number(realizedH.toFixed(5)),
+    realizedLow: realizedH === null ? null : Number((s * (1 - realizedH)).toFixed(2)),
+    realizedHigh: realizedH === null ? null : Number((s * (1 + realizedH)).toFixed(2)),
+
+    spot: s,
     vrp: numOrNull(vrp),
     iv30: numOrNull(iv30),
     rv30: numOrNull(rv30),
@@ -635,6 +689,7 @@ export function buildCard({
         vrp: f.vrp, iv30: f.iv30, rv30: f.rv30,
         horizonExpiry: painRow ? painRow.expiry : null,
         asOf: sessionDate,
+        sessions: HORIZON_SESSIONS,
       }),
       context: buildContext({
         closes: f.closes,

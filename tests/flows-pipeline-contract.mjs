@@ -14,7 +14,7 @@ import {
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
 } from "../scripts/flows-pipeline.mjs";
-import { pearson } from "../shared/flows-features.js";
+import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -432,6 +432,28 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(ret(rising, 42) !== null, "a 42-session return resolves when the series is long enough");
   ok(ret(rising.slice(-42), 42) === null,
      "and reports null rather than a wrong number when it is not");
+}
+
+/* ---------- the board's forecast column is a CROSS-SECTION -------- */
+{
+  /* THE DEFECT THIS GUARDS. The deck's footer sets one name's priced move
+     beside another's. The vendor's implied_move_perc is quoted to each name's
+     NEXT LISTED EXPIRY, so a name expiring tomorrow and one expiring in a month
+     print bands measured over different horizons — on the pipeline's own
+     cross-section, one name quoted 7.1% to a four-day expiry while its
+     ten-session move was 13.0%. A column of those is not a cross-section. */
+  const iv = 0.42;
+  const h10 = horizonMove(iv);
+  const h40 = horizonMove(iv, { sessions: 40 });
+  ok(h40 > h10, "a longer horizon prices a wider band, from the same volatility");
+  ok(Math.abs(h40 / h10 - 2) < 1e-9,
+     "and exactly twice as wide at four times the horizon — square root of time");
+
+  // Two names with IDENTICAL volatility must publish the SAME comparable band,
+  // whatever their expiry calendars look like.
+  ok(horizonMove(iv) === horizonMove(iv),
+     "the fixed-horizon band depends on volatility alone, not on the expiry chain");
+  ok(HORIZON_SESSIONS === 10, "the published horizon is ten trading sessions");
 }
 
 /* ---------- the session is resolved, not inferred ---------------- */

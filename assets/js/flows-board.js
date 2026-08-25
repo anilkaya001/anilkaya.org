@@ -114,6 +114,14 @@
     return td;
   }
 
+  /* Set from the payload on every render. Before version 2, fam.V and fam.O
+     were SIGNED votes rather than unsigned gauges, so a v1 board's V and O must
+     not be drawn on the signed glyph as though nothing had changed. */
+  let legacyFamilies = false;
+  // The horizon every `hm` on the board is stated in, read from the payload
+  // rather than assumed, so the tooltip cannot outlive a change to it.
+  let horizonSessions = null;
+
   function familyCell(fam) {
     const td = document.createElement("td");
     td.className = "c-num";
@@ -122,7 +130,8 @@
     wrap.className = "fb-fam";
     const parts = [];
     for (const k of keys) {
-      const n = isNum(fam && fam[k]);
+      const gauge = k === "V" || k === "O";
+      const n = legacyFamilies && gauge ? null : isNum(fam && fam[k]);
       const i = document.createElement("i");
       i.style.setProperty("--h", n === null ? 0 : Math.min(Math.abs(n) / 100, 1));
       // Sign is drawn as direction from a centre line, not as a colour swap.
@@ -273,12 +282,25 @@
     foot.className = "fd-foot";
     const conv = document.createElement("span");
     conv.textContent = isNum(row.cnv) === null ? DASH : row.cnv + " conv";
-    /* The move the option market has already PRICED to its next expiry. It is
-       the only forward-looking number on this card, it is a price rather than
-       a prediction, and it is labelled "priced" for exactly that reason. */
+    /* The move priced over a FIXED horizon — the same number of sessions for
+       every card on the board. The vendor's own implied_move_perc is quoted to
+       each name's next listed expiry, so a column of those is a column of
+       different horizons: on this board one name quoted 7.1% to an expiry four
+       days out while its ten-session move was 13.0%. Setting two such numbers
+       side by side is a category error, so `im` stays on the card, where its
+       expiry is named, and the deck shows `hm`.
+
+       It is a price, not a prediction, and it is labelled "priced" for exactly
+       that reason. */
     const move = document.createElement("span");
     move.className = "fd-move";
-    move.textContent = isNum(row.im) === null ? "" : "\u00b1" + (row.im * 100).toFixed(1) + "% priced";
+    move.textContent = isNum(row.hm) === null ? "" : "\u00b1" + (row.hm * 100).toFixed(1) + "% priced";
+    if (isNum(row.hm) !== null) {
+      move.title = horizonSessions
+        ? `The option market prices ±${(row.hm * 100).toFixed(1)}% over ${horizonSessions} trading sessions` +
+          (isNum(row.hr) !== null ? `; this name has delivered ±${(row.hr * 100).toFixed(1)}% over the same horizon.` : ".")
+        : "";
+    }
     const reg = document.createElement("span");
     reg.className = row.gRegime === "short" ? "fb-neg" : "";
     reg.textContent = regimeText(row.gRegime);
@@ -288,7 +310,9 @@
     card.setAttribute("aria-label",
       `${row.t}, rank ${row.r != null ? row.r : index + 1}, score ${score === null ? "unavailable" : score}, ` +
       `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}. ` +
-      (isNum(row.im) === null ? "" : `The option market prices plus or minus ${(row.im * 100).toFixed(1)} percent. `) +
+      (isNum(row.hm) === null ? ""
+        : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
+          `${horizonSessions || 10} trading sessions. `) +
       `Open the detail card.`);
     return card;
   }
@@ -488,6 +512,9 @@
         return;
       }
 
+      legacyFamilies = (isNum(payload.v) ?? 1) < 2;
+      horizonSessions = isNum(payload.horizonSessions);
+
       const tableFrag = document.createDocumentFragment();
       rows.forEach((row, i) => tableFrag.append(rowFor(row, i)));
       body.replaceChildren(tableFrag);            // one insertion, 50 rows
@@ -520,7 +547,11 @@
           " inside the ±" + payload.deadBand + " band");
       }
       if (isNum(payload.dispersion) !== null) {
-        parts.push("dispersion " + payload.dispersion.toFixed(2) + "σ");
+        /* This is the 95th percentile of |composite| across the scored pool, not
+           a standard deviation, so it does not get a sigma suffix — a quantile
+           wearing a σ invites a reader to reach for a normal table that does not
+           apply to it. */
+        parts.push("spread " + payload.dispersion.toFixed(2) + " (95th pct)");
       }
       parts.push("built " + when);
       statusEl.textContent = parts.join(" · ") + ".";

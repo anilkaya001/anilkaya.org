@@ -18,7 +18,9 @@ import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
   buildCalendar, buildDisplacement, buildVol, buildPricedMove, buildContext,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
+  HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
+import { horizonMove } from "../shared/flows-features.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -242,6 +244,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const complete = buildCard(full);
   eq(complete.v, CARD_SCHEMA_VERSION, "the card carries its schema version");
+  /* THE VERSION IS A CONTRACT WITH THE RENDERER, not decoration. It moved to 2
+     when fam.V and fam.O stopped being signed votes and became unsigned gauges.
+     Pinning the literal here means a future change to those semantics cannot
+     ship without also moving the number the renderer switches on — which is the
+     only thing standing between a reader and a published 53 redrawn as a
+     53%-full gauge it never meant. */
+  eq(CARD_SCHEMA_VERSION, 2,
+     "schema version 2 is where V and O became unsigned gauges; bump it again " +
+     "if any published field changes MEANING, and teach the renderer the new floor");
   eq(complete.sessionDate, "2026-08-24",
      "THE SESSION, not the run date: a pre-open job reads the previous completed session");
   ok(complete.generatedAt !== complete.sessionDate, "the two dates are distinct fields");
@@ -373,12 +384,49 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      expiry the vendor quoted rather than a round number of days. */
   const pm = buildPricedMove({
     spot: 100, impliedMovePerc: 0.05, vrp: 0.11, iv30: 0.42, rv30: 0.31,
-    horizonExpiry: "2026-09-04", asOf: "2026-08-24",
+    horizonExpiry: "2026-09-04", asOf: "2026-08-24", sessions: 10,
   });
   eq(pm.low, 95, "the band's low is spot times one minus the implied move");
   eq(pm.high, 105, "and its high the mirror");
   eq(pm.horizonDays, 11, "the horizon is measured to the QUOTED expiry");
   eq(pm.horizonExpiry, "2026-09-04", "which is named, not paraphrased as a number of days");
+
+  /* THE FIXED HORIZON, which is the only one of the two bands that is a
+     cross-section. The vendor's implied_move_perc is quoted to each name's own
+     next listed expiry, so a column of those compares different horizons. */
+  eq(pm.sessions, 10, "the horizon is published beside the numbers derived from it");
+  /* 0.42 * sqrt(10/252) = 0.0836662..., published rounded to five decimals, so
+     the tolerance is the rounding granularity and not tighter. */
+  ok(Math.abs(pm.impliedMove - 0.42 * Math.sqrt(10 / 252)) < 1e-5,
+     `the fixed-horizon move is the square-root-of-time scaling (got ${pm.impliedMove})`);
+  ok(Math.abs(pm.realizedMove - 0.31 * Math.sqrt(10 / 252)) < 1e-5,
+     "and the realized band uses the same rule, so the two are comparable");
+  ok(pm.impliedMove > pm.realizedMove,
+     "a positive variance risk premium means the priced band is wider than the delivered one");
+  ok(Math.abs((pm.impliedHigh - pm.impliedLow) / 2 / 100 - pm.impliedMove) < 1e-4,
+     "the published prices agree with the published fraction");
+
+  ok(Math.abs(horizonMove(0.42, { sessions: 252 }) - 0.42) < 1e-12,
+     "a full year of sessions returns the annual figure unchanged");
+  ok(horizonMove(0.42, { sessions: 40 }) > horizonMove(0.42, { sessions: 10 }),
+     "and a longer horizon is a wider band");
+  ok(horizonMove(null) === null && horizonMove(0) === null && horizonMove(-1) === null,
+     "a missing or non-positive vol has no horizon move, rather than zero");
+  ok(horizonMove(0.4, { sessions: 0 }) === null, "and neither does a zero horizon");
+  ok(HORIZON_SESSIONS > 0, "the default horizon is a positive number of sessions");
+
+  /* THE TWO BANDS ARE INDEPENDENT. A name with no vendor quote still gets the
+     comparable band, and a name with no implied vol still gets the quote. */
+  const noQuote = buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.42, rv30: 0.2, asOf: "2026-08-24" });
+  eq(noQuote.status, "ok", "no vendor quote is not a dead panel when implied vol is present");
+  eq(noQuote.movePerc, null, "the quoted band is withheld");
+  ok(noQuote.impliedMove > 0, "while the fixed-horizon band is published");
+  const noIv = buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: null, rv30: null, asOf: "2026-08-24" });
+  eq(noIv.status, "ok", "and the reverse");
+  eq(noIv.impliedMove, null, "with the fixed-horizon band withheld");
+  ok(noIv.movePerc > 0, "and the quote published");
+  ok(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: null }).status === "unavailable",
+     "neither band means no panel");
   eq(pm.richness, "rich", "a positive variance risk premium is a rich band");
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: -0.04, asOf: "2026-08-24" }).richness,
      "cheap", "and a negative one a cheap band");
