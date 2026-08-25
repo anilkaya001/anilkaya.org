@@ -698,6 +698,17 @@ try {
     eq(await page.locator("#deskGripY").getAttribute("aria-orientation"), "horizontal",
        "and the height grip as a horizontal one");
 
+    /* THE CORNER BORROWS NO ROLE. It answers arrow keys, and every role that
+       fits its shape promises something else: button promises Enter and Space,
+       separator carries a single orientation, slider is one-dimensional. A
+       focusable element whose label states the interaction is honest where a
+       borrowed role is a promise the handle breaks. */
+    eq(await page.locator("#deskGripXY").getAttribute("role"), null,
+       "the corner claims no role it cannot honour");
+    const cornerLabel = await page.locator("#deskGripXY").getAttribute("aria-label");
+    ok(cornerLabel && /arrow keys/i.test(cornerLabel),
+       `and its label says how to work it (${cornerLabel})`);
+
     const size = () => page.evaluate(() => ({
       w: Math.round(document.getElementById("deskPane").getBoundingClientRect().width),
       h: Math.round(document.getElementById("deskTableWrap").getBoundingClientRect().height),

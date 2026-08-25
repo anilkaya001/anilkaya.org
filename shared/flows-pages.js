@@ -494,8 +494,14 @@ ${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
     <div class="desk-grip desk-grip--y" id="deskGripY" role="separator"
          aria-orientation="horizontal" aria-label="Pane height" tabindex="0"
          aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
-    <div class="desk-grip desk-grip--xy" id="deskGripXY" role="button" tabindex="0"
-         aria-label="Pane size, both axes"></div>
+    <!-- NO ROLE, deliberately. role="button" was wrong: a button promises
+         Enter and Space activation, and this handle answers arrow keys. There
+         is no ARIA role for a two-axis resize handle — separator carries an
+         orientation and slider is one-dimensional — so it is a focusable
+         element whose label says what the keys do, which is honest where a
+         borrowed role is a promise it breaks. -->
+    <div class="desk-grip desk-grip--xy" id="deskGripXY" tabindex="0"
+         aria-label="Pane size, both axes — arrow keys resize width and height"></div>
     <button type="button" class="desk-grip-reset" id="deskGripReset" hidden>Reset size</button>
   </div>
 
