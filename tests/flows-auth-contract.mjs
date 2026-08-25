@@ -15,7 +15,7 @@ import {
   FLOWS_AUDIENCE, LEARN_AUDIENCE, FLOWS_COOKIE, FLOWS_USERNAMES,
   PBKDF2_ITERATIONS, deriveHash, timingSafeEqual, parseCredentials,
   verifyCredential, signFlowsSession, verifyFlowsSession, isLearnAudience,
-  LOCKOUT, isLocked, nextFailureState,
+  LOCKOUT, isLocked, nextFailureState, sessionEpoch, DEFAULT_SESSION_EPOCH,
 } from "../shared/flows-auth.js";
 
 let checks = 0;
@@ -186,6 +186,40 @@ const PASSWORD = "Ankara06**--";
 
   const rolled = nextFailureState({ failures: 7, first_at: stale }, now);
   ok(rolled.failures === 1, "a stale window resets the count");
+}
+
+/* ---------- session revocation ----------------------------------
+   Sign-out only clears the cookie; a copied cookie value kept working
+   for the full 14-day TTL, and DEPLOY.md documented a pepper rotation
+   as the way to force sign-out. It is not: the pepper is used for
+   credential derivation and never touches session verification. The
+   epoch is the actual revocation lever. */
+{
+  ok(DEFAULT_SESSION_EPOCH === "1", "an unset epoch binding is a stable default, not undefined");
+  ok(sessionEpoch({}) === "1", "a missing binding falls back to the default");
+  ok(sessionEpoch({ FLOWS_SESSION_EPOCH: "" }) === "1", "an empty binding falls back");
+  ok(sessionEpoch({ FLOWS_SESSION_EPOCH: "7" }) === "7", "a set binding is honoured");
+  ok(sessionEpoch(null) === "1", "a null env is safe");
+
+  const t1 = await signFlowsSession("anilkaya", SECRET, 3600, "1");
+  ok((await verifyFlowsSession(t1, SECRET, "1")).username === "anilkaya",
+     "a session verifies against its own epoch");
+  ok(await verifyFlowsSession(t1, SECRET, "2") === null,
+     "THE REVOCATION LEVER: bumping the epoch invalidates an outstanding session");
+
+  // A token minted before epochs existed carries none at all.
+  const epochless = await signSession(
+    { sub: "anilkaya", aud: FLOWS_AUDIENCE, exp: Date.now() + 60000 }, SECRET,
+  );
+  ok(await verifyFlowsSession(epochless, SECRET, "1") === null,
+     "a token predating epochs is refused rather than silently accepted");
+
+  // The epoch must not become a way to smuggle a wrong audience through.
+  const wrongAud = await signSession(
+    { sub: "anilkaya", aud: "learn", epoch: "1", exp: Date.now() + 60000 }, SECRET,
+  );
+  ok(await verifyFlowsSession(wrongAud, SECRET, "1") === null,
+     "a correct epoch does not excuse a wrong audience");
 }
 
 console.log(`✓ flows-auth: ${checks} assertions — roster, peppered PBKDF2, timing-safe verify, bidirectional session isolation with legacy tolerance, lockout`);

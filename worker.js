@@ -5,9 +5,9 @@
    ============================================================= */
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import {
-  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE,
+  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, FLOWS_USERNAMES,
   parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
-  isLearnAudience, isLocked, nextFailureState,
+  isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES } from "./shared/flows-pages.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
@@ -218,18 +218,22 @@ function requireGoogleConfig(env) {
   }
 }
 
-async function readJSON(request) {
-  const contentType = request.headers.get("Content-Type") || "";
-  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
-  if (mediaType !== "application/json") {
-    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
-  }
-
+/**
+ * Read a request body with a HARD byte cap, stopping the moment it is
+ * exceeded.
+ *
+ * Content-Length is a claim, not a fact: a chunked request simply omits it,
+ * and `Number(null || 0)` is 0, which passes any `> limit` guard. Checking the
+ * header alone therefore caps nothing at all — the body still materialises in
+ * full before anything truncates it. The header check below is kept only as a
+ * cheap early rejection; the loop is what actually enforces the limit.
+ */
+async function readBounded(request, maxBytes, message) {
   const declared = Number(request.headers.get("Content-Length"));
-  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) {
-    throw new HttpError(413, "payload_too_large", "JSON body is too large");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new HttpError(413, "payload_too_large", message);
   }
-  if (!request.body) throw new HttpError(400, "invalid_json", "A JSON body is required");
+  if (!request.body) return new Uint8Array(0);
 
   const reader = request.body.getReader();
   const chunks = [];
@@ -238,16 +242,33 @@ async function readJSON(request) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_JSON_BYTES) {
-      await reader.cancel();
-      throw new HttpError(413, "payload_too_large", "JSON body is too large");
+    if (total > maxBytes) {
+      // Stop reading and throw. Do NOT cancel the stream: cancelling a request
+      // body tears the connection down rather than delivering this 413, and a
+      // caller that gets a reset instead of a status learns nothing. Every
+      // other early-return route here abandons the body the same way, and the
+      // runtime discards the remainder when the request ends. The cap is
+      // enforced by not reading further, which is what actually bounds memory.
+      throw new HttpError(413, "payload_too_large", message);
     }
     chunks.push(value);
   }
-
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
+async function readJSON(request) {
+  const contentType = request.headers.get("Content-Type") || "";
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
+    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
+  }
+
+  if (!request.body) throw new HttpError(400, "invalid_json", "A JSON body is required");
+
+  const bytes = await readBounded(request, MAX_JSON_BYTES, "JSON body is too large");
   try {
     const value = JSON.parse(new TextDecoder().decode(bytes));
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
@@ -891,18 +912,14 @@ async function loadAcademyBootstrapSnapshot(env, user) {
 async function currentFlowsUser(request, env) {
   const token = getCookie(request, FLOWS_COOKIE);
   if (!token || !env.SESSION_SECRET) return null;
-  return verifyFlowsSession(token, env.SESSION_SECRET);
+  return verifyFlowsSession(token, env.SESSION_SECRET, sessionEpoch(env));
 }
 
 // Bounded form read. A login body is a few dozen bytes; anything larger
 // is not a login and is refused before it reaches the KDF.
 async function readFlowsForm(request) {
-  const declared = Number(request.headers.get("Content-Length") || 0);
-  if (Number.isFinite(declared) && declared > 4096) {
-    throw new HttpError(413, "payload_too_large", "Request body too large");
-  }
-  const text = (await request.text()).slice(0, 4096);
-  return new URLSearchParams(text);
+  const bytes = await readBounded(request, 4096, "Request body too large");
+  return new URLSearchParams(new TextDecoder().decode(bytes));
 }
 
 function flowsLoginResponse(message) {
@@ -932,6 +949,27 @@ async function ensureFlowsTables(env) {
   } catch { /* a read will simply return nothing; never fail a request on this */ }
 }
 
+/**
+ * The throttle key.
+ *
+ * Keying on the username alone was wrong twice over. The roster is hardcoded
+ * in a PUBLIC repository, so anyone can read all eleven names: eight wrong
+ * passwords would lock a real user out of the section for fifteen minutes,
+ * repeatable indefinitely. And the raw submitted string was used as a primary
+ * key, so an attacker could mint unbounded rows in a database whose free-tier
+ * write budget is shared with the live learning app.
+ *
+ * Both are fixed by scoping the key to the CALLER as well as the account, and
+ * by refusing to store anything for a username that is not on the roster — an
+ * off-roster attempt can never succeed, so there is nothing worth counting.
+ */
+function flowsThrottleKey(request, username) {
+  if (!FLOWS_USERNAMES.includes(username)) return null;
+  // CF-Connecting-IP is set by the edge and cannot be spoofed by the client.
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  return username + "|" + ip;
+}
+
 async function flowsLockRecord(env, username) {
   if (!username || !env.DB) return null;
   await ensureFlowsTables(env);
@@ -943,6 +981,8 @@ async function flowsLockRecord(env, username) {
 }
 
 async function recordFlowsFailure(env, username, previous) {
+  // username here is a throttle key from flowsThrottleKey(); a null one means
+  // the attempt was off-roster and must not create a row.
   if (!username || !env.DB) return;
   await ensureFlowsTables(env);
   const next = nextFailureState(previous);
@@ -1718,21 +1758,25 @@ async function route(request, env, url, ctx) {
     const username = String(form.get("username") || "").trim().toLowerCase();
     const password = String(form.get("password") || "");
 
-    const locked = await flowsLockRecord(env, username);
+    const throttleKey = flowsThrottleKey(request, username);
+    const locked = await flowsLockRecord(env, throttleKey);
     if (isLocked(locked)) {
       return flowsLoginResponse("Too many attempts. Try again shortly.");
     }
 
     const verified = await verifyCredential(username, password, credentials, env.FLOWS_PEPPER);
     if (!verified) {
-      // Write only on failure: the happy path costs no D1 rows, which
-      // matters against a free-tier budget shared with the learning app.
-      await recordFlowsFailure(env, username, locked);
+      // Write only on failure, and only for a roster username from a known
+      // caller: the happy path costs no D1 rows, and an off-roster attempt
+      // costs none either.
+      await recordFlowsFailure(env, throttleKey, locked);
       return flowsLoginResponse("Those credentials were not recognised.");
     }
 
-    await clearFlowsFailures(env, verified);
-    const session = await signFlowsSession(verified, env.SESSION_SECRET);
+    await clearFlowsFailures(env, throttleKey);
+    const session = await signFlowsSession(
+      verified, env.SESSION_SECRET, FLOWS_SESSION_TTL_SECONDS, sessionEpoch(env),
+    );
     return redirect(origin + "/flows/", 303, [
       cookie(FLOWS_COOKIE, session, { maxAge: FLOWS_SESSION_TTL_SECONDS }),
     ]);
@@ -1777,14 +1821,9 @@ async function route(request, env, url, ctx) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
 
-    const declared = Number(request.headers.get("Content-Length") || 0);
-    if (Number.isFinite(declared) && declared > FLOWS_MAX_PAYLOAD_BYTES) {
-      throw new HttpError(413, "payload_too_large", "Payload too large");
-    }
-    const payload = await request.text();
-    if (payload.length > FLOWS_MAX_PAYLOAD_BYTES) {
-      throw new HttpError(413, "payload_too_large", "Payload too large");
-    }
+    const payload = new TextDecoder().decode(
+      await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"),
+    );
     // Parse once, here, purely to reject malformed JSON at the door — the
     // read path must never parse, so a bad payload would otherwise be served
     // verbatim to the browser and fail there instead.

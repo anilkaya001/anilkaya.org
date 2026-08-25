@@ -322,23 +322,43 @@ audience claim, not the secret, is what separates the two.
 # A high-entropy pepper. Generate it once; never commit it, never reuse it
 # elsewhere. Folded into every password before derivation, so a leaked
 # credential map cannot be attacked offline without it.
-openssl rand -base64 48 | ./tests/node_modules/.bin/wrangler secret put FLOWS_PEPPER
+PEPPER=$(openssl rand -base64 48)
 
-# The per-user hash map. Generate locally with the same pepper:
-node scripts/generate-flows-credentials.mjs
-# then paste its single-line JSON output into:
+# The per-user hash map. The generator reads BOTH secrets from stdin, never
+# from argv: arguments are visible in ps output and are appended verbatim to
+# shell history, which would leave the password and pepper on disk forever.
+printf '%s\n%s\n' "$SHARED_PASSWORD" "$PEPPER" \
+  | node scripts/generate-flows-credentials.mjs
+
+# Then set the three secrets, pasting the JSON line the generator printed:
+./tests/node_modules/.bin/wrangler secret put FLOWS_PEPPER
 ./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS
+./tests/node_modules/.bin/wrangler secret put FLOWS_INGEST_TOKEN
 ```
 
-**The repository is public.** Neither the pepper nor the credential map may ever
-be committed, echoed into CI logs, or pasted into an issue. `generate-flows-credentials.mjs`
-writes nothing to disk for exactly this reason.
+**The repository is public.** None of these values may ever be committed,
+echoed into CI logs, or pasted into an issue.
 
-Rotating the shared password means regenerating `FLOWS_CREDENTIALS` with the
-same pepper and re-putting the secret. Every existing session survives, because
-sessions are signed tokens rather than password material — force a sign-out by
-rotating `FLOWS_PEPPER` as well, which invalidates nothing but stops the old
-password working.
+### Rotating and revoking
+
+These are two different operations and only one of them signs anyone out.
+
+| Goal | Action | Effect on live sessions |
+|---|---|---|
+| Change the password | Regenerate `FLOWS_CREDENTIALS` with the same pepper | **None** — everyone stays signed in |
+| Revoke every session | Bump `FLOWS_SESSION_EPOCH` | All sessions invalid immediately |
+
+```bash
+# Force every user to sign in again. FLOWS_SESSION_EPOCH is an ordinary var,
+# not a secret; any new value works, so incrementing is fine.
+./tests/node_modules/.bin/wrangler secret put FLOWS_SESSION_EPOCH
+```
+
+Rotating `FLOWS_PEPPER` does **not** sign anyone out. The pepper is used for
+credential derivation only and never touches session verification, so an
+already-issued token keeps working for its full 14-day life. Changing the
+password without bumping the epoch means a departing user's existing cookie
+still opens the board for up to two weeks — bump the epoch as well.
 
 ### 10.3 Verify the gate before announcing it
 

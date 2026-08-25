@@ -275,6 +275,132 @@ try {
        "the ingested board is still refused to anonymous callers");
   }
 
+  /* ---------- BODY BOUNDS: Content-Length is not a bound ----------
+     readFlowsForm checked the declared Content-Length and then read the
+     whole body anyway. A chunked request declares no length at all, so the
+     check was skipped entirely and an unauthenticated caller could stream
+     an unbounded body into the Worker before the KDF ever ran. The bound
+     now lives in the read loop, where it cannot be declared away. */
+  {
+    const big = "x".repeat(64 * 1024);
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("username=anilkaya&password=" + big));
+        controller.close();
+      },
+    });
+    const res = await fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      duplex: "half",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: stream,
+    });
+    eq(res.status, 413, "a chunked oversize login body is refused on its actual size, not its declared one");
+    ok(!(await res.text()).includes(BOARD_MARKER), "and it certainly does not render the board");
+
+    // Harness detail, not a product behaviour: responding before the client
+    // has finished streaming leaves wrangler dev's proxy holding a half-written
+    // upload, and it closes that connection. undici then reuses the dead socket
+    // and reports the reset as a 503. Two throwaway requests retire it so the
+    // next assertion measures the Worker rather than the pool.
+    const settle = async () => {
+      for (let i = 0; i < 2; i++) {
+        try { await (await get("/flows/")).text(); } catch { /* the dead socket */ }
+      }
+    };
+    await settle();
+
+    // The same body WITH an honest Content-Length is refused too, so the
+    // fix did not trade one path for the other.
+    const declared = await fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: "username=anilkaya&password=" + big,
+    });
+    eq(declared.status, 413, "a declared oversize login body is still refused");
+    await settle();
+  }
+
+  /* ---------- THROTTLE SCOPE: lockout must not be a weapon ---------
+     The roster is hardcoded in a PUBLIC repository, so all eleven usernames
+     are readable by anyone. Keying the failure counter on the username alone
+     meant eight deliberate wrong passwords locked a real person out of the
+     section for fifteen minutes, repeatable forever. The key is now scoped to
+     the caller as well, so an attacker can only lock out themselves. */
+  {
+    const ATTACKER = "203.0.113.10";
+    const VICTIM = "198.51.100.20";
+    const TARGET = "berkkocak";
+
+    const attempt = (username, password, ip) => fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+        "CF-Connecting-IP": ip,
+      },
+      body: new URLSearchParams({ username, password }).toString(),
+    });
+
+    // Burn through the lockout threshold from one address.
+    let lastBody = "";
+    for (let i = 0; i < 9; i++) {
+      const res = await attempt(TARGET, "wrong-" + i, ATTACKER);
+      eq(res.status, 401, `attacker attempt ${i + 1} is refused`);
+      lastBody = await res.text();
+    }
+    ok(/Too many attempts/i.test(lastBody), "the attacker's own address is locked out");
+
+    // THE FIX: the real account holder, from their own address, is unaffected.
+    const victim = await attempt(TARGET, FLOWS_PASSWORD, VICTIM);
+    eq(victim.status, 303, "THE FIX: the account holder still signs in while an attacker is locked out");
+    ok((victim.headers.get("set-cookie") || "").includes("flows_session="),
+       "and receives a working session");
+  }
+
+  /* ---------- THROTTLE STORAGE: off-roster costs no rows -----------
+     The submitted string was used verbatim as a D1 primary key, so an
+     unauthenticated caller could mint unbounded rows in a database whose
+     free-tier write budget is shared with the live learning app. An
+     off-roster attempt can never succeed, so there is nothing to count. */
+  {
+    const junkPost = (username) => fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+        "CF-Connecting-IP": "192.0.2.77",
+      },
+      body: new URLSearchParams({ username, password: "whatever" }).toString(),
+    });
+
+    for (let i = 0; i < 5; i++) {
+      eq((await junkPost("floodrow" + i)).status, 401, `off-roster attempt ${i} is refused`);
+    }
+
+    const dump = await server.d1(
+      "SELECT username FROM flows_login_failures"
+    );
+    ok(!/floodrow/.test(dump),
+       "THE FIX: five off-roster sign-in attempts wrote zero rows to D1");
+    ok(/berkkocak\|203\.0\.113\.10/.test(dump),
+       "a genuine failure is still counted, and the key is scoped to the caller");
+  }
+
   /* ---------- the section is not in the static bundle -------------- */
   {
     // shared/ and flows/ are both in .assetsignore. If the board HTML were
@@ -282,6 +408,19 @@ try {
     const res = await get("/shared/flows-pages.js");
     ok(res.status === 404 || !(await res.text()).includes("boardPage"),
        "the page source is not publicly served");
+  }
+
+  /* ---------- the login page escapes what it renders --------------
+     The error string is interpolated into the login markup. Today every
+     caller passes a fixed literal, but "no untrusted value reaches it yet"
+     is a property of the callers, not of the page, and callers change. */
+  {
+    const { loginPage } = await import("../shared/flows-pages.js");
+    const html = loginPage({ error: '<img src=x onerror=alert(1)>"&' });
+    ok(!html.includes("<img src=x"), "an injected tag is escaped, not rendered");
+    ok(html.includes("&lt;img"), "it appears as text");
+    ok(html.includes("&amp;"), "ampersands are escaped too");
+    ok(loginPage().includes('action="/flows/login"'), "the ordinary page is unaffected");
   }
 
   console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip`);

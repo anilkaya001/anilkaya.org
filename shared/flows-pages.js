@@ -48,8 +48,11 @@ const topbar = (active) => `
 /* ---------- login ---------------------------------------------- */
 
 export function loginPage({ error = "" } = {}) {
+  // Escaped like every other interpolation in this file. Both call sites pass
+  // literals today, so this is not a live hole — but an unescaped sink that
+  // happens to be safe is one careless caller away from not being.
   const message = error
-    ? `<p class="flows-alert" role="alert">${error}</p>`
+    ? `<p class="flows-alert" role="alert">${escapeHTML(error)}</p>`
     : "";
   return `${head("Flows — Sign in", "Restricted options-flow intelligence.")}
 <body class="flows-body">
