@@ -81,6 +81,11 @@ src = src.slice(0, close) +
 
 const browser = await chromium.launch();
 try {
+  /* TWO VIEWPORTS. Every measurement here was written after a narrow-screen
+     bug, so 320 is the one that matters most — but the panels size their
+     viewBox from the host, which means a WIDE host is a different code path
+     and an untested one. A chart that clips at 320 and a chart that draws a
+     166px caption into a 900px canvas fail in opposite directions. */
   const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -248,6 +253,13 @@ try {
           minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
           clipped,
           widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
+          /* [viewBox width, rendered CSS width] per svg. The invariant the
+             host-sizing fix exists to hold is that these are the SAME: one
+             viewBox unit is one CSS pixel. */
+          scales: svgs.map((s) => {
+            const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
+            return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
+          }),
         });
       }
       return { panels: out, errors, overflow: document.documentElement.scrollWidth > 320 };
@@ -283,12 +295,92 @@ try {
         ok(w > 0 && w <= 320,
            `${who} ${p.id}: sizes its drawing to the viewport rather than past it (${w}px)`);
       }
+      /* ONE VIEWBOX UNIT IS ONE CSS PIXEL — the actual invariant the
+         host-sizing fix exists to hold, and the only one that catches this
+         defect in BOTH directions. preserveAspectRatio="xMidYMid meet" with a
+         fixed height attribute means a drawing can never be magnified, only
+         shrunk or letterboxed, so an assertion on rendered type size catches a
+         viewBox that is too WIDE (type shrinks) and is structurally incapable
+         of catching one that is too NARROW (the drawing is centred in empty
+         space at its intended size). Comparing the two widths catches both.
+         The tolerance is 15% because panelWidth clamps to [300, 760]. */
+      for (const [vbW, cssW] of p.scales) {
+        if (!(vbW > 0) || !(cssW > 0)) continue;
+        const ratio = vbW / cssW;
+        ok(ratio > 0.85 && ratio < 1.15,
+           `${who} ${p.id}: one viewBox unit is one CSS pixel (viewBox ${vbW} in ${cssW}px)`);
+      }
     }
     eq(swept.overflow, false, `${who}: a fully painted card overflows nothing at 320px`);
 
     const drew = swept.panels.filter((p) => !p.dead).length;
     ok(drew >= 4, `${who}: the sweep measured panels rather than skipping them all (${drew} live)`);
     }
+  }
+
+  /* ---------- the same sweep at a DESKTOP width ------------------ */
+  {
+    /* The panels size their viewBox from the host, so a wide host is a
+       genuinely different layout, not a scaled one — the whole point of that
+       fix. It has never been measured. */
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
+    const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
+
+    const wide = await page.evaluate(({ card }) => {
+      const dlg = document.getElementById("flowsCard");
+      if (!dlg.open) dlg.showModal();
+      window.__paint(card, Date.now());
+      const out = [];
+      for (const id of ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal",
+                        "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+        const host = document.getElementById(id);
+        const svgs = Array.from(host.querySelectorAll("svg"));
+        let minText = Infinity, maxText = 0, clipped = false;
+        for (const t of host.querySelectorAll("text")) {
+          const h = t.getBoundingClientRect().height;
+          if (h > 0) { if (h < minText) minText = h; if (h > maxText) maxText = h; }
+        }
+        for (const svg of svgs) {
+          const box = svg.getBoundingClientRect();
+          for (const t of svg.querySelectorAll("text")) {
+            const r = t.getBoundingClientRect();
+            if (r.width === 0) continue;
+            if (r.left < box.left - 2 || r.right > box.right + 2) { clipped = true; break; }
+          }
+        }
+        out.push({
+          id, dead: !!host.querySelector(".fc-dead"), empty: host.childElementCount === 0,
+          minText: minText === Infinity ? null : minText, maxText, clipped,
+          widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
+          scales: svgs.map((s) => {
+            const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
+            return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
+          }),
+        });
+      }
+      return { panels: out, overflow: document.documentElement.scrollWidth > 1280 };
+    }, { card });
+
+    for (const p of wide.panels) {
+      ok(!p.empty, `wide ${p.id}: renders content or an explicit notice`);
+      if (p.dead) continue;
+      eq(p.clipped, false, `wide ${p.id}: draws no text outside its own canvas`);
+      if (p.minText !== null) {
+        ok(p.minText >= 8, `wide ${p.id}: type is not scaled down (${p.minText}px)`);
+      }
+      /* THE SAME INVARIANT AT A WIDE HOST, which is where it bites the other
+         way: a viewBox NARROWER than its host letterboxes, drawing at its
+         intended size inside empty margins, so no type measurement can see it. */
+      for (const [vbW, cssW] of p.scales) {
+        if (!(vbW > 0) || !(cssW > 0)) continue;
+        const ratio = vbW / cssW;
+        ok(ratio > 0.85 && ratio < 1.15,
+           `wide ${p.id}: the drawing fills its host rather than letterboxing (viewBox ${vbW} in ${cssW}px)`);
+      }
+    }
+    eq(wide.overflow, false, "a painted card overflows nothing at 1280px either");
+    await page.setViewportSize({ width: 320, height: 900 });
   }
 
   /* A CARD FROM BEFORE THIS PANEL EXISTED must degrade, not throw. Published
