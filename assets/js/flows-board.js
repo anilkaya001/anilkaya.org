@@ -560,13 +560,19 @@
   /* THE VIEW TOGGLE. Both renderers are fed from the same payload on every
      render, so switching is a visibility change and never a refetch — and the
      hidden one carries no rows a screen reader could announce twice, because
-     `hidden` removes it from the accessibility tree. The choice is remembered
-     per browser; a failure to read storage must not stop the board rendering,
-     so every access is guarded. */
+     `hidden` removes it from the accessibility tree.
+
+     The choice lives in the URL, exactly as `side` already does, rather than
+     in browser storage. Three reasons, in order: this page is credential-gated
+     and per-user, so nothing it writes should outlive a sign-out on a shared
+     browser; storage.js is this site's sanctioned owner of browser-local
+     persistence and the Flows page does not load it, so writing there directly
+     would be the one place on the site that bypasses it; and a URL is
+     shareable and bookmarkable where a per-browser flag is neither. */
   function readView() {
     try {
-      const v = localStorage.getItem("flows.view");
-      return v === "table" || v === "deck" ? v : "deck";
+      const v = new URL(location.href).searchParams.get("view");
+      return v === "table" ? "table" : "deck";
     } catch { return "deck"; }
   }
 
@@ -579,7 +585,15 @@
       button.classList.toggle("is-on", on);
       button.setAttribute("aria-pressed", String(on));
     }
-    try { localStorage.setItem("flows.view", view); } catch { /* a preference, never a requirement */ }
+    try {
+      const url = new URL(location.href);
+      // The deck is the default, so it is spelled by the parameter's ABSENCE.
+      // Stamping ?view=deck on every visit would make the common URL longer
+      // and turn a default into a decision the reader has to have made.
+      if (view === "table") url.searchParams.set("view", "table");
+      else url.searchParams.delete("view");
+      history.replaceState(null, "", url);
+    } catch { /* deep-linking is a convenience, never a requirement */ }
   }
 
   for (const button of viewButtons) {
