@@ -482,7 +482,18 @@
   font-size: 0.86rem;
 }
 
-.fc.is-stale .fc-panel { opacity: 0.62; }
+/* Staleness is marked on the chrome, NOT by dimming text.
+   opacity:0.62 over --bg-elev pushed --ink-dim body copy to roughly 2.9:1,
+   below the 4.5:1 floor — and it dimmed the very sentence explaining why the
+   card was dimmed. The band says it in words; a rule down the left edge says
+   it visually without touching a single glyph's contrast. */
+.fc.is-stale .fc-panel {
+  border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
+  padding-left: 0.8rem;
+}
+
+.fc.is-stale .gp,
+.fc.is-stale .fp { opacity: 0.72; }
 
 .fc-panel { margin-top: 1.5rem; }
 
@@ -743,4 +754,18 @@
   font-size: 0.86rem;
 }
 
-body.is-stale .flows-table tbody { opacity: 0.66; }
+/* Same reasoning as the card: mark the chrome, never the text. */
+body.is-stale .flows-tablewrap {
+  border-color: color-mix(in srgb, var(--flow-down) 55%, transparent);
+}
+
+/* Card tables scroll inside their own box so the DIALOG never scrolls
+   sideways — at 320px that would take the header and the close button
+   off-screen with it. */
+.fc-tablewrap {
+  overflow-x: auto;
+  outline-offset: 2px;
+}
+
+.fc-tablewrap .fc-levels,
+.fc-tablewrap .fc-congress { min-width: 22rem; }

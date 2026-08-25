@@ -35,7 +35,7 @@
   let pushedByUs = false;
   let current = null;
   let opener = null;
-  let inflight = null;
+  const inflight = new Map();
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => {
@@ -54,6 +54,14 @@
   const pct = (v) => (isNum(v) === null ? DASH : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%");
   const sigma = (v) => (isNum(v) === null ? DASH : (v >= 0 ? "+" : "") + v.toFixed(2) + "σ");
   const px2 = (v) => (isNum(v) === null ? DASH : v.toFixed(2));
+  // "$-1.23B" prints the sign inside the currency symbol. The minus belongs in
+  // front of the whole quantity, which is where a reader scanning a column
+  // expects it.
+  const money = (v) => {
+    const n = isNum(v);
+    if (n === null) return DASH;
+    return (n < 0 ? "\u2212" : "") + "$" + compact(Math.abs(n));
+  };
   const compact = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
@@ -368,7 +376,15 @@
       tb.append(tr);
     }
     table.append(tb);
-    host.append(table);
+    // The table gets its own scroll container so the DIALOG never scrolls
+    // sideways: at 320px a horizontally scrolling dialog takes the header and
+    // the close button off-screen with it.
+    const wrap = el("div", "fc-tablewrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Key levels");
+    wrap.append(table);
+    host.append(wrap);
 
     const note = el("p", "fc-note");
     note.textContent = isNum(panel.atr) === null
@@ -409,7 +425,7 @@
     const dl = el("dl", "fc-stats");
     for (const [k, v] of [
       ["Net delta", compact(panel.netDelta)],
-      ["Net premium", "$" + compact(panel.netPremium)],
+      ["Net premium", money(panel.netPremium)],
       ["Minutes on tape", String(panel.minutes)],
     ]) {
       dl.append(el("dt", null, k));
@@ -463,7 +479,12 @@
       tb.append(tr);
     }
     table.append(tb);
-    host.append(table);
+    const wrap = el("div", "fc-tablewrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Disclosed congressional transactions");
+    wrap.append(table);
+    host.append(wrap);
 
     const note = el("p", "fc-note");
     note.textContent =
@@ -569,6 +590,11 @@
     $("fcConv").textContent = "";
     $("fcRegime").textContent = "";
     $("fcStale").hidden = true;
+    // Staleness is a property of a PAINTED payload, so it is cleared by the
+    // same function that clears the panels. Leaving it to paint() meant the
+    // dim survived into the next card whenever that card was pending or
+    // failed to load — and then never cleared at all.
+    dialog.classList.remove("is-stale");
     $("fcProv").textContent = "Loading…";
     for (const id of ["fcGamma", "fcLevels", "fcPath", "fcCongress", "fcWhy"]) {
       $(id).replaceChildren(el("p", "fc-note", "Loading…"));
@@ -581,7 +607,20 @@
 
   function load(ticker) {
     if (cache.has(ticker)) return Promise.resolve(cache.get(ticker));
-    if (inflight) inflight.controller.abort();
+
+    /* Keyed by ticker, the way the board already does it.
+       A single `inflight` slot meant the hover prefetch was aborted by the
+       very click it existed to warm: pointerenter started the fetch, the click
+       called load() again, and the first line of the old body aborted it — so
+       every card open cost two requests and the prefetch delivered nothing.
+       Now a request for the same ticker joins the one in flight, and only a
+       request for a DIFFERENT ticker cancels its predecessor. */
+    const pending = inflight.get(ticker);
+    if (pending) return pending.promise;
+    for (const [key, entry] of inflight) {
+      if (key !== ticker) { entry.controller.abort(); inflight.delete(key); }
+    }
+
     const controller = new AbortController();
     const promise = fetch("/api/flows/card?t=" + encodeURIComponent(ticker), {
       credentials: "same-origin", signal: controller.signal,
@@ -593,8 +632,8 @@
     }).then((v) => {
       if (v) { cache.set(ticker, v); trim(); }
       return v;
-    }).finally(() => { inflight = null; });
-    inflight = { controller, promise };
+    }).finally(() => { inflight.delete(ticker); });
+    inflight.set(ticker, { controller, promise });
     return promise;
   }
 
@@ -619,6 +658,11 @@
       paint(v.body, v.updatedAt);
     }).catch((e) => {
       if (e && e.name === "AbortError") return;
+      // Every panel still said "Loading…", so a failed card was
+      // indistinguishable from a slow one and the reader waited forever.
+      for (const id of ["fcGamma", "fcLevels", "fcPath", "fcCongress", "fcWhy"]) {
+        deadPanel($(id), "", "This card could not be loaded. Close and try again.");
+      }
       $("fcProv").textContent = "This card could not be loaded.";
     });
   }
@@ -653,7 +697,18 @@
   $("fcClose").addEventListener("click", closeCard);
 
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); closeCard(); });
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) closeCard(); });
+  /* Backdrop click, by GEOMETRY rather than by event target.
+     A <dialog> is its own scroll container, so a click on its scrollbar has
+     the dialog itself as event.target — identical to a backdrop click — and
+     dragging the scrollbar closed the card. Comparing the pointer against the
+     dialog's own box distinguishes the two: the scrollbar is inside it. */
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    const box = dialog.getBoundingClientRect();
+    const inside = event.clientX >= box.left && event.clientX <= box.right
+                && event.clientY >= box.top && event.clientY <= box.bottom;
+    if (!inside) closeCard();
+  });
   dialog.addEventListener("close", () => {
     if (opener && document.contains(opener)) opener.focus();
     opener = null;

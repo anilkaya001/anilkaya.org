@@ -1816,6 +1816,15 @@ async function route(request, env, url, ctx) {
     if (!env.SESSION_SECRET) throw new HttpError(503, "unavailable", "Sign-in is not configured");
 
     const credentials = parseCredentials(env.FLOWS_CREDENTIALS);
+    /* A missing credential map or pepper is a CONFIGURATION fault, and it must
+       not masquerade as a wrong password. Without this, a deploy that forgot
+       either secret rejects all eleven accounts with "those credentials were
+       not recognised" — indistinguishable from a typo, so the operator retries
+       the password instead of checking the secret store. The two neighbouring
+       secrets already fail loudly this way. */
+    if (!credentials || !env.FLOWS_PEPPER) {
+      throw new HttpError(503, "unavailable", "Sign-in is not configured");
+    }
     const form = await readFlowsForm(request);
     const username = String(form.get("username") || "").trim().toLowerCase();
     const password = String(form.get("password") || "");

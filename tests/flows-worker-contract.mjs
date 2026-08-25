@@ -541,6 +541,40 @@ try {
     ok(loginPage().includes('action="/flows/login"'), "the ordinary page is unaffected");
   }
 
+  /* ---------- a misconfigured deploy fails LOUDLY -----------------
+     A missing credential map or pepper is a configuration fault and must not
+     masquerade as a wrong password. Without this check a deploy that forgot
+     either secret rejects all eleven accounts with "those credentials were not
+     recognised", which is indistinguishable from a typo — so the operator
+     retries the password instead of checking the secret store. This runs on
+     its own Worker because it needs a deliberately broken environment. */
+  {
+    const broken = await startWorker({ extraVars: ["FLOWS_CREDENTIALS:not-valid-json"] });
+    try {
+      const res = await fetch(broken.baseURL + "/flows/login", {
+        method: "POST", redirect: "manual",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: broken.baseURL, "Sec-Fetch-Site": "same-origin",
+        },
+        body: new URLSearchParams({ username: FLOWS_TEST_USER, password: FLOWS_PASSWORD }).toString(),
+      });
+      eq(res.status, 503,
+         "an unparseable credential map is a configuration fault, not a bad password");
+      const body = await res.json();
+      eq(body.error.code, "unavailable", "and it says so in the project error envelope");
+      ok(!/not recognised/i.test(JSON.stringify(body)),
+         "it never blames the credentials the operator typed correctly");
+
+      // The login PAGE must still render, so the operator can see the section exists.
+      const page = await fetch(broken.baseURL + "/flows/", { redirect: "manual" });
+      eq(page.status, 200, "the login page still renders on a misconfigured deploy");
+      ok(!(await page.text()).includes(BOARD_MARKER), "and still leaks no board");
+    } finally {
+      await broken.stop();
+    }
+  }
+
   console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip`);
 } finally {
   await server.stop();
