@@ -298,6 +298,14 @@ export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollate
  * counts every exclusion by reason and `screened` is how many contracts the
  * vendor sent. rows.length / screened is the honest headline: how much of
  * this chain is actually sellable.
+ *
+ * EACH CONTRACT IS CHARGED TO THE FIRST GATE IT FAILS, not to every gate it
+ * would fail. That is what makes the counts reconcile — excluded + priced ===
+ * screened, which the tests assert — but it means the reasons are a partition
+ * and not a tally: the lottery ticket below is counted once under `premium`
+ * even though its spread and its open interest are both hopeless too. Read
+ * "900 too wide" as "900 whose FIRST disqualification was the spread", never
+ * as "900 whose spread is the only problem".
  */
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",

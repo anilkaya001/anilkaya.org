@@ -379,10 +379,17 @@
       .map(([reason, n]) => n + " " + reasonWord(reason));
     /* WHAT WAS EXCLUDED, IN THE OPEN. A screen that quietly drops nine tenths
        of a chain and shows a tidy top ten misrepresents how thin the real
-       opportunity set is. */
+       opportunity set is.
+
+       The reasons are a PARTITION, not a tally: each contract is charged to the
+       first gate it failed, which is what makes the counts reconcile against
+       the screened total. The lottery ticket counted under "paying too little"
+       usually has a hopeless spread and no open interest either. Saying so
+       costs one clause and stops "900 too wide" being read as "900 whose only
+       problem is the spread". */
     foot.textContent = dropped.length
-      ? priced + " of " + screened + " quoted contracts are sellable. Set aside: " +
-        dropped.join(", ") + "."
+      ? priced + " of " + screened + " quoted contracts are sellable. The rest fail a gate: " +
+        dropped.join(", ") + " — each counted once, under the first gate it failed."
       : priced + " of " + screened + " quoted contracts are sellable.";
     updateStatus(oldest);
   }
@@ -501,16 +508,27 @@
       statusEl.textContent = "That is not a symbol this desk can price.";
       return;
     }
+    /* Count the symbols that actually NEED a slot, not every symbol typed. A
+       user with 19 on the desk who types "AAPL MSFT" where AAPL is already
+       there needs one slot and has one, and telling them the desk is full is
+       wrong. Comparing wanted.length against the room did exactly that. */
+    const needSlots = wanted.filter((w) => !book.has(w));
     const room = MAX_SYMBOLS - book.size;
     const added = add(wanted);
     input.value = "";
-    if (!added.length && wanted.every((w) => book.has(w))) {
-      statusEl.textContent = "Already on the desk.";
-    } else if (room < wanted.length) {
-      /* The cap is a quota decision, so it is stated as one rather than
-         letting symbols vanish without explanation. */
+    if (!needSlots.length) {
+      statusEl.textContent = wanted.length === 1
+        ? wanted[0] + " is already on the desk."
+        : "Already on the desk.";
+    } else if (added.length < needSlots.length) {
+      /* The cap is a quota decision — each symbol is a live lookup — so it is
+         stated as one rather than letting the overflow vanish unexplained,
+         and it names what was dropped. */
+      const dropped = needSlots.filter((w) => !book.has(w));
       statusEl.textContent = "The desk holds " + MAX_SYMBOLS +
-        " symbols; each one is a live lookup. Remove one to add another.";
+        " symbols; each one is a live lookup. " +
+        (dropped.length ? "Not added: " + dropped.join(", ") + ". " : "") +
+        "Remove one to add another.";
     }
   });
 
