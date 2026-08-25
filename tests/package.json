@@ -15,7 +15,7 @@
     "test:browser": "node regression.mjs",
     "test:flows": "node flows-features.mjs && node flows-auth-contract.mjs",
     "test:flows-worker": "node flows-worker-contract.mjs",
-    "test:pipeline": "node ../scripts/flows-pipeline.mjs --dry-run"
+    "test:pipeline": "node ../scripts/flows-pipeline.mjs --dry-run && node flows-pipeline-contract.mjs"
   },
   "devDependencies": {
     "playwright": "1.61.1",

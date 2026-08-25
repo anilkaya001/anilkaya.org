@@ -212,6 +212,26 @@ async function enrich(ticker, spot) {
     uw(`/api/stock/${ticker}/ohlc/1d`, { timeframe: "2M" }).catch(() => []),
   ]);
 
+  /* A missing source is NOT a zero.
+     Each call above is individually caught, so enrich() could not throw and
+     the completeness gate — which counts only thrown exceptions — reported
+     100% for a name that had lost four of its five sources. Worse, the zeros
+     were not neutral: a missing greek-flow gives otmShare = 0 and vegaTilt = 0,
+     which is the TOP of family O's winsorized column, so losing the data
+     scored BETTER than having it. A name that cannot be measured must be
+     dropped, not ranked.
+
+     greek-flow carries families F and O, spot-exposures carries P, and the
+     candles carry both the ATR that normalises every distance and the dollar
+     volume the liquidity floor needs. Those three are required. Ticks (family
+     D) and expiries (family V) degrade coverage instead, which conviction
+     already discounts. */
+  const missing = [];
+  if (!greekFlow.length) missing.push("greek-flow");
+  if (!strikes.length) missing.push("spot-exposures/strike");
+  if (!ohlc.length) missing.push("ohlc/1d");
+  if (missing.length) throw new Error(`no data from ${missing.join(", ")}`);
+
   return computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc });
 }
 
@@ -230,9 +250,33 @@ function medianDollarVolume(candles) {
   return values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
 }
 
+/**
+ * Sort candles oldest-first.
+ *
+ * The vendor does not document the order /ohlc returns, and every consumer
+ * here assumes oldest-first: atr14 runs Wilder's forward recursion and uses
+ * each bar's PREVIOUS close, and both take the newest window off the end. If
+ * the response is newest-first, `.slice(-40)` silently keeps the OLDEST bars
+ * and the recursion runs backwards through time. Rather than depend on an
+ * undocumented convention, sort explicitly — correct under either.
+ */
+function candlesAscending(candles) {
+  const rows = (candles || []).map((c) => ({
+    c,
+    t: Date.parse(c.start_time || c.end_time || c.date || ""),
+  }));
+  // If no candle carries a parseable timestamp there is nothing to sort by;
+  // fall back to the given order rather than discarding the whole series.
+  if (!rows.some((r) => Number.isFinite(r.t))) return candles || [];
+  return rows
+    .filter((r) => Number.isFinite(r.t))
+    .sort((a, b) => a.t - b.t)
+    .map((r) => r.c);
+}
+
 /** Wilder's ATR(14) — the sigma unit for distance-to-spot. */
 function atr14(candles) {
-  const rows = (candles || []).slice(-40).map((c) => ({
+  const rows = candlesAscending(candles).slice(-40).map((c) => ({
     h: num(c.high), l: num(c.low), c: num(c.close),
   })).filter((r) => r.h > 0);
   if (rows.length < 15) return 0;
@@ -314,27 +358,47 @@ function scoreBoard(features, tilts, sectors, caps) {
   const fNet = z((f, i) => tilts[i].netTilt);
   const fOi = z((f, i) => tilts[i].oiTilt);
 
-  // Family P — dealer positioning. Short gamma amplifies whatever
-  // direction flow is pushing; long gamma suppresses it. Displacement
-  // is signed toward where new gamma is building.
+  /* THE SIGN RULE for this blend: every column must be SIGNED, because the
+     composite means "long" when positive and "short" when negative. A column
+     that measures a magnitude — how clean the positioning is, how durable the
+     regime is — carries no direction of its own, and adding it to a signed sum
+     converts "this name's flow is high quality" into "this name is bullish".
+
+     Measured before the fix, on two names with IDENTICAL strongly bearish flow:
+     the clean near-money one scored z = +1.91 and the OTM-lottery one z = -1.89,
+     so the clean BEARISH name was pushed toward the LONG board. Magnitudes are
+     therefore signed by the direction of the name's own flow, which is what
+     makes them modifiers rather than votes. */
+  const dir = (f) => Math.sign(f.dirDelta) || 0;
+
+  // Family P — dealer positioning. Short gamma amplifies whatever direction
+  // flow is pushing; long gamma suppresses it. Displacement is signed toward
+  // where new gamma is building.
   const pDisp = z((f) => (f.displacementWeight > 0 ? f.displacement : 0));
   const pFlip = z((f) => (f.flipDist === null ? 0 : -f.flipDist));
+  // The measured regime itself. netGamma was computed, surfaced to the UI as
+  // gRegime, and then never scored — family P's own comment described an
+  // amplification mechanism that existed nowhere in the code. Short gamma
+  // (netGamma < 0) amplifies the flow's direction, long gamma damps it, and
+  // the cross-sectional z below supplies the scale so no constant is invented.
+  const pRegime = z((f) => dir(f) * -f.netGamma);
 
   // Family D — path shape. Persistent accumulation in the day's
   // direction, discounted when it all arrived in one spike.
   const dPath = z((f) => Math.sign(f.pathNet) * f.persistence * (1 - f.concentration));
 
-  // Family V — regime durability. A front-loaded gamma book means the
-  // current regime expires soon; that is information, not noise.
-  const vFront = z((f) => -f.gammaFrontLoad);
+  // Family V — regime durability. A front-loaded gamma book means the current
+  // regime expires soon, so whatever the flow is pushing has less time to act.
+  const vFront = z((f) => dir(f) * -f.gammaFrontLoad);
 
-  // Family O — quality. High OTM share is lottery positioning; a high
-  // vega tilt means they are trading vol, not direction.
-  const oQuality = z((f) => -(f.otmShare) - Math.min(f.vegaTilt, 5) * 0.2);
+  // Family O — quality. High OTM share is lottery positioning; a high vega
+  // tilt means they are trading vol, not direction. Both discount the
+  // conviction of the flow they belong to, in that flow's own direction.
+  const oQuality = z((f) => dir(f) * (-(f.otmShare) - Math.min(f.vegaTilt, 5) * 0.2));
 
   const familyCols = {
     F: [fDelta, fTilt, fNet, fOi],
-    P: [pDisp, pFlip],
+    P: [pDisp, pFlip, pRegime],
     D: [dPath],
     V: [vFront],
     O: [oQuality],
@@ -410,6 +474,26 @@ function partitionSides(scored) {
     long: sorted.slice(0, half),
     short: sorted.slice(sorted.length - half).reverse(),   // most negative first
   };
+}
+
+/**
+ * The top n and bottom n of a ranked list, DEDUPLICATED by ticker.
+ *
+ * slice(0, n) and slice(-n) overlap whenever the list holds fewer than 2n
+ * entries — a state this pipeline explicitly permits, since it only refuses a
+ * universe below 50 against an enrich buffer of 30 per side. The same name was
+ * then enriched twice (five wasted calls each), entered the scored pool twice,
+ * and could land on the long AND the short board at once, presented as two
+ * independent opinions. partitionSides guarantees its slices are INDEX-disjoint,
+ * not TICKER-disjoint, so it does not cover this. At 55 survivors five names
+ * duplicated; at 50, ten did.
+ */
+function selectExtremes(ranked, n) {
+  const picked = new Map();
+  for (const p of [...ranked.slice(0, n), ...ranked.slice(-n)]) {
+    if (!picked.has(p.row.ticker)) picked.set(p.row.ticker, p);
+  }
+  return [...picked.values()];
 }
 
 function toRows(pool, screenerByTicker, previousIds) {
@@ -591,7 +675,24 @@ async function main() {
   }
 
   // 1. Universe, from a single screener call.
-  const screener = DRY_RUN ? fakeScreener(420) : await uw("/api/screener/stocks", { limit: 500 });
+  /* The universe call carries NO `limit`: /api/screener/stocks does not accept
+     one, and accepts no `page` or `offset` either. Sending it was a silent
+     no-op — the pipeline was reading whatever page the vendor chose to return
+     and calling it the universe. The absence of any pagination parameter is
+     the clue to how this endpoint is meant to be used: the FILTERS are the
+     limiter, and they run server-side.
+
+     Only unambiguous numeric filters are pushed. `issue_types[]` is left to
+     eligible() below because the vendor's accepted values for it are not
+     documented in the specification available here, and a wrong value would
+     return an empty universe. eligible() still re-checks everything sent, so a
+     server-side boundary that differs from ours cannot widen the universe. */
+  const screener = DRY_RUN ? fakeScreener(420) : await uw("/api/screener/stocks", {
+    min_underlying_price: UNIVERSE.minPrice,
+    min_marketcap: UNIVERSE.minMarketCap,
+    min_volume: UNIVERSE.minOptionVolume,
+    min_oi: UNIVERSE.minOpenInterest,
+  });
   const universe = screener.filter(eligible);
   console.log(`universe: ${universe.length} eligible of ${screener.length} screened`);
   if (universe.length < 50) throw new Error(`universe too small (${universe.length}) — refusing to publish`);
@@ -615,10 +716,15 @@ async function main() {
 
   // 3. Enrich only the extremes. This two-stage split is the entire
   //    request economy: 1 screener call plus ~5 per enriched name.
-  const picks = [
-    ...composite.slice(0, UNIVERSE.enrichPerSide),
-    ...composite.slice(-UNIVERSE.enrichPerSide),
-  ];
+  /* Deduplicate by ticker. slice(0, n) and slice(-n) overlap whenever fewer
+     than 2n names survive the earnings gate — a state this pipeline explicitly
+     permits, since it only refuses below 50 — and the same name was then
+     enriched twice (five wasted calls each), entered the scored pool twice,
+     and could land on the long AND the short board simultaneously.
+     partitionSides guarantees its two slices are INDEX-disjoint, not
+     TICKER-disjoint, so the downstream fix did not cover this. At 55 survivors
+     five names duplicated; at 50, ten did. */
+  const picks = selectExtremes(composite, UNIVERSE.enrichPerSide);
   console.log(`enriching ${picks.length} names (${UNIVERSE.enrichPerSide} per side)`);
 
   const enriched = [];
@@ -713,7 +819,10 @@ async function main() {
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 }
 
-export { partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume };
+export {
+  partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
+  candlesAscending, selectExtremes, scoreBoard,
+};
 
 // Only run when invoked directly. Without this guard, importing the module —
 // which the contract tests do, to exercise partitionSides — would fire the
