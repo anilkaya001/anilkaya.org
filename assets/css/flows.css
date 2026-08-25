@@ -1107,3 +1107,261 @@ body.is-stale .flows-tablewrap {
   height: calc(var(--h, 0) * 1rem);
   background: var(--gold-celadon);
 }
+
+/* ---------- premium desk ---------------------------------------
+   The desk is the one page whose numbers are fetched live rather
+   than precomputed, and its layout carries that: chips that show
+   per-symbol state, and a table wide enough that the wrapper — not
+   the page — is what scrolls. The 320px zero-overflow invariant the
+   suite asserts holds here the same way it holds on the board. */
+
+.flows-subnav {
+  display: flex;
+  gap: 0.35rem;
+  margin: 1.2rem 0 0.4rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.flows-subnav a {
+  padding: 0.55rem 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.flows-subnav a:hover { color: var(--ink); }
+
+/* Weight and a rule, not colour alone. */
+.flows-subnav a.is-active {
+  color: var(--gold-harvest);
+  font-weight: 700;
+  border-bottom-color: var(--gold-harvest);
+}
+
+.flows-subnav a:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+.desk-entry { margin: 1.4rem 0 0.8rem; }
+
+.desk-entry label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 0.4rem;
+}
+
+.desk-entry__row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.desk-entry input {
+  flex: 1 1 12rem;
+  min-width: 0;                     /* or the flex item refuses to shrink at 320px */
+  min-height: 44px;
+  padding: 0 0.85rem;
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+}
+
+.desk-entry input:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 1px;
+}
+
+.desk-add,
+.desk-refresh,
+.desk-clear {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--hairline);
+  background: var(--flow-surface);
+  color: var(--ink-dim);
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.desk-add {
+  border-color: transparent;
+  color: #1a1407;
+  font-weight: 700;
+  background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest));
+}
+
+.desk-refresh:hover,
+.desk-clear:hover { color: var(--ink); }
+
+.desk-add:focus-visible,
+.desk-refresh:focus-visible,
+.desk-clear:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 3px;
+}
+
+.desk-help {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.desk-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.9rem 0 0;
+}
+
+.desk-list:empty { margin: 0; }
+
+.desk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.7rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--flow-surface);
+  max-width: 100%;
+}
+
+/* State is carried by a border AND the note text beside it, never by
+   colour alone — the note says "loading…" or names the failure. */
+.desk-chip.is-loading { border-color: color-mix(in srgb, var(--gold-harvest) 45%, var(--hairline)); }
+.desk-chip.is-error { border-color: color-mix(in srgb, var(--flow-down) 55%, var(--hairline)); }
+.desk-chip.is-ok { border-color: color-mix(in srgb, var(--flow-up) 40%, var(--hairline)); }
+
+.desk-chip__sym {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.desk-chip__note {
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+}
+
+.desk-chip__x {
+  all: unset;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ink-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.desk-chip__x:hover { color: var(--flow-down); background: var(--bg-deep); }
+.desk-chip__x:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 1px; }
+
+.desk-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  color: var(--ink-dim);
+}
+
+/* 44px of hit area without a 44px painted box: the label wraps the input
+   and the padding is what the finger lands on. */
+.desk-check input {
+  width: 18px;
+  height: 18px;
+  margin: 13px 0;
+  accent-color: var(--gold-harvest);
+  cursor: pointer;
+}
+
+.desk-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  margin: 1rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.desk-bulk,
+.desk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+}
+
+.desk-filters label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.desk-filters select {
+  min-height: 44px;
+  padding: 0 0.7rem;
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.desk-filters select:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 1px;
+}
+
+.desk-table td.c-side {
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+/* The annualized column is a CONVENTION, and it is set apart so it does not
+   read as a peer of the yield beside it. Dimmed and italic rather than
+   coloured: it is not a good or bad number, it is a differently-defined one. */
+.desk-table td.c-ann {
+  color: var(--ink-dim);
+  font-style: italic;
+  cursor: help;
+}
+
+@media (max-width: 40rem) {
+  .desk-controls { justify-content: flex-start; }
+  .desk-chip__note { max-width: 9rem; }
+}

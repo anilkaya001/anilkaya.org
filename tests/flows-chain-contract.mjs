@@ -87,7 +87,39 @@ const auth = { Cookie: "flows_session=" + token };
 const get = (p, headers) => fetch(server.baseURL + p, { redirect: "manual", headers: { ...auth, ...headers } });
 const anon = (p) => fetch(server.baseURL + p, { redirect: "manual" });
 
+/* A marker that appears only in the authenticated desk, never in the login
+   page — the single most useful signal for "did the gate leak". */
+const DESK_MARKER = 'id="deskBody"';
+
 try {
+  /* ---------- the desk PAGE is gated exactly as the board is ------ */
+  {
+    const res = await anon("/flows/desk/");
+    eq(res.status, 200, "an anonymous visitor gets a page, not a 404 — the section is not the secret");
+    const body = await res.text();
+    ok(!body.includes(DESK_MARKER), "but never the desk itself");
+    ok(body.includes('action="/flows/login"'), "they get the sign-in form");
+    eq(res.headers.get("cache-control"), "no-store", "gated documents are no-store");
+
+    /* Signed out, the login page must be served AT /flows/desk/ rather than
+       redirecting to /flows/ — a redirect sends the user to the board after
+       signing in, not back to the desk they asked for. */
+    eq(res.status, 200, "and it is served in place rather than bounced to the board");
+
+    const inn = await get("/flows/desk/");
+    eq(inn.status, 200, "a signed-in user gets the desk");
+    const deskBody = await inn.text();
+    ok(deskBody.includes(DESK_MARKER), "which contains the desk table");
+    ok(deskBody.includes('href="/flows/"'), "and a way back to the board");
+
+    const canon = await anon("/flows/desk");
+    eq(canon.status, 308, "the un-slashed path redirects to the canonical one");
+    ok((canon.headers.get("location") || "").endsWith("/flows/desk/"), "to /flows/desk/");
+
+    const post = await fetch(server.baseURL + "/flows/desk/", { method: "POST", headers: auth });
+    eq(post.status, 405, "the desk page is GET only");
+  }
+
   /* ---------- the gate is in front of the credential -------------- */
   {
     const res = await anon("/api/flows/chain?t=AAPL");

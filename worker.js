@@ -1993,6 +1993,27 @@ async function route(request, env, url, ctx) {
     });
   }
 
+  if (path === "/flows/desk" ) {
+    requireMethod(request, ["GET", "HEAD"]);
+    return redirect(new URL("/flows/desk/", url).toString(), 308);
+  }
+
+  if (path === "/flows/desk/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    /* Anonymous visitors get the LOGIN page, not a redirect and not a 404.
+       Same as /flows/: the section's existence is not the secret, and a
+       redirect would bounce a signed-out user to the board rather than back
+       here after signing in. */
+    const session = await currentFlowsUser(request, env);
+    const body = session
+      ? FLOWS_PAGES.deskPage({ username: session.username })
+      : FLOWS_PAGES.loginPage();
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   if (path === "/api/flows/ingest") {
     // The pipeline runs in GitHub Actions and POSTs finished payloads here.
     // GitHub deliberately holds NO Cloudflare API token: Cloudflare's KV:Edit
