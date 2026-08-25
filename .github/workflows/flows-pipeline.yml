@@ -97,6 +97,42 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: node scripts/flows-pipeline.mjs --dry-run
 
+      # Reports WHICH scope each name is visible in, and never a value. Set as
+      # an Environment secret rather than a Repository secret, a job that does
+      # not declare `environment:` cannot see it — the expression silently
+      # renders empty, which is indistinguishable from "never set". Same if a
+      # value lands under the Variables tab instead of Secrets. This step tells
+      # the difference in one run instead of a guess per attempt.
+      - name: Report which scope the credentials are visible in
+        if: steps.gate.outputs.run == 'true'
+        env:
+          S_KEY: ${{ secrets.UW_API_KEY }}
+          S_TOK: ${{ secrets.FLOWS_INGEST_TOKEN }}
+          S_URL: ${{ secrets.FLOWS_INGEST_URL }}
+          V_KEY: ${{ vars.UW_API_KEY }}
+          V_TOK: ${{ vars.FLOWS_INGEST_TOKEN }}
+          V_URL: ${{ vars.FLOWS_INGEST_URL }}
+        run: |
+          mark() { if [ -n "$2" ]; then echo "  $1  VISIBLE"; else echo "  $1  empty"; fi; }
+          echo "Repository/Environment SECRETS  (secrets.*)"
+          mark "UW_API_KEY         " "$S_KEY"
+          mark "FLOWS_INGEST_TOKEN " "$S_TOK"
+          mark "FLOWS_INGEST_URL   " "$S_URL"
+          echo
+          echo "Repository VARIABLES  (vars.*)"
+          mark "UW_API_KEY         " "$V_KEY"
+          mark "FLOWS_INGEST_TOKEN " "$V_TOK"
+          mark "FLOWS_INGEST_URL   " "$V_URL"
+          echo
+          echo "repository: ${{ github.repository }}"
+          echo "ref: ${{ github.ref }}   event: ${{ github.event_name }}"
+          if [ -z "$S_KEY" ] && [ -n "$V_KEY" ]; then
+            echo "::warning::UW_API_KEY is under Variables, not Secrets. Move it: an API key belongs in Secrets."
+          fi
+          if [ -z "$S_KEY" ] && [ -z "$V_KEY" ]; then
+            echo "::warning::UW_API_KEY is invisible in BOTH scopes for this repository. Most likely it was saved as an ENVIRONMENT secret (this job declares no environment:), or on a different repository or an org with this repo excluded."
+          fi
+
       - name: Build and publish the board
         if: steps.gate.outputs.run == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
         env:
