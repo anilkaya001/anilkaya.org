@@ -169,6 +169,31 @@ try {
        "the zero-bid contract is absent — no bid is no sale, not a cheap one");
   }
 
+  /* ---------- headers and cells agree ---------------------------- */
+  {
+    /* A column added to the markup and not to rowFor — or the reverse —
+       shifts every cell after it under the wrong heading, and the table still
+       renders perfectly. This is not hypothetical: adding the "If called"
+       column did exactly that to a test reading a hardcoded index, and it read
+       the spread as the cap.
+
+       It runs HERE, immediately after the first table, rather than in the
+       desktop block where it started. Assertions abort the file, so a
+       mismatch was being reported by whichever later assertion happened to
+       trip over the shift — a confusing message for the clearest possible
+       defect. Order is part of a test's diagnosis. */
+    const shape = await page.evaluate(() => {
+      const heads = document.querySelectorAll(".desk-table thead th").length;
+      const rows = Array.from(document.querySelectorAll("#deskBody tr"));
+      return { heads, widths: rows.map((r) => r.querySelectorAll("th, td").length) };
+    });
+    ok(shape.heads > 0 && shape.widths.length > 0, "there is a table to check");
+    for (const w of shape.widths) {
+      eq(w, shape.heads,
+         `every row has exactly one cell per header (${w} cells, ${shape.heads} headers)`);
+    }
+  }
+
   /* ---------- the page says WHICH price it priced against -------- */
   {
     /* A covered call's collateral IS the shares at spot and every moneyness is
@@ -378,6 +403,44 @@ try {
     const sides = (await page.locator("#deskBody td.c-side").allTextContents()).map((s) => s.trim());
     ok(sides.length > 0 && sides.every((s) => s === "Cash-secured put"),
        "a csp desk shows only puts");
+  }
+
+  /* ---------- and at the width it is actually used at ------------ */
+  {
+    /* Every assertion above runs at 390px, which is the width that breaks
+       layouts — but a premium desk is a trading screen, and the width it is
+       actually USED at had never been measured. Thirteen columns behave
+       differently when they all fit. */
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.waitForFunction(() => document.querySelectorAll("#deskBody tr").length > 0,
+      null, { timeout: 8000 });
+
+    const wide = await page.evaluate(() => {
+      const wrap = document.getElementById("deskTableWrap");
+      const table = document.querySelector(".desk-table");
+      const heads = Array.from(document.querySelectorAll(".desk-table thead th"));
+      const firstRow = document.querySelector("#deskBody tr");
+      const cells = firstRow ? firstRow.querySelectorAll("th, td").length : 0;
+      return {
+        pageOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        headCount: heads.length,
+        cellCount: cells,
+        // Does the table now fit without the wrapper scrolling?
+        wrapScrolls: wrap.scrollWidth > wrap.clientWidth + 1,
+        tableW: Math.round(table.getBoundingClientRect().width),
+        wrapW: Math.round(wrap.getBoundingClientRect().width),
+        // Any header text wrapped to an unreadable sliver?
+        minHeadW: Math.min(...heads.map((h) => Math.round(h.getBoundingClientRect().width))),
+      };
+    });
+
+    eq(wide.pageOverflow, false, "the desk overflows nothing at 1440px");
+    ok(wide.minHeadW >= 24,
+       `no header is crushed to an unreadable sliver (${wide.minHeadW}px)`);
+    ok(wide.tableW <= wide.wrapW + 2,
+       `thirteen columns fit without scrolling at desk width (${wide.tableW} in ${wide.wrapW})`);
+
+    await page.setViewportSize({ width: 390, height: 900 });
   }
 
   /* ---------- nothing threw, at a phone width -------------------- */
