@@ -485,11 +485,19 @@ dropped half its work.
 
 Repository secrets required (Settings → Secrets and variables → Actions):
 
-| Secret | Purpose |
-|---|---|
-| `UW_API_KEY` | Unusual Whales API bearer token |
-| `FLOWS_INGEST_URL` | The Worker ingest endpoint the pipeline POSTs to |
-| `FLOWS_INGEST_TOKEN` | Bearer token authenticating that POST |
+| Secret | Required | Purpose |
+|---|---|---|
+| `UW_API_KEY` | yes | Unusual Whales API bearer token |
+| `FLOWS_INGEST_TOKEN` | yes | Bearer token authenticating the POST. Must be **byte-identical** to the Worker secret of the same name. |
+| `FLOWS_INGEST_URL` | no | Overrides the ingest endpoint. Defaults to `https://anilkaya.org/api/flows/ingest`; set it only for a staging Worker. |
+
+The URL is not a secret — the bearer token is what protects the route — and
+requiring it added a step whose failure mode looks like success: the pipeline
+runs, every publish 401s or redirects, and the board silently keeps yesterday's
+data. It now defaults to production.
+
+A run missing either required secret names **all** of them at once and exits
+before spending a single API call.
 
 GitHub is deliberately given **no Cloudflare API token**: Cloudflare's `KV: Edit`
 and `D1: Edit` permissions are account-scoped, so a CI credential could reach the

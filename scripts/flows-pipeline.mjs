@@ -18,7 +18,7 @@
 
    Environment (live only):
      UW_API_KEY           Unusual Whales bearer token
-     FLOWS_INGEST_URL     e.g. https://anilkaya.org/api/flows/ingest
+     FLOWS_INGEST_URL     optional; defaults to https://anilkaya.org/api/flows/ingest
      FLOWS_INGEST_TOKEN   bearer token for that endpoint
    ============================================================= */
 
@@ -37,6 +37,21 @@ const EMIT = process.argv.includes("--emit")
   : null;
 
 const BASE = "https://api.unusualwhales.com";
+
+/* The ingest endpoint is a PUBLIC URL, not a secret — the bearer token is what
+   protects it. Requiring it as a repository secret added a configuration step
+   and a place to typo, and getting it wrong is the failure that looks like
+   success: the pipeline runs, every publish 401s or redirects, and the board
+   silently keeps yesterday's data. It defaults to production and stays
+   overridable for a staging Worker or a local test.
+
+   Resolved per call rather than captured at import: a module-level constant
+   freezes whatever the environment held when the file was first imported, so
+   a test that sets FLOWS_INGEST_URL after importing would silently POST to
+   PRODUCTION. The contract test caught exactly that. */
+function ingestURL() {
+  return process.env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest";
+}
 
 /* ---------- universe gate --------------------------------------
    These thresholds are the difference between a live edge and a
@@ -544,10 +559,10 @@ function sessionDateFrom(enrichedRecords) {
  * A stale-board read must never stop today's board from publishing.
  */
 async function fetchPublishedTickers(key) {
-  if (DRY_RUN || !process.env.FLOWS_INGEST_URL) return [];
+  if (DRY_RUN) return [];
   try {
     const response = await fetch(
-      process.env.FLOWS_INGEST_URL + "?key=" + encodeURIComponent(key),
+      ingestURL() + "?key=" + encodeURIComponent(key),
       {
         redirect: "error",   // same reasoning as publish(): never redirect a bearer
         headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN },
@@ -626,7 +641,7 @@ async function publish(key, payload) {
     return;
   }
   const response = await fetch(
-    process.env.FLOWS_INGEST_URL + "?key=" + encodeURIComponent(key),
+    ingestURL() + "?key=" + encodeURIComponent(key),
     {
       method: "POST",
       // Never follow a redirect while carrying a bearer token. If
@@ -809,9 +824,18 @@ async function main() {
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
 
   if (!DRY_RUN) {
-    for (const key of ["UW_API_KEY", "FLOWS_INGEST_URL", "FLOWS_INGEST_TOKEN"]) {
-      if (!process.env[key]) throw new Error(`missing required environment variable ${key}`);
+    /* Report EVERY missing variable at once. Throwing on the first one costs a
+       round trip per secret: the operator sets UW_API_KEY, re-runs, waits, and
+       only then learns FLOWS_INGEST_TOKEN is also unset. */
+    const missing = ["UW_API_KEY", "FLOWS_INGEST_TOKEN"].filter((k) => !process.env[k]);
+    if (missing.length) {
+      throw new Error(
+        `missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
+        ` — set ${missing.length > 1 ? "them" : "it"} as repository secrets under` +
+        ` Settings > Secrets and variables > Actions`,
+      );
     }
+    console.log(`publishing to ${ingestURL()}`);
   }
 
   // 1. Universe, from a single screener call.
