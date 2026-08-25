@@ -1317,6 +1317,13 @@ function fakeScreener(count) {
   return rows;
 }
 
+/** Does this row carry none of the four gamma legs buildSurface reads? */
+function card0Unusable(row) {
+  if (!row || typeof row !== "object") return true;
+  return !["call_gamma_ask", "call_gamma_bid", "put_gamma_ask", "put_gamma_bid"]
+    .some((k) => row[k] !== undefined && row[k] !== null && row[k] !== "");
+}
+
 /**
  * The strike x expiry gamma surface, in the shape /spot-exposures/expiry-strike
  * returns: one row per (strike, expiry) pair carrying the SAME aggressor-split
@@ -1776,6 +1783,8 @@ async function main() {
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
+  // The surface shape is reported once per run, not once per card.
+  let surfaceReported = false;
   const deadline = stats.startedAt + DEADLINE_MS;
   for (const ticker of onBoard.keys()) {
     if (Date.now() > deadline) { cardsSkipped++; continue; }
@@ -1813,11 +1822,49 @@ async function main() {
             ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
               "expirations[]": surfaceExpiries,
               ...(sessionDate ? { date: sessionDate } : {}),
-              ...(spotPx > 0 ? { min_strike: Math.floor(spotPx * 0.75), max_strike: Math.ceil(spotPx * 1.25) } : {}),
+              /* min_strike / max_strike are documented as INTEGERS, so on a $3
+                 name a +-25% band rounds to 2..4 and throws away most of the
+                 chain — the band is narrower than the tick. Below $20 the
+                 bounds are dropped and `limit` does the work instead; the
+                 surface builder windows on strike again anyway. */
+              ...(spotPx >= 20
+                ? { min_strike: Math.floor(spotPx * 0.75), max_strike: Math.ceil(spotPx * 1.25) }
+                : {}),
               limit: 500,
             }).catch(() => [])
             : Promise.resolve([]),
         ]);
+
+      /* SAY WHAT CAME BACK WHEN NOTHING USABLE DID.
+      
+         The roll-off calendar shipped "unavailable" on twelve consecutive
+         cards because three readers asked for call_gamma and the wire sends
+         call_gex. A `.catch(() => [])` cannot tell an endpoint that 404s from
+         one that returns healthy rows under names nobody read, and both look
+         identical on the card: an empty panel. That mystery was solved in one
+         run by printing a row.
+
+         Bounded to the FIRST card of the run and to one row's keys, so a
+         systematic failure is reported once rather than twelve times, and a
+         working run costs one line. */
+      if (!surfaceReported && !DRY_RUN) {
+        surfaceReported = true;
+        const rows = Array.isArray(surface) ? surface : (surface && surface.data) || [];
+        if (!rows.length) {
+          console.warn(
+            `  NOTE: ${ticker} /spot-exposures/expiry-strike returned no rows for ` +
+            `${surfaceExpiries.length} expiries (${surfaceExpiries.slice(0, 3).join(", ")}...). ` +
+            "The gamma surface will be unavailable on every card until it does.");
+        } else if (card0Unusable(rows[0])) {
+          console.warn(
+            `  NOTE: ${ticker} /spot-exposures/expiry-strike returned ${rows.length} rows ` +
+            "carrying no readable gamma leg. First row: " +
+            Object.entries(rows[0]).slice(0, 12)
+              .map(([k, v]) => `${k}=${String(v).slice(0, 18)}`).join(" "));
+        } else {
+          console.log(`  surface: ${ticker} ${rows.length} rows over ${surfaceExpiries.length} expiries`);
+        }
+      }
 
       const card = buildCard({
         ticker,
