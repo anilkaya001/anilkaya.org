@@ -23,4 +23,5 @@ wrangler.toml
 .env*
 CNAME
 schema.sql
+migrations/
 *.md

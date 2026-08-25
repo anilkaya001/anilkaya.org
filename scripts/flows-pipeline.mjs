@@ -548,7 +548,10 @@ async function fetchPublishedTickers(key) {
   try {
     const response = await fetch(
       process.env.FLOWS_INGEST_URL + "?key=" + encodeURIComponent(key),
-      { headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN } },
+      {
+        redirect: "error",   // same reasoning as publish(): never redirect a bearer
+        headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN },
+      },
     );
     if (!response.ok) return [];
     const body = await response.json();
@@ -626,6 +629,13 @@ async function publish(key, payload) {
     process.env.FLOWS_INGEST_URL + "?key=" + encodeURIComponent(key),
     {
       method: "POST",
+      // Never follow a redirect while carrying a bearer token. If
+      // FLOWS_INGEST_URL is set to the apex when the site redirects to www, or
+      // to http when the zone upgrades to https, the client would re-issue the
+      // request — with the Authorization header — against whatever the
+      // redirect named. Failing loudly on a misconfigured URL is the correct
+      // outcome; silently handing the ingest token to another host is not.
+      redirect: "error",
       headers: {
         Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
         "Content-Type": "application/json",

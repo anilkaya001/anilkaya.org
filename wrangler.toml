@@ -33,7 +33,19 @@ migrations_dir = "migrations"
 [triggers]
 crons = ["*/15 * * * *"]
 
+# Plain variables. FLOWS_SESSION_EPOCH is the session revocation lever: it is
+# not sensitive — it is a counter whose only job is to invalidate outstanding
+# Flows sessions — so it belongs here rather than in the secret store.
+# Incrementing it and redeploying signs every Flows user out immediately.
+# Leaving it unset is safe: sessionEpoch() defaults to "1", which is a stable
+# epoch rather than an undefined-versus-undefined comparison.
+[vars]
+FLOWS_SESSION_EPOCH = "1"
+
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET
+#   FLOWS_PEPPER, FLOWS_CREDENTIALS, FLOWS_INGEST_TOKEN
+# FLOWS_INGEST_TOKEN must ALSO be set as a GitHub repository secret with the
+# same value: it is what authenticates the Actions pipeline to /api/flows/ingest.
 # BASE_URL is intentionally unset — the Worker uses the request's own origin.

@@ -304,6 +304,19 @@ OAuth path can grant access to `/flows/`.
 ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0005_flows.sql
 ```
 
+`d1 execute --file` is used deliberately rather than `d1 migrations apply`,
+even though `migrations_dir` is configured. `migrations apply` runs everything
+the bookkeeping table does not already record as applied, and the earlier
+migrations on this database were applied out of band — so it would attempt to
+re-run them. Every statement in `0005_flows.sql` is `CREATE TABLE IF NOT
+EXISTS`, which makes applying it by hand idempotent and safe to repeat.
+
+The consequence is that D1's migration bookkeeping stays out of date, and
+anyone who later runs `migrations apply` will hit that. `worker.js` compensates
+with `ensureFlowsTables()`, which creates both tables on first use and swallows
+the error if it cannot — because a Worker that refuses every request over a
+missing table is worse than one that reports an empty board.
+
 Confirm both tables exist before deploying the Worker, or every board request
 falls back to the "pending" empty state and every failed login silently skips
 throttling:
@@ -313,31 +326,71 @@ throttling:
   --command="SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'flows_%';"
 ```
 
-### 10.2 Set the three secrets
+### 10.2 Set the four secrets
 
 `SESSION_SECRET` is already set and is shared with the learning session — the
 audience claim, not the secret, is what separates the two.
 
-```bash
-# A high-entropy pepper. Generate it once; never commit it, never reuse it
-# elsewhere. Folded into every password before derivation, so a leaked
-# credential map cannot be attacked offline without it.
-PEPPER=$(openssl rand -base64 48)
+Four secrets are needed, and **one of them must be set in two places with the
+same value**: `FLOWS_INGEST_TOKEN` authenticates the pipeline to the Worker, so
+the Worker needs it as a secret and GitHub Actions needs it as a repository
+secret. If the two differ, every publish returns 401, the job exits non-zero,
+and the board silently keeps yesterday's data.
 
-# The per-user hash map. The generator reads BOTH secrets from stdin, never
-# from argv: arguments are visible in ps output and are appended verbatim to
-# shell history, which would leave the password and pepper on disk forever.
+```bash
+# 1. Generate the three values. All three are printed ONCE; keep the terminal
+#    open until they are pasted, because none can be recovered afterwards.
+PEPPER=$(openssl rand -base64 48)
+INGEST_TOKEN=$(openssl rand -hex 32)
+
+# 2. Choose the shared password. `read -s` keeps it off the screen and, because
+#    it is not a command argument, out of shell history and out of `ps`.
+read -rsp 'Flows password for all 11 accounts: ' SHARED_PASSWORD; echo
+
+# 3. Derive the per-user hash map. The generator reads BOTH values from stdin,
+#    never from argv, for the same reason.
 printf '%s\n%s\n' "$SHARED_PASSWORD" "$PEPPER" \
   | node scripts/generate-flows-credentials.mjs
 
-# Then set the three secrets, pasting the JSON line the generator printed:
+# 4. Print the pepper and the ingest token so they can be pasted below.
+printf 'FLOWS_PEPPER:       %s\nFLOWS_INGEST_TOKEN: %s\n' "$PEPPER" "$INGEST_TOKEN"
+```
+
+Now set them. Each command prompts for the value; paste the matching line from
+above, and paste the JSON the generator printed for `FLOWS_CREDENTIALS`.
+
+```bash
 ./tests/node_modules/.bin/wrangler secret put FLOWS_PEPPER
 ./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS
 ./tests/node_modules/.bin/wrangler secret put FLOWS_INGEST_TOKEN
 ```
 
+Then clear the variables from the live shell, since three of them are still in
+memory:
+
+```bash
+unset PEPPER INGEST_TOKEN SHARED_PASSWORD
+```
+
 **The repository is public.** None of these values may ever be committed,
 echoed into CI logs, or pasted into an issue.
+
+#### `FLOWS_SESSION_EPOCH` is a plain var, not a secret
+
+It is not sensitive — it is a counter whose only job is to invalidate
+outstanding sessions — and `sessionEpoch()` reads it from `env` like any other
+binding. Setting it with `wrangler secret put` also works, because secrets and
+vars arrive on the same `env` object, but the runbook and the code should agree
+on one place. Put it in `wrangler.toml` under `[vars]`:
+
+```toml
+[vars]
+FLOWS_SESSION_EPOCH = "1"
+```
+
+Leaving it unset is safe: it defaults to `"1"`, which is a valid stable epoch
+rather than an undefined-versus-undefined comparison that would accept
+anything.
 
 ### Rotating and revoking
 
@@ -346,19 +399,24 @@ These are two different operations and only one of them signs anyone out.
 | Goal | Action | Effect on live sessions |
 |---|---|---|
 | Change the password | Regenerate `FLOWS_CREDENTIALS` with the same pepper | **None** — everyone stays signed in |
-| Revoke every session | Bump `FLOWS_SESSION_EPOCH` | All sessions invalid immediately |
-
-```bash
-# Force every user to sign in again. FLOWS_SESSION_EPOCH is an ordinary var,
-# not a secret; any new value works, so incrementing is fine.
-./tests/node_modules/.bin/wrangler secret put FLOWS_SESSION_EPOCH
-```
+| Revoke every session | Increment `FLOWS_SESSION_EPOCH` in `[vars]` and redeploy | All sessions invalid immediately |
 
 Rotating `FLOWS_PEPPER` does **not** sign anyone out. The pepper is used for
 credential derivation only and never touches session verification, so an
 already-issued token keeps working for its full 14-day life. Changing the
 password without bumping the epoch means a departing user's existing cookie
 still opens the board for up to two weeks — bump the epoch as well.
+
+### 10.2b Deploy
+
+Sections 10.1 and 10.2 change the database and the secret store; neither
+reaches the running Worker until it is deployed. If Workers Builds owns
+deployment (section 5), pushing to the default branch is enough and the build
+must be observed to succeed before continuing. Otherwise:
+
+```bash
+./tests/node_modules/.bin/wrangler deploy
+```
 
 ### 10.3 Verify the gate before announcing it
 
@@ -371,10 +429,12 @@ curl -s "$BASE/flows/" | grep -c 'flowsBody'                            # expect
 
 # The JSON surface refuses anonymous callers with the project error envelope.
 curl -s -o /dev/null -w '%{http_code}\n' "$BASE/api/flows/board"        # expect 401
-curl -sI "$BASE/api/flows/board" | grep -i '^cache-control'             # expect no-store
+# -I sends HEAD, which this GET-only route answers 405 — use -D- with -o
+# /dev/null to read headers from a real GET.
+curl -s -D- -o /dev/null "$BASE/api/flows/board" | grep -i '^cache-control'   # expect no-store
 
 # Gated documents must not be storable by a shared cache.
-curl -sI "$BASE/flows/" | grep -i '^cache-control'                      # expect no-store
+curl -s -D- -o /dev/null "$BASE/flows/" | grep -i '^cache-control'      # expect no-store
 
 # THE BYPASS CHECKS. The gated HTML lives in shared/flows-pages.js and `flows/`
 # is in .assetsignore, so there is no file in the bundle for a mangled path to
