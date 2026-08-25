@@ -654,11 +654,31 @@ async function publish(key, payload) {
       headers: {
         Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
         "Content-Type": "application/json",
+        // Identify the client honestly. Node's fetch sends no User-Agent, and
+        // an anonymous POST from a datacenter address is exactly the shape
+        // edge bot heuristics drop. Naming the caller is also what lets the
+        // operator write a precise WAF skip rule instead of a broad one.
+        "User-Agent": "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)",
       },
       body,
     },
   );
-  if (!response.ok) throw new Error(`ingest ${key} -> HTTP ${response.status}`);
+  if (!response.ok) {
+    /* Report WHOSE rejection this is.
+       The Worker's own failures are the project's JSON envelope; an edge
+       rejection is an HTML block page with a cf-ray. Only the status was
+       reported, so a 403 from Cloudflare's WAF — a status this Worker never
+       returns on the ingest path — was indistinguishable from an application
+       error, and there was nothing in the log to act on. */
+    const detail = await response.text().catch(() => "");
+    const ray = response.headers.get("cf-ray") || "none";
+    const server = response.headers.get("server") || "unknown";
+    throw new Error(
+      `ingest ${key} -> HTTP ${response.status}` +
+      ` (server: ${server}, cf-ray: ${ray})` +
+      (detail ? ` body: ${detail.slice(0, 300).replace(/\s+/g, " ")}` : " body: <empty>"),
+    );
+  }
   console.log(`  published ${key}: ${summarize(payload)}, ${body.length} bytes`);
 }
 
