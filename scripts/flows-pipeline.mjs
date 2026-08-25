@@ -319,28 +319,69 @@ async function verifyDating(sessionDate) {
   const usable = (rows) => (rows || []).some(
     (r) => r && r.expiry && (num(r.call_gamma) !== 0 || num(r.put_gamma) !== 0));
 
+  /* A SINGLE-NAME EQUITY, not SPY. The first version probed SPY because it is
+     the most liquid thing listed — and got no usable expiry gamma from it
+     either dated or undated, which says nothing about the `date` parameter and
+     everything about that instrument on that endpoint. An ETF is exactly the
+     wrong control for a question about single-name option chains. */
+  const PROBE = "AAPL";
+
   const [dated, undated, capped] = await Promise.all([
-    uw("/api/stock/SPY/greek-exposure/expiry", { date: sessionDate }).catch(() => []),
-    uw("/api/stock/SPY/greek-exposure/expiry").catch(() => []),
-    uw("/api/stock/SPY/ohlc/1d", { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+    uw(`/api/stock/${PROBE}/greek-exposure/expiry`, { date: sessionDate }).catch(() => []),
+    uw(`/api/stock/${PROBE}/greek-exposure/expiry`).catch(() => []),
+    uw(`/api/stock/${PROBE}/ohlc/1d`, { timeframe: "1M", end_date: sessionDate }).catch(() => []),
   ]);
 
-  const date = usable(dated);
+  /* ONLY DISTRUST `date` WHEN THE UNDATED CALL DEMONSTRABLY DOES BETTER.
+
+     The first version dropped the parameter whenever the dated call came back
+     unusable — including when the undated one was unusable too, which is the
+     case where the probe has learned NOTHING. That fired on the first live run:
+     both calls returned no usable gamma, so the guard concluded `date` was at
+     fault and reverted the whole run to the undated behaviour it was written to
+     replace. A probe that cannot distinguish the two hypotheses must not act. */
+  const date = usable(dated) || !usable(undated);
   const endDate = Array.isArray(capped) && capped.length > 0;
-  if (!date) {
+
+  if (!usable(dated) && !usable(undated)) {
     console.warn(
-      `WARNING: /greek-exposure/expiry?date=${sessionDate} returns no usable gamma for SPY` +
-      (usable(undated) ? ", while the undated call does" : ", and neither does the undated call") +
-      " — dropping `date` for this run. The board will carry whatever session the " +
-      "vendor defaults to, which is the behaviour that mislabelled it before.");
+      `NOTE: ${PROBE} /greek-exposure/expiry returns no usable gamma either dated ` +
+      `(${sessionDate}) or undated, so this probe cannot tell whether \`date\` is at ` +
+      "fault. Keeping `date` — the dated call is the one that is correct by " +
+      "construction. The gamma roll-off panel will be unavailable on every card " +
+      "until that endpoint returns greeks; see the shape report below.");
+  } else if (!date) {
+    console.warn(
+      `WARNING: /greek-exposure/expiry?date=${sessionDate} returns no usable gamma for ` +
+      `${PROBE} while the undated call does — dropping \`date\` for this run. The board ` +
+      "will carry whatever session the vendor defaults to, which is the behaviour " +
+      "that mislabelled it before.");
   }
   if (!endDate) {
     console.warn(
-      `WARNING: /ohlc/1d?end_date=${sessionDate} returned no candles for SPY — ` +
+      `WARNING: /ohlc/1d?end_date=${sessionDate} returned no candles for ${PROBE} — ` +
       "dropping `end_date` for this run. Candles will include the session in progress.");
   }
+
+  /* REPORT WHAT THE ENDPOINT ACTUALLY SENT, once, when it sent nothing usable.
+     Every other defect in this pipeline was found by reading a real payload
+     rather than reasoning about one; a source that quietly yields nothing
+     deserves the same treatment. One row, keys and truncated values, so the
+     next run turns a mystery into an observation. */
+  if (!usable(dated) || !usable(undated)) {
+    for (const [label, rows] of [["dated", dated], ["undated", undated]]) {
+      const arr = Array.isArray(rows) ? rows : [];
+      if (!arr.length) { console.warn(`  ${PROBE} expiry ${label}: 0 rows`); continue; }
+      const shape = Object.entries(arr[0])
+        .map(([k, v]) => `${k}=${v === null ? "null" : String(v).slice(0, 14)}`)
+        .join(" ");
+      console.warn(`  ${PROBE} expiry ${label}: ${arr.length} rows, first: ${shape}`);
+    }
+  }
+
   return { date, endDate };
 }
+
 
 async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate: true }) {
   const band = spot > 0
