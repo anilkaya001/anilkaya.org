@@ -1097,3 +1097,13 @@ body.is-stale .flows-tablewrap {
 .bd-lab.is-spot { fill: var(--ink); }
 .bd-lab.is-vol { fill: var(--gold-mystic); }
 .bd-axis-lab { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 10px; }
+
+/* A GAUGE GROWS FROM THE BASELINE, not from the centre rule. V and O carry no
+   direction, and drawing them on the signed axis made a 0..100 reading look
+   like a bullish vote of the same size. Matches .fc-fam li.is-gauge on the card. */
+.fb-fam i.is-gauge::before {
+  bottom: 0;
+  top: auto;
+  height: calc(var(--h, 0) * 1rem);
+  background: var(--gold-celadon);
+}

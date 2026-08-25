@@ -147,6 +147,23 @@
     };
   }
 
+  /**
+   * THE VIEWBOX UNIT MUST BE ONE CSS PIXEL, on every panel.
+   *
+   * A viewBox fixed at 560 units, emitted with width="100%", is scaled by the
+   * browser to whatever the container is — and it scales the TEXT with it.
+   * Measured at a 320px viewport, where the dialog's inner width is 288px: the
+   * factor is 288/560 = 0.514, so a 9px axis label renders at 4.6 CSS px and a
+   * 10.5px one at 5.4. Unreadable, and silently so, because nothing overflows.
+   *
+   * The gamma and path panels already sized themselves from the host; the four
+   * added later did not. Same bounds as the gamma panel, so a wide desktop gets
+   * a wider plot rather than a magnified one.
+   */
+  function panelWidth(host) {
+    return Math.max(300, Math.min(760, (host && host.clientWidth) || 560));
+  }
+
   /** A round tick interval at or just below `raw`: 1, 2, 2.5 or 5 times a power of ten. */
   function niceStep(raw) {
     if (!(raw > 0)) return 0;
@@ -267,11 +284,21 @@
        read the rest against. */
     marks.push(tau, vmax);
 
+    /* THE GUARANTEED MARKS WERE ALWAYS REJECTED. `rate` is the largest
+       pixels-per-unit that fits both sides, so whenever the zero rule is not
+       clamped to its 18/82 bounds, negW/|fMin| and posW/fMax are EQUAL and
+       xOf(+-vmax) lands exactly on plotR or plotL — inside the two-unit edge
+       test. The widest bar, which this rail's own comment promises is always
+       marked, was drawn on none of the 109 emitted cards. Clamp the guaranteed
+       pair inward instead of discarding it; a decade that falls off the end is
+       still dropped, because unlike vmax it is not load-bearing. */
+    const guaranteed = new Set([tau, vmax]);
     const decades = [];
     for (const v of marks.sort((a, b) => a - b)) {
       for (const sgn of [1, -1]) {
-        const x = xOf(sgn * v);
-        if (x < plotL + 2 || x > plotR - 2) continue;
+        let x = xOf(sgn * v);
+        if (guaranteed.has(v)) x = Math.min(plotR - 2, Math.max(plotL + 2, x));
+        else if (x < plotL + 2 || x > plotR - 2) continue;
         if (Math.abs(x - x0) < 18) continue;             // never crowd the zero rule
         if (decades.some((d) => Math.abs(d.x - x) < 40)) continue;
         decades.push({ x, v, sgn });
@@ -517,7 +544,7 @@
     const pad = (hi - lo) * 0.18;
     lo -= pad; hi += pad;
 
-    const W = 560, H = 96, padX = 28;
+    const W = panelWidth(host), H = 96, padX = 28;
     const xOf = (v) => padX + ((v - lo) / (hi - lo)) * (W - padX * 2);
     const svg = svgEl("svg", {
       class: "bd", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
@@ -590,7 +617,7 @@
        fifteen monospace characters at 10.5px, about 95 units, and it is drawn
        text-anchor:end from padL - 8. At padL = 96 that started at x = -7 and
        the SVG clipped it — invisibly, because clipping is silent. */
-    const W = 560, ROW = 26, padL = 116, padR = 56, padT = 8;
+    const W = panelWidth(host), ROW = 26, padL = 116, padR = 56, padT = 8;
     const H = padT + rows.length * ROW + 26;
     const plotW = W - padL - padR;
     const svg = svgEl("svg", {
@@ -691,7 +718,7 @@
       return deadPanel(host, question, "no band could be measured");
     }
 
-    const W = 560, H = 118, padX = 16;
+    const W = panelWidth(host), H = 118, padX = 16;
     const plotW = W - padX * 2;
     const mid = padX + plotW / 2;
     // 0.44 rather than 0.5 leaves room for the price labels at each extreme.
@@ -805,7 +832,7 @@
 
     const closes = Array.isArray(panel.closes) ? panel.closes : [];
     if (closes.length >= 2) {
-      const W = 560, H = 76, pad = 4;
+      const W = panelWidth(host), H = 76, pad = 4;
       let lo = Infinity, hi = -Infinity;
       for (const c of closes) { if (c < lo) lo = c; if (c > hi) hi = c; }
       const span = hi - lo || 1;
