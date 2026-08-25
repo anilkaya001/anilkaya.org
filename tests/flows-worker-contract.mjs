@@ -24,9 +24,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const url = (p) => server.baseURL + p;
 const get = (p, init) => fetch(url(p), { redirect: "manual", ...init });
 
-/* A marker that appears only in the authenticated board, never in the login
-   page — the single most useful signal for "did the gate leak". */
-const BOARD_MARKER = 'id="flowsBody"';
+/* A marker that appears only in an AUTHENTICATED page, never in the login
+   page. It must be on the page each assertion actually requests: /flows/ is
+   now the Overview, which has no results table at all, so the old
+   id="flowsBody" marker would have passed every leak test for the wrong
+   reason — absent when signed in as much as when signed out. The rail is on
+   every gated page and on none of the public ones. */
+const BOARD_MARKER = 'class="flows-rail"';
 
 try {
   /* ---------- the login page is public, the board is not ---------- */
@@ -193,7 +197,38 @@ try {
     eq(board.status, 200, "the board renders for an authenticated session");
     ok(html.includes(BOARD_MARKER), "the board markup is present");
     ok(html.includes(FLOWS_TEST_USER), "the board names the signed-in account");
-    ok(html.includes("/assets/js/flows-board.js"), "the board loads its controller");
+    ok(html.includes("/assets/js/flows-overview.js"),
+       "the overview loads its own controller");
+
+    /* THE SIDES ARE ROUTES NOW, not a toggle. A toggle has no address: a
+       reader could not link to the bearish side, bookmark it or send it, and
+       half the session sat behind a click. Each side is a page, so each is
+       asserted as one. */
+    for (const route of ["/flows/long/", "/flows/short/"]) {
+      const side = await get(route, { headers: { Cookie: "flows_session=" + token } });
+      eq(side.status, 200, `${route} renders for an authenticated session`);
+      const sideHtml = await side.text();
+      ok(sideHtml.includes(BOARD_MARKER), `${route} is a gated page`);
+      ok(sideHtml.includes("/assets/js/flows-board.js"), `${route} loads the board controller`);
+      ok(sideHtml.includes('id="flowsBody"'), `${route} carries the results table`);
+      ok(/aria-current="page"/.test(sideHtml), `${route} marks itself current in the rail`);
+
+      const anon = await get(route);
+      eq(anon.status, 200, `${route} serves a page to an anonymous visitor`);
+      const anonHtml = await anon.text();
+      ok(!anonHtml.includes(BOARD_MARKER), `${route} leaks nothing to an anonymous visitor`);
+      ok(anonHtml.includes('action="/flows/login"'),
+         `${route} offers the sign-in form IN PLACE — a redirect would lose the page asked for`);
+
+      const bare = await get(route.replace(/\/$/, ""));
+      eq(bare.status, 308, `${route} without its trailing slash redirects`);
+    }
+
+    /* Every gated page carries the rail, and the rail carries every
+       destination — a nav that omits a route is a route nobody finds. */
+    for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/desk/"]) {
+      ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
+    }
 
     // The API answers, and answers honestly before the pipeline has run.
     const api = await get("/api/flows/board?side=long", {

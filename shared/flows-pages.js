@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "59";
+export const ASSET_VERSION = "61";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -44,6 +44,76 @@ const topbar = (active) => `
     <a href="/flows/"${active ? ' class="is-active" aria-current="page"' : ""}>Flows</a>
   </nav>
 </header>`;
+
+
+/* ---------- the rail ------------------------------------------- */
+
+/**
+ * The persistent left navigation, on every Flows page.
+ *
+ * The section had more navigable surface than its two-item subnav admitted:
+ * the ticker card has shipped a working ?t= deep link that nothing linked to,
+ * and the long and short sides were a TOGGLE — a control that hides half the
+ * product behind a click and cannot be linked to, bookmarked or sent to
+ * anyone. Splitting them into routes makes each a place rather than a state.
+ *
+ * A RAIL ON A PHONE IS A DRAWER, NOT A COLUMN. At 320px a persistent 200px
+ * column would leave 120px for a thirteen-column table. Below 60rem it
+ * collapses to a horizontal strip of the same links, scrollable, with the
+ * group labels dropped — the destinations survive, the chrome does not.
+ * There is no hamburger and nothing to open: a menu you must open is a menu
+ * that hides the product, which is the problem this replaces.
+ */
+const rail = (active) => {
+  /* THE COUNTS ARE FILLED IN THE BROWSER, not here. The Worker would have to
+     read both board rows out of D1 on every page view to render a two-digit
+     badge — two row reads per view, against a free-tier quota shared with a
+     live app, for a number the page is about to fetch anyway. So the slot is
+     emitted empty and hidden, and whichever controller already has the
+     payload fills it. A badge that says nothing until the data lands is
+     honest; a badge that says 0 while the fetch is in flight is not. */
+  const item = (href, label, key) => {
+    const on = active === key;
+    const badge = key === "long" || key === "short"
+      ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
+    return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
+      `<span class="rail-label">${label}</span>${badge}</a>`;
+  };
+  return `
+<nav class="flows-rail" aria-label="Flows">
+  <p class="rail-group" id="railSession">Session</p>
+  <div class="rail-items" role="group" aria-labelledby="railSession">
+    ${item("/flows/", "Overview", "overview")}
+    ${item("/flows/long/", "Bullish", "long")}
+    ${item("/flows/short/", "Bearish", "short")}
+  </div>
+  <p class="rail-group" id="railDesk">Desk</p>
+  <div class="rail-items" role="group" aria-labelledby="railDesk">
+    ${item("/flows/desk/", "Premium desk", "desk")}
+  </div>
+</nav>`;
+};
+
+
+/* The chrome every Flows page shares. Kept in one place so the rail, the
+   identity block and the heading structure cannot drift between four pages. */
+const shell = (title, kicker, active, username, body) => `
+<body class="flows-body has-rail">
+${topbar(true)}
+${rail(active)}
+<main class="flows-main">
+  <header class="flows-head">
+    <div>
+      <p class="flows-kicker">${kicker}</p>
+      <h1>${title}</h1>
+    </div>
+    <div class="flows-session">
+      <span class="flows-user">${escapeHTML(username)}</span>
+      <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
+    </div>
+  </header>
+${body}
+</main>`;
 
 /* ---------- login ---------------------------------------------- */
 
@@ -78,77 +148,12 @@ ${topbar(true)}
 </html>`;
 }
 
-/* ---------- board ---------------------------------------------- */
 
-export function boardPage({ username = "" } = {}) {
-  return `${head("Flows — Board", "Ranked options-flow candidates.")}
-<body class="flows-body">
-${topbar(true)}
-<main class="flows-main">
-  <header class="flows-head">
-    <div>
-      <p class="flows-kicker">Options-flow intelligence</p>
-      <h1>Flows Board</h1>
-    </div>
-    <div class="flows-session">
-      <span class="flows-user">${escapeHTML(username)}</span>
-      <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
-    </div>
-  </header>
-
-  <nav class="flows-subnav" aria-label="Flows sections">
-    <a href="/flows/" class="is-active" aria-current="page">Board</a>
-    <a href="/flows/desk/">Premium desk</a>
-  </nav>
-
-  <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
-  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <div class="flows-sides" role="group" aria-label="Board side">
-      <button type="button" class="flows-side is-on" data-side="long" aria-pressed="true">Long</button>
-      <button type="button" class="flows-side" data-side="short" aria-pressed="false">Short</button>
-    </div>
-    <div class="flows-views" role="group" aria-label="Layout">
-      <button type="button" class="flows-view is-on" data-view="deck" aria-pressed="true">Deck</button>
-      <button type="button" class="flows-view" data-view="table" aria-pressed="false">Table</button>
-    </div>
-  </div>
-
-  <!-- One payload, two renderers, exactly one mounted at a time. The deck is
-       the default because the table's ten columns are wider than any phone. -->
-  <div class="flows-deck" id="flowsDeck" role="list" aria-label="Ranked candidates"></div>
-
-  <!-- tabindex + role: the table is wider than any phone viewport, so this
-       wrapper always scrolls horizontally. Without a tabindex a keyboard-only
-       user tabs straight past it and seven of the ten columns are unreachable;
-       without role and a name it is not announced as a scrollable region. -->
-  <div class="flows-tablewrap" id="flowsTableWrap" tabindex="0" role="region" aria-label="Ranked candidates" hidden>
-    <table class="flows-table" id="flowsTable">
-      <caption class="flows-caption">Ranked candidates. Select a ticker for its gamma profile, key levels and disclosed congressional trades. Every score decomposes into its contributing families.</caption>
-      <thead>
-        <tr>
-          <th scope="col" class="c-rank">#</th>
-          <th scope="col">Ticker</th>
-          <th scope="col" class="c-num">Last</th>
-          <th scope="col" class="c-num">Score</th>
-          <th scope="col" class="c-num">Conv</th>
-          <th scope="col" class="c-num"><abbr title="Three signed axes — Flow, Positioning, Path — then two unsigned gauges: Vol regime and Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
-          <th scope="col" class="c-num">&Pi;</th>
-          <th scope="col" class="c-num">&Gamma; regime</th>
-          <th scope="col" class="c-num">&Gamma;&#8320; dist</th>
-          <th scope="col" class="c-num">Net prem</th>
-        </tr>
-      </thead>
-      <tbody id="flowsBody"></tbody>
-    </table>
-  </div>
-
-  <p class="flows-foot">
-    Scores are a ranked attention signal, not a return forecast. At the information
-    coefficient this class of signal supports, expect a hit rate near 51&ndash;52%.
-  </p>
-</main>
+/* The ticker card, shared by every page that lists tickers. Extracted so the
+   overview and the two side pages cannot drift apart on the markup the card
+   renderer targets by id — a mismatch there is a panel that silently never
+   draws, which this repo has shipped before. */
+const cardDialog = () => `
 <dialog id="flowsCard" class="fc" aria-labelledby="fcTitle">
   <article class="fc-inner">
     <header class="fc-head">
@@ -215,7 +220,140 @@ ${topbar(true)}
 
     <p class="fc-prov" id="fcProv"></p>
   </article>
-</dialog>
+</dialog>`;
+
+/* ---------- overview: both tails at once ------------------------ */
+
+/**
+ * The landing page.
+ *
+ * It used to be the board with a LONG/SHORT toggle, which is two problems in
+ * one control: it hides half the session behind a click, and a toggle has no
+ * URL, so a reader cannot link to, bookmark or send the bearish side.
+ *
+ * The main section now shows BOTH POLES AT ONCE over a fixed score axis, and
+ * the dead band is drawn rather than described. That band is the reason the
+ * page is usually short — 17 of 24 names landed inside it on the session now
+ * live — and a reader who cannot see it reads a three-name page as a broken
+ * one. Drawing it turns "why is this empty" into "most of the market is not
+ * leaning, and here is how much of it".
+ *
+ * The full ranked lists move to their own routes, where they are pages rather
+ * than a state of this one.
+ */
+export function overviewPage({ username = "" } = {}) {
+  return `${head("Flows — Overview", "Where the session leans, both tails at once.")}
+${shell("Session Overview", "Options-flow intelligence", "overview", username, `
+  <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
+  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
+
+  <!-- THE SPINE. A fixed -100..+100 axis with the dead band hatched, so the
+       band that excluded most of the market is visible rather than inferred. -->
+  <section class="spine" aria-labelledby="spineH">
+    <h2 id="spineH" class="spine-h">Where the session leans</h2>
+    <div id="spinePlot"></div>
+  </section>
+
+  <div class="poles">
+    <section class="pole is-bull" aria-labelledby="bullH">
+      <header class="pole-head">
+        <h2 id="bullH">Most bullish-leaning</h2>
+        <a href="/flows/long/" class="pole-all" id="bullAll">All bullish</a>
+      </header>
+      <div class="pole-deck" id="bullDeck" role="list" aria-labelledby="bullH"></div>
+    </section>
+
+    <section class="pole is-bear" aria-labelledby="bearH">
+      <header class="pole-head">
+        <h2 id="bearH">Most bearish-leaning</h2>
+        <a href="/flows/short/" class="pole-all" id="bearAll">All bearish</a>
+      </header>
+      <div class="pole-deck" id="bearDeck" role="list" aria-labelledby="bearH"></div>
+    </section>
+  </div>
+
+  <p class="flows-foot">
+    Scores are a ranked attention signal, not a return forecast. At the
+    information coefficient this class of signal supports, expect a hit rate near
+    51&ndash;52%. Names inside the dead band are not published on either side.
+  </p>
+`)}
+${cardDialog()}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-overview.js")}" defer></script>
+<script src="${v("/assets/js/flows-card.js")}" defer></script>
+</body>
+</html>`;
+}
+
+/* ---------- board ---------------------------------------------- */
+
+/**
+ * A candidate list — /flows/long/ or /flows/short/ — as a PAGE, not a toggle.
+ *
+ * The side used to be a control on the landing page. That is two problems: it
+ * hid half the session behind a click, and a toggle has no address, so a
+ * reader could not link to the bearish side, bookmark it, or send it to
+ * anyone. As routes they are places, the rail can mark which one you are on,
+ * and the overview can link to both.
+ *
+ * The deck/table toggle stays a toggle, because it genuinely is a preference
+ * about the same rows rather than a different set of them.
+ */
+export function sidePage({ username = "", side = "long" } = {}) {
+  const bear = side === "short";
+  const title = bear ? "Bearish candidates" : "Bullish candidates";
+  const lede = bear
+    ? "Names leaning bearish this session, ranked by score."
+    : "Names leaning bullish this session, ranked by score.";
+  return `${head("Flows — " + title, lede)}
+${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
+  <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
+  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+    <div class="flows-views" role="group" aria-label="Layout">
+      <button type="button" class="flows-view is-on" data-view="deck" aria-pressed="true">Deck</button>
+      <button type="button" class="flows-view" data-view="table" aria-pressed="false">Table</button>
+    </div>
+  </div>
+
+  <!-- One payload, two renderers, exactly one mounted at a time. The deck is
+       the default because the table's columns are wider than any phone. -->
+  <div class="flows-deck" id="flowsDeck" role="list" aria-label="Ranked candidates"></div>
+
+  <!-- tabindex + role: the table is wider than any phone viewport, so this
+       wrapper always scrolls horizontally. Without a tabindex a keyboard-only
+       user tabs straight past it and most columns are unreachable. -->
+  <div class="flows-tablewrap" id="flowsTableWrap" tabindex="0" role="region" aria-label="Ranked candidates" hidden>
+    <table class="flows-table" id="flowsTable">
+      <caption class="flows-caption">Ranked candidates. Select a ticker for its gamma profile, key levels and disclosed congressional trades. Every score decomposes into its contributing families.</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="c-rank">#</th>
+          <th scope="col">Ticker</th>
+          <th scope="col" class="c-num">Last</th>
+          <th scope="col" class="c-num">Score</th>
+          <th scope="col" class="c-num">Conv</th>
+          <th scope="col" class="c-num"><abbr title="Three signed axes — Flow, Positioning, Path — then two unsigned gauges: Vol regime and Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
+          <th scope="col" class="c-num">&Pi;</th>
+          <th scope="col" class="c-num">&Gamma; regime</th>
+          <th scope="col" class="c-num">&Gamma;&#8320; dist</th>
+          <th scope="col" class="c-num">Net prem</th>
+        </tr>
+      </thead>
+      <tbody id="flowsBody"></tbody>
+    </table>
+  </div>
+
+  <p class="flows-foot">
+    Scores are a ranked attention signal, not a return forecast. At the
+    information coefficient this class of signal supports, expect a hit rate near
+    51&ndash;52%.
+  </p>
+`)}
+${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
@@ -242,26 +380,8 @@ ${topbar(true)}
  */
 export function deskPage({ username = "" } = {}) {
   return `${head("Flows — Premium desk", "Option-sale economics for any listed name.")}
-<body class="flows-body">
-${topbar(true)}
-<main class="flows-main flows-desk">
-  <header class="flows-head">
-    <div>
-      <p class="flows-kicker">Options-flow intelligence</p>
-      <h1>Premium Desk</h1>
-    </div>
-    <div class="flows-session">
-      <span class="flows-user">${escapeHTML(username)}</span>
-      <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
-    </div>
-  </header>
-
-  <nav class="flows-subnav" aria-label="Flows sections">
-    <a href="/flows/">Board</a>
-    <a href="/flows/desk/" class="is-active" aria-current="page">Premium desk</a>
-  </nav>
-
-  <form class="desk-entry" id="deskEntry" autocomplete="off">
+${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
+<form class="desk-entry" id="deskEntry" autocomplete="off">
     <label for="deskInput">Add symbols</label>
     <div class="desk-entry__row">
       <input id="deskInput" name="tickers" type="text" inputmode="latin"
@@ -284,28 +404,66 @@ ${topbar(true)}
       <button type="button" class="desk-clear" id="deskClear">Clear</button>
     </div>
     <div class="desk-filters">
+      <!-- Each label is wrapped WITH its control. A flat flex row wraps
+           between them on a phone, which orphans "Rank by" onto the line above
+           its own select and directly under the other one — a label that reads
+           as belonging to the wrong control is worse than no label. -->
+      <span class="desk-field">
       <label for="deskStrategy">Sell</label>
       <select id="deskStrategy">
         <option value="both">Puts and calls</option>
         <option value="csp">Cash-secured puts</option>
         <option value="cc">Covered calls</option>
       </select>
+      </span>
+      <span class="desk-field">
       <label for="deskRank">Rank by</label>
       <select id="deskRank">
         <option value="annualized">Annualised yield</option>
         <option value="premium">Premium received</option>
         <option value="yieldOnCollateral">Yield on collateral</option>
         <option value="cushionSigmas">Cushion</option>
+        <option value="collectible">Premium collectible</option>
       </select>
+      </span>
     </div>
   </div>
 
+  <div class="desk-capital">
+    <div class="desk-capital__entry">
+      <label for="deskBP">Buying power</label>
+      <div class="desk-capital__field">
+        <span class="desk-capital__prefix" aria-hidden="true">$</span>
+        <input id="deskBP" name="bp" type="text" inputmode="numeric" autocomplete="off"
+               spellcheck="false" placeholder="25,000" aria-describedby="deskBPHelp">
+      </div>
+      <button type="button" class="desk-capital__clear" id="deskBPClear" hidden>Clear</button>
+    </div>
+    <p class="desk-help" id="deskBPHelp">
+      Cash. Puts are sized cash-secured — the whole strike is reserved — so this
+      under-counts what a margin account could write. Held in this page&#39;s address
+      so a reload keeps it, which means a link you share carries it too.
+    </p>
+  </div>
+
+  <p class="desk-plan" id="deskPlan" role="status" hidden></p>
+
   <div class="flows-status" id="deskStatus" role="status">Add a symbol to begin.</div>
 
-  <div class="flows-tablewrap" id="deskTableWrap" tabindex="0" role="region"
-       aria-label="Sellable contracts" hidden>
-    <table class="flows-table desk-table">
-      <caption class="flows-caption">
+  <!-- THE PANE IS ANCHORED AT ITS TOP-LEFT, and only its right edge, bottom
+       edge and bottom-right corner are draggable. A grip on the top or left
+       would have to MOVE the box rather than resize it, which in normal
+       document flow means every element above the table shifts under the
+       cursor mid-drag. Four of the eight grips an "all corners" pane implies
+       are therefore not resize handles at all; they are page-reflow handles.
+       The right edge, the bottom edge and the bottom-right corner between
+       them reach every size the other six could, and all three answer the
+       keyboard, which a browser's native resize corner does not. -->
+  <div class="desk-pane" id="deskPane" hidden>
+    <div class="flows-tablewrap desk-tablewrap" id="deskTableWrap" tabindex="0" role="region"
+         aria-label="Sellable contracts">
+      <table class="flows-table desk-table">
+        <caption class="flows-caption">
         Every quoted contract that clears the liquidity gates, ranked across all selected
         symbols. Premium is what the bid pays today; the mid is not a price anyone must trade at.
       </caption>
@@ -317,6 +475,7 @@ ${topbar(true)}
           <th scope="col" class="c-num">Expiry</th>
           <th scope="col" class="c-num">Bid</th>
           <th scope="col" class="c-num">Premium</th>
+          <th scope="col" class="c-num c-collect" id="deskCollectHead" hidden><abbr title="What your stated buying power collects on this line: contracts affordable times the premium each pays. Integer division — you cannot sell a third of a contract">Collect</abbr></th>
           <th scope="col" class="c-num"><abbr title="Premium as a fraction of the collateral the trade ties up">Yield</abbr></th>
           <th scope="col" class="c-num"><abbr title="Simple 365/days scaling of the yield. A convention for comparing tenors, not a return anyone earns">Ann.</abbr></th>
           <th scope="col" class="c-num"><abbr title="Distance from spot to breakeven, in units of the move this option's own implied volatility prices over its own remaining life. Not a probability">Cushion</abbr></th>
@@ -326,8 +485,18 @@ ${topbar(true)}
           <th scope="col" class="c-num"><abbr title="Open interest, and the change since the prior session">OI</abbr></th>
         </tr>
       </thead>
-      <tbody id="deskBody"></tbody>
-    </table>
+        <tbody id="deskBody"></tbody>
+      </table>
+    </div>
+    <div class="desk-grip desk-grip--x" id="deskGripX" role="separator"
+         aria-orientation="vertical" aria-label="Pane width" tabindex="0"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
+    <div class="desk-grip desk-grip--y" id="deskGripY" role="separator"
+         aria-orientation="horizontal" aria-label="Pane height" tabindex="0"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
+    <div class="desk-grip desk-grip--xy" id="deskGripXY" role="button" tabindex="0"
+         aria-label="Pane size, both axes"></div>
+    <button type="button" class="desk-grip-reset" id="deskGripReset" hidden>Reset size</button>
   </div>
 
   <p class="flows-foot" id="deskFoot"></p>
@@ -340,7 +509,7 @@ ${topbar(true)}
     Selling options has unbounded loss on the call side and equity-sized loss
     on the put side. This is a screen, not advice.
   </p>
-</main>
+`)}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-desk.js")}" defer></script>
 </body>
@@ -353,4 +522,4 @@ function escapeHTML(value) {
   })[c]);
 }
 
-export const FLOWS_PAGES = { loginPage, boardPage, deskPage, ASSET_VERSION };
+export const FLOWS_PAGES = { loginPage, overviewPage, sidePage, deskPage, ASSET_VERSION };

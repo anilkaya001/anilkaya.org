@@ -2152,11 +2152,27 @@ async function route(request, env, url, ctx) {
     return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
   }
 
-  if (path === "/flows/") {
+  /* THE FLOWS PAGES, one table rather than four near-identical blocks.
+  
+     The long and short sides were a TOGGLE on one page, which is two problems:
+     it hid half the session behind a click, and a toggle has no address — a
+     reader could not link to the bearish side, bookmark it, or send it. They
+     are routes now, so the rail can mark which one you are on.
+  
+     Anonymous visitors get the LOGIN page at whatever path they asked for,
+     never a redirect: bouncing them to /flows/ loses the page they wanted, and
+     the section's existence is not the secret. */
+  const FLOWS_ROUTES = {
+    "/flows/": (u) => FLOWS_PAGES.overviewPage({ username: u }),
+    "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
+    "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
+    "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
+  };
+  if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
     const session = await currentFlowsUser(request, env);
     const body = session
-      ? FLOWS_PAGES.boardPage({ username: session.username })
+      ? FLOWS_ROUTES[path](session.username)
       : FLOWS_PAGES.loginPage();
     return new Response(body, {
       status: 200,
@@ -2164,25 +2180,11 @@ async function route(request, env, url, ctx) {
     });
   }
 
-  if (path === "/flows/desk" ) {
+  /* Canonical trailing slash for every gated page, so a link without one is a
+     redirect rather than a 404 handed to the static bundle. */
+  if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk") {
     requireMethod(request, ["GET", "HEAD"]);
-    return redirect(new URL("/flows/desk/", url).toString(), 308);
-  }
-
-  if (path === "/flows/desk/") {
-    requireMethod(request, ["GET", "HEAD"]);
-    /* Anonymous visitors get the LOGIN page, not a redirect and not a 404.
-       Same as /flows/: the section's existence is not the secret, and a
-       redirect would bounce a signed-out user to the board rather than back
-       here after signing in. */
-    const session = await currentFlowsUser(request, env);
-    const body = session
-      ? FLOWS_PAGES.deskPage({ username: session.username })
-      : FLOWS_PAGES.loginPage();
-    return new Response(body, {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+    return redirect(new URL(path + "/", url).toString(), 308);
   }
 
   if (path === "/api/flows/ingest") {
