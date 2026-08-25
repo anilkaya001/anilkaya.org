@@ -342,6 +342,13 @@ async function verifyDating(sessionDate) {
      wrong control for a question about single-name option chains. */
   const PROBE = "AAPL";
 
+  /* A SINGLE-NAME EQUITY, not SPY. The first version probed SPY because it is
+     the most liquid thing listed — and got no usable expiry gamma from it
+     either dated or undated, which says nothing about the `date` parameter and
+     everything about that instrument on that endpoint. An ETF is exactly the
+     wrong control for a question about single-name option chains. */
+  const PROBE = "AAPL";
+
   const [dated, undated, capped] = await Promise.all([
     uw(`/api/stock/${PROBE}/greek-exposure/expiry`, { date: sessionDate }).catch(() => []),
     uw(`/api/stock/${PROBE}/greek-exposure/expiry`).catch(() => []),
