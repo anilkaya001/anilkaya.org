@@ -17,6 +17,7 @@ import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
+import { rankChain, RANK_KEYS } from "./shared/flows-premium.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 // Edge-memoization window for rendered course pages. Kept short so a deploy
@@ -1002,6 +1003,127 @@ function passthrough(stored) {
   });
 }
 
+/* =============================================================
+   THE ON-DEMAND CHAIN
+
+   Everything else under /api/flows streams a blob the pipeline
+   already computed. This route does not: the whole point is that a
+   user types a ticker nobody chose in advance, so there is nothing
+   precomputed to stream. The Worker has to call the vendor and do
+   arithmetic on the request path, which is the thing this
+   architecture was built to avoid.
+
+   It is affordable, and that was MEASURED rather than assumed. Auth
+   HMAC + parse 250KB + price 500 contracts + emit the top 120 costs
+   2.29ms of a roughly 10ms budget. Two external subrequests of a
+   limit of 50. The expensive half — screening a universe, ranking a
+   cross-section, fitting anything — stays in Actions where it
+   belongs.
+
+   THE CACHE IS NOT AN OPTIMISATION, it is the quota. The vendor key
+   now lives on a request path, so an authenticated user holding down
+   refresh is spending a shared API budget. caches.default is the
+   right store for it: edge-local, free, no D1 write, and NOT counted
+   as a subrequest — which matters because D1's write budget is shared
+   with the learning app and a chain lookup must never be able to
+   starve it.
+
+   Auth is checked before the cache is touched, and what is cached is
+   market data identical for every viewer — the gate is on access, not
+   on content. The key is built from normalised parameters at the route
+   below, never from the raw request.
+   ============================================================= */
+
+/* Overridable for the same reason FLOWS_INGEST_URL is: the contract tests
+   stand a stub upstream on localhost and drive the real route against it,
+   which is the only way to test the cache, the refresh floor and the spot
+   selection rather than just the gate in front of them. An operator who can
+   set this can already read the key it is sent with, so this widens nothing. */
+const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
+
+/* Long enough that a refresh-happy user costs one call, short enough that
+   "refresh" means something during a session. Quotes move faster than this;
+   the response carries its own age so the reader can say so out loud rather
+   than implying it is live. */
+const CHAIN_TTL_SECONDS = 120;
+
+/* How stale a copy has to be before an explicit refresh is allowed to spend a
+   vendor call. Short enough that pressing refresh feels like it did something,
+   long enough that holding it down cannot drain a shared API budget. */
+const CHAIN_REFRESH_FLOOR_SECONDS = 15;
+
+async function uwFetch(env, path, params) {
+  if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
+  const url = new URL((env.UW_BASE || UW_BASE_DEFAULT) + path);
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: "Bearer " + env.UW_API_KEY, Accept: "application/json" },
+    });
+  } catch {
+    throw new HttpError(502, "chain_upstream", "Market data provider unreachable");
+  }
+  if (response.status === 429) throw new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting");
+  if (!response.ok) throw new HttpError(502, "chain_upstream", "Market data provider returned an error");
+  /* PARSE FAILURES ARE UPSTREAM FAILURES, not 500s. A vendor sending HTML
+     where JSON was promised is their outage being reported as ours. */
+  try {
+    return await response.json();
+  } catch {
+    throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+  }
+}
+
+/**
+ * Fetch and price one ticker's sellable chain.
+ *
+ * Two subrequests: the chain itself, and a daily candle for spot. Spot is
+ * NOT optional and is not defaulted — a covered call's collateral is the
+ * shares at spot, and moneyness is measured against it, so a missing spot
+ * makes every number on the page wrong in a way that still renders. It
+ * fails loudly instead.
+ */
+async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
+  const [contracts, candles] = await Promise.all([
+    uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/option-contracts`, {
+      /* The sellable universe in one call rather than the whole book in ten:
+         out-of-the-money contracts that somebody already holds. Both filters
+         are the vendor's, applied upstream, so they cost nothing here. */
+      maybe_otm_only: "true",
+      exclude_zero_oi_chains: "true",
+      limit: 500,
+    }),
+    uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/ohlc/1d`, { timeframe: "5D" }),
+  ]);
+
+  const rows = Array.isArray(contracts) ? contracts : (contracts && contracts.data) || [];
+  const bars = Array.isArray(candles) ? candles : (candles && candles.data) || [];
+  if (!rows.length) throw new HttpError(404, "chain_empty", "No listed options found for that symbol");
+
+  /* The most recent close the vendor will admit to. Bars arrive newest-first
+     on some endpoints and oldest-first on others, so the date is compared
+     rather than an index trusted. */
+  let spot = null, asOf = null;
+  for (const b of bars) {
+    const close = Number(b && (b.close ?? b.c));
+    const date = b && (b.date || b.start_time || b.timestamp);
+    if (!Number.isFinite(close) || close <= 0 || !date) continue;
+    const day = String(date).slice(0, 10);
+    if (asOf === null || day > asOf) { asOf = day; spot = close; }
+  }
+  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
+
+  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit });
+  return {
+    ticker, spot, asOf,
+    strategy, ...ranked,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 let flowsSchemaReady = false;
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
@@ -1963,6 +2085,78 @@ async function route(request, env, url, ctx) {
         return json({ ticker, status: "pending" });
       }
       return passthrough(stored);
+    }
+
+    if (path === "/api/flows/chain") {
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      /* NORMALISED BEFORE THEY REACH THE CACHE KEY. An unvalidated parameter in
+         a cache key hands an authenticated user unbounded distinct keys to fill
+         the edge cache with, and every miss is a vendor call. */
+      const rawStrategy = url.searchParams.get("strategy");
+      const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
+      const rawRank = url.searchParams.get("rank");
+      const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
+      const wantsRefresh = url.searchParams.get("refresh") === "1";
+
+      const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+      /* Built HERE from the normalised parameters, never from the raw request.
+         A gated response keyed by an attacker-shaped URL is how a cache turns
+         into a bypass. */
+      const cacheKey = new Request(
+        `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
+        { method: "GET" });
+
+      const hit = cache ? await cache.match(cacheKey) : null;
+      const storedAt = hit ? Number(hit.headers.get("X-Chain-Stored")) : NaN;
+      const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
+
+      /* THE REFRESH FLOOR, and it is the quota control rather than a nicety.
+         The vendor key now lives on a request path, so refresh has to actually
+         refresh without also being an unmetered proxy to it. A first draft let
+         refresh=1 skip the cache read outright, which is exactly that: hold the
+         button down and every press is a vendor call.
+
+         So refresh skips the cache only once the copy is older than the floor.
+         Below it the cached body is served and SAYS it was throttled, which
+         bounds vendor traffic to one call per ticker per floor globally, no
+         matter how many users press how hard. Stateless — no D1 write, whose
+         budget is shared with the learning app and must not be spendable from
+         an unauthenticated-adjacent path. */
+      const serveCached = hit && (wantsRefresh ? ageSeconds < CHAIN_REFRESH_FLOOR_SECONDS : true);
+      if (serveCached) {
+        const out = new Response(hit.body, hit);
+        out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
+        out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
+        /* The wrapper below forces no-store on every /api/ response, so this is
+           belt and braces rather than the enforcement. Set anyway: the stored
+           copy carries a real max-age and this is the line that says the copy
+           leaving here does not. */
+        out.headers.set("Cache-Control", "no-store");
+        return out;
+      }
+
+      const payload = await buildChainPayload(env, { ticker, strategy, rankBy, limit: 120 });
+      const body = JSON.stringify(payload);
+
+      if (cache) {
+        const store = new Response(body, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
+            "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
+          },
+        });
+        /* waitUntil so the caller is not waiting on the write. The synthetic
+           key never passes through the response wrapper, so the stored copy
+           keeps its max-age while every served copy gets no-store. */
+        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
+        else await cache.put(cacheKey, store);
+      }
+
+      return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
     }
 
     throw new HttpError(404, "not_found", "API route not found");
