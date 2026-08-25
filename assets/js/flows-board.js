@@ -148,7 +148,25 @@
     const tr = document.createElement("tr");
     tr.className = "fb-row";
     tr.append(cell(fmtInt(row.r != null ? row.r : index + 1), "c-rank"));
-    tr.append(cell(String(row.t || DASH), "fb-tk"));
+    /* The ticker is a real button, not a click handler on the row. That buys
+       keyboard operability and a focus ring for free and states honest
+       semantics; giving the <tr> role="button" would lie to a screen reader
+       about what a table row is. */
+    const tk = document.createElement("td");
+    tk.className = "fb-tk";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "fb-open";
+    open.dataset.t = String(row.t || "");
+    open.setAttribute("aria-haspopup", "dialog");
+    open.textContent = String(row.t || DASH);
+    // Warm the card on hover so the overlay opens instantly. At most six
+    // entries are cached, against a 5M row/day read budget.
+    open.addEventListener("pointerenter", () => {
+      if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
+    });
+    tk.append(open);
+    tr.append(tk);
 
     const px = document.createElement("td");
     px.className = "c-num";

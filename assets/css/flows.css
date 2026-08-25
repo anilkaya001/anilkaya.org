@@ -395,3 +395,337 @@
   .flows-side,
   .flows-signout { transition: none; }
 }
+
+/* =============================================================
+   Card reader — a modal dialog over the board.
+
+   Below 640px it is a full-bleed sheet rather than a centred box,
+   which is the correct mobile detail-view idiom, and it uses dvh so
+   the iOS URL bar cannot clip the footer.
+   ============================================================= */
+
+.fc {
+  /* The UA centres a dialog with margin:auto; restate it because the
+     shorthand reset below would otherwise leave it pinned left. */
+  margin: auto;
+  width: min(52rem, 94vw);
+  max-width: none;
+  max-height: 90dvh;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.fc::backdrop { background: rgba(0, 0, 0, 0.62); }
+
+.fc-inner { padding: clamp(1rem, 3vw, 1.7rem); }
+
+.fc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fc-id { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+
+.fc-id h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+}
+
+.fc-id h2:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 3px; }
+
+.fc-score {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.fc-score.is-pos { color: var(--flow-up); }
+.fc-score.is-neg { color: var(--flow-down); }
+
+.fc-meta { color: var(--ink-dim); font-size: 0.86rem; }
+
+.fc-close {
+  flex: none;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.15rem 0.5rem 0.3rem;
+  cursor: pointer;
+}
+
+.fc-close:hover { color: var(--ink); border-color: var(--gold-mystic); }
+
+/* A persistent band, not a toast: a reader scrolls past a toast, and a card
+   whose numbers are two days old must keep saying so. */
+.fc-staleband {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--flow-down);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.fc.is-stale .fc-panel { opacity: 0.62; }
+
+.fc-panel { margin-top: 1.5rem; }
+
+.fc-panel h3 {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* The question the panel answers, stated before its chart. A panel that
+   cannot say what it is for does not belong on the card. */
+.fc-q {
+  margin: 0 0 0.7rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.fc-note {
+  margin: 0.6rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.fc-dead {
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px dashed var(--hairline);
+  border-radius: 3px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+.fc-prov {
+  margin: 1.6rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+/* ---------- gamma profile ---------------------------------------- */
+
+.gp { display: block; width: 100%; height: auto; }
+
+/* currentColor inside a <pattern> resolves against the pattern element's own
+   computed colour, not the referencing shape's — so the hue is set here. */
+.gp-negpat { color: var(--flow-down); }
+
+.gp-zero { stroke: var(--hairline); stroke-width: 1; }
+.gp-bar.is-pos { fill: var(--gold-mystic); }
+.gp-bar.is-neg { stroke: none; }
+
+.gp-cum { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+.gp-cum.is-pos { stroke: var(--gold-celadon); }
+.gp-cum.is-neg { stroke: var(--flow-down); stroke-dasharray: 4 3; }
+
+.gp-spot { stroke: var(--ink); stroke-width: 1.5; }
+.gp-flip { stroke: var(--gold-harvest); stroke-width: 1.5; stroke-dasharray: 6 4; }
+
+.gp-plate rect { fill: var(--bg-elev); stroke: var(--hairline); }
+/* Drawn when a plate had to be nudged off its rule to avoid a collision, so
+   the label is never silently detached from the level it names. */
+.gp-leader { stroke: var(--hairline); stroke-width: 1; }
+.gp-plate-k { fill: var(--ink); font-family: var(--font-mono); font-size: 10.5px; }
+.gp-plate-s { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 9.5px; }
+.gp-plate.is-flip .gp-plate-k { fill: var(--gold-harvest); }
+
+.gp-price { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.gp-price.is-spot { fill: var(--ink); }
+.gp-price.is-flip { fill: var(--gold-harvest); }
+.gp-axis { fill: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
+
+/* ---------- session path ------------------------------------------ */
+
+.fp { display: block; width: 100%; height: auto; }
+.fp-zero { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 3 3; }
+.fp-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
+.fp-line.is-pos { stroke: var(--flow-up); }
+.fp-line.is-neg { stroke: var(--flow-down); }
+
+.fc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.2rem 1rem;
+  margin: 0.8rem 0 0;
+}
+
+.fc-stats dt { color: var(--ink-dim); font-size: 0.78rem; }
+.fc-stats dd {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+/* ---------- tables ------------------------------------------------- */
+
+.fc-levels,
+.fc-congress {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.fc-levels th,
+.fc-congress th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink-dim);
+  font-weight: 500;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fc-levels td,
+.fc-congress td {
+  padding: 0.38rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent);
+}
+
+.fc-levels .c-num,
+.fc-congress .c-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Above and below spot is geometry, not a bullish or bearish opinion, so it
+   deliberately does not borrow the directional palette. */
+.fc-levels .is-above { color: var(--ink); }
+.fc-levels .is-below { color: var(--ink-dim); }
+
+.fc-member { display: block; }
+.fc-issuer,
+.fc-chamber {
+  display: inline-block;
+  margin-right: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fc-side.is-buy { color: var(--flow-up); }
+.fc-side.is-sell { color: var(--flow-down); }
+.fc-amt { color: var(--ink-dim); font-size: 0.8rem; }
+
+/* Past 45 days the STOCK Act window has lapsed and the move is usually gone.
+   Marked with weight as well as colour, so the signal is not colour-only. */
+.fc-congress .is-late { color: var(--flow-down); font-weight: 600; }
+
+/* ---------- score derivation --------------------------------------- */
+
+.fc-fam { list-style: none; margin: 0; padding: 0; }
+
+.fc-fam li {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(4rem, 8rem) 3rem 1fr;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.32rem 0;
+}
+
+.fc-fam-k {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.fc-fam-track {
+  position: relative;
+  display: block;
+  height: 0.55rem;
+  background: color-mix(in srgb, var(--hairline) 60%, transparent);
+  border-radius: 2px;
+}
+
+/* Positive grows right of centre, negative left: the sign is geometric, so a
+   colour-blind reader gets it from position rather than hue. */
+.fc-fam-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: calc(var(--w, 0) * 50%);
+  border-radius: 2px;
+  background: var(--gold-mystic);
+}
+
+.fc-fam li.is-neg .fc-fam-track i {
+  left: auto;
+  right: 50%;
+  background: var(--flow-down);
+}
+
+.fc-fam li.is-null .fc-fam-track i {
+  left: calc(50% - 1px);
+  width: 2px;
+  background: var(--ink-dim);
+  opacity: 0.55;
+}
+
+.fc-fam-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 0.85rem;
+}
+
+.fc-fam-l { color: var(--ink-dim); font-size: 0.78rem; }
+
+/* ---------- the ticker button -------------------------------------- */
+
+.fb-open {
+  all: unset;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  border-bottom: 1px solid transparent;
+}
+
+.fb-open:hover { color: var(--gold-celadon); border-bottom-color: currentColor; }
+.fb-open:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .fc {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .fc-fam li { grid-template-columns: 1.2rem minmax(3rem, 1fr) 2.6rem; }
+  .fc-fam-l { grid-column: 1 / -1; padding-left: 1.8rem; }
+  .fc-congress .fc-amt { font-size: 0.72rem; }
+}

@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "44";
+export const ASSET_VERSION = "45";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -109,7 +109,7 @@ ${topbar(true)}
        without role and a name it is not announced as a scrollable region. -->
   <div class="flows-tablewrap" tabindex="0" role="region" aria-label="Ranked candidates">
     <table class="flows-table" id="flowsTable">
-      <caption class="flows-caption">Ranked candidates. Every score decomposes into its contributing families.</caption>
+      <caption class="flows-caption">Ranked candidates. Select a ticker for its gamma profile, key levels and disclosed congressional trades. Every score decomposes into its contributing families.</caption>
       <thead>
         <tr>
           <th scope="col" class="c-rank">#</th>
@@ -133,8 +133,51 @@ ${topbar(true)}
     coefficient this class of signal supports, expect a hit rate near 51&ndash;52%.
   </p>
 </main>
+<dialog id="flowsCard" class="fc" aria-labelledby="fcTitle">
+  <article class="fc-inner">
+    <header class="fc-head">
+      <div class="fc-id">
+        <h2 id="fcTitle" tabindex="-1">&nbsp;</h2>
+        <span class="fc-score" id="fcScore"></span>
+        <span class="fc-meta" id="fcConv"></span>
+        <span class="fc-meta" id="fcRegime"></span>
+      </div>
+      <button type="button" class="fc-close" id="fcClose" aria-label="Close">&times;</button>
+    </header>
+
+    <p class="fc-staleband" id="fcStale" role="status" hidden></p>
+
+    <section class="fc-panel" aria-labelledby="fcGammaH">
+      <h3 id="fcGammaH">Gamma convexity</h3>
+      <div id="fcGamma"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcLevelsH">
+      <h3 id="fcLevelsH">Key levels &amp; distance to spot</h3>
+      <div id="fcLevels"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcPathH">
+      <h3 id="fcPathH">Session path</h3>
+      <div id="fcPath"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcCongressH">
+      <h3 id="fcCongressH">Disclosed congressional transactions</h3>
+      <div id="fcCongress"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcWhyH">
+      <h3 id="fcWhyH">Score derivation</h3>
+      <div id="fcWhy"></div>
+    </section>
+
+    <p class="fc-prov" id="fcProv"></p>
+  </article>
+</dialog>
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
+<script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
 }

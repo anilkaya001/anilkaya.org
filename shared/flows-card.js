@@ -323,6 +323,11 @@ export function buildCard({
     regime: features && features.netGamma !== undefined
       ? { netGamma: numOrNull(features.netGamma), label: features.gRegime || null }
       : null,
+    // The flip price is the flagship number on the whole card — the gamma
+    // panel draws its line from here — so it is a top-level field rather than
+    // something the renderer has to dig out of the level list.
+    gammaFlip: numOrNull(features && features.gammaFlip),
+    atr: numOrNull(features && features.atr),
     panels: {
       gamma,
       levels: buildLevels({

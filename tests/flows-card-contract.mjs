@@ -201,6 +201,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(complete.sessionDate, "2026-08-24",
      "THE SESSION, not the run date: a pre-open job reads the previous completed session");
   ok(complete.generatedAt !== complete.sessionDate, "the two dates are distinct fields");
+  eq(complete.gammaFlip, 96,
+     "the flip price is a top-level field — the gamma panel draws its line from it");
+  eq(complete.atr, 4, "and ATR travels with it, so distances can be shown in sigma");
+  eq(buildCard({ ...full, features: null }).gammaFlip, null,
+     "with no features the flip is null, never 0 — 'spot is exactly at the flip' " +
+     "is the most actionable state on the card and must never be manufactured");
   for (const key of ["gamma", "levels", "path", "congress"]) {
     eq(complete.panels[key].status, "ok", `panel ${key} resolves when every source is present`);
   }
