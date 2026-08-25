@@ -1442,3 +1442,20 @@ body.is-stale .flows-tablewrap {
   color: var(--ink-faint);
   cursor: help;
 }
+
+/* A contract that outlives the next earnings report. The glyph carries the
+   fact; the tint is a second channel, never the only one — the cell already
+   reads differently in a greyscale render because of the ⚠. */
+.desk-table td.crosses-earnings {
+  color: var(--flow-down);
+  cursor: help;
+}
+
+/* Whether it crosses could not be DETERMINED — distinct from "it does not".
+   Dotted like the stale cushion, because it is the same kind of statement:
+   a number whose standing the page cannot vouch for. */
+.desk-table td.earnings-unknown {
+  text-decoration: underline dotted var(--hairline);
+  text-underline-offset: 3px;
+  cursor: help;
+}

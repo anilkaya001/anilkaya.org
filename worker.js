@@ -17,7 +17,7 @@ import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
-import { rankChain, RANK_KEYS } from "./shared/flows-premium.js";
+import { rankChain, RANK_KEYS, crossesEarnings } from "./shared/flows-premium.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 // Edge-memoization window for rendered course pages. Kept short so a deploy
@@ -1055,6 +1055,13 @@ const CHAIN_TTL_SECONDS = 120;
    and a page size that disagrees with the ceiling reports truncation wrong. */
 const CHAIN_PAGE_SIZE = 500;
 
+/* An earnings date is a daily-cadence fact, not a quote. It gets its own cache
+   entry keyed on TICKER ALONE at a long TTL — the chain's key carries strategy
+   and rank (3 x 4 = up to 12 variants), so a per-ticker fact fetched inside the
+   chain would be re-fetched a dozen times per ticker per window for toggles
+   that cannot change it. */
+const INFO_TTL_SECONDS = 6 * 3600;
+
 /* How stale a copy has to be before an explicit refresh is allowed to spend a
    vendor call. Short enough that pressing refresh feels like it did something,
    long enough that holding it down cannot drain a shared API budget. */
@@ -1108,7 +1115,52 @@ async function uwFetch(env, path, params) {
  * makes every number on the page wrong in a way that still renders. It fails
  * loudly instead.
  */
-async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
+/**
+ * A per-ticker reference fact, cached on its own key.
+ *
+ * Returns null on ANY failure. That is load-bearing rather than lazy: uwFetch
+ * throws on 429 and on every non-ok status, and this endpoint 404s for symbols
+ * it does not cover — so an uncaught leg would turn a missing earnings date
+ * into "data provider unavailable" for the whole symbol, withholding a priced
+ * table over a marker.
+ */
+async function cachedTickerInfo(env, ctx, ticker) {
+  const key = new Request(`https://flows-info.internal/${ticker}`, { method: "GET" });
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (cache) {
+    const hit = await cache.match(key).catch(() => null);
+    if (hit) return hit.json().catch(() => null);
+  }
+  const raw = await uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/info`, {})
+    .catch(() => null);
+  if (raw === null) return null;
+  /* THE ENVELOPE IS AMBIGUOUS IN THE VENDOR'S OWN SPEC: the schema declares
+     these fields at top level while its example nests them under `data`. Both
+     are unwrapped rather than one being guessed at. */
+  const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
+  if (!d || typeof d !== "object") return null;
+  const out = {
+    nextEarningsDate: typeof d.next_earnings_date === "string" ? d.next_earnings_date : null,
+    announceTime: typeof d.announce_time === "string" ? d.announce_time : null,
+    /* Why a null date is null. "Empty if unknown or not applicable such as
+       ETF/Index" — so an ETF having no earnings and a name whose date is merely
+       unknown are different facts, and the page can say which. */
+    issueType: typeof d.issue_type === "string" ? d.issue_type : null,
+  };
+  if (cache) {
+    const store = new Response(JSON.stringify(out), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `max-age=${INFO_TTL_SECONDS}`,
+      },
+    });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    else await cache.put(key, store).catch(() => {});
+  }
+  return out;
+}
+
+async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
   const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
     /* The sellable universe rather than the whole book: out-of-the-money
@@ -1120,7 +1172,7 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
     ...(page > 1 ? { page } : {}),
   });
 
-  const [firstPage, candles, state] = await Promise.all([
+  const [firstPage, candles, state, info] = await Promise.all([
     chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
     /* THE DAILY CANDLE IS NOT A LIVE PRICE, and this desk is priced against
@@ -1132,6 +1184,10 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
        directly. It is allowed to fail: the candle is still there, and a desk
        priced off the close and SAYING so beats no desk at all. */
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
+    /* The fourth leg of the Promise.all, which is FOUR OF SIX simultaneous
+       connections — the ceiling that actually binds here, eight times tighter
+       than the 50-subrequest cap. Two slots spare. */
+    cachedTickerInfo(env, ctx, ticker),
   ]);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
@@ -1206,6 +1262,15 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
   const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit });
+
+  /* MARKED AFTER THE GATES, so this is ~120 string comparisons rather than
+     1000. A cushion is a diffusion number and an earnings report is not a
+     diffusion, so a contract that outlives one is a different trade at the
+     same premium and the same cushion. */
+  const earnDate = info ? info.nextEarningsDate : null;
+  for (const row of ranked.rows) {
+    row.crossesEarnings = info ? crossesEarnings(row.expiry, earnDate, info.announceTime) : null;
+  }
   return {
     ticker, spot, asOf,
     spotSource,
@@ -1220,6 +1285,12 @@ async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
        symbols needs to know that one of them was cut off. */
     truncated,
     pageSize: CHAIN_PAGE_SIZE,
+    /* null when the lookup failed OR the vendor has no date for this symbol —
+       and issueType separates those, because an ETF with no earnings and an
+       equity whose date is merely unknown are different facts. */
+    earnings: info
+      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
+      : null,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2259,7 +2330,7 @@ async function route(request, env, url, ctx) {
         return out;
       }
 
-      const payload = await buildChainPayload(env, { ticker, strategy, rankBy, limit: 120 });
+      const payload = await buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 });
       const body = JSON.stringify(payload);
 
       if (cache) {

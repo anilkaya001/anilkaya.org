@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import {
   parseOptionSymbol, daysToExpiry, priceSale, rankChain, ivConvention,
-  numOrNull, DEFAULT_GATES, SHARES_PER_CONTRACT, DAYS_PER_YEAR,
+  numOrNull, DEFAULT_GATES, SHARES_PER_CONTRACT, DAYS_PER_YEAR, crossesEarnings,
 } from "../shared/flows-premium.js";
 
 let checks = 0;
@@ -215,6 +215,62 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(puts.gated.strategy, 1, "and reports the calls it set aside");
   eq(rankChain(rows, { spot: 100, asOf: "2026-08-25", strategy: "cc" }).rows[0].type, "C");
   eq(rankChain(rows, { spot: 100, asOf: "2026-08-25" }).priced, 2, "both, by default");
+}
+
+/* ---------- earnings crossing, and the tri-state that matters --- */
+{
+  /* A cushion is a DIFFUSION number. An earnings report is a jump. Two rows
+     with identical premium and identical cushion are different trades when one
+     outlives a report — so this marks them, and the marking has three states
+     rather than two.
+
+     NULL IS NOT FALSE, and the difference points the dangerous way. Answering
+     "does not cross" when the truth is "cannot tell" reports a 45-day put as
+     event-free on a name whose date the vendor simply does not have. */
+  const c = crossesEarnings;
+
+  eq(c("2026-09-18", "2026-08-20", "afterhours"), true,
+     "a report before expiry crosses, and the announce time is irrelevant");
+  eq(c("2026-09-18", "2026-10-30", "premarket"), false,
+     "a report after expiry does not, and the announce time is irrelevant there too");
+
+  /* THE ONLY CASE THE DATE CANNOT SETTLE is a report ON the expiry date. */
+  eq(c("2026-09-18", "2026-09-18", "premarket"), true,
+     "same day before the open: the report lands while the contract is alive");
+  eq(c("2026-09-18", "2026-09-18", "postmarket"), false,
+     "same day after the close: it lands after settlement");
+  eq(c("2026-09-18", "2026-09-18", "afterhours"), false,
+     "and the OTHER spelling of after-the-close means the same thing");
+
+  /* THE VOCABULARY IS UNDOCUMENTED, which is why an unrecognised token is not
+     guessed at. /info's announce_time is declared `string` with no enum — only
+     the example "premarket" — while its sibling report_time on the earnings
+     endpoints documents "premarket, postmarket and unknown". Two fields, one
+     concept, different words, and the one read here documents none. */
+  eq(c("2026-09-18", "2026-09-18", "unknown"), null,
+     "same day with the timing unknown is NULL, not false");
+  eq(c("2026-09-18", "2026-09-18", "at_some_point"), null,
+     "an unrecognised token is null — the vendor's vocabulary is not pinned");
+  eq(c("2026-09-18", "2026-09-18", ""), null, "and an empty token is null");
+  eq(c("2026-09-18", "2026-09-18", null), null, "and a missing one");
+
+  /* SHAPE GUARDS. `=== null` catches neither shape that breaks this: an ABSENT
+     key makes `undefined < "2026-09-18"` false, so every row reads event-free;
+     an EMPTY STRING makes `"" < "2026-09-18"` true, so every row is marked. */
+  eq(c("2026-09-18", undefined, "premarket"), null, "an absent date is null, not false");
+  eq(c("2026-09-18", "", "premarket"), null, "an empty date is null, not a crossing");
+  eq(c("2026-09-18", null, "premarket"), null, "and an explicit null");
+
+  /* SHAPE IS NOT VALIDITY. "2023-13-45" passes a YYYY-MM-DD regex and sorts
+     lexicographically BEFORE every real date, so a shape-only check read it as
+     "crosses" on every single row. */
+  eq(c("2026-09-18", "2023-13-45", "premarket"), null, "month 13 is not a date");
+  eq(c("2026-09-18", "2023-10-32", "premarket"), null, "day 32 is not a date");
+  eq(c("2026-09-18", "2023-02-30", "premarket"), null, "and neither is 30 February");
+  eq(c("2026-09-18", "2024-02-29", "premarket"), true, "but a real leap day is");
+  eq(c("2026-09-18", "2023-10-26T13:30:00Z", "premarket"), null,
+     "a datetime is not the bare date this comparison requires");
+  eq(c("bad-expiry", "2026-08-20", "premarket"), null, "an unusable expiry is null too");
 }
 
 /* ---------- hygiene ------------------------------------------- */

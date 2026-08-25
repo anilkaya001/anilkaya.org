@@ -453,7 +453,28 @@
     tr.append(cell(side, "c-side"));
 
     tr.append(cell(fmt2(r.strike), "c-num"));
-    tr.append(cell(fmtExpiry(r.expiry, r.days), "c-num"));
+    /* THE EARNINGS MARKER RIDES THE EXPIRY CELL rather than claiming a
+       fourteenth column. A desk that grows a column per fact has answered
+       "what else could we show" instead of "what is this table for".
+
+       A cushion is a diffusion number; an earnings report is a jump. Two rows
+       with identical premium and identical cushion are different trades when
+       one of them outlives a report. */
+    const exp = cell(fmtExpiry(r.expiry, r.days), "c-num");
+    if (r.crossesEarnings === true) {
+      exp.className = "c-num crosses-earnings";
+      exp.textContent = fmtExpiry(r.expiry, r.days) + " \u26a0";
+      exp.title = "This contract expires after the next earnings report. The cushion on " +
+        "this line is a diffusion number priced against a jump.";
+    } else if (r.crossesEarnings === null) {
+      /* NOT THE SAME AS "no earnings before expiry", and the difference is the
+         dangerous direction for a seller. Rendered identically to a clean row
+         it would read as "event-free" when the truth is "cannot tell". */
+      exp.className = "c-num earnings-unknown";
+      exp.title = "Whether this contract outlives the next earnings report could not be " +
+        "determined. Treat the cushion with that in mind.";
+    }
+    tr.append(exp);
     tr.append(cell(fmt2(r.bid), "c-num"));
     tr.append(cell(fmtMoney(r.premium), "c-num"));
     tr.append(cell(fmtPct(r.yieldOnCollateral, 2), "c-num"));
@@ -547,11 +568,36 @@
       ? " · " + stale.join(", ") + " priced off the last close, not a live print"
       : "";
 
+    /* THE EARNINGS CLAUSE, per symbol, INCLUDING the symbols with no date.
+       An unmarked row has to be unmarked for a stated reason, or "no marker"
+       silently means both "no report before expiry" and "we could not find
+       out" — and only one of those is safe to sell into. */
+    const earnBits = [];
+    for (const sym of chosen) {
+      const p = (book.get(sym) || {}).payload;
+      if (!p || p.state === "error") continue;
+      const e = p.earnings;
+      const rows = (p.rows || []).filter((r) => r.ticker === sym || chosen.length === 1);
+      const crossing = (p.rows || []).filter((r) => r.crossesEarnings === true).length;
+      if (!e || !e.date) {
+        /* An ETF genuinely has none; an equity's may merely be unknown. The
+           vendor's own issue_type separates them, so the page does too. */
+        const etf = e && /etf|index|fund/i.test(String(e.issueType || ""));
+        earnBits.push(sym + (etf ? " has no earnings (" + e.issueType + ")" : " has no known earnings date"));
+      } else if (crossing > 0) {
+        earnBits.push(sym + " reports " + String(e.date).slice(5) + " — " + crossing +
+          " of " + (p.rows || []).length + " lines expire after it");
+      } else {
+        earnBits.push(sym + " reports " + String(e.date).slice(5) + " — no line expires after it");
+      }
+    }
+    const earnNote = earnBits.length ? " · " + earnBits.join("; ") : "";
+
     statusEl.textContent = (failed.length
       ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " +
         failed.join(", ") + " unavailable"
       : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") +
-      session + age + staleNote;
+      session + age + staleNote + earnNote;
   }
 
   function showEmpty(text) {

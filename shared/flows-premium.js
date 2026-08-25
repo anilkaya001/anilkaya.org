@@ -371,3 +371,90 @@ export function rankChain(contracts, {
     gates: g,
   };
 }
+
+/* =============================================================
+   EARNINGS CROSSING
+
+   A cushion is a DIFFUSION number. cushionSigmas divides the move
+   to breakeven by the move the option's own implied vol prices over
+   its own remaining life, and that arithmetic assumes the underlying
+   wanders. An earnings report is not a wander, and a contract that
+   outlives one is a different trade from a contract that does not —
+   identical premium, identical cushion, and the cushion means less on
+   one of them.
+
+   The comparison is exact and needs no model: both operands are bare
+   ISO YYYY-MM-DD strings, so a lexicographic comparison IS a date
+   comparison. next_earnings_date is documented `e.g. 2023-10-26` and
+   parseOptionSymbol builds expiry as `20${yy}-${mm}-${dd}` from
+   zero-padded captures.
+
+   THE ANNOUNCE TIME VOCABULARY IS NOT KNOWN, and this is the fourth
+   time this vendor's documentation has been the risk. /info's
+   `announce_time` is declared `string` with NO enum — only the
+   example "premarket". Its sibling `report_time`, on the earnings
+   endpoints, documents "premarket, postmarket and unknown". So two
+   fields for one concept use different words and the one read here
+   documents none of them.
+
+   The design therefore never depends on recognising the token. The
+   token is consulted ONLY when the report falls exactly ON the expiry
+   date, which is the one case a date comparison cannot settle:
+
+     earnings <  expiry   ->  true   (crosses; no token needed)
+     earnings >  expiry   ->  false  (does not; no token needed)
+     earnings == expiry   ->  the token decides, and if it is not a
+                              word this code recognises, the answer is
+                              NULL rather than a guess.
+
+   Null is a rendered state, not a silent false. Answering "no
+   earnings risk" when the truth is "cannot tell" is the confident
+   zero this project exists to refuse, and it points the dangerous way
+   for a seller.
+   ============================================================= */
+
+/* SHAPE IS NOT VALIDITY. A regex alone accepts "2023-13-45", which is not a
+   date — and because it sorts lexicographically BEFORE every real one, it read
+   as "crosses" on every row. The round trip through Date rejects it: an
+   out-of-range component either fails to parse or normalises to a different
+   string. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+function isRealDate(s) {
+  if (typeof s !== "string" || !ISO_DATE.test(s)) return false;
+  const t = Date.parse(s + "T00:00:00Z");
+  if (!Number.isFinite(t)) return false;
+  return new Date(t).toISOString().slice(0, 10) === s;
+}
+
+/* Words that place the report AFTER the session close. BOTH spellings are
+   accepted because the vendor uses each of them for this concept somewhere,
+   and which one `announce_time` uses is exactly what is undocumented. */
+const AFTER_CLOSE = new Set(["postmarket", "afterhours", "aftermarket", "after_hours"]);
+const BEFORE_OPEN = new Set(["premarket", "beforeopen", "before_open"]);
+
+/**
+ * Does a contract expiring on `expiry` outlive the next earnings report?
+ *
+ * Returns true, false, or null — null meaning "cannot be determined", which
+ * covers a missing date, a malformed one, and a same-day report whose timing
+ * is stated in a word this code does not recognise.
+ */
+export function crossesEarnings(expiry, earningsDate, announceTime) {
+  /* SHAPE-GUARDED, not null-checked. `=== null` catches neither of the two
+     shapes that actually break this: an ABSENT key makes
+     `undefined < "2026-01-16"` false, so every row silently reads event-free;
+     an EMPTY STRING makes `"" < "2026-01-16"` true, so every row is marked as
+     crossing. Both are string comparisons that succeed and lie. */
+  if (!isRealDate(expiry)) return null;
+  if (!isRealDate(earningsDate)) return null;
+
+  if (earningsDate < expiry) return true;
+  if (earningsDate > expiry) return false;
+
+  /* Exactly on the expiry date. A report before the open lands while the
+     contract is still alive; one after the close lands after it settles. */
+  const token = String(announceTime || "").trim().toLowerCase().replace(/[\s-]/g, "");
+  if (BEFORE_OPEN.has(token)) return true;
+  if (AFTER_CLOSE.has(token)) return false;
+  return null;
+}

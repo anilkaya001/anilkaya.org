@@ -85,6 +85,17 @@ const upstream = http.createServer((req, res) => {
   if (url.pathname.endsWith("/option-contracts")) {
     res.writeHead(200); res.end(JSON.stringify({ data: chain.rows })); return;
   }
+  if (url.pathname.endsWith("/info")) {
+    /* AAA reports between its two expiries; BBB has no info at all. One page
+       therefore carries a marked row, an unmarked-for-a-reason row, and a
+       cannot-tell row — the three states that are currently one silence. */
+    if (ticker !== "AAA") { res.writeHead(404); res.end("{}"); return; }
+    res.writeHead(200);
+    res.end(JSON.stringify({ data: {
+      next_earnings_date: "2026-09-10", announce_time: "premarket",
+      issue_type: "Common Stock" } }));
+    return;
+  }
   if (url.pathname.endsWith("/stock-state")) {
     /* AAA gets a LIVE print above its daily close; BBB gets no live price at
        all. One desk therefore carries both cases at once, which is the only
@@ -278,6 +289,38 @@ try {
     }
     ok(sawCall, "the fixture contains a covered call");
     ok(sawPut, "and a cash-secured put");
+  }
+
+  /* ---------- earnings crossing, and the state that is not false -- */
+  {
+    /* A cushion is a diffusion number and an earnings report is a jump. AAA's
+       September contracts outlive its 09-10 report; BBB has no earnings
+       information at all, which is NOT the same as having no report. */
+    const marked = page.locator("#deskBody td.crosses-earnings");
+    ok(await marked.count() >= 1, "a contract outliving the report is marked");
+    ok((await marked.first().textContent()).includes("\u26a0"),
+       "the marker is a glyph, so it survives a greyscale render");
+    const title = await marked.first().getAttribute("title");
+    ok(title && /diffusion number priced against a jump/.test(title),
+       `and says why the cushion is weaker there (${(title || "").slice(0, 60)})`);
+
+    /* THE DANGEROUS STATE. BBB's /info 404s, so whether its rows cross cannot
+       be determined — and rendering that identically to "no report before
+       expiry" tells a seller their position is event-free when the truth is
+       that nobody looked. */
+    const unknown = page.locator("#deskBody td.earnings-unknown");
+    ok(await unknown.count() >= 1,
+       "a symbol with no earnings information is marked as UNDETERMINED, not clean");
+    const uTitle = await unknown.first().getAttribute("title");
+    ok(uTitle && /could not be\s+determined/.test(uTitle.replace(/\s+/g, " ")),
+       `and says so rather than implying safety (${(uTitle || "").slice(0, 60)})`);
+
+    /* And the status line names both, so an unmarked row is unmarked for a
+       stated reason. */
+    const status = await page.locator("#deskStatus").textContent();
+    ok(/AAA reports 09-10/.test(status), `the status names the report date (${status})`);
+    ok(/BBB has no known earnings date/.test(status),
+       "and says which symbol it could not date");
   }
 
   /* ---------- a cushion is only as fresh as the vol it divides by -- */

@@ -114,6 +114,18 @@ const upstream = http.createServer((req, res) => {
     send(200, JSON.stringify({ data: upstreamMode === "noSpot" ? [] : candles }));
     return;
   }
+  if (path.endsWith("/info")) {
+    if (upstreamMode === "noInfo") { send(404, "{}"); return; }
+    /* NESTED UNDER `data`, which is how the vendor's own EXAMPLE ships it even
+       though its schema declares the fields at top level. The route unwraps
+       both; this fixture exercises the nested one because it is the shape a
+       reader of the example would build against. */
+    send(200, JSON.stringify({
+      data: { next_earnings_date: "2026-09-04", announce_time: "premarket",
+              issue_type: "Common Stock" },
+    }));
+    return;
+  }
   if (path.endsWith("/stock-state")) {
     /* The live print is DELIBERATELY different from the latest daily close
        (183.40 against 180.00). If the route still prices off the candle, every
@@ -377,6 +389,47 @@ try {
     upstreamMode = "ok";
   }
 
+  /* ---------- earnings crossing --------------------------------- */
+  {
+    /* A cushion is a diffusion number and an earnings report is a jump, so a
+       contract that outlives one is a different trade at the same premium. */
+    upstreamMode = "ok";
+    const res = await get("/api/flows/chain?t=EARN&refresh=1");
+    eq(res.status, 200);
+    const body = await res.json();
+    eq(body.earnings.date, "2026-09-04", "the earnings date ships with the payload");
+    eq(body.earnings.announceTime, "premarket", "and the vendor's own token, verbatim");
+    eq(body.earnings.issueType, "Common Stock",
+       "and the issue type, which separates 'no earnings' from 'date unknown'");
+
+    /* The fixture's contracts expire 2026-09-18 and 2026-08-27, either side of
+       a 2026-09-04 report. */
+    const after = body.rows.filter((r) => r.expiry > "2026-09-04");
+    ok(after.length > 0, "the fixture has contracts expiring after the report");
+    ok(after.every((r) => r.crossesEarnings === true),
+       "every contract outliving the report is marked");
+    const before = body.rows.filter((r) => r.expiry < "2026-09-04");
+    ok(before.every((r) => r.crossesEarnings === false),
+       "and every contract settling before it is not");
+  }
+
+  /* ---------- a missing earnings date is NULL, never false -------- */
+  {
+    /* The dangerous direction. Rendering "could not determine" the same as
+       "no report before expiry" tells a seller their 45-day put is event-free
+       when the vendor merely has no date — and ETFs, which genuinely have
+       none, are heavily represented on a premium desk. */
+    upstreamMode = "noInfo";
+    const res = await get("/api/flows/chain?t=NOINFO");
+    eq(res.status, 200, "a failed /info lookup does not fail the request");
+    const body = await res.json();
+    eq(body.earnings, null, "the payload says it has no earnings information");
+    ok(body.rows.length > 0, "and the chain still prices");
+    ok(body.rows.every((r) => r.crossesEarnings === null),
+       "every row is NULL — not false, which would read as event-free");
+    upstreamMode = "ok";
+  }
+
   /* ---------- the ceiling nobody quotes -------------------------- */
   {
     /* Workers Free allows 50 external subrequests per invocation — this route
@@ -393,6 +446,8 @@ try {
        `the fixture actually observed concurrency rather than serialising (${openPeak})`);
     ok(openPeak <= 6,
        `the route opens at most six simultaneous upstream connections (${openPeak})`);
+    ok(openPeak >= 4,
+       `the fixture sees the fourth leg — /info joined the Promise.all (${openPeak})`);
 
     /* And a paginated chain must not widen it: the second page is fetched
        AFTER the first resolves, deliberately, so it costs a subrequest and not
