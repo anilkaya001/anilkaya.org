@@ -509,6 +509,17 @@
       band +
       `The gamma axis is symlog with decade rules: read magnitude off the labelled powers of ten, not off bar length. ` +
       `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
+      /* THE CURVE AND THE BARS DO NOT SHARE A SCALE, and sharing the zero rule
+         makes them look as though they do. A running total is the SUM of the
+         bars, so it routinely exceeds the largest of them by an order of
+         magnitude and has to be normalised separately or it leaves the plot —
+         measured at 12.4x on a realistic 40-strike ladder. The two agree at
+         exactly one place, the zero rule, which is the only place they must:
+         it is where the crossing is the flip. Saying so is cheaper than a
+         second axis nobody would read, but leaving it unsaid invites a reader
+         to compare a curve height against a bar length, which means nothing. */
+      `The cumulative curve is normalised separately from the bars — only its ZERO CROSSING is ` +
+      `comparable to them, which is the flip. Read the curve for shape, not height. ` +
       `σ is ATR(14).` +
       (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
     host.append(note);
