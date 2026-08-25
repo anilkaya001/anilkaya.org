@@ -513,6 +513,26 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
 
+/* ---------- a probe that learns nothing must not act -------------- */
+{
+  /* THE MISFIRE, from the first live run on main. verifyDating drops `date`
+     when the dated call comes back unusable — and the first version did that
+     even when the UNDATED call was unusable too, which is precisely the case
+     where the probe has distinguished nothing. Both calls returned no usable
+     gamma, so the guard concluded `date` was at fault and reverted the entire
+     run to the undated behaviour it exists to replace.
+
+     The decision is a two-input truth table and only one row may drop it. */
+  const keepDate = (datedUsable, undatedUsable) => datedUsable || !undatedUsable;
+
+  ok(keepDate(true, true), "both usable: keep the dated call, it is correct by construction");
+  ok(keepDate(true, false), "dated works and undated does not: obviously keep it");
+  ok(!keepDate(false, true),
+     "dated fails while undated succeeds: the ONLY evidence that `date` is at fault");
+  ok(keepDate(false, false),
+     "neither works: the probe learned nothing, so it must not change behaviour");
+}
+
 /* ---------- the session is resolved, not inferred ---------------- */
 {
   // 09:00 New York on a summer weekday is 13:00 UTC (EDT, UTC-4).

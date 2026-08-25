@@ -130,6 +130,15 @@
     wrap.className = "fb-fam";
     const parts = [];
     for (const k of keys) {
+      /* V AND O CARRY NO DIRECTION. The card's own family track was rebuilt to
+         draw them from the baseline for exactly that reason; this glyph went on
+         drawing them on the signed centre line, so the live board announced
+         "V +55, O +62" with gold bars growing UP from the zero rule — the same
+         drawing a +55 bullish vote gets. An unsigned gauge on a signed axis is
+         the confusion the whole three-axes-plus-two-gauges split exists to end.
+
+         On a v1 board they WERE signed votes, but of different families, so the
+         meaning moved and they stay withheld there. */
       const gauge = k === "V" || k === "O";
       const n = legacyFamilies && gauge ? null : isNum(fam && fam[k]);
       const i = document.createElement("i");
@@ -138,9 +147,11 @@
       // A MISSING family gets its own mark: it used to render as a short
       // positive stub, which read as a small bullish contribution.
       if (n === null) i.className = "is-null";
+      else if (gauge) i.className = "is-gauge";
       else if (n < 0) i.className = "is-neg";
       wrap.append(i);
-      parts.push(k + " " + (n === null ? DASH : fmtSignedInt(n)));
+      // A gauge gets no sign in the readout either: "V 55", not "V +55".
+      parts.push(k + " " + (n === null ? DASH : gauge ? String(n) : fmtSignedInt(n)));
     }
     // The glyph is decorative; the numbers must still be readable to
     // a screen reader and on hover.
