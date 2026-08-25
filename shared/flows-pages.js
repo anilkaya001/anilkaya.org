@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "51";
+export const ASSET_VERSION = "52";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -166,6 +166,11 @@ ${topbar(true)}
     <section class="fc-panel" aria-labelledby="fcGammaH">
       <h3 id="fcGammaH">Gamma convexity</h3>
       <div id="fcGamma"></div>
+    </section>
+
+    <section class="fc-panel" aria-labelledby="fcSurfaceH">
+      <h3 id="fcSurfaceH">Gamma surface &mdash; strike &times; expiry</h3>
+      <div id="fcSurface"></div>
     </section>
 
     <section class="fc-panel" aria-labelledby="fcLevelsH">

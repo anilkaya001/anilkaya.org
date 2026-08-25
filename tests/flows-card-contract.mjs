@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
-  buildCalendar, buildDisplacement, buildPricedMove, buildContext,
+  buildCalendar, buildDisplacement, buildPricedMove, buildContext, buildSurface,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
@@ -544,6 +544,147 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(staleCard.panels.levels.status === "unavailable"
      || staleCard.panels.levels.levels.every((l) => l.kind !== "max_pain"),
      "so a four-month-stale chain puts no max-pain level on the rail");
+}
+
+/* ---------- the strike x expiry gamma surface ------------------- */
+{
+  /* The profile and the calendar are both MARGINALS of this. The surface is
+     fetched from its own endpoint rather than derived, because an outer
+     product of two marginals is a model of a joint, not a measurement of one,
+     and the difference is the whole reason this panel exists. */
+  const cell = (strike, expiry, call, put) => ({
+    strike: String(strike), expiry,
+    call_gamma_ask: String(call * 0.6), call_gamma_bid: String(call * 0.4),
+    put_gamma_ask: String(put * 0.6), put_gamma_bid: String(put * 0.4),
+  });
+
+  const rows = [
+    cell(90, "2026-08-28", 1e7, -5e7), cell(90, "2026-09-18", 2e6, -1e7),
+    cell(100, "2026-08-28", 4e7, -2e7), cell(100, "2026-09-18", 8e6, -4e6),
+    cell(110, "2026-08-28", 9e7, -1e7), cell(110, "2026-09-18", 2e7, -2e6),
+  ];
+  const surf = buildSurface(rows, { spot: 100, asOf: "2026-08-25" });
+  eq(surf.status, "ok", "a strike x expiry response builds a surface");
+  assert.deepEqual(surf.expiries, ["2026-08-28", "2026-09-18"]); checks++;
+  assert.deepEqual(surf.strikes, [90, 100, 110]); checks++;
+  eq(surf.atSpot, 100, "the strike nearest spot is named");
+
+  /* THE RECONCILIATION. Summing the grid across expiries must reproduce the
+     row marginal — the same quantity the gamma profile draws. Two views of one
+     book that disagree are worse than one view. The put legs arrive ALREADY
+     dealer-signed, so all four legs are SUMMED here exactly as the profile
+     sums them; taking a difference anywhere would break this equality. */
+  surf.strikes.forEach((k, i) => {
+    const across = surf.grid[i].reduce((a, v) => a + (v ?? 0), 0);
+    near(across, surf.rowTotals[i], Math.abs(surf.rowTotals[i]) * 1e-9 + 1,
+         `strike ${k} reconciles across expiries`);
+  });
+
+  /* THE SURFACE IS NOT SEPARABLE, and the fixture must not let it be. If the
+     joint were the outer product of its marginals, every 2x2 minor would have
+     zero determinant and the endpoint would be redundant with two cheaper
+     calls. This asserts the fixture actually exercises a joint. */
+  const det = surf.grid[0][0] * surf.grid[2][1] - surf.grid[0][1] * surf.grid[2][0];
+  ok(Math.abs(det) > 1e-6,
+     "the fixture carries a genuine joint, not an outer product of two marginals");
+
+  eq(surf.callWall.strike, 110, "the call wall is the most positive row in the drawn window");
+  eq(surf.putWall.strike, 90, "the put wall is the most negative");
+}
+
+{
+  const cell = (strike, expiry, g) => ({
+    strike: String(strike), expiry,
+    call_gamma_ask: String(g), call_gamma_bid: "0", put_gamma_ask: "0", put_gamma_bid: "0",
+  });
+
+  /* UNMEASURED IS NULL, NEVER ZERO. A strike-expiry pair the vendor did not
+     return and one carrying no gamma look identical the moment a fallback zero
+     is written into the grid, and only one of them is a fact. On a heatmap the
+     difference is a grey cell versus a cell that says "no gamma here", which
+     is a tradeable claim. */
+  const sparse = buildSurface([
+    cell(100, "2026-08-28", 5e6),
+    cell(110, "2026-09-18", 3e6),
+  ], { spot: 105 });
+  eq(sparse.status, "ok");
+  const at100 = sparse.strikes.indexOf(100);
+  const sep = sparse.expiries.indexOf("2026-09-18");
+  ok(sparse.grid[at100][sep] === null,
+     "a pair the vendor did not return is null, not a confident zero");
+
+  /* A row with no measured leg at all is DROPPED rather than entered as zero. */
+  const noLegs = buildSurface([
+    cell(100, "2026-08-28", 5e6),
+    { strike: "105", expiry: "2026-08-28" },
+  ], { spot: 100 });
+  ok(!noLegs.strikes.includes(105), "a row carrying no gamma leg never reaches the grid");
+
+  /* EXPIRIES IN DATE ORDER, NOT BY SIZE. Keeping the largest columns would
+     draw a January LEAP beside this Friday with nothing saying six weeks were
+     skipped — a column axis with holes that still reads as consecutive. */
+  const many = [];
+  for (let j = 0; j < 12; j++) {
+    const d = new Date(Date.UTC(2026, 7, 28) + j * 7 * 86400000).toISOString().slice(0, 10);
+    // The LAST expiry is by far the largest, so a size-ranked axis would keep it.
+    many.push(cell(100, d, j === 11 ? 9e9 : 1e6));
+  }
+  const windowed = buildSurface(many, { spot: 100, maxExpiries: 4 });
+  assert.deepEqual(windowed.expiries, many.slice(0, 4).map((r) => r.expiry)); checks++;
+  ok(!windowed.expiries.includes(many[11].expiry),
+     "the biggest far-dated column does not jump the queue past the near term");
+  eq(windowed.expiriesShown, 4, "and the window says how much it is showing");
+  eq(windowed.expiriesTotal, 12, "out of how much there is");
+
+  /* STRIKES ARE CENTRED ON SPOT, and the window REFILLS when spot sits at an
+     edge rather than returning a half-empty grid. */
+  const ladder = [];
+  for (let i = 0; i < 30; i++) ladder.push(cell(80 + i, "2026-08-28", 1e6));
+  const centred = buildSurface(ladder, { spot: 95, maxStrikes: 5 });
+  assert.deepEqual(centred.strikes, [93, 94, 95, 96, 97]); checks++;
+  const atEdge = buildSurface(ladder, { spot: 80, maxStrikes: 5 });
+  eq(atEdge.strikes.length, 5, "spot at the low edge still yields a full window");
+  eq(atEdge.strikes[0], 80, "anchored where the data starts");
+  const atTop = buildSurface(ladder, { spot: 109, maxStrikes: 5 });
+  eq(atTop.strikes.length, 5, "and at the high edge too");
+  eq(atTop.strikes[4], 109);
+}
+
+{
+  const cell = (strike, expiry, g) => ({
+    strike: String(strike), expiry,
+    call_gamma_ask: String(g), call_gamma_bid: "0", put_gamma_ask: "0", put_gamma_bid: "0",
+  });
+
+  /* THE COLOUR SCALE IS CAPPED AND SAYS SO. One ATM cell on the front expiry
+     routinely carries more gamma than the rest of the grid combined. Scaling
+     to the maximum paints one saturated square on a field of grey and hides
+     the structure the panel exists to show. */
+  const rows = [];
+  for (let i = 0; i < 21; i++) rows.push(cell(90 + i, "2026-08-28", 1e6));
+  rows.push(cell(100, "2026-09-18", 1e9));            // the dominant cell
+  const capped = buildSurface(rows, { spot: 100 });
+  ok(capped.scaleCap < capped.peak,
+     `the scale caps below the peak (cap ${capped.scaleCap}, peak ${capped.peak})`);
+  ok(capped.clipped >= 1, "and reports how many cells were clipped rather than flattening them");
+  ok(capped.scaleCap > 0, "a capped scale is still a positive scale");
+
+  /* A grid of one value must not produce a zero scale — that would divide
+     every cell by nothing. */
+  const flat = buildSurface([cell(100, "2026-08-28", 5e6)], { spot: 100 });
+  ok(flat.scaleCap > 0, "a single-valued grid still has a usable scale");
+
+  /* Unavailable paths carry a reason and NO numbers. */
+  for (const [args, why] of [
+    [[[], { spot: 100 }], "an empty response"],
+    [[null, { spot: 100 }], "a null response"],
+    [[[cell(100, "2026-08-28", 1e6)], { spot: null }], "no spot"],
+    [[[cell(100, "2026-08-28", 1e6)], { spot: 0 }], "a zero spot"],
+  ]) {
+    const out = buildSurface(...args);
+    eq(out.status, "unavailable", `${why} yields unavailable`);
+    ok(out.reason && !("grid" in out), `${why} carries a reason and no numbers`);
+  }
 }
 
 console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, and a full source-ablation sweep`);

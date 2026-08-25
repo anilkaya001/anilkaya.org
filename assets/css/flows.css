@@ -1365,3 +1365,50 @@ body.is-stale .flows-tablewrap {
   .desk-controls { justify-content: flex-start; }
   .desk-chip__note { max-width: 9rem; }
 }
+
+/* ---------- gamma surface (strike x expiry) --------------------
+   Sign is carried by the hatch, magnitude by fill-opacity, price by
+   row and time by column. Hue is the LAST channel and duplicates the
+   hatch, so a greyscale print and a deuteranope reader keep every
+   reading — a diverging heatmap where hue is the only channel is the
+   commonest way this chart is drawn and the commonest way it fails. */
+
+.gs-cell.is-pos { fill: var(--gold-mystic); }
+.gs-cell.is-neg { fill: var(--flow-down); }
+.gs-hatch { color: var(--bg-deep); opacity: 0.55; }
+
+/* Not measured, drawn as an explicit void rather than as an empty cell:
+   a pair the vendor never returned and a pair carrying no gamma are
+   different facts, and only one of them is tradeable. */
+.gs-void { fill: var(--bg-deep); opacity: 0.35; }
+
+/* A cell past the colour cap, marked rather than silently flattened. */
+.gs-clip { stroke: var(--bg); stroke-width: 1; opacity: 0.85; }
+
+.gs-colrule { stroke: var(--hairline); stroke-width: 0.5; opacity: 0.5; }
+
+.gs-spot { stroke: var(--ink); stroke-width: 1.5; }
+
+/* The walls are outlined, not filled: a fill would fight the cell
+   opacity that is carrying the magnitude underneath them. */
+.gs-callwall,
+.gs-putwall { fill: none; stroke-width: 1.4; }
+.gs-callwall { stroke: var(--gold-celadon); }
+.gs-putwall { stroke: var(--flow-down); stroke-dasharray: 5 3; }
+
+.gs-price {
+  fill: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+/* Spot's own row label is the reference every other row is read against,
+   so it is the one that is not dimmed. */
+.gs-price.is-spot { fill: var(--ink); font-weight: 700; }
+
+.gs-exp {
+  fill: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
