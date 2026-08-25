@@ -49,26 +49,36 @@ jobs:
         with:
           node-version: 22
 
-      # The two schedules above mean one of them is always an hour wrong.
-      # Resolve it by asking for the real Eastern hour rather than assuming.
-      - name: Skip the schedule that is not 05:00 Eastern today
-        if: github.event_name == 'schedule'
+      # Two schedules fire, so one of them is always an hour wrong. Resolve it
+      # by asking for the real Eastern hour rather than assuming an offset.
+      #
+      # This sets an OUTPUT rather than exiting. GitHub Actions dropped the
+      # neutral exit code when it moved off HCL: `exit 78` was neutral in v1
+      # but is now an ordinary failure like any non-zero code, so exiting here
+      # would paint the repository red every day for half the year.
+      - name: Resolve whether this firing is the intended one
+        id: gate
         run: |
-          hour=$(TZ=America/New_York date +%H)
-          echo "Eastern hour is $hour"
-          if [ "$hour" != "05" ]; then
-            echo "Not the intended firing for this half of the year — exiting."
-            exit 78
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manual run — proceeding."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$(TZ=America/New_York date +%H)" = "05" ]; then
+            echo "Eastern hour is 05 — this is the intended firing."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Eastern hour is $(TZ=America/New_York date +%H) — the other schedule owns today. Skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Verify the pipeline runs against fixtures
-        # Always exercise the full code path with no network first. A syntax
-        # error or a broken feature contract fails here, before the live run
-        # has spent any API quota.
+        # Exercise the full code path with no network first. A syntax error or
+        # a broken feature contract fails here, before the live run has spent
+        # any API quota.
+        if: steps.gate.outputs.run == 'true'
         run: node scripts/flows-pipeline.mjs --dry-run
 
       - name: Build and publish the board
-        if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+        if: steps.gate.outputs.run == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
         env:
           # Never echoed, never interpolated into a log line. Actions logs are
           # PUBLIC on a public repository.
