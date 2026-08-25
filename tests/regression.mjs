@@ -157,7 +157,11 @@ async function solve(route, answer, expectedPoints, repeat) {
 try {
   browser = await chromium.launch();
   // Layout and console integrity at all supported viewports.
-  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [768, 1024, true], [1024, 768, true], [1280, 720, false], [1440, 900, false], [2048, 1152, false]]) {
+  /* 481 and 640 are here because the band between 481px and 793px had no
+     coverage at all, and that is exactly where a fourth nav tab broke the
+     topbar on every page — 207px clipped at 481px with the Flows tab entirely
+     off-screen. The gap between 390 and 768 was the bug's hiding place. */
+  for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [481, 900, true], [640, 900, true], [768, 1024, true], [1024, 768, true], [1280, 720, false], [1440, 900, false], [2048, 1152, false]]) {
     const context = await browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 2 : 1 });
     const page = await context.newPage();
     const clean = watch(page);
@@ -172,6 +176,40 @@ try {
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
+
+      /* THE TOPBAR, measured directly.
+
+         scrollWidth cannot see a clipped topbar: body{overflow-x:hidden} cuts
+         it off silently, so the assertion above stayed green through two
+         separate regressions while half the navigation was invisible. The
+         only honest test is the real geometry of the fixed bar's own children
+         against the viewport. */
+      const nav = await page.evaluate(() => {
+        const pill = document.querySelector(".pill");
+        if (!pill) return null;
+        const social = document.querySelector(".topbar__social");
+        const brand = document.querySelector(".topbar__brand");
+        const boxes = [pill, social, brand].filter(Boolean).map((n) => n.getBoundingClientRect());
+        return {
+          right: Math.max(...boxes.map((b) => b.right)),
+          left: Math.min(...boxes.map((b) => b.left)),
+          vw: window.innerWidth,
+          tabs: [...pill.querySelectorAll("a")].map((a) => ({
+            label: a.textContent.trim().slice(0, 20),
+            right: a.getBoundingClientRect().right,
+            left: a.getBoundingClientRect().left,
+          })),
+        };
+      });
+      if (nav) {
+        assert(nav.right <= nav.vw + 1,
+          `[${width}px] topbar clipped on ${route}: right edge at ${Math.round(nav.right)} in a ${nav.vw}px viewport`);
+        assert(nav.left >= -1,
+          `[${width}px] topbar overflows left on ${route}: left edge at ${Math.round(nav.left)}`);
+        const offscreen = nav.tabs.filter((t) => t.right > nav.vw + 1 || t.left < -1);
+        assert(offscreen.length === 0,
+          `[${width}px] nav tab off-screen on ${route}: ${offscreen.map((t) => `${t.label}@${Math.round(t.right)}`).join(", ")}`);
+      }
       if (route === "/lab/") {
         const today = await page.locator(".today").boundingBox();
         const heroAction = await page.locator("#heroPrimaryCta").boundingBox();

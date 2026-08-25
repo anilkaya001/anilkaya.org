@@ -211,7 +211,28 @@
 
     // The cumulative curve, split at the sign change so the short-gamma
     // stretch is dashed as well as coloured.
-    const pts = cum.map((c, i) => [xOf(c), yOfIndex(i)]);
+    /* The cumulative curve gets its OWN scale, sharing only the zero rule.
+       It was being projected through xOf(), which normalises against the
+       largest single BAR — but a running total is the sum of the bars, not
+       their maximum, so it routinely exceeds that by an order of magnitude.
+       Measured on a realistic 40-strike bell-shaped ladder: peak |cum| was
+       12.4x the largest bar, the curve ran to x = 820 on a 560px canvas, and
+       only 12 of 40 points landed inside the plot. The root SVG's overflow
+       clipping hid the rest, so the curve appeared to shoot right and vanish
+       — taking the zero crossing, which is the flip and the flagship reading
+       of the whole card, off-screen with it. Worst in the common case of a
+       mostly one-signed book, where nearly the entire curve was lost.
+
+       Sharing x0 keeps the crossing exactly on the zero rule, which is the
+       one place the two series must agree. */
+    const cs = cum.map(f);
+    const cMin = Math.min(...cs, 0), cMax = Math.max(...cs, 0);
+    const xOfCum = (v) => {
+      const t = f(v);
+      return t < 0 ? x0 - (Math.abs(t) / (Math.abs(cMin) || 1)) * negW
+                   : x0 + (t / (cMax || 1)) * posW;
+    };
+    const pts = cum.map((c, i) => [xOfCum(c), yOfIndex(i)]);
     for (const sign of [1, -1]) {
       let d = "", open = false;
       cum.forEach((c, i) => {
@@ -311,7 +332,8 @@
       (flip !== null
         ? `Dealers are short gamma below ${px2(flip)} — hedging amplifies moves there — and long above it, where hedging damps them. `
         : "Net gamma does not change sign inside the drawn band, so no flip level exists here. ") +
-      `σ is ATR(14). The gamma axis is symlog: twice the bar is not twice the gamma, so read magnitudes from the numbers rather than the ink.` +
+      `σ is ATR(14). The gamma axis is symlog: twice the bar is not twice the gamma, so read magnitudes from the numbers rather than the ink. ` +
+      `The running-total curve is drawn on its own scale — it shares only the zero line with the bars, where its crossing marks the flip.` +
       (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
     host.append(note);
   }

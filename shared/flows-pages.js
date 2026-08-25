@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "45";
+export const ASSET_VERSION = "46";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -97,6 +97,7 @@ ${topbar(true)}
   </header>
 
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
+  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
   <div class="flows-sides" role="group" aria-label="Board side">
     <button type="button" class="flows-side is-on" data-side="long" aria-pressed="true">Long</button>

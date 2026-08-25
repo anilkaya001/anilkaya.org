@@ -14,6 +14,7 @@
 
   const body = document.getElementById("flowsBody");
   const statusEl = document.getElementById("flowsStatus");
+  const staleEl = document.getElementById("flowsStale");
   const sideButtons = Array.from(document.querySelectorAll(".flows-side"));
   if (!body || !statusEl || !sideButtons.length) return;
 
@@ -187,6 +188,50 @@
     return tr;
   }
 
+  /**
+   * Two independent ways a board goes stale, reported separately because the
+   * remedies differ.
+   *
+   * A dead pipeline has an old WRITE time: GitHub disables scheduled workflows
+   * after 60 days of repository inactivity, and that failure's only symptom is
+   * a date that stops advancing. A frozen upstream has a recent write time and
+   * an old SESSION. The board previously showed neither — it rendered the
+   * build time in a status line and applied no test at all, so a reader
+   * looking at the board alone could not tell it was three days old.
+   */
+  function assessAge(payload) {
+    const now = Date.now();
+    const written = Number(payload.__updatedAt) || null;
+    // One publish cadence plus slack. Weekends are handled by the session
+    // check below, not here: the pipeline does not run at all on a Saturday.
+    const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
+    // Four days covers a normal weekend plus one public holiday.
+    const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+
+    if (written && now - written > STALE_WRITE_MS) {
+      const days = Math.floor((now - written) / 86400000);
+      return "This board was last written " +
+        (days >= 1 ? days + (days === 1 ? " day" : " days") : Math.floor((now - written) / 3600000) + " hours") +
+        " ago. The pipeline has not published since — check the Actions tab.";
+    }
+    if (payload.sessionDate) {
+      const session = Date.parse(payload.sessionDate + "T21:00:00Z");
+      if (Number.isFinite(session) && now - session > STALE_SESSION_MS) {
+        return "These numbers describe the " + payload.sessionDate + " session, " +
+          "which is more than four days old. The pipeline is running but its " +
+          "data is not advancing.";
+      }
+    }
+    return null;
+  }
+
+  function setStale(message) {
+    if (!staleEl) return;
+    staleEl.hidden = !message;
+    staleEl.textContent = message || "";
+    document.body.classList.toggle("is-stale", Boolean(message));
+  }
+
   function showMessage(text) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -225,7 +270,16 @@
         return null;
       }
       if (!response.ok) throw new Error("HTTP " + response.status);
-      return response.json();
+      // The write timestamp answers a question the payload cannot: whether the
+      // PIPELINE ran, as distinct from whether the DATA moved. A frozen vendor
+      // feed republished on schedule has a fresh write time and a stale
+      // session; a dead pipeline has the reverse. They are different failures
+      // and the reader is told which one.
+      const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
+      return response.json().then((body) => {
+        if (body && typeof body === "object") body.__updatedAt = updatedAt;
+        return body;
+      });
     }).then((payload) => {
       if (payload) cache.set(which, payload);
       return payload;
@@ -264,11 +318,18 @@
 
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       if (payload.status === "pending" || !rows.length) {
+        /* "pending" from the API means the row is genuinely absent. It is also
+           what the Worker returns when the D1 read THREW — the catch there
+           falls back to the same shape — so this message has to cover a
+           database fault too rather than confidently asserting that nothing
+           has ever been published. */
         showMessage(
-          "No session has been published yet. The board fills in once the "
-          + "pipeline completes its first run.",
+          "No board is available for this side. Either the pipeline has not "
+          + "published its first session yet, or the store could not be read. "
+          + "If this persists past the next trading morning, check the Actions tab.",
         );
-        statusEl.textContent = "Awaiting the first published session.";
+        statusEl.textContent = "No published session available.";
+        setStale(null);
         return;
       }
 
@@ -280,8 +341,13 @@
       const when = payload.generatedAt
         ? new Date(payload.generatedAt).toLocaleString()
         : "an unknown time";
+      // Two dates, because the job runs pre-open and the vendor returns the
+      // previous COMPLETED session. Showing only the build time would let a
+      // board built this morning from four-day-old data look current.
       statusEl.textContent =
-        rows.length + " " + which + " candidates, generated " + when + ".";
+        rows.length + " " + which + " candidates · session " +
+        (payload.sessionDate || "unknown") + " · built " + when + ".";
+      setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;
       showMessage("The board could not be loaded. Refresh to try again.");

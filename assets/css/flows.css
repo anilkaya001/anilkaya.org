@@ -729,3 +729,18 @@
   .fc-fam-l { grid-column: 1 / -1; padding-left: 1.8rem; }
   .fc-congress .fc-amt { font-size: 0.72rem; }
 }
+
+/* Board staleness. A band, for the same reason the card uses one: a reader
+   scrolls past a toast, and a board whose data stopped advancing must keep
+   saying so on every visit. */
+.flows-stale {
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--flow-down);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--flow-down) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+body.is-stale .flows-table tbody { opacity: 0.66; }
