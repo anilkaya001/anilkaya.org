@@ -37,6 +37,16 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 let upstreamCalls = 0;
 let upstreamMode = "ok";
 let pagesAsked = [];
+/* CONCURRENT connections, not total calls. Workers Free allows 50 external
+   subrequests per invocation and only SIX simultaneous open connections —
+   eight times tighter, and it is the width of a Promise.all that spends it. */
+let openNow = 0, openPeak = 0;
+/* THE STUB MUST BE SLOW TO SHOW CONCURRENCY. Answering instantly serialises
+   three genuinely parallel fetches into a peak of one, and the concurrency
+   assertion then measures nothing while passing — the same failure as a test
+   that measures a closed dialog. Only the concurrency probe turns this on, so
+   no other case pays the delay. */
+let slowUpstream = 0;
 const chainRows = [
   /* the one real line */
   { option_symbol: "AAPL260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60",
@@ -58,16 +68,28 @@ const candles = [
 
 const upstream = http.createServer((req, res) => {
   upstreamCalls++;
+  openNow++;
+  if (openNow > openPeak) openPeak = openNow;
+  /* Held open a beat so genuinely concurrent requests overlap in the counter.
+     Without it a fast stub can serialise and report a peak of 1 against a
+     route that opens six. */
+  let closed = false;
+  const done = () => { if (!closed) { closed = true; openNow--; } };
+  res.on("finish", done);
+  res.on("close", done);
   const path = req.url.split("?")[0];
   res.setHeader("Content-Type", "application/json");
-  if (upstreamMode === "error") { res.writeHead(500); res.end("{}"); return; }
-  if (upstreamMode === "garbage") { res.writeHead(200); res.end("<html>not json</html>"); return; }
-  if (upstreamMode === "rate") { res.writeHead(429); res.end("{}"); return; }
+  const send = (code, body) => {
+    const go = () => { res.writeHead(code); res.end(body); };
+    if (slowUpstream > 0) setTimeout(go, slowUpstream); else go();
+  };
+  if (upstreamMode === "error") { send(500, "{}"); return; }
+  if (upstreamMode === "garbage") { send(200, "<html>not json</html>"); return; }
+  if (upstreamMode === "rate") { send(429, "{}"); return; }
   if (path.endsWith("/option-contracts")) {
     const page = Number(new URL(req.url, "http://x").searchParams.get("page") || 1);
     pagesAsked.push(page);
-    res.writeHead(200);
-    if (upstreamMode === "emptyChain") { res.end(JSON.stringify({ data: [] })); return; }
+    if (upstreamMode === "emptyChain") { send(200, JSON.stringify({ data: [] })); return; }
     /* A FULL PAGE MEANS THERE MAY BE MORE. The vendor caps limit at 500 and
        offers no ordering on this route, so a full page is the only signal that
        the chain was cut. "big" returns two full pages (still truncated);
@@ -79,18 +101,17 @@ const upstream = http.createServer((req, res) => {
         open_interest: "900", volume: "50",
       }));
       if (page >= 2 && upstreamMode === "part") {
-        res.end(JSON.stringify({ data: full.slice(0, 3) }));
+        send(200, JSON.stringify({ data: full.slice(0, 3) }));
         return;
       }
-      res.end(JSON.stringify({ data: full }));
+      send(200, JSON.stringify({ data: full }));
       return;
     }
-    res.end(JSON.stringify({ data: chainRows }));
+    send(200, JSON.stringify({ data: chainRows }));
     return;
   }
   if (path.includes("/ohlc/")) {
-    res.writeHead(200);
-    res.end(JSON.stringify({ data: upstreamMode === "noSpot" ? [] : candles }));
+    send(200, JSON.stringify({ data: upstreamMode === "noSpot" ? [] : candles }));
     return;
   }
   if (path.endsWith("/stock-state")) {
@@ -103,17 +124,16 @@ const upstream = http.createServer((req, res) => {
        the case has to fail both, or it only proves the fallback works — which
        is what a separate case below is for. */
     if (upstreamMode === "noState" || upstreamMode === "noSpot") {
-      res.writeHead(404); res.end("{}"); return;
+      send(404, "{}"); return;
     }
-    res.writeHead(200);
-    res.end(JSON.stringify({
+    send(200, JSON.stringify({
       close: "183.40", prev_close: "179.10", open: "180.20",
       high: "184.00", low: "179.80", market_time: "regular",
       tape_time: "2026-08-25 18:06:00+00:00", total_volume: 23132119, volume: 12348,
     }));
     return;
   }
-  res.writeHead(404); res.end("{}");
+  send(404, "{}");
 });
 await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
 const upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
@@ -354,6 +374,35 @@ try {
     pagesAsked = [];
     await get("/api/flows/chain?t=BIG2");
     eq(pagesAsked.length, 2, "two pages is the ceiling, whatever the chain holds");
+    upstreamMode = "ok";
+  }
+
+  /* ---------- the ceiling nobody quotes -------------------------- */
+  {
+    /* Workers Free allows 50 external subrequests per invocation — this route
+       spends three or four, nowhere near it. It also allows only SIX
+       SIMULTANEOUS OPEN CONNECTIONS, which is eight times tighter and is what
+       a Promise.all actually costs. Anything added to buildChainPayload goes
+       into that same array, so this asserts the width rather than the count. */
+    slowUpstream = 60;
+    openPeak = 0;
+    upstreamMode = "ok";
+    const res = await get("/api/flows/chain?t=CONC");
+    eq(res.status, 200, "the route answers");
+    ok(openPeak >= 2,
+       `the fixture actually observed concurrency rather than serialising (${openPeak})`);
+    ok(openPeak <= 6,
+       `the route opens at most six simultaneous upstream connections (${openPeak})`);
+
+    /* And a paginated chain must not widen it: the second page is fetched
+       AFTER the first resolves, deliberately, so it costs a subrequest and not
+       a connection slot. */
+    openPeak = 0;
+    upstreamMode = "big";
+    await get("/api/flows/chain?t=CONCBIG");
+    ok(openPeak <= 6,
+       `a paginated chain still opens at most six (${openPeak})`);
+    slowUpstream = 0;
     upstreamMode = "ok";
   }
 

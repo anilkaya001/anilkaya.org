@@ -1088,11 +1088,25 @@ async function uwFetch(env, path, params) {
 /**
  * Fetch and price one ticker's sellable chain.
  *
- * Two subrequests: the chain itself, and a daily candle for spot. Spot is
- * NOT optional and is not defaulted — a covered call's collateral is the
- * shares at spot, and moneyness is measured against it, so a missing spot
- * makes every number on the page wrong in a way that still renders. It
- * fails loudly instead.
+ * THREE CONCURRENT SUBREQUESTS, and a fourth sequentially when the first
+ * chain page fills: the chain, a daily candle, and the live stock state.
+ *
+ * THE BINDING LIMIT IS NOT THE ONE EVERYONE QUOTES. Workers Free allows 50
+ * external subrequests per invocation, and at three or four this route is
+ * nowhere near it — but it also allows only SIX SIMULTANEOUS OPEN
+ * CONNECTIONS per invocation, which is eight times tighter and is what a
+ * Promise.all actually spends. This one opens three of six. Anything added
+ * here goes in that same array, so the count to watch is the width of the
+ * Promise.all, not the total call count.
+ *
+ * One invocation prices ONE ticker — flows-desk.js fans out one request per
+ * symbol — so neither ceiling is per desk. A twenty-symbol desk is twenty
+ * invocations, and what it actually spends is the shared vendor quota.
+ *
+ * Spot is NOT optional and is not defaulted — a covered call's collateral is
+ * the shares at spot, and moneyness is measured against it, so a missing spot
+ * makes every number on the page wrong in a way that still renders. It fails
+ * loudly instead.
  */
 async function buildChainPayload(env, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
