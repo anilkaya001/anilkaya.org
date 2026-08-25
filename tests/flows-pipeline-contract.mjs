@@ -11,12 +11,13 @@
 import assert from "node:assert/strict";
 import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
-  medianDollarVolume, eligible, daysToEarnings,
+  medianDollarVolume, eligible, daysToEarnings, publish, summarize,
 } from "../scripts/flows-pipeline.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
+const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 /* ---------- candle ordering is not assumed ---------------------- */
 {
@@ -189,4 +190,66 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(daysToEarnings({}, today) === null, "an absent earnings date is null, not zero");
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — candle-order invariance, ticker dedupe, board disjointness, the signed-column rule, gamma regime in the score, liquidity floor`);
+/* ---------- THE LIVE PUBLISH PATH -------------------------------
+   --dry-run returns before the live branch, so the harness that gates every
+   deploy could not see this code at all. It diverged: the dry-run branch knew
+   that cards and meta carry no `rows` while the live branch still read
+   payload.rows.length, so a green dry run certified a path that would throw on
+   the first real card, fail all fifty inside their per-card catch, and then
+   take the whole job down on the uncaught meta publish — AFTER the boards had
+   already been committed. These tests drive the live branch against a stub. */
+{
+  const http = await import("node:http");
+  const received = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      received.push({ url: req.url, auth: req.headers.authorization, body });
+      res.writeHead(body.includes("FAILME") ? 500 : 200, { "Content-Type": "application/json" });
+      res.end('{"ok":true}');
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${port}/api/flows/ingest`;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+
+  try {
+    // A board payload: the shape the old code assumed was the only shape.
+    await publish("board:long", { side: "long", rows: [{ t: "A" }, { t: "B" }] });
+    eq(received.length, 1, "a board publishes over the live path");
+    ok(received[0].url.includes("key=board%3Along"), "the key is url-encoded into the query");
+    eq(received[0].auth, "Bearer test-token", "and carries the bearer");
+
+    // THE REGRESSION: a card has no rows at all.
+    await publish("card:AAPL", { v: 1, ticker: "AAPL", panels: {} });
+    eq(received.length, 2, "a CARD publishes over the live path without throwing");
+
+    // And so does meta.
+    await publish("meta", { generatedAt: "x", cardsBuilt: 3 });
+    eq(received.length, 3, "meta publishes over the live path without throwing");
+
+    // A non-2xx must still throw, so a real ingest failure is not swallowed.
+    let threw = null;
+    try { await publish("card:FAILME", { ticker: "FAILME" }); }
+    catch (error) { threw = error; }
+    ok(threw && /HTTP 500/.test(threw.message), "a failed ingest throws with its status");
+
+    // Both branches describe a payload the same way, by construction.
+    eq(summarize({ rows: [1, 2, 3] }), "3 rows", "a board is described by its row count");
+    eq(summarize({ ticker: "AAPL" }), "no rows", "a card is described honestly, not by a crash");
+    eq(summarize({ rows: null }), "no rows", "a null rows field is not a length lookup");
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, ticker dedupe, board disjointness, the signed-column rule, gamma regime in the score, liquidity floor`);

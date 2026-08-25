@@ -594,6 +594,24 @@ function toRows(pool, screenerByTicker, previousIds) {
   });
 }
 
+/**
+ * One description of a payload, used by BOTH publish branches.
+ *
+ * It was written twice, and the two copies diverged: the dry-run branch was
+ * taught that cards and meta carry no `rows` while the live branch kept
+ * reading `payload.rows.length` directly. Since --dry-run returns before ever
+ * reaching the live branch, the harness could not see it — so a green dry run
+ * certified a path that would throw on the first real card, fail all fifty
+ * inside their per-card catch, and then take the whole job down on the
+ * uncaught meta publish, AFTER the boards had already been committed.
+ *
+ * Sharing the function is the fix; the test below exercises the live branch
+ * against a stub so the two can never silently disagree again.
+ */
+function summarize(payload) {
+  return Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
+}
+
 async function publish(key, payload) {
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
@@ -601,9 +619,7 @@ async function publish(key, payload) {
       const { writeFileSync } = await import("node:fs");
       writeFileSync(EMIT.replace(/\.json$/, "") + "-" + key.replace(":", "-") + ".json", body);
     }
-    // Not every payload is a board: cards and meta carry no rows.
-    const shape = Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
-    console.log(`  [dry-run] ${key}: ${shape}, ${body.length} bytes`);
+    console.log(`  [dry-run] ${key}: ${summarize(payload)}, ${body.length} bytes`);
     return;
   }
   const response = await fetch(
@@ -618,7 +634,7 @@ async function publish(key, payload) {
     },
   );
   if (!response.ok) throw new Error(`ingest ${key} -> HTTP ${response.status}`);
-  console.log(`  published ${key}: ${payload.rows.length} rows, ${body.length} bytes`);
+  console.log(`  published ${key}: ${summarize(payload)}, ${body.length} bytes`);
 }
 
 /* ---------- synthetic fixtures for --dry-run --------------------
@@ -1024,7 +1040,7 @@ async function main() {
 
 export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
-  candlesAscending, selectExtremes, scoreBoard, sessionDateFrom,
+  candlesAscending, selectExtremes, scoreBoard, sessionDateFrom, publish, summarize,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —
