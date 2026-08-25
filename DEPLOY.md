@@ -403,9 +403,25 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
-allows 10 ms of CPU per invocation including cron, and the daily job is 600–800
-Unusual Whales calls. The Worker only verifies a cookie and hands back a stored
-string.
+allows 10 ms of CPU per invocation including cron, and the daily job makes
+hundreds of Unusual Whales calls. The Worker only verifies a cookie and hands
+back a stored string.
+
+The call count is derived, not estimated:
+
+```
+  1  screener call (the whole universe, filtered server-side)
++ 5  per enriched name x 2 sides x enrichPerSide (30)   = 300
++ 2  per board name (max-pain, congress) x boardSize x 2 = 100
++ 2  reads of the live board, for hysteresis
+                                                        = 403, plus retries
+```
+
+Earlier revisions of this runbook claimed 600–800, which is two to three times
+the real figure. That matters because it is the number the rate-limit sizing
+below is done against: an operator reading "301 API calls" in the log against a
+runbook promising 600–800 would reasonably conclude the job had silently
+dropped half its work.
 
 Repository secrets required (Settings → Secrets and variables → Actions):
 

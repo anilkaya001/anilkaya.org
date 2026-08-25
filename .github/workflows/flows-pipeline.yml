@@ -3,10 +3,11 @@ name: flows-pipeline
 # Builds the daily Flows board and POSTs it to the Worker.
 #
 # Why this runs here and not on Cloudflare: the Workers free plan allows 10 ms
-# of CPU per invocation INCLUDING cron handlers, and this job makes 500-900
-# Unusual Whales calls. Chaining that through a 1-minute-minimum cron would
-# take hours and wedge on any stall. GitHub Actions has no such limits and is
-# unlimited for public repositories.
+# of CPU per invocation INCLUDING cron handlers, and this job makes roughly 400
+# Unusual Whales calls (1 screener + 5 per enriched name x 60 + 2 per board name
+# x 50 + 2 board reads for hysteresis). Chaining that through a 1-minute-minimum
+# cron would take hours and wedge on any stall. GitHub Actions has no such
+# limits and is unlimited for public repositories.
 #
 # TIMEZONE: cron here is UTC, the market opens 09:30 America/New_York, and the
 # US observes DST — so a single fixed UTC time drifts by an hour twice a year.
