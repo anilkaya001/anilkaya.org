@@ -444,6 +444,14 @@
        and on the live board it was frequently the other way round — the note
        contradicted the header badge on the same card. */
     const regime = card.regime || {};
+    /* A CARD FROM BEFORE flipSide WAS MEASURED gets no sentence at all.
+       Defaulting an absent flipSide to "short" reproduces the hardcoded string
+       this panel used to carry — and that string was wrong often enough to be
+       the reason flipSide exists: on the live INTC book the truth is
+       long_below. Withholding is the same discipline the score panel applies
+       to fam.V and fam.O, and for the same reason: a field whose value cannot
+       be verified must not be asserted. */
+    const knowsSide = regime.flipSide === "long_below" || regime.flipSide === "short_below";
     const below = regime.flipSide === "long_below" ? "long" : "short";
     const above = below === "long" ? "short" : "long";
     const amplifies = (side) => (side === "short"
@@ -456,7 +464,11 @@
       : "";
     const sep = isNum(regime.flipSeparation);
     note.textContent =
-      (flip !== null
+      (flip !== null && !knowsSide
+        ? `The book changes sign at ${px2(flip)}. This card was built before the side of ` +
+          `that boundary was measured, so which way round it runs is not stated here — it ` +
+          `returns on the next published session. `
+        : flip !== null
         ? `Dealers are ${below} gamma immediately below ${px2(flip)} — ${amplifies(below)} — ` +
           `and ${above} immediately above it. ` +
           (sep !== null
@@ -473,6 +485,87 @@
       `σ is ATR(14).` +
       (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
     host.append(note);
+  }
+
+  /* ---------- book displacement -------------------------------------- */
+
+  /**
+   * Where today's flow is building gamma, against where the book already is.
+   *
+   * *_oi is the standing book; *_vol is what traded today. Compared as
+   * DISTRIBUTIONS rather than totals — the gap between their gamma centroids,
+   * in ATR units. Conventional dealer-gamma reporting describes the regime you
+   * are in; this says the regime is moving, and which way.
+   *
+   * Drawn as a dumbbell because the two centroids are the reading and the gap
+   * between them is the signal: two dots on one price axis, with spot marked,
+   * so the direction is read off position rather than off a sign.
+   */
+  function renderDisplacement(host, panel) {
+    const question = "Is today's flow building dealer gamma where the book already is, or somewhere else?";
+    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    panelHead(host, question);
+
+    const oi = isNum(panel.oiCentroid), vol = isNum(panel.volCentroid), spot = isNum(panel.spot);
+    if (oi === null || vol === null) return deadPanel(host, question, "no centroid could be measured");
+
+    const points = [oi, vol, spot].filter((v) => v !== null);
+    let lo = Math.min(...points), hi = Math.max(...points);
+    // A degenerate range would put every dot on top of the others; open it out
+    // so the drawing still reads as "these are the same level".
+    if (!(hi > lo)) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.18;
+    lo -= pad; hi += pad;
+
+    const W = 560, H = 96, padX = 28;
+    const xOf = (v) => padX + ((v - lo) / (hi - lo)) * (W - padX * 2);
+    const svg = svgEl("svg", {
+      class: "bd", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    svg.append(svgEl("line", { class: "bd-axis", x1: padX, x2: W - padX, y1: 52, y2: 52 }));
+
+    if (spot !== null) {
+      svg.append(svgEl("line", { class: "bd-spot", x1: xOf(spot), x2: xOf(spot), y1: 30, y2: 62 }));
+      const t = svgEl("text", { class: "bd-lab is-spot", x: xOf(spot), y: 24, "text-anchor": "middle" });
+      t.textContent = "spot " + px2(spot);
+      svg.append(t);
+    }
+
+    // The bar between the two centroids IS the displacement.
+    svg.append(svgEl("line", {
+      class: "bd-gap " + (vol >= oi ? "is-up" : "is-down"),
+      x1: xOf(oi), x2: xOf(vol), y1: 52, y2: 52,
+    }));
+    for (const [v, cls, label] of [[oi, "is-oi", "standing book"], [vol, "is-vol", "today's flow"]]) {
+      svg.append(svgEl("circle", { class: "bd-dot " + cls, cx: xOf(v), cy: 52, r: 5 }));
+      const t = svgEl("text", { class: "bd-lab " + cls, x: xOf(v), y: 74, "text-anchor": "middle" });
+      t.textContent = label + " " + px2(v);
+      svg.append(t);
+    }
+
+    const gapAtr = isNum(panel.gapAtr);
+    const cap = svgEl("text", { class: "bd-axis-lab", x: W / 2, y: H - 4, "text-anchor": "middle" });
+    cap.textContent = gapAtr === null
+      ? "gap " + px2(panel.gapPx) + " (no ATR, so no sigma reading)"
+      : "gap " + sigma(gapAtr) + " — new gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book";
+    svg.append(cap);
+
+    svg.setAttribute("aria-label",
+      `The standing gamma book is centred at ${px2(oi)} and today's traded gamma at ${px2(vol)}` +
+      (spot !== null ? `, with spot at ${px2(spot)}` : "") +
+      (gapAtr === null ? "." : `, a gap of ${gapAtr.toFixed(2)} ATR.`));
+    host.append(svg);
+
+    host.append(el("p", "fc-note",
+      "Open interest is the book that already exists; today's volume is what was " +
+      "added to it. Comparing them as DISTRIBUTIONS rather than as totals — the gap " +
+      "between their gamma-weighted centroids — is what turns a static regime reading " +
+      "into a statement that the regime is moving, and which way. The gap is measured " +
+      "in ATR so it compares across names: half a point means one thing in a $9 stock " +
+      "and another in a $900 one. This is descriptive; it enters the score through the " +
+      "positioning axis, which is the only signed thing the gamma block contributes."));
   }
 
   /* ---------- gamma roll-off ---------------------------------------- */
@@ -493,7 +586,11 @@
     panelHead(host, question);
 
     const rows = panel.schedule;
-    const W = 560, ROW = 26, padL = 96, padR = 56, padT = 8;
+    /* padL fits the widest label the rail can hold: "2026-09-04  11d" is
+       fifteen monospace characters at 10.5px, about 95 units, and it is drawn
+       text-anchor:end from padL - 8. At padL = 96 that started at x = -7 and
+       the SVG clipped it — invisibly, because clipping is silent. */
+    const W = 560, ROW = 26, padL = 116, padR = 56, padT = 8;
     const H = padT + rows.length * ROW + 26;
     const plotW = W - padL - padR;
     const svg = svgEl("svg", {
@@ -624,8 +721,10 @@
     }
 
     // The vendor's own quote, as a reference pair rather than a band, because
-    // its horizon is not this panel's horizon.
-    if (quoted !== null && panel.horizonExpiry) {
+    // its horizon is not this panel's horizon — and is not datable from
+    // anything this pipeline sees, so it is labelled by the rule the vendor
+    // states rather than by a date.
+    if (quoted !== null && panel.horizonRule) {
       const h = halfOf(quoted);
       for (const x of [mid - h, mid + h]) {
         svg.append(svgEl("line", { class: "pm-quote", x1: x, x2: x, y1: 30, y2: 68 }));
@@ -635,7 +734,7 @@
          on a 560-unit canvas and a label starting there runs clean off the
          viewBox — silently, because the SVG clips it. */
       const t = svgEl("text", { class: "pm-quotelab", x: W - padX, y: 78, "text-anchor": "end" });
-      t.textContent = "quoted to " + panel.horizonExpiry;
+      t.textContent = "vendor quote, to " + panel.horizonRule;
       svg.append(t);
     }
 
@@ -648,7 +747,7 @@
     cap.textContent = imp !== null
       ? `±${(imp * 100).toFixed(1)}% priced over ${sessions} sessions` +
         (real !== null ? `  ·  ±${(real * 100).toFixed(1)}% delivered` : "")
-      : `±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonExpiry || "the next expiry"}`;
+      : `±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonRule || "the vendor's own expiry"}`;
     svg.append(cap);
 
     svg.setAttribute("aria-label",
@@ -661,18 +760,23 @@
         ? `This stock has delivered plus or minus ${(real * 100).toFixed(1)} percent over the ` +
           `same horizon. `
         : "") +
-      (quoted !== null && panel.horizonExpiry
+      (quoted !== null && panel.horizonRule
         ? `The vendor separately quotes plus or minus ${(quoted * 100).toFixed(1)} percent to ` +
-          `${panel.horizonExpiry}, a different horizon.`
+          `${panel.horizonRule}, a different horizon.`
         : ""));
     host.append(svg);
 
     host.append(statList([
       ["Implied 30d vol", vol1(panel.iv30)],
-      ["Realized 30d vol", vol1(panel.rv30)],
+      // 21 sessions, which is the usual count in the 30 CALENDAR days the
+      // implied leg is quoted over. Labelled by what was measured.
+      ["Realized vol, 21 sessions", vol1(panel.rv30)],
       ["Variance risk premium",
         isNum(panel.vrp) === null ? DASH : signed(panel.vrp, (a) => (a * 100).toFixed(1) + " vol pts")],
       ["Band", panel.richness === null ? DASH : panel.richness],
+      ["IV rank", isNum(panel.ivRank) === null ? DASH : Math.round(panel.ivRank * 100) + "% of its year"],
+      ["IV, past week", isNum(panel.ivMomentum) === null ? DASH
+        : signed(panel.ivMomentum, (a) => (a * 100).toFixed(1) + " vol pts")],
     ]));
 
     host.append(el("p", "fc-note",
@@ -681,11 +785,13 @@
       `is exact whenever successive returns are uncorrelated — no fitted parameter, ` +
       `every input observable, and an assumption the term structure of implied ` +
       `volatility openly disagrees with. The inner band is the ` +
-      `volatility this stock has actually delivered over its last 30 sessions, scaled ` +
+      `volatility this stock has actually delivered over its last 21 sessions — the usual ` +
+      `count in the thirty CALENDAR days the implied leg is quoted over — scaled ` +
       `the same way, so the gap between them is the variance risk premium in price ` +
-      `units. The vendor's own quote is marked separately because it is priced to ` +
-      `this name's next listed expiry, which is a different horizon for every name and ` +
-      `therefore not comparable across the board. ` +
+      `units. The vendor's own quote is marked separately because it is priced to the ` +
+      `nearest end-of-week expiry — the vendor's documented default when no expiry is ` +
+      `supplied, and the screener accepts none — which is a different horizon from this ` +
+      `panel's and not comparable across the board. ` +
       `NOT CLAIMED: a direction, a probability, a point target, or that the stock will ` +
       `stay inside any of these bands.`));
   }
@@ -1034,6 +1140,7 @@
     const panels = card.panels || {};
     renderGamma($("fcGamma"), panels.gamma, card);
     renderLevels($("fcLevels"), panels.levels);
+    renderDisplacement($("fcDisp"), panels.displacement);
     renderCalendar($("fcCal"), panels.calendar);
     renderMove($("fcMove"), panels.pricedMove);
     renderContext($("fcCtx"), panels.context);
@@ -1060,7 +1167,7 @@
     // failed to load — and then never cleared at all.
     dialog.classList.remove("is-stale");
     $("fcProv").textContent = "Loading…";
-    for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+    for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
       $(id).replaceChildren(el("p", "fc-note", "Loading…"));
     }
   }
@@ -1113,7 +1220,7 @@
       if (!v || current !== ticker) return;
       if (v.body && v.body.status === "pending") {
         $("fcProv").textContent = "";
-        for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+        for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
           deadPanel($(id), "", "No card has been built for this name yet. Cards are " +
             "published after the boards, so one can briefly lag its row.");
         }
@@ -1124,7 +1231,7 @@
       if (e && e.name === "AbortError") return;
       // Every panel still said "Loading…", so a failed card was
       // indistinguishable from a slow one and the reader waited forever.
-      for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+      for (const id of ["fcGamma", "fcLevels", "fcDisp", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
         deadPanel($(id), "", "This card could not be loaded. Close and try again.");
       }
       $("fcProv").textContent = "This card could not be loaded.";

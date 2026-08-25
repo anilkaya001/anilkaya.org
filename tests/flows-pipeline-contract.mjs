@@ -13,6 +13,7 @@ import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
+  screenerTilt,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 
@@ -454,6 +455,38 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(horizonMove(iv) === horizonMove(iv),
      "the fixed-horizon band depends on volatility alone, not on the expiry chain");
   ok(HORIZON_SESSIONS === 10, "the published horizon is ten trading sessions");
+}
+
+/* ---------- iv_rank is a percentile, not a fraction --------------- */
+{
+  /* THE VENDOR'S OWN SCHEMA IS WRONG HERE, and the generated reference inherits
+     the error: iv_rank is declared `$ref: 'Stock IV 30d 1M'`, so every doc
+     shows iv30d_1m's description ("The 30 day implied volatility from 1 month
+     ago") and iv30d_1m's example (0.2136...). The screener's EXAMPLE OBJECT is
+     the only place the truth appears, and it is unambiguous:
+     `iv_rank: '13.52369891956068210400'` sitting beside `iv30d: '0.2038...'`
+     in the same response.
+
+     Read as a fraction, 13.52 would have printed "1352% of its year" on the
+     card. The scoring was unharmed either way — percentileRank is
+     scale-invariant — which is exactly why only the display would have shown
+     it, and why the fixture had to carry the real scale to catch it. */
+  const tilt = (v) => screenerTilt({
+    ticker: "T", close: "100", prev_close: "100", iv_rank: v,
+    bullish_premium: "1", bearish_premium: "1", call_premium: "1", put_premium: "1",
+    call_volume: 1, put_volume: 1, total_open_interest: 10,
+  });
+  ok(Math.abs(tilt("13.52369891956068210400").ivRank - 0.1352369891956068) < 1e-12,
+     "the vendor's own example value reads as a fraction of its year");
+  ok(Math.abs(tilt("88.9").ivRank - 0.889) < 1e-12, "and so does a high percentile");
+  ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
+  ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
+  /* A value at or below 1 is ambiguous between the two conventions; treating it
+     as already-a-fraction is the reading that cannot produce a nonsense
+     number. */
+  ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
+  ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
+  ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
 
 /* ---------- the session is resolved, not inferred ---------------- */

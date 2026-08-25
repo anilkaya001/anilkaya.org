@@ -385,11 +385,23 @@
   opacity: 0.55;
 }
 
+/* Styled for both renderers: a <td> inside the table and a <p> inside the deck
+   grid, which is the default view and where these messages were invisible. */
 .fb-empty {
   padding: 2.2rem 1rem;
   text-align: center;
   color: var(--ink-dim);
   font-size: 0.94rem;
+  margin: 0;
+}
+
+/* The deck is a grid; an explanation must span it rather than sit in a
+   card-width column of its own. */
+p.fb-empty {
+  grid-column: 1 / -1;
+  max-width: 46rem;
+  justify-self: center;
+  line-height: 1.6;
 }
 
 .flows-foot {
@@ -1068,3 +1080,20 @@ body.is-stale .flows-tablewrap {
    this panel's horizon, so it must not read as a third comparable range. */
 .pm-quote { stroke: var(--ink-dim); stroke-width: 1; stroke-dasharray: 3 3; }
 .pm-quotelab { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
+
+/* ---------- book displacement --------------------------------------
+   A dumbbell: two centroids on one price axis, and the bar between them is
+   the reading. Direction is carried by position, not by a sign. */
+
+.bd { display: block; width: 100%; height: auto; }
+.bd-axis { stroke: var(--hairline); stroke-width: 1; }
+.bd-spot { stroke: var(--ink); stroke-width: 1.5; }
+.bd-gap { stroke-width: 3; stroke-linecap: round; }
+.bd-gap.is-up { stroke: color-mix(in srgb, var(--flow-up) 55%, transparent); }
+.bd-gap.is-down { stroke: color-mix(in srgb, var(--flow-down) 55%, transparent); }
+.bd-dot.is-oi { fill: var(--ink-dim); }
+.bd-dot.is-vol { fill: var(--gold-mystic); }
+.bd-lab { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9.5px; }
+.bd-lab.is-spot { fill: var(--ink); }
+.bd-lab.is-vol { fill: var(--gold-mystic); }
+.bd-axis-lab { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 10px; }

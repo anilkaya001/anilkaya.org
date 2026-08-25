@@ -250,7 +250,7 @@ function screenerTilt(row) {
        call and all of it previously computed and thrown away. */
     iv30: Number.isFinite(iv30) ? iv30 : null,
     ivMomentum: Number.isFinite(iv30) ? iv30 - num(row.iv30d_1w, NaN) : null,
-    ivRank: num(row.iv_rank, NaN),
+    ivRank: ivRankFraction(row.iv_rank),
     impliedMovePerc: num(row.implied_move_perc, NaN),
     impliedMove: num(row.implied_move, NaN),
     atmVol: num(row.volatility, NaN),
@@ -259,6 +259,33 @@ function screenerTilt(row) {
     week52High: num(row.week_52_high, NaN),
     week52Low: num(row.week_52_low, NaN),
   };
+}
+
+/**
+ * iv_rank as a FRACTION, because the vendor publishes it as a percentile.
+ *
+ * The endpoint reference documents iv_rank as "The 30 day implied volatility
+ * from 1 month ago", example 0.2136848270893097 — which is iv30d_1m's
+ * description and iv30d_1m's example, not iv_rank's. The vendor's own OpenAPI
+ * schema explains why: iv_rank is declared as `$ref: 'Stock IV 30d 1M'`, so
+ * every generated doc inherits the wrong field's text.
+ *
+ * The screener's own EXAMPLE OBJECT is the only place the truth appears, and it
+ * is unambiguous: `iv_rank: '13.52369891956068210400'` sits beside
+ * `iv30d: '0.2038...'` in the same response. iv_rank is on 0..100.
+ *
+ * Read as a fraction it would have printed "1352% of its year" on the card.
+ * The scoring was unharmed either way — percentileRank is scale-invariant —
+ * which is exactly why only the display would have shown it.
+ *
+ * The <= 1 branch is not defensive clutter: a percentile of 0.5 is ambiguous
+ * between the two conventions, and treating it as already-a-fraction is the
+ * reading that cannot produce a nonsense number.
+ */
+function ivRankFraction(raw) {
+  const v = num(raw, NaN);
+  if (!Number.isFinite(v) || v < 0) return NaN;
+  return v > 1 ? v / 100 : v;
 }
 
 /** Days until earnings, or null. Used to gate, never to predict. */
@@ -496,7 +523,13 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const dollarVolume = medianDollarVolume(ohlc);
 
   const closes = candlesAscending(ohlc).map((c) => num(c.close));
-  const rv30 = realizedVol(closes, { window: 30 });
+  /* 21 SESSIONS, NOT 30, because the implied leg is a THIRTY-CALENDAR-DAY
+     figure. Both are annualized, so the units already agree; what did not
+     agree was the window — 30 trading sessions spans about 42 calendar days,
+     so the premium was comparing six weeks of delivered volatility against
+     four weeks of priced volatility. Twenty-one sessions is the usual count
+     in thirty calendar days. */
+  const rv30 = realizedVol(closes, { window: 21 });
   const iv30 = tilt && Number.isFinite(tilt.iv30) ? tilt.iv30 : null;
 
   const flipDist = gamma.flip && spot > 0 ? (gamma.flip - spot) / spot : null;
@@ -1192,7 +1225,9 @@ function fakeScreener(count) {
       iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4),
-      iv_rank: rnd().toFixed(4),
+      // 0..100, matching the screener's own example object rather than the
+      // schema $ref that points at the wrong field.
+      iv_rank: (rnd() * 100).toFixed(4),
       implied_move: (price * (0.02 + rnd() * 0.06)).toFixed(4),
       implied_move_perc: (0.02 + rnd() * 0.06).toFixed(6),
       volatility: (0.18 + rnd() * 0.5).toFixed(4),
@@ -1621,7 +1656,9 @@ async function main() {
       const [maxPain, congress] = DRY_RUN
         ? [fakeMaxPain(ticker, num(e.row.close)), fakeCongress(ticker)]
         : await Promise.all([
-          uw(`/api/stock/${ticker}/max-pain`).catch(() => []),
+          // The one per-name source the dating commit left undated. The
+          // endpoint takes a `date`, and its window spans 120 days of expiries.
+          uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
           uw("/api/congress/recent-trades", { ticker, limit: 50 }).catch(() => []),
         ]);
 

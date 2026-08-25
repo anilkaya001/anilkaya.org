@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
-  buildCalendar, buildDisplacement, buildVol, buildPricedMove, buildContext,
+  buildCalendar, buildDisplacement, buildPricedMove, buildContext,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
@@ -263,7 +263,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "with no features the flip is null, never 0 — 'spot is exactly at the flip' " +
      "is the most actionable state on the card and must never be manufactured");
   for (const key of ["gamma", "levels", "path", "congress", "calendar",
-                     "displacement", "vol", "pricedMove", "context"]) {
+                     "displacement", "pricedMove", "context"]) {
     eq(complete.panels[key].status, "ok", `panel ${key} resolves when every source is present`);
   }
 
@@ -384,12 +384,20 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      expiry the vendor quoted rather than a round number of days. */
   const pm = buildPricedMove({
     spot: 100, impliedMovePerc: 0.05, vrp: 0.11, iv30: 0.42, rv30: 0.31,
-    horizonExpiry: "2026-09-04", asOf: "2026-08-24", sessions: 10,
+    asOf: "2026-08-24", sessions: 10,
   });
   eq(pm.low, 95, "the band's low is spot times one minus the implied move");
   eq(pm.high, 105, "and its high the mirror");
-  eq(pm.horizonDays, 11, "the horizon is measured to the QUOTED expiry");
-  eq(pm.horizonExpiry, "2026-09-04", "which is named, not paraphrased as a number of days");
+  /* THE VENDOR'S QUOTE IS NOT DATED, because its date cannot be observed. The
+     schema behind implied_move says the figure is "for the nearest end of the
+     week expiration" when no expiry is supplied, and the screener accepts no
+     expiry parameter. This panel used to name that horizon from the max-pain
+     chain's nearest row — the same date only when the nearest listed expiry
+     happens to be the coming Friday. It is labelled by the RULE now. */
+  eq(pm.horizonRule, "the nearest end-of-week expiry",
+     "the quote is labelled by the vendor's stated rule, not by an inferred date");
+  ok(!("horizonExpiry" in pm) && !("horizonDays" in pm),
+     "and carries no date at all, so no renderer can print one");
 
   /* THE FIXED HORIZON, which is the only one of the two bands that is a
      cross-section. The vendor's implied_move_perc is quoted to each name's own
@@ -436,18 +444,25 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "no quoted move means no band — never a zero-width one at spot");
   ok(buildPricedMove({ spot: 0, impliedMovePerc: 0.05 }).status === "unavailable",
      "and no spot means no band either");
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, asOf: "2026-08-24" }).horizonDays, null,
-     "an unresolvable expiry degrades the horizon to null rather than inventing one");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.4, asOf: "2026-08-24" }).horizonRule, null,
+     "with no vendor quote there is no rule to state either");
 
-  /* THE VOL PANEL. Nothing in it is directional, and the polarity table must
-     say so — a renderer that green-tints a rich option market is inventing a
-     forecast the data does not support. */
+  /* THE VOLATILITY SURFACE. Nothing in it is directional, and the polarity
+     table must say so — a renderer that green-tints a rich option market is
+     inventing a forecast the data does not support. */
   for (const k of ["iv30", "rv30", "vrp", "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
     eq(polarityOf(k), 0, `${k} carries no direction`);
   }
-  ok(buildVol({}).status === "unavailable", "an empty surface is unavailable, not a wall of zeros");
-  const vol = buildVol({ iv30: 0.4, rv30: null, vrp: null, ivRank: 0.5 }, { asOf: "2026-08-24" });
-  eq(vol.rv30, null, "a missing realized vol stays null beside a live implied one");
+  /* IT TRAVELS WITH THE BAND, not in a panel of its own. A separate `vol` panel
+     was built, serialised and published on every card, and no renderer drew it
+     — bytes on the read path that nothing could read. */
+  const surf = buildPricedMove({
+    spot: 100, impliedMovePerc: 0.05, iv30: 0.4, rv30: null, vrp: null,
+    ivRank: 0.5, ivMomentum: 0.02, asOf: "2026-08-24",
+  });
+  eq(surf.rv30, null, "a missing realized vol stays null beside a live implied one");
+  eq(surf.ivRank, 0.5, "IV rank travels with the band it qualifies");
+  eq(surf.ivMomentum, 0.02, "and so does the week's IV change");
 
   /* BOOK DISPLACEMENT, in ATR units, and null rather than Infinity without one. */
   const disp = buildDisplacement([
@@ -483,6 +498,38 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(pickMaxPain([]), null, "an empty chain has no max pain");
   eq(pickMaxPainRow([{ expiry: "2026-08-28", max_pain: null }]), null,
      "and a null level is dropped rather than parsed to zero");
+
+  /* THE NEAREST LIVE EXPIRY, not the first row. The vendor documents /max-pain
+     as returning "all expirations ... for the last 120 days", so the array can
+     carry expiries that have already passed; sorting ascending and taking
+     rows[0] took the OLDEST and drew it on the levels rail beside spot as
+     though it still existed. No fixture supplied a past expiry, which is why
+     nothing caught it. */
+  const stale = [
+    { expiry: "2026-05-15", max_pain: "70" },
+    { expiry: "2026-08-28", max_pain: "102" },
+    { expiry: "2026-09-18", max_pain: "120" },
+  ];
+  eq(pickMaxPainRow(stale, { asOf: "2026-08-24" }).expiry, "2026-08-28",
+     "an expired row is skipped, not published as the nearest level");
+  eq(pickMaxPainRow(stale).expiry, "2026-05-15",
+     "and with no session date the old behaviour is unchanged, so the guard is the date");
+  eq(pickMaxPainRow([{ expiry: "2026-05-15", max_pain: "70" }], { asOf: "2026-08-24" }), null,
+     "a chain whose every expiry has passed reports NO max pain, never a stale one");
+  eq(pickMaxPainRow(stale, { asOf: "2026-08-28" }).expiry, "2026-08-28",
+     "an expiry on the session date itself is still live");
+
+  const staleCard = buildCard({
+    ticker: "STALE",
+    row: { close: "100" },
+    features: { spot: 100, atr: 4, gammaFlip: 96 },
+    strikes: [], ticks: [], expiries: [], congress: [],
+    maxPain: [{ expiry: "2026-05-15", max_pain: "70" }],
+    generatedAt: "2026-08-25T09:15:00Z", sessionDate: "2026-08-24",
+  });
+  ok(staleCard.panels.levels.status === "unavailable"
+     || staleCard.panels.levels.levels.every((l) => l.kind !== "max_pain"),
+     "so a four-month-stale chain puts no max-pain level on the rail");
 }
 
 console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, and a full source-ablation sweep`);

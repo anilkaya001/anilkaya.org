@@ -90,7 +90,38 @@ export function robustZ(values, { clamp = 3 } = {}) {
   if (ok.length < 2) return xs.map(() => 0);
 
   const m = median(ok);
-  let scale = mad(ok, m);
+  /* TWO ROBUST SCALE ESTIMATORS, and the LARGER of them.
+     
+     The MAD collapses on a column that is BIMODAL BY SIGN — which is exactly
+     what a signed-magnitude column is. Once more than half the names share one
+     sign, median(|x - median|) is taken over a set whose own median sits inside
+     the majority cluster, so the estimate measures the spread WITHIN that
+     cluster and not the distance BETWEEN the two. Measured on a column of
+     +-0.5 split 18/6: MAD = 0.0222 against a true spread near 1.0, so every
+     minority name z-scored past the clamp and eleven of twenty-four names on
+     the emitted board printed exactly 93 for family D.
+
+     The interquartile range straddles both clusters and does not collapse.
+     Both are consistent estimators of sigma for Gaussian data — MAD scaled by
+     1.4826, the IQR by 1.349 — so on a well-behaved column they agree and the
+     max changes nothing. On a bimodal one the IQR is the estimate that is
+     still measuring the right thing. Taking the larger can only SHRINK a z,
+     never inflate one, which is the conservative direction.
+
+     The interquartile range straddles both clusters and does not collapse —
+     until the minority falls below a quarter of the board, at which point the
+     quartiles themselves sit inside the majority and it collapses too. An 80/20
+     split still clamped every minority name. So a third, wider span is taken as
+     well: the 10-to-90 range, which straddles any split down to a tenth. All
+     three are consistent estimators of sigma for Gaussian data (MAD scaled by
+     1.4826, the IQR by 1.349, the 10-90 range by 2.563), so on a well-behaved
+     column they agree and the max changes nothing. The extreme tenth on each
+     side is already handled by winsorize before this is called. */
+  const span = (lo, hi, c) => {
+    const v = (quantile(ok, hi) - quantile(ok, lo)) / c;
+    return Number.isFinite(v) ? v : 0;
+  };
+  let scale = Math.max(mad(ok, m), span(0.25, 0.75, 1.349), span(0.10, 0.90, 2.563));
 
   if (!Number.isFinite(scale) || scale <= 1e-12) {
     const mean = ok.reduce((a, b) => a + b, 0) / ok.length;
@@ -1072,41 +1103,48 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
 }
 
 /**
- * Rank hysteresis. A board that churns completely every session is
- * unusable and expensive. A name already on the board stays until it
- * falls out of `exitRank`; a new name must beat `entryRank` to
- * displace one. Asymmetric by design.
+ * Rank hysteresis. A board that churns completely every session is unusable
+ * and expensive, so a name already on it is given room to slip before it goes.
+ *
+ * THE RULE, and it took two wrong versions to get here:
+ *
+ *   - Every name in today's top `entryRank` is on the board. Unconditionally.
+ *   - An incumbent still inside `exitRank` is ALSO kept.
+ *   - The board is the union, in today's rank order, so it runs between
+ *     `entryRank` and `exitRank` rows.
+ *
+ * The first version placed incumbents last, which made the whole thing a
+ * provable no-op — identical to slice(0, entryRank) for every input. Placing
+ * them first fixed that and overcorrected into something worse: incumbency
+ * came to beat rank absolutely. With 25 incumbents sitting at ranks 5 to 29,
+ * the emitted board was exactly those 25 and the session's four strongest
+ * names were not on it at all.
+ *
+ * A variable-length board is the price, and it is the right price: the
+ * alternative is a fixed length that can only be held by excluding the very
+ * names the board exists to surface. The dead band already makes length vary.
  */
 export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exitRank = 35 } = {}) {
-  const held = new Set(yesterdayIds || []);
   const ranked = todayRanked || [];
-
-  /* Incumbents are placed FIRST, and that is the whole mechanism.
-     The previous version pushed every name ranked <= entryRank and broke as
-     soon as it had entryRank of them -- which happens on the very first
-     entryRank iterations -- so the incumbent branch below it was unreachable
-     and the function was provably identical to slice(0, entryRank) for every
-     input. Verified exhaustively before the rewrite: for all single-incumbent
-     sets over 60 names, and for "every name held", the output never differed.
-
-     Reordering alone is not enough either. Merging both groups and re-sorting
-     by rank returns the top entryRank again whenever the list is long, because
-     the sub-entryRank names always fill every slot. Hysteresis only exists if
-     an incumbent inside exitRank OUTRANKS a newcomer for its slot -- which is
-     exactly what the docstring promises: a name stays until it falls out of
-     exitRank. */
-  const keep = [];
+  const held = new Set(yesterdayIds || []);
   const taken = new Set();
+  const keep = [];
+
+  // Today's top `entryRank`, always. Nothing outranks being one of the best
+  // names in the session.
   for (let i = 0; i < ranked.length && keep.length < entryRank; i++) {
-    const id = ranked[i];
-    if (held.has(id) && i + 1 <= exitRank) { keep.push(id); taken.add(id); }
-  }
-  for (let i = 0; i < ranked.length && keep.length < entryRank; i++) {
-    const id = ranked[i];
-    if (i + 1 <= entryRank && !taken.has(id)) { keep.push(id); taken.add(id); }
+    keep.push(ranked[i]);
+    taken.add(ranked[i]);
   }
 
-  // Rank order, not "incumbents first", is what the board displays.
+  // Then incumbents that have slipped past entryRank but are still inside the
+  // exit band. This is the hysteresis, and it can only ADD.
+  for (let i = entryRank; i < ranked.length && i < exitRank; i++) {
+    const id = ranked[i];
+    if (held.has(id) && !taken.has(id)) { keep.push(id); taken.add(id); }
+  }
+
   const rankOf = new Map(ranked.map((id, i) => [id, i]));
   return keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
 }
+

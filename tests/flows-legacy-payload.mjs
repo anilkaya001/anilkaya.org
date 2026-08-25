@@ -83,10 +83,13 @@ await page.waitForSelector(".fd-card");
 await page.click('.flows-view[data-view="table"]');
 const glyph = await page.evaluate(() => {
   const cell = document.querySelector(".fb-fam");
+  const row = document.querySelector("#flowsBody tr");
   return {
     label: cell.getAttribute("aria-label"),
     nullMarks: cell.querySelectorAll("i.is-null").length,
     bars: cell.querySelectorAll("i").length,
+    // Column order: #, ticker, last, score, conv, families, purity, ...
+    purity: row.children[6].textContent.trim(),
   };
 });
 
@@ -142,6 +145,11 @@ const v2 = (k) => famV2.find((f) => f.k === k);
 const px = (w) => parseFloat(w) || 0;
 const legacyNoteOnV2 = await page.evaluate(() =>
   [...document.querySelectorAll("#fcWhy .fc-note")].some((n) => n.textContent.includes("built before")));
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+await page.click('.flows-view[data-view="table"]');
+const v2Purity = await page.evaluate(() =>
+  document.querySelector("#flowsBody tr").children[6].textContent.trim());
 
 const assertions = [
   [fam.find((f) => f.k === "V").v === "—", "V is withheld on a v1 card"],
@@ -150,12 +158,17 @@ const assertions = [
   [legacyNote, "and the card says why"],
   [bad.length === 0, "no negative bar widths"],
   [glyph.nullMarks === 2, "the table glyph marks V and O absent"],
+  /* purity changed meaning at v2 too — from a net over a gross to gross over
+     gross — and renders in the same column under the same heading. */
+  [glyph.purity === "\u2014", `a v1 board withholds purity as well (got "${glyph.purity}")`],
   // ...and the same renderer draws them on a current payload.
   [v2("V").v === "59" && v2("O").v === "71", "a v2 card publishes both gauges"],
   [v2("V").gauge && v2("O").gauge, "and draws them as gauges, not signed axes"],
   [px(v2("V").width) > 10 && px(v2("O").width) > 10,
     `with real width (V ${v2("V").width}, O ${v2("O").width})`],
   [!legacyNoteOnV2, "and without the legacy explanation"],
+  [v2Purity !== "\u2014" && v2Purity.length > 0,
+    `a v2 board publishes purity rather than withholding it (got "${v2Purity}")`],
   [v2("F").v === "−73", "signed axes are unaffected by the version"],
   [errors.length === 0, "no page errors: " + errors.join(" | ")],
 ];
@@ -172,7 +185,7 @@ for (const [passed, msg] of assertions) {
 }
 console.log(failed
   ? `✗ flows-legacy: ${failed} of ${assertions.length} transitional assertions FAILED`
-  : `✓ flows-legacy: ${assertions.length} assertions — both sides of the schema boundary — a v1 payload withholds the two fields whose meaning moved and says why, a v2 payload draws them as gauges`);
+  : `✓ flows-legacy: ${assertions.length} assertions — both sides of the schema boundary — a v1 payload withholds every field whose meaning moved and says why, a v2 payload draws them`);
 await browser.close();
 await server.stop();
 process.exit(failed ? 1 : 0);

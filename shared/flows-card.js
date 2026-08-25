@@ -357,33 +357,6 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   });
 }
 
-/* ---------- volatility regime -------------------------------------- */
-
-/**
- * What the option market is charging, against what the stock has delivered.
- *
- * Every number here comes from the one screener call and the candles already
- * fetched for ATR — zero marginal requests. The variance risk premium is the
- * identified one: iv30d and a 30-session close-to-close realized vol are both
- * annualized volatilities of the same underlying over the same horizon, so
- * their difference needs no free parameter.
- *
- * NOTHING in this panel is directional, and the panel says so. A rich option
- * market means buyers are paying up; it does not mean the stock goes up.
- */
-export function buildVol({ iv30, rv30, vrp, ivRank, ivMomentum, impliedMovePerc }, { asOf = null } = {}) {
-  const v = {
-    iv30: numOrNull(iv30),
-    rv30: numOrNull(rv30),
-    vrp: numOrNull(vrp),
-    ivRank: numOrNull(ivRank),
-    ivMomentum: numOrNull(ivMomentum),
-    impliedMovePerc: numOrNull(impliedMovePerc),
-  };
-  if (Object.values(v).every((x) => x === null)) return unavailable("no volatility surface");
-  return ok(v, asOf);
-}
-
 /* ---------- the priced move ---------------------------------------- */
 
 /**
@@ -401,10 +374,15 @@ export function buildVol({ iv30, rv30, vrp, ivRank, ivMomentum, impliedMovePerc 
  *    beside it is the only observable that says whether the band is expensive
  *    against what this stock has actually been delivering.
  *
- * `horizonExpiry` comes from the max-pain chain, which is the nearest listed
- * expiry. When it cannot be resolved the quoted band is still published and the
- * horizon reads "unresolved", because a band with an unknown maturity is
- * degraded, not fabricated.
+ * THE VENDOR'S QUOTE IS NOT DATED, because its date cannot be observed. The
+ * schema behind implied_move says: "If no expiry date is included, then the
+ * implied move is for the nearest end of the week expiration (the nearest
+ * monthly expiration if there are no weekly contracts)" — and the screener
+ * accepts no expiry parameter, so that default always applies. This panel used
+ * to name that horizon from the max-pain chain's nearest expiry, which is the
+ * same date only when the nearest listed expiry happens to be the coming
+ * Friday; any intra-week expiry breaks it. The quote is therefore labelled by
+ * the RULE the vendor states rather than by a date this code inferred.
  *
  * TWO BANDS, and only one of them is a cross-section.
  *
@@ -419,7 +397,7 @@ export function buildVol({ iv30, rv30, vrp, ivRank, ivMomentum, impliedMovePerc 
  * the units a reader sizes in.
  */
 export function buildPricedMove({
-  spot, impliedMovePerc, vrp, iv30, rv30, horizonExpiry, asOf,
+  spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, asOf,
   sessions = HORIZON_SESSIONS,
 }) {
   const s = numOrNull(spot);
@@ -430,19 +408,16 @@ export function buildPricedMove({
   if (s === null || !(s > 0)) return unavailable("no spot price");
   if ((m === null || !(m > 0)) && impliedH === null) return unavailable("no implied volatility");
 
-  const days = horizonExpiry && asOf
-    ? Math.round((Date.parse(String(horizonExpiry).slice(0, 10) + "T00:00:00Z") -
-                  Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z")) / 86400000)
-    : null;
-
   const quoted = m !== null && m > 0;
   return ok({
-    // --- the vendor's quote, to its own expiry: real, but not comparable ---
+    /* --- the vendor's quote, to ITS OWN undated horizon: real, but neither
+       comparable across names nor datable from anything this pipeline sees. --- */
     movePerc: quoted ? Number(m.toFixed(5)) : null,
     low: quoted ? Number((s * (1 - m)).toFixed(2)) : null,
     high: quoted ? Number((s * (1 + m)).toFixed(2)) : null,
-    horizonExpiry: horizonExpiry || null,
-    horizonDays: Number.isFinite(days) ? days : null,
+    // The vendor's stated rule, carried verbatim so the renderer states it
+    // rather than inventing a date for it.
+    horizonRule: quoted ? "the nearest end-of-week expiry" : null,
 
     // --- the fixed horizon, which IS comparable across the board ---
     sessions,
@@ -457,6 +432,14 @@ export function buildPricedMove({
     vrp: numOrNull(vrp),
     iv30: numOrNull(iv30),
     rv30: numOrNull(rv30),
+    /* Where this name's implied vol sits in its own year, and whether it is
+       rising. Neither is directional — a rich, rising option market says
+       buyers are paying up, not that the stock goes up — so both live beside
+       the band as context and are summarised by the unsigned V gauge on the
+       score panel. They used to sit in a separate `vol` panel that was built,
+       serialised and published on every card, and that no renderer drew. */
+    ivRank: numOrNull(ivRank),
+    ivMomentum: numOrNull(ivMomentum),
     // The one comparative statement the data supports, as a tag rather than
     // prose so the renderer cannot embellish it.
     richness: numOrNull(vrp) === null ? null : (vrp > 0 ? "rich" : "cheap"),
@@ -616,7 +599,7 @@ export function buildCard({
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
   const gamma = buildGammaProfile(strikes, { spot });
-  const painRow = pickMaxPainRow(maxPain);
+  const painRow = pickMaxPainRow(maxPain, { asOf: sessionDate });
   const prev = numOrNull(row && row.prev_close);
   const close = numOrNull(row && row.close);
 
@@ -677,23 +660,21 @@ export function buildCard({
         spot,
         atr: features && features.atr,
         gammaFlip: features && features.gammaFlip,
-        maxPain: pickMaxPain(maxPain),
+        // The SAME row the priced-move panel resolved — dated, so an expiry
+        // from the vendor's 120-day window that has already passed does not
+        // reach the rail as a live level.
+        maxPain: painRow ? painRow.px : null,
         callWall: gamma.status === "ok" ? gamma.callWall : null,
         putWall: gamma.status === "ok" ? gamma.putWall : null,
       }),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
       displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
-      vol: buildVol({
-        iv30: f.iv30, rv30: f.rv30, vrp: f.vrp,
-        ivRank: f.ivRank, ivMomentum: f.ivMomentum,
-        impliedMovePerc: f.impliedMovePerc,
-      }, { asOf: sessionDate }),
       pricedMove: buildPricedMove({
         spot,
         impliedMovePerc: f.impliedMovePerc,
         vrp: f.vrp, iv30: f.iv30, rv30: f.rv30,
-        horizonExpiry: painRow ? painRow.expiry : null,
+        ivRank: f.ivRank, ivMomentum: f.ivMomentum,
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
       }),
@@ -718,15 +699,30 @@ export function buildCard({
  * toward it. The card ranks it beside the walls as another level, and never
  * as a forecast.
  */
-export function pickMaxPainRow(rows) {
+export function pickMaxPainRow(rows, { asOf = null } = {}) {
   const parsed = (rows || [])
     .map((r) => ({ expiry: r.expiry, px: numOrNull(r.max_pain) }))
     .filter((r) => r.expiry && r.px !== null)
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
-  return parsed.length ? parsed[0] : null;
+  if (!parsed.length) return null;
+  /* THE NEAREST LIVE EXPIRY, not the first row.
+
+     The vendor documents /max-pain as returning "the max pain for all
+     expirations for the given ticker for the last 120 days", so the array can
+     carry expiries that have already passed. Sorting ascending and taking
+     rows[0] therefore took the OLDEST — up to four months stale — and drew it
+     on the levels rail beside spot as though it were a level that still
+     existed. No fixture supplied a past expiry, so nothing caught it. */
+  if (asOf) {
+    const live = parsed.filter((r) => String(r.expiry).slice(0, 10) >= String(asOf).slice(0, 10));
+    if (live.length) return live[0];
+    // Every expiry on file has passed: there is no live max pain to report.
+    return null;
+  }
+  return parsed[0];
 }
 
-export function pickMaxPain(rows) {
-  const row = pickMaxPainRow(rows);
+export function pickMaxPain(rows, options) {
+  const row = pickMaxPainRow(rows, options);
   return row ? row.px : null;
 }

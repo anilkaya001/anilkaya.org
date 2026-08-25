@@ -359,7 +359,14 @@
     tr.append(scoreCell(row.s));
     tr.append(cell(fmtInt(row.cnv), "c-num"));
     tr.append(familyCell(row.fam));
-    tr.append(cell(fmtRatio(row.purity), "c-num"));
+    /* PURITY CHANGED MEANING AT VERSION 2, from |SUM dir| / SUM|total| — a net
+       over a gross, where two different cancellations fought each other — to
+       SUM|dir| / SUM|total|. The live v1 board printed 0.003 to 0.008 on names
+       whose flow was overwhelmingly directional; v2 prints about 0.6 for the
+       same tape. Both render in this column as "Π", so a v1 board drawn by a v2
+       renderer shows a number whose definition silently moved. Withheld for the
+       same reason fam.V and fam.O are. */
+    tr.append(cell(legacyFamilies ? DASH : fmtRatio(row.purity), "c-num"));
     tr.append(cell(regimeText(row.gRegime), "c-num " + (row.gRegime === "short" ? "fb-neg" : "fb-flat")));
     tr.append(cell(row.gFlipDist == null ? DASH : fmtPct(row.gFlipDist, 1), "c-num"));
     tr.append(cell(fmtMoney(row.netPrem), "c-num " + toneClass(row.netPrem)));
@@ -410,6 +417,15 @@
     document.body.classList.toggle("is-stale", Boolean(message));
   }
 
+  /**
+   * An empty-state message, in BOTH renderers.
+   *
+   * This used to write only a <tr> into the table body — and the table is
+   * `hidden` in the deck view, which is the default. Every explanation this
+   * function produces ("no board is available", "the board could not be
+   * loaded", "no name cleared the band") was therefore invisible to a reader
+   * in the default view: they saw an empty grid and no reason for it.
+   */
   function showMessage(text) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -418,6 +434,13 @@
     td.textContent = text;
     tr.append(td);
     body.replaceChildren(tr);
+
+    if (deck) {
+      const note = document.createElement("p");
+      note.className = "fb-empty";
+      note.textContent = text;
+      deck.replaceChildren(note);
+    }
   }
 
   /* ---------- data ------------------------------------------------ */
@@ -496,6 +519,28 @@
       if (which !== side || !payload) return;     // user moved on, or redirected
 
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
+
+      /* AN EMPTY SIDE IS NOT AN EMPTY STORE. Under the dead band a side can
+         legitimately hold nothing — no name cleared the bar on this side of
+         the market — and telling that reader "the pipeline has not published
+         its first session yet" reports a working quiet day as an outage. The
+         published `scored` count separates the two: a board that scored names
+         and placed none here is a reading, not a failure. */
+      if (!rows.length && isNum(payload.scored) > 0) {
+        showMessage(
+          "No name on this side cleared the ±" + (payload.deadBand ?? "") + " band this session. " +
+          (isNum(payload.scored) + " names were scored; " +
+           (isNum(payload.neutral) ?? "all") + " of them landed inside the band, which is what a " +
+           "quiet session looks like. The other side may still have candidates."),
+        );
+        statusEl.textContent =
+          "No " + which + " candidates this session · session " +
+          (payload.sessionDate || "unknown") + ".";
+        setStale(assessAge(payload));
+        painted = which;
+        return;
+      }
+
       if (payload.status === "pending" || !rows.length) {
         /* "pending" from the API means the row is genuinely absent. It is also
            what the Worker returns when the D1 read THREW — the catch there

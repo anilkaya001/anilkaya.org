@@ -490,47 +490,94 @@ const near = (a, b, tol, msg) => {
   ok(wild.conviction <= 100, "out-of-range coverage is clamped");
 }
 
+/* ---------- the scale estimator does not collapse on a signed column --- */
+{
+  /* THE FAILURE: a column that is BIMODAL BY SIGN — which is what every
+     signed-magnitude column is — collapses the MAD. Once more than half the
+     names share one sign, median(|x - median|) is taken over a set whose own
+     median sits inside the majority cluster, so it measures the spread WITHIN
+     that cluster and not the distance BETWEEN the two.
+
+     Measured on the pipeline's own emitted board before the fix: eleven of
+     twenty-four names printed family D as exactly 93 — the value of a z
+     clamped at 3 — because every minority-sign name saturated. */
+  const bimodal = (pos, neg) => [
+    ...Array.from({ length: pos }, (_, i) => 0.50 + (i % 5) * 0.01),
+    ...Array.from({ length: neg }, (_, i) => -(0.50 + (i % 5) * 0.01)),
+  ];
+  for (const [pos, neg] of [[14, 10], [18, 6], [20, 4], [12, 12]]) {
+    const z = robustZ(winsorize(bimodal(pos, neg), 0.02));
+    const clamped = z.filter((v) => Math.abs(v) >= 2.999).length;
+    ok(clamped === 0,
+       `a ${pos}/${neg} sign split must not saturate the clamp (got ${clamped} of ${z.length})`);
+    ok(z.some((v) => v < 0) && z.some((v) => v >= 0),
+       `and both signs survive the ${pos}/${neg} split`);
+  }
+
+  /* The IQR alone is not enough: below a quarter of the board the quartiles
+     themselves sit inside the majority, which is why a wider span is taken too. */
+  const lopsided = robustZ(winsorize(bimodal(20, 4), 0.02));
+  ok(Math.max(...lopsided.map(Math.abs)) < 3,
+     "an 80/20 split is inside the clamp, not against it");
+
+  /* A GENUINE OUTLIER MUST STILL CLAMP — the estimator is a floor on the
+     scale, not an amnesty for extremes. */
+  const outlier = robustZ([...Array.from({ length: 30 }, (_, i) => 1 + (i % 3) * 0.01), 500]);
+  ok(Math.abs(outlier[30]) >= 2.999, "one wild value still clamps");
+
+  /* AND A WELL-BEHAVED COLUMN IS UNCHANGED: all three estimators are
+     consistent for Gaussian data, so the max of them agrees with the MAD. */
+  const smooth = Array.from({ length: 60 }, (_, i) => Math.sin(i * 1.7) * 2 + i * 0.01);
+  const zs = robustZ(smooth);
+  ok(zs.filter((v) => Math.abs(v) >= 2.999).length === 0,
+     "a smooth column has nothing at the clamp");
+  ok(Math.max(...zs.map(Math.abs)) > 0.5,
+     "and still has real dispersion — the floor shrinks z, it does not flatten it");
+}
+
 /* ---------- rank hysteresis ------------------------------------- */
 {
   const today = Array.from({ length: 60 }, (_, i) => "T" + (i + 1));
-  // T40 held yesterday sits at rank 40 today -> beyond the exit band, drops.
-  const kept = applyHysteresis(today, ["T40"], { entryRank: 25, exitRank: 35 });
-  ok(kept.length === 25, "the board stays at 25 names");
-  ok(!kept.includes("T40"), "an incumbent past the exit band still drops");
 
-  /* THE REGRESSION. This function was provably a no-op: it pushed every name
-     ranked <= entryRank and broke the moment it had entryRank of them, which
-     happens on the first entryRank iterations, so the incumbent branch beneath
-     was unreachable. Verified exhaustively before the fix -- for every
-     single-incumbent set over 60 names, and for "every name held", the output
-     was byte-identical to slice(0, entryRank). The old test asserted only the
-     board's LENGTH, which a no-op satisfies, so nothing caught it. */
-  const ranking = [...Array.from({ length: 25 }, (_, i) => "N" + i), "A"];
-  const withIncumbent = applyHysteresis(ranking, ["A"], { entryRank: 25, exitRank: 35 });
-  ok(withIncumbent.length === 25, "buffer does not overfill the board");
-  ok(withIncumbent.includes("A"),
-     "THE MECHANISM: an incumbent at rank 26, inside the exit band, keeps its slot");
-  ok(!withIncumbent.includes("N24"),
-     "and displaces the newcomer that would otherwise have taken it");
+  /* THE SESSION'S BEST NAMES ARE ALWAYS ON THE BOARD. Two wrong versions came
+     before this one. The first placed incumbents LAST, which made hysteresis a
+     provable no-op — identical to slice(0, entryRank) for every input. Placing
+     them first fixed that and overcorrected: incumbency came to beat rank
+     absolutely, so with 25 incumbents at ranks 5..29 the board was exactly
+     those 25 and the four strongest names in the session were not on it. */
+  const slipped = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 });
+  for (const t of ["T1", "T2", "T3", "T4"]) {
+    ok(slipped.includes(t), `${t} is one of the session's best and is on the board`);
+  }
+  ok(slipped.includes("T26") && slipped.includes("T29"),
+     "and an incumbent that slipped past entryRank but is inside the exit band is held");
+  ok(slipped.length > 25 && slipped.length <= 35,
+     `the board grows rather than dropping the best (got ${slipped.length})`);
 
-  // It must not be a no-op for the plain case either.
-  const plain = today.slice(0, 25);
-  const held30 = applyHysteresis(today, ["T30"], { entryRank: 25, exitRank: 35 });
-  ok(JSON.stringify(held30) !== JSON.stringify(plain),
-     "holding a name inside the exit band changes the board (it is not slice(0,25))");
-  ok(held30.includes("T30"), "the incumbent at rank 30 is retained");
-  ok(held30.length === 25, "and the board is still 25 names");
+  // With no incumbents it is exactly today's top entryRank.
+  const fresh = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 });
+  eq(fresh.length, 25, "no incumbents means exactly the top entryRank");
+  eq(fresh[0], "T1", "ordered by today's rank");
+  eq(fresh[24], "T25", "and cut at entryRank");
 
-  // Output is in rank order, not incumbents-first: the board displays a ranking.
-  const order = held30.map((id) => today.indexOf(id));
-  ok(order.every((v, i) => i === 0 || v > order[i - 1]), "the result stays in rank order");
+  // An incumbent past the exit band goes, which is the whole point of exitRank.
+  const dropped = applyHysteresis(today, ["T36", "T50"], { entryRank: 25, exitRank: 35 });
+  ok(!dropped.includes("T36") && !dropped.includes("T50"),
+     "an incumbent beyond exitRank is not held");
+  eq(dropped.length, 25, "so the board does not grow for it");
 
-  // With nothing held, it degrades to the plain top-N.
-  ok(JSON.stringify(applyHysteresis(today, [], { entryRank: 25, exitRank: 35 })) === JSON.stringify(plain),
-     "with no incumbents it is exactly the top 25");
+  // The board is always ordered by TODAY's rank, never by incumbency.
+  const mixed = applyHysteresis(today, today.slice(25, 34), { entryRank: 25, exitRank: 35 });
+  const positions = mixed.map((t) => today.indexOf(t));
+  ok(positions.every((v, i) => i === 0 || v > positions[i - 1]),
+     "the emitted board is in today's rank order");
+  ok(new Set(mixed).size === mixed.length, "and holds no duplicates");
 
-  const none = applyHysteresis([], [], {});
-  ok(none.length === 0, "an empty ranking is safe");
+  // Degenerate inputs must not throw or invent names.
+  eq(applyHysteresis([], ["T1"]).length, 0, "an empty session yields an empty board");
+  eq(applyHysteresis(null, null).length, 0, "and null inputs are safe");
+  const short = applyHysteresis(today.slice(0, 8), today.slice(0, 8), { entryRank: 25, exitRank: 35 });
+  eq(short.length, 8, "a pool shorter than entryRank is kept whole, not padded");
 }
 
 /* ---------- asset-version pinning -------------------------------
