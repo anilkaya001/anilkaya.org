@@ -13,7 +13,7 @@
     "test:placement": "node placement-contract.mjs",
     "test:worker": "node worker-regression.mjs",
     "test:browser": "node regression.mjs",
-    "test:flows": "node flows-features.mjs && node flows-auth-contract.mjs && node flows-card-contract.mjs",
+    "test:flows": "node flows-features.mjs && node flows-auth-contract.mjs && node flows-card-contract.mjs && node flows-premium-contract.mjs",
     "test:flows-worker": "node flows-worker-contract.mjs",
     "test:flows-legacy": "node flows-legacy-payload.mjs",
     "test:pipeline": "node ../scripts/flows-pipeline.mjs --dry-run && node flows-pipeline-contract.mjs"
