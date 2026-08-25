@@ -217,6 +217,44 @@ try {
       "the merged table is re-ranked across symbols, not concatenated"); checks++;
   }
 
+  /* ---------- the covered call's cap, which was computed and hidden -- */
+  {
+    /* priceSale has always computed assignedReturn and capSigmas, serialised
+       them on every row, and shipped them over the wire. rowFor drew neither,
+       so the desk told a covered-call seller what they get paid and never what
+       they gave up. */
+    /* THE COLUMN INDEX IS DERIVED FROM THE HEADER, not hardcoded. A magic
+       index silently reads the wrong column the first time anyone inserts
+       one — and this test was written the same day a column was inserted. */
+    const calledIdx = await page.evaluate(() => {
+      const heads = Array.from(document.querySelectorAll(".desk-table thead th"));
+      const i = heads.findIndex((h) => /If called/.test(h.textContent));
+      return i - 1;                                  // the first column is a <th> in each row
+    });
+    ok(calledIdx >= 0, "the table has an 'If called' column");
+
+    const rows = await page.locator("#deskBody tr").all();
+    let sawCall = false, sawPut = false;
+    for (const tr of rows) {
+      const side = (await tr.locator("td.c-side").textContent()).trim();
+      const called = tr.locator("td").nth(calledIdx);
+      const text = (await called.textContent()).trim();
+      const title = await called.getAttribute("title");
+      if (side === "Covered call") {
+        sawCall = true;
+        ok(/%$/.test(text), `a covered call shows its called-away return (${text})`);
+        ok(title && /run/.test(title), "and how far the market must run to get there");
+      } else if (side === "Cash-secured put") {
+        sawPut = true;
+        eq(text, "\u2014", "a put shows a dash — it has no upside cap");
+        ok(title && /no upside cap/.test(title),
+           "and the dash SAYS it is an absence, not missing data");
+      }
+    }
+    ok(sawCall, "the fixture contains a covered call");
+    ok(sawPut, "and a cash-secured put");
+  }
+
   /* ---------- a cushion is only as fresh as the vol it divides by -- */
   {
     const stale = page.locator("#deskBody td.is-stale-iv");

@@ -1434,3 +1434,11 @@ body.is-stale .flows-tablewrap {
   text-underline-offset: 3px;
   cursor: help;
 }
+
+/* A cell whose quantity does not EXIST for this row's strategy, as opposed to
+   one that could not be measured. Both render as a dash, so the distinction
+   lives in the tooltip and in a lighter weight — never in colour alone. */
+.desk-table td.is-na {
+  color: var(--ink-faint);
+  cursor: help;
+}

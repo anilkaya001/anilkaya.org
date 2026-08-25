@@ -39,7 +39,7 @@
   const foot = document.getElementById("deskFoot");
   if (!entry || !input || !list || !tbody) return;
 
-  const COLUMNS = 12;               // keep in sync with the <thead> in flows-pages.js
+  const COLUMNS = 13;               // keep in sync with the <thead> in flows-pages.js
   const MAX_SYMBOLS = 20;           // each is a live vendor call; the ceiling is deliberate
   const CONCURRENCY = 3;
 
@@ -481,6 +481,32 @@
     }
     tr.append(cushion);
     tr.append(cell(fmt2(r.breakeven), "c-num"));
+
+    /* THE OTHER HALF OF A COVERED CALL, and it was computed, serialised and
+       shipped on every row without ever being drawn. The desk told a
+       covered-call seller what they get paid and not what they gave up: if the
+       shares are called away, assignedReturn is the whole trade's return, and
+       capSigmas is how far the market must run in the option's own implied
+       moves before that happens.
+
+       A put genuinely has no upside cap — its best case is keeping the premium,
+       which is already the Yield column — so the cell is a dash that SAYS so.
+       An unexplained dash reads as missing data, and this one is a real
+       absence rather than an unmeasured quantity. */
+    const called = cell(fmtPct(r.assignedReturn, 1), "c-num");
+    if (r.strategy === "cc") {
+      if (isNum(r.capSigmas) !== null) {
+        called.title = "Called away at " + fmt2(r.strike) + ", the whole position returns " +
+          fmtPct(r.assignedReturn, 1) + ". The market has to run " + fmtSigmas(r.capSigmas) +
+          " — in this option's own implied moves — to get there.";
+      }
+    } else {
+      called.textContent = DASH;
+      called.title = "A cash-secured put has no upside cap. Its best case is keeping the " +
+        "premium, which is the Yield column.";
+      called.className = "c-num is-na";
+    }
+    tr.append(called);
     tr.append(cell(fmtPct(r.spread, 1), "c-num"));
 
     const oi = isNum(r.oi);

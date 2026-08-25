@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "57";
+export const ASSET_VERSION = "58";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -321,6 +321,7 @@ ${topbar(true)}
           <th scope="col" class="c-num"><abbr title="Simple 365/days scaling of the yield. A convention for comparing tenors, not a return anyone earns">Ann.</abbr></th>
           <th scope="col" class="c-num"><abbr title="Distance from spot to breakeven, in units of the move this option's own implied volatility prices over its own remaining life. Not a probability">Cushion</abbr></th>
           <th scope="col" class="c-num">Breakeven</th>
+          <th scope="col" class="c-num"><abbr title="A covered call's total return if the shares are called away: the premium plus the move to the strike. A cash-secured put has no upside cap, so its best case is simply the premium — the Yield column">If called</abbr></th>
           <th scope="col" class="c-num"><abbr title="Bid-ask spread as a fraction of the mid">Spread</abbr></th>
           <th scope="col" class="c-num"><abbr title="Open interest, and the change since the prior session">OI</abbr></th>
         </tr>
