@@ -15,7 +15,8 @@ import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER,
 } from "./worker-server.mjs";
 
-const server = await startWorker();
+const INGEST_TOKEN = "test-ingest-token-abcdefghijklmnopqrstuv";
+const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST_TOKEN}`] });
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
@@ -213,6 +214,65 @@ try {
     eq(out.status, 303, "sign-out redirects");
     ok(/flows_session=;|flows_session=%3B|Max-Age=0/i.test(out.headers.get("set-cookie") || ""),
        "sign-out clears the session cookie");
+  }
+
+  /* ---------- the ingest endpoint ---------------------------------- */
+  {
+    const post = (key, body, token) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body,
+    });
+
+    const payload = JSON.stringify({
+      side: "long", generatedAt: new Date().toISOString(), status: "ok",
+      rows: [{ t: "TEST", r: 1, s: 42, cnv: 70, px: 100, chg: 0.01,
+               purity: 0.5, gRegime: "long", gFlipDist: -0.02, netPrem: 1e6,
+               fam: { F: 10, P: 20, D: 30, V: 5, O: -5 } }],
+    });
+
+    eq((await post("board:long", payload, null)).status, 401, "ingest without a token is refused");
+    eq((await post("board:long", payload, "wrong-token")).status, 401, "ingest with a wrong token is refused");
+    eq((await post("../../etc/passwd", payload, INGEST_TOKEN)).status, 400,
+       "ingest rejects a key outside the allowed set");
+    eq((await post("board:sideways", payload, INGEST_TOKEN)).status, 400,
+       "ingest rejects an unknown board side");
+    eq((await post("board:long", "not json at all", INGEST_TOKEN)).status, 400,
+       "ingest rejects malformed JSON at the door, so the read path never serves it");
+
+    const good = await post("board:long", payload, INGEST_TOKEN);
+    eq(good.status, 200, "a correctly authenticated ingest succeeds");
+    const receipt = await good.json();
+    ok(receipt.ok === true && receipt.key === "board:long", "ingest returns a receipt");
+
+    eq((await get("/api/flows/ingest")).status, 405, "ingest is POST-only");
+
+    // Round trip: what was ingested is what an authenticated reader gets.
+    const login = await fetch(url("/flows/login"), {
+      method: "POST", redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL, "Sec-Fetch-Site": "same-origin",
+      },
+      body: new URLSearchParams({ username: FLOWS_TEST_USER, password: FLOWS_PASSWORD }).toString(),
+    });
+    const token = /flows_session=([^;]+)/.exec(login.headers.get("set-cookie") || "")[1];
+    const read = await get("/api/flows/board?side=long", {
+      headers: { Cookie: "flows_session=" + token },
+    });
+    eq(read.status, 200, "the ingested board reads back");
+    const board = await read.json();
+    eq(board.rows.length, 1, "the ingested row is served");
+    eq(board.rows[0].t, "TEST", "the payload round-trips unchanged");
+    eq(read.headers.get("cache-control"), "no-store", "board data is never cached");
+
+    // And it is still gated.
+    eq((await get("/api/flows/board?side=long")).status, 401,
+       "the ingested board is still refused to anonymous callers");
   }
 
   /* ---------- the section is not in the static bundle -------------- */

@@ -263,6 +263,8 @@
   background: var(--bg-deep);
 }
 
+.flows-table thead abbr { text-decoration: none; border-bottom: 0; cursor: help; }
+
 .flows-table tbody tr:last-child td { border-bottom: 0; }
 .flows-table tbody tr:hover { background: var(--bg-deep); }
 

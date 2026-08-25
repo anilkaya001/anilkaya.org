@@ -17,7 +17,7 @@
   const sideButtons = Array.from(document.querySelectorAll(".flows-side"));
   if (!body || !statusEl || !sideButtons.length) return;
 
-  const COLUMNS = 9;                 // keep in sync with the <thead> in flows-pages.js
+  const COLUMNS = 10;                // keep in sync with the <thead> in flows-pages.js
   const cache = new Map();           // side -> payload
   const inflight = new Map();        // side -> { promise, controller }
   let side = initialSide();
@@ -154,6 +154,7 @@
 
     tr.append(scoreCell(row.s));
     tr.append(cell(fmtInt(row.cnv), "c-num"));
+    tr.append(familyCell(row.fam));
     tr.append(cell(fmtRatio(row.purity), "c-num"));
     tr.append(cell(regimeText(row.gRegime), "c-num " + (row.gRegime === "short" ? "fb-neg" : "fb-flat")));
     tr.append(cell(row.gFlipDist == null ? DASH : fmtPct(row.gFlipDist, 1), "c-num"));

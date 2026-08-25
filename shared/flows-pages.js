@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "42";
+export const ASSET_VERSION = "43";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -110,6 +110,7 @@ ${topbar(true)}
           <th scope="col" class="c-num">Last</th>
           <th scope="col" class="c-num">Score</th>
           <th scope="col" class="c-num">Conv</th>
+          <th scope="col" class="c-num"><abbr title="Family sub-scores: Flow, Positioning, Path, Vol, Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
           <th scope="col" class="c-num">&Pi;</th>
           <th scope="col" class="c-num">&Gamma; regime</th>
           <th scope="col" class="c-num">&Gamma;&#8320; dist</th>

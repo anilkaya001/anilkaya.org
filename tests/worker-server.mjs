@@ -91,7 +91,7 @@ async function flowsCredentialsJSON() {
   return JSON.stringify(map);
 }
 
-export async function startWorker() {
+export async function startWorker({ extraVars = [] } = {}) {
   const port = await freePort();
   const persist = await mkdtemp(path.join(os.tmpdir(), "anilkaya-worker-test-"));
   try {
@@ -109,6 +109,7 @@ export async function startWorker() {
     "--var", `SESSION_SECRET:${SESSION_SECRET}`,
     "--var", `FLOWS_PEPPER:${FLOWS_PEPPER}`,
     "--var", `FLOWS_CREDENTIALS:${await flowsCredentialsJSON()}`,
+    ...extraVars.flatMap((v) => ["--var", v]),
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {
     cwd: REPO_ROOT,

@@ -913,6 +913,16 @@ function flowsLoginResponse(message) {
   });
 }
 
+const FLOWS_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+
+function timingSafeEqualStr(a, b) {
+  const x = String(a ?? ""), y = String(b ?? "");
+  const n = Math.max(x.length, y.length);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
 let flowsSchemaReady = false;
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
@@ -1744,6 +1754,50 @@ async function route(request, env, url, ctx) {
       status: 200,
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
+  }
+
+  if (path === "/api/flows/ingest") {
+    // The pipeline runs in GitHub Actions and POSTs finished payloads here.
+    // GitHub deliberately holds NO Cloudflare API token: Cloudflare's KV:Edit
+    // and D1:Edit permissions are ACCOUNT-scoped, so a CI credential could
+    // reach the live learning database. A bearer token scoped to this one
+    // route cannot.
+    requireMethod(request, ["POST"]);
+    if (!env.FLOWS_INGEST_TOKEN) throw new HttpError(503, "unavailable", "Ingest is not configured");
+
+    const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    // Constant-time: a length-leaking early return would let an attacker
+    // narrow the token one byte at a time.
+    if (!offered || !timingSafeEqualStr(offered, env.FLOWS_INGEST_TOKEN)) {
+      throw new HttpError(401, "unauthorized", "Authentication required");
+    }
+
+    const key = url.searchParams.get("key") || "";
+    if (!/^board:(long|short)$|^meta$/.test(key)) {
+      throw new HttpError(400, "invalid_key", "Unknown payload key");
+    }
+
+    const declared = Number(request.headers.get("Content-Length") || 0);
+    if (Number.isFinite(declared) && declared > FLOWS_MAX_PAYLOAD_BYTES) {
+      throw new HttpError(413, "payload_too_large", "Payload too large");
+    }
+    const payload = await request.text();
+    if (payload.length > FLOWS_MAX_PAYLOAD_BYTES) {
+      throw new HttpError(413, "payload_too_large", "Payload too large");
+    }
+    // Parse once, here, purely to reject malformed JSON at the door — the
+    // read path must never parse, so a bad payload would otherwise be served
+    // verbatim to the browser and fail there instead.
+    try { JSON.parse(payload); }
+    catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
+
+    await ensureFlowsTables(env);
+    await env.DB.prepare(
+      "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
+    ).bind(key, payload, Date.now()).run();
+
+    return json({ ok: true, key, bytes: payload.length });
   }
 
   if (path.startsWith("/api/flows/")) {

@@ -1,0 +1,82 @@
+name: flows-pipeline
+
+# Builds the daily Flows board and POSTs it to the Worker.
+#
+# Why this runs here and not on Cloudflare: the Workers free plan allows 10 ms
+# of CPU per invocation INCLUDING cron handlers, and this job makes 500-900
+# Unusual Whales calls. Chaining that through a 1-minute-minimum cron would
+# take hours and wedge on any stall. GitHub Actions has no such limits and is
+# unlimited for public repositories.
+#
+# TIMEZONE: cron here is UTC, the market opens 09:30 America/New_York, and the
+# US observes DST — so a single fixed UTC time drifts by an hour twice a year.
+# Rather than pick one and be wrong for half the year, both candidate times
+# fire and the job itself checks the actual Eastern hour and exits early unless
+# it is the intended one. 09:15 UTC is 05:15 EDT (summer); 10:15 UTC is 05:15
+# EST (winter). Either way the run starts 4h15m before the open.
+#
+# KNOWN FAILURE MODE: GitHub disables scheduled workflows after 60 days of
+# repository inactivity, and a workflow run does not itself count as activity.
+# This is the most likely way the board silently goes stale. If `generatedAt`
+# on the board stops advancing, check the Actions tab first.
+
+on:
+  schedule:
+    - cron: "15 9 * * 1-5"    # 05:15 America/New_York during EDT
+    - cron: "15 10 * * 1-5"   # 05:15 America/New_York during EST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run against synthetic fixtures without publishing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flows-pipeline
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The two schedules above mean one of them is always an hour wrong.
+      # Resolve it by asking for the real Eastern hour rather than assuming.
+      - name: Skip the schedule that is not 05:00 Eastern today
+        if: github.event_name == 'schedule'
+        run: |
+          hour=$(TZ=America/New_York date +%H)
+          echo "Eastern hour is $hour"
+          if [ "$hour" != "05" ]; then
+            echo "Not the intended firing for this half of the year — exiting."
+            exit 78
+          fi
+
+      - name: Verify the pipeline runs against fixtures
+        # Always exercise the full code path with no network first. A syntax
+        # error or a broken feature contract fails here, before the live run
+        # has spent any API quota.
+        run: node scripts/flows-pipeline.mjs --dry-run
+
+      - name: Build and publish the board
+        if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+        env:
+          # Never echoed, never interpolated into a log line. Actions logs are
+          # PUBLIC on a public repository.
+          UW_API_KEY: ${{ secrets.UW_API_KEY }}
+          FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
+          FLOWS_INGEST_TOKEN: ${{ secrets.FLOWS_INGEST_TOKEN }}
+        run: node scripts/flows-pipeline.mjs
+
+      # Deliberately NO actions/upload-artifact. On a public repository,
+      # workflow artifacts are downloadable by any GitHub account, which would
+      # publish the board to everyone the credential gate exists to exclude.
