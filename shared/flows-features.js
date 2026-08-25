@@ -181,7 +181,7 @@ export function vanDerWaerden(values) {
  * Ridge term keeps a rank-deficient design (a sector with one member,
  * a constant control) from blowing up.
  */
-export function neutralize(y, { numeric = [], groups = [], ridge = 1e-8 } = {}) {
+export function neutralize(y, { numeric = [], groups = [], ridge = 1e-8, minGroup = 3 } = {}) {
   const n = y.length;
   if (!n) return [];
 
@@ -191,7 +191,27 @@ export function neutralize(y, { numeric = [], groups = [], ridge = 1e-8 } = {}) 
     cols.push(c.map((v) => (Number.isFinite(v) ? v : 0)));
   }
   if (groups.length === n) {
-    const levels = [...new Set(groups.filter((g) => g != null && g !== ""))].sort();
+    /* Levels below minGroup members are pooled into the reference bucket
+       rather than given their own dummy.
+
+       Drop-first coding hands a single-member level an indicator that is
+       nonzero for exactly one observation, and OLS then has a free coefficient
+       affecting only that row -- so it drives that row's residual to zero and
+       deletes the name's entire signal, whatever it was. The ridge does not
+       restrain this: for a singleton column the XtX diagonal is 1, which is
+       eight orders of magnitude above a 1e-8 ridge. Measured before the fix: a
+       lone-sector name carrying the strongest raw signal on a 48-name board
+       (y = 5.0 against everyone else inside [-1, 1]) came out with a residual
+       of 5e-8 while the rest reached 0.85, and ranked 22nd of 48.
+
+       Pooling is the conservative choice: a name in a thin sector is compared
+       against the board's baseline instead of against itself. */
+    const counts = new Map();
+    for (const g of groups) {
+      if (g == null || g === "") continue;
+      counts.set(g, (counts.get(g) || 0) + 1);
+    }
+    const levels = [...counts.keys()].filter((lv) => counts.get(lv) >= minGroup).sort();
     // drop-first coding: the intercept absorbs the reference level
     for (const lv of levels.slice(1)) cols.push(groups.map((g) => (g === lv ? 1 : 0)));
   }
@@ -373,9 +393,19 @@ export function pathSignature(tickRows) {
     .sort((a, b) => a.t - b.t);
   if (rows.length < 3) return { persistence: 0, concentration: 0, centroid: 0.5, net: 0, bars: rows.length };
 
-  const steps = [];
-  for (let i = 1; i < rows.length; i++) steps.push(rows[i].d - rows[i - 1].d);
-  const net = rows[rows.length - 1].d - rows[0].d;
+  /* Each row of /net-prem-ticks is that TICK's own value, not a running total.
+     The vendor defines every sibling field per-tick — net_call_premium is
+     "(call premium ask side) - (call premium bid side)" for the tick, and
+     tape_time is "the start time of the tick" — so net_delta is the minute's
+     net delta, and the increments ARE the rows.
+
+     Differencing them, as this did, measured the second difference of the true
+     signal. A buyer working a steady order at +900 per minute for 390 minutes
+     has net +351,000 and persistence 1.0; differencing gave net = (last minute
+     - first minute) ~ 0, so the direction was a coin flip and every downstream
+     path measure was noise. */
+  const steps = rows.map((r) => r.d);
+  const net = steps.reduce((a, b) => a + b, 0);
   const dir = Math.sign(net) || 1;
 
   const withDir = steps.filter((s) => Math.sign(s) === dir).length;
@@ -388,8 +418,8 @@ export function pathSignature(tickRows) {
 
   const span = rows[rows.length - 1].t - rows[0].t;
   let wsum = 0, wt = 0;
-  for (let i = 1; i < rows.length; i++) {
-    const w = Math.abs(steps[i - 1]);
+  for (let i = 0; i < rows.length; i++) {
+    const w = Math.abs(steps[i]);
     if (w <= 0) continue;
     wsum += w;
     wt += w * (span > 0 ? (rows[i].t - rows[0].t) / span : 0.5);
@@ -414,7 +444,14 @@ export function gammaDecayCalendar(expiryRows) {
   const rows = (expiryRows || [])
     .map((r) => ({
       expiry: r.expiry,
-      gamma: Math.abs(num(r.call_gamma) + num(r.put_gamma)),
+      /* GROSS gamma rolling off, so magnitudes are summed rather than the sum
+         taken in magnitude. put_gamma arrives ALREADY dealer-signed (negative
+         against a positive call_gamma), the convention this module's header
+         calls load-bearing, so |call + put| cancels the two legs and reports
+         the net residual. A front-week book of 1e9 call against -999e6 put --
+         2.0e9 of gross gamma about to expire -- reported as 1e6 and lost the
+         roll-off schedule entirely. */
+      gamma: Math.abs(num(r.call_gamma)) + Math.abs(num(r.put_gamma)),
     }))
     .filter((r) => r.expiry && r.gamma > 0)
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
@@ -570,13 +607,34 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
  */
 export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exitRank = 35 } = {}) {
   const held = new Set(yesterdayIds || []);
+  const ranked = todayRanked || [];
+
+  /* Incumbents are placed FIRST, and that is the whole mechanism.
+     The previous version pushed every name ranked <= entryRank and broke as
+     soon as it had entryRank of them -- which happens on the very first
+     entryRank iterations -- so the incumbent branch below it was unreachable
+     and the function was provably identical to slice(0, entryRank) for every
+     input. Verified exhaustively before the rewrite: for all single-incumbent
+     sets over 60 names, and for "every name held", the output never differed.
+
+     Reordering alone is not enough either. Merging both groups and re-sorting
+     by rank returns the top entryRank again whenever the list is long, because
+     the sub-entryRank names always fill every slot. Hysteresis only exists if
+     an incumbent inside exitRank OUTRANKS a newcomer for its slot -- which is
+     exactly what the docstring promises: a name stays until it falls out of
+     exitRank. */
   const keep = [];
-  for (let i = 0; i < todayRanked.length; i++) {
-    const id = todayRanked[i];
-    const rank = i + 1;
-    if (rank <= entryRank) keep.push(id);
-    else if (held.has(id) && rank <= exitRank) keep.push(id);
-    if (keep.length >= entryRank) break;
+  const taken = new Set();
+  for (let i = 0; i < ranked.length && keep.length < entryRank; i++) {
+    const id = ranked[i];
+    if (held.has(id) && i + 1 <= exitRank) { keep.push(id); taken.add(id); }
   }
-  return keep;
+  for (let i = 0; i < ranked.length && keep.length < entryRank; i++) {
+    const id = ranked[i];
+    if (i + 1 <= entryRank && !taken.has(id)) { keep.push(id); taken.add(id); }
+  }
+
+  // Rank order, not "incumbents first", is what the board displays.
+  const rankOf = new Map(ranked.map((id, i) => [id, i]));
+  return keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
 }

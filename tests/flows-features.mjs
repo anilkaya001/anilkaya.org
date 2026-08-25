@@ -120,6 +120,33 @@ const near = (a, b, tol, msg) => {
 
   ok(neutralize([]).length === 0, "empty input is safe");
   ok(neutralize([1, 2], { groups: ["a", "b"] }).length === 2, "degenerate design returns input length");
+
+  /* THE REGRESSION. Drop-first dummy coding gives a single-member level an
+     indicator that is nonzero for exactly one row, so OLS has a free
+     coefficient affecting only that row and drives its residual to zero --
+     deleting the name's entire signal. The ridge does not restrain it: for a
+     singleton column the XtX diagonal is 1, eight orders above a 1e-8 ridge.
+     Measured before the fix: residual 5e-8 while the rest of the board reached
+     0.85, so the strongest raw signal on the board ranked 22nd of 48. */
+  {
+    const n = 48;
+    const lonely = Array.from({ length: n }, (_, i) =>
+      i === n - 1 ? "utilities" : ["tech", "energy", "health", "fins"][i % 4]);
+    const caps = Array.from({ length: n }, (_, i) => Math.log(1e9 + i * 1e8));
+    const signal = Array.from({ length: n }, (_, i) => (i === n - 1 ? 5.0 : Math.sin(i) * 0.8));
+    const out = neutralize(signal, { numeric: [caps], groups: lonely });
+    ok(Math.abs(out[n - 1]) > 1,
+       `a name alone in its sector keeps its signal (${out[n - 1].toFixed(3)}, was 5e-8)`);
+    ok(Math.abs(out[n - 1]) > Math.max(...out.slice(0, n - 1).map(Math.abs)),
+       "and it is still the strongest name on the board, as the raw data said");
+
+    // Pooling must not disturb sectors that are genuinely populated.
+    const populated = Array.from({ length: n }, (_, i) => ["tech", "energy", "health"][i % 3]);
+    const byGroup = Array.from({ length: n }, (_, i) => (i % 3) * 4 + Math.sin(i) * 0.1);
+    const cleaned = neutralize(byGroup, { groups: populated });
+    ok(Math.max(...cleaned.map(Math.abs)) < 0.5,
+       "a real sector effect is still removed from well-populated groups");
+  }
 }
 
 /* ---------- dealer gamma: the sign trap ------------------------- */
@@ -180,17 +207,27 @@ const near = (a, b, tol, msg) => {
   const t0 = Date.parse("2026-08-24T13:30:00Z");
   const minute = (i) => new Date(t0 + i * 60000).toISOString();
 
+  /* Each row of /net-prem-ticks carries that TICK's own value, not a running
+     total: the vendor defines net_call_premium as "(call premium ask side) -
+     (call premium bid side)" for the tick and tape_time as "the start time of
+     the tick". These fixtures are therefore per-minute increments.
+
+     They were previously written as a cumulative ramp (0, 10, 20, ... 1000),
+     which pinned the opposite convention and hid a real defect: the function
+     differenced its input, so on true per-tick data it measured the SECOND
+     difference and family D was noise. */
+
   // Same end-of-day net delta (1000), opposite shapes.
   const steady = [];
-  for (let i = 0; i <= 100; i++) steady.push({ tape_time: minute(i), net_delta: String(i * 10) });
+  for (let i = 0; i < 100; i++) steady.push({ tape_time: minute(i), net_delta: "10" });
 
   const spike = [];
-  for (let i = 0; i <= 100; i++) spike.push({ tape_time: minute(i), net_delta: String(i < 50 ? 0 : 1000) });
+  for (let i = 0; i < 100; i++) spike.push({ tape_time: minute(i), net_delta: i === 50 ? "1000" : "0" });
 
   const s = pathSignature(steady);
   const k = pathSignature(spike);
 
-  near(s.net, 1000, 1e-9, "steady path net delta");
+  near(s.net, 1000, 1e-9, "steady path net delta is the SUM of the ticks");
   near(k.net, 1000, 1e-9, "spike path net delta");
   ok(Math.abs(s.net - k.net) < 1e-9, "the two paths have IDENTICAL daily totals");
 
@@ -201,8 +238,22 @@ const near = (a, b, tol, msg) => {
   ok(k.centroid > 0.4, "spike centroid sits at the spike");
 
   const late = [];
-  for (let i = 0; i <= 100; i++) late.push({ tape_time: minute(i), net_delta: String(i < 80 ? 0 : (i - 80) * 50) });
+  for (let i = 0; i < 100; i++) late.push({ tape_time: minute(i), net_delta: i < 80 ? "0" : "50" });
   ok(pathSignature(late).centroid > 0.75, "late accumulation reports a late centroid");
+
+  /* THE REGRESSION. A buyer working a large order steadily all session: 390
+     minutes at +900. Differencing the input returned (last tick - first tick)
+     = 0, so Math.sign(net) was a coin flip and persistence was meaningless. */
+  const worked = [];
+  for (let i = 0; i < 390; i++) worked.push({ tape_time: minute(i), net_delta: "900" });
+  const w = pathSignature(worked);
+  near(w.net, 351000, 1e-9, "a worked order reports its true daily total, not ~0");
+  ok(w.persistence > 0.99, "and reads as fully persistent rather than a coin flip");
+
+  // A session that reverses nets out, and that is the honest reading.
+  const reversal = [];
+  for (let i = 0; i < 100; i++) reversal.push({ tape_time: minute(i), net_delta: i < 50 ? "500" : "-500" });
+  near(pathSignature(reversal).net, 0, 1e-9, "flow that reverses within the day nets to zero");
 
   const thin = pathSignature([{ tape_time: minute(0), net_delta: "1" }]);
   near(thin.persistence, 0, 0, "too few bars degrades safely");
@@ -270,6 +321,28 @@ const near = (a, b, tol, msg) => {
   ]);
   assert.equal(flat.halfLifeExpiry, "2026-09-18"); checks++;
   ok(gammaDecayCalendar([]).halfLifeExpiry === null, "empty calendar has no half-life");
+
+  /* THE REGRESSION. put_gamma arrives ALREADY dealer-signed, so taking the
+     magnitude of the SUM cancels the two legs. Every fixture above passes
+     put_gamma: "0", which is exactly why this went unnoticed. Here the front
+     week carries 2.0e9 of GROSS gamma against September's 5e6 -- four hundred
+     times more -- and the old code reported the front week as one sixth of the
+     book and named September the half-life. */
+  const signed = gammaDecayCalendar([
+    { expiry: "2026-08-28", call_gamma: "1e9", put_gamma: "-999000000" },
+    { expiry: "2026-09-18", call_gamma: "5000000", put_gamma: "0" },
+  ]);
+  ok(signed.frontLoad > 0.99,
+     `gross roll-off sums magnitudes: a 2.0e9 front week dominates (${signed.frontLoad})`);
+  assert.equal(signed.halfLifeExpiry, "2026-08-28"); checks++;
+
+  // A perfectly balanced expiry must not vanish from the schedule entirely.
+  const balanced = gammaDecayCalendar([
+    { expiry: "2026-08-28", call_gamma: "1e9", put_gamma: "-1e9" },
+    { expiry: "2026-09-18", call_gamma: "1e6", put_gamma: "0" },
+  ]);
+  ok(balanced.schedule.length === 2,
+     "an expiry whose legs net to zero still carries gross gamma and stays on the schedule");
 }
 
 /* ---------- effective breadth ----------------------------------- */
@@ -358,14 +431,36 @@ const near = (a, b, tol, msg) => {
   ok(kept.length === 25, "the board stays at 25 names");
   ok(!kept.includes("T40"), "an incumbent past the exit band still drops");
 
-  // An incumbent inside the buffer is retained even though it missed entry.
-  const board = ["A", ...Array.from({ length: 40 }, (_, i) => "N" + i)];
-  const withIncumbent = applyHysteresis(
-    [...Array.from({ length: 25 }, (_, i) => "N" + i), "A"],
-    ["A"], { entryRank: 25, exitRank: 35 },
-  );
+  /* THE REGRESSION. This function was provably a no-op: it pushed every name
+     ranked <= entryRank and broke the moment it had entryRank of them, which
+     happens on the first entryRank iterations, so the incumbent branch beneath
+     was unreachable. Verified exhaustively before the fix -- for every
+     single-incumbent set over 60 names, and for "every name held", the output
+     was byte-identical to slice(0, entryRank). The old test asserted only the
+     board's LENGTH, which a no-op satisfies, so nothing caught it. */
+  const ranking = [...Array.from({ length: 25 }, (_, i) => "N" + i), "A"];
+  const withIncumbent = applyHysteresis(ranking, ["A"], { entryRank: 25, exitRank: 35 });
   ok(withIncumbent.length === 25, "buffer does not overfill the board");
-  ok(board.length === 41, "fixture intact");
+  ok(withIncumbent.includes("A"),
+     "THE MECHANISM: an incumbent at rank 26, inside the exit band, keeps its slot");
+  ok(!withIncumbent.includes("N24"),
+     "and displaces the newcomer that would otherwise have taken it");
+
+  // It must not be a no-op for the plain case either.
+  const plain = today.slice(0, 25);
+  const held30 = applyHysteresis(today, ["T30"], { entryRank: 25, exitRank: 35 });
+  ok(JSON.stringify(held30) !== JSON.stringify(plain),
+     "holding a name inside the exit band changes the board (it is not slice(0,25))");
+  ok(held30.includes("T30"), "the incumbent at rank 30 is retained");
+  ok(held30.length === 25, "and the board is still 25 names");
+
+  // Output is in rank order, not incumbents-first: the board displays a ranking.
+  const order = held30.map((id) => today.indexOf(id));
+  ok(order.every((v, i) => i === 0 || v > order[i - 1]), "the result stays in rank order");
+
+  // With nothing held, it degrades to the plain top-N.
+  ok(JSON.stringify(applyHysteresis(today, [], { entryRank: 25, exitRank: 35 })) === JSON.stringify(plain),
+     "with no incumbents it is exactly the top 25");
 
   const none = applyHysteresis([], [], {});
   ok(none.length === 0, "an empty ranking is safe");
