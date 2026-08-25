@@ -365,6 +365,25 @@ above, and paste the JSON the generator printed for `FLOWS_CREDENTIALS`.
 ./tests/node_modules/.bin/wrangler secret put FLOWS_INGEST_TOKEN
 ```
 
+**Adding a secret does not deploy it.** The dashboard stores it as a new Worker
+version and leaves that version undeployed, so the running Worker keeps serving
+the previous one and every route behaves exactly as if the secret were never
+set — `/flows/login` answers `503 "Sign-in is not configured"` and
+`/api/flows/ingest` answers the same. Nothing in the UI flags this. After adding
+all three, go to **Deployments** and promote the new version to 100%, or run
+`wrangler deploy`.
+
+Two checks that distinguish "deployed" from "stored but dormant", both from any
+terminal and neither revealing a value:
+
+```bash
+# 401, not 503, means FLOWS_INGEST_TOKEN is live on the running Worker.
+curl -s https://anilkaya.org/api/flows/ingest
+
+# The login form rendering is not evidence; submitting it is. A 503 here means
+# FLOWS_PEPPER or FLOWS_CREDENTIALS is stored but not deployed.
+```
+
 Then clear the variables from the live shell, since three of them are still in
 memory:
 
