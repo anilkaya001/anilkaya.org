@@ -387,4 +387,32 @@ const near = (a, b, tol, msg) => {
   }
 }
 
+/* ---------- the two boards must be disjoint ---------------------
+   Taking the top N and the bottom N of one sorted list looks equivalent
+   to partitioning and is not. Once the pool falls below 2*boardSize the
+   slices overlap and a name lands on BOTH boards — presented as
+   simultaneously a top long and a top short candidate.
+
+   This is reachable in normal operation: the pipeline enriches 30 per
+   side (pool 60) and its completeness gate passes at 80%, i.e. 48
+   survivors, which overlaps by 2. */
+{
+  const { partitionSides } = await import("../scripts/flows-pipeline.mjs");
+
+  for (const n of [60, 50, 48, 40, 20, 3, 1, 0]) {
+    const scored = Array.from({ length: n }, (_, i) => ({ ticker: "T" + i, score: 100 - i * 4 }));
+    const { long, short } = partitionSides(scored);
+    const overlap = long.filter((r) => short.some((s) => s.ticker === r.ticker));
+    ok(overlap.length === 0, `pool of ${n} yields disjoint boards (overlap ${overlap.length})`);
+    ok(long.length + short.length <= n, `pool of ${n} is not double-counted`);
+  }
+
+  const scored = Array.from({ length: 60 }, (_, i) => ({ ticker: "T" + i, score: 100 - i * 4 }));
+  const { long, short } = partitionSides(scored);
+  ok(long[0].score > long[long.length - 1].score, "the long side is ordered best-first");
+  ok(short[0].score < short[short.length - 1].score, "the short side is ordered most-negative-first");
+  ok(long[0].score === 100, "the long side starts at the highest score");
+  ok(short[0].score === 100 - 59 * 4, "the short side starts at the lowest score");
+}
+
 console.log(`✓ flows-features: ${checks} assertions — robust stats, rank-normal transform, neutralization, dealer-gamma sign, path signature, dispersion-invariant calibration, reachable conviction`);

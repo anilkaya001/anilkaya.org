@@ -366,15 +366,36 @@ function scoreBoard(features, tilts, sectors, caps) {
 
 /* ---------- payload --------------------------------------------- */
 
-function toRows(scored, screenerByTicker, side, previousIds) {
-  const sorted = scored.slice().sort((a, b) =>
-    side === "long" ? b.score - a.score : a.score - b.score);
+/**
+ * Split the scored pool into two DISJOINT halves before either board is
+ * built. Taking the top N and the bottom N of one sorted list looks
+ * equivalent and is not: once the pool drops below 2*boardSize the two
+ * slices overlap and a name appears on BOTH boards at once, presented as
+ * simultaneously a top long and a top short candidate.
+ *
+ * That is reachable in normal operation, not a pathological case. With
+ * enrichPerSide 30 the pool is 60 and the completeness gate passes at 80%,
+ * i.e. 48 survivors — which overlaps by 2. At 40 survivors it overlaps by 10.
+ *
+ * Partitioning at the median makes the boards disjoint by construction at
+ * any pool size, and a shrunken pool then yields a SHORTER board rather than
+ * an incoherent one.
+ */
+function partitionSides(scored) {
+  const sorted = scored.slice().sort((a, b) => b.score - a.score);
+  const half = Math.floor(sorted.length / 2);
+  return {
+    long: sorted.slice(0, half),
+    short: sorted.slice(sorted.length - half).reverse(),   // most negative first
+  };
+}
 
+function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
-    sorted.map((r) => r.ticker), previousIds,
+    pool.map((r) => r.ticker), previousIds,
     { entryRank: UNIVERSE.boardSize, exitRank: Math.round(UNIVERSE.boardSize * 1.4) },
   );
-  const byTicker = new Map(sorted.map((r) => [r.ticker, r]));
+  const byTicker = new Map(pool.map((r) => [r.ticker, r]));
 
   return ids.map((ticker, i) => {
     const r = byTicker.get(ticker);
@@ -616,8 +637,23 @@ async function main() {
 
   // 6. Publish both sides.
   const generatedAt = new Date().toISOString();
+  const sides = partitionSides(scored);
+
+  // A board thinner than this is not worth showing: it means enrichment
+  // degraded badly enough that the cross-section it was ranked against is
+  // no longer meaningful.
+  const MIN_ROWS = 10;
   for (const side of ["long", "short"]) {
-    const rows = toRows(scored, screenerByTicker, side, []);
+    if (sides[side].length < MIN_ROWS) {
+      throw new Error(
+        `${side} side has only ${sides[side].length} candidates after partitioning ` +
+        `(minimum ${MIN_ROWS}) — publishing nothing rather than a board too thin to rank`,
+      );
+    }
+  }
+
+  for (const side of ["long", "short"]) {
+    const rows = toRows(sides[side], screenerByTicker, []);
     await publish("board:" + side, {
       side, generatedAt, rows,
       universe: universe.length,
@@ -636,7 +672,17 @@ async function main() {
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 }
 
-main().catch((error) => {
-  console.error("pipeline failed:", error.message);
-  process.exit(1);
-});
+export { partitionSides, screenerTilt, eligible, atr14, daysToEarnings };
+
+// Only run when invoked directly. Without this guard, importing the module —
+// which the contract tests do, to exercise partitionSides — would fire the
+// whole pipeline as an import side effect.
+const invokedDirectly = process.argv[1]
+  && (await import("node:url")).fileURLToPath(import.meta.url) === process.argv[1];
+
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error("pipeline failed:", error.message);
+    process.exit(1);
+  });
+}
