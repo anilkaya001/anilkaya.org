@@ -271,7 +271,51 @@ function daysToEarnings(row, today) {
 
 /* ---------- per-name enrichment --------------------------------- */
 
-async function enrich(ticker, spot, sessionDate) {
+/**
+ * PROVE THE NEW PARAMETERS WORK BEFORE BETTING THE RUN ON THEM.
+ *
+ * Dating every per-name call is the fix for a board stamped with the wrong
+ * session and a family that measured nothing — and it is also a way to lose
+ * the whole run. A date the vendor will not accept, or a session it has no
+ * data for, does not error: it returns an empty array. Every name then fails
+ * the required-source gate, the 80% completeness gate throws, and nothing
+ * publishes at all. The undated behaviour was wrong but it was not an outage.
+ *
+ * Two calls against SPY settle it. `date` is checked for USABLE output rather
+ * than a 200, because the exact failure that started this was a 200 carrying
+ * rows whose greeks were null. When a probe fails the run continues with that
+ * parameter dropped, loudly, rather than publishing nothing.
+ */
+async function verifyDating(sessionDate) {
+  if (!sessionDate || DRY_RUN) return { date: !!sessionDate, endDate: !!sessionDate };
+
+  const usable = (rows) => (rows || []).some(
+    (r) => r && r.expiry && (num(r.call_gamma) !== 0 || num(r.put_gamma) !== 0));
+
+  const [dated, undated, capped] = await Promise.all([
+    uw("/api/stock/SPY/greek-exposure/expiry", { date: sessionDate }).catch(() => []),
+    uw("/api/stock/SPY/greek-exposure/expiry").catch(() => []),
+    uw("/api/stock/SPY/ohlc/1d", { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+  ]);
+
+  const date = usable(dated);
+  const endDate = Array.isArray(capped) && capped.length > 0;
+  if (!date) {
+    console.warn(
+      `WARNING: /greek-exposure/expiry?date=${sessionDate} returns no usable gamma for SPY` +
+      (usable(undated) ? ", while the undated call does" : ", and neither does the undated call") +
+      " — dropping `date` for this run. The board will carry whatever session the " +
+      "vendor defaults to, which is the behaviour that mislabelled it before.");
+  }
+  if (!endDate) {
+    console.warn(
+      `WARNING: /ohlc/1d?end_date=${sessionDate} returned no candles for SPY — ` +
+      "dropping `end_date` for this run. Candles will include the session in progress.");
+  }
+  return { date, endDate };
+}
+
+async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate: true }) {
   const band = spot > 0
     ? { min_strike: Math.round(spot * 0.7), max_strike: Math.round(spot * 1.3) }
     : {};
@@ -285,7 +329,7 @@ async function enrich(ticker, spot, sessionDate) {
      for a session that has not happened it returns rows with null greeks,
      which is exactly how family V came out identically zero on all thirty-four
      published names while coverage went on reporting five sources of five. */
-  const dated = sessionDate ? { date: sessionDate } : {};
+  const dated = sessionDate && dating.date ? { date: sessionDate } : {};
 
   // Bounding the strike ladder is what makes per-name enrichment
   // affordable: an unbanded ladder is ~600 KB, a banded one a fraction.
@@ -300,7 +344,7 @@ async function enrich(ticker, spot, sessionDate) {
        one response. end_date pins it to the same session as the rest. */
     uw(`/api/stock/${ticker}/ohlc/1d`, {
       timeframe: "1Y",
-      ...(sessionDate ? { end_date: sessionDate } : {}),
+      ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
     }).catch(() => []),
   ]);
 
@@ -1295,6 +1339,8 @@ async function main() {
         per-name call can be pinned to it. */
   const sessionDate = DRY_RUN ? "2026-08-24" : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
+  const dating = await verifyDating(sessionDate);
+  console.log(`dating: date=${dating.date} end_date=${dating.endDate}`);
 
   // 1. Universe, from a single screener call.
   /* THE UNIVERSE IS FETCHED IN MARKET-CAP BANDS, because one call cannot
@@ -1402,7 +1448,7 @@ async function main() {
         features = computeFeatures({ ...fake, sessionDate, tilt: pick.tilt });
         raw = fake;
       } else {
-        ({ features, raw } = await enrich(ticker, spot, sessionDate));
+        ({ features, raw } = await enrich(ticker, spot, sessionDate, dating));
         features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
       }
       enriched.push({ features, raw, tilt: pick.tilt, row: pick.row });
