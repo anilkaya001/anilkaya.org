@@ -839,24 +839,59 @@ async function main() {
   }
 
   // 1. Universe, from a single screener call.
-  /* The universe call carries NO `limit`: /api/screener/stocks does not accept
-     one, and accepts no `page` or `offset` either. Sending it was a silent
-     no-op — the pipeline was reading whatever page the vendor chose to return
-     and calling it the universe. The absence of any pagination parameter is
-     the clue to how this endpoint is meant to be used: the FILTERS are the
-     limiter, and they run server-side.
+  /* THE UNIVERSE IS FETCHED IN MARKET-CAP BANDS, because one call cannot
+     return enough names.
 
-     Only unambiguous numeric filters are pushed. `issue_types[]` is left to
-     eligible() below because the vendor's accepted values for it are not
-     documented in the specification available here, and a wrong value would
-     return an empty universe. eligible() still re-checks everything sent, so a
-     server-side boundary that differs from ours cannot widen the universe. */
-  const screener = DRY_RUN ? fakeScreener(420) : await uw("/api/screener/stocks", {
-    min_underlying_price: UNIVERSE.minPrice,
-    min_marketcap: UNIVERSE.minMarketCap,
-    min_volume: UNIVERSE.minOptionVolume,
-    min_oi: UNIVERSE.minOpenInterest,
-  });
+     /api/screener/stocks accepts no `limit`, no `page` and no `offset` — the
+     full parameter list has sixty-odd filters and not one of them pages — and
+     a live run proved what that means in practice: the endpoint returned
+     exactly 50 rows against filters that thousands of US names satisfy. 50 is
+     a fixed page cap. The original `limit: 500` was a silent no-op, so this
+     pipeline could never have cleared its own 50-name universe floor; the
+     failure only surfaced once real credentials let the call through.
+
+     With no pagination parameter, the way to see more of the market is to ask
+     narrower questions. Market cap is the right axis: the bands are disjoint
+     so the pages cannot overlap, `min_marketcap` and `max_marketcap` are
+     unambiguous numerics already proven to work in the live call, and no enum
+     value has to be guessed — unlike `sectors[]`, whose accepted spellings are
+     undocumented here and would silently return nothing if wrong.
+
+     Six bands, up to 50 each, deduplicated by ticker. Sector diversity comes
+     along for free, which matters because the score neutralises on sector: a
+     universe drawn entirely from one industry makes that step meaningless. */
+  const CAP_BANDS = [
+    [UNIVERSE.minMarketCap, 3e9],
+    [3e9, 1e10],
+    [1e10, 5e10],
+    [5e10, 2e11],
+    [2e11, 1e12],
+    [1e12, null],
+  ];
+
+  let screener;
+  if (DRY_RUN) {
+    screener = fakeScreener(420);
+  } else {
+    const byTicker = new Map();
+    for (const [min, max] of CAP_BANDS) {
+      const page = await uw("/api/screener/stocks", {
+        min_underlying_price: UNIVERSE.minPrice,
+        min_volume: UNIVERSE.minOptionVolume,
+        min_oi: UNIVERSE.minOpenInterest,
+        min_marketcap: min,
+        ...(max === null ? {} : { max_marketcap: max }),
+      }).catch(() => []);
+      for (const row of page) if (row && row.ticker) byTicker.set(row.ticker, row);
+      const label = max === null
+        ? `>= $${(min / 1e9).toFixed(0)}B`
+        : `$${(min / 1e9).toFixed(0)}-${(max / 1e9).toFixed(0)}B`;
+      console.log(`  screener ${label.padEnd(12)} ${String(page.length).padStart(3)} rows` +
+                  `  (union ${byTicker.size})`);
+    }
+    screener = [...byTicker.values()];
+  }
+
   const universe = screener.filter(eligible);
   console.log(`universe: ${universe.length} eligible of ${screener.length} screened`);
   if (universe.length < 50) throw new Error(`universe too small (${universe.length}) — refusing to publish`);
