@@ -75,20 +75,37 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 /* ---------- gamma profile: the dealer-signed sum ----------------- */
 {
   // put_gamma arrives already dealer-signed, so exposure per strike is a SUM.
+  /* THE REAL FIELD NAMES. /spot-exposures/strike splits every greek by
+     aggressor: call_gamma_ask, call_gamma_bid, put_gamma_ask, put_gamma_bid.
+     This fixture previously used call_gamma/put_gamma — the names the function
+     under test was guessing at — so the test validated the guess against
+     itself and passed while production published 54 bars of exactly zero. */
   const ladder = [
-    { strike: "90", call_gamma: "1e8", put_gamma: "-5e8" },   // net short: put wall
-    { strike: "100", call_gamma: "2e8", put_gamma: "-1e8" },
-    { strike: "110", call_gamma: "9e8", put_gamma: "-1e8" },  // net long: call wall
+    { strike: "90", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
+      put_gamma_ask: "-3e8", put_gamma_bid: "-2e8" },          // net short: put wall
+    { strike: "100", call_gamma_ask: "1.2e8", call_gamma_bid: "0.8e8",
+      put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },
+    { strike: "110", call_gamma_ask: "5e8", call_gamma_bid: "4e8",
+      put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },      // net long: call wall
   ];
   const g = buildGammaProfile(ladder, { spot: 100 });
   eq(g.status, "ok", "a ladder resolves");
   eq(g.callWall, 110, "the call wall is the most positive net-gamma strike");
   eq(g.putWall, 90, "the put wall is the most negative");
-  near(g.bars[0].g, -4e8, 1, "per-strike gamma is call + put, not call - put");
+  near(g.bars[0].g, -4e8, 1, "all four aggressor legs are SUMMED, not differenced");
+
+  // The exact production failure: rows carrying only the WRONG names must not
+  // silently become a ladder of measured zeros.
+  const wrongNames = buildGammaProfile(
+    [{ strike: "100", call_gamma: "1e9", put_gamma: "-2e8" }], { spot: 100 },
+  );
+  ok(wrongNames.status === "unavailable" || wrongNames.bars.every((b) => b.g !== 0),
+     "a row with no aggressor-split gamma is dropped, never drawn as zero gamma");
 
   // Bucketing keeps a 500-strike ladder inside the ingest cap.
   const wide = Array.from({ length: 500 }, (_, i) => ({
-    strike: String(50 + i), call_gamma: "1e6", put_gamma: "-2e5",
+    strike: String(50 + i), call_gamma_ask: "6e5", call_gamma_bid: "4e5",
+    put_gamma_ask: "-1e5", put_gamma_bid: "-1e5",
   }));
   const bucketed = buildGammaProfile(wide, { spot: 200, maxBars: 60 });
   ok(bucketed.bars.length <= 60, `500 strikes reduce to at most 60 bars (${bucketed.bars.length})`);
@@ -182,8 +199,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     row: { close: "100" },
     features: { spot: 100, atr: 4, gammaFlip: 96, netGamma: -8e8, gRegime: "short",
                 score: 71, conviction: 64, fam: { F: 60, P: -20, D: 30, V: 5, O: -5 } },
-    strikes: [{ strike: "95", call_gamma: "1e8", put_gamma: "-4e8" },
-              { strike: "105", call_gamma: "7e8", put_gamma: "-1e8" }],
+    strikes: [{ strike: "95", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
+                put_gamma_ask: "-2.4e8", put_gamma_bid: "-1.6e8" },
+              { strike: "105", call_gamma_ask: "4e8", call_gamma_bid: "3e8",
+                put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" }],
     ticks: Array.from({ length: 60 }, (_, i) => ({
       tape_time: new Date(t0 + i * 60000).toISOString(),
       net_delta: "50", net_call_premium: "800", net_put_premium: "300",

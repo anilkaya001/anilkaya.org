@@ -140,10 +140,32 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
  * is a second consumer of the same fields.
  */
 export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
-  const rows = (strikeRows || []).map((r) => ({
-    strike: numOrNull(r.strike ?? r.price),
-    gamma: (numOrNull(r.call_gamma) ?? 0) + (numOrNull(r.put_gamma) ?? 0),
-  })).filter((r) => r.strike !== null);
+  /* THE AGGRESSOR-SPLIT FIELDS, matching aggressorGamma() exactly.
+
+     /spot-exposures/strike returns call_gamma_ask, call_gamma_bid,
+     call_gamma_oi and call_gamma_vol — and the put equivalents. It does NOT
+     return call_gamma or put_gamma; those belong to /greek-exposure/expiry,
+     a different endpoint with a different shape.
+
+     Reading the wrong names cost nothing loudly and everything quietly: every
+     strike summed to exactly 0, so the published cards carried 54 correctly
+     priced bars of zero gamma, both walls came out null, and the panel drew an
+     empty plot beside a flip line the pipeline had computed correctly from the
+     same rows. The ablation test did not catch it because its fixture used the
+     field names this function was guessing at — it validated the guess against
+     itself. That fixture now carries the real names.
+
+     put_gamma_* arrives ALREADY dealer-signed, so all four legs are SUMMED. */
+  const rows = (strikeRows || []).map((r) => {
+    const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
+    const present = legs.some((v) => numOrNull(v) !== null);
+    return {
+      strike: numOrNull(r.strike ?? r.price),
+      // null, not 0, when the row carries no gamma at all: a strike whose
+      // exposure is unknown must not be drawn as a measured zero.
+      gamma: present ? legs.reduce((a, v) => a + (numOrNull(v) ?? 0), 0) : null,
+    };
+  }).filter((r) => r.strike !== null && r.gamma !== null);
 
   if (!rows.length) return unavailable("no strike ladder");
   rows.sort((a, b) => a.strike - b.strike);
