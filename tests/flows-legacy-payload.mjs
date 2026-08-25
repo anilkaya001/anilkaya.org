@@ -77,6 +77,13 @@ await page.goto(url("/flows/"), { waitUntil: "networkidle" });
 await page.fill("#u", FLOWS_TEST_USER);
 await page.fill("#p", FLOWS_PASSWORD);
 await Promise.all([page.waitForNavigation({ waitUntil: "networkidle" }), page.click(".flows-submit")]);
+
+/* THE DECK AND THE TABLE MOVED. /flows/ is the Overview now — both poles at
+   once over the dead band — and the full ranked list with its deck/table
+   toggle is a route of its own. The sides stopped being a toggle because a
+   toggle has no address: half the session sat behind a click that could not be
+   linked to, bookmarked or sent. */
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
 
 // The table's family glyph must withhold V and O on a v1 board.

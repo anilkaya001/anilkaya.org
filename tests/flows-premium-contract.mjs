@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import {
   parseOptionSymbol, daysToExpiry, priceSale, rankChain, ivConvention,
   numOrNull, DEFAULT_GATES, SHARES_PER_CONTRACT, DAYS_PER_YEAR, crossesEarnings,
+  sizeToBuyingPower, planBuyingPower,
 } from "../shared/flows-premium.js";
 
 let checks = 0;
@@ -271,6 +272,126 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c("2026-09-18", "2023-10-26T13:30:00Z", "premarket"), null,
      "a datetime is not the bare date this comparison requires");
   eq(c("bad-expiry", "2026-08-20", "premarket"), null, "an unusable expiry is null too");
+}
+
+/* ---------- adjusted series cannot be priced ------------------- */
+{
+  /* Every dollar on this desk multiplies by 100 — premium, collateral,
+     breakeven, and everything derived. That is the STANDARD deliverable, and
+     after a split, merger or special dividend the OCC issues an adjusted
+     series whose contract may deliver a different share count, or shares plus
+     cash. Those carry a suffixed root: AAPL1, AAPL2.
+
+     The vendor exposes no deliverable field, so an adjusted contract's
+     economics are not recoverable from this response at all. Pricing it
+     anyway would put a confidently wrong figure in every money column of that
+     row, and nothing on the page could reveal it. */
+  const standard = { option_symbol: "AAPL260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60",
+                     implied_volatility: "0.28", open_interest: "1200", volume: "9" };
+  const adjusted = { ...standard, option_symbol: "AAPL1260918P00170000" };
+
+  const r = rankChain([standard, adjusted], { spot: 180, asOf: "2026-08-25", ticker: "AAPL" });
+  eq(r.priced, 1, "the adjusted series is excluded");
+  eq(r.gated.nonStandard, 1, "and counted under its own reason, not hidden in unpriceable");
+  eq(r.rows[0].symbol, "AAPL260918P00170000", "only the standard contract is ranked");
+
+  /* The exclusion still reconciles — every screened contract is ranked or
+     attributed, which is what makes the footer's counts trustworthy. */
+  const excluded = Object.values(r.gated).reduce((a, b) => a + b, 0);
+  eq(excluded + r.priced, r.screened, "the gate partition still accounts for everything");
+
+  /* Case and whitespace do not create a false mismatch. */
+  eq(rankChain([standard], { spot: 180, asOf: "2026-08-25", ticker: " aapl " }).priced, 1,
+     "the comparison normalises case and padding rather than dropping a good row");
+
+  /* WITHOUT A TICKER THERE IS NO CHECK, and that is stated rather than
+     silently skipped — a caller that forgets to pass it gets the old
+     behaviour, not a false sense of a guard. */
+  const unchecked = rankChain([standard, adjusted], { spot: 180, asOf: "2026-08-25" });
+  eq(unchecked.priced, 2, "with nothing to compare against, no contract is excluded");
+  eq(unchecked.gated.nonStandard, 0, "and none is claimed to be");
+}
+
+/* ---------- buying power: what you can actually collect --------- */
+{
+  /* THE WHOLE POINT, in one fixture. Two lines at IDENTICAL 3.0% yield. Yield
+     is the right way to compare two contracts and the wrong way to plan a
+     session, because capital is finite and contracts are indivisible. */
+  const amgn = { ticker: "AMGN", collateral: 43000, premium: 1290, yieldOnCollateral: 0.03 };
+  const wmb  = { ticker: "WMB",  collateral: 7000,  premium: 210,  yieldOnCollateral: 0.03 };
+
+  const a = sizeToBuyingPower(amgn, 50000);
+  const w = sizeToBuyingPower(wmb, 50000);
+  eq(a.contracts, 1, "a $43,000 requirement fits once into $50,000");
+  eq(w.contracts, 7, "a $7,000 requirement fits seven times");
+  eq(a.collectible, 1290);
+  eq(w.collectible, 1470, "the SAME yield collects more when the line is smaller");
+  ok(w.collectible > a.collectible,
+     "so ranking by collectible reverses the ranking by yield — which is the feature");
+
+  eq(a.idle, 7000, "and the capital integer division leaves behind is reported");
+  eq(w.idle, 1000);
+  eq(a.deployed, 43000, "deployed is what the contracts actually tie up");
+  near(w.yieldOnDeployed, 1470 / 49000, 1e-12,
+       "yield on DEPLOYED capital, which differs from the line's yield whenever there is a remainder");
+
+  /* FLOOR, NOT ROUND — and the fixture has to be chosen so the two DISAGREE.
+     Every case above divides to a fraction below .5, where floor and round
+     give the same answer, so they could not tell an over-allocating build from
+     a correct one. $50,000 against a $4,000 requirement is exactly 12.5:
+     rounding buys 13 contracts for $52,000 on a $50,000 account. */
+  const half = sizeToBuyingPower({ collateral: 4000, premium: 100 }, 50000);
+  eq(half.contracts, 12, "12.5 contracts floors to 12 — rounding would overspend the account");
+  eq(half.deployed, 48000, "and deploys only what those contracts require");
+  ok(half.deployed <= 50000, "deployed capital NEVER exceeds the buying power entered");
+  eq(half.idle, 2000, "the remainder is idle, not quietly spent");
+
+  /* ZERO CONTRACTS IS AN ANSWER, NOT AN ABSENCE. "You cannot afford this" is
+     exactly what a $5,000 account needs told about a $443 stock; dropping the
+     row would leave the reader wondering where it went. */
+  const small = sizeToBuyingPower(amgn, 5000);
+  eq(small.contracts, 0, "a line larger than the account sizes to zero");
+  eq(small.affordable, false, "and says so explicitly");
+  eq(small.collectible, 0, "collecting nothing is the honest number here");
+  eq(small.idle, 5000, "with the whole account left idle");
+
+  /* Unanswerable inputs are null, never a zero that reads as a real answer. */
+  ok(sizeToBuyingPower(amgn, 0) === null, "no buying power is unanswerable, not zero contracts");
+  ok(sizeToBuyingPower(amgn, null) === null, "and so is an absent one");
+  ok(sizeToBuyingPower(amgn, -100) === null, "and a negative one");
+  ok(sizeToBuyingPower({ collateral: 0, premium: 100 }, 50000) === null,
+     "a line with no collateral cannot be sized");
+  ok(sizeToBuyingPower(null, 50000) === null, "and neither can a missing line");
+}
+
+{
+  const rows = [
+    { ticker: "AMGN", collateral: 43000, premium: 1290 },
+    { ticker: "WMB",  collateral: 7000,  premium: 210 },
+    { ticker: "HUGE", collateral: 900000, premium: 40000 },
+  ];
+  const plan = planBuyingPower(rows, 50000);
+  eq(plan.buyingPower, 50000);
+  eq(plan.affordable, 2, "the line bigger than the account is counted as unaffordable");
+  eq(plan.best.ticker, "WMB", "the best line for THIS account is the one that collects most");
+  eq(plan.rows.length, 3, "and every row survives, sized — none is silently dropped");
+  ok(plan.rows.every((r) => r.sizing !== null), "each carries its own sizing");
+
+  /* HUGE has the largest premium per contract by far and is still not the
+     answer, because none of it is reachable. */
+  const huge = plan.rows.find((r) => r.ticker === "HUGE");
+  eq(huge.sizing.contracts, 0);
+  ok(huge.premium > plan.best.premium,
+     "the biggest per-contract premium on the chain loses to one the account can actually buy");
+
+  /* With no buying power entered the desk is unchanged — sizing is null and
+     nothing is filtered, because the feature is additive. */
+  const none = planBuyingPower(rows, null);
+  eq(none.buyingPower, null);
+  eq(none.rows.length, 3, "every row still present");
+  ok(none.rows.every((r) => r.sizing === null), "and none pretends to be sized");
+  eq(none.best, null, "with no best line claimed");
+  eq(planBuyingPower(null, 50000).rows.length, 0, "a null chain is empty, not a throw");
 }
 
 /* ---------- hygiene ------------------------------------------- */

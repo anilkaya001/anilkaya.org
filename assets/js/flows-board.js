@@ -15,18 +15,17 @@
   const body = document.getElementById("flowsBody");
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
-  const sideButtons = Array.from(document.querySelectorAll(".flows-side"));
   const viewButtons = Array.from(document.querySelectorAll(".flows-view"));
   const deck = document.getElementById("flowsDeck");
   const tableWrap = document.getElementById("flowsTableWrap");
-  if (!body || !statusEl || !sideButtons.length) return;
+  if (!body || !statusEl) return;
 
   const COLUMNS = 10;                // keep in sync with the <thead> in flows-pages.js
   const cache = new Map();           // side -> payload
   const inflight = new Map();        // side -> { promise, controller }
-  let side = initialSide();
+  const side = initialSide();        // fixed by the route, not by a control
   // Which side's rows are actually on screen right now, as opposed to which
-  // side the controls claim. They diverge for the duration of every fetch.
+  // side was requested. They diverge for the duration of every fetch.
   let painted = null;
 
   /* ---------- formatting -----------------------------------------
@@ -456,8 +455,20 @@
 
   /* ---------- data ------------------------------------------------ */
 
+  /* THE SIDE COMES FROM THE ROUTE, not from a control.
+  
+     It used to be a toggle on one page, which is two problems in one widget:
+     half the session sat behind a click, and a toggle has no address — a
+     reader could not link to the bearish side, bookmark it, or send it to
+     anyone. /flows/long/ and /flows/short/ are pages, so the rail can mark
+     which one you are on and a link can name one.
+  
+     The ?side= parameter is still honoured, because links to it exist in the
+     wild and breaking them costs more than reading one extra parameter. */
   function initialSide() {
     try {
+      if (/\/flows\/short\/?$/.test(location.pathname)) return "short";
+      if (/\/flows\/long\/?$/.test(location.pathname)) return "long";
       const q = new URLSearchParams(location.search).get("side");
       return q === "short" ? "short" : "long";
     } catch { return "long"; }
@@ -507,12 +518,13 @@
     statusEl.textContent = "Loading the " + which + " board…";
 
     /* Clear the table whenever the side being requested is not the one on
-       screen. select() flips the button fill, aria-pressed and the ?side= URL
-       synchronously, but the tbody was only ever replaced inside the success
-       handler — so on a slow connection the page presented the LONG rows under
-       a Short label, styled and announced as Short, for the whole fetch. Rows
-       from the wrong day's cross-section under the wrong heading are worse
-       than no rows. */
+       screen. The side is now fixed by the route, so within one page load this
+       can only fire if render() is ever called twice — but the guard stays,
+       because the failure it prevents is the expensive kind: the tbody is only
+       replaced inside the success handler, so a stale body would sit under the
+       new heading for the whole fetch, styled and announced as the new side.
+       Rows from the wrong cross-section under the wrong heading are worse than
+       no rows. */
     if (painted !== null && painted !== which) {
       body.replaceChildren();
       if (deck) deck.replaceChildren();
@@ -530,6 +542,14 @@
       if (which !== side || !payload) return;     // user moved on, or redirected
 
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
+
+      /* THE RAIL BADGE FOR THIS SIDE. The nav is server-rendered with the
+         slots empty, because filling them there would cost a D1 row read per
+         page view for a number the page is about to fetch anyway. This page
+         only ever holds its own side, so it fills its own badge and leaves
+         the other one hidden rather than guessing at it. */
+      const slot = document.querySelector('[data-rail-count="' + which + '"]');
+      if (slot) { slot.textContent = String(rows.length); slot.hidden = false; }
 
       /* AN EMPTY SIDE IS NOT AN EMPTY STORE. Under the dead band a side can
          legitimately hold nothing — no name cleared the bar on this side of
@@ -621,28 +641,7 @@
     });
   }
 
-  /* ---------- side toggle ----------------------------------------- */
-
-  function select(which) {
-    if (which !== "long" && which !== "short") return;
-    if (which === side && painted === side) return;
-    side = which;
-    for (const button of sideButtons) {
-      const on = button.dataset.side === which;
-      button.classList.toggle("is-on", on);
-      button.setAttribute("aria-pressed", String(on));
-    }
-    try {
-      const url = new URL(location.href);
-      url.searchParams.set("side", which);
-      history.replaceState(null, "", url);
-    } catch { /* deep-linking is a convenience, never a requirement */ }
-    render(which);
-  }
-
-  for (const button of sideButtons) {
-    button.addEventListener("click", () => select(button.dataset.side));
-  }
+  /* ---------- view toggle ----------------------------------------- */
 
   /* THE VIEW TOGGLE. Both renderers are fed from the same payload on every
      render, so switching is a visibility change and never a refetch — and the
@@ -688,5 +687,5 @@
   }
   selectView(readView());
 
-  select(side);
+  render(side);
 })();

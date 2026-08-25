@@ -68,6 +68,8 @@ const candles = [
 
 const upstream = http.createServer((req, res) => {
   upstreamCalls++;
+  const tm = req.url.match(/\/api\/stock\/([^/]+)\//);
+  const ticker = tm ? decodeURIComponent(tm[1]).toUpperCase() : "AAPL";
   openNow++;
   if (openNow > openPeak) openPeak = openNow;
   /* Held open a beat so genuinely concurrent requests overlap in the counter.
@@ -89,6 +91,12 @@ const upstream = http.createServer((req, res) => {
   if (path.endsWith("/option-contracts")) {
     const page = Number(new URL(req.url, "http://x").searchParams.get("page") || 1);
     pagesAsked.push(page);
+    /* THE ROOT MUST MATCH THE TICKER REQUESTED, because the desk now rejects
+       adjusted series — a root of AAPL1 against a request for AAPL delivers an
+       unknown share count, so its every dollar figure would be fiction. A stub
+       that served AAPL symbols for every ticker was not just unrealistic, it
+       made the whole chain look adjusted. */
+    const reroot = (sym) => String(sym).replace(/^[A-Z]+/, ticker);
     if (upstreamMode === "emptyChain") { send(200, JSON.stringify({ data: [] })); return; }
     /* A FULL PAGE MEANS THERE MAY BE MORE. The vendor caps limit at 500 and
        offers no ordering on this route, so a full page is the only signal that
@@ -96,7 +104,7 @@ const upstream = http.createServer((req, res) => {
        "part" returns one full page then a short one (complete). */
     if (upstreamMode === "big" || upstreamMode === "part") {
       const full = Array.from({ length: 500 }, (_, i) => ({
-        option_symbol: `PAG260918P${String((100 + i) * 1000).padStart(8, "0")}`,
+        option_symbol: `${ticker}260918P${String((100 + i) * 1000).padStart(8, "0")}`,
         nbbo_bid: "2.00", nbbo_ask: "2.05", implied_volatility: "0.30",
         open_interest: "900", volume: "50",
       }));
@@ -107,7 +115,9 @@ const upstream = http.createServer((req, res) => {
       send(200, JSON.stringify({ data: full }));
       return;
     }
-    send(200, JSON.stringify({ data: chainRows }));
+    send(200, JSON.stringify({
+      data: chainRows.map((r) => ({ ...r, option_symbol: reroot(r.option_symbol) })),
+    }));
     return;
   }
   if (path.includes("/ohlc/")) {

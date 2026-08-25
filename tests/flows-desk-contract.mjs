@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
+import { sizeToBuyingPower } from "../shared/flows-premium.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 
 let checks = 0;
@@ -193,8 +194,12 @@ try {
        mismatch was being reported by whichever later assertion happened to
        trip over the shift — a confusing message for the clearest possible
        defect. Order is part of a test's diagnosis. */
+    /* VISIBLE headers, because one column is conditional: Collect exists only
+       once a buying power does. A hidden <th> counted here would demand a cell
+       nothing should be drawing. The buying-power block below asserts both
+       states of that column explicitly, so nothing is lost by excluding it. */
     const shape = await page.evaluate(() => {
-      const heads = document.querySelectorAll(".desk-table thead th").length;
+      const heads = document.querySelectorAll(".desk-table thead th:not([hidden])").length;
       const rows = Array.from(document.querySelectorAll("#deskBody tr"));
       return { heads, widths: rows.map((r) => r.querySelectorAll("th, td").length) };
     });
@@ -263,7 +268,11 @@ try {
        index silently reads the wrong column the first time anyone inserts
        one — and this test was written the same day a column was inserted. */
     const calledIdx = await page.evaluate(() => {
-      const heads = Array.from(document.querySelectorAll(".desk-table thead th"));
+      /* :not([hidden]) is load-bearing. A conditional column that is present
+         in the markup but drawn in no row shifts every derived index past it,
+         which is the same off-by-one this block already warns about — just
+         arriving through the header list instead of through a magic number. */
+      const heads = Array.from(document.querySelectorAll(".desk-table thead th:not([hidden])"));
       const i = heads.findIndex((h) => /If called/.test(h.textContent));
       return i - 1;                                  // the first column is a <th> in each row
     });
@@ -461,7 +470,7 @@ try {
     const wide = await page.evaluate(() => {
       const wrap = document.getElementById("deskTableWrap");
       const table = document.querySelector(".desk-table");
-      const heads = Array.from(document.querySelectorAll(".desk-table thead th"));
+      const heads = Array.from(document.querySelectorAll(".desk-table thead th:not([hidden])"));
       const firstRow = document.querySelector("#deskBody tr");
       const cells = firstRow ? firstRow.querySelectorAll("th, td").length : 0;
       return {
@@ -482,6 +491,270 @@ try {
        `no header is crushed to an unreadable sliver (${wide.minHeadW}px)`);
     ok(wide.tableW <= wide.wrapW + 2,
        `thirteen columns fit without scrolling at desk width (${wide.tableW} in ${wide.wrapW})`);
+  }
+
+  /* ---------- buying power sizes the desk ------------------------
+     Still at 1440px: this is the block that adds a fourteenth column, so it
+     runs where there is room for one.
+
+     THE FIXTURE STRADDLES THE AFFORDABILITY CLIFF ON PURPOSE. At $10,000:
+
+       AAA 47 put   $4,700 collateral -> 2 contracts, collects $380
+       AAA 55 call  $5,100 collateral -> 1 contract,  collects  $60
+       BBB 380 put $38,000 collateral -> 0 contracts, collects   $0
+
+     BBB pays the most per contract and has the second-best yield, and this
+     account cannot buy one. So the collectible order is AAA, AAA, BBB where
+     every other key on the page orders it AAA, BBB, AAA or BBB, AAA, AAA. The
+     table is ALREADY rendered in AAA, BBB, AAA when this block starts, so a
+     controller that ignored the new key would be caught by the order not
+     changing at all. */
+  {
+    const BP = 10000;
+
+    /* A KNOWN STARTING STATE. The block above left the desk on a deep link
+       that pinned strategy=csp and rank=premium, and an ordering assertion
+       that inherits whatever the previous block happened to leave behind is
+       an assertion about test order rather than about the desk. */
+    await page.goto(server.baseURL + "/flows/desk/?t=AAA,BBB&strategy=both&rank=annualized",
+      { waitUntil: "domcontentloaded" });
+    await settle(3);
+
+    /* THE ARITHMETIC IS CHECKED AGAINST ITS AUTHORITY, not against numbers
+       typed into this file. flows-desk.js re-implements sizeToBuyingPower()
+       so the account balance never leaves the browser — see the comment there
+       — and a re-implementation with no parity check is a fork waiting to
+       drift. The rows come from the Worker's own JSON; the expected cells are
+       computed here by the shared module; the actual cells are read out of a
+       real browser. */
+    const chainOf = async (symbol) => {
+      const r = await fetch(
+        `${server.baseURL}/api/flows/chain?t=${symbol}&strategy=both&rank=yieldOnCollateral`,
+        { headers: { Cookie: `flows_session=${token}`, Accept: "application/json" } });
+      ok(r.ok, `the chain route answers for ${symbol} (${r.status})`);
+      return r.json();
+    };
+    const expected = new Map();
+    for (const symbol of ["AAA", "BBB"]) {
+      const payload = await chainOf(symbol);
+      for (const row of payload.rows || []) {
+        expected.set(`${row.ticker}|${row.strike}|${row.strategy}`, sizeToBuyingPower(row, BP));
+      }
+    }
+    ok(expected.size >= 3, `the fixture priced enough lines to size (${expected.size})`);
+
+    /* ---- the column exists only once a balance does ---- */
+    eq(await page.locator("#deskCollectHead").isHidden(), true,
+       "no Collect column before a buying power is entered");
+    eq(await page.locator("#deskPlan").isHidden(), true, "and no plan line");
+
+    const chainRequests = [];
+    page.on("request", (req) => {
+      if (req.url().includes("/api/flows/chain")) chainRequests.push(req.url());
+    });
+
+    const callsBefore = upstreamCalls;
+    await page.fill("#deskBP", "10,000");
+    await page.waitForFunction(
+      () => !document.getElementById("deskCollectHead").hidden, null, { timeout: 5000 });
+    eq(upstreamCalls, callsBefore,
+       "sizing to a balance spends no vendor call — it is arithmetic on rows already here");
+    eq(chainRequests.length, 0, "and issues no request at all");
+
+    /* ---- every Collect cell matches the shared module ---- */
+    const collectIdx = await page.evaluate(() => {
+      const heads = Array.from(document.querySelectorAll(".desk-table thead th:not([hidden])"));
+      return heads.findIndex((h) => /Collect/.test(h.textContent)) - 1;
+    });
+    ok(collectIdx >= 0, "the Collect column is drawn");
+
+    const seen = [];
+    for (const tr of await page.locator("#deskBody tr").all()) {
+      const ticker = (await tr.locator("th").textContent()).trim();
+      const strike = Number((await tr.locator("td").nth(1).textContent()).trim());
+      const side = (await tr.locator("td.c-side").textContent()).trim();
+      const strategy = side === "Covered call" ? "cc" : "csp";
+      const cell = tr.locator("td").nth(collectIdx);
+      const text = (await cell.textContent()).trim();
+      const want = expected.get(`${ticker}|${strike}|${strategy}`);
+      ok(want !== undefined, `the browser row ${ticker} ${strike} came from the Worker's payload`);
+      seen.push({ ticker, strike, text, want });
+
+      if (!want.affordable) {
+        /* $0 IS A READING. A blank or a dash here would say "not measured",
+           and what is true is "one contract costs more than the account". */
+        eq(text, "$0", `${ticker} ${strike} collects nothing at $${BP}`);
+        ok(await cell.evaluate((el) => el.classList.contains("is-unaffordable")),
+           "and the cell is marked as a verdict rather than a figure");
+        const title = await cell.getAttribute("title");
+        ok(title && /more than/.test(title),
+           `and says by how much it misses (${title})`);
+      } else {
+        const dollars = "$" + Math.round(want.collectible).toLocaleString("en-US");
+        eq(text, `${dollars} (${want.contracts}\u00d7)`,
+           `${ticker} ${strike} collects what sizeToBuyingPower() says it does`);
+        const title = await cell.getAttribute("title");
+        ok(title && title.includes("$" + Math.round(want.deployed).toLocaleString("en-US")),
+           "and the tooltip names the capital it deploys");
+        ok(title && title.includes("$" + Math.round(want.idle).toLocaleString("en-US")),
+           "and what it leaves idle — the number a yield percentage hides");
+      }
+    }
+    ok(seen.some((r) => !r.want.affordable), "the fixture contains an unaffordable line");
+    ok(seen.some((r) => r.want.affordable && r.want.contracts > 1),
+       "and one the account can buy more than once");
+
+    /* ---- the plan line ---- */
+    const plan = await page.locator("#deskPlan").textContent();
+    ok(/\$10,000 buying power/.test(plan), `the plan states the balance (${plan})`);
+    ok(/best single deployment: 2\u00d7 AAA 47\.00 cash-secured put/.test(plan),
+       `and names the best line, not the highest yield (${plan})`);
+    ok(/collects \$380/.test(plan), "with what it collects");
+    ok(/leaving \$600 idle/.test(plan),
+       "and the idle cash, which is the cost integer division imposes");
+
+    /* ---- ranking by what this account collects ---- */
+    const orderNow = async () =>
+      (await page.locator("#deskBody th").allTextContents()).map((t) => t.trim());
+    assert.deepEqual(await orderNow(), ["AAA", "BBB", "AAA"],
+      "before the switch the table is ranked by the default key"); checks++;
+
+    await page.selectOption("#deskRank", "collectible");
+    /* The wait is SWALLOWED so the assertion below is what reports. A bare
+       waitForFunction turns the clearest possible failure — a table in the
+       wrong order — into a bare TimeoutError naming a line number and no
+       ordering at all. The wait is here to avoid a race, not to be the test. */
+    await page.waitForFunction(() => {
+      const t = document.querySelectorAll("#deskBody th");
+      return t.length === 3 && t[1].textContent.trim() === "AAA";
+    }, null, { timeout: 5000 }).catch(() => {});
+    assert.deepEqual(await orderNow(), ["AAA", "AAA", "BBB"],
+      "ranking by premium collectible sinks the line this account cannot buy"); checks++;
+    eq(upstreamCalls, callsBefore, "and re-ranking still spends no vendor call");
+
+    /* ---- the server rank the client asks for ---- */
+    {
+      /* "collectible" cannot be a server rank: it depends on a balance the
+         Worker deliberately never learns. Yield on collateral is its proxy,
+         exact to within one contract's premium, and it is what decides which
+         120 rows survive truncation. Asking for a key the API does not have
+         would silently fall back to the default and truncate the wrong slice. */
+      chainRequests.length = 0;
+      await page.click("#deskRefresh");
+      await page.waitForFunction((n) => n > 0, chainRequests.length, { timeout: 100 })
+        .catch(() => {});
+      await page.waitForTimeout(400);
+      ok(chainRequests.length > 0, "Refresh does go back to the route");
+      for (const url of chainRequests) {
+        const rank = new URL(url).searchParams.get("rank");
+        eq(rank, "yieldOnCollateral",
+           `a collectible ranking asks the API for its proxy, not for a key it lacks (${rank})`);
+      }
+    }
+
+    /* ---- the balance survives a reload, and says that it does ---- */
+    {
+      const u = new URL(page.url());
+      eq(u.searchParams.get("bp"), "10000", "the balance is held in the URL like the rest of the desk");
+      const help = await page.locator("#deskBPHelp").textContent();
+      ok(/link you share carries it too/.test(help),
+         "and the page says so, because an account size in a shared link is not a surprise anyone should get");
+    }
+
+    /* ---- an unreadable balance is marked, not swallowed ---- */
+    {
+      await page.fill("#deskBP", "25.000.00");
+      await page.waitForFunction(
+        () => document.getElementById("deskBP").getAttribute("aria-invalid") === "true",
+        null, { timeout: 3000 });
+      eq(await page.locator("#deskCollectHead").isHidden(), true,
+         "an unparseable balance sizes nothing");
+      ok(await page.locator("#deskBP").evaluate((el) => el.classList.contains("is-invalid")),
+         "and the field says it is the input that is wrong, not the desk");
+      /* The rank had nowhere to go, so it must not stay pointing at a key
+         nothing can compute. */
+      eq(await page.locator("#deskRank").inputValue(), "annualized",
+         "and the collectible ranking falls back rather than sorting by nothing");
+
+      await page.fill("#deskBP", "25k");
+      await page.waitForFunction(
+        () => !document.getElementById("deskCollectHead").hidden, null, { timeout: 3000 });
+      eq(new URL(page.url()).searchParams.get("bp"), "25000",
+         "shorthand is accepted and normalised — 25k is a balance a person types");
+    }
+  }
+
+  /* ---------- the pane resizes, including from the keyboard ------ */
+  {
+    /* A native `resize: both` corner would cover the pointer and nothing else.
+       These three grips exist because a keyboard cannot reach that corner and
+       a screen reader is never told the pane is resizable at all. */
+    for (const id of ["deskGripX", "deskGripY", "deskGripXY"]) {
+      eq(await page.locator("#" + id).getAttribute("tabindex"), "0",
+         `${id} is reachable by keyboard`);
+    }
+    eq(await page.locator("#deskGripX").getAttribute("aria-orientation"), "vertical",
+       "the width grip is announced as a vertical separator");
+    eq(await page.locator("#deskGripY").getAttribute("aria-orientation"), "horizontal",
+       "and the height grip as a horizontal one");
+
+    /* THE CORNER BORROWS NO ROLE. It answers arrow keys, and every role that
+       fits its shape promises something else: button promises Enter and Space,
+       separator carries a single orientation, slider is one-dimensional. A
+       focusable element whose label states the interaction is honest where a
+       borrowed role is a promise the handle breaks. */
+    eq(await page.locator("#deskGripXY").getAttribute("role"), null,
+       "the corner claims no role it cannot honour");
+    const cornerLabel = await page.locator("#deskGripXY").getAttribute("aria-label");
+    ok(cornerLabel && /arrow keys/i.test(cornerLabel),
+       `and its label says how to work it (${cornerLabel})`);
+
+    const size = () => page.evaluate(() => ({
+      w: Math.round(document.getElementById("deskPane").getBoundingClientRect().width),
+      h: Math.round(document.getElementById("deskTableWrap").getBoundingClientRect().height),
+    }));
+
+    const before = await size();
+    await page.focus("#deskGripX");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    const narrower = await size();
+    ok(narrower.w < before.w,
+       `the arrow keys narrow the pane (${before.w} -> ${narrower.w})`);
+    eq(narrower.h, before.h, "and leave the height alone");
+
+    await page.focus("#deskGripY");
+    await page.keyboard.press("ArrowUp");
+    const shorter = await size();
+    ok(shorter.h < narrower.h, `and the height grip shortens it (${narrower.h} -> ${shorter.h})`);
+
+    /* THE CORNER IS BOTH AT ONCE, which is the whole reason it exists. */
+    await page.focus("#deskGripXY");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
+    const bigger = await size();
+    ok(bigger.w > shorter.w && bigger.h > shorter.h,
+       `the corner moves both axes (${shorter.w}x${shorter.h} -> ${bigger.w}x${bigger.h})`);
+
+    /* A FLOOR, or the reader can drag the table out of existence and has no
+       way back to it. */
+    await page.focus("#deskGripX");
+    for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowLeft");
+    const floor = await size();
+    ok(floor.w >= 320, `the pane cannot be collapsed past a usable width (${floor.w}px)`);
+
+    /* And the way back. */
+    eq(await page.locator("#deskGripReset").isHidden(), false,
+       "a resized pane offers to go back");
+    await page.click("#deskGripReset");
+    const restored = await size();
+    ok(restored.w > floor.w, `Reset restores the pane (${floor.w} -> ${restored.w})`);
+    eq(await page.locator("#deskGripReset").isHidden(), true,
+       "and the offer withdraws once there is nothing to restore");
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1);
+    eq(overflow, false, "a fourteen-column desk still overflows nothing at 1440px");
 
     await page.setViewportSize({ width: 390, height: 900 });
   }
@@ -502,7 +775,8 @@ try {
 
   console.log(`✓ flows-desk: ${checks} assertions — cross-symbol re-ranking, URL-held state, ` +
     `select-all tri-state, a refresh floor that spends nothing, per-chip failure isolation, ` +
-    `and no vendor call for a symbol the page can reject itself`);
+    `a desk sized to a real balance and checked against the module that defines the sizing, ` +
+    `and a pane three grips and a keyboard can resize`);
 } finally {
   await browser.close();
   await server.stop();

@@ -93,7 +93,7 @@ try {
   /* THE REAL MARKUP. A stub dialog would pass this test while the shipped page
      was missing the panel's own container — which is the failure the id in
      flows-pages.js and the id in flows-card.js exist to keep in step. */
-  const boardHTML = FLOWS_PAGES.boardPage({ username: "test" })
+  const boardHTML = FLOWS_PAGES.sidePage({ username: "test", side: "long" })
     .replace(/<script[^>]*><\/script>/g, "")
     .replace("</body>", '<div id="h"></div></body>');
   await page.setContent(boardHTML);

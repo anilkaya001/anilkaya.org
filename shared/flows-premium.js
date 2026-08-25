@@ -295,6 +295,29 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1 } = {}) {
    omission about how thin the real opportunity set is.
    ============================================================= */
 
+/* =============================================================
+   ADJUSTED CONTRACTS CANNOT BE PRICED, so they are not priced.
+
+   Every dollar on this desk multiplies by 100 — premium, collateral,
+   breakeven, and everything derived from them. That multiplier is the
+   standard deliverable, and it is NOT universal: after a split, a
+   merger or a special dividend, the OCC issues an adjusted series
+   whose contract may deliver a different share count, or shares plus
+   cash. Those series carry a suffixed root — AAPL1, AAPL2 — while the
+   ordinary ones carry the bare ticker.
+
+   The vendor exposes no deliverable field and no shares-per-contract,
+   so an adjusted contract's economics are not recoverable from this
+   response at all. Multiplying it by 100 anyway would put a
+   confidently wrong dollar figure in every money column of that row,
+   and nothing on the page could reveal it.
+
+   So the root is compared against the ticker that was ASKED FOR, and
+   a mismatch is excluded and counted like any other gate. Dropping a
+   row the desk cannot price is the small cost; the alternative is
+   pricing it wrongly, which is not a cost the reader can see.
+   ============================================================= */
+
 export const DEFAULT_GATES = Object.freeze({
   /* Wider than this and the bid is not a price, it is a placeholder. 15% of
      mid is loose for SPY and tight for a $3 biotech; it is a starting gate,
@@ -330,17 +353,28 @@ export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollate
  */
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
+  ticker = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
   const { divisor, basis } = ivConvention(list.map((r) => r && r.implied_volatility));
 
-  const gated = { unpriceable: 0, spread: 0, openInterest: 0, premium: 0, expiry: 0, strategy: 0 };
+  const gated = {
+    unpriceable: 0, nonStandard: 0, spread: 0, openInterest: 0,
+    premium: 0, expiry: 0, strategy: 0,
+  };
+  /* Only checkable when the caller says what it asked for. No ticker, no
+     check — asserted rather than assumed, because a silent skip here is the
+     same wrong number arriving by a different route. */
+  const want = typeof ticker === "string" && ticker ? ticker.trim().toUpperCase() : null;
   const rows = [];
 
   for (const raw of list) {
     const p = priceSale(raw, { spot, asOf, ivDivisor: divisor });
     if (!p) { gated.unpriceable++; continue; }
+    /* An adjusted series — AAPL1 against a request for AAPL — delivers an
+       unknown share count, so its every dollar figure would be fiction. */
+    if (want !== null && p.ticker !== want) { gated.nonStandard++; continue; }
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
     if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
     if (p.premium < g.minPremium) { gated.premium++; continue; }
@@ -457,4 +491,88 @@ export function crossesEarnings(expiry, earningsDate, announceTime) {
   if (BEFORE_OPEN.has(token)) return true;
   if (AFTER_CLOSE.has(token)) return false;
   return null;
+}
+
+/* =============================================================
+   BUYING POWER — what you can actually collect, not what a line pays
+
+   The desk ranks by yield, which is the right way to compare two
+   contracts and the wrong way to plan a session. A 3% yield on a
+   $38,000 collateral requirement and a 3% yield on a $4,700 one are
+   the same number and completely different trades when the capital
+   is finite. "Greatest premium collectible" is the question a seller
+   actually has, and it cannot be answered without knowing the size
+   of the account.
+
+   THE ARITHMETIC IS INTEGER DIVISION AND NOTHING ELSE:
+
+     contracts = floor(buyingPower / collateral)
+     collectible = contracts * premium
+     deployed = contracts * collateral
+     idle = buyingPower - deployed
+
+   No free parameters, so it clears the identification bar. What it
+   does NOT do is model margin, and that omission is deliberate and
+   labelled rather than papered over.
+
+   THE CASH-SECURED ASSUMPTION IS A CHOICE, AND IT IS THE CONSERVATIVE
+   ONE. A cash-secured put reserves the whole strike; a broker
+   offering margin will reserve far less and let the same capital
+   write several times the contracts. Modelling that would need a
+   broker's margin formula — Reg-T, portfolio margin, house
+   requirements all differ — which is a free parameter per account.
+   So this reports what CASH secures, states that it is doing so, and
+   under-counts rather than over-counts. A desk that flatters the
+   account is worse than one that under-promises.
+
+   A COVERED CALL IS NOT BOUGHT WITH CASH, which makes `contracts`
+   mean something different on that side: it is how many hundred-share
+   lots the capital would BUY at spot, not how much cash is set aside.
+   A seller who already owns the shares has a different constraint
+   entirely — their limit is the position, not the account. Both are
+   reported so neither is mistaken for the other.
+   ============================================================= */
+
+/** Contracts affordable, and what they collect. Null when unanswerable. */
+export function sizeToBuyingPower(row, buyingPower) {
+  const bp = numOrNull(buyingPower);
+  if (bp === null || !(bp > 0)) return null;
+  if (!row || !(row.collateral > 0) || !(row.premium > 0)) return null;
+
+  const contracts = Math.floor(bp / row.collateral);
+  const deployed = contracts * row.collateral;
+  return {
+    contracts,
+    /* Zero contracts is a REAL ANSWER, not an absence: this line costs more
+       than the account holds. It is reported rather than dropped, because
+       "you cannot afford this" is exactly what a seller with $5,000 needs to
+       know about a $443 stock, and silently omitting the row would leave them
+       wondering where it went. */
+    affordable: contracts > 0,
+    collectible: contracts * row.premium,
+    deployed,
+    idle: bp - deployed,
+    /* Yield on the capital ACTUALLY committed, which is not the line's yield
+       whenever integer division leaves a remainder. */
+    yieldOnDeployed: deployed > 0 ? (contracts * row.premium) / deployed : null,
+  };
+}
+
+/** The same, applied across a ranked chain, plus the totals a session needs. */
+export function planBuyingPower(rows, buyingPower) {
+  const bp = numOrNull(buyingPower);
+  const list = Array.isArray(rows) ? rows : [];
+  if (bp === null || !(bp > 0)) {
+    return { buyingPower: null, rows: list.map((r) => ({ ...r, sizing: null })), affordable: 0, best: null };
+  }
+  const out = list.map((r) => ({ ...r, sizing: sizeToBuyingPower(r, bp) }));
+  const affordable = out.filter((r) => r.sizing && r.sizing.affordable);
+  /* The single line that collects the most from THIS account — which is
+     frequently not the highest-yielding line, and that gap is the whole
+     reason this exists. */
+  let best = null;
+  for (const r of affordable) {
+    if (best === null || r.sizing.collectible > best.sizing.collectible) best = r;
+  }
+  return { buyingPower: bp, rows: out, affordable: affordable.length, best };
 }

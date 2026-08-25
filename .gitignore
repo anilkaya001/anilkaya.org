@@ -9,8 +9,19 @@ node_modules/
 
 # Scratch probes. Rendering checks and viewport measurements get written into
 # tests/ so they can resolve playwright from tests/node_modules, and `git add -A`
-# has swept them into a PUBLIC repository twice. They carry absolute paths and
-# no assertions; anything worth keeping becomes a real contract test instead.
+# has swept them into a PUBLIC repository three times now. They carry absolute
+# paths and no assertions; anything worth keeping becomes a real contract test.
+#
+# ENUMERATING NAMES IS A LOSING GAME, and the list below is the evidence: it
+# caught probe-* and cardshot-* and missed _d2.mjs, which shipped in #18, and
+# __chip_probe.html, which was one `--amend` from shipping here. What every one
+# of them actually shares is a leading underscore, so that is what is ignored —
+# a convention a future probe will follow without this file being updated.
+#
+# articles/_template/ is the one real leading-underscore path in the tree.
+_*
+!articles/_template/
+!articles/_template/**
 tests/*_tmp.mjs
 tests/.tmp-*
 tests/probe-*.mjs
