@@ -1559,6 +1559,10 @@ async function main() {
         features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
         strikes: e.raw.strikes,
         ticks: e.raw.ticks,
+        // The expiry gamma was fetched for the score and thrown away at the
+        // card boundary; the roll-off staircase costs nothing to add.
+        expiries: e.raw.expiries,
+        weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
       });
 

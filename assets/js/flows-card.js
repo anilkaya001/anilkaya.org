@@ -51,22 +51,31 @@
   };
 
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const pct = (v) => (isNum(v) === null ? DASH : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%");
-  const sigma = (v) => (isNum(v) === null ? DASH : (v >= 0 ? "+" : "") + v.toFixed(2) + "σ");
-  const px2 = (v) => (isNum(v) === null ? DASH : v.toFixed(2));
+  /* ONE MINUS SIGN, U+2212, everywhere on the card. JavaScript's own toFixed
+     emits U+002D, which is narrower and sits lower, so a card mixed the two
+     within a single numeric column — the money formatter used the typographic
+     minus and every other formatter the hyphen. */
+  const MINUS = "\u2212";
+  const neg = (str) => String(str).replace(/-/g, MINUS);
+  const signed = (n, body) => (n >= 0 ? "+" : MINUS) + body(Math.abs(n));
+  const pct = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(2) + "%"));
+  const pct1 = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(1) + "%"));
+  const sigma = (v) => (isNum(v) === null ? DASH : signed(v, (a) => a.toFixed(2) + "σ"));
+  const px2 = (v) => (isNum(v) === null ? DASH : neg(v.toFixed(2)));
+  const vol1 = (v) => (isNum(v) === null ? DASH : neg((v * 100).toFixed(1)) + "%");
   // "$-1.23B" prints the sign inside the currency symbol. The minus belongs in
   // front of the whole quantity, which is where a reader scanning a column
   // expects it.
   const money = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
-    return (n < 0 ? "\u2212" : "") + "$" + compact(Math.abs(n));
+    return (n < 0 ? MINUS : "") + "$" + compact(Math.abs(n));
   };
   const compact = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
     const a = Math.abs(n);
-    const s = n < 0 ? "-" : "";
+    const s = n < 0 ? MINUS : "";
     if (a >= 1e9) return s + (a / 1e9).toFixed(2) + "B";
     if (a >= 1e6) return s + (a / 1e6).toFixed(1) + "M";
     if (a >= 1e3) return s + (a / 1e3).toFixed(0) + "K";
@@ -85,6 +94,26 @@
       reason || "This panel's data source did not return.",
     ));
     host.append(note);
+  }
+
+  /**
+   * A definition list whose pairs cannot come apart.
+   *
+   * The stat block was a grid of `repeat(auto-fit, minmax(8rem, 1fr))` with dt
+   * and dd as separate children, so six items in five columns wrapped the last
+   * dt onto a new row and orphaned its dd under the WRONG label — on every
+   * desktop card, silently, because the six-item case only appeared once the
+   * panel grew. Wrapping each pair makes the grid item atomic.
+   */
+  function statList(pairs) {
+    const dl = el("dl", "fc-stats");
+    for (const [k, v, cls] of pairs) {
+      const wrap = el("div", "fc-stat");
+      wrap.append(el("dt", null, k));
+      wrap.append(el("dd", cls || null, v));
+      dl.append(wrap);
+    }
+    return dl;
   }
 
   function panelHead(host, question) {
@@ -116,6 +145,14 @@
       if (a <= tau || span <= 0) return s * (tau > 0 ? lam * (a / tau) : 0);
       return s * (lam + (1 - lam) * (Math.log10(a / tau) / span));
     };
+  }
+
+  /** A round tick interval at or just below `raw`: 1, 2, 2.5 or 5 times a power of ten. */
+  function niceStep(raw) {
+    if (!(raw > 0)) return 0;
+    const e = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [5, 2.5, 2, 1]) if (m * e <= raw) return m * e;
+    return e;
   }
 
   function quantileAbs(values, q) {
@@ -167,11 +204,23 @@
     const share = Math.abs(fMin) / (Math.abs(fMin) + Math.abs(fMax) || 1);
     const x0 = plotL + plotW * Math.min(0.82, Math.max(0.18, share));
     const negW = x0 - plotL, posW = plotR - x0;
-    const xOf = (v) => {
-      const t = f(v);
-      return t < 0 ? x0 - (Math.abs(t) / (Math.abs(fMin) || 1)) * negW
-                   : x0 + (t / (fMax || 1)) * posW;
-    };
+
+    /* ONE SCALE ACROSS THE ZERO RULE.
+
+       Each side used to be normalised against its OWN extreme, so the largest
+       bar on each side was drawn at that side's full width no matter what it
+       was worth. A book whose short side is 1% of its long side drew that 1%
+       at 22% of the ink — the reader's first impression of the balance of the
+       book was manufactured by the renderer.
+
+       `rate` is the largest pixels-per-unit that fits BOTH sides inside their
+       halves, so the two are directly comparable and neither overflows. */
+    const rate = Math.min(
+      Math.abs(fMin) > 0 ? negW / Math.abs(fMin) : Infinity,
+      fMax > 0 ? posW / fMax : Infinity,
+    );
+    const barRate = Number.isFinite(rate) ? rate : 0;
+    const xOf = (v) => x0 + f(v) * barRate;
 
     const lo = bars[0].k, hi = bars[bars.length - 1].k;
     const yOfIndex = (i) => padT + (bars.length - 1 - i) * ROW + ROW / 2;
@@ -195,9 +244,45 @@
       id: "gpNeg", width: 4, height: 4, patternUnits: "userSpaceOnUse",
       patternTransform: "rotate(45)", class: "gp-negpat",
     });
-    pat.append(svgEl("line", { x1: 0, y1: 0, x2: 0, y2: 4, stroke: "currentColor", "stroke-width": 1.6 }));
+    /* The hatch line sits at the CENTRE of the tile, not on its edge. At x=0
+       a 1.6px stroke puts 0.8px outside the tile, where patternUnits clips it,
+       so a short-gamma bar rendered at a fraction of the ink of an identical
+       long-gamma bar and the texture that is supposed to carry the sign in a
+       greyscale render was almost invisible. */
+    pat.append(svgEl("line", { x1: 2, y1: 0, x2: 2, y2: 4, stroke: "currentColor", "stroke-width": 1.8 }));
     defs.append(pat);
     svg.append(defs);
+
+    /* DECADE TICKS. A symlog's log segment is exactly scale-invariant, so a
+       book with a 35:1 spread and one with a 4e17:1 spread draw identically:
+       bar LENGTH alone encodes rank, not magnitude. Printing a rule and a
+       label at each power of ten restores the magnitude to the ink, which is
+       what the panel's own note used to apologise for not having. */
+    const marks = [];
+    for (let e = Math.ceil(Math.log10(tau)); Math.pow(10, e) <= vmax; e++) marks.push(Math.pow(10, e));
+    /* A book whose whole range is under one decade would otherwise get NO
+       magnitude reference at all, which is the failure this rail exists to
+       fix. The knee — where the axis stops being linear — and the widest bar
+       are always marked, so the reader always has two labelled quantities to
+       read the rest against. */
+    marks.push(tau, vmax);
+
+    const decades = [];
+    for (const v of marks.sort((a, b) => a - b)) {
+      for (const sgn of [1, -1]) {
+        const x = xOf(sgn * v);
+        if (x < plotL + 2 || x > plotR - 2) continue;
+        if (Math.abs(x - x0) < 18) continue;             // never crowd the zero rule
+        if (decades.some((d) => Math.abs(d.x - x) < 40)) continue;
+        decades.push({ x, v, sgn });
+      }
+    }
+    for (const d of decades) {
+      svg.append(svgEl("line", { class: "gp-tick", x1: d.x, x2: d.x, y1: padT - 2, y2: H - padB + 2 }));
+      const t = svgEl("text", { class: "gp-ticklabel", x: d.x, y: H - padB + 14, "text-anchor": "middle" });
+      t.textContent = (d.sgn < 0 ? MINUS : "") + compact(d.v);
+      svg.append(t);
+    }
 
     // the zero rule
     svg.append(svgEl("line", { class: "gp-zero", x1: x0, x2: x0, y1: padT - 4, y2: H - padB + 4 }));
@@ -235,11 +320,12 @@
        one place the two series must agree. */
     const cs = cum.map(f);
     const cMin = Math.min(...cs, 0), cMax = Math.max(...cs, 0);
-    const xOfCum = (v) => {
-      const t = f(v);
-      return t < 0 ? x0 - (Math.abs(t) / (Math.abs(cMin) || 1)) * negW
-                   : x0 + (t / (cMax || 1)) * posW;
-    };
+    const cumRate = Math.min(
+      Math.abs(cMin) > 0 ? negW / Math.abs(cMin) : Infinity,
+      cMax > 0 ? posW / cMax : Infinity,
+    );
+    const cRate = Number.isFinite(cumRate) ? cumRate : 0;
+    const xOfCum = (v) => x0 + f(v) * cRate;
     const pts = cum.map((c, i) => [xOfCum(c), yOfIndex(i)]);
     for (const sign of [1, -1]) {
       let d = "", open = false;
@@ -303,6 +389,19 @@
         lv ? pct(lv.distPct) + " · " + sigma(lv.distAtr) : null, "is-flip"));
     }
 
+    /* PRICE TICKS. The labels below are earned rather than gridded, which
+       keeps the rail readable — but with nothing else on the axis a 225px
+       column of 25 strikes carried no price reference between one earned
+       label and the next. Unlabelled ticks at a round step restore the ruler
+       without adding text. */
+    const tickStep = niceStep((hi - lo) / 8);
+    if (tickStep > 0) {
+      for (let v = Math.ceil(lo / tickStep) * tickStep; v <= hi + 1e-9; v += tickStep) {
+        const y = yOfPrice(v);
+        svg.append(svgEl("line", { class: "gp-ptick", x1: labelW - 4, x2: labelW, y1: y, y2: y }));
+      }
+    }
+
     // Price labels are earned, not gridded: spot, flip, and the three biggest
     // strikes by |gamma|, with a de-collision pass.
     const wanted = [];
@@ -323,8 +422,10 @@
       if (placed.length >= 8) break;
     }
 
-    const axis = svgEl("text", { class: "gp-axis", x: plotL, y: H - 10 });
-    axis.textContent = "net dealer Γ — short ◀ 0 ▶ long";
+    /* The caption sits AT the zero rule it labels rather than at the far left
+       of the canvas, where it was 303px away from the thing it described. */
+    const axis = svgEl("text", { class: "gp-axis", x: x0, y: H - 3, "text-anchor": "middle" });
+    axis.textContent = "◀ short   net dealer Γ   long ▶";
     svg.append(axis);
 
     svg.setAttribute("aria-label",
@@ -335,15 +436,230 @@
 
     host.append(svg);
 
+    /* THE SENTENCE IS DERIVED, NOT ASSERTED.
+
+       This used to read "dealers are short gamma below X and long above it" as
+       a hardcoded string. Whether that holds is determined by the sign of the
+       cumulative on the low side of the crossing the pipeline actually chose,
+       and on the live board it was frequently the other way round — the note
+       contradicted the header badge on the same card. */
+    const regime = card.regime || {};
+    const below = regime.flipSide === "long_below" ? "long" : "short";
+    const above = below === "long" ? "short" : "long";
+    const amplifies = (side) => (side === "short"
+      ? "hedging amplifies moves there"
+      : "hedging damps them there");
+
     const note = el("p", "fc-note");
+    const band = isNum(regime.bandMin) !== null && isNum(regime.bandMax) !== null
+      ? `Measured over strikes ${px2(regime.bandMin)}–${px2(regime.bandMax)} only, so this is net dealer gamma inside that band, not the whole book. `
+      : "";
     note.textContent =
       (flip !== null
-        ? `Dealers are short gamma below ${px2(flip)} — hedging amplifies moves there — and long above it, where hedging damps them. `
-        : "Net gamma does not change sign inside the drawn band, so no flip level exists here. ") +
-      `σ is ATR(14). The gamma axis is symlog: twice the bar is not twice the gamma, so read magnitudes from the numbers rather than the ink. ` +
-      `The running-total curve is drawn on its own scale — it shares only the zero line with the bars, where its crossing marks the flip.` +
+        ? `Dealers are ${below} gamma below ${px2(flip)} — ${amplifies(below)} — and ${above} above it. ` +
+          (isNum(regime.crossings) !== null && regime.crossings > 1
+            ? `The book crosses zero ${regime.crossings} times; this is the crossing nearest spot. `
+            : "")
+        : "Net gamma does not change sign materially inside the drawn band, so no flip level is published here. ") +
+      band +
+      `The gamma axis is symlog with decade rules: read magnitude off the labelled powers of ten, not off bar length. ` +
+      `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
+      `σ is ATR(14).` +
       (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
     host.append(note);
+  }
+
+  /* ---------- gamma roll-off ---------------------------------------- */
+
+  /**
+   * The expiry term structure of dealer gamma.
+   *
+   * Gamma exposure is almost always published as a scalar. It has a term
+   * structure, and the term structure is the difference between "it's pinned"
+   * and "it's pinned until Friday, and then it isn't". These rows were already
+   * being fetched for the score and thrown away at the card boundary.
+   */
+  function renderCalendar(host, panel) {
+    const question = "When does this dealer positioning expire, and what is left after it does?";
+    if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
+      return deadPanel(host, question, panel && panel.reason);
+    }
+    panelHead(host, question);
+
+    const rows = panel.schedule;
+    const W = 560, ROW = 26, padL = 96, padR = 56, padT = 8;
+    const H = padT + rows.length * ROW + 26;
+    const plotW = W - padL - padR;
+    const svg = svgEl("svg", {
+      class: "gc", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    // The staircase: cumulative share, so the reader sees the book drain.
+    let prevX = padL;
+    rows.forEach((r, i) => {
+      const y = padT + i * ROW;
+      const xEnd = padL + plotW * Math.min(1, r.cumShare);
+      svg.append(svgEl("rect", {
+        class: "gc-cum", x: padL, y: y + 4, width: Math.max(1, xEnd - padL), height: ROW - 10, rx: 1,
+      }));
+      svg.append(svgEl("rect", {
+        class: "gc-step", x: prevX, y: y + 4, width: Math.max(1.5, xEnd - prevX), height: ROW - 10, rx: 1,
+      }));
+      prevX = xEnd;
+
+      const lab = svgEl("text", { class: "gc-exp", x: padL - 8, y: y + ROW / 2 + 3, "text-anchor": "end" });
+      lab.textContent = r.expiry + (isNum(r.days) !== null ? "  " + r.days + "d" : "");
+      svg.append(lab);
+
+      const val = svgEl("text", { class: "gc-share", x: W - padR + 6, y: y + ROW / 2 + 3 });
+      val.textContent = (r.share * 100).toFixed(0) + "%";
+      svg.append(val);
+    });
+
+    // The half-life rule, where cumulative roll-off passes 50%.
+    const halfX = padL + plotW * 0.5;
+    svg.append(svgEl("line", { class: "gc-half", x1: halfX, x2: halfX, y1: padT, y2: H - 22 }));
+    const ht = svgEl("text", { class: "gc-axis", x: halfX, y: H - 8, "text-anchor": "middle" });
+    ht.textContent = "half the book";
+    svg.append(ht);
+
+    svg.setAttribute("aria-label",
+      `Gamma roll-off by expiry. ` + rows.map((r) =>
+        `${r.expiry}: ${(r.share * 100).toFixed(0)} percent`).join(", ") + ".");
+    host.append(svg);
+
+    host.append(statList([
+      ["Front expiry", rows[0].expiry],
+      ["Front share", (rows[0].share * 100).toFixed(0) + "%"],
+      ["Half-life", panel.halfLifeExpiry || DASH],
+      ["Mean life", isNum(panel.meanLifeDays) === null ? DASH : panel.meanLifeDays.toFixed(0) + " days"],
+      ["Expiries", String(panel.expiries)],
+    ]));
+
+    host.append(el("p", "fc-note",
+      "Gross gamma rolling off, so the two legs are summed in magnitude: put gamma " +
+      "arrives already dealer-signed, and a front week of one billion call against " +
+      "minus 999 million put is two billion of gamma about to expire, not the one " +
+      "million their signed sum leaves behind. " +
+      "Mean life is the gamma-weighted average days to expiry — unlike the front " +
+      "expiry's share it does not change when the chain is cut differently, so it " +
+      "is the number that compares across names."));
+  }
+
+  /* ---------- the priced move ---------------------------------------- */
+
+  /**
+   * The band the option market has already quoted.
+   *
+   * This is a PRICE, not a prediction, and the panel is built so it cannot be
+   * read as one: no point target, no direction, no probability. The horizon is
+   * the expiry the vendor quoted rather than a round number of days, because
+   * relabelling a quoted-expiry number as a fixed horizon silently rescales it
+   * by the ratio of the two maturities, differently for every name.
+   */
+  function renderMove(host, panel) {
+    const question = "What move has the option market already priced, and is that band rich or cheap?";
+    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    panelHead(host, question);
+
+    const W = 560, H = 92, padL = 16, padR = 16;
+    const plotW = W - padL - padR;
+    const svg = svgEl("svg", {
+      class: "pm", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    const mid = padL + plotW / 2;
+    const half = plotW * 0.42;
+    svg.append(svgEl("rect", { class: "pm-band", x: mid - half, y: 26, width: half * 2, height: 22, rx: 3 }));
+    svg.append(svgEl("line", { class: "pm-spot", x1: mid, x2: mid, y1: 18, y2: 56 }));
+    for (const [x, txt, cls] of [
+      [mid - half, px2(panel.low), "is-low"],
+      [mid, px2(panel.spot), "is-spot"],
+      [mid + half, px2(panel.high), "is-high"],
+    ]) {
+      const t = svgEl("text", { class: "pm-lab " + cls, x, y: 16, "text-anchor": "middle" });
+      t.textContent = txt;
+      svg.append(t);
+    }
+    const cap = svgEl("text", { class: "pm-axis", x: mid, y: 72, "text-anchor": "middle" });
+    cap.textContent = "±" + (panel.movePerc * 100).toFixed(1) + "% to " + (panel.horizonExpiry || "the quoted expiry") +
+      (isNum(panel.horizonDays) !== null ? "  ·  " + panel.horizonDays + " calendar days" : "");
+    svg.append(cap);
+    svg.setAttribute("aria-label",
+      `The option market prices a move of plus or minus ${(panel.movePerc * 100).toFixed(1)} percent ` +
+      `to ${panel.horizonExpiry || "the quoted expiry"}, a band from ${px2(panel.low)} to ${px2(panel.high)}.`);
+    host.append(svg);
+
+    host.append(statList([
+      ["Implied 30d vol", vol1(panel.iv30)],
+      ["Realized 30d vol", vol1(panel.rv30)],
+      ["Variance risk premium",
+        isNum(panel.vrp) === null ? DASH : signed(panel.vrp, (a) => (a * 100).toFixed(1) + " vol pts")],
+      ["Band", panel.richness === null ? DASH : panel.richness],
+    ]));
+
+    host.append(el("p", "fc-note",
+      "THIS IS A PRICE, NOT A FORECAST. The implied move is what the at-the-money " +
+      "contracts cost, so it is what someone would have to pay to be long that move " +
+      "— a risk-neutral quantity, not an expectation of where the stock goes. " +
+      "The variance risk premium beside it is the one comparative statement the data " +
+      "supports: implied 30-day volatility minus the volatility this stock has " +
+      "actually delivered over the last 30 sessions. Positive means the band is " +
+      "expensive against recent history. " +
+      "NOT CLAIMED: a direction, a probability, a point target, or that the stock " +
+      "will stay inside the band."));
+  }
+
+  /* ---------- price context ------------------------------------------ */
+
+  function renderContext(host, panel) {
+    const question = "Where has this name been, before any of today's flow?";
+    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    panelHead(host, question);
+
+    const closes = Array.isArray(panel.closes) ? panel.closes : [];
+    if (closes.length >= 2) {
+      const W = 560, H = 76, pad = 4;
+      let lo = Infinity, hi = -Infinity;
+      for (const c of closes) { if (c < lo) lo = c; if (c > hi) hi = c; }
+      const span = hi - lo || 1;
+      const xOf = (i) => pad + (i / (closes.length - 1)) * (W - pad * 2);
+      const yOf = (v) => pad + (1 - (v - lo) / span) * (H - pad * 2);
+      const svg = svgEl("svg", {
+        class: "px", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+        role: "img", preserveAspectRatio: "none",
+      });
+      // A baseline at the window's first close, so the line's position against
+      // it IS the window return — no axis labels needed.
+      svg.append(svgEl("line", { class: "px-base", x1: pad, x2: W - pad, y1: yOf(closes[0]), y2: yOf(closes[0]) }));
+      const d = closes.map((c, i) => (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yOf(c).toFixed(1)).join(" ");
+      const up = closes[closes.length - 1] >= closes[0];
+      svg.append(svgEl("path", { class: "px-line " + (up ? "is-pos" : "is-neg"), d }));
+      svg.append(svgEl("circle", {
+        class: "px-dot " + (up ? "is-pos" : "is-neg"),
+        cx: xOf(closes.length - 1), cy: yOf(closes[closes.length - 1]), r: 2.5,
+      }));
+      svg.setAttribute("aria-label",
+        `${closes.length} daily closes, from ${px2(closes[0])} to ${px2(closes[closes.length - 1])}.`);
+      host.append(svg);
+    }
+
+    host.append(statList([
+      ["Today", pct(panel.changePct)],
+      ["5 sessions", pct1(panel.r5)],
+      ["21 sessions", pct1(panel.r21)],
+      ["42 sessions", pct1(panel.r42)],
+      ["52-week position",
+        isNum(panel.week52Pos) === null ? DASH : Math.round(panel.week52Pos * 100) + "% of range"],
+    ]));
+
+    host.append(el("p", "fc-note",
+      "Simple close-to-close returns over the trailing window, and where the last " +
+      "close sits between the 52-week low and high. Descriptive only: none of it " +
+      "enters the score, and past returns over these horizons carry no forecast " +
+      "this system is willing to make."));
   }
 
   /* ---------- level rail ------------------------------------------- */
@@ -422,16 +738,11 @@
       `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}.`);
     host.append(svg);
 
-    const dl = el("dl", "fc-stats");
-    for (const [k, v] of [
+    host.append(statList([
       ["Net delta", compact(panel.netDelta)],
       ["Net premium", money(panel.netPremium)],
       ["Minutes on tape", String(panel.minutes)],
-    ]) {
-      dl.append(el("dt", null, k));
-      dl.append(el("dd", null, v));
-    }
-    host.append(dl);
+    ]));
     host.append(el("p", "fc-note",
       "The curve is the running total, so its shape is the accumulation: a straight " +
       "climb is a worked order, a single step is one print. Net premium is call buying " +
@@ -500,39 +811,88 @@
 
   /* ---------- score derivation -------------------------------------- */
 
-  const FAMILY_LABEL = {
-    F: "Flow — directional delta, weighted by purity",
-    P: "Positioning — dealer gamma regime and displacement",
-    D: "Path — how the day accumulated",
-    V: "Vol — how durable the current regime is",
-    O: "Quality — considered positioning versus lottery tickets",
-  };
+  const AXES = [
+    { k: "F", signed: true, label: "Flow", blurb: "net directional delta, premium tilt, aggressor volume and open-interest change — every column a ratio, so the column ranks flow rather than market capitalisation" },
+    { k: "P", signed: true, label: "Positioning", blurb: "where today's flow is building dealer gamma relative to where the standing book already is, in ATR units" },
+    { k: "D", signed: true, label: "Path", blurb: "how the day accumulated — steady work against the tape, or one spike already in the price" },
+    { k: "V", signed: false, label: "Vol regime", blurb: "how rich options are against delivered vol, where 30-day IV sits in its own year, and whether it is rising" },
+    { k: "O", signed: false, label: "Quality", blurb: "the multiplier this name earned: directional share of the tape, near-money rather than lottery, direction rather than vol, and dealer gamma at spot" },
+  ];
 
+  /**
+   * The decomposition.
+   *
+   * THREE SIGNED AXES AND TWO GAUGES, drawn differently on purpose. F, P and D
+   * carry a direction and are drawn from a centre origin; V and O carry none
+   * and are drawn as left-origin gauges, because putting an unsigned quantity
+   * on a signed axis is exactly the confusion that let unsigned magnitudes into
+   * the composite in the first place. A gauge at zero is a real reading; a
+   * signed axis at null is an absent one, and those must not look alike.
+   */
   function renderScore(host, card) {
-    const question = "Why is this name on the board?";
+    const question = "Why is this name on the board, and how much of the score came from where?";
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
 
+    const weights = card.weights || {};
+    const wTotal = Object.values(weights).reduce((a, w) => a + (isNum(w) || 0), 0);
+
     const list = el("ul", "fc-fam");
-    for (const k of ["F", "P", "D", "V", "O"]) {
-      const v = isNum(card.fam[k]);
-      const li = el("li", v === null ? "is-null" : v < 0 ? "is-neg" : "is-pos");
-      li.append(el("span", "fc-fam-k", k));
+    for (const axis of AXES) {
+      const v = isNum(card.fam[axis.k]);
+      const li = el("li", (axis.signed ? "is-signed " : "is-gauge ") +
+        (v === null ? "is-null" : !axis.signed ? "is-pos" : v < 0 ? "is-neg" : "is-pos"));
+      li.append(el("span", "fc-fam-k", axis.k));
+
       const track = el("span", "fc-fam-track");
+      // A zero mark on every signed track. Family V used to publish 0 on every
+      // name, be classed positive, and render as literally nothing — an empty
+      // track that looked identical to a track whose bar was too small to see.
+      if (axis.signed) track.append(el("b", "fc-fam-zero"));
       const bar = el("i");
-      bar.style.setProperty("--w", v === null ? 0 : Math.min(Math.abs(v) / 100, 1));
+      bar.style.setProperty("--w", v === null ? 0 : (axis.signed ? Math.min(Math.abs(v) / 100, 1) : Math.min(v / 100, 1)));
       track.append(bar);
       li.append(track);
-      li.append(el("span", "fc-fam-v", v === null ? DASH : (v > 0 ? "+" : "") + v));
-      li.append(el("span", "fc-fam-l", FAMILY_LABEL[k]));
+
+      li.append(el("span", "fc-fam-v", v === null ? DASH
+        : axis.signed ? (v > 0 ? "+" + v : v < 0 ? MINUS + Math.abs(v) : "0")
+        : String(v)));
+
+      const lab = el("span", "fc-fam-l");
+      lab.append(document.createTextNode(axis.label));
+      if (axis.signed && wTotal > 0 && isNum(weights[axis.k]) !== null) {
+        const w = el("span", "fc-fam-w");
+        w.textContent = " " + Math.round((weights[axis.k] / wTotal) * 100) + "% of the blend";
+        lab.append(w);
+      } else if (!axis.signed) {
+        lab.append(el("span", "fc-fam-w", " gauge — no direction"));
+      }
+      lab.title = axis.blurb;
+      li.append(lab);
       list.append(li);
     }
     host.append(list);
+
+    const conv = card.conv || {};
+    host.append(statList([
+      ["Score", isNum(card.score) === null ? DASH
+        : (card.score > 0 ? "+" : card.score < 0 ? MINUS : "") + Math.abs(card.score)],
+      ["Conviction", isNum(card.conviction) === null ? DASH : String(card.conviction)],
+      ["Agreement", isNum(conv.agreement) === null ? DASH : Math.round(conv.agreement * 100) + "%"],
+      ["Axes present", isNum(conv.breadth) === null ? DASH : conv.breadth + " of 3"],
+      ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
+      ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
+    ]));
+
     host.append(el("p", "fc-note",
-      "Each family is scored across the whole cross-section, then the blend is " +
-      "neutralised against sector and market cap — so this ranks the name against " +
-      "its peers rather than rediscovering that one sector was strong today. The score " +
-      "is a ranked attention signal, not a return forecast."));
+      "The three signed axes are blended by EFFECTIVE breadth — a family of five " +
+      "columns that all restate the same tape counts as one signal, not five — and " +
+      "the blend is then multiplied by the quality gate, which is bounded above by " +
+      "two and averages one across the board, so it can amplify or damp a reading " +
+      "but never reverse it. The result is neutralised against sector and market cap, " +
+      "then scored against a FIXED unit: two robust sigma from the cross-sectional " +
+      "median is 80, on every session and at every board size. A quiet day therefore " +
+      "prints quiet scores. This is a ranked attention signal, not a return forecast."));
   }
 
   /* ---------- assembly ---------------------------------------------- */
@@ -543,11 +903,15 @@
     return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : String(iso);
   }
 
+  let painted = null;
+
   function paint(card, updatedAt) {
+    painted = { card, updatedAt };
     $("fcTitle").textContent = card.ticker;
     const score = isNum(card.score);
     const badge = $("fcScore");
-    badge.textContent = score === null ? DASH : (score > 0 ? "+" : "") + score;
+    badge.textContent = score === null ? DASH
+      : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
     badge.className = "fc-score " + (score === null ? "" : score < 0 ? "is-neg" : "is-pos");
     const conv = isNum(card.conviction);
     $("fcConv").textContent = conv === null ? DASH : conv + " conviction";
@@ -571,10 +935,14 @@
         `${fmtDate(card.sessionDate)} session. Its numbers are not today's and are shown dimmed.`;
     }
 
-    renderGamma($("fcGamma"), card.panels && card.panels.gamma, card);
-    renderLevels($("fcLevels"), card.panels && card.panels.levels);
-    renderPath($("fcPath"), card.panels && card.panels.path);
-    renderCongress($("fcCongress"), card.panels && card.panels.congress);
+    const panels = card.panels || {};
+    renderGamma($("fcGamma"), panels.gamma, card);
+    renderLevels($("fcLevels"), panels.levels);
+    renderCalendar($("fcCal"), panels.calendar);
+    renderMove($("fcMove"), panels.pricedMove);
+    renderContext($("fcCtx"), panels.context);
+    renderPath($("fcPath"), panels.path);
+    renderCongress($("fcCongress"), panels.congress);
     renderScore($("fcWhy"), card);
 
     // Two dates, always. The job runs pre-open, so the session the data
@@ -596,7 +964,7 @@
     // failed to load — and then never cleared at all.
     dialog.classList.remove("is-stale");
     $("fcProv").textContent = "Loading…";
-    for (const id of ["fcGamma", "fcLevels", "fcPath", "fcCongress", "fcWhy"]) {
+    for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
       $(id).replaceChildren(el("p", "fc-note", "Loading…"));
     }
   }
@@ -649,7 +1017,7 @@
       if (!v || current !== ticker) return;
       if (v.body && v.body.status === "pending") {
         $("fcProv").textContent = "";
-        for (const id of ["fcGamma", "fcLevels", "fcPath", "fcCongress", "fcWhy"]) {
+        for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
           deadPanel($(id), "", "No card has been built for this name yet. Cards are " +
             "published after the boards, so one can briefly lag its row.");
         }
@@ -660,7 +1028,7 @@
       if (e && e.name === "AbortError") return;
       // Every panel still said "Loading…", so a failed card was
       // indistinguishable from a slow one and the reader waited forever.
-      for (const id of ["fcGamma", "fcLevels", "fcPath", "fcCongress", "fcWhy"]) {
+      for (const id of ["fcGamma", "fcLevels", "fcCal", "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
         deadPanel($(id), "", "This card could not be loaded. Close and try again.");
       }
       $("fcProv").textContent = "This card could not be loaded.";
@@ -681,7 +1049,9 @@
   /* ---------- wiring -------------------------------------------------- */
 
   document.addEventListener("click", (event) => {
-    const button = event.target.closest && event.target.closest(".fb-open");
+    // The deck card and the table's ticker button are both openers. Delegation
+    // rather than per-node listeners, so a re-rendered board needs no rebind.
+    const button = event.target.closest && event.target.closest(".fb-open, .fd-card");
     if (!button) return;
     event.preventDefault();
     const ticker = button.dataset.t;
@@ -726,6 +1096,32 @@
   // reader from the site entirely.
   const initial = new URL(location.href).searchParams.get("t");
   if (initial) { pushedByUs = false; openCard(initial, null); }
+
+  /* THE SVGs ARE LAID OUT ONCE, AT OPEN, AND WERE NEVER REDRAWN.
+
+     Every chart on the card sizes itself from host.clientWidth at paint time
+     and then relies on the viewBox to scale. That is fine for the geometry and
+     wrong for everything measured in absolute units: rotating a phone to
+     landscape scaled 10.5px labels to 23.4px and the 132px plate rail to
+     294px, so the annotation swallowed the plot it was annotating. Redrawing
+     on a settled resize costs one repaint and nothing else — the payload is
+     already in hand, so there is no fetch.
+
+     Debounced, because a drag-resize fires continuously, and gated on the
+     dialog actually being open. */
+  let resizeTimer = 0;
+  let lastWidth = window.innerWidth;
+  window.addEventListener("resize", () => {
+    if (!dialog.open || !painted) return;
+    // Mobile browsers fire resize when the URL bar hides, changing only the
+    // HEIGHT. Redrawing then would flicker the card for no benefit.
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      if (dialog.open && painted) paint(painted.card, painted.updatedAt);
+    }, 160);
+  });
 
   window.flowsCardPrefetch = (ticker) => { if (!cache.has(ticker)) load(ticker).catch(() => {}); };
 })();

@@ -81,6 +81,24 @@ export const POLARITY = Object.freeze({
   riskReversal: -1,
   ivRank: 0,
   disclosureLagDays: 0,
+  /* The volatility block. NONE of it is directional, and that is the point:
+     there is no identified relation turning "implied vol is rich" into "this
+     name goes up". A renderer that green-tints a high VRP is inventing a
+     forecast the data does not support. */
+  iv30: 0,
+  rv30: 0,
+  vrp: 0,
+  ivMomentum: 0,
+  impliedMovePerc: 0,
+  // Where new dealer gamma is building relative to the standing book: signed,
+  // positive means above.
+  displacement: +1,
+  // Cumulative dealer gamma at spot as a share of the ladder's peak. A regime,
+  // not a direction: negative amplifies whatever the flow is pushing.
+  spotGammaShare: 0,
+  gammaFrontLoad: 0,
+  gammaMeanLifeDays: 0,
+  week52Pos: 0,
 });
 
 /** Look up a field's polarity. Unknown fields are neutral, never guessed. */
@@ -191,7 +209,219 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
     spot: numOrNull(spot),
     strikes: rows.length,
     bucketed: step > 1,
+    /* THE BAND IS PART OF THE READING, not an implementation detail.
+
+       The ladder is fetched over spot*[0.7, 1.3], so every cumulative on it is
+       the true cumulative minus a constant — the book below the floor. The
+       panel used to present the result as "net gamma" without qualification
+       and the flip as an unconditional level. Publishing the bounds lets the
+       card say "net dealer gamma between $X and $Y", which is what was
+       actually measured. */
+    bandMin: rows[0].strike,
+    bandMax: rows[rows.length - 1].strike,
   });
+}
+
+/* ---------- gamma expiry calendar --------------------------------- */
+
+/**
+ * The roll-off staircase: what share of this name's dealer gamma expires
+ * when.
+ *
+ * Gamma exposure is almost always published as a scalar. It has a term
+ * structure, and the term structure is the difference between "it's pinned"
+ * and "it's pinned until Friday, and then it isn't". These rows are already
+ * fetched for the score and were thrown away at the card boundary.
+ *
+ * put_gamma arrives ALREADY dealer-signed, so the GROSS roll-off sums the
+ * magnitudes: a front week of 1e9 call against -999e6 put is 2.0e9 of gamma
+ * about to expire, not the 1e6 residual their signed sum leaves behind.
+ */
+export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
+  const rows = (expiryRows || []).map((r) => {
+    const c = numOrNull(r.call_gamma);
+    const p = numOrNull(r.put_gamma);
+    if (c === null && p === null) return null;
+    return { expiry: r.expiry || null, gamma: Math.abs(c ?? 0) + Math.abs(p ?? 0) };
+  }).filter((r) => r && r.expiry && r.gamma > 0)
+    .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+
+  if (!rows.length) return unavailable("no expiry gamma");
+
+  const total = rows.reduce((a, r) => a + r.gamma, 0);
+  const base = asOf ? Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z") : NaN;
+  const daysTo = (expiry) => {
+    if (!Number.isFinite(base)) return null;
+    const t = Date.parse(String(expiry).slice(0, 10) + "T00:00:00Z");
+    return Number.isFinite(t) ? Math.round((t - base) / 86400000) : null;
+  };
+
+  let cum = 0, halfLifeExpiry = null, halfLifeDays = null;
+  let lifeWeighted = 0;
+  const schedule = rows.map((r) => {
+    cum += r.gamma;
+    const days = daysTo(r.expiry);
+    if (halfLifeExpiry === null && cum / total >= 0.5) {
+      halfLifeExpiry = r.expiry;
+      halfLifeDays = days;
+    }
+    if (days !== null) lifeWeighted += days * r.gamma;
+    return {
+      expiry: r.expiry,
+      share: Number((r.gamma / total).toFixed(4)),
+      cumShare: Number((cum / total).toFixed(4)),
+      days,
+    };
+  });
+
+  return ok({
+    // The first `maxRows` expiries carry the decision; the tail is a footnote.
+    schedule: schedule.slice(0, maxRows),
+    expiries: schedule.length,
+    halfLifeExpiry,
+    halfLifeDays,
+    /* frontLoad is PARTITION-DEPENDENT — it is the first LISTED expiry's
+       share, so a weekly chain and a monthly chain are not comparable and
+       adding an expiry changes it without the book changing. The gamma-
+       weighted mean life is identified: E[days to expiry] under the gross-
+       gamma measure, in days, invariant to how the chain is cut. */
+    frontLoad: schedule.length ? schedule[0].share : null,
+    meanLifeDays: total > 0 && Number.isFinite(base)
+      ? Number((lifeWeighted / total).toFixed(1))
+      : null,
+  }, asOf);
+}
+
+/* ---------- book displacement ------------------------------------- */
+
+/**
+ * Where today's flow is building gamma, against where the book already is.
+ *
+ * *_oi is the standing book; *_vol is what traded today. Compared as
+ * DISTRIBUTIONS rather than totals — the gap between their gamma centroids,
+ * in ATR units. Conventional GEX describes the regime you are in; this says
+ * the regime is moving, and which way. Same rows as the gamma panel, so it
+ * costs nothing.
+ */
+export function buildDisplacement(strikeRows, { atr, spot } = {}) {
+  const a = numOrNull(atr);
+  const centroid = (call, put) => {
+    let wsum = 0, wx = 0;
+    for (const r of strikeRows || []) {
+      const k = numOrNull(r.strike);
+      const cw = numOrNull(r[call]);
+      const pw = numOrNull(r[put]);
+      if (k === null || !(k > 0) || (cw === null && pw === null)) continue;
+      const w = Math.abs(cw ?? 0) + Math.abs(pw ?? 0);
+      if (!(w > 0)) continue;
+      wsum += w; wx += k * w;
+    }
+    return wsum > 0 ? { c: wx / wsum, w: wsum } : null;
+  };
+
+  const oi = centroid("call_gamma_oi", "put_gamma_oi");
+  const vol = centroid("call_gamma_vol", "put_gamma_vol");
+  if (!oi || !vol) return unavailable("no open-interest or volume gamma");
+
+  return ok({
+    oiCentroid: Number(oi.c.toFixed(2)),
+    volCentroid: Number(vol.c.toFixed(2)),
+    spot: numOrNull(spot),
+    gapPx: Number((vol.c - oi.c).toFixed(2)),
+    // null, not Infinity, when there is no sigma: a distance in sigma units
+    // with no sigma is not a small number, it is no number.
+    gapAtr: a !== null && a > 0 ? Number(((vol.c - oi.c) / a).toFixed(3)) : null,
+  });
+}
+
+/* ---------- volatility regime -------------------------------------- */
+
+/**
+ * What the option market is charging, against what the stock has delivered.
+ *
+ * Every number here comes from the one screener call and the candles already
+ * fetched for ATR — zero marginal requests. The variance risk premium is the
+ * identified one: iv30d and a 30-session close-to-close realized vol are both
+ * annualized volatilities of the same underlying over the same horizon, so
+ * their difference needs no free parameter.
+ *
+ * NOTHING in this panel is directional, and the panel says so. A rich option
+ * market means buyers are paying up; it does not mean the stock goes up.
+ */
+export function buildVol({ iv30, rv30, vrp, ivRank, ivMomentum, impliedMovePerc }, { asOf = null } = {}) {
+  const v = {
+    iv30: numOrNull(iv30),
+    rv30: numOrNull(rv30),
+    vrp: numOrNull(vrp),
+    ivRank: numOrNull(ivRank),
+    ivMomentum: numOrNull(ivMomentum),
+    impliedMovePerc: numOrNull(impliedMovePerc),
+  };
+  if (Object.values(v).every((x) => x === null)) return unavailable("no volatility surface");
+  return ok(v, asOf);
+}
+
+/* ---------- the priced move ---------------------------------------- */
+
+/**
+ * The band the option market has already quoted, and whether it is rich.
+ *
+ * This is a PRICE, not a prediction. implied_move_perc is the move the ATM
+ * contracts imply to a quoted expiry; it is a risk-neutral quantity, so it is
+ * what someone would have to pay to be long that move, not what the stock is
+ * expected to do. Two consequences the panel is built around:
+ *
+ *  - The horizon is the EXPIRY THE VENDOR QUOTED, never "ten days". Relabelling
+ *    a quoted-expiry number as a fixed horizon silently rescales it by the
+ *    ratio of the two maturities, differently for every name.
+ *  - No point target, no direction, no probability. The variance risk premium
+ *    beside it is the only observable that says whether the band is expensive
+ *    against what this stock has actually been delivering.
+ *
+ * `horizonExpiry` comes from the max-pain chain, which is the nearest listed
+ * expiry — the same one implied_move is quoted to. When it cannot be resolved
+ * the band is still published and the horizon reads "unresolved", because a
+ * band with an unknown maturity is degraded, not fabricated.
+ */
+export function buildPricedMove({ spot, impliedMovePerc, vrp, iv30, rv30, horizonExpiry, asOf }) {
+  const s = numOrNull(spot);
+  const m = numOrNull(impliedMovePerc);
+  if (s === null || !(s > 0) || m === null || !(m > 0)) return unavailable("no quoted implied move");
+
+  const days = horizonExpiry && asOf
+    ? Math.round((Date.parse(String(horizonExpiry).slice(0, 10) + "T00:00:00Z") -
+                  Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z")) / 86400000)
+    : null;
+
+  return ok({
+    movePerc: Number(m.toFixed(5)),
+    low: Number((s * (1 - m)).toFixed(2)),
+    high: Number((s * (1 + m)).toFixed(2)),
+    spot: s,
+    horizonExpiry: horizonExpiry || null,
+    horizonDays: Number.isFinite(days) ? days : null,
+    vrp: numOrNull(vrp),
+    iv30: numOrNull(iv30),
+    rv30: numOrNull(rv30),
+    // The one comparative statement the data supports, as a tag rather than
+    // prose so the renderer cannot embellish it.
+    richness: numOrNull(vrp) === null ? null : (vrp > 0 ? "rich" : "cheap"),
+  }, asOf);
+}
+
+/* ---------- price context ------------------------------------------ */
+
+/** Where the name has been: period returns and its position in a year's range. */
+export function buildContext({ closes, r5, r21, r42, week52Pos, changePct }, { asOf = null } = {}) {
+  const series = (closes || []).map(numOrNull).filter((c) => c !== null && c > 0);
+  const fields = {
+    r5: numOrNull(r5), r21: numOrNull(r21), r42: numOrNull(r42),
+    week52Pos: numOrNull(week52Pos), changePct: numOrNull(changePct),
+  };
+  if (series.length < 2 && Object.values(fields).every((x) => x === null)) {
+    return unavailable("no price history");
+  }
+  return ok({ ...fields, closes: series.map((c) => Number(c.toFixed(4))), sessions: series.length }, asOf);
 }
 
 /* ---------- intraday path ---------------------------------------- */
@@ -326,11 +556,15 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * live gamma panel, and no panel failure can remove the name from the board.
  */
 export function buildCard({
-  ticker, row, features, strikes, ticks, maxPain, congress,
-  generatedAt, sessionDate,
+  ticker, row, features, strikes, ticks, expiries, maxPain, congress,
+  generatedAt, sessionDate, weights,
 }) {
+  const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
   const gamma = buildGammaProfile(strikes, { spot });
+  const painRow = pickMaxPainRow(maxPain);
+  const prev = numOrNull(row && row.prev_close);
+  const close = numOrNull(row && row.close);
 
   return {
     v: CARD_SCHEMA_VERSION,
@@ -341,9 +575,36 @@ export function buildCard({
     sessionDate: sessionDate || null,
     score: numOrNull(features && features.score),
     conviction: numOrNull(features && features.conviction),
-    fam: (features && features.fam) || null,
-    regime: features && features.netGamma !== undefined
-      ? { netGamma: numOrNull(features.netGamma), label: features.gRegime || null }
+    fam: f.fam || null,
+    /* THE WEIGHTS THE SCORE WAS BUILT FROM. Without them the family bars are
+       five numbers with no stated relationship to the headline, and a reader
+       cannot tell that one axis carried half the board and another a tenth. */
+    weights: weights || null,
+    conv: {
+      agreement: numOrNull(f.agreement),
+      breadth: numOrNull(f.breadth),
+      coverage: numOrNull(f.coverage),
+      gate: numOrNull(f.gate),
+    },
+    regime: f.netGamma !== undefined
+      ? {
+        netGamma: numOrNull(f.netGamma),
+        label: f.gRegime || null,
+        /* WHICH SIDE OF THE FLIP DEALERS ARE SHORT ON, as data. The panel used
+           to assert "short below, long above" as a hardcoded sentence; whether
+           that holds depends on the sign of the cumulative at the crossing the
+           code actually picked, and on the live board it was frequently the
+           other way round. */
+        flipSide: f.flipSide || null,
+        // Cumulative dealer gamma AT SPOT, as a share of the ladder's peak.
+        // Unit-free, so it is comparable across a $35 name and a $900 one.
+        spotGammaShare: numOrNull(f.spotGammaShare),
+        // How many material crossings the ladder has. More than one means
+        // "the gamma flip" is a simplification, and the card should say so.
+        crossings: numOrNull(f.flipCount),
+        bandMin: numOrNull(f.bandMin),
+        bandMax: numOrNull(f.bandMax),
+      }
       : null,
     // The flip price is the flagship number on the whole card — the gamma
     // panel draws its line from here — so it is a top-level field rather than
@@ -361,16 +622,50 @@ export function buildCard({
         putWall: gamma.status === "ok" ? gamma.putWall : null,
       }),
       path: buildPath(ticks, { sessionDate }),
+      calendar: buildCalendar(expiries, { asOf: sessionDate }),
+      displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
+      vol: buildVol({
+        iv30: f.iv30, rv30: f.rv30, vrp: f.vrp,
+        ivRank: f.ivRank, ivMomentum: f.ivMomentum,
+        impliedMovePerc: f.impliedMovePerc,
+      }, { asOf: sessionDate }),
+      pricedMove: buildPricedMove({
+        spot,
+        impliedMovePerc: f.impliedMovePerc,
+        vrp: f.vrp, iv30: f.iv30, rv30: f.rv30,
+        horizonExpiry: painRow ? painRow.expiry : null,
+        asOf: sessionDate,
+      }),
+      context: buildContext({
+        closes: f.closes,
+        r5: f.r5, r21: f.r21, r42: f.r42,
+        week52Pos: f.week52Pos,
+        changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
+      }, { asOf: sessionDate }),
       congress: buildCongress(congress, { asOf: sessionDate }),
     },
   };
 }
 
-/** The nearest expiry's max pain. The array is one row per expiry. */
-export function pickMaxPain(rows) {
+/**
+ * The nearest expiry's max pain, with its expiry. The array is one row per
+ * expiry.
+ *
+ * MAX PAIN IS A LEVEL, NOT A TARGET. It is the strike minimising aggregate
+ * option-holder value against TODAY'S open interest — a statement about the
+ * current book, recomputed every session, with no mechanism that moves price
+ * toward it. The card ranks it beside the walls as another level, and never
+ * as a forecast.
+ */
+export function pickMaxPainRow(rows) {
   const parsed = (rows || [])
     .map((r) => ({ expiry: r.expiry, px: numOrNull(r.max_pain) }))
     .filter((r) => r.expiry && r.px !== null)
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
-  return parsed.length ? parsed[0].px : null;
+  return parsed.length ? parsed[0] : null;
+}
+
+export function pickMaxPain(rows) {
+  const row = pickMaxPainRow(rows);
+  return row ? row.px : null;
 }

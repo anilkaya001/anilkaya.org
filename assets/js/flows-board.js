@@ -16,6 +16,9 @@
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
   const sideButtons = Array.from(document.querySelectorAll(".flows-side"));
+  const viewButtons = Array.from(document.querySelectorAll(".flows-view"));
+  const deck = document.getElementById("flowsDeck");
+  const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl || !sideButtons.length) return;
 
   const COLUMNS = 10;                // keep in sync with the <thead> in flows-pages.js
@@ -137,6 +140,157 @@
     wrap.title = parts.join("  ");
     td.append(wrap);
     return td;
+  }
+
+  /* ---------- the deck ---------------------------------------------
+     One payload, two renderers, exactly one mounted at a time.
+
+     The deck is the default because the table's ten columns are wider than
+     any phone viewport — the table lives inside a horizontally scrolling
+     region for precisely that reason, and seven of its columns are off-screen
+     on a phone before a finger touches it.
+
+     A card is ONE tab stop and the whole card is the target. Splitting it into
+     a ticker button plus decorative regions would put five stops on every card
+     and make a 25-name board a 125-stop obstacle. */
+
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  /** Unpack the 84-character sparkline: two base-64 characters a session. */
+  function unpackSpark(str) {
+    if (typeof str !== "string" || str.length < 4 || str.length % 2) return null;
+    const out = [];
+    for (let i = 0; i < str.length; i += 2) {
+      const hi = B64.indexOf(str[i]), lo = B64.indexOf(str[i + 1]);
+      if (hi < 0 || lo < 0) return null;
+      out.push((hi << 6) | lo);
+    }
+    return out;
+  }
+
+  function sparkSvg(values, up) {
+    const W = 120, H = 30, pad = 2;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "fd-spark " + (up ? "is-pos" : "is-neg"));
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const xOf = (i) => pad + (i / (values.length - 1)) * (W - pad * 2);
+    // The samples are already normalised to the window's own extremes, so
+    // 0 is the window low and 4095 the high — no rescaling here.
+    const yOf = (v) => pad + (1 - v / 4095) * (H - pad * 2);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("class", "fd-sparkline");
+    path.setAttribute("d", values.map((v, i) =>
+      (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yOf(v).toFixed(1)).join(" "));
+    svg.append(path);
+    return svg;
+  }
+
+  /** One period-return chip. Basis points in, a signed percent out. */
+  function retChip(label, bp) {
+    const n = isNum(bp);
+    const chip = document.createElement("div");
+    chip.className = "fd-ret " + (n === null ? "is-flat" : n > 0 ? "is-pos" : n < 0 ? "is-neg" : "is-flat");
+    const k = document.createElement("span");
+    k.className = "fd-ret-k";
+    k.textContent = label;
+    const v = document.createElement("span");
+    v.className = "fd-ret-v";
+    v.textContent = n === null ? DASH : (n >= 0 ? "+" : MINUS) + (Math.abs(n) / 100).toFixed(1) + "%";
+    chip.append(k, v);
+    return chip;
+  }
+
+  function deckCard(row, index) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "fd-card";
+    card.dataset.t = String(row.t || "");
+    card.setAttribute("role", "listitem");
+    card.setAttribute("aria-haspopup", "dialog");
+    card.addEventListener("pointerenter", () => {
+      if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
+    });
+
+    const score = isNum(row.s);
+
+    const head = document.createElement("div");
+    head.className = "fd-head";
+    const rank = document.createElement("span");
+    rank.className = "fd-rank";
+    rank.textContent = fmtInt(row.r != null ? row.r : index + 1);
+    const tk = document.createElement("span");
+    tk.className = "fd-tk";
+    tk.textContent = String(row.t || DASH);
+    const sc = document.createElement("span");
+    sc.className = "fd-score " + toneClass(score);
+    sc.textContent = score === null ? DASH : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
+    head.append(rank, tk, sc);
+    card.append(head);
+
+    const price = document.createElement("div");
+    price.className = "fd-price";
+    const px = document.createElement("span");
+    px.className = "fd-px";
+    px.textContent = fmtPrice(row.px);
+    const chg = document.createElement("span");
+    chg.className = "fd-chg " + toneClass(row.chg);
+    chg.textContent = fmtPct(row.chg, 2);
+    price.append(px, chg);
+    card.append(price);
+
+    const spark = unpackSpark(row.spark);
+    if (spark && spark.length >= 2) {
+      card.append(sparkSvg(spark, spark[spark.length - 1] >= spark[0]));
+    } else {
+      const gap = document.createElement("div");
+      gap.className = "fd-spark is-empty";
+      card.append(gap);
+    }
+
+    const rets = document.createElement("div");
+    rets.className = "fd-rets";
+    const pr = Array.isArray(row.pr) ? row.pr : [];
+    rets.append(retChip("5D", pr[0]), retChip("21D", pr[1]), retChip("42D", pr[2]));
+    card.append(rets);
+
+    /* The score bar grows from the CENTRE, so the sign is geometric and a
+       colour-blind reader gets it from position rather than hue — the same
+       rule the card's own family track follows. */
+    const track = document.createElement("div");
+    track.className = "fd-track";
+    const zero = document.createElement("b");
+    zero.className = "fd-zero";
+    const bar = document.createElement("i");
+    bar.className = score !== null && score < 0 ? "is-neg" : "is-pos";
+    bar.style.setProperty("--w", score === null ? 0 : Math.min(Math.abs(score) / 100, 1));
+    track.append(zero, bar);
+    card.append(track);
+
+    const foot = document.createElement("div");
+    foot.className = "fd-foot";
+    const conv = document.createElement("span");
+    conv.textContent = isNum(row.cnv) === null ? DASH : row.cnv + " conv";
+    /* The move the option market has already PRICED to its next expiry. It is
+       the only forward-looking number on this card, it is a price rather than
+       a prediction, and it is labelled "priced" for exactly that reason. */
+    const move = document.createElement("span");
+    move.className = "fd-move";
+    move.textContent = isNum(row.im) === null ? "" : "\u00b1" + (row.im * 100).toFixed(1) + "% priced";
+    const reg = document.createElement("span");
+    reg.className = row.gRegime === "short" ? "fb-neg" : "";
+    reg.textContent = regimeText(row.gRegime);
+    foot.append(conv, move, reg);
+    card.append(foot);
+
+    card.setAttribute("aria-label",
+      `${row.t}, rank ${row.r != null ? row.r : index + 1}, score ${score === null ? "unavailable" : score}, ` +
+      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}. ` +
+      (isNum(row.im) === null ? "" : `The option market prices plus or minus ${(row.im * 100).toFixed(1)} percent. `) +
+      `Open the detail card.`);
+    return card;
   }
 
   function regimeText(v) {
@@ -303,6 +457,7 @@
        than no rows. */
     if (painted !== null && painted !== which) {
       body.replaceChildren();
+      if (deck) deck.replaceChildren();
       painted = null;
     }
     body.setAttribute("aria-busy", "true");
@@ -333,9 +488,14 @@
         return;
       }
 
-      const frag = document.createDocumentFragment();
-      rows.forEach((row, i) => frag.append(rowFor(row, i)));
-      body.replaceChildren(frag);                 // one insertion, 50 rows
+      const tableFrag = document.createDocumentFragment();
+      rows.forEach((row, i) => tableFrag.append(rowFor(row, i)));
+      body.replaceChildren(tableFrag);            // one insertion, 50 rows
+      if (deck) {
+        const deckFrag = document.createDocumentFragment();
+        rows.forEach((row, i) => deckFrag.append(deckCard(row, i)));
+        deck.replaceChildren(deckFrag);
+      }
       painted = which;
 
       const when = payload.generatedAt
@@ -344,9 +504,26 @@
       // Two dates, because the job runs pre-open and the vendor returns the
       // previous COMPLETED session. Showing only the build time would let a
       // board built this morning from four-day-old data look current.
-      statusEl.textContent =
-        rows.length + " " + which + " candidates · session " +
-        (payload.sessionDate || "unknown") + " · built " + when + ".";
+      /* WHAT THE SCORE MEANS, beside the board.
+
+         The score is now a FIXED unit — two robust sigma from the
+         cross-sectional median is 80, at any board size — so a short board and
+         a low dispersion are the readings that say "quiet session" rather than
+         "something broke". Under the old rank ladder both printed +84 and
+         there was nothing to report. */
+      const parts = [
+        rows.length + " " + which + " candidate" + (rows.length === 1 ? "" : "s"),
+        "session " + (payload.sessionDate || "unknown"),
+      ];
+      if (isNum(payload.neutral) !== null && isNum(payload.deadBand) !== null) {
+        parts.push(payload.neutral + " of " + (payload.scored || "?") +
+          " inside the ±" + payload.deadBand + " band");
+      }
+      if (isNum(payload.dispersion) !== null) {
+        parts.push("dispersion " + payload.dispersion.toFixed(2) + "σ");
+      }
+      parts.push("built " + when);
+      statusEl.textContent = parts.join(" · ") + ".";
       setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;
@@ -379,6 +556,36 @@
   for (const button of sideButtons) {
     button.addEventListener("click", () => select(button.dataset.side));
   }
+
+  /* THE VIEW TOGGLE. Both renderers are fed from the same payload on every
+     render, so switching is a visibility change and never a refetch — and the
+     hidden one carries no rows a screen reader could announce twice, because
+     `hidden` removes it from the accessibility tree. The choice is remembered
+     per browser; a failure to read storage must not stop the board rendering,
+     so every access is guarded. */
+  function readView() {
+    try {
+      const v = localStorage.getItem("flows.view");
+      return v === "table" || v === "deck" ? v : "deck";
+    } catch { return "deck"; }
+  }
+
+  function selectView(which) {
+    const view = which === "table" ? "table" : "deck";
+    if (deck) deck.hidden = view !== "deck";
+    if (tableWrap) tableWrap.hidden = view !== "table";
+    for (const button of viewButtons) {
+      const on = button.dataset.view === view;
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    try { localStorage.setItem("flows.view", view); } catch { /* a preference, never a requirement */ }
+  }
+
+  for (const button of viewButtons) {
+    button.addEventListener("click", () => selectView(button.dataset.view));
+  }
+  selectView(readView());
 
   select(side);
 })();
