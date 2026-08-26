@@ -13,7 +13,14 @@
      exactly on the edge its own filter discarded;
 
      a gamma profile summed the wrong four field names, so every strike came to
-     exactly zero and the panel drew 54 correctly-priced bars of nothing.
+     exactly zero and the panel drew 54 correctly-priced bars of nothing;
+
+     a surface encoded magnitude in opacity and mapped every ordinary cell to
+     between 0.130 and 0.159 of it, and THIS FILE asserted that magnitude was
+     "encoded in opacity, not flattened" and passed — because it counted
+     distinct values instead of measuring their spread, against a fixture
+     whose cells all sat inside a 4x band. An assertion that cannot fail and a
+     fixture on which the naive answer is the right one are the same bug.
 
    None of those is catchable without rendering. So this loads the REAL board
    markup, the REAL stylesheet and a REAL emitted card, draws the surface at a
@@ -47,16 +54,30 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 /* A surface with every feature the renderer has to handle: both signs, a hole
-   the vendor did not return, and one cell far past the colour cap. */
+   the vendor did not return, a pair it measured at exactly zero, and one cell
+   far past the colour cap.
+
+   THE MAGNITUDE FIELD IS HEAVY-TAILED, and that is the point of it. The
+   fixture this replaces put every ordinary cell in a 4x band — 1e6, 2e6, 3e6,
+   4e6 — which is not what a strike ladder looks like and, worse, is a shape
+   under which a magnitude encoding cannot be wrong in any way a test can see.
+   The renderer mapped all four of those to fill-opacities between 0.130 and
+   0.159 and the suite's own "magnitude is encoded in opacity" assertion
+   passed, because it counted distinct values rather than measuring their
+   spread. Real per-cell gamma decays like a gaussian out of the money and
+   again with time, so it spans two or three decades inside one grid; that is
+   the shape that separates a scale which earns its range from one that spends
+   it all on the top decade. */
 function fixture() {
   const rows = [];
   const expiries = ["2026-08-28", "2026-09-04", "2026-09-18", "2026-10-16"];
   for (let i = 0; i < 25; i++) {
     const k = 90 + i;
     for (const [j, e] of expiries.entries()) {
-      if (k === 97 && e === "2026-09-04") continue;          // the hole
-      const lean = (k - 100) / 100;
-      const g = (k === 100 && j === 0 ? 9e9 : 1e6 * (1 + j)) * (lean >= 0 ? 1 : -1);
+      if (k === 97 && e === "2026-09-04") continue;          // the hole: never returned
+      let g = 3e6 * Math.exp(-Math.pow((k - 100) / 4.5, 2)) / (1 + j * 0.8) * (k >= 100 ? 1 : -1);
+      if (k === 103 && j === 0) g = 9e9;                     // the one cell past the cap
+      if (k === 98 && e === "2026-09-18") g = 0;             // measured, and measured at nothing
       rows.push({
         strike: String(k), expiry: e,
         call_gamma_ask: String(g * 0.6), call_gamma_bid: String(g * 0.4),
@@ -127,8 +148,37 @@ try {
       cellW: cellRect.width, cellH: cellRect.height,
       pageOverflow: document.documentElement.scrollWidth > 320,
       // Opacity must vary, or magnitude is not being encoded at all.
-      opacities: new Set(Array.from(svg.querySelectorAll(".gs-cell"))
+      opacities: new Set(Array.from(svg.querySelectorAll(".gs-cell:not(.is-zero)"))
         .map((n) => n.getAttribute("fill-opacity"))).size,
+      /* Shaded cells IN GRID ORDER. The renderer appends row-major and skips
+         nothing, so this list pairs one-to-one with the grid's non-null,
+         non-zero values and the magnitude behind each shade can be recovered
+         in the test rather than guessed at. */
+      shades: Array.from(svg.querySelectorAll(".gs-cell:not(.is-zero)"))
+        .map((n) => Number(n.getAttribute("fill-opacity"))),
+      zeroCells: q(".gs-cell.is-zero"),
+      zeroMarks: q(".gs-zeromark"),
+      zeroSigned: q(".gs-cell.is-zero.is-pos, .gs-cell.is-zero.is-neg"),
+      keySwatches: Array.from(svg.querySelectorAll(".gs-key-sw.is-pos"))
+        .map((n) => Number(n.getAttribute("fill-opacity"))),
+      keyLabels: Array.from(svg.querySelectorAll(".gs-key")).map((n) => n.textContent),
+      /* The key's sign swatch has to be the TEXTURE, drawn: a legend that
+         names a colour is a legend a greyscale reader cannot use. */
+      keyHatched: Array.from(svg.querySelectorAll(".gs-key-sw.is-neg")).filter((sw) => {
+        const b = sw.getBoundingClientRect();
+        return Array.from(svg.querySelectorAll(".gs-hatch")).some((h) => {
+          const r = h.getBoundingClientRect();
+          return Math.abs(r.left - b.left) < 1 && Math.abs(r.top - b.top) < 1;
+        });
+      }).length,
+      aria: svg.getAttribute("aria-label") || "",
+      priceTexts: Array.from(svg.querySelectorAll(".gs-price")).map((n) => n.textContent),
+      /* Every clip mark's own extent, so a mark on one cell can be shown to
+         stay on that cell. */
+      clipBoxes: Array.from(svg.querySelectorAll(".gs-clip")).map((n) => [
+        Math.abs(Number(n.getAttribute("x2")) - Number(n.getAttribute("x1"))),
+        Math.abs(Number(n.getAttribute("y2")) - Number(n.getAttribute("y1"))),
+      ]),
     };
   }, { panel });
 
@@ -144,8 +194,110 @@ try {
   eq(r.clips, panel.clipped, "every cell past the colour cap is marked, and only those");
   ok(r.opacities > 3, `magnitude is encoded in opacity, not flattened (${r.opacities} levels)`);
 
+  /* THE THIRD STATE. `is-pos` was assigned by `v < 0`, so a pair the vendor
+     measured at exactly zero was drawn as the palest LONG cell on the grid:
+     a sign the book does not have, at the one magnitude where sign has no
+     meaning, and at a shade that read as the smallest real cell rather than
+     as none. Not measured, measured at nothing, and measured at something are
+     three facts and the panel now draws three things. */
+  eq(r.zeroCells, 1, "the pair the vendor measured at exactly zero is drawn as its own kind of cell");
+  eq(r.zeroSigned, 0, "and carries NO sign class — zero is neither long nor short gamma");
+  ok(r.zeroMarks >= 1, "with a mark of its own, so it cannot be mistaken for a void");
+
+  /* THE SCALE HAS TO EARN ITS RANGE.
+
+     Counting distinct fill-opacities cannot see the defect this panel had:
+     the shipped linear map put every ordinary cell of this grid between 0.130
+     and 0.159 — five "levels" spanning three hundredths of an opacity, all of
+     them indistinguishable from each other and nearly indistinguishable from
+     the 0.35 void. So measure the SPREAD, and measure it over the bulk rather
+     than over the outlier that a capped scale exists to contain: between the
+     first and ninth deciles of the drawn magnitudes, the shading must move
+     across most of the range it has. */
+  {
+    const mags = [];
+    for (const row of panel.grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
+    eq(r.shades.length, mags.length, "every shaded cell pairs with a magnitude on the grid");
+    const sorted = mags.slice().sort((a, b) => a - b);
+    const d1 = sorted[Math.floor(sorted.length * 0.1)], d9 = sorted[Math.floor(sorted.length * 0.9)];
+    const bulk = r.shades.filter((_, i) => mags[i] >= d1 && mags[i] <= d9);
+    const spread = Math.max(...bulk) - Math.min(...bulk);
+    ok(spread >= 0.4,
+       `the shading spends its range on the cells rather than on the outlier ` +
+       `(interdecile opacity spread ${spread.toFixed(3)} over ${bulk.length} cells)`);
+    /* AND IT IS MONOTONIC. A ramp that separates cells but ranks them wrongly
+       is worse than a flat one: it looks like a reading. */
+    const pairs = mags.map((m, i) => [m, r.shades[i]]).sort((a, b) => a[0] - b[0]);
+    let inversions = 0;
+    for (let i = 1; i < pairs.length; i++) if (pairs[i][1] < pairs[i - 1][1] - 1e-9) inversions++;
+    eq(inversions, 0, "and a bigger cell is never drawn paler than a smaller one");
+  }
+
+  /* THE ENCODING NEEDS A DECODER. "Magnitude by opacity" with nothing on the
+     panel to read a shade against is not a quantity, it is a mood. The key
+     draws the steps themselves, and its two labels must be the same numbers
+     the note states — a key and a sentence that disagree are worse than
+     either alone. */
+  eq(r.keySwatches.length, 5, "the shading key draws every step of the ramp");
+  eq(new Set(r.keySwatches).size, 5, "each step at its own shade");
+  ok(r.keySwatches.every((v, i, a) => i === 0 || v > a[i - 1]),
+     `the key runs pale to dark in the order the cells do (${r.keySwatches.join(", ")})`);
+  ok(/Shading steps by a factor of/.test(r.note),
+     `the note names the step factor, so a shade converts to a number (${r.note.slice(0, 120)})`);
+  for (const lab of r.keyLabels.filter((t) => t !== "short")) {
+    ok(r.note.includes(lab),
+       `the key's "${lab}" is a number the note states too, so picture and prose cannot drift`);
+  }
+  ok(/short/.test(r.keyLabels.join(" ")), "and the key names the short-gamma texture");
+  eq(r.keyHatched, 1,
+     "drawing the texture itself as the swatch rather than naming a colour for it — " +
+     "a legend whose sign key is a hue is a legend a greyscale reader cannot use");
+
+  /* role="img" AND NO LABEL is a picture a screen reader announces as
+     "image". 126 cells cannot be read out, so the label carries what the
+     legend carries. */
+  ok(/strikes/.test(r.aria) && /expir/.test(r.aria),
+     `the surface has an accessible label naming both of its axes (${r.aria.slice(0, 80)})`);
+  ok(/hatched/.test(r.aria), "and says what the hatch means, since a screen reader cannot see it");
+
   eq(r.expLabels, panel.expiries.length, "every expiry column is labelled");
   ok(r.priceLabels >= 3, "the price ladder is labelled");
+
+  /* THE LABELS MUST NOT OUTNUMBER THE READING.
+
+     The stride was "as many labels as fit without overlapping" — ceil(13 /
+     rowH) — and a 21-rung ladder at 15 units a rung fits twenty-one of them,
+     so the stride came out 1 and every strike on the grid carried a price.
+     Twenty near-identical numbers down the side, all at one weight, is not a
+     ladder; it is a second dataset competing with the cells. Legibility was
+     never the binding constraint. So: a budget, and separately a guarantee
+     that the levels which actually mean something are inside it. */
+  /* Nine is the design's own ceiling — a ruler budget of five, plus the three
+     levels that are guaranteed, plus a little slack for the two ends. The
+     shipped renderer draws seven here; the defect drew twenty-one. */
+  ok(r.priceLabels <= 9,
+     `the price rail is sparse rather than exhaustive ` +
+     `(${r.priceLabels} labels for ${panel.strikes.length} strikes)`);
+  for (const [what, price] of [["spot's row", panel.atSpot],
+                               ["the call wall", panel.callWall && panel.callWall.strike],
+                               ["the put wall", panel.putWall && panel.putWall.strike]]) {
+    if (price === null || price === undefined) continue;
+    ok(r.priceTexts.includes(price.toFixed(2)),
+       `and ${what} (${price.toFixed(2)}) is labelled inside that budget, never thinned out ` +
+       `(${r.priceTexts.join(" ")})`);
+  }
+
+  /* A MARK ON A CELL STAYS ON ITS CELL. The clip slash was drawn corner to
+     corner, so its angle and its length were functions of the cell's aspect
+     ratio — and cells are 44 x 15 at a phone width and 240 x 15 on a desktop.
+     On a wide card the mark stopped being a mark on one cell and became a
+     long shallow rule running across the grid. */
+  for (const [dx, dy] of r.clipBoxes) {
+    ok(dx <= r.cellW + 0.5 && dy <= r.cellH + 0.5,
+       `the off-scale mark stays inside its own cell (${dx.toFixed(1)}x${dy.toFixed(1)} ` +
+       `in a ${r.cellW.toFixed(1)}x${r.cellH.toFixed(1)} cell)`);
+    ok(Math.abs(dx - dy) < 0.5, "and is a slash at 45 degrees rather than the cell's diagonal");
+  }
   eq(r.spotRule, 1, "spot is drawn");
   eq(r.callWall, 1, "the call wall is marked");
   eq(r.putWall, 1, "the put wall is marked");
@@ -186,6 +338,37 @@ try {
   ok(/2 cells run past it/.test(many.note) && /and are marked/.test(many.note),
      "two clipped cells are described in the plural");
   ok(many.clips >= 2, "and both are actually marked on the grid");
+
+  /* A SURFACE PUBLISHED WITHOUT A COLOUR SCALE.
+
+     The shading ramp, the key and the off-scale marks all hang off scaleCap,
+     and the Worker serves new assets the moment code merges while the next
+     pipeline run is hours away — so a card that predates a field is a
+     certainty, not a hypothetical. The failure to avoid is not a crash: it is
+     a grid drawn at one flat weight with a key beside it, which reads as a
+     measurement of uniformity, and a cap sentence with an em dash in it. */
+  {
+    const none = await page.evaluate(({ panel }) => {
+      const host = document.getElementById("h");
+      const p3 = JSON.parse(JSON.stringify(panel));
+      delete p3.scaleCap; delete p3.peak; delete p3.clipped;
+      window.__renderSurface(host, p3, {});
+      const svg = host.querySelector("svg.gs");
+      return {
+        cells: svg.querySelectorAll(".gs-cell").length,
+        keys: svg.querySelectorAll(".gs-key-sw").length,
+        clips: svg.querySelectorAll(".gs-clip").length,
+        note: (host.querySelector(".fc-note") || {}).textContent || "",
+      };
+    }, { panel });
+    ok(none.cells > 0, "a surface published before the colour scale existed still draws its grid");
+    eq(none.keys, 0, "and no shading key, because there is no ramp to label");
+    eq(none.clips, 0, "and marks nothing off-scale against a cap it does not have");
+    ok(/no colour scale could be measured/i.test(none.note),
+       "saying shade carries no magnitude here, so a flat grid is not read as uniform gamma");
+    ok(!/capped at —|NaN|undefined/.test(none.note),
+       `with no em-dashed or NaN cap sentence left behind (${none.note.slice(0, 120)})`);
+  }
 
   /* ---------- EVERY PANEL, from a real emitted card -------------- */
 
@@ -589,6 +772,260 @@ try {
        "with no zero anywhere in that explanation — zero is the BEST reading of both");
   }
 
+  /* ---------- THE CONVEXITY AXIS IS A RULER ---------------------
+
+     The magnitude rail was built from the decades PLUS tau and vmax — the
+     60th percentile of this book's bars and its single widest one — so a live
+     card carried
+
+         −505K  −100K  −4K   4K   100K  505K
+
+     and a reader was left to work out what is special about four thousand.
+     Two of those three magnitudes are readings, not graduations, and the
+     third (10K) had been squeezed out by the smaller of them because the
+     acceptance pass ran from the bottom up.
+
+     The fixture is shaped to reproduce exactly that: a sharply peaked book
+     whose widest bar is 503,823 and whose 60th percentile is a few thousand,
+     so every number the old rail would print is unround. */
+  {
+    const ladder = (shortPeak) => {
+      const rows = [];
+      for (let i = 0; i <= 40; i++) {
+        const k = 60 + i * 0.5;
+        const bell = Math.exp(-Math.pow((k - 70.12) / 1.7, 2));
+        /* shortPeak === null is a book with no short strikes AT ALL. It is
+           not the same as a short peak of zero, which would draw twenty bars
+           of measured nothing and move the quantile the whole axis is built
+           on — the difference between "no short side" and "a short side of
+           zero" is exactly the kind of thing a fixture gets wrong quietly. */
+        const g = shortPeak !== null && k < 70.12
+          ? -(shortPeak * bell + shortPeak * 0.05)
+          : 505432 * bell + 137;
+        rows.push({
+          strike: String(k), call_gamma_ask: String(g * 0.5), call_gamma_bid: String(g * 0.5),
+          put_gamma_ask: "0", put_gamma_bid: "0",
+        });
+      }
+      return buildGammaProfile(rows, { spot: 71.89 });
+    };
+    /* THREE BOOKS, because the rail fails differently on each. A balanced one
+       exercises the ladder itself; one with no short strikes at all is where
+       the old guarantee printed a magnitude into an empty half-plot; and a
+       LOPSIDED one — the short side 0.04% of the long, which is the case the
+       zero rule's own 18/82 clamp exists for — is where it printed a
+       magnitude the short side cannot reach even though that side has bars.
+       Neither of the first two can see that third failure. */
+    const twoSided = ladder(505432), allLong = ladder(null), lopsided = ladder(200);
+    const vmax = Math.max(...twoSided.bars.map((b) => Math.abs(b.g)));
+    const vmant = vmax / Math.pow(10, Math.floor(Math.log10(vmax)));
+    ok([1, 2, 5].every((m) => Math.abs(vmant - m) > 0.02),
+       `the fixture's widest bar is nowhere near a ladder value (${Math.round(vmax)}), so a rail ` +
+       `built from this book's own numbers cannot accidentally print a round one`);
+
+    const gr = await page.evaluate(({ twoSided, allLong, lopsided }) => {
+      /* THE REAL PANEL HOST, not the bare probe div. The rail is sized as a
+         fraction of the canvas and the canvas is sized from the host, so a
+         320px scratch div and the dialog's own 288px column are different
+         layouts — and the narrower one is the one a phone gets. */
+      const host = document.getElementById("fcGamma");
+      const draw = (gp) => {
+        window.__renderGamma(host, gp, {
+          ticker: "T", gammaFlip: 70.12, panels: {},
+          regime: { spotGammaShare: -0.62, flipSide: "short_below", bandMin: 60, bandMax: 80 },
+        });
+        const svg = host.querySelector("svg.gp");
+        const num = (n, a) => Number(n.getAttribute(a));
+        const ptick = svg.querySelector(".gp-ptick");
+        const negBar = svg.querySelector(".gp-bar.is-neg");
+        return {
+          vb: Number((svg.getAttribute("viewBox") || "").split(/\s+/)[2]),
+          ticks: Array.from(svg.querySelectorAll(".gp-ticklabel"))
+            .map((n) => ({ label: n.textContent, x: num(n, "x") })),
+          zeroX: num(svg.querySelector(".gp-zero"), "x1"),
+          plotL: ptick ? num(ptick, "x2") : null,
+          plotR: num(svg.querySelector(".gp-leader"), "x1"),
+          negBars: svg.querySelectorAll(".gp-bar.is-neg").length,
+          hatches: svg.querySelectorAll(".gp-barhatch").length,
+          negFill: negBar ? getComputedStyle(negBar).fill : null,
+          plateRects: svg.querySelectorAll(".gp-plate rect").length,
+          axis: (svg.querySelector(".gp-axis") || {}).textContent || "",
+          prices: Array.from(svg.querySelectorAll(".gp-price")).map((n) => n.textContent),
+          priceYs: Array.from(svg.querySelectorAll(".gp-price"))
+            .map((n) => num(n, "y")).sort((a, b) => a - b),
+          plotTop: num(svg.querySelector(".gp-zero"), "y1"),
+          plotBottom: num(svg.querySelector(".gp-zero"), "y2"),
+          note: (host.querySelector(".fc-note") || {}).textContent || "",
+          /* How far the longest bar on each side of the zero rule reaches.
+             Position IS magnitude on this axis, so no graduation may be drawn
+             beyond it. */
+          reach: Array.from(svg.querySelectorAll(".gp-bar")).reduce((acc, b) => {
+            const x = num(b, "x"), w = num(b, "width");
+            const z = num(svg.querySelector(".gp-zero"), "x1");
+            if (b.classList.contains("is-neg")) acc.neg = Math.max(acc.neg, z - x);
+            else acc.pos = Math.max(acc.pos, x + w - z);
+            return acc;
+          }, { neg: 0, pos: 0 }),
+        };
+      };
+      return { two: draw(twoSided), long: draw(allLong), lop: draw(lopsided) };
+    }, { twoSided, allLong, lopsided });
+
+    /* EVERY GRADUATION COMES OFF THE 1-2-5 LADDER. compact() rounds, so this
+       parses the printed string back: "500K" is 5e5 and passes, "505K" is
+       5.05e5 and does not. */
+    const parseMark = (t) => {
+      const m = /^(\d+(?:\.\d+)?)([KMB])?$/.exec(t.replace(/−/, ""));
+      if (!m) return NaN;
+      return Number(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[m[2]] || 1);
+    };
+    ok(gr.two.ticks.length >= 2, `the axis is graduated at all (${gr.two.ticks.length} marks)`);
+    for (const t of gr.two.ticks) {
+      const v = parseMark(t.label);
+      const mant = v / Math.pow(10, Math.floor(Math.log10(v)));
+      ok(Math.abs(mant - Math.round(mant * 10) / 10) < 1e-9 && [1, 2, 5].includes(Math.round(mant)),
+         `"${t.label}" is a round graduation and not a reading off this book's own data`);
+    }
+    /* THE GRADUATION NEAREST THE WIDEST BAR ALWAYS SURVIVES — on every book,
+       which is the only form of that promise worth making. The old rail kept
+       it with a special case and accepted marks from the SMALLEST up, so a
+       mark near the knee claimed its space first and blocked the decade above
+       it; on a narrow canvas that is how the top graduation disappeared
+       altogether. Taking the biggest first is what makes the promise
+       structural. Checked on all three books because the failure is a
+       function of how much room is left after the small marks have taken
+       theirs, which is different on each. */
+    const topLadder = (bars) => {
+      const v = Math.max(...bars.map((b) => Math.abs(b.g)));
+      const dec = Math.pow(10, Math.floor(Math.log10(v)));
+      for (const m of [5, 2, 1]) if (m * dec <= v) return m * dec;
+      return dec;
+    };
+    for (const [who, g, prof] of [["balanced", gr.two, twoSided],
+                                  ["all-long", gr.long, allLong],
+                                  ["lopsided", gr.lop, lopsided]]) {
+      const want = topLadder(prof.bars);
+      ok(g.ticks.some((t) => parseMark(t.label) === want),
+         `${who}: the graduation nearest the widest bar survives the spacing pass ` +
+         `(wanted ${want}, got ${g.ticks.map((t) => t.label).join(" ") || "nothing"})`);
+    }
+
+    /* POSITION IS MAGNITUDE ON THIS AXIS. On a book with no short strikes the
+       whole left of the zero rule is a region no bar can reach, and the old
+       rail clamped its guaranteed −vmax mark to the left edge and labelled it
+       — printing "−505K" at a place where −505K is not. */
+    eq(gr.long.negBars, 0, "the all-long fixture really has no short strikes");
+    eq(gr.long.ticks.filter((t) => t.label.startsWith("−")).length, 0,
+       `and the axis names no negative magnitude on it ` +
+       `(${gr.long.ticks.map((t) => t.label).join(" ")})`);
+
+    /* THE SAME DEFECT ON A SIDE THAT DOES HAVE BARS, which is the case
+       neither of the two above can see. The lopsided book's short side runs
+       to a few tens of thousands while the long side runs to half a million,
+       so the ladder produces marks the short side cannot reach — and the old
+       code clamped its guaranteed −vmax to plotL + 2 and labelled it there.
+       The invariant is the axis's own premise: distance from the zero rule IS
+       magnitude, so a graduation past the longest bar on its own side is a
+       magnitude drawn where that magnitude is not. */
+    for (const [who, g] of [["lopsided", gr.lop], ["balanced", gr.two], ["all-long", gr.long]]) {
+      for (const t of g.ticks) {
+        const d = Math.abs(t.x - g.zeroX);
+        const reach = t.label.startsWith("−") ? g.reach.neg : g.reach.pos;
+        ok(d <= reach + 2,
+           `${who}: the "${t.label}" graduation sits inside the reach of its own side of the ` +
+           `book (${d.toFixed(1)} against ${reach.toFixed(1)})`);
+      }
+    }
+    /* Measured on the DATA, not on the drawing: the whole point of a log axis
+       is that a 2500:1 spread in gamma is a small difference in pixels, so a
+       pixel-side non-vacuity check would be checking the wrong thing. */
+    const shortest = Math.max(...lopsided.bars.filter((b) => b.g < 0).map((b) => -b.g), 0);
+    const longest = Math.max(...lopsided.bars.map((b) => b.g));
+    ok(shortest > 0 && longest > shortest * 100,
+       `and the lopsided fixture really is lopsided, so that check is not vacuous ` +
+       `(short side peaks at ${shortest.toFixed(0)}, long side at ${longest.toFixed(0)})`);
+    ok(gr.lop.negBars > 0, "while still drawing short bars, which is what makes it the harder case");
+    /* And where both sides DO carry bars, a magnitude and its negation are the
+       same distance from the zero rule, which is what makes the rail readable
+       as a ruler at all. */
+    for (const t of gr.two.ticks.filter((t) => t.label.startsWith("−"))) {
+      const mirror = gr.two.ticks.find((o) => o.label === t.label.replace("−", ""));
+      if (!mirror) continue;
+      ok(Math.abs((gr.two.zeroX - t.x) - (mirror.x - gr.two.zeroX)) <= 2,
+         `${t.label} and ${mirror.label} sit the same distance from zero ` +
+         `(${(gr.two.zeroX - t.x).toFixed(1)} against ${(mirror.x - gr.two.zeroX).toFixed(1)})`);
+    }
+
+    /* THE AXIS SAYS WHAT IT IS, ON THE AXIS. A reader who assumes a linear
+       scale misjudges every bar on the panel, always in the direction that
+       flatters the wings, and the only place that was stated was four
+       sentences into the note below the chart. */
+    ok(/log/.test(gr.two.axis), `the axis caption names the scale (${gr.two.axis})`);
+    ok(/LOGARITHMIC/.test(gr.two.note) && /not off bar length|rank/.test(gr.two.note),
+       "and the note says what to do about it rather than only naming it");
+
+    /* SIGN SURVIVES GREYSCALE, AND SO DOES SIZE. A short bar was drawn as
+       `fill: url(#gpNeg)` with nothing underneath — 45% coverage of diagonal
+       lines against a long bar's 100% solid, so two bars carrying the same
+       number were drawn with half the ink on one side. The texture that
+       exists to carry the sign was setting the reader's impression of the
+       balance of the book. */
+    ok(gr.two.negBars > 0, "the two-sided fixture draws short bars");
+    eq(gr.two.hatches, gr.two.negBars,
+       "every short bar carries the texture that encodes its sign without hue");
+    ok(gr.two.negFill && !/url\(/.test(gr.two.negFill),
+       `and the bar underneath is a solid fill, not the pattern itself, so both signs ` +
+       `carry the same ink for the same number (${gr.two.negFill})`);
+
+    /* THE RAIL IS AN ANNOTATION COLUMN, NOT A TOOLTIP. Two labels in filled,
+       outlined plates took 132 units of a 300-unit canvas — wider than the
+       chart they annotated, and drawn over nothing, since the rail is empty
+       space. */
+    eq(gr.two.plateRects, 0,
+       "the level readouts are annotations in the rail, not plates floating over the plot");
+    ok(gr.two.plotL !== null, "the price rail is measurable");
+    ok(gr.two.vb - gr.two.plotR < gr.two.plotR - gr.two.plotL,
+       `the annotation column is narrower than the chart it annotates ` +
+       `(rail ${gr.two.vb - gr.two.plotR}, plot ${gr.two.plotR - gr.two.plotL})`);
+
+    /* AND IT DOES NOT SAY THE SAME NUMBER TWICE. Spot and the flip each had a
+       rule, a rail annotation carrying px2() of the level, AND an entry in
+       the price ladder on the left — the same price printed twice on one row,
+       with the left copy distinguished from its neighbours by colour alone. */
+    for (const p of ["71.89", "70.12"]) {
+      ok(!gr.two.prices.includes(p),
+         `${p} is labelled once, in the rail, not again in the price ladder ` +
+         `(${gr.two.prices.join(" ")})`);
+    }
+
+    /* AND THE PRICE RAIL IS STILL A RAIL. Dropping spot and the flip from it
+       left an emitted card with four labels on a 490-unit column — the three
+       biggest strikes bunched around the peak, and the low end — so most of
+       the ladder had no price against it at all. The earned labels are still
+       earned; a round step fills the gaps behind them. The measurable form of
+       "it is a ruler" is that no stretch of the column goes unlabelled for
+       more than about a fifth of its height. */
+    {
+      const span = gr.two.plotBottom - gr.two.plotTop;
+      const ys = [gr.two.plotTop, ...gr.two.priceYs, gr.two.plotBottom];
+      let worst = 0;
+      for (let i = 1; i < ys.length; i++) worst = Math.max(worst, ys[i] - ys[i - 1]);
+      ok(worst <= span * 0.22,
+         `no stretch of the price rail runs unlabelled ` +
+         `(worst gap ${worst.toFixed(0)} of ${span.toFixed(0)} units, ` +
+         `${gr.two.prices.length} labels)`);
+      /* And filling the gaps must not stack two labels on one row. SVG will
+         happily draw one price on top of another and the result reads as a
+         smudge, not as an error. */
+      let tightest = Infinity;
+      for (let i = 1; i < gr.two.priceYs.length; i++) {
+        tightest = Math.min(tightest, gr.two.priceYs[i] - gr.two.priceYs[i - 1]);
+      }
+      ok(tightest >= 11,
+         `and no two prices are drawn on top of each other (closest pair ${tightest} units apart)`);
+    }
+  }
+
   /* ---------- HOW SHORT, NOT MERELY SHORT -----------------------
      regime.spotGammaShare is published on every card and was drawn nowhere:
      only its SIGN reached the reader, through the header badge. Dealers at
@@ -695,9 +1132,13 @@ try {
   eq(legacy.svg, false, "and draws no chart at all rather than an empty grid");
 
   console.log(`✓ flows-card-render: ${checks} assertions — cells reconcile against the grid, ` +
-    `sign survives without hue, the colour cap is marked, axis type is not silently shrunk, ` +
-    `both path legs are drawn on stated scales, the path signature and the dealer-gamma ` +
-    `share at spot reach the reader, and a pre-surface, pre-signature card degrades`);
+    `sign survives without hue, the shading ramp spends its range on the cells rather than ` +
+    `on one outlier and is drawn as a key the note agrees with, not measured and measured ` +
+    `at nothing are told apart, the price rails are rulers rather than walls of digits, ` +
+    `the convexity axis is graduated on a round ladder and never names a magnitude where no ` +
+    `bar can reach it, axis type is not silently shrunk, both path legs are drawn on stated ` +
+    `scales, the path signature and the dealer-gamma share at spot reach the reader, and a ` +
+    `pre-surface, pre-scale, pre-signature card degrades`);
 } finally {
   await browser.close();
   await rm(SCRATCH, { recursive: true, force: true });

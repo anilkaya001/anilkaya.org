@@ -72,7 +72,20 @@
      print a precision the data does not have, and never render a missing
      value as 0 — a confident zero is a lie the reader cannot detect. */
 
+  /* MISSING IS TESTED BEFORE COERCION, because Number(null) is 0 and
+     Number("") is 0 and both are finite — so the one helper whose entire job
+     is telling a missing value from a real one answered 0 for null.
+
+     The board's copy of this helper carried the identical defect and was
+     fixed earlier today. This one was worked around instead: a second reader,
+     numOr(), was added beside it for the three call sites where a null is a
+     FINDING rather than an absence — atmIv null means "this expiry has no
+     at-the-money quote this page will vouch for", skew null means "this
+     contract has no known place on a smile" — leaving the other twenty-one
+     callers reading a null as a confident zero. Two readers for one question
+     is how the next caller picks the wrong one. */
   const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) ? n : null;
   };
@@ -192,6 +205,12 @@
       if (rankSel && rank && Array.from(rankSel.options).some((o) => o.value === rank)) {
         rankSel.value = rank;
       }
+      /* Which surface was on screen when the link was made. Validated against
+         the same pattern the watchlist is, then re-checked against the symbols
+         that actually priced — a link naming a symbol that has since left the
+         desk falls back to the first rather than showing nothing. */
+      const wantedSurface = String(q.get("surface") || "").trim().toUpperCase();
+      surfaceSymbol = TICKER_RE.test(wantedSurface) ? wantedSurface : null;
       buyingPower = parseBuyingPower(q.get("bp"));
       if (bpInput && buyingPower !== null) bpInput.value = formatBuyingPower(buyingPower);
       /* A URL asking for the collectible ranking without a balance is asking
@@ -214,6 +233,8 @@
       url.searchParams.set("rank", rankSel ? rankSel.value : "annualized");
       if (buyingPower !== null) url.searchParams.set("bp", String(Math.round(buyingPower)));
       else url.searchParams.delete("bp");
+      if (surfaceSymbol !== null && book.has(surfaceSymbol)) url.searchParams.set("surface", surfaceSymbol);
+      else url.searchParams.delete("surface");
       history.replaceState(null, "", url);
     } catch { /* a desk that cannot rewrite its own URL still works */ }
   }
@@ -449,6 +470,14 @@
        division inside one is how a 2,400-row merge gets slow for nothing. */
     for (const r of rows) r.__sizing = sizeRow(r, buyingPower);
 
+    /* DRAWN BEFORE THE TABLE'S OWN EARLY EXIT. A chain where nothing clears
+       the liquidity gates still has a volatility surface — the surface is
+       taken before those gates precisely because they are a statement about
+       sellability and not about whether the quoted vol is real — so a desk
+       that returned early on an empty table would hide the one panel that
+       still had something to say. */
+    renderSurface();
+
     const key = rankSel ? rankSel.value : "annualized";
     const sortKey = key === "collectible"
       ? (r) => (r.__sizing ? r.__sizing.collectible : null)
@@ -583,6 +612,664 @@
       (best.expiry || "?") + " collects " + fmtMoney(z.collectible) + ", deploying " +
       fmtMoney(z.deployed) + " and leaving " + fmtMoney(z.idle) + " idle (" +
       fmtPct(z.yieldOnDeployed, 2) + " on capital committed).";
+  }
+
+  /* ---------- the implied volatility surface -----------------------
+
+     WHAT WAS ALREADY IN THE RESPONSE. Every contract the chain route returns
+     carries a quoted implied volatility beside its strike and its expiry, and
+     the page spent all of it on one column — the cushion — and dropped the
+     rest. The surface those numbers describe costs no vendor call, no second
+     fetch and no extra byte of quota: shared/flows-premium.js builds it inside
+     the same pass that prices the chain and ships it on the payload.
+
+     TWO READINGS, AND THEY NEED DIFFERENT CHANNELS.
+
+       THE SMILE — how vol varies across strikes at one expiry. Read DOWN a
+       column. Choosing between two strikes is choosing between two points on
+       it, which is what the ranked table above never says.
+
+       THE TERM STRUCTURE — how the level varies across tenors at one
+       moneyness. Read ACROSS a row, and read off the strip under the grid,
+       which is each expiry's at-the-money quote.
+
+     THE LEVEL SWAMPS THE SHAPE IF THEY SHARE A CHANNEL. A heatmap of raw vol
+     on a name whose front trades 45 and whose January trades 26 paints one
+     column dark and the other light, and the smile inside each is invisible.
+     So the SHADE is vol minus that expiry's own at-the-money quote — the
+     smile with the level divided out — and the NUMBER printed in the cell is
+     the quoted vol itself, unmodified.
+
+     FIVE ENCODINGS, IN THIS ORDER, AND HUE IS LAST. Sign of the skew by
+     hatch, magnitude by fill-opacity, moneyness by row, tenor by column,
+     age of the print by the cell's border. Every one of those survives a
+     greyscale print and a deuteranope reader; the colour duplicates the hatch
+     and carries nothing on its own. This is the same discipline the gamma
+     surface documents, for the same reason: a diverging red/green heatmap
+     where hue is the only channel is the commonest way this chart is drawn
+     and the commonest way it fails.
+
+     NOTHING HERE IS MODELLED. A quoted implied volatility is an observable
+     and the difference between two of them on the same expiry is arithmetic.
+     No fitted smile, no interpolated surface, no model delta, no "fair" vol —
+     each of those inverts or reprices an option, which needs a risk-free rate
+     and a dividend yield, the two free parameters this desk refuses
+     everywhere else. */
+
+  /* NULL IS A MEASUREMENT HERE, AND isNum() CANNOT CARRY IT. Number(null) is
+     0, so isNum(null) answers 0 — harmless for a field that is merely absent
+     from a payload and catastrophic for one whose null is a finding. Every
+     null on this surface is a finding: `atmIv` null means "this expiry has no
+     at-the-money quote this page will vouch for" and `skew` null means "this
+     contract has no known place on a smile". Read through isNum() both become
+     zero, which draws a missing level as 0.0% and an unplaceable contract as
+     sitting exactly at the money — two confident zeros, in the two spots where
+     a confident zero is least detectable. This reader keeps null null.
+
+     It was not a hypothetical: the first build of this panel printed "0.0" in
+     the term-structure strip for the expiry that has no level, and the
+     assertion in tests/flows-desk-contract.mjs that expects an em dash there
+     is what caught it. */
+  const numOr = isNum;
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(name, attrs) {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const key of Object.keys(attrs || {})) {
+      const value = attrs[key];
+      if (value === null || value === undefined) continue;
+      node.setAttribute(key, String(value));
+    }
+    return node;
+  }
+
+  /* TYPE AND COLOUR AS PRESENTATION ATTRIBUTES, NOT ONLY AS CLASSES, and the
+     stylesheet still wins wherever both apply — a presentation attribute is
+     the lowest-priority CSS declaration there is. This is the same belt the
+     session path's premium line wears and for the same reason: assets deploy
+     before a cache-busted stylesheet is guaranteed to have landed, and an
+     unstyled <text> inherits the page's 16px serif while an unstyled <rect> is
+     fill:black. A surface that renders as eight black tiles and four
+     overlapping labels for the first minute after a deploy is indistinguishable
+     from one that is broken. currentColor rather than a token, so the fallback
+     is the page's own ink and the palette lives in one file. */
+  const TYPE = Object.freeze({
+    "font-family": "monospace", "font-size": 9, fill: "currentColor",
+  });
+
+  /** A vol as a percent, one decimal. Unsigned — this is a level. */
+  function fmtVol(v) {
+    const n = numOr(v);
+    return n === null ? DASH : (n * 100).toFixed(1);
+  }
+
+  /** A skew in vol POINTS, signed, because the sign is the whole reading. */
+  function fmtSkew(v) {
+    const n = numOr(v);
+    if (n === null) return DASH;
+    return (n < 0 ? MINUS : "+") + Math.abs(n * 100).toFixed(1);
+  }
+
+  /** Log-moneyness as a percent, signed with U+2212 rather than a hyphen. */
+  function fmtMoneyness(v) {
+    const n = numOr(v);
+    if (n === null) return DASH;
+    if (Math.abs(n) < 5e-5) return "0.0%";
+    return (n < 0 ? MINUS : "+") + Math.abs(n * 100).toFixed(1) + "%";
+  }
+
+  /* Which symbol's surface is on screen. Held in the URL beside the
+     watchlist, the strategy and the ranking key, because a desk is meant to
+     be shareable and a link that restores everything except which surface
+     was being read restores a different screen from the one that was sent. */
+  let surfaceSymbol = null;
+  let surfaceHost = null, surfaceSelect = null, surfacePlot = null, surfaceNote = null;
+  let surfaceFrame = 0;
+  /* Whether the last draw had room to print the volatility inside each cell.
+     Set by the drawing pass and read by the note it is written for, in that
+     order, because the note otherwise says "the number in a cell is the
+     contract's own quoted implied volatility" on a phone where there is no
+     number in any cell — a sentence describing a chart that is not on screen. */
+  let surfaceNumbersDrawn = true;
+
+  /** Build the block once, after the table's own footnote. It is created here
+   *  rather than in the page markup for the same reason the watchlist chips
+   *  and every table row are: the renderer owns what it draws, and a static
+   *  skeleton for a chart that may not exist is a hidden element the page has
+   *  to remember to keep in step. */
+  function ensureSurfaceHost() {
+    if (surfaceHost) return surfaceHost;
+    if (!foot || !foot.parentNode) return null;
+
+    surfaceHost = document.createElement("section");
+    surfaceHost.className = "desk-surface";
+    surfaceHost.id = "deskSurface";
+    surfaceHost.hidden = true;
+
+    const head = document.createElement("div");
+    head.className = "desk-surface__head";
+
+    const title = document.createElement("h2");
+    title.className = "desk-surface__title";
+    title.textContent = "Implied volatility surface";
+    head.append(title);
+
+    const field = document.createElement("span");
+    field.className = "desk-field desk-surface__field";
+    const label = document.createElement("label");
+    label.setAttribute("for", "deskSurfaceSymbol");
+    label.textContent = "Symbol";
+    surfaceSelect = document.createElement("select");
+    surfaceSelect.id = "deskSurfaceSymbol";
+    surfaceSelect.addEventListener("change", () => {
+      surfaceSymbol = surfaceSelect.value || null;
+      writeURL();
+      drawSurface();
+    });
+    field.append(label, surfaceSelect);
+    head.append(field);
+    surfaceHost.append(head);
+
+    surfacePlot = document.createElement("div");
+    surfacePlot.className = "desk-surface__plot";
+    surfaceHost.append(surfacePlot);
+
+    surfaceNote = document.createElement("p");
+    surfaceNote.className = "desk-surface__note";
+    surfaceHost.append(surfaceNote);
+
+    foot.insertAdjacentElement("afterend", surfaceHost);
+    return surfaceHost;
+  }
+
+  /** The symbols that have a payload to draw a surface from, in desk order. */
+  function surfaceCandidates() {
+    return selectedSymbols().filter((s) => {
+      const e = book.get(s);
+      return e && e.state === "ok" && e.payload && e.payload.ivSurface;
+    });
+  }
+
+  function renderSurface() {
+    const host = ensureSurfaceHost();
+    if (!host) return;
+    const candidates = surfaceCandidates();
+    if (!candidates.length) {
+      host.hidden = true;
+      if (surfacePlot) surfacePlot.textContent = "";
+      return;
+    }
+    if (surfaceSymbol === null || !candidates.includes(surfaceSymbol)) {
+      surfaceSymbol = candidates[0];
+    }
+    /* Rebuilt rather than diffed: at most twenty options, and a stale option
+       list is how a select ends up offering a symbol that left the desk. */
+    surfaceSelect.textContent = "";
+    for (const symbol of candidates) {
+      const option = document.createElement("option");
+      option.value = symbol;
+      option.textContent = symbol;
+      surfaceSelect.append(option);
+    }
+    surfaceSelect.value = surfaceSymbol;
+    /* One symbol is not a choice. The control stays in the DOM so the block's
+       shape does not jump when a second symbol arrives, but it is disabled
+       rather than offering a menu of one. */
+    surfaceSelect.disabled = candidates.length < 2;
+    host.hidden = false;
+    drawSurface();
+  }
+
+  function drawSurface() {
+    if (!surfaceHost || surfaceHost.hidden || !surfacePlot) return;
+    const state = book.get(surfaceSymbol);
+    const payload = state && state.payload;
+    const surface = payload && payload.ivSurface;
+    surfacePlot.textContent = "";
+    if (!surface) { surfaceNote.textContent = ""; return; }
+
+    if (surface.status !== "ok") {
+      /* A SURFACE THAT COULD NOT BE BUILT SAYS WHY. An empty panel where a
+         chart was reads as a broken page; the reason is frequently the most
+         informative thing on it — "nothing on this chain carries an implied
+         volatility" is a fact about the name. */
+      surfaceNote.textContent = "No surface for " + surfaceSymbol + ": " +
+        (surface.reason || "not available") + ".";
+      return;
+    }
+    surfacePlot.append(surfaceSvg(surface, payload));
+    surfaceNote.textContent = surfaceNoteText(surface, payload);
+  }
+
+  /* WHICH EXPIRIES OUTLIVE THE NEXT EARNINGS REPORT, borrowed from the rows
+     rather than recomputed here.
+
+     crossesEarnings() in shared/flows-premium.js is the authority and this
+     file cannot call it — flows-desk.js is a classic script, not a module —
+     so a second implementation would be a fork of the one function on this
+     page whose tri-state is the point. The Worker already ran it per row and
+     shipped the answer, so the column simply inherits whatever the rows on
+     that expiry were told.
+
+     An expiry whose contracts were ALL gated out of the table has no row to
+     inherit from, and gets no marking rather than a clean one. The note says
+     so: an unmarked column has to be unmarked for a stated reason, or "no
+     marker" quietly means both "no report before this expiry" and "nobody
+     looked", and only one of those is safe to sell into. */
+  function earningsByExpiry(payload) {
+    const out = new Map();
+    for (const row of (payload && payload.rows) || []) {
+      if (!row || !row.expiry) continue;
+      const prior = out.get(row.expiry);
+      if (row.crossesEarnings === true) out.set(row.expiry, true);
+      else if (prior === undefined) out.set(row.expiry, row.crossesEarnings === false ? false : null);
+      else if (prior === false && row.crossesEarnings === null) out.set(row.expiry, null);
+    }
+    return out;
+  }
+
+  function surfaceSvg(surface, payload) {
+    const cols = surface.expiries, rows = surface.rows;
+    const hostW = surfacePlot.getBoundingClientRect().width;
+    const W = Math.max(280, Math.round(hostW || 320));
+    const labelW = 52, padR = 10, padT = 30, gapTerm = 16, termH = 46;
+    const plotL = labelW;
+    const plotW = Math.max(60, W - labelW - padR);
+    const colW = plotW / cols.length;
+    /* A cell shorter than 11px is a line, not a cell; taller than 24 and a
+       ten-row surface becomes a poster. */
+    const rowH = Math.max(11, Math.min(24, 300 / rows.length));
+    const gridH = rows.length * rowH;
+    const termT = padT + gridH + gapTerm;
+    const H = Math.round(termT + termH);
+
+    /* The number only goes in the cell when the cell can hold it. On a phone
+       eight columns leave 30px and "30.5" at 9px does not fit, so the shade
+       and the hatch carry the reading alone and the note says the numbers are
+       in the tooltips. Drawing them anyway would overlap them into a smear
+       that looks like data. */
+    const withNumbers = colW >= 28 && rowH >= 12;
+    surfaceNumbersDrawn = withNumbers;
+
+    const svg = svgEl("svg", {
+      class: "ivs", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+      "aria-label": surfaceAria(surface, payload),
+    });
+
+    /* The hatch that carries SIGN independently of hue, drawn at the centre
+       of its tile rather than on the edge: a stroke on a tile boundary is
+       half clipped by patternUnits and renders at a fraction of its weight.
+       Same construction, and the same reason, as the gamma surface's. */
+    const defs = svgEl("defs");
+    const pat = svgEl("pattern", {
+      id: "ivsNeg", width: 5, height: 5, patternUnits: "userSpaceOnUse",
+      patternTransform: "rotate(45)", class: "ivs-negpat",
+    });
+    pat.append(svgEl("line", {
+      x1: 2.5, y1: 0, x2: 2.5, y2: 5, stroke: "currentColor", "stroke-width": 1.6,
+    }));
+    defs.append(pat);
+    svg.append(defs);
+
+    const earnings = earningsByExpiry(payload);
+    const cap = numOr(surface.skewCap);
+
+    /* ---- column headings: the expiry, its tenor, and its event ---- */
+    cols.forEach((e, j) => {
+      const x = plotL + j * colW + colW / 2;
+      const crosses = earnings.has(e.expiry) ? earnings.get(e.expiry) : undefined;
+      /* THE <title> HANGS ON A WRAPPING GROUP, NOT ON THE <text>. A title
+         child of a text element is not painted but IS part of its
+         textContent, so the label reads back as the label plus a paragraph of
+         prose — invisible on screen and wrong to anything that reads the DOM,
+         which includes this page's own contract test. */
+      const group = svgEl("g", { class: "ivs-colhead" });
+      const title = svgEl("title");
+      title.textContent = e.expiry + (e.days === null ? "" : ", " + e.days + " days") + ". " +
+        (crosses === true
+          ? "Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion."
+          : crosses === false
+            ? "No earnings report falls before this expiry."
+            : "Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.");
+      group.append(title);
+
+      const head = svgEl("text", {
+        class: "ivs-exp" + (crosses === true ? " crosses-earnings" : ""),
+        x, y: padT - 17, "text-anchor": "middle", ...TYPE, "fill-opacity": 0.8,
+      });
+      head.textContent = String(e.expiry).slice(5) + (crosses === true ? " ⚠" : "");
+      group.append(head);
+
+      const tenor = svgEl("text", {
+        class: "ivs-days", x, y: padT - 6, "text-anchor": "middle", ...TYPE,
+        "font-size": 8.5, "fill-opacity": 0.6,
+      });
+      tenor.textContent = e.days === null ? DASH : e.days + "d";
+      group.append(tenor);
+      svg.append(group);
+
+      if (j > 0) {
+        svg.append(svgEl("line", {
+          class: "ivs-colrule", x1: plotL + j * colW - 0.5, x2: plotL + j * colW - 0.5,
+          y1: padT, y2: padT + gridH,
+          stroke: "currentColor", "stroke-width": 0.5, "stroke-opacity": 0.18,
+        }));
+      }
+    });
+
+    /* ---- the grid ------------------------------------------------- */
+    rows.forEach((r, i) => {
+      const y = padT + i * rowH;
+      cols.forEach((e, j) => {
+        const x = plotL + j * colW;
+        const w = Math.max(1, colW - 1), h = Math.max(1, rowH - 1);
+        const cell = surface.grid[i][j];
+        if (!cell) {
+          /* NO CONTRACT AT THIS MONEYNESS ON THIS EXPIRY is drawn as an
+             explicit void. A strike that is not listed and a strike quoted at
+             a vol indistinguishable from its neighbours would otherwise look
+             alike, and only one of them is a reading. */
+          svg.append(svgEl("rect", {
+            class: "ivs-void", x, y, width: w, height: h,
+            fill: "currentColor", "fill-opacity": 0.07,
+          }));
+          return;
+        }
+
+        const skew = numOr(cell.skew);
+        const mag = skew !== null && cap !== null && cap > 0
+          ? Math.min(1, Math.abs(skew) / cap) : 0;
+        const neg = skew !== null && skew < 0;
+        const rect = svgEl("rect", {
+          /* is-nolevel is NOT "flat". A cell whose expiry has no at-the-money
+             quote this surface will vouch for has an UNKNOWN position on the
+             smile, which is a different thing from sitting on the money — and
+             a zero-magnitude fill would say the second. It is drawn hollow. */
+          class: "ivs-cell " + (skew === null ? "is-nolevel" : neg ? "is-neg" : "is-pos") +
+            (cell.traded === false ? " is-stale" : cell.traded === null ? " is-unknown-age" : ""),
+          x, y, width: w, height: h,
+          fill: skew === null ? "none" : "currentColor",
+          /* A floor under the opacity so a small-but-real skew still reads as
+             a cell: zero opacity and "nothing here" must not look alike. The
+             ceiling is short of full because the quoted vol is printed on top
+             of this fill and has to stay legible against it. */
+          "fill-opacity": skew === null ? 0 : (0.12 + 0.46 * mag).toFixed(3),
+          /* PROVENANCE BY BORDER, which is a channel nothing else is using.
+             A dashed edge is a contract that did NOT trade today, a dotted one
+             is a contract the vendor sent no volume for at all, and a solid
+             fill with no edge is today's print. All three survive greyscale;
+             none of them is a colour. */
+          stroke: cell.traded === true && skew !== null ? "none" : "currentColor",
+          "stroke-width": cell.traded === true && skew !== null ? 0 : 1,
+          "stroke-dasharray": cell.traded === false ? "3 2" : cell.traded === null ? "1 2" : null,
+          "stroke-opacity": cell.traded === true ? 0.35 : 0.85,
+          "data-expiry": cell.expiry,
+          "data-strike": cell.strike,
+          "data-iv": cell.iv,
+          "data-skew": skew === null ? "" : skew,
+          "data-traded": cell.traded === null ? "unknown" : String(cell.traded),
+          "data-crowd": cell.crowd,
+        });
+        /* ONE GROUP, ONE TITLE, so the whole cell answers a hover — the
+           number painted on top of the tile would otherwise swallow the
+           pointer and leave the tooltip unreachable exactly where the reader
+           is looking. */
+        const group = svgEl("g", { class: "ivs-cellgroup" });
+        group.append(cellTitle(cell, e, surface));
+        group.append(rect);
+
+        if (neg && rowH >= 9 && colW >= 9) {
+          group.append(svgEl("rect", {
+            class: "ivs-hatch", x, y, width: w, height: h, fill: "url(#ivsNeg)",
+            /* Faded so the hatch is a texture under the number rather than a
+               strikethrough across it. The stylesheet darkens it further. */
+            opacity: 0.5,
+          }));
+        }
+        /* Past the shade cap, marked rather than silently flattened against
+           every other saturated cell. */
+        if (skew !== null && cap !== null && Math.abs(skew) > cap) {
+          /* A SHORT SLASH AT THE CELL'S EDGE, not a corner-to-corner one. The
+             gamma surface draws its clip mark across the whole tile because
+             its tiles are thirty pixels wide; these are as wide as the panel
+             divided by three, and a diagonal across one of those is a line
+             through the chart that reads as data. Fixed length, so the mark
+             means the same thing at every column width. */
+          const slash = Math.min(9, Math.max(4, w - 4));
+          group.append(svgEl("line", {
+            class: "ivs-clip",
+            x1: x + 3, y1: y + h - 3, x2: x + 3 + slash, y2: y + Math.max(2, h - 3 - slash),
+            stroke: "currentColor", "stroke-width": 1.2, "stroke-opacity": 0.9,
+          }));
+        }
+        if (withNumbers) {
+          const t = svgEl("text", {
+            class: "ivs-iv" + (cell.traded === true ? "" : " is-stale"),
+            x: x + w / 2, y: y + h / 2 + 3.2, "text-anchor": "middle", ...TYPE,
+          });
+          t.textContent = fmtVol(cell.iv);
+          group.append(t);
+        }
+        svg.append(group);
+      });
+    });
+
+    /* ---- row labels: log-moneyness, and the money itself ---------- */
+    /* Every row labelled at 11px is a wall of digits. The at-the-money row is
+       the reference every other row is read against so it always gets one, as
+       do both ends, and the rest are filled in at whatever stride stays
+       legible — the same rule, for the same reason, as the gamma surface's
+       price labels. */
+    const must = new Set([0, rows.length - 1]);
+    const atmRow = rows.findIndex((r) => r.k === 0);
+    if (atmRow >= 0) must.add(atmRow);
+    const stride = Math.max(1, Math.ceil(13 / rowH));
+    rows.forEach((r, i) => {
+      if (!must.has(i) && i % stride !== 0) return;
+      if (!must.has(i) && Array.from(must).some((m) => Math.abs(m - i) * rowH < 12)) return;
+      const t = svgEl("text", {
+        class: "ivs-m" + (r.k === 0 ? " is-atm" : ""),
+        x: labelW - 6, y: padT + i * rowH + rowH / 2 + 3.2, "text-anchor": "end", ...TYPE,
+        "fill-opacity": r.k === 0 ? 1 : 0.7,
+      });
+      t.textContent = r.k === 0 ? "ATM" : fmtMoneyness(r.m);
+      svg.append(t);
+    });
+
+    /* ---- the level strip: each expiry's at-the-money quote -------- */
+    /* THIS IS THE TERM STRUCTURE and it is a separate strip on purpose. The
+       grid above has the level divided out of every cell, which is what makes
+       the smiles comparable; putting the level back as its own row is what
+       stops that from being a loss. Read left to right it says whether the
+       front is bid over the back. */
+    const levels = cols.map((e) => numOr(e.atmIv));
+    const present = levels.filter((v) => v !== null);
+    const lo = present.length ? Math.min.apply(null, present) : 0;
+    const hi = present.length ? Math.max.apply(null, present) : 1;
+    const span = hi - lo;
+    const bandT = termT, bandH = 24;
+    const yOf = (v) => span > 1e-9
+      ? bandT + bandH - ((v - lo) / span) * bandH
+      : bandT + bandH / 2;
+
+    svg.append(svgEl("line", {
+      class: "ivs-termrule", x1: plotL, x2: plotL + plotW, y1: bandT + bandH + 4, y2: bandT + bandH + 4,
+      stroke: "currentColor", "stroke-width": 1, "stroke-opacity": 0.2,
+    }));
+    const strip = svgEl("text", {
+      class: "ivs-m is-atm", x: labelW - 6, y: bandT + bandH / 2 + 3.2, "text-anchor": "end", ...TYPE,
+    });
+    strip.textContent = "ATM";
+    svg.append(strip);
+
+    cols.forEach((e, j) => {
+      const x = plotL + j * colW + colW / 2;
+      const v = levels[j];
+      const group = svgEl("g", { class: "ivs-levelgroup" });
+      const title = svgEl("title");
+      title.textContent = v === null
+        ? e.expiry + " has no at-the-money level: " + (e.atmReason || "not measurable") + "."
+        : e.expiry + " at the money: " + fmtVol(v) + "% implied, from the " + e.atmStrike +
+          " " + (e.atmType === "P" ? "put" : "call") + " — " + fmtMoneyness(e.atmM) +
+          " from spot and traded today.";
+      group.append(title);
+      const label = svgEl("text", {
+        class: "ivs-level" + (v === null ? " is-missing" : ""),
+        x, y: bandT + bandH + 16, "text-anchor": "middle", ...TYPE,
+        "font-size": 10, "font-weight": 700, "fill-opacity": v === null ? 0.6 : 1,
+      });
+      label.textContent = v === null ? DASH : fmtVol(v);
+      group.append(label);
+      svg.append(group);
+
+      if (v === null) return;
+      svg.append(svgEl("circle", {
+        class: "ivs-dot", cx: x, cy: yOf(v), r: 2.6, fill: "currentColor",
+      }));
+      /* THE LINE NEVER BRIDGES A MISSING LEVEL. Joining the expiry either side
+         of one that has no at-the-money print would draw a level straight
+         through the gap, which is an interpolation — and an interpolated
+         term structure is exactly the invented number this desk does not
+         publish. Adjacent pairs only; a lone level stays a lone dot. */
+      const prev = levels[j - 1];
+      if (j > 0 && prev !== null) {
+        svg.append(svgEl("line", {
+          class: "ivs-termline", fill: "none", stroke: "currentColor", "stroke-width": 1.4,
+          x1: plotL + (j - 1) * colW + colW / 2, y1: yOf(prev), x2: x, y2: yOf(v),
+        }));
+      }
+    });
+
+    return svg;
+  }
+
+  function cellTitle(cell, expiry, surface) {
+    const title = svgEl("title");
+    const side = cell.type === "P" ? "put" : "call";
+    const parts = [];
+    parts.push(cell.strike + " " + side + " " + cell.expiry +
+      " · " + fmtMoneyness(cell.m) + " from the money · " + fmtVol(cell.iv) + "% implied");
+    if (numOr(cell.skew) !== null) {
+      parts.push(fmtSkew(cell.skew) + " vol points against this expiry's at-the-money " +
+        fmtVol(expiry.atmIv) + "%");
+    } else {
+      parts.push("No skew: " + (expiry.atmReason || "this expiry has no at-the-money level"));
+    }
+    if (cell.traded === false) {
+      parts.push("This contract has NOT traded today, so its implied volatility is the last " +
+        "transaction's — of unknown age. It is drawn but it did not set this expiry's level.");
+    } else if (cell.traded === null) {
+      parts.push("The vendor reported no volume for this contract, so the age of its implied " +
+        "volatility is unknown. It did not set this expiry's level.");
+    } else {
+      parts.push("Traded " + fmtInt(cell.volume) + " today" +
+        (cell.oi === null ? "" : ", open interest " + fmtInt(cell.oi)) + ".");
+    }
+    if (cell.crowd > 1) {
+      parts.push(cell.crowd + " contracts fall in this row of this column; the one shown is " +
+        "the print this surface prefers — today's first, then nearest the row's centre. " +
+        "The cell is never an average of quotes.");
+    }
+    if (numOr(cell.skew) !== null && numOr(surface.skewCap) !== null &&
+        Math.abs(cell.skew) > surface.skewCap) {
+      parts.push("Past the shade cap of " + fmtSkew(surface.skewCap) +
+        " vol points, so the shade understates it. Marked with a slash.");
+    }
+    title.textContent = parts.join(". ").replace(/\.\./g, ".");
+    return title;
+  }
+
+  function surfaceAria(surface, payload) {
+    const levels = surface.expiries.map((e) => String(e.expiry).slice(5) + " " +
+      (numOr(e.atmIv) === null ? "no level" : fmtVol(e.atmIv) + " percent"));
+    return "Implied volatility surface for " + (payload && payload.ticker ? payload.ticker : surfaceSymbol) +
+      ": " + surface.expiriesShown + " expiries by " + surface.rowsShown +
+      " moneyness bands. At-the-money implied volatility by expiry — " + levels.join(", ") +
+      ". Shade is each contract's implied volatility against its own expiry's at-the-money quote.";
+  }
+
+  function surfaceNoteText(surface, payload) {
+    const bits = [];
+    bits.push("Rows are log-moneyness, ln(strike ÷ spot), in bands " +
+      (surface.step * 100).toFixed(1) + "% wide; columns are expiries, nearest first");
+    bits.push((surfaceNumbersDrawn
+      ? "The number in a cell is the contract's own quoted implied volatility. "
+      : "The columns are too narrow at this width to print a volatility inside each cell, so " +
+        "every cell carries its own in a tooltip instead — drawing them anyway would overlap " +
+        "them into a smear that looks like data. ") +
+      "The shade is that volatility against its own expiry's at-the-money quote — hatched " +
+      "below it, plain above — so the smile is readable without the term structure swamping " +
+      "it. The level itself is the strip beneath the grid, which read left to right IS the " +
+      "term structure");
+
+    /* THE AT-THE-MONEY QUOTES IN TEXT, because a strip of dots is not readable
+       by a screen reader and is not readable at all in a printed copy of this
+       page. It is also the reading a desk repeats out loud. */
+    const levels = surface.expiries.map((e) => String(e.expiry).slice(5) + " " +
+      (numOr(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%"));
+    bits.push("At the money: " + levels.join(", "));
+
+    /* WHAT THE LEVEL IS ALLOWED TO BE. Stated because it is a choice. */
+    const noLevel = surface.expiries.filter((e) => numOr(e.atmIv) === null);
+    if (noLevel.length) {
+      bits.push(noLevel.map((e) => String(e.expiry).slice(5) + " has no level — " + e.atmReason)
+        .join("; ") + ". Those columns carry their quoted volatilities and no shade, and the " +
+        "term-structure line does not bridge them");
+    }
+
+    /* THE AGE OF THE PRINTS, WHICH IS THE THING THAT MAKES THIS HONEST. */
+    /* A COUNT OF ZERO IS NOT WORTH A CLAUSE. "3 did not and 0 carry no volume
+       at all" is a sentence that trains a reader to skip the sentence, and
+       this is the sentence that must not be skipped. */
+    const agedBits = [];
+    if (surface.stale > 0) agedBits.push(surface.stale + " did not");
+    if (surface.unknownAge > 0) {
+      agedBits.push(surface.unknownAge + " carr" + (surface.unknownAge === 1 ? "ies" : "y") +
+        " no volume at all");
+    }
+    bits.push("This vendor's implied volatility is the LAST TRANSACTION's, not a quote. " +
+      surface.fresh + " of " + surface.placed + " cells traded today" +
+      (agedBits.length === 0 ? " — every cell on this surface is a print from today" :
+        "; " + agedBits.join(" and ") + ", so their volatility is of unknown age. Those cells " +
+        "are drawn with a broken border and NONE of them set an expiry's level — a stale cell " +
+        "is one marked number, but a stale level would tilt a whole column's smile with no " +
+        "marker on any cell it moved"));
+
+    if (surface.crowded > 0) {
+      bits.push(surface.crowded === 1
+        ? "One contract shares a row with another; the cell shows one quoted contract and is " +
+          "never an average of two"
+        : surface.crowded + " contracts share a row with another; each cell shows one quoted " +
+          "contract and is never an average of two");
+    }
+    if (surface.clipped > 0) {
+      bits.push("The shade is capped at " + fmtSkew(surface.skewCap) + " vol points; " +
+        surface.clipped + " cell" + (surface.clipped === 1 ? " runs" : "s run") +
+        " past it and " + (surface.clipped === 1 ? "is" : "are") + " marked with a slash");
+    }
+    const windowed = [];
+    if (surface.expiriesShown < surface.expiriesTotal) {
+      windowed.push(surface.expiriesShown + " of " + surface.expiriesTotal + " expiries");
+    }
+    if (surface.rowsShown < surface.rowsTotal) {
+      windowed.push(surface.rowsShown + " of " + surface.rowsTotal + " moneyness bands");
+    }
+    if (windowed.length) bits.push("Showing " + windowed.join(" and "));
+
+    /* THE UNIVERSE THIS SURFACE IS TAKEN OVER, which is NOT the table above. */
+    bits.push("Built from every contract with a two-sided quote, before the liquidity gates that " +
+      "decide the table above and regardless of the Sell toggle — those gates fall hardest on the " +
+      "wings, and a smile with its tails cut off is a different smile" +
+      (payload && payload.truncated
+        ? ". This chain is larger than the desk fetches, so the surface is taken over a partial chain"
+        : ""));
+    if (surface.ivBasis) bits.push("Volatility units resolved once for the whole chain: " + surface.ivBasis);
+    bits.push("Quoted volatilities, and differences between quoted volatilities on the same expiry. " +
+      "Nothing here is fitted, interpolated or repriced — that would need a rate and a dividend " +
+      "yield, which this desk does not invent");
+
+    return bits.join(". ") + ".";
   }
 
   function reasonWord(reason) {
@@ -1037,13 +1724,29 @@
 
   clearBtn.addEventListener("click", () => {
     book.clear();
+    surfaceSymbol = null;
     writeURL();
     renderList();
     tbody.textContent = "";
     setPaneVisible(false);
     foot.textContent = "";
     renderPlan([]);
+    /* The surface is drawn from the same book the table is, so clearing the
+       book has to clear it too. render() is not called on this path — it would
+       re-run the whole merge over an empty desk — so the panel is told
+       directly rather than left holding the last symbol's chart. */
+    renderSurface();
     updateStatus();
+  });
+
+  /* THE SURFACE IS SIZED IN PIXELS, so it has to be redrawn when the pixels
+     change. The table does not need this — it reflows — but an SVG built
+     against a 1440px column keeps its 1440px viewBox on a phone and scales
+     every label down with it until nothing is legible. One frame of debounce,
+     because a drag-resize fires this continuously. */
+  window.addEventListener("resize", () => {
+    if (surfaceFrame) return;
+    surfaceFrame = requestAnimationFrame(() => { surfaceFrame = 0; drawSurface(); });
   });
 
   /* ---------- the buying-power field --------------------------------

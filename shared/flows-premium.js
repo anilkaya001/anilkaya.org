@@ -123,13 +123,22 @@ function median(values) {
 /** Decide the whole chain's IV convention from its median.
  *  Returns { divisor, basis } — basis names the evidence so the answer is
  *  auditable rather than a constant someone has to trust. */
+/* A decimal chain's median lands in roughly [0.05, 2.0]; a percent chain's in
+   [5, 200]. The gap between them is wide and nothing real sits in it, so the
+   threshold does not have to be delicate.
+
+   IT IS A NAMED CONSTANT BECAUSE IT HAS TWO USERS. ivConvention() decides the
+   divisor with it; ivSurface() below re-tests the ALREADY-DIVIDED values with
+   it as a tripwire, and refuses to draw a surface whose numbers still read as
+   percent. Two bare 5s in two files is how one of them gets tuned and the
+   other silently disagrees — at which point the tripwire stops tripping and
+   the failure it exists to catch ships. */
+export const IV_PERCENT_THRESHOLD = 5;
+
 export function ivConvention(rawValues) {
   const m = median(rawValues.map(numOrNull).filter((v) => v !== null && v > 0));
   if (m === null) return { divisor: 1, basis: "no implied vol on this chain" };
-  /* A decimal chain's median lands in roughly [0.05, 2.0]; a percent chain's
-     in [5, 200]. The gap between them is wide and nothing real sits in it, so
-     the threshold does not have to be delicate. */
-  if (m > 5) return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent` };
+  if (m > IV_PERCENT_THRESHOLD) return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent` };
   return { divisor: 1, basis: `median ${m.toFixed(4)} reads as a fraction` };
 }
 
@@ -368,6 +377,23 @@ export function rankChain(contracts, {
      same wrong number arriving by a different route. */
   const want = typeof ticker === "string" && ticker ? ticker.trim().toUpperCase() : null;
   const rows = [];
+  /* THE SURFACE IS TAKEN BEFORE THE SALE GATES, and that is the whole reason
+     it is collected here rather than rebuilt in the page from the ranked rows.
+
+     Every gate below is a statement about whether a contract is worth SELLING
+     — the spread is too wide to get filled, the open interest says nobody else
+     is in it, the premium is smaller than the round trip, the tenor is outside
+     the window, the strategy toggle is on the other side. None of them is a
+     statement about whether the vol printed on that contract is real, and they
+     fall hardest on exactly the wings a smile is read for. A surface drawn
+     from the survivors would show a skew with both its tails cut off and no
+     sign that they had been, which is a smile-shaped lie.
+
+     The one exclusion the surface DOES inherit is priceSale() returning null,
+     which needs a two-sided quote, and the adjusted-series check below, whose
+     strike is struck against an unknown deliverable and is therefore not a
+     moneyness at all. Both are stated on the page. */
+  const forSurface = [];
 
   for (const raw of list) {
     const p = priceSale(raw, { spot, asOf, ivDivisor: divisor });
@@ -375,6 +401,7 @@ export function rankChain(contracts, {
     /* An adjusted series — AAPL1 against a request for AAPL — delivers an
        unknown share count, so its every dollar figure would be fiction. */
     if (want !== null && p.ticker !== want) { gated.nonStandard++; continue; }
+    forSurface.push(p);
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
     if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
     if (p.premium < g.minPremium) { gated.premium++; continue; }
@@ -403,6 +430,405 @@ export function rankChain(contracts, {
     ivBasis: basis,
     rankedBy: key,
     gates: g,
+    /* Ships with the ranking because it was already paid for: the same parse,
+       the same priceSale() pass, the same per-chain IV convention. It costs no
+       vendor call and no second fetch — see the module comment above. */
+    ivSurface: ivSurface(forSurface, { ivBasis: basis }),
+  };
+}
+
+
+/* =============================================================
+   THE IMPLIED VOLATILITY SURFACE
+
+   Every contract the vendor returns on /option-contracts carries an
+   implied volatility next to its strike and its expiry, and until now
+   priceSale() spent all of it on one scalar — the sigma underneath
+   cushionSigmas and capSigmas — and threw the rest of the surface
+   away. The whole strike x expiry grid was already in the response,
+   already parsed, already priced. It cost nothing to keep.
+
+   WHAT A SELLER READS OFF IT, and why a bare grid of levels does not
+   answer either question:
+
+     THE SMILE, across strikes at one expiry. Choosing between two
+     strikes IS choosing between two points on a smile, and the desk
+     was ranking them by premium without ever showing that the wing
+     pays more because it is quoted at a higher vol.
+
+     THE TERM STRUCTURE, at one moneyness across tenors. Whether the
+     front is bid relative to the back is the difference between "this
+     week is expensive" and "this name is expensive".
+
+   These are a LEVEL and a SHAPE and they need different treatment,
+   because the level swamps the shape. On a name whose front month
+   trades 45 and whose January trades 26, a heatmap of raw vol paints
+   the whole front column dark and the whole back column light, and
+   the smile — the thing being chosen between — is invisible inside
+   each column. So the two are separated and both are published:
+
+     THE CELL'S SHADE is the contract's vol MINUS its own expiry's
+     at-the-money vol. A difference of two quoted numbers on the same
+     expiry, so it clears the identification bar, and it is the smile
+     with the level divided out.
+
+     THE CELL'S NUMBER is the quoted vol itself, unmodified, printed
+     where the cell is wide enough to hold it.
+
+     THE LEVEL is published separately as each expiry's at-the-money
+     quote — one number per column, which read left to right IS the
+     term structure.
+
+   WHAT IS NOT HERE, and would be easy to add and wrong. No fitted
+   smile, no interpolated surface, no model vol, no delta. Every one
+   of those inverts or reprices an option, which needs a risk-free
+   rate and a dividend yield, which are the two free parameters this
+   project has refused everywhere else — the same refusal that keeps
+   assignment probability, expected value and fair premium off the
+   desk. A quoted implied volatility is an OBSERVABLE: the vendor
+   published it, we display it and we difference it against another
+   number the vendor published on the same expiry. Nothing here
+   inverts anything.
+
+   (The vendor computed those IVs with rate and dividend assumptions
+   of its own that it does not disclose. That is precisely the reason
+   they are only ever compared against each other, never against
+   anything computed here: differences within one vendor's convention
+   are meaningful, a difference across two conventions is noise.)
+
+   AND DELTA IS NOT AVAILABLE AS A MONEYNESS AXIS. A delta-space
+   surface is the better chart and cannot be drawn: this vendor gives
+   delta only per EXPIRY (/greeks, call_delta and put_delta), never
+   per contract. See the module header. Log-moneyness is the axis
+   that IS recoverable.
+
+   WHAT IT COSTS, MEASURED RATHER THAN ASSUMED, because this runs on
+   the request path inside a 10ms Worker CPU budget. Over a synthetic
+   1,010-contract chain across ten expiries: rankChain 2.27ms with the
+   surface in it, of which the surface leg is 0.36ms — 16% of a pass
+   that was already the expensive part of the route. It is a single
+   sweep of the rows priceSale has already built, with no second parse
+   and no second regex; the only sorts are over the 88 shaded cells
+   and the ten distinct expiries, never over the chain. It serialises
+   to about 15KB, alongside a rows array that is already larger.
+
+   ZERO ADDITIONAL VENDOR CALLS, which is the other budget. The chain
+   route opens four of its six permitted simultaneous connections and
+   this adds none: every number here was in the response the desk had
+   already paid for.
+   ============================================================= */
+
+/* Columns. Eight expiries is what the gamma surface windows to and it is
+   the same reason: past that the labels collide and the reader is scanning
+   rather than reading. */
+export const SURFACE_MAX_EXPIRIES = 8;
+
+/* Rows. Odd, so that the at-the-money band is a row rather than a boundary
+   between two — a smile is read for its symmetry about that row, and a grid
+   with no centre row makes the reader interpolate one. */
+export const SURFACE_MAX_ROWS = 17;
+
+/* The ladder of row widths, in log-moneyness. A STATED LADDER RATHER THAN AN
+   ARBITRARY DIVISION: rows whose width is (range / 17) are a different width
+   on every symbol and every session, so the same reader comparing AAPL to
+   NVDA is comparing two different axes without being told. These are round
+   numbers a person can hold — half a percent, one, two, two and a half, five,
+   ten — and the surface says which one it used. */
+export const SURFACE_ROW_STEPS = Object.freeze([0.005, 0.01, 0.02, 0.025, 0.05, 0.10]);
+
+/* HOW FAR FROM THE MONEY A CONTRACT MAY BE AND STILL BE CALLED THE LEVEL.
+   This is a CHOICE and it is labelled as one. The at-the-money quote is what
+   every cell in its column is measured against, so it has to actually be at
+   the money: on a thin chain the nearest contract that traded today can be
+   30% out, and calling that "the level" would tilt an entire column's smile
+   by the amount of its own skew. Past this band the expiry gets NO level and
+   its column carries no shade — the vols are still printed, because they were
+   still quoted. */
+export const ATM_BAND_LOG = 0.10;
+
+/* The shade scale is capped at a high quantile of |skew| rather than at the
+   maximum, for the reason the gamma surface caps its colour: one 90-vol
+   lottery ticket on the far wing otherwise compresses every real reading into
+   the bottom eighth of the scale. Cells past the cap are marked, not
+   flattened silently. The floor stops a genuinely flat surface — every strike
+   within a vol point of the money — from being amplified into a dramatic
+   picture of nothing. */
+export const SKEW_CAP_QUANTILE = 0.9;
+export const SKEW_CAP_FLOOR = 0.01;
+
+/** Row index for a log-moneyness, symmetric about zero.
+ *
+ *  Math.round() alone rounds ties toward +Infinity, so -6.5 lands on -6 while
+ *  +6.5 lands on +7 — a half-row bias applied to one wing of a smile and not
+ *  the other, on a chart whose entire purpose is comparing the two wings. The
+ *  magnitude is rounded and the sign reapplied instead. */
+function rowOf(m, step) {
+  const k = Math.round(Math.abs(m) / step);
+  return m < 0 ? -k : k;
+}
+
+/**
+ * Build the strike x expiry implied-volatility surface for one chain.
+ *
+ * `priced` is priceSale() output — NOT raw vendor rows. That is load-bearing
+ * rather than a convenience: a priced row's `iv` has already been through
+ * ivConvention()'s per-chain divisor, and a raw row's `implied_volatility` has
+ * not. This function reads `iv` and no raw field at all, so handing it raw
+ * rows produces an EMPTY surface rather than one that is 100x off on the
+ * symbols where the vendor happens to quote percent and correct on the rest —
+ * which is the worst available failure, because it renders perfectly.
+ *
+ * The tripwire below catches the other direction: values that reached here
+ * still on a percent scale, whatever route they took.
+ */
+export function ivSurface(priced, {
+  maxExpiries = SURFACE_MAX_EXPIRIES,
+  maxRows = SURFACE_MAX_ROWS,
+  ivBasis = null,
+} = {}) {
+  const empty = (reason) => ({
+    status: "empty", reason, ivBasis,
+    expiries: [], rows: [], grid: [],
+    step: null, atmBand: ATM_BAND_LOG,
+    placed: 0, fresh: 0, stale: 0, unknownAge: 0, crowded: 0, levelled: 0,
+    expiriesShown: 0, expiriesTotal: 0, rowsShown: 0, rowsTotal: 0,
+    skewCap: null, clipped: 0,
+  });
+
+  const list = Array.isArray(priced) ? priced : [];
+  const usable = [];
+  for (const p of list) {
+    if (!p) continue;
+    const iv = numOrNull(p.iv);
+    /* A CONTRACT WITH NO IMPLIED VOLATILITY IS A HOLE IN THE SURFACE, not a
+       zero-vol quote. Both would draw as the palest possible cell and only one
+       of them is a reading. */
+    if (iv === null || !(iv > 0)) continue;
+    const mn = numOrNull(p.moneyness);
+    if (mn === null || !(mn > -1)) continue;
+    /* LOG-MONEYNESS, ln(K/S), from the moneyness priceSale already computed:
+       ln(1 + (K/S - 1)). Log rather than the raw ratio because the axis exists
+       to be compared ACROSS expiries and across symbols, and only in log space
+       is a strike 10% above spot the same distance from the money as one 10%
+       below. It is also the space cushionSigmas already works in — that column
+       divides log(spot/breakeven) by an implied move — so the page does not
+       carry two different definitions of "how far out". */
+    usable.push({ src: p, iv, m: Math.log1p(mn) });
+  }
+  if (!usable.length) return empty("no contract on this chain carries both a quoted implied volatility and a strike");
+
+  /* THE TRIPWIRE. ivConvention() decided this chain's divisor once, from its
+     median, and priceSale() applied it. If what arrives here still reads as a
+     percent chain then the convention did not run, or ran on a different set
+     of numbers than these — and the consequence is not a wobble, it is every
+     vol on the page off by exactly 100x. Silence is not an option and neither
+     is drawing it: a surface labelled 3000% is at least visibly wrong, but a
+     surface where the SHADES are right and only the printed numbers are wrong
+     is not, and the shades are differences so they survive the scaling. */
+  const med = median(usable.map((u) => u.iv));
+  if (med !== null && med > IV_PERCENT_THRESHOLD) {
+    return empty(`implied volatility reached the surface on a percent scale (median ${med.toFixed(2)}); ` +
+      "the per-chain convention did not run, and drawing this would be wrong by 100x");
+  }
+
+  /* ---- columns: expiries, nearest first --------------------------- */
+  const byExpiry = new Map();
+  for (const u of usable) {
+    const key = u.src.expiry;
+    if (!key) continue;
+    let e = byExpiry.get(key);
+    if (!e) { e = { expiry: key, days: numOrNull(u.src.days), items: [] }; byExpiry.set(key, e); }
+    e.items.push(u);
+  }
+  const allExpiries = Array.from(byExpiry.values()).sort((a, b) => {
+    if (a.days !== null && b.days !== null && a.days !== b.days) return a.days - b.days;
+    return a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0;
+  });
+  if (!allExpiries.length) return empty("no contract on this chain carries a usable expiry");
+
+  /* WINDOWED FIRST AND LAST, THEN EVENLY. A term structure whose right-hand
+     end is missing is not a term structure — dropping the tail would turn "the
+     front is bid over January" into "the front is bid over October", which is
+     a different and much weaker statement. So the nearest and the furthest
+     expiry are always kept and the middle is thinned at an even stride. */
+  let columns = allExpiries;
+  if (allExpiries.length > maxExpiries) {
+    const picked = new Set();
+    for (let i = 0; i < maxExpiries; i++) {
+      picked.add(Math.round((i * (allExpiries.length - 1)) / (maxExpiries - 1)));
+    }
+    columns = Array.from(picked).sort((a, b) => a - b).map((i) => allExpiries[i]);
+  }
+
+  /* ---- rows: a stated ladder over the shown columns only ---------- */
+  let lo = Infinity, hi = -Infinity;
+  for (const e of columns) for (const u of e.items) { if (u.m < lo) lo = u.m; if (u.m > hi) hi = u.m; }
+  /* The range is taken over the SHOWN columns, not over every expiry. A single
+     windowed-out two-year LEAP whose strikes run to +90% would otherwise
+     stretch the row ladder around contracts that are not on the chart, and
+     flatten every column that is. */
+
+  let step = SURFACE_ROW_STEPS[SURFACE_ROW_STEPS.length - 1];
+  for (const candidate of SURFACE_ROW_STEPS) {
+    if (rowOf(hi, candidate) - rowOf(lo, candidate) + 1 <= maxRows) { step = candidate; break; }
+  }
+  let rowLo = rowOf(lo, step), rowHi = rowOf(hi, step);
+  const rowsTotal = rowHi - rowLo + 1;
+  /* Even the coarsest ladder step can overflow on a chain that runs from a
+     deep put wing to a far call wing. The rows kept are the ones nearest the
+     money, because that is where a sale is written, and the count says how
+     much was cut. */
+  if (rowsTotal > maxRows) {
+    const half = Math.floor(maxRows / 2);
+    rowLo = Math.max(rowLo, -half);
+    rowHi = Math.min(rowHi, rowLo + maxRows - 1);
+  }
+  const rowIndices = [];
+  for (let k = rowHi; k >= rowLo; k--) rowIndices.push(k);   // high strikes at the top, price-ladder order
+
+  /* ---- the level: each expiry's at-the-money quote ---------------- */
+  /* THE REFERENCE MUST HAVE TRADED TODAY, and this is the single most
+     load-bearing decision in the module.
+
+     `iv` on this vendor is the LAST TRANSACTION's implied volatility, not a
+     quote — the module header and the cushion column both say so. A stale CELL
+     is one number of unknown age, marked, and the reader can discount it. A
+     stale REFERENCE is different in kind: every other cell in that column is
+     measured against it, so one four-session-old print silently shifts a whole
+     column's smile and there is no marker on any of the cells it moved. That
+     is an undetectable error in an aggregate, which is exactly the class of
+     thing this desk refuses.
+
+     So: the level is the contract nearest the money that traded TODAY, and if
+     there is none inside the band the expiry has NO level. `ivTraded === null`
+     — the vendor sent no volume field — does not qualify either: "no evidence
+     it is fresh" and "evidence it is fresh" are not the same fact, and only
+     one of them may seed a reference. */
+  for (const e of columns) {
+    let ref = null, anyFresh = false, nearestFresh = null;
+    for (const u of e.items) {
+      if (u.src.ivTraded !== true) continue;
+      anyFresh = true;
+      if (nearestFresh === null || Math.abs(u.m) < Math.abs(nearestFresh.m)) nearestFresh = u;
+      if (Math.abs(u.m) > ATM_BAND_LOG) continue;
+      const closer = ref === null || Math.abs(u.m) < Math.abs(ref.m) ||
+        (Math.abs(u.m) === Math.abs(ref.m) && u.src.strike < ref.src.strike);
+      if (closer) ref = u;
+    }
+    e.atmIv = ref ? ref.iv : null;
+    e.atmM = ref ? ref.m : null;
+    e.atmStrike = ref ? ref.src.strike : null;
+    e.atmType = ref ? ref.src.type : null;
+    e.atmReason = ref ? null
+      : !anyFresh
+        ? "nothing on this expiry traded today, so it has no level this surface will vouch for"
+        : `the nearest contract that traded today is ${(Math.abs(nearestFresh.m) * 100).toFixed(1)}% ` +
+          `from the money, outside the ${(ATM_BAND_LOG * 100).toFixed(0)}% band an at-the-money quote may sit in`;
+    e.fresh = 0; e.stale = 0; e.unknownAge = 0;
+  }
+
+  /* ---- cells ------------------------------------------------------ */
+  const grid = rowIndices.map(() => columns.map(() => null));
+  const rowAt = new Map();
+  rowIndices.forEach((k, i) => rowAt.set(k, i));
+
+  let placed = 0, fresh = 0, stale = 0, unknownAge = 0, crowded = 0, dropped = 0;
+  columns.forEach((e, col) => {
+    for (const u of e.items) {
+      const k = rowOf(u.m, step);
+      const rowIdx = rowAt.get(k);
+      if (rowIdx === undefined) { dropped++; continue; }
+      const centre = k * step;
+      const held = grid[rowIdx][col];
+      if (held === null) {
+        grid[rowIdx][col] = { pick: u, crowd: 1 };
+        continue;
+      }
+      /* TWO CONTRACTS IN ONE ROW OF ONE COLUMN. Adjacent strikes land in the
+         same band whenever the ladder is finer than the row width, and near
+         the money an out-of-the-money put and an out-of-the-money call are
+         both there at once.
+
+         THE CELL IS NOT AN AVERAGE. Averaging two quoted vols produces a
+         number nobody quoted, on a page whose whole discipline is that every
+         published figure is recoverable from an observable. One of the two is
+         SHOWN and the cell says it was crowded — freshness first, because a
+         print from today a third of a row off centre beats a print of unknown
+         age dead on it, then distance from the row's centre, then the lower
+         strike so the answer does not depend on the vendor's ordering. */
+      held.crowd++;
+      crowded++;
+      const a = u, b = held.pick;
+      const af = a.src.ivTraded === true, bf = b.src.ivTraded === true;
+      let better;
+      if (af !== bf) better = af;
+      else {
+        const ad = Math.abs(a.m - centre), bd = Math.abs(b.m - centre);
+        better = ad !== bd ? ad < bd : a.src.strike < b.src.strike;
+      }
+      if (better) held.pick = a;
+    }
+  });
+
+  const skews = [];
+  grid.forEach((row) => {
+    row.forEach((slot, col) => {
+      if (slot === null) return;
+      const u = slot.pick, e = columns[col];
+      const traded = u.src.ivTraded === true ? true : u.src.ivTraded === false ? false : null;
+      if (traded === true) { fresh++; e.fresh++; }
+      else if (traded === false) { stale++; e.stale++; }
+      else { unknownAge++; e.unknownAge++; }
+      placed++;
+      const skew = e.atmIv !== null ? u.iv - e.atmIv : null;
+      if (skew !== null) skews.push(Math.abs(skew));
+      row[col] = {
+        iv: u.iv,
+        skew,
+        m: u.m,
+        strike: u.src.strike,
+        type: u.src.type,
+        expiry: e.expiry,
+        traded,
+        volume: numOrNull(u.src.volume),
+        oi: numOrNull(u.src.oi),
+        crowd: slot.crowd,
+      };
+    });
+  });
+
+  /* The cap, from a quantile of what is actually on the chart. */
+  let skewCap = null, clipped = 0;
+  if (skews.length) {
+    const sorted = skews.slice().sort((a, b) => a - b);
+    const at = sorted[Math.floor(SKEW_CAP_QUANTILE * (sorted.length - 1))];
+    skewCap = Math.max(SKEW_CAP_FLOOR, at);
+    for (const s of skews) if (s > skewCap) clipped++;
+  }
+
+  return {
+    status: "ok",
+    reason: null,
+    /* The evidence for the units these numbers are in, carried so the answer
+       is auditable rather than a scale someone has to trust. */
+    ivBasis,
+    step,
+    atmBand: ATM_BAND_LOG,
+    rows: rowIndices.map((k) => ({ k, m: k * step })),
+    expiries: columns.map((e) => ({
+      expiry: e.expiry, days: e.days,
+      atmIv: e.atmIv, atmM: e.atmM, atmStrike: e.atmStrike, atmType: e.atmType,
+      atmReason: e.atmReason,
+      fresh: e.fresh, stale: e.stale, unknownAge: e.unknownAge,
+    })),
+    grid,
+    placed, fresh, stale, unknownAge, crowded, dropped,
+    levelled: columns.filter((e) => e.atmIv !== null).length,
+    expiriesShown: columns.length,
+    expiriesTotal: allExpiries.length,
+    rowsShown: rowIndices.length,
+    rowsTotal,
+    skewCap, clipped,
   };
 }
 

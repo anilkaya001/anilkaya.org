@@ -576,11 +576,18 @@ p.fb-empty {
 
 /* currentColor inside a <pattern> resolves against the pattern element's own
    computed colour, not the referencing shape's — so the hue is set here. */
-.gp-negpat { color: var(--flow-down); }
+/* THE HATCH IS A TEXTURE OVER THE FILL, NOT THE FILL ITSELF. Drawn as
+   `fill: url(#gpNeg)` with nothing underneath, a short bar covered about 45%
+   of its box against a long bar's 100% — so two bars meaning the same number
+   carried half the ink, and the channel that encodes the SIGN was quietly
+   setting the reader's impression of the BALANCE of the book. Same
+   construction as the gamma surface now: solid fill, hatch laid over it. */
+.gp-negpat { color: var(--bg-deep); }
 
 .gp-zero { stroke: var(--hairline); stroke-width: 1; }
 .gp-bar.is-pos { fill: var(--gold-mystic); }
-.gp-bar.is-neg { stroke: none; }
+.gp-bar.is-neg { fill: var(--flow-down); stroke: none; }
+.gp-barhatch { opacity: 0.55; }
 
 .gp-cum { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
 .gp-cum.is-pos { stroke: var(--gold-celadon); }
@@ -589,7 +596,6 @@ p.fb-empty {
 .gp-spot { stroke: var(--ink); stroke-width: 1.5; }
 .gp-flip { stroke: var(--gold-harvest); stroke-width: 1.5; stroke-dasharray: 6 4; }
 
-.gp-plate rect { fill: var(--bg-elev); stroke: var(--hairline); }
 /* Drawn when a plate had to be nudged off its rule to avoid a collision, so
    the label is never silently detached from the level it names. */
 .gp-leader { stroke: var(--hairline); stroke-width: 1; }
@@ -598,8 +604,6 @@ p.fb-empty {
 .gp-plate.is-flip .gp-plate-k { fill: var(--gold-harvest); }
 
 .gp-price { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
-.gp-price.is-spot { fill: var(--ink); }
-.gp-price.is-flip { fill: var(--gold-harvest); }
 .gp-axis {
   fill: var(--ink-faint);
   /* The caption used to inherit the page serif inside an otherwise wholly
@@ -610,7 +614,9 @@ p.fb-empty {
 }
 
 /* Decade rules on the symlog axis: the magnitude the bar length cannot carry. */
-.gp-tick { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.7; }
+/* The ruler behind the earned labels. Solid and faint rather than dashed:
+   a dashed rule at this weight competes with the bars it sits behind. */
+.gp-tick { stroke: var(--hairline); stroke-width: 1; opacity: 0.5; }
 .gp-ticklabel { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
 /* Unlabelled price ticks, so the rail is a ruler between earned labels. */
 .gp-ptick { stroke: var(--hairline); stroke-width: 1; }
@@ -1767,6 +1773,126 @@ body.is-stale .flows-tablewrap {
    inheriting the button's pointer. */
 .flows-table thead th .fb-sort abbr { text-decoration: inherit; cursor: inherit; }
 
+/* ---------- the implied volatility surface (moneyness x expiry) ----
+
+   Drawn by assets/js/flows-desk.js beneath the desk's own footnote, from
+   contracts priceSale() had already built — a second sweep of rows already
+   in hand, at zero additional vendor calls.
+
+   THE SHADE IS THE SMILE, THE NUMBER IS THE QUOTE, THE LEVEL IS A STRIP.
+   A heatmap of raw vol on a name whose front trades 45 and whose January
+   trades 26 paints one column dark and the other light, and the smile inside
+   each is invisible — the level swamps the shape. So the cell is shaded by
+   its vol MINUS its own expiry's at-the-money quote, its printed number is
+   the quoted vol unmodified, and the levels ride a separate strip which read
+   left to right is the term structure.
+
+   The renderer sets every colour and type size as a PRESENTATION ATTRIBUTE
+   too, so the panel is legible with none of these rules applied: assets
+   deploy before a cache-busted stylesheet is guaranteed to have landed, and
+   an unstyled <rect> is fill:black. These rules win wherever both apply,
+   because a presentation attribute is the lowest-priority declaration there is.
+
+   TWO PROPERTIES THIS BLOCK MUST NEVER SET. `fill-opacity` on .ivs-cell
+   carries the MAGNITUDE of the skew, and `stroke-dasharray` carries the AGE
+   of the print. Both are computed per cell; a blanket rule here would flatten
+   one of the chart's five channels into a constant, and nothing would look
+   wrong. */
+
+.desk-surface { margin: 1.6rem 0 0; }
+
+.desk-surface__head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0.5rem 1rem; margin-bottom: 0.5rem;
+}
+
+.desk-surface__title {
+  font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-dim); font-weight: 400;
+}
+
+.desk-surface__field label {
+  font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-faint); margin-right: 0.4rem;
+}
+
+.desk-surface__field select {
+  font: inherit; font-size: 0.8rem; color: var(--ink);
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+  border-radius: 4px; padding: 0.2rem 0.4rem;
+}
+
+.desk-surface__field select:focus-visible {
+  outline: 2px solid var(--gold-harvest); outline-offset: 1px;
+}
+
+/* One symbol is not a choice; the control stays so the block does not jump
+   when a second arrives, and must stay legible while disabled. */
+.desk-surface__field select:disabled { color: var(--ink-dim); opacity: 1; }
+
+.desk-surface__plot { margin: 0.2rem 0 0.6rem; }
+.ivs { display: block; max-width: 100%; }
+
+.desk-surface__note {
+  color: var(--ink-faint); font-size: 0.78rem; line-height: 1.6;
+  max-width: var(--measure);
+}
+
+/* Cells: `fill` only. */
+.ivs-cell.is-pos { fill: var(--gold-mystic); }
+.ivs-cell.is-neg { fill: var(--flow-down); }
+
+/* A cell whose expiry has no at-the-money quote is HOLLOW rather than pale:
+   an unknown place on the smile is not the middle of it. The renderer gives
+   it fill:none — this tints only its outline. */
+.ivs-cell.is-nolevel { stroke: var(--ink-faint); }
+
+/* Age of the print, by border. Dashed did not trade today; dotted carries no
+   volume field at all. Forms, so both survive greyscale and colour-blindness. */
+.ivs-cell.is-stale,
+.ivs-cell.is-unknown-age { stroke: var(--ink-dim); }
+
+/* Sign, independent of hue. Dark like the gamma surface's, so it reads as
+   texture under the printed volatility rather than as a strikethrough. */
+.ivs-hatch { color: var(--bg-deep); opacity: 0.5; }
+
+/* No listed strike at this moneyness on this expiry — an explicit void, which
+   is not the same fact as a contract quoted at the money. */
+.ivs-void { fill: var(--bg-deep); fill-opacity: 0.55; }
+
+/* Past the shade cap, marked rather than silently flattened. */
+.ivs-clip { stroke: var(--bg); }
+
+.ivs-colrule,
+.ivs-termrule { stroke: var(--hairline); stroke-opacity: 1; }
+
+.ivs-exp, .ivs-days, .ivs-iv, .ivs-m, .ivs-level { font-family: var(--font-mono); }
+.ivs-exp  { fill: var(--ink-dim);   fill-opacity: 1; letter-spacing: 0.04em; }
+.ivs-days { fill: var(--ink-faint); fill-opacity: 1; }
+.ivs-iv   { fill: var(--ink);       fill-opacity: 1; }
+
+/* A volatility that is a print of unknown age — dimmed to match the stale
+   cushion in the table above it. */
+.ivs-iv.is-stale { fill: var(--ink-dim); }
+
+.ivs-m { fill: var(--ink-faint); fill-opacity: 1; }
+
+/* The at-the-money row is the reference every other row is read against, so
+   it is the one that is NOT dimmed. */
+.ivs-m.is-atm { fill: var(--ink); font-weight: 700; }
+
+.ivs-level { fill: var(--ink); fill-opacity: 1; }
+.ivs-level.is-missing { fill: var(--ink-faint); }
+
+.ivs-dot { fill: var(--ink); }
+.ivs-termline { stroke: var(--ink); }
+
+/* An expiry that outlives the next earnings report. The warning glyph carries
+   the fact; the tint is a second channel, never the only one. */
+.ivs-exp.crosses-earnings { fill: var(--flow-down); }
+
+.ivs-cellgroup, .ivs-colhead, .ivs-levelgroup { cursor: help; }
+
 /* ---------- the watch list -------------------------------------
    Deliberately quieter than the board. Nothing here cleared the bar,
    so the page gets no score bars, no rank badges and no colour
@@ -1892,19 +2018,52 @@ body.is-stale .flows-tablewrap {
    different facts, and only one of them is tradeable. */
 .gs-void { fill: var(--bg-deep); opacity: 0.35; }
 
+/* MEASURED ZERO IS ITS OWN STATE. `is-pos` was assigned by `v < 0`, so a pair
+   measured at exactly zero rendered as the palest LONG cell — a sign the book
+   does not have, at the one magnitude where sign is meaningless. Three facts,
+   three appearances: a value, a measured zero, and a pair never returned. */
+.gs-cell.is-zero { fill: none; }
+.gs-zeromark { stroke: var(--ink-faint); stroke-width: 1; }
+
+.gs-price.is-call,
+.gs-price.is-put { fill: var(--ink-dim); }
+
+/* THE DECODER. "Magnitude by opacity" with nothing to read a shade against is
+   a mood, not a quantity — so the ramp is stepped, and the steps are drawn.
+   It lives in the 34px of bottom padding the panel already reserved and never
+   drew into, which is why it costs no height.
+
+   The 9px is load-bearing: with no font-size an SVG <text> defaults to 16px
+   and the key overruns the band it is drawn in. */
+.gs-key { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
+.gs-key-sw.is-pos { fill: var(--gold-mystic); }
+.gs-key-sw.is-neg { fill: var(--flow-down); }
+
 /* A cell past the colour cap, marked rather than silently flattened. */
 .gs-clip { stroke: var(--bg); stroke-width: 1; opacity: 0.85; }
 
 .gs-colrule { stroke: var(--hairline); stroke-width: 0.5; opacity: 0.5; }
 
-.gs-spot { stroke: var(--ink); stroke-width: 1.5; }
+.gs-spot { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 6 3; }
 
 /* The walls are outlined, not filled: a fill would fight the cell
    opacity that is carrying the magnitude underneath them. */
-.gs-callwall,
-.gs-putwall { fill: none; stroke-width: 1.4; }
-.gs-callwall { stroke: var(--gold-celadon); }
-.gs-putwall { stroke: var(--flow-down); stroke-dasharray: 5 3; }
+/* THE WALLS WERE FULL-WIDTH OUTLINED RECTS at stroke-width 1.4 — more ink
+   than the cells they were annotating. A marker in the gutter and a tick at
+   the far edge says the same thing and lets the data hold the middle.
+
+   Filled for the call wall, hollow for the put wall: a FORM, so the two are
+   still distinguishable in greyscale and to a colour-blind reader. Hue only
+   ever duplicates it. */
+.gs-callwall { color: var(--gold-celadon); }
+.gs-putwall  { color: var(--flow-down); }
+.gs-wallmark {
+  fill: currentColor; stroke: currentColor;
+  stroke-width: 1.4; stroke-linejoin: round;
+}
+.gs-putwall .gs-wallmark { fill: var(--bg); }
+.gs-walltick { stroke: currentColor; stroke-width: 1.5; }
+.gs-putwall .gs-walltick { stroke-dasharray: 3 2; }
 
 .gs-price {
   fill: var(--ink-faint);

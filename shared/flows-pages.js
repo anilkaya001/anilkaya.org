@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "62";
+export const ASSET_VERSION = "63";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
