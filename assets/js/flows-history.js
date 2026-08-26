@@ -423,6 +423,20 @@
     const parts = [];
     if (retained !== null) parts.push(retained + " session" + (retained === 1 ? "" : "s") + " retained");
     if (sessions.length) parts.push(sessions.length + " scored");
+    /* THE SPLIT, SAID OUT LOUD WHENEVER THERE ARE SESSIONS ON BOTH SIDES OF IT.
+
+       The board's selection rule changed, so sessions before that date scored
+       a different population of names. The scorer reports the two separately
+       instead of averaging them; if this page did not say so, a reader would
+       see one curve with a gap in it and reasonably assume the gap was missing
+       data rather than a different experiment. */
+    const priorN = isNum(payload.priorRetained);
+    const epochN = isNum(payload.epochRetained);
+    if (payload.epoch && priorN && epochN !== null) {
+      parts.push(
+        epochN + " under the current selection rule, " + priorN + " before it (" +
+        payload.epoch + "), reported separately");
+    }
     if (payload.firstSession && payload.lastSession) {
       parts.push("from " + payload.firstSession + " to " + payload.lastSession);
     }

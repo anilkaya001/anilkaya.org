@@ -48,6 +48,13 @@
 
   const MINUS = "−";            // U+2212, not a hyphen
   const DASH = "—";
+  /* ONE SENTENCE FOR THE ABSENCE, said the same way on the deck, in the
+     table and to a screen reader. A reader who notices that some rows open
+     and others do not is owed the reason in the place they noticed it. */
+  const NO_CARD_SAID =
+    "No detail card: the chain and the card cost vendor calls the run spends " +
+    "only on the names furthest from neutral. This row is scored and ranked " +
+    "from the same five sources as every other.";
 
   /* NULL IS NOT ZERO, AND Number() DISAGREES.
      `Number(null)` is 0 and `Number("")` is 0, both finite, so the original
@@ -185,6 +192,22 @@
   // The horizon every `hm` on the board is stated in, read from the payload
   // rather than assumed, so the tooltip cannot outlive a change to it.
   let horizonSessions = null;
+  /* DOES THIS PAYLOAD KNOW ABOUT DEEP ROWS AT ALL?
+
+     THE BUG THIS EXISTS TO PREVENT WOULD HAVE BEEN LIVE FOR A DAY. Assets
+     deploy the moment `main` moves; the pipeline runs once, the next morning.
+     So between the two there is always a window where NEW JavaScript is
+     reading an OLD board — and an old board has no `dp` on any row, because
+     the field did not exist when it was written. A renderer that treats
+     "no dp" as "no card" would have made every single name on the board
+     unclickable until the next pipeline run, silently, on a page whose whole
+     purpose is opening those cards.
+
+     The test is on the PAYLOAD, not the row: `deep` is a count the board
+     publishes alongside `deepRule`, so its absence means "this board predates
+     the distinction", and every row on such a board does have a card. A row's
+     own missing `dp` on a board that DOES publish `deep` is a real answer. */
+  let knowsDeep = false;
 
   function familyCell(fam) {
     const td = document.createElement("td");
@@ -288,15 +311,31 @@
   }
 
   function deckCard(row, index) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "fd-card";
-    card.dataset.t = String(row.t || "");
+    /* NOT EVERY ROW HAS A CARD, and the deck has to say so BEFORE the click.
+
+       The board is built from data already fetched, so it costs nothing to
+       publish a hundred names. A detail card is not free — it is two more
+       vendor calls a name — so the pipeline builds them only for the names
+       furthest from neutral and stamps `dp` on the rows that got one.
+
+       A row without `dp` therefore renders as a plain element, not a button:
+       no pointer cursor, no tab stop, no aria-haspopup, no prefetch, and no
+       `data-t` — which is what actually keeps it out of the click delegation
+       in flows-card.js, since a missing attribute cannot be styled around.
+       The alternative is 43 cards that look identical to the other 50 and
+       open a fetch for a key the pipeline never wrote. */
+    const deep = !knowsDeep || row.dp === 1;
+    const card = document.createElement(deep ? "button" : "div");
+    if (deep) card.type = "button";
+    card.className = deep ? "fd-card" : "fd-card fd-flat";
     card.setAttribute("role", "listitem");
-    card.setAttribute("aria-haspopup", "dialog");
-    card.addEventListener("pointerenter", () => {
-      if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
-    });
+    if (deep) {
+      card.dataset.t = String(row.t || "");
+      card.setAttribute("aria-haspopup", "dialog");
+      card.addEventListener("pointerenter", () => {
+        if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
+      });
+    }
 
     const score = isNum(row.s);
 
@@ -388,7 +427,7 @@
       (isNum(row.hm) === null ? ""
         : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
           `${horizonSessions || 10} trading sessions. `) +
-      `Open the detail card.`);
+      (deep ? `Open the detail card.` : NO_CARD_SAID));
     return card;
   }
 
@@ -684,17 +723,26 @@
        about what a table row is. */
     const tk = document.createElement("td");
     tk.className = "fb-tk";
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "fb-open";
-    open.dataset.t = String(row.t || "");
-    open.setAttribute("aria-haspopup", "dialog");
+    /* Same rule as the deck: a row with no card is not a button. See
+       deckCard. A <span> rather than a disabled <button>, because a disabled
+       button reads as "temporarily broken" and this is a permanent, stated
+       property of the row. */
+    const deep = !knowsDeep || row.dp === 1;
+    const open = document.createElement(deep ? "button" : "span");
+    open.className = deep ? "fb-open" : "fb-open fb-flat";
     open.textContent = String(row.t || DASH);
-    // Warm the card on hover so the overlay opens instantly. At most six
-    // entries are cached, against a 5M row/day read budget.
-    open.addEventListener("pointerenter", () => {
-      if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
-    });
+    if (deep) {
+      open.type = "button";
+      open.dataset.t = String(row.t || "");
+      open.setAttribute("aria-haspopup", "dialog");
+      // Warm the card on hover so the overlay opens instantly. At most six
+      // entries are cached, against a 5M row/day read budget.
+      open.addEventListener("pointerenter", () => {
+        if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
+      });
+    } else {
+      open.title = NO_CARD_SAID;
+    }
     tk.append(open);
     tr.append(tk);
 
@@ -980,6 +1028,7 @@
 
       legacyFamilies = (isNum(payload.v) ?? 1) < 2;
       horizonSessions = isNum(payload.horizonSessions);
+      knowsDeep = isNum(payload.deep) !== null;
 
       currentRows = rows;
       /* A deep-linked sort keyed to a column THIS payload withholds is

@@ -34,6 +34,10 @@ import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS } from "../shared/flows-chain.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
+import {
+  capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
+  PICK_SIZE, PICK_INDEX,
+} from "../shared/flows-universe.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -77,8 +81,17 @@ const UNIVERSE = {
   minOptionVolume: 1000,     // fewer contracts than this and per-name greeks are noise
   minOpenInterest: 5000,
   excludeIssueTypes: ["ETF", "Index", "ADR"],   // index flow is not single-name conviction
-  boardSize: 25,
-  enrichPerSide: 30,         // enrich a buffer so hysteresis has candidates to hold
+
+  /* THE BOARD IS HALF THE POOL, NOT A QUARTER OF IT. At a 100-name pool a
+     board of 25 a side publishes every name that scored, which is the point:
+     the reader asked to see the market, and a ranked list that stops at 25
+     answers a different question than a ranked list of everything measured. */
+  boardSize: 50,
+
+  /* HOW MANY NAMES ARE ENRICHED, and therefore what the score is a
+     cross-section OF. Five vendor calls each, so this number times five is the
+     largest line in the call budget and the two must be changed together. */
+  enrichCount: 100,
 };
 
 /* ---------- rate limiting --------------------------------------
@@ -98,17 +111,81 @@ export const RATE = {
      to reach 5s would cost CALL_BUDGET x 5s = 43 minutes against a 30-minute
      deadline — the run would publish nothing at all, which is a strictly worse
      failure than being rate-limited. At 750ms the same budget costs
-     521 x 0.75 = 391s, comfortably inside the window the chain leg reserves.
-     rateFloorSurvivesBudget() below is the assertion, and it is tested. */
+     800 x 0.75 = 600s, comfortably inside the window the chain leg reserves.
+     rateFloorSurvivesBudget() below is the assertion, and it is tested — and
+     it is the assertion, not this comment, that fails the build if the budget
+     is raised past what the deadline can absorb (1,919 calls at this floor). */
   floorCeilingMs: 750,
 };
 
 /* The call budget this pipeline is designed around, named so the floor ceiling
    can be checked against it rather than against a number in a comment:
-   1 dating probe + 6 screener bands + 5 per enriched name x 60 + 1 chain call
-   per board name x 50 + 3 per card x 50 + a handful of publishes. The live run
-   of 2026-08-26 spent 408 on an 11-name board. */
-export const CALL_BUDGET = 521;
+
+     1  session-date probe (SPY candles)
+   + 3  dating probes
+   + 32 screener bands  (was 6; the ~50-row cap per band is what made the old
+        ladder a 300-name ceiling on the entire investable universe)
+   + 500 enrichment      (5 calls x UNIVERSE.enrichCount = 100)
+   + 11 sector ETF candles
+   + 1  chain truncation probe
+   + 50 option chains    (top 50 board names by |score|)
+   + 100 cards           (2 per name x 50: max-pain and the gamma surface;
+        congress went market-wide and is the one call below)
+   + 1  congress, market-wide
+   = 699 modelled, ~772 attempts at the 10.5% retry rate observed on 2026-08-26.
+
+   The run of 2026-08-26 spent 408 attempts on an ELEVEN-name board. This
+   budget buys a hundred. */
+export const CALL_BUDGET = 800;
+
+/* The screener's undocumented page cap, measured: every band that has ever had
+   more names than this returned exactly this many. Named so the saturation
+   check compares against the same number the ladder is sized around. */
+export const SCREENER_PAGE_ROWS = 50;
+
+/**
+ * How many board names get the per-name legs that cost vendor calls.
+ *
+ * The board itself is free: it is built from data already fetched, so widening
+ * it from 11 names to 93 cost nothing. The CHAIN and the CARD are not free —
+ * one and two calls a name respectively — so at 93 names they would spend 279
+ * calls and turn a coverage win into a deadline risk.
+ *
+ * They are therefore capped, and capped by |score| rather than by side, so the
+ * names that get the expensive treatment are the ones furthest from neutral
+ * on either board rather than the top of an arbitrary one. Everything below
+ * the cap still publishes a row, a score and a rank; it publishes no card, and
+ * the row says so rather than linking to a page that will not load.
+ */
+export const DEEP_NAMES = 50;
+
+/** The rule, in the words the board publishes it in. */
+export const DEEP_RULE =
+  "The " + 50 + " names furthest from neutral across both boards carry a chain " +
+  "and a detail card. Every other row is scored and ranked from the same five " +
+  "sources, and has no card: the card costs vendor calls the run cannot spend " +
+  "on a hundred names.";
+
+/**
+ * The board names that earn a chain and a card, ranked by distance from
+ * neutral across BOTH sides.
+ *
+ * Pure and exported because the alternative — slicing inside the leg — makes
+ * the two legs able to disagree about which names are deep, and a card built
+ * for a name whose chain was skipped renders four "unavailable" panels for a
+ * reason that is about a budget rather than about the data.
+ */
+export function deepNames(published, limit = DEEP_NAMES) {
+  const rows = [];
+  for (const side of ["long", "short"]) {
+    for (const row of (published && published[side]) || []) {
+      const s = Number(row && row.s);
+      if (row && row.t) rows.push({ t: row.t, side, mag: Number.isFinite(s) ? Math.abs(s) : -1 });
+    }
+  }
+  rows.sort((a, b) => b.mag - a.mag || a.t.localeCompare(b.t));
+  return rows.slice(0, Math.max(0, limit));
+}
 
 /**
  * Can a run at the floor ceiling still finish inside the deadline?
@@ -1030,10 +1107,24 @@ const SIGNED = ["F", "P", "D"];
  * neutral state cannot report a quiet session.
  *
  * This is a PRESENTATION threshold, not an identification claim: a name whose
- * score is inside +-20 is not shown on either board. Published in the payload
- * so the reader can see the bar that was applied.
+ * score is inside the band is not shown on either board. Published in the
+ * payload so the reader can see the bar that was applied.
+ *
+ * TWENTY WAS CALIBRATED AGAINST A POOL THAT NO LONGER EXISTS. When the pool
+ * was sixty tilt-EXTREMES, a score of 20 was an ordinary reading and a band
+ * that wide still left most names outside it. Against a stated size cohort the
+ * same threshold swallows the middle of the market: on the first dry run of
+ * the expanded pool, 71 of 100 names fell inside it and the board published 29.
+ * Widening the universe and keeping the band would have answered "show me more
+ * names" by measuring more names and showing the same few.
+ *
+ * ONE, NOT ZERO. Zero would leave a score of exactly 0 — a real outcome, not a
+ * rounding artefact — with no side to belong to, and it would have to be
+ * assigned arbitrarily. At 1 the exact zero has an unambiguous home on the
+ * watch board, and |s| >= 1 is a residual of about 0.018 sigma: a bar low
+ * enough to be honest about being a formality, which is what it now is.
  */
-const DEAD_BAND = 20;
+const DEAD_BAND = 1;
 
 /**
  * THE BOARD PAYLOAD'S SCHEMA VERSION, on the same rule as the card's: bump when
@@ -1650,7 +1741,11 @@ function toRows(pool, screenerByTicker, previousIds) {
  * surface that publishes right up to a hard limit fails on the day a column is
  * added, and it fails as a 413 from the Worker rather than here.
  */
-const WATCH_ROWS = 40;
+/* AT A HUNDRED-NAME POOL, FORTY TRUNCATES INTO NOWHERE. The watch board is
+   where a name inside the dead band is published; capped at 40 against a pool
+   this size, a name could clear no board at all and appear on no surface,
+   which is the one outcome the dead band exists to prevent. */
+const WATCH_ROWS = 80;
 
 /** A finite number rounded for publication, or null. Never 0 for "missing". */
 const fixed = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
@@ -2899,20 +2994,28 @@ async function main() {
      Six bands, up to 50 each, deduplicated by ticker. Sector diversity comes
      along for free, which matters because the score neutralises on sector: a
      universe drawn entirely from one industry makes that step meaningless. */
-  const CAP_BANDS = [
-    [UNIVERSE.minMarketCap, 3e9],
-    [3e9, 1e10],
-    [1e10, 5e10],
-    [5e10, 2e11],
-    [2e11, 1e12],
-    [1e12, null],
-  ];
+  /* THIRTY-TWO BANDS, NOT SIX, and generated rather than hand-picked.
+
+     The vendor's ~50-row cap binds PER BAND, so the ladder is not a
+     convenience — it is the only pagination this endpoint has, and its length
+     is the ceiling on how much of the market can be seen at all. Six bands
+     capped the entire investable universe at 300 names before one filter ran,
+     and the first band ($1-3B, a 3x span) was saturated at 50 on every run:
+     the small-cap end of the market was being truncated silently, because the
+     log prints what each band RETURNED and a truncated band returns exactly
+     the same 50 as a complete one.
+
+     Equal ratio rather than equal width, because listed companies are roughly
+     log-uniform in market cap: equal ratio puts roughly equal pressure on
+     every band's cap instead of saturating the bottom and wasting the top. */
+  const CAP_BANDS = capBands({ min: UNIVERSE.minMarketCap, max: 4e12, ratio: 1.3 });
 
   let screener;
   if (DRY_RUN) {
     screener = fakeScreener(420);
   } else {
     const byTicker = new Map();
+    let saturated = 0;
     for (const [min, max] of CAP_BANDS) {
       const page = await uw("/api/screener/stocks", {
         min_underlying_price: UNIVERSE.minPrice,
@@ -2923,12 +3026,24 @@ async function main() {
       }).catch(() => []);
       for (const row of page) if (row && row.ticker) byTicker.set(row.ticker, row);
       const label = max === null
-        ? `>= $${(min / 1e9).toFixed(0)}B`
-        : `$${(min / 1e9).toFixed(0)}-${(max / 1e9).toFixed(0)}B`;
-      console.log(`  screener ${label.padEnd(12)} ${String(page.length).padStart(3)} rows` +
+        ? `>= $${(min / 1e9).toFixed(1)}B`
+        : `$${(min / 1e9).toFixed(1)}-${(max / 1e9).toFixed(1)}B`;
+      /* A BAND THAT RETURNED EXACTLY THE CAP IS A BAND THAT WAS TRUNCATED, and
+         until this line said so the truncation was invisible: a full band and
+         a complete band print the same count. Saturated bands are where the
+         ladder needs to be finer, and this is the only evidence of it. */
+      if (page.length >= SCREENER_PAGE_ROWS) saturated++;
+      console.log(`  screener ${label.padEnd(14)} ${String(page.length).padStart(3)} rows` +
+                  `${page.length >= SCREENER_PAGE_ROWS ? " CAP" : "   "}` +
                   `  (union ${byTicker.size})`);
     }
     screener = [...byTicker.values()];
+    if (saturated) {
+      console.warn(
+        `  screener: ${saturated} of ${CAP_BANDS.length} bands returned the full ` +
+        `${SCREENER_PAGE_ROWS}-row page, so those bands are TRUNCATED and the ` +
+        `universe below them is incomplete. Narrow the ladder's ratio to see more.`);
+    }
   }
 
   const universe = screener.filter(eligible);
@@ -2966,18 +3081,44 @@ async function main() {
            Math.tanh(tilt.surpriseTilt || 0),
   })).sort((a, b) => b.rough - a.rough);
 
-  // 3. Enrich only the extremes. This two-stage split is the entire
-  //    request economy: 1 screener call plus ~5 per enriched name.
-  /* Deduplicate by ticker. slice(0, n) and slice(-n) overlap whenever fewer
-     than 2n names survive the earnings gate — a state this pipeline explicitly
-     permits, since it only refuses below 50 — and the same name was then
-     enriched twice (five wasted calls each), entered the scored pool twice,
-     and could land on the long AND the short board simultaneously.
-     partitionSides guarantees its two slices are INDEX-disjoint, not
-     TICKER-disjoint, so the downstream fix did not cover this. At 55 survivors
-     five names duplicated; at 50, ten did. */
-  const picks = selectExtremes(composite, UNIVERSE.enrichPerSide);
-  console.log(`enriching ${picks.length} names (${UNIVERSE.enrichPerSide} per side)`);
+  /* 3. THE ENRICHMENT POOL — A STATED UNIVERSE, NOT THE TAILS OF A PRE-SCORE.
+
+     Until 2026-08-26 this line was selectExtremes(composite, 30): the thirty
+     most and least tilted names by a rough composite of the very screener
+     columns family F is built from. Two things were wrong with it, and the
+     second is worse than the first.
+
+     It published eleven names. Sixty enriched, twenty-three past the liquidity
+     floor, twelve inside the dead band, eleven left. Nobody would call that a
+     market view, and the owner said so.
+
+     And it selected the cross-section on the measurement. The score is a
+     residual against the spread of the pool it is computed over; when the pool
+     IS the tails of that same signal, the spread is not the market's, it is
+     the selection's, and every z-score in the board inherits it. A pool chosen
+     for extreme tilt makes tilt look ordinary.
+
+     Market capitalisation fixes both. It is on the screener row already, it is
+     stable session to session, and — the property that does the work — it is
+     independent of the option flow being scored, so selecting on it cannot
+     bias the cross-section the scorer normalises against.
+
+     The Nasdaq-100 rides along as an ADDITIVE guarantee, never a filter, so
+     the dated constant behind it can rot without ever producing a wrong
+     number. See shared/flows-universe.js. */
+  const tiltByPick = new Map(tilted.map(({ row, tilt }) => [row.ticker, tilt]));
+  const coverage = selectCoverage(tilted.map(({ row }) => row), {
+    count: UNIVERSE.enrichCount,
+    guaranteed: NDX_100,
+  });
+  const picks = coverage.map(({ row, why }) => ({
+    row, why, tilt: tiltByPick.get(row.ticker) || screenerTilt(row),
+  }));
+  const byIndex = picks.filter((p) => p.why === PICK_INDEX).length;
+  console.log(
+    `enriching ${picks.length} names: ${picks.length - byIndex} by market cap ` +
+    `(the largest ${UNIVERSE.enrichCount} of ${tilted.length} gated), ` +
+    `${byIndex} added by Nasdaq-100 membership (list dated ${NDX_AS_OF})`);
 
   const enriched = [];
   let failed = 0;
@@ -3096,8 +3237,53 @@ async function main() {
   const payloads = {};
   const first = scored[0] || {};
   for (const side of ["long", "short"]) {
-    const rows = toRows(sides[side], screenerByTicker, previous[side]);
-    published[side] = rows;
+    published[side] = toRows(sides[side], screenerByTicker, previous[side]);
+  }
+
+  /* WHICH ROWS HAVE A CARD, STAMPED ONTO THE ROW ITSELF.
+
+     The board is free and the card is not, so the board is 93 rows and only
+     the 50 furthest from neutral get the two calls a card costs. Without this
+     flag every row still LOOKS clickable and 43 of them would open a page that
+     fetches a key the pipeline never wrote — a 404 rendered as a broken
+     reader, for a reason that is about a call budget and that no reader could
+     possibly infer.
+
+     Stamped HERE, from the deep list, rather than later from whether a chain
+     came back: the chain leg can be skipped wholesale on a slow morning while
+     the cards are still built, and a flag derived from chain success would
+     then hide fifty cards that exist. It is a statement about what this run
+     INTENDED to build deeply, which is exactly what the reader needs. */
+  const deepSet = new Set(deepNames(published).map((d) => d.t));
+  for (const side of ["long", "short"]) {
+    for (const row of published[side]) {
+      if (deepSet.has(row.t)) row.dp = 1;
+      /* THE FOUR CHAIN COLUMNS ARE DECLARED HERE, NULL, ON EVERY ROW.
+
+         They used to be appended by the re-publish, which skipped any row
+         without a chain — and until this run every board row HAD a chain,
+         because the board was eleven names and every one of them was deep. At
+         93 rows and a 50-name chain budget, 43 rows would have shipped without
+         their last four keys at all. The board table binds columns
+         POSITIONALLY, so a row missing its trailing keys does not render four
+         blanks: it renders whatever the renderer finds at those offsets, or
+         nothing, under headings that no longer describe it.
+
+         Declared null rather than omitted, in this order, so every row has the
+         same shape and the re-publish OVERWRITES rather than appends —
+         assigning an existing key leaves JavaScript's insertion order intact,
+         so the four stay last and stay in order for the rows that do get a
+         chain. A null here means "no chain was fetched for this name", which
+         `deepRule` on the payload explains. */
+      row.skew = null;
+      row.term = null;
+      row.atmIv = null;
+      row.skewDays = null;
+    }
+  }
+
+  for (const side of ["long", "short"]) {
+    const rows = published[side];
     payloads[side] = {
       v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
@@ -3116,6 +3302,13 @@ async function main() {
       horizonSessions: HORIZON_SESSIONS,
       weights: first.weights || null,
       shareClasses,
+      /* HOW MANY NAMES GOT THE EXPENSIVE TREATMENT, and the rule that chose
+         them, published rather than left for a reader to infer from which
+         rows happen to be clickable. */
+      deep: rows.filter((r) => r.dp).length,
+      deepRule: DEEP_RULE,
+      selection: UNIVERSE_NOTES.rule,
+      selectionEpoch: SELECTION_EPOCH,
       status: rows.length ? "ok" : "thin",
     };
     await publish("board:" + side, payloads[side]);
@@ -3243,6 +3436,10 @@ async function main() {
       horizons: RECORD_HORIZONS,
       statedK: HORIZON_SESSIONS,
       maxSessions: RECORD_MAX_SESSIONS,
+      /* The date the pool changed. Without it the scorer averages boards drawn
+         from two different selection rules into one hit rate. See
+         shared/flows-universe.js. */
+      epoch: SELECTION_EPOCH,
     });
     const features = icTable(datedBoards, recordCloses, recordCalendar, {
       k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
@@ -3253,6 +3450,7 @@ async function main() {
       status: "ok",
       statedHorizon: HORIZON_SESSIONS,
       attrition: RECORD_NOTES.attrition,
+      epochNote: RECORD_NOTES.epoch,
       ...rec,
       features: {
         k: features.k,
@@ -3366,8 +3564,13 @@ async function main() {
      that nothing may fail the run. */
   const chainByTicker = new Map();
   try {
-  const boardTickers = [...new Set(
-    ["long", "short"].flatMap((side) => payloads[side].rows.map((r) => r.t)))];
+  /* THE DEEP NAMES, not every board name. The board is 93 rows now and each
+     chain is a vendor call; deepNames() ranks by distance from neutral across
+     both sides so the expensive legs go to the names furthest from neutral,
+     and the card leg below uses the SAME list so the two cannot disagree
+     about who is deep. */
+  const deep = deepNames({ long: payloads.long.rows, short: payloads.short.rows });
+  const boardTickers = [...new Set(deep.map((d) => d.t))];
   const spotByTicker = new Map();
   for (const side of ["long", "short"]) {
     for (const row of payloads[side].rows) {
@@ -3575,12 +3778,50 @@ async function main() {
      so a sustained 429 regime would otherwise walk straight into the timeout.
      At the 5s ceiling this loop abandons at 30 minutes and reports how many
      it managed. */
+  /* THE SAME DEEP LIST THE CHAIN LEG USED. Built from the same function over
+     the same rows, so a card is never built for a name whose chain was skipped
+     — which would render four panels as "unavailable" for a reason that is
+     about the call budget rather than about the data. */
   const onBoard = new Map();
-  for (const side of ["long", "short"]) {
-    for (const row of published[side]) onBoard.set(row.t, side);
-  }
+  for (const d of deepNames(published)) onBoard.set(d.t, d.side);
   const byTicker = new Map(liquid.map((e) => [e.features.ticker, e]));
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
+
+  /* CONGRESS, ONCE FOR THE WHOLE MARKET RATHER THAN ONCE PER NAME.
+
+     /api/congress/recent-trades takes an OPTIONAL ticker. Passing it bought
+     one name's disclosures per call; omitting it returns the recent tape
+     across every name, which is the same data for fifty cards at one call
+     instead of fifty. That is 49 calls saved — and, just as usefully, it
+     shrinks the per-card fan-out from three concurrent requests to two, and a
+     three-request burst repeated fifty times is precisely the arrival shape
+     that earns the 429s this run cannot afford.
+
+     Disclosures are filings, not quotes: they are weeks stale by construction,
+     so a market-wide read carries exactly the same information per name as a
+     targeted one. Bucketed by ticker here; a name with no disclosures gets an
+     empty array and the panel says so, which is what it did before. */
+  const congressByTicker = new Map();
+  if (onBoard.size) {
+    try {
+      const recent = DRY_RUN
+        ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
+        : await uw("/api/congress/recent-trades", { limit: 500 });
+      for (const row of recent) {
+        const t = row && (row.ticker || row.symbol);
+        if (!t || !onBoard.has(t)) continue;
+        if (!congressByTicker.has(t)) congressByTicker.set(t, []);
+        congressByTicker.get(t).push(row);
+      }
+      console.log(
+        `  congress: ${recent.length} disclosure(s) market-wide, ` +
+        `${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
+    } catch (error) {
+      /* A DEAD CONGRESS FEED IS ONE EMPTY PANEL, NOT A DEAD CARD LEG. It was
+         .catch(() => []) per name before and it stays non-fatal here. */
+      console.warn(`  congress: ${error.message} — every card publishes the panel empty`);
+    }
+  }
 
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
   // The surface shape is reported once per run, not once per card.
@@ -3606,13 +3847,13 @@ async function main() {
         .slice(0, SURFACE_EXPIRIES);
 
       const spotPx = num(e.row.close);
-      const [maxPain, congress, surface] = DRY_RUN
-        ? [fakeMaxPain(ticker, spotPx), fakeCongress(ticker), fakeSurface(ticker, spotPx, surfaceExpiries)]
+      const congress = congressByTicker.get(ticker) || [];
+      const [maxPain, surface] = DRY_RUN
+        ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries)]
         : await Promise.all([
           // The one per-name source the dating commit left undated. The
           // endpoint takes a `date`, and its window spans 120 days of expiries.
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
-          uw("/api/congress/recent-trades", { ticker, limit: 50 }).catch(() => []),
           /* ONE call for the whole strike x expiry joint, not one per expiry.
              expirations[] is an array parameter, so the horizon is a choice
              rather than a call count. Banded on strike for the same reason the

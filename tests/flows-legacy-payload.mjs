@@ -176,6 +176,60 @@ const famV2 = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .f
 })));
 const v2 = (k) => famV2.find((f) => f.k === k);
 const px = (w) => parseFloat(w) || 0;
+
+/* ---------- THE DEEP-ROW WINDOW ------------------------------------
+
+   THE SAME TRANSITIONAL CERTAINTY THIS FILE EXISTS FOR, one field later.
+
+   The board now publishes ~93 rows and builds detail cards only for the 50
+   furthest from neutral, stamping `dp` on those rows so the renderer can stop
+   advertising a card that was never written. Fine — except that assets deploy
+   the moment `main` moves and the pipeline runs the NEXT MORNING, so for the
+   whole intervening day the new renderer reads a board written before `dp`
+   existed. Every row would carry no `dp`, the renderer would conclude no row
+   has a card, and the entire card reader would go dark on a page whose only
+   purpose is opening those cards. Silently: no error, no empty state, just
+   ninety-three names that no longer respond to a click.
+
+   The compatibility rule is that the test is on the PAYLOAD, not the row.
+   `deep` is a count published beside `deepRule`; a board that omits it
+   predates the distinction, so every row on it has a card. */
+await page.evaluate(() => window.scrollTo(0, 0));
+
+// (a) A board with no `deep` at all — literally yesterday's payload.
+const preDeep = JSON.parse(JSON.stringify(currentBoard));
+preDeep.rows = [{ ...currentBoard.rows[0], t: "OLDB" }];
+delete preDeep.deep;
+await post("board:long", preDeep);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const preDeepClickable = await page.evaluate(() =>
+  document.querySelectorAll('.fd-card[data-t="OLDB"]').length === 1 &&
+  document.querySelector('.fd-card[data-t="OLDB"]').tagName === "BUTTON");
+
+// (b) A board that DOES publish `deep`: an unstamped row is a real answer.
+const withDeep = JSON.parse(JSON.stringify(currentBoard));
+withDeep.deep = 1;
+withDeep.deepRule = "the names furthest from neutral carry a chain and a detail card";
+withDeep.rows = [
+  { ...currentBoard.rows[0], t: "DEEPR", dp: 1 },
+  { ...currentBoard.rows[0], t: "FLATR" },
+];
+await post("board:long", withDeep);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector('.fd-card[data-t="DEEPR"]');
+const deepSplit = await page.evaluate(() => {
+  const deep = document.querySelector('.fd-card[data-t="DEEPR"]');
+  const flat = [...document.querySelectorAll(".fd-card")]
+    .find((el) => (el.getAttribute("aria-label") || "").startsWith("FLATR"));
+  return {
+    deepIsButton: !!deep && deep.tagName === "BUTTON",
+    flatExists: !!flat,
+    flatIsButton: !!flat && flat.tagName === "BUTTON",
+    flatHasDataT: !!flat && flat.hasAttribute("data-t"),
+    flatSaysWhy: !!flat && /No detail card/i.test(flat.getAttribute("aria-label") || ""),
+  };
+});
 /* NARROWED, AND THE NARROWING IS THE POINT.
 
    This read `.includes("built before")` and matched ANY such note in the
@@ -204,6 +258,16 @@ const v2Purity = await page.evaluate(() =>
   document.querySelector("#flowsBody tr").children[6].textContent.trim());
 
 const assertions = [
+  ["a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
+   "between new assets and the next pipeline run must not dark the card reader",
+   preDeepClickable],
+  ["on a board that publishes `deep`, a stamped row is still a button", deepSplit.deepIsButton],
+  ["an unstamped row on that same board still RENDERS — it is a real row with real numbers, " +
+   "not a hidden one", deepSplit.flatExists],
+  ["but it is not a button, so it cannot be clicked into a 404", !deepSplit.flatIsButton],
+  ["and it carries no data-t, which is what keeps it out of the click delegation rather than " +
+   "a class name two files have to agree about", !deepSplit.flatHasDataT],
+  ["and it tells a screen reader WHY there is nothing to open", deepSplit.flatSaysWhy],
   [fam.find((f) => f.k === "V").v === "—", "V is withheld on a v1 card"],
   [fam.find((f) => f.k === "O").v === "—", "O is withheld on a v1 card"],
   [fam.find((f) => f.k === "F").v === "−73", "F still renders, because its meaning did not change"],

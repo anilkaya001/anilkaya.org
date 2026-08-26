@@ -132,6 +132,7 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
   horizons = [1, 5, 10, 21],
   statedK = 10,
   maxSessions = 30,
+  epoch = null,
 } = {}) {
   const calendarIdx = new Map(calendar.map((d, i) => [d, i]));
 
@@ -143,13 +144,49 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
   }
   const dates = [...byDate.keys()].sort();
 
-  const horizonRows = horizons.map((k) => {
+  /* THE SELECTION EPOCH: THE DATE THE POOL BEING SCORED CHANGED.
+
+     A session's long-minus-short return is the return of the names that board
+     published, and which names it published is decided by a selection rule.
+     When that rule changes, the boards on either side of the change are two
+     different experiments — same column headings, same units, entirely
+     different populations. Averaging them produces a number that is finite,
+     plausible, renders perfectly, and answers no question anyone asked.
+
+     Before 2026-08-26 the pool was sixty names selected as the extremes of a
+     rough tilt composite; after it, a stated market-cap cohort of a hundred.
+     Both are honest. Their mean is not.
+
+     So the horizon means are reported for the CURRENT rule, and the earlier
+     sessions are reported beside them under their own count rather than
+     discarded — discarding them would throw away the only track record that
+     exists to avoid explaining a footnote. A run with no epoch, or with every
+     session on one side of it, behaves exactly as before. */
+  const inEpoch = (d) => !epoch || d >= epoch;
+  const currentDates = dates.filter(inEpoch);
+  const priorDates = dates.filter((d) => !inEpoch(d));
+
+  const meanOver = (subset, k) => {
     let sum = 0, n = 0;
-    for (const d of dates) {
+    for (const d of subset) {
       const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, k);
       if (s.state === "ok" && s.ls !== null) { sum += s.ls; n++; }
     }
-    return { k, ls: n ? round(sum / n, 4) : null, n };
+    return { ls: n ? round(sum / n, 4) : null, n };
+  };
+
+  const horizonRows = horizons.map((k) => {
+    const cur = meanOver(currentDates, k);
+    const row = { k, ls: cur.ls, n: cur.n };
+    /* PUBLISHED ONLY WHEN THERE IS SOMETHING ON THE OTHER SIDE. A `prior` key
+       that is always present but usually null invites a renderer to draw an
+       empty second series on every chart forever. */
+    if (priorDates.length) {
+      const before = meanOver(priorDates, k);
+      row.prior = before.ls;
+      row.priorN = before.n;
+    }
+    return row;
   });
 
   const sessions = [];
@@ -174,6 +211,11 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
     lastSession: dates.length ? dates[dates.length - 1] : null,
     horizons: horizonRows,
     sessions,
+    /* The epoch rides along with the counts on either side of it, so the page
+       can state the split rather than a reader having to notice it. */
+    epoch: epoch || null,
+    epochRetained: epoch ? currentDates.length : null,
+    priorRetained: epoch ? priorDates.length : null,
   };
 }
 
@@ -314,4 +356,8 @@ export const RECORD_NOTES = {
     "horizon walks that calendar, never calendar days",
   attrition: "a name with no close at the exit date is counted in `lost` and excluded " +
     "from every mean — never scored as zero",
+  epoch: "the selection rule that decides which names a board publishes changed on the " +
+    "stated date; sessions before it were drawn from a different pool, so their mean is " +
+    "reported separately rather than averaged into the current one — same headings, " +
+    "same units, a different population",
 };
