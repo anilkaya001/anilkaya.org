@@ -30,7 +30,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { buildSurface } from "../shared/flows-card.js";
+import { buildSurface, buildPath, buildGammaProfile } from "../shared/flows-card.js";
 import { FLOWS_PAGES } from "../shared/flows-pages.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -77,6 +77,9 @@ const close = src.lastIndexOf("})();");
 assert.ok(close > 0, "flows-card.js is still an IIFE");
 src = src.slice(0, close) +
   "  window.__renderSurface = renderSurface;\n" +
+  "  window.__renderPath = renderPath;\n" +
+  "  window.__renderGamma = renderGamma;\n" +
+  "  window.__renderScore = renderScore;\n" +
   "  window.__paint = paint;\n" + src.slice(close);
 
 const browser = await chromium.launch();
@@ -383,6 +386,301 @@ try {
     await page.setViewportSize({ width: 320, height: 900 });
   }
 
+  /* ---------- THE SESSION PATH DRAWS BOTH LEGS ------------------
+     buildPath has always emitted [cumDelta, cumPremium] pairs and the renderer
+     read p[0], so about 78 premium points per card were serialised, shipped
+     and dropped. Nothing numeric could see that — the payload was correct and
+     the panel drew a perfectly good curve of half of it. Only a render test
+     can. */
+  {
+    const t0 = Date.parse("2026-08-24T13:30:00Z");
+    /* A SESSION WHERE THE TWO LEGS DISAGREE, which is the whole reason the
+       premium leg is worth its ink: delta is worked steadily all day while
+       premium reverses after lunch — money going into structure rather than
+       into a direction. A fixture where both legs are monotone and parallel
+       would let a renderer plot one series twice and still pass. */
+    const ticks = Array.from({ length: 390 }, (_, i) => ({
+      tape_time: new Date(t0 + i * 60000).toISOString(),
+      net_delta: String(i > 260 ? 800 : 60),
+      net_call_premium: String(i < 200 ? 4000 : 0),
+      net_put_premium: String(i < 200 ? 0 : 5000),
+    }));
+    const path = buildPath(ticks, { sessionDate: "2026-08-24" });
+    ok(path.status === "ok" && path.persistence !== null,
+       "the path fixture builds, signature and all");
+
+    const r = await page.evaluate(({ path }) => {
+      const host = document.getElementById("h");
+      window.__renderPath(host, path);
+      const svg = host.querySelector("svg.fp");
+      if (!svg) return { error: "no path svg" };
+      const line = svg.querySelector(".fp-line");
+      const prem = svg.querySelector(".fp-prem");
+      const cen = svg.querySelector(".fp-centroid");
+      const vb = Number((svg.getAttribute("viewBox") || "").split(/\s+/)[2]);
+      const stats = {};
+      for (const st of host.querySelectorAll(".fc-stat")) {
+        stats[st.querySelector("dt").textContent] = st.querySelector("dd").textContent;
+      }
+      /* The topmost point each leg reaches. Both legs' largest absolute
+         readings are POSITIVE in this fixture, so under the panel's stated
+         normalisation — each leg by its own extreme, sharing only the zero
+         rule — the two must peak at exactly the same height. Under one shared
+         axis they cannot. */
+      const ys = (n) => (n.getAttribute("d").match(/ ([\d.]+)(?= |$)/g) || []).map((t) => Number(t));
+      return {
+        deltaTop: line ? Math.min(...ys(line)) : null,
+        premTop: prem ? Math.min(...ys(prem)) : null,
+        deltaD: line && line.getAttribute("d"),
+        premD: prem && prem.getAttribute("d"),
+        deltaDash: line && line.getAttribute("stroke-dasharray"),
+        premDash: prem && prem.getAttribute("stroke-dasharray"),
+        deltaFill: line && line.getAttribute("fill"),
+        premFill: prem && prem.getAttribute("fill"),
+        endDot: svg.querySelectorAll(".fp-line-end").length,
+        endSquare: svg.querySelectorAll(".fp-prem-end").length,
+        centroidX: cen && Number(cen.getAttribute("x1")),
+        vb, stats,
+        legend: (host.querySelector(".fp-legend") || {}).textContent || "",
+        swatches: host.querySelectorAll(".fp-legend svg").length,
+        reading: (host.querySelector(".fc-reading") || {}).textContent || "",
+        aria: svg.getAttribute("aria-label") || "",
+      };
+    }, { path });
+
+    ok(!r.error, "the session path renders an svg");
+    /* THE DEFECT ITSELF: a second path element, with its own geometry. Identical
+       `d` strings would mean the same series was plotted twice. */
+    ok(r.premD && r.premD.length > 20, "the cumulative-premium leg is drawn at all");
+    ok(r.deltaD && r.deltaD !== r.premD,
+       "and it is its OWN series — the two legs do not share a path");
+
+    /* IDENTITY WITHOUT HUE. This codebase hatches short-gamma cells because
+       colour is the last channel, not the first; two lines separated only by
+       stroke colour fail a greyscale print and a colour-blind reader. */
+    ok(r.premDash && !r.deltaDash,
+       `the premium leg is dashed and the delta leg is not, so the two survive greyscale ` +
+       `(delta ${r.deltaDash}, premium ${r.premDash})`);
+    eq(r.endDot, 1, "the delta leg ends in a filled disc");
+    eq(r.endSquare, 1, "and the premium leg in a hollow square — a second non-colour channel");
+    /* A path with no stylesheet defaults to fill:black, stroke:none — a blob.
+       The renderer ships before its CSS does, every time. */
+    eq(r.deltaFill, "none", "the delta leg sets fill:none as an attribute, not only in CSS");
+    eq(r.premFill, "none", "and so does the premium leg");
+
+    /* BOTH SCALES ARE STATED. The legs are contracts of delta and dollars —
+       not comparable — so the panel may not draw them without saying what a
+       full deflection is worth in each. */
+    ok(/contracts at full deflection/.test(r.legend),
+       "the legend states the delta leg's scale");
+    ok(/\$[\d.]+[KMB]? at full deflection/.test(r.legend),
+       `the legend states the premium leg's scale in its own units (${r.legend})`);
+    ok(r.swatches >= 2,
+       "and draws the strokes themselves as swatches rather than naming colours");
+
+    /* THE TWO SCALES ARE REALLY TWO. The legend claims each leg is normalised
+       by its own extreme; this is the geometry that claim commits to. Both
+       legs' largest absolute readings are positive here, so both must reach
+       the same top of the plot. Drawn on one shared axis the dollar leg would
+       dwarf or vanish against the delta leg and this fails — and a legend
+       stating a scale the drawing does not use is a worse lie than no legend. */
+    ok(r.deltaTop !== null && r.premTop !== null && Math.abs(r.deltaTop - r.premTop) <= 0.5,
+       `each leg is scaled by its own extreme and both reach full deflection ` +
+       `(delta top ${r.deltaTop}, premium top ${r.premTop})`);
+
+    /* THE CENTROID IS DRAWN AT THE TIME IT MEASURES, not at a decorative
+       position: the rule must land where the movement-weighted mean minute
+       actually is. */
+    const wantX = 10 + path.centroid * (r.vb - 20);
+    ok(Math.abs(r.centroidX - wantX) <= 1,
+       `the centroid rule is drawn at the minute it measures ` +
+       `(${r.centroidX} against ${wantX.toFixed(1)} for a centroid of ${path.centroid.toFixed(3)})`);
+    ok(path.centroid > 0.55,
+       "and the fixture's centroid is late enough that a hardcoded mid-session rule would miss");
+
+    /* THE THREE NUMBERS THEMSELVES. Family D is these; the panel could not
+       state them at all. */
+    eq(r.stats["Minutes with the direction"], Math.round(path.persistence * 100) + "%",
+       "persistence is printed, not merely computed");
+    eq(r.stats["Busiest 5% of minutes"], Math.round(path.concentration * 100) + "%",
+       "and so is concentration");
+    eq(r.stats["Weighted mean minute"], Math.round(path.centroid * 100) + "%",
+       "and the weighted mean minute");
+    ok(/uniform session would put there/.test(r.reading),
+       "the reading states concentration against its own 5% baseline rather than a chosen threshold");
+    ok(/50% for a tape with no direction/.test(r.reading),
+       "and persistence against the coin-flip baseline");
+    ok(/premium/.test(r.aria), "the accessible label mentions both legs");
+  }
+
+  /* A PREMIUM LEG OF ZEROS IS NOT A MEASUREMENT. A flat line along the axis
+     reads as a finding — "premium went nowhere all day" — when the truth may
+     be that nothing was recorded. */
+  {
+    const t0 = Date.parse("2026-08-24T13:30:00Z");
+    const flatPrem = buildPath(Array.from({ length: 90 }, (_, i) => ({
+      tape_time: new Date(t0 + i * 60000).toISOString(),
+      net_delta: "120", net_call_premium: "0", net_put_premium: "0",
+    })), { sessionDate: "2026-08-24" });
+    const r = await page.evaluate(({ panel }) => {
+      const host = document.getElementById("h");
+      window.__renderPath(host, panel);
+      return {
+        prem: host.querySelectorAll(".fp-prem").length,
+        delta: host.querySelectorAll(".fp-line").length,
+        text: host.textContent,
+      };
+    }, { panel: flatPrem });
+    eq(r.delta, 1, "a session with no premium still draws its delta leg");
+    eq(r.prem, 0, "and draws NO premium leg rather than a flat line at the axis");
+    ok(/no net premium in either direction/.test(r.text),
+       "the panel says why the leg is absent instead of leaving a reader to read the axis");
+    ok(!/Net premium — dashed/.test(r.text),
+       "and offers no legend key for a leg it did not draw — a scale stated for an " +
+       "absent series is the same false measurement as the flat line itself");
+  }
+
+  /* A REAL v1 CARD, published before any of this existed. The transitional
+     window is a certainty: the Worker serves new assets the moment code
+     merges and the next pipeline run is hours later. */
+  {
+    const v1 = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-v1-card.json"), "utf8"));
+    eq(v1.v, 1, "the legacy fixture is still a v1 card");
+    ok(!("persistence" in v1.panels.path), "which carries no path signature");
+    ok(!v1.quality, "and no quality pair");
+
+    const r = await page.evaluate(({ card }) => {
+      const host = document.getElementById("h");
+      const out = {};
+      window.__renderPath(host, card.panels.path);
+      out.pathText = host.textContent;
+      out.stats = {};
+      for (const st of host.querySelectorAll(".fc-stat")) {
+        out.stats[st.querySelector("dt").textContent] = st.querySelector("dd").textContent;
+      }
+      out.centroidRules = host.querySelectorAll(".fp-centroid").length;
+      window.__renderScore(host, card);
+      out.scoreText = host.textContent;
+      out.scoreStats = Array.from(host.querySelectorAll(".fc-stat dt")).map((n) => n.textContent);
+      return out;
+    }, { card: v1 });
+
+    /* NOT MEASURED, NEVER ZERO. A published 0 persistence is "not one minute
+       moved with the day" and a published 0.5 centroid is "the weight sat
+       exactly at midday" — both real, unusual readings, and both would be
+       manufactured entirely by the card's age. */
+    eq(r.stats["Minutes with the direction"], "—",
+       "a pre-signature card shows an em dash for persistence, not a zero");
+    eq(r.stats["Busiest 5% of minutes"], "—", "nor a zero concentration");
+    eq(r.stats["Weighted mean minute"], "—", "nor a confident midday centroid");
+    eq(r.centroidRules, 0, "and draws no centroid rule at a position it does not know");
+    ok(/built before the path signature was published/.test(r.pathText),
+       "and says so, rather than leaving three em dashes unexplained");
+    /* The premium leg is v1 too and it was ALWAYS on the wire, so it must
+       still draw: only the fields whose meaning is unknown are withheld. */
+    eq(r.stats["Net premium"] === "—", false,
+       "while the premium total, which v1 did publish, still renders");
+
+    ok(!r.scoreStats.includes("OTM share of directional flow"),
+       "a card with no quality pair shows no quality stats");
+    ok(/not published on this card/.test(r.scoreText),
+       "and says the two suppression reasons were not measured rather than printing zeros");
+    ok(!/\b0%\b/.test(r.scoreText),
+       "with no zero anywhere in that explanation — zero is the BEST reading of both");
+  }
+
+  /* ---------- HOW SHORT, NOT MERELY SHORT -----------------------
+     regime.spotGammaShare is published on every card and was drawn nowhere:
+     only its SIGN reached the reader, through the header badge. Dealers at
+     0.9 of their peak short position at spot and dealers at 0.05 of it are
+     not the same board, and the card rendered them identically. */
+  {
+    const strikes = [
+      { strike: "95", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
+        put_gamma_ask: "-2.4e8", put_gamma_bid: "-1.6e8" },
+      { strike: "100", call_gamma_ask: "2e8", call_gamma_bid: "1e8",
+        put_gamma_ask: "-1e8", put_gamma_bid: "-1e8" },
+      { strike: "105", call_gamma_ask: "4e8", call_gamma_bid: "3e8",
+        put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },
+    ];
+    const gp = buildGammaProfile(strikes, { spot: 100 });
+    ok(gp.status === "ok", "the gamma fixture builds");
+
+    const shot = await page.evaluate(({ gp }) => {
+      const host = document.getElementById("h");
+      const draw = (share) => {
+        window.__renderGamma(host, gp, {
+          ticker: "T", gammaFlip: 99, panels: {},
+          regime: { spotGammaShare: share, flipSide: "short_below", bandMin: 95, bandMax: 105 },
+        });
+        return {
+          text: host.textContent,
+          plate: Array.from(host.querySelectorAll(".gp-plate-s")).map((n) => n.textContent).join("|"),
+        };
+      };
+      return { deep: draw(-0.93), shallow: draw(-0.05), absent: draw(null) };
+    }, { gp });
+
+    /* THE ASSERTION THE AUDIT IS ABOUT. Two books that differ by a factor of
+       eighteen in how hard dealers are positioned at spot must not render the
+       same words. */
+    ok(shot.deep.text !== shot.shallow.text,
+       "a book 0.93 of peak short at spot and one 0.05 of peak short no longer render identically");
+    ok(/0\.93 of/.test(shot.deep.plate),
+       `the magnitude is on the spot rule itself (${shot.deep.plate})`);
+    ok(/0\.05 of/.test(shot.shallow.plate), "for both readings");
+    ok(/0\.93 of this ladder's peak/.test(shot.deep.text),
+       "and the note states it as a share of the ladder's peak, which is what makes it comparable across names");
+    /* The panel already says "short gamma immediately below the flip" on every
+       card, so a bare /short/ here would pass under any mutation. The sign must
+       be attached to THIS reading. */
+    ok(/peak exposure and short/.test(shot.deep.text),
+       "with the sign attached to that reading rather than to the flip sentence");
+    ok(!/0\.00 of|NaN|undefined/.test(shot.absent.text),
+       "a card whose spot lies outside the measured band manufactures no reading");
+    ok(/not published on this card/.test(shot.absent.text),
+       "and says why the reading is missing");
+  }
+
+  /* ---------- THE TWO SUPPRESSION REASONS ------------------------ */
+  {
+    const r = await page.evaluate(() => {
+      const host = document.getElementById("h");
+      const base = { v: 2, fam: { F: 10, P: -5, D: 3, V: 50, O: 38 },
+                     weights: { F: 1, P: 1, D: 1 }, conv: {} };
+      const read = () => {
+        const stats = {};
+        for (const st of host.querySelectorAll(".fc-stat")) {
+          stats[st.querySelector("dt").textContent] = st.querySelector("dd").textContent;
+        }
+        return { stats, text: host.textContent };
+      };
+      window.__renderScore(host, { ...base, quality: { otmShare: 0.71, vegaTilt: 1.34 } });
+      const live = read();
+      window.__renderScore(host, { ...base, quality: { otmShare: 0.08, vegaTilt: 0.02 } });
+      const clean = read();
+      window.__renderScore(host, { ...base, quality: { otmShare: null, vegaTilt: null } });
+      const none = read();
+      return { live, clean, none };
+    });
+
+    eq(r.live.stats["OTM share of directional flow"], "71%",
+       "the OTM share of directional flow is printed, not folded into the O digit");
+    eq(r.live.stats["Vega flow per unit delta"], "1.34",
+       "and so is vega flow per unit of delta flow");
+    eq(r.clean.stats["OTM share of directional flow"], "8%",
+       "a near-money book reads differently from a lottery-ticket one");
+    ok(r.live.text !== r.clean.text,
+       "so two names with the same O gauge no longer say the same thing");
+    ok(/lottery tickets/.test(r.live.text) && /trading VOLATILITY/.test(r.live.text),
+       "each reading is named as the suppression reason it is");
+    eq(r.none.stats["OTM share of directional flow"], "—",
+       "no directional flow to divide by is an em dash, never 0 — zero is the TOP of that column");
+    eq(r.none.stats["Vega flow per unit delta"], "—", "and likewise the vega tilt");
+    ok(/no directional view/.test(r.none.text),
+       "with the reason stated: a vanishing delta flow is no view, not infinite vol conviction");
+  }
+
   /* A CARD FROM BEFORE THIS PANEL EXISTED must degrade, not throw. Published
      cards outlive the code that reads them. */
   const legacy = await page.evaluate(() => {
@@ -398,7 +696,8 @@ try {
 
   console.log(`✓ flows-card-render: ${checks} assertions — cells reconcile against the grid, ` +
     `sign survives without hue, the colour cap is marked, axis type is not silently shrunk, ` +
-    `and a pre-surface card degrades`);
+    `both path legs are drawn on stated scales, the path signature and the dealer-gamma ` +
+    `share at spot reach the reader, and a pre-surface, pre-signature card degrades`);
 } finally {
   await browser.close();
   await rm(SCRATCH, { recursive: true, force: true });

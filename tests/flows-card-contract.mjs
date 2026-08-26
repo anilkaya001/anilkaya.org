@@ -144,6 +144,64 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(gp.series.every(([d]) => d >= 500 - 1e-9),
      "the running total carries forward through quiet buckets rather than dropping to zero");
 
+  /* THE SECOND SERIES IS REAL, NOT PADDING.
+     Each row is [cumulative delta, cumulative premium]. The renderer read only
+     p[0] for months, so ~78 premium points per card were serialised, shipped
+     and dropped on the floor. Pinning the last bucket against the published
+     total is what makes that column load-bearing: a buildPath that stopped
+     emitting the pair, or emitted a constant beside it, fails here. */
+  eq(p.series[77][1], p.netPremium,
+     "the last bucket's premium IS the published session total — the premium leg " +
+     "is a measured series, not a placeholder beside the delta one");
+  ok(p.series.every((row) => Array.isArray(row) && row.length === 2),
+     "every bucket is a [delta, premium] pair");
+  ok(p.series[77][1] > p.series[0][1],
+     "and the premium leg cumulates across the session in its own units");
+
+  /* ---- THE PATH SIGNATURE, which is the whole of family D and which the
+     card published none of. Two sessions with the SAME net delta and opposite
+     meanings are the fixture, because that is the distinction the panel's own
+     docstring says it exists to draw. */
+  eq(p.persistence, 1,
+     "a tape that moves the same way every minute has persistence 1, not an unpublished field");
+  near(p.concentration, 20 / 390, 1e-9,
+     "on a perfectly uniform session the busiest 5% of minutes carry 5% of the movement");
+  near(p.centroid, 0.5, 1e-9, "and its movement-weighted mean minute sits at mid-session");
+
+  const spikeTicks = Array.from({ length: 390 }, (_, i) => ({
+    tape_time: new Date(t0 + i * 60000).toISOString(),
+    net_delta: i === 5 ? "39000" : "0", net_call_premium: "0", net_put_premium: "0",
+  }));
+  const spike = buildPath(spikeTicks, { sessionDate: "2026-08-24" });
+  eq(spike.netDelta, p.netDelta,
+     "THE FIXTURE PAIR: one 09:35 print and a session-long worked order with the " +
+     "SAME end-of-day net delta — the totals cannot tell them apart");
+  eq(spike.concentration, 1,
+     "but the spike put every unit of its movement in the busiest 5% of minutes");
+  ok(spike.concentration > p.concentration * 10,
+     "which separates it from the worked order by an order of magnitude");
+  ok(spike.persistence < 0.01 && p.persistence === 1,
+     "and only one of its 390 minutes moved with the day's direction");
+  ok(spike.centroid < 0.05, "an early spike reports an early centroid");
+
+  /* A TAPE THAT DID NOT MOVE HAS NO SHAPE, and pathSignature's own fallbacks —
+     persistence 0, concentration 0, centroid 0.5 — are the manufactured
+     extremes this file exists to prevent reaching a card: 0.5 is "the day's
+     weight sat exactly at midday" and 0 concentration is the flattest session
+     that can exist. Both must be withheld, not published. */
+  const flat = buildPath(Array.from({ length: 30 }, (_, i) => ({
+    tape_time: new Date(t0 + i * 60000).toISOString(),
+    net_delta: "0", net_call_premium: "0", net_put_premium: "0",
+  })), { sessionDate: "2026-08-24" });
+  eq(flat.status, "ok", "a motionless tape is still a tape: the panel resolves");
+  eq(flat.persistence, null, "with no movement there is no direction to persist in — null, not 0");
+  eq(flat.concentration, null, "and no busiest minute — null, not the flattest possible session");
+  eq(flat.centroid, null, "and no weighted mean minute — null, not a confident midday");
+
+  ok(!("persistence" in buildPath([])),
+     "an unavailable path panel carries no signature fields at all, not null ones a " +
+     "renderer might paint");
+
   eq(buildPath([]).status, "unavailable", "no tape is unavailable");
   eq(buildPath([{ tape_time: "nonsense", net_delta: "1" }]).status, "unavailable",
      "unparseable timestamps are unavailable, not an empty chart");
@@ -206,6 +264,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
       bandMin: 70, bandMax: 130,
       score: 71, conviction: 64, agreement: 1, breadth: 3, coverage: 1, gate: 1.2,
       fam: { F: 60, P: -20, D: 30, V: 55, O: 62 },
+      otmShare: 0.62, vegaTilt: 1.4,
       iv30: 0.42, rv30: 0.31, vrp: 0.11, ivRank: 0.66, ivMomentum: 0.03,
       impliedMovePerc: 0.048,
       closes: Array.from({ length: 42 }, (_, i) => 90 + i * 0.25),
@@ -259,6 +318,31 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(complete.gammaFlip, 96,
      "the flip price is a top-level field — the gamma panel draws its line from it");
   eq(complete.atr, 4, "and ATR travels with it, so distances can be shown in sigma");
+  /* THE TWO SUPPRESSION REASONS ARE PUBLISHED, not folded away into the O digit.
+     POLARITY has reserved an entry for each of these since before buildCard
+     existed — a reserved slot for a field nothing published, which is the exact
+     shape the unrendered quantities in this repository keep taking. */
+  ok(complete.quality,
+     "the card publishes a quality block at all, rather than leaving the two gate " +
+     "inputs computable but unpublished");
+  eq((complete.quality || {}).otmShare, 0.62,
+     "the OTM share of directional flow reaches the card");
+  eq((complete.quality || {}).vegaTilt, 1.4,
+     "and so does vega flow per unit of delta flow — the cleanest reason to " +
+     "suppress a directional read rather than misread it as a view");
+  eq(polarityOf("otmShare"), 0, "neither carries a direction of its own");
+  eq(polarityOf("vegaTilt"), 0, "so neither may ever be coloured directionally");
+  eq((buildCard({ ...full, features: null }).quality || {}).otmShare, null,
+     "with no greek-flow the OTM share is null, NEVER 0 — zero is the TOP of that " +
+     "column once it is oriented, and a missing source scoring better than a present " +
+     "one is a bug this repository has already shipped twice");
+  eq((buildCard({ ...full, features: null }).quality || {}).vegaTilt, null,
+     "and the vega tilt likewise: no delta flow to divide by is 'no directional view', " +
+     "never zero vol content");
+  eq((buildCard({ ...full,
+    features: { ...full.features, otmShare: null, vegaTilt: null } }).quality || {}).otmShare, null,
+     "a null from positioningQuality survives as a null rather than parsing to zero");
+
   eq(buildCard({ ...full, features: null }).gammaFlip, null,
      "with no features the flip is null, never 0 — 'spot is exactly at the flip' " +
      "is the most actionable state on the card and must never be manufactured");

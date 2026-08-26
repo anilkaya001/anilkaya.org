@@ -13,7 +13,8 @@ import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
-  screenerTilt,
+  screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
+  WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 
@@ -555,4 +556,253 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(DEAD_BAND > 0 && DEAD_BAND < 100, "the dead band is a publishable threshold");
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor`);
+/* ---------- the dead band is a LIST as well as a count ------------
+   ~48 of 60 fully scored names land inside +-20 on a normal session. They were
+   counted at the payload boundary and discarded, so the payload could say "48
+   neutral" and could not say WHICH — a name at 19, one session from breaking
+   out, was indistinguishable from one at 1. The list is what the watch board
+   publishes, and these are the two ways publishing it can go wrong: the count
+   and the list disagreeing, or the count changing TYPE under a renderer that
+   already reads it. */
+{
+  const scored = Array.from({ length: 60 }, (_, i) => ({
+    ticker: "T" + i, score: 90 - i * 3, residual: (90 - i * 3) / 100,
+  }));
+  const sides = partitionSides(scored);
+
+  ok(Array.isArray(sides.neutralRows), "the dead band is published as a list of rows");
+  eq(typeof sides.neutral, "number",
+     "and `neutral` STAYS a count — a wire field's type is not free to change under the deck");
+  eq(sides.neutral, sides.neutralRows.length,
+     "THE FIX: the count is derived from the list, so a payload can never claim 48 above a list of 40");
+
+  const seen = new Set();
+  for (const r of [...sides.long, ...sides.short, ...sides.neutralRows]) {
+    ok(!seen.has(r.ticker), `${r.ticker} appears on exactly one of long, short and watch`);
+    seen.add(r.ticker);
+  }
+  eq(seen.size, scored.length, "and every scored name lands on exactly one of the three");
+
+  for (const r of sides.neutralRows) {
+    ok(Math.abs(r.score) < sides.deadBand,
+       `a watch name is inside the band by construction (${r.ticker} at ${r.score})`);
+  }
+  eq(partitionSides([]).neutral, 0, "an empty pool reports no neutral names, not a crash");
+}
+
+/* ---------- the dated archive key --------------------------------
+   flows_payload is keyed `id TEXT PRIMARY KEY` and the ingest upserts, so
+   every morning's board:long destroyed yesterday's. The dated key is the
+   record; the prune is what stops the record from being unbounded. Both are
+   pure functions of the session date precisely so they can be tested here
+   rather than discovered in a table nobody can query cheaply. */
+{
+  eq(datedKey("long", "2026-08-26"), "board:long:2026-08-26", "a dated board key is side and session");
+  eq(datedKey("short", "2026-08-26"), "board:short:2026-08-26", "and both sides are dated");
+
+  /* THE UNPRUNABLE ROW. sessionDate is legitimately null in this pipeline —
+     resolveSessionDate falls back to undated vendor calls and says so — and
+     "board:long:null" would be a key pruneKeys can never name, i.e. a row that
+     lives forever in a table whose whole retention story is that every dated
+     key is recomputable from a date. */
+  eq(datedKey("long", null), null, "no session date yields NO key rather than an unprunable one");
+  eq(datedKey("long", undefined), null, "and neither does an undefined one");
+  eq(datedKey("long", ""), null, "nor an empty string");
+  eq(datedKey("long", "2026-8-6"), null, "a non-ISO date is refused rather than normalised");
+  eq(datedKey("long", "not-a-date"), null, "and so is anything else");
+}
+
+/* ---------- the prune is BOUNDED and it is PREDICTABLE ------------
+   There is no `DELETE ... WHERE id LIKE 'board:%:%'` in this design and there
+   must not be: the pipeline holds a route-scoped bearer rather than an
+   account-scoped Cloudflare token, and a pattern delete is the operation whose
+   row count nobody can state before it runs. The sweep names its keys. */
+{
+  const session = "2026-08-26";
+  const keys = pruneKeys(session);
+  const day = (back) => new Date(Date.parse(session + "T00:00:00Z") - back * 86400000)
+    .toISOString().slice(0, 10);
+
+  ok(keys.includes(`board:long:${day(ARCHIVE_RETENTION_DAYS + 1)}`),
+     "the first day PAST the retention window is swept");
+  ok(!keys.includes(`board:long:${day(ARCHIVE_RETENTION_DAYS)}`),
+     "THE BOUNDARY: the oldest day still inside the window is never deleted — off by one here silently " +
+     "drops the cohort a scorer is about to read");
+  ok(!keys.includes(`board:long:${day(0)}`) && !keys.includes(`board:long:${day(1)}`),
+     "and today's board and yesterday's are nowhere near the sweep");
+  ok(!keys.includes(`board:long:${day(ARCHIVE_RETENTION_DAYS + ARCHIVE_PRUNE_LOOKBACK_DAYS + 1)}`),
+     "the sweep stops at the far edge too, rather than walking back to the epoch");
+
+  for (const k of keys) {
+    const m = /^board:(long|short):(\d{4}-\d{2}-\d{2})$/.exec(k);
+    ok(m, `every swept key is a dated board key and nothing else (${k})`);
+    ok(Date.parse(m[2] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
+       `${k} is strictly older than the retention window`);
+  }
+
+  /* THE BOUND, asserted after the shape checks so that a sweep which walks the
+     wrong WAY is reported as a wrong boundary rather than as a wrong count. */
+  eq(keys.length, 2 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
+     "THE BOUND: one run deletes at most two sides x the lookback, and that number is knowable before it runs");
+  eq(new Set(keys).size, keys.length, "and never names the same row twice");
+
+  // A key this pipeline never wrote must never be nameable by the sweep.
+  ok(!keys.some((k) => k.startsWith("card:") || k === "meta" || k === "board:watch" ||
+                       k === "board:long" || k === "board:short"),
+     "the sweep cannot name a live key, a card or the meta row");
+
+  eq(pruneKeys(null).length, 0, "no session date means no sweep rather than a sweep of garbage keys");
+  eq(pruneKeys("2026-8-6").length, 0, "and neither does a malformed one");
+
+  // The retention window is stated in calendar days because the KEYS are.
+  ok(ARCHIVE_RETENTION_DAYS >= 120 && ARCHIVE_RETENTION_DAYS <= 135,
+     "126 calendar days is 90 trading sessions at 5/7 — nine times the ten-session forecast horizon");
+  ok(ARCHIVE_RETENTION_DAYS / 7 * 5 >= 9 * HORIZON_SESSIONS,
+     "the window holds many multiples of the horizon, so the archive is a record and not a buffer");
+}
+
+/* ---------- a route that refuses does not get asked sixty times ----
+   The sweep is sixty named DELETEs. If the ingest route does not accept the
+   method at all — which is the state of the world the day this ships, since
+   the route is declared GET and POST — then every one of those sixty fails
+   identically, and the pipeline spends nine seconds a day and sixty log lines
+   discovering the same fact. A 404 is different in kind: it is the ORDINARY
+   answer for a day this pipeline never published, and treating it as a refusal
+   would abandon the sweep on the first gap in the archive and leak every
+   expired key behind it. */
+{
+  const http = await import("node:http");
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+
+  /* A SHORT SKIRT here on purpose: the property under test is the breaker and
+     the 404 rule, and driving the production 60 through a 150ms publish spacing
+     would put nineteen seconds into the suite to re-prove arithmetic pruneKeys
+     already proves above. */
+  const LOOKBACK = 6;
+  const run = async (status) => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      seen.push({ method: req.method, url: req.url });
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+    try {
+      const result = await pruneArchive("2026-08-26", { lookbackDays: LOOKBACK });
+      return { seen, result };
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  };
+
+  try {
+    const refused = await run(405);
+    eq(refused.seen.length, 3,
+       "THE CIRCUIT BREAKER: three identical refusals is enough — the sweep does not ask a route that " +
+       "rejects DELETE another fifty-seven times");
+    ok(refused.result.abandoned, "and it says so, rather than reporting a clean prune of nothing");
+    eq(refused.seen[0].method, "DELETE", "the sweep deletes rather than overwriting with a tombstone");
+
+    const missing = await run(404);
+    eq(missing.seen.length, 2 * LOOKBACK,
+       "a 404 is an ordinary empty day, so the sweep runs the whole skirt rather than stopping at the first gap");
+    ok(!missing.result.abandoned, "and reports no abandonment");
+    eq(missing.result.removed, 0, "with nothing removed, honestly");
+
+    const done = await run(200);
+    eq(done.result.removed, 2 * LOOKBACK,
+       "and every key that really was there is counted as removed");
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+  }
+}
+
+/* ---------- the watch board ---------------------------------------
+   The names inside the dead band, ranked by how close they are to leaving it,
+   carrying the three screener observables the pipeline has always computed and
+   never displayed. surpriseTilt in particular — options volume against the
+   name's OWN 30-day norm — is the most conventional unusual-activity measure
+   in the product and was used once as a pre-enrichment sort key and dropped. */
+{
+  const mk = (ticker, score, extra = {}) => ({
+    ticker, score, residual: score / 100,
+    conviction: 50, spot: 100, purity: 0.5, gRegime: "long", flipDist: 0.1,
+    fam: { F: score, P: 0, D: 0, O: 50, V: 40 },
+    closes: Array.from({ length: 60 }, (_, i) => 100 + i),
+    r5: 0.01, r21: 0.02, r42: 0.03,
+    week52Pos: 0.42, vrp: 0.03, ivRank: 0.61,
+    impliedMovePerc: 0.05, iv30: 0.4, rv30: 0.3,
+    ...extra,
+  });
+
+  const screener = new Map([["A", { close: "101", prev_close: "100" }]]);
+  const tilts = new Map([
+    ["A", { surpriseTilt: 1.23456, relVolume: 2.718, putCallRatio: 0.87654 }],
+    // B's 30-day volume norm is missing, which the vendor reports as no field
+    // at all; screenerTilt turns that into NaN rather than into a number.
+    ["B", { surpriseTilt: NaN, relVolume: NaN, putCallRatio: NaN }],
+  ]);
+
+  // Deliberately unsorted, and mixing signs: the ranking must come from the
+  // magnitude, not from the input order and not from the sign.
+  const pool = [mk("C", 3), mk("A", -19), mk("B", 12), mk("D", -7)];
+  const rows = toWatchRows(pool, screener, tilts);
+
+  eq(rows.map((r) => r.t).join(","), "A,B,D,C",
+     "THE RANKING: the name CLOSEST to leaving the band is first, whichever side it is closest on");
+  eq(rows.map((r) => r.r).join(","), "1,2,3,4", "and the published rank agrees with the order");
+
+  /* ONE VOCABULARY. A watch row is a board row plus three columns. A second
+     name for `px` or for `s` on this surface would mean a downstream scorer has
+     to know which of two surfaces it is holding before it can read a close. */
+  const board = toRows([mk("A", -19)], screener, []);
+  eq(board.length, 1, "the board builder still produces a row");
+  for (const key of Object.keys(board[0])) {
+    ok(key in rows[0], `a watch row carries the board's own \`${key}\`, not a synonym for it`);
+  }
+
+  // Problem 3: w52, vrp and ivr are emitted on every board row and no renderer
+  // has ever drawn them. Confirm they are there, on BOTH surfaces, unrenamed.
+  for (const key of ["w52", "vrp", "ivr"]) {
+    ok(board[0][key] !== undefined, `the board row still emits \`${key}\``);
+    ok(rows[0][key] !== undefined, `and the watch row carries \`${key}\` too`);
+  }
+  eq(board[0].w52, 0.42, "w52 is the 52-week position from the candles, unchanged in name and unit");
+  eq(rows[0].w52, 0.42, "and the watch row publishes the SAME 52-week position, not a second one");
+
+  // The three new columns, at the precision their source actually has.
+  eq(rows[0].surpriseTilt, 1.235, "surpriseTilt is finally published, rounded to a thousandth");
+  eq(rows[0].relVolume, 2.72, "relative volume at the two decimals the vendor quotes");
+  eq(rows[0].putCallRatio, 0.877, "and the put/call ratio at three");
+
+  /* A MISSING READING IS NULL, NEVER ZERO. Zero is a real value of
+     surpriseTilt — it means call and put surprise are equal — so rendering an
+     absent 30-day norm as 0 would publish "perfectly balanced unusual
+     activity" for a name the vendor said nothing about. */
+  const b = rows.find((r) => r.t === "B");
+  eq(b.surpriseTilt, null, "a name with no 30-day volume norm reports null, not a balanced zero");
+  eq(b.relVolume, null, "an absent relative volume is null, not a flat 0x");
+  eq(b.putCallRatio, null, "an absent put/call ratio is null, not a call-only 0");
+
+  // A name the screener tilt map has no entry for at all must not throw.
+  const orphan = toWatchRows([mk("Z", 5)], screener, tilts);
+  eq(orphan[0].surpriseTilt, null, "a name with no tilt row at all is null across the three columns");
+
+  /* THE CAP. The band holds ~48 names on a normal session; the list is capped
+     and truncates from the QUIET end, so what falls off is the names furthest
+     from ever leaving the band. */
+  const wide = toWatchRows(
+    Array.from({ length: 90 }, (_, i) => mk("W" + i, 19 - (i % 19))), screener, new Map());
+  eq(wide.length, WATCH_ROWS, `the watch list is capped at ${WATCH_ROWS} rows however wide the band is`);
+  ok(Math.abs(wide[0].s) >= Math.abs(wide[wide.length - 1].s),
+     "and the rows that survive the cap are the ones nearest the edge of the band");
+  eq(toWatchRows([], screener, tilts).length, 0, "an empty band publishes an empty list, not a crash");
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor`);

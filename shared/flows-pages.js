@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "61";
+export const ASSET_VERSION = "62";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -74,7 +74,7 @@ const rail = (active) => {
      honest; a badge that says 0 while the fetch is in flight is not. */
   const item = (href, label, key) => {
     const on = active === key;
-    const badge = key === "long" || key === "short"
+    const badge = key === "long" || key === "short" || key === "watch"
       ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
     return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
       `<span class="rail-label">${label}</span>${badge}</a>`;
@@ -86,10 +86,15 @@ const rail = (active) => {
     ${item("/flows/", "Overview", "overview")}
     ${item("/flows/long/", "Bullish", "long")}
     ${item("/flows/short/", "Bearish", "short")}
+    ${item("/flows/watch/", "Watch", "watch")}
   </div>
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
+  </div>
+  <p class="rail-group" id="railEvidence">Evidence</p>
+  <div class="rail-items" role="group" aria-labelledby="railEvidence">
+    ${item("/flows/history/", "Track record", "history")}
   </div>
 </nav>`;
 };
@@ -341,6 +346,18 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
           <th scope="col" class="c-num">&Gamma; regime</th>
           <th scope="col" class="c-num">&Gamma;&#8320; dist</th>
           <th scope="col" class="c-num">Net prem</th>
+          <!-- APPENDED, NEVER INSERTED. The board controller binds its column
+               model positionally, and tests/flows-legacy-payload.mjs reads the
+               families glyph at a fixed child index, so anything placed before
+               Net prem silently shifts every cell after it under the wrong
+               heading — a table that still renders perfectly and is wrong.
+
+               All three arrived on every board row from the first day and no
+               renderer drew them, which is the same class of defect as the
+               desk's If-called column: computed, serialised, shipped, unread. -->
+          <th scope="col" class="c-num"><abbr title="Where the last close sits in its own 52-week range: 0% at the year's low, 100% at the high. A position in a range, not a return — a name can sit at 95% after a year of going nowhere and a month of going up">52w</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Thirty-day implied volatility minus the volatility this name has actually delivered over the 21 sessions spanning the same thirty calendar days, both annualised, in volatility points. The difference between two measurements — not a forecast, not an edge, and not a variance premium in the swap sense. It says what the option market is charging against what the stock has been doing, and nothing about which of the two is right">VRP</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Where 30-day implied volatility sits within its own past year: 0 at the year's low, 100 at the high. A percentile of volatility, not a level of it — a 20 IVR name can still be the most volatile name on the board">IVR</abbr></th>
         </tr>
       </thead>
       <tbody id="flowsBody"></tbody>
@@ -522,10 +539,169 @@ ${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
 </html>`;
 }
 
+/* ---------- the watch list ------------------------------------- */
+
+/**
+ * THE DEAD BAND, WHICH WAS AN INTEGER.
+ *
+ * Roughly forty-eight of every sixty scored names land inside the +-20 band
+ * each session. They are fully scored -- every family, every gate, every
+ * quality multiplier -- and then discarded at the payload boundary, reported
+ * to the reader as a single count in a status line.
+ *
+ * That count is the least useful form of the information. A name sitting at
+ * +19 is one session from being published and nothing on the site would let
+ * you see it coming; a name at +2 with the largest options-volume surprise in
+ * the universe is the most interesting row of the day and had nowhere to
+ * appear at all. The band is where a signal is BORN, and it was the one part
+ * of the cross-section the product threw away.
+ *
+ * IT IS NOT A THIRD SIDE. Nothing here cleared the bar, and the page says so
+ * in its own lede rather than letting proximity to the band read as a
+ * recommendation.
+ */
+export function watchPage({ username = "" } = {}) {
+  const lede = "Scored names that did not clear the band on either side, " +
+    "ranked by how close they came. Nothing here is a candidate.";
+  return `${head("Flows \u2014 Watch", lede)}
+${shell("Watch List", "Options-flow intelligence", "watch", username, `
+  <div class="flows-status" id="watchStatus" role="status">Loading the session\u2026</div>
+  <p class="flows-stale" id="watchStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <div class="flows-tablewrap" id="watchTableWrap" tabindex="0" role="region"
+       aria-label="Names inside the dead band" hidden>
+    <table class="flows-table watch-table">
+      <caption class="flows-caption">
+        Every name the pipeline scored and published on neither side. Distance is
+        how far the score sits from the band edge, so a row near zero is one
+        session from appearing on a board. Surprise is today&#39;s options volume
+        against this name&#39;s own thirty-day norm &#8212; the most conventional
+        reading of &#8220;unusual activity&#8221; there is, and one this product
+        computed and never showed.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Ticker</th>
+          <th scope="col" class="c-num">Last</th>
+          <th scope="col" class="c-num">Score</th>
+          <th scope="col" class="c-num"><abbr title="How far this score sits from the nearest edge of the dead band, in score units. Zero means it would publish">To band</abbr></th>
+          <th scope="col" class="c-num">Conv</th>
+          <th scope="col" class="c-num"><abbr title="Today&#39;s options volume against this name&#39;s own thirty-day average, as a multiple. 1.0 is an ordinary day for this name, not for the market">Surprise</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Today&#39;s share volume against its own recent norm, as the vendor reports it">Rel vol</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Put contracts traded per call contract. A ratio of the tape, not a positioning estimate">P/C</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Where the last price sits between the 52-week low and high. 0% is the low, 100% the high">52w</abbr></th>
+        </tr>
+      </thead>
+      <tbody id="watchBody"></tbody>
+    </table>
+  </div>
+
+  <p class="flows-foot">
+    A name inside the band is one the cross-section could not separate from
+    noise this session. Proximity to the edge is not a weaker version of a
+    signal &#8212; it is the absence of one, measured. Read this list for what
+    is stirring, never for what to do.
+  </p>
+`)}
+${cardDialog()}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-watch.js")}" defer></script>
+<script src="${v("/assets/js/flows-card.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
+/* ---------- the track record ----------------------------------- */
+
+/**
+ * HAS THIS SIGNAL EVER BEEN RIGHT?
+ *
+ * The product asserted a 51-52% hit rate in a footer for months and measured
+ * nothing, because the store could not hold a past. flows_payload was keyed by
+ * id alone and every morning `board:long` overwrote `board:long`, so by the
+ * time any forward return existed there was no record of what had been claimed.
+ * A signal you cannot score is a claim, not a measurement.
+ *
+ * Each session's board is now retained under a dated key and scored against
+ * later closes by the pipeline, which is where every other heavy computation
+ * on this site already lives.
+ *
+ * THIS PAGE STARTS EMPTY AND IT SAYS SO. Retention begins with the first run
+ * after deploy; nothing can be scored at the shortest horizon until that many
+ * sessions have passed. A track record that appeared fully formed on the day
+ * it shipped would be a backtest wearing a live-results label, which is the
+ * single most misleading object in this field.
+ */
+export function historyPage({ username = "" } = {}) {
+  const lede = "What the board said, and what happened next.";
+  return `${head("Flows \u2014 Track record", lede)}
+${shell("Track Record", "Options-flow intelligence", "history", username, `
+  <div class="flows-status" id="recStatus" role="status">Loading the record\u2026</div>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <section class="rec-block" aria-labelledby="recCurveH">
+    <h2 id="recCurveH">Forward return by horizon</h2>
+    <p class="rec-note" id="recCurveNote"></p>
+    <div id="recCurve"></div>
+  </section>
+
+  <section class="rec-block" aria-labelledby="recTableH">
+    <h2 id="recTableH">Every scored session</h2>
+    <div class="flows-tablewrap" id="recTableWrap" tabindex="0" role="region"
+         aria-label="Scored sessions" hidden>
+      <table class="flows-table rec-table">
+        <caption class="flows-caption">
+          One row per published session, once enough sessions have passed to
+          measure it. Return is the equal-weighted price return of that
+          session&#39;s names, long side minus short side, from the close the
+          board was published at. Not a strategy: no costs, no slippage, no
+          borrow, and no position sizing.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Session</th>
+            <th scope="col" class="c-num">Long</th>
+            <th scope="col" class="c-num">Short</th>
+            <th scope="col" class="c-num"><abbr title="Equal-weighted price return of the long names minus that of the short names, over the stated horizon">L&#8722;S</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Share of published names whose price moved in the direction the board leaned">Hit</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Names that could not be scored because they left the screened universe before the horizon closed. A high number makes the row&#39;s return unreliable, not merely noisy">Lost</abbr></th>
+          </tr>
+        </thead>
+        <tbody id="recBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="flows-foot">
+    These are PRICE returns of an equal-weighted basket, gross of everything:
+    no commissions, no slippage, no short borrow, no dividends. They are the
+    arithmetic of published closes and nothing more, which is the only claim
+    this page can make without inventing a parameter. A handful of sessions is
+    not evidence of anything; the sample size is stated because it is the most
+    important number here.
+  </p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-history.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
 function escapeHTML(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[c]);
 }
 
-export const FLOWS_PAGES = { loginPage, overviewPage, sidePage, deskPage, ASSET_VERSION };
+export const FLOWS_PAGES = {
+  loginPage, overviewPage, sidePage, watchPage, historyPage, deskPage, ASSET_VERSION,
+};

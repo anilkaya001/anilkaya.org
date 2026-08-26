@@ -1680,6 +1680,202 @@ body.is-stale .flows-tablewrap {
   .desk-chip__note { max-width: 9rem; }
 }
 
+/* ---------- session path: the premium leg, the centroid, the legend ----
+
+   The panel shipped a cumulative PREMIUM series on every card from the day
+   it was written and the renderer plotted only the delta leg — roughly
+   seventy-eight points per card, computed, serialised and dropped. Delta
+   and premium diverging intraday is the spread-versus-directional tell:
+   flow that moves premium without moving net delta is being spent on
+   structure rather than on direction. */
+
+/* Dashed, not merely recoloured. Two lines separated only by hue are one
+   line in greyscale and for a colour-blind reader — the same argument the
+   gamma surface's hatch already makes. The renderer also sets these as
+   presentation attributes, because an unstyled <path> is fill:black,
+   stroke:none — a blob — and assets deploy before a cache-busted
+   stylesheet is guaranteed to have landed. These rules win where both apply. */
+.fp-prem {
+  fill: none;
+  stroke: var(--ink-dim);
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  stroke-linejoin: round;
+}
+
+.fp-prem-end { fill: none; stroke: var(--ink-dim); stroke-width: 1.4; }
+.fp-line-end.is-pos { fill: var(--flow-up); }
+.fp-line-end.is-neg { fill: var(--flow-down); }
+.fp-centroid { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 1 3; }
+
+.fp-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: baseline; }
+.fp-key { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+/* FIXED PIXELS, NOT RELATIVE UNITS. flows-card-render.mjs asserts that one
+   viewBox unit is one CSS pixel on every svg inside a panel — the invariant
+   that replaced an earlier assertion about type size which could not fail —
+   and these swatches are svgs inside the path panel. A width in % or em
+   breaks it, and the failure would read as a type-scaling bug somewhere else
+   entirely. */
+.fp-swatch { flex: none; width: 26px; height: 10px; vertical-align: middle; }
+
+/* ---------- sortable headers -----------------------------------
+   The control fills its header cell so the whole <th> is the target,
+   and inherits the header's own type. A button that looked like a
+   button would put ten chrome widgets across a data table, which is
+   how a dense table stops being readable. */
+
+.flows-table thead th .fb-sort {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3em;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.flows-table thead th.c-num .fb-sort,
+.flows-table thead th.c-rank .fb-sort { justify-content: flex-end; }
+
+.flows-table thead th .fb-sort:hover:not(:disabled) { text-decoration: underline; }
+
+/* Disabled, not hidden. The families glyph is five numbers on three signed
+   axes plus two unsigned gauges, and any single order over it is an invented
+   weighting; Pi is unsortable on a legacy payload because every value would
+   render as an em dash. A missing control says "this table cannot sort";
+   a dimmed one says "not this column, and here is that it exists". */
+.flows-table thead th .fb-sort:disabled { cursor: default; opacity: 0.55; }
+
+.flows-table thead th .fb-sort:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+/* The indicator is empty on every unsorted column, so it must not reserve
+   width — headers that jump sideways when a sort lands read as a layout bug. */
+.fb-sort-ind { font-size: 0.85em; line-height: 1; }
+
+/* The <abbr> inside the button keeps its own help affordance rather than
+   inheriting the button's pointer. */
+.flows-table thead th .fb-sort abbr { text-decoration: inherit; cursor: inherit; }
+
+/* ---------- the watch list -------------------------------------
+   Deliberately quieter than the board. Nothing here cleared the bar,
+   so the page gets no score bars, no rank badges and no colour
+   weight beyond the sign of the score itself — the visual language
+   of a candidate would be a claim the data does not make. */
+
+.watch-table th[scope="row"] a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.watch-table th[scope="row"] a:hover { color: var(--gold-harvest); border-bottom-color: currentColor; }
+.watch-table th[scope="row"] a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* The one column this page exists for. Marked, not coloured by magnitude:
+   a gradient would imply a continuous strength reading, and the only fact
+   here is proximity to a threshold. */
+.watch-table td.c-toband { color: var(--ink-dim); }
+
+.watch-table td.c-toband.is-near {
+  color: var(--gold-harvest);
+  font-weight: 600;
+  cursor: help;
+}
+
+/* A large surprise multiple is worth the eye, but it is a multiple of the
+   NAME's own norm and says nothing about the size of that norm — so it is
+   marked with weight rather than with an alarm colour. */
+.watch-table td.is-surprise { color: var(--ink); font-weight: 600; cursor: help; }
+
+/* ---------- the track record -----------------------------------
+   The zero line is always drawn and always at zero. A returns chart
+   whose baseline floats to the data's minimum turns a uniformly
+   negative record into a rising line, and that is the commonest way
+   this kind of plot lies. */
+
+.rec-block { margin: 2rem 0 0; }
+
+.rec-block h2 {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 0.5rem;
+}
+
+.rec-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  max-width: 62ch;
+}
+
+.rec-empty {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  border: 1px dashed var(--hairline);
+  border-radius: 4px;
+  color: var(--ink-faint);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.rc { display: block; overflow: visible; }
+.rc-zero { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3; }
+.rc-line { fill: none; stroke: var(--gold-harvest); stroke-width: 1.8; }
+.rc-dot.is-pos { fill: var(--flow-up); }
+.rc-dot.is-neg { fill: var(--flow-down); }
+
+/* The legs of the spread are measurements, not results: a positive SHORT
+   return means the names the board leaned against went up. Colouring it green
+   beside a green long leg would read as two wins where there is one of each. */
+.rec-table td.c-leg { color: var(--ink-dim); }
+
+.rc-axislabel.is-zero { fill: var(--ink-dim); }
+
+.rc-axislabel,
+.rc-ticklabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--ink-faint);
+}
+
+/* The sample size rides every point. A percentage without its n is the
+   thing this page exists to stop printing, so it is drawn smaller but
+   never omitted. */
+.rc-nlabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--ink-faint);
+  opacity: 0.75;
+}
+
+/* Attrition is a DATA-QUALITY reading, not a result. Names that leave the
+   universe before a horizon closes are not a random sample — they are
+   disproportionately the ones something happened to — so a row losing many
+   of them is close to no measurement at all rather than a noisy one. */
+.rec-table td.is-attrition {
+  color: var(--flow-down);
+  cursor: help;
+}
+
+@media (max-width: 40rem) {
+  .rec-block h2 { font-size: 0.68rem; }
+}
+
 /* ---------- gamma surface (strike x expiry) --------------------
    Sign is carried by the hatch, magnitude by fill-opacity, price by
    row and time by column. Hue is the LAST channel and duplicates the

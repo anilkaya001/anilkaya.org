@@ -399,12 +399,30 @@
       return g;
     };
 
+    /* HOW SHORT, NOT MERELY SHORT. regime.spotGammaShare is the cumulative
+       dealer gamma interpolated AT SPOT as a share of the ladder's peak |cum|,
+       so it lives in [-1, 1], is unit-free, and is comparable across a $35
+       name and a $900 one — its own definition site says so. The card has
+       published it on every payload since the field existed and nothing drew
+       it: only its SIGN reached the reader, laundered through the "short Γ" /
+       "long Γ" badge in the header, so dealers at 0.9 of their peak short
+       position at spot and dealers at 0.05 of it rendered identically. Those
+       are not the same board. The magnitude belongs on the spot rule, which is
+       the one place a reader is already looking when they ask the question. */
+    const atSpot = isNum((card.regime || {}).spotGammaShare);
     // Spot claims its plate first: it is the reference every other level is
     // measured against, so it is the one that must sit exactly on its rule.
     if (spot !== null && spot >= lo && spot <= hi) {
       const y = yOfPrice(spot);
       svg.append(svgEl("line", { class: "gp-spot", x1: plotL, x2: plotR, y1: y, y2: y }));
-      svg.append(plate(y, "SPOT", px2(spot), null, "is-spot"));
+      /* The magnitude only. The SIGN is already carried three times over — the
+         header badge, the derived sentence below, and the side of the zero rule
+         the curve is on there — and the sub-line has room for about twenty
+         monospace characters before it runs off the canvas, where SVG clips it
+         silently. */
+      svg.append(plate(y, "SPOT", px2(spot),
+        atSpot === null ? null : "\u0393 " + Math.abs(atSpot).toFixed(2) + " of peak",
+        "is-spot"));
     }
 
     if (flip !== null && flip >= lo && flip <= hi) {
@@ -516,6 +534,21 @@
             ? `The book crosses zero ${regime.crossings} times; this is the one separating the most exposure. `
             : "")
         : "Net gamma does not change sign materially inside the drawn band, so no flip level is published here. ") +
+      /* THE READING IN WORDS, because a share of a peak is not self-evidently
+         a position size. 0 is "spot sits where the running total is zero",
+         which is the flip itself; 1 is "spot sits at the most exposed rung the
+         ladder measured". Withheld rather than defaulted when spot lies
+         outside the measured band — the feature returns null there precisely
+         because clamping to the edge rung reported a confident +-1 for a stock
+         trading nowhere near the strikes on file. */
+      (atSpot !== null
+        ? `Dealer gamma AT SPOT is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
+          `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
+          `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"} ` +
+          `— a share, not a dollar figure, which is what makes it comparable across names. `
+        : `Where spot sits in the cumulative is not published on this card: spot lies outside ` +
+          `the measured strike band, and the edge rung would report a confident extreme for a ` +
+          `stock trading nowhere near the strikes on file. `) +
       band +
       `The gamma axis is symlog with decade rules: read magnitude off the labelled powers of ten, not off bar length. ` +
       `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
@@ -1160,6 +1193,44 @@
 
   /* ---------- session path ------------------------------------------ */
 
+  /**
+   * THE PANEL DRAWS BOTH SERIES, ON TWO SCALES THAT SHARE ONLY THEIR ZERO.
+   *
+   * buildPath has always emitted `series` as [cumulative net delta,
+   * cumulative net premium] PAIRS, and this renderer read `p[0]` and dropped
+   * the second half of every row: ~78 premium points shipped on every card,
+   * paid for in ingest bytes, and never once drawn. The same shape as the
+   * `vol` block that no renderer read, and as assignedReturn on the desk rows.
+   *
+   * The premium leg is worth its ink because DELTA AND PREMIUM DIVERGING
+   * INTRADAY IS THE SPREAD-VERSUS-DIRECTIONAL TELL: money that moves premium
+   * without moving net delta is being spent on structure — verticals, calendars,
+   * anything with two legs — rather than on a direction. A reader with only the
+   * delta curve cannot see that, and the two end-of-day totals below the chart
+   * cannot show WHEN it happened.
+   *
+   * TWO SCALES, STATED, BECAUSE THE UNITS ARE NOT COMMENSURABLE. One leg is
+   * contracts of delta, the other is dollars. Plotting them against one shared
+   * axis would let a reader compare their heights, which means nothing at all —
+   * the identical mistake the gamma panel's note apologises for between its
+   * bars and its cumulative curve. Each leg is normalised by its OWN largest
+   * absolute value, and the two share exactly one thing: the zero rule, which
+   * is the one place they must agree, because zero means "nothing net" in both
+   * units. Both normalisations are printed under the chart.
+   *
+   * IDENTITY WITHOUT HUE. Delta is a solid stroke ending in a filled disc;
+   * premium is dashed and ends in a hollow square; the legend swatches are
+   * drawn with the same strokes rather than described in words. The gamma
+   * surface hatches its short-gamma cells for this reason and says why —
+   * colour is the LAST channel here, not the first — and this panel had been
+   * relying on hue alone to distinguish a positive run from a negative one.
+   *
+   * The stroke styling is set as PRESENTATION ATTRIBUTES rather than left to
+   * the stylesheet. A path with no CSS defaults to fill:black, stroke:none —
+   * a solid blob, not a line — so a renderer that ships before its rules do
+   * would draw something actively wrong rather than something plain. Any CSS
+   * rule of the same name still wins over an attribute.
+   */
   function renderPath(host, panel) {
     const question = "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
@@ -1167,35 +1238,219 @@
     }
     panelHead(host, question);
 
-    const series = panel.series.map((p) => p[0]);
+    /* A row is a PAIR. A card old enough to carry bare numbers instead is read
+       as delta-only rather than crashing on `undefined[1]` — published cards
+       outlive the code that reads them. */
+    const rows = panel.series.map((r) => (Array.isArray(r) ? r : [r, null]));
+    const delta = rows.map((r) => isNum(r[0]));
+    const prem = rows.map((r) => isNum(r[1]));
+    if (delta.filter((v) => v !== null).length < 2) {
+      return deadPanel(host, question, "the tape carried no usable cumulative delta");
+    }
+
+    /* WHY A ZERO PREMIUM SERIES IS NOT DRAWN. A flat line along the axis is
+       indistinguishable from a measured series that happened to end where it
+       began, so it reads as a finding. Absence is stated in words instead —
+       the same rule that keeps a missing ATR from drawing a zero-width band. */
+    const premMeasured = prem.filter((v) => v !== null);
+    const premPublished = premMeasured.length >= 2;
+    const premMoved = premMeasured.some((v) => v !== 0);
+    const drawPrem = premPublished && premMoved;
+
     const W = Math.max(280, Math.min(760, host.clientWidth || 560));
-    const H = 120, pad = 10;
-    const lo = Math.min(...series, 0), hi = Math.max(...series, 0);
-    const span = hi - lo || 1;
-    const x = (i) => pad + (i / (series.length - 1)) * (W - 2 * pad);
-    const y = (v) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+    const H = 132, pad = 10;
+    const x = (i) => pad + (i / (rows.length - 1)) * (W - 2 * pad);
+
+    // Each leg normalised by its own largest |value|, so each lands in [-1, 1]
+    // with zero fixed at zero — which is what makes one shared zero rule
+    // honest while the magnitudes stay separately scaled.
+    const scaleOf = (vals) => Math.max(...vals.filter((v) => v !== null).map(Math.abs), 0);
+    const dScale = scaleOf(delta);
+    const pScale = drawPrem ? scaleOf(prem) : 0;
+    const unit = (v, s) => (v === null || !(s > 0) ? null : v / s);
+    const dU = delta.map((v) => unit(v, dScale));
+    const pU = drawPrem ? prem.map((v) => unit(v, pScale)) : [];
+    const all = dU.concat(pU).filter((v) => v !== null);
+    const uLo = Math.min(0, ...all), uHi = Math.max(0, ...all);
+    const uSpan = uHi - uLo || 1;
+    const y = (u) => pad + (1 - (u - uLo) / uSpan) * (H - 2 * pad);
 
     const svg = svgEl("svg", {
       class: "fp", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img",
     });
-    svg.append(svgEl("line", { class: "fp-zero", x1: pad, x2: W - pad, y1: y(0), y2: y(0) }));
-    const d = series.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+    svg.append(svgEl("line", { class: "fp-zero", x1: pad, x2: W - pad, y1: y(0), y2: y(0),
+      stroke: "currentColor", "stroke-opacity": 0.35, "stroke-dasharray": "3 3" }));
+
+    // A break in the series is a break in the line, not a segment drawn
+    // through a value nobody measured.
+    const dOf = (us) => {
+      let d = "", open = false;
+      us.forEach((u, i) => {
+        if (u === null) { open = false; return; }
+        d += (open ? "L" : "M") + x(i).toFixed(1) + " " + y(u).toFixed(1) + " ";
+        open = true;
+      });
+      return d.trim();
+    };
+    const lastOf = (us) => { for (let i = us.length - 1; i >= 0; i--) if (us[i] !== null) return i; return -1; };
+
+    if (drawPrem) {
+      // Drawn UNDER the delta line: delta is the panel's subject, premium its
+      // context, and the one that ends up on top is the one that reads as the
+      // measurement when they cross.
+      svg.append(svgEl("path", {
+        class: "fp-prem", d: dOf(pU), fill: "none", stroke: "currentColor",
+        "stroke-opacity": 0.75, "stroke-width": 1.4, "stroke-dasharray": "5 3",
+        "stroke-linejoin": "round",
+      }));
+      const li = lastOf(pU);
+      if (li >= 0) {
+        svg.append(svgEl("rect", {
+          class: "fp-prem-end", x: x(li) - 3, y: y(pU[li]) - 3, width: 6, height: 6,
+          fill: "none", stroke: "currentColor", "stroke-width": 1.4,
+        }));
+      }
+    }
+
+    const dLast = lastOf(dU);
     svg.append(svgEl("path", {
-      class: "fp-line " + (series[series.length - 1] >= 0 ? "is-pos" : "is-neg"), d,
+      class: "fp-line " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"), d: dOf(dU),
+      fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linejoin": "round",
     }));
+    if (dLast >= 0) {
+      svg.append(svgEl("circle", {
+        class: "fp-line-end " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"),
+        cx: x(dLast), cy: y(dU[dLast]), r: 2.6, fill: "currentColor",
+      }));
+    }
+
+    /* THE CENTROID IS A TIME, so it is drawn on the time axis rather than
+       printed only as a percentage. It is the movement-weighted mean minute of
+       the session: a rule near the left edge with a curve that ends high says
+       the work was done early and the tape merely held; a rule near the right
+       edge under the same curve is a late arrival. */
+    const centroid = isNum(panel.centroid);
+    if (centroid !== null) {
+      const cx = Number((pad + Math.min(1, Math.max(0, centroid)) * (W - 2 * pad)).toFixed(1));
+      svg.append(svgEl("line", {
+        class: "fp-centroid", x1: cx, x2: cx, y1: pad, y2: H - pad,
+        stroke: "currentColor", "stroke-opacity": 0.5, "stroke-width": 1,
+        "stroke-dasharray": "1 3",
+      }));
+    }
+
     svg.setAttribute("aria-label",
-      `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}.`);
+      `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}` +
+      (drawPrem ? `, and cumulative net premium ending at ${money(panel.netPremium)}, ` +
+        `drawn on its own scale and sharing only the zero rule` : "") +
+      (centroid !== null ? `. Movement-weighted mean minute at ${Math.round(centroid * 100)}% of the session` : "") +
+      ".");
     host.append(svg);
 
+    /* THE LEGEND CARRIES THE STROKES THEMSELVES, not a colour word. A reader
+       who cannot separate the two hues — or who printed the card — matches the
+       dash pattern instead, and the scale each leg was normalised by is stated
+       beside it rather than left as an axis nobody would read. */
+    /* A PARAGRAPH RATHER THAN A LIST, because nothing in this stylesheet
+       resets list markers: a <ul> with no rules of its own renders as bulleted,
+       indented text, and a legend that has to wait for a stylesheet to stop
+       looking broken is a legend that ships broken. A note-classed paragraph
+       is already styled and already wraps. */
+    const legend = el("p", "fc-note fp-legend");
+    const key = (draw, text) => {
+      const span = el("span", "fp-key");
+      const sw = svgEl("svg", { class: "fp-swatch", width: 26, height: 10,
+        viewBox: "0 0 26 10", "aria-hidden": "true" });
+      draw(sw);
+      span.append(sw);
+      span.append(el("span", "fp-key-t", text));
+      return span;
+    };
+    legend.append(key((sw) => {
+      sw.append(svgEl("line", { x1: 1, y1: 5, x2: 20, y2: 5, stroke: "currentColor",
+        "stroke-width": 1.8 }));
+      sw.append(svgEl("circle", { cx: 22, cy: 5, r: 2.6, fill: "currentColor" }));
+    }, `Net delta — solid; \u00b1${compact(dScale)} contracts at full deflection. `));
+    if (drawPrem) {
+      legend.append(key((sw) => {
+        sw.append(svgEl("line", { x1: 1, y1: 5, x2: 18, y2: 5, stroke: "currentColor",
+          "stroke-width": 1.4, "stroke-dasharray": "5 3", "stroke-opacity": 0.75 }));
+        sw.append(svgEl("rect", { x: 20, y: 2, width: 6, height: 6, fill: "none",
+          stroke: "currentColor", "stroke-width": 1.4 }));
+      }, `Net premium — dashed; \u00b1${money(pScale)} at full deflection. `));
+    }
+    if (centroid !== null) {
+      legend.append(key((sw) => {
+        sw.append(svgEl("line", { x1: 10, y1: 0, x2: 10, y2: 10, stroke: "currentColor",
+          "stroke-width": 1, "stroke-dasharray": "1 3", "stroke-opacity": 0.5 }));
+      }, "Movement-weighted mean minute."));
+    }
+    host.append(legend);
+
+    /* THE THREE PATH NUMBERS, which are the whole of family D and which this
+       panel could not state until they were published. A card built before
+       they were is shown an em dash and told so below; it is never shown a
+       zero, because 0 persistence and a 0.5 centroid are both real and
+       unusual readings. */
+    const hasSig = panel && "persistence" in panel;
+    const persistence = isNum(panel.persistence);
+    const concentration = isNum(panel.concentration);
+    const share = (v) => (v === null ? DASH : Math.round(v * 100) + "%");
     host.append(statList([
       ["Net delta", compact(panel.netDelta)],
       ["Net premium", money(panel.netPremium)],
       ["Minutes on tape", String(panel.minutes)],
+      ["Minutes with the direction", share(persistence)],
+      ["Busiest 5% of minutes", share(concentration)],
+      ["Weighted mean minute", share(centroid)],
     ]));
-    host.append(el("p", "fc-note",
+
+    /* THE READING, not the method: what the three numbers say about this
+       session, each against the baseline its own definition supplies. Nothing
+       here is thresholded into an adjective — the baselines are 50% for a
+       directionless tape and 5% for a uniform one, both of which come from the
+       estimators themselves and neither of which is a parameter anybody chose. */
+    if (persistence !== null || concentration !== null || centroid !== null) {
+      const reading = el("p", "fc-reading");
+      reading.textContent =
+        (persistence !== null
+          ? `${Math.round(persistence * 100)}% of minutes moved with the day's net direction, ` +
+            `against 50% for a tape with no direction at all. `
+          : "") +
+        (concentration !== null
+          ? `The busiest 5% of minutes carried ${Math.round(concentration * 100)}% of the movement — ` +
+            `${(concentration / 0.05).toFixed(1)}× what a uniform session would put there. `
+          : "") +
+        (centroid !== null
+          ? `The movement-weighted mean minute sits at ${Math.round(centroid * 100)}% of the session.`
+          : "");
+      host.append(reading);
+    }
+
+    const note = el("p", "fc-note");
+    note.textContent =
       "The curve is the running total, so its shape is the accumulation: a straight " +
       "climb is a worked order, a single step is one print. Net premium is call buying " +
-      "minus put buying — positive put premium is put BUYING, which is bearish."));
+      "minus put buying — positive put premium is put BUYING, which is bearish. " +
+      (drawPrem
+        ? "The two legs are in DIFFERENT UNITS — contracts of delta against dollars — so " +
+          "each is normalised by its own largest reading and they share only the zero rule. " +
+          "Compare their SHAPES, never their heights: premium moving while delta does not is " +
+          "money spent on structure rather than on a direction. "
+        : premPublished
+        ? "The premium leg is not drawn: the tape recorded no net premium in either direction " +
+          "this session, and a flat line along the axis would read as a measurement rather " +
+          "than as an absence. "
+        : "The premium leg is not drawn: this card was built before the premium series was " +
+          "published, and it returns on the next published session. ") +
+      (hasSig
+        ? "Persistence counts minutes, not size, so a steady worked order and one spike can " +
+          "share an end-of-day total and separate here."
+        : "This card was built before the path signature was published, so persistence, " +
+          "concentration and the weighted mean minute are shown as unmeasured rather than " +
+          "as zeros — a zero concentration is the flattest session possible and a 0.5 " +
+          "centroid is a real reading. They return on the next published session.");
+    host.append(note);
   }
 
   /* ---------- congress ---------------------------------------------- */
@@ -1340,6 +1595,63 @@
       ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
       ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
     ]));
+
+    /* THE TWO REASONS THE QUALITY GAUGE IS LOW, spelled out.
+    
+       O is a single digit and it is a PRODUCT of four oriented axes, so a 38
+       can mean "this name's flow is lottery tickets", "this participant is
+       trading vol, not direction", or neither of those and something else
+       entirely. Those readings call for opposite handling — one says the
+       direction is real but the sizing is a punt, the other says there is no
+       directional view to read at all — and until now the card folded both
+       into that digit and the reader could not recover either.
+    
+       Both are ratios of gross sums with no free parameter. otmShare is in
+       [0, 1] by construction (|otm directional delta| <= |directional delta|
+       row by row); vegaTilt is gross vega flow per unit of gross delta flow,
+       unbounded above, and its floor of zero is "every dollar of this flow was
+       spent on direction". Neither is thresholded into an adjective here: the
+       scorer ranks them cross-sectionally, so no absolute cut is identified,
+       and inventing one would be exactly the free parameter this project has
+       refused elsewhere. */
+    const quality = card.quality;
+    if (!quality) {
+      host.append(el("p", "fc-note",
+        "The two quality readings behind the O gauge — the out-of-the-money share of " +
+        "directional flow and the vega tilt — are not published on this card. It was " +
+        "built before they were, so they are shown as unmeasured rather than as zeros: " +
+        "zero is the BEST possible reading of both once they are oriented, and imputing " +
+        "it would reward a name for having no data. They return on the next published " +
+        "session."));
+    } else {
+      const otm = isNum(quality.otmShare);
+      const tilt = isNum(quality.vegaTilt);
+      host.append(statList([
+        ["OTM share of directional flow", otm === null ? DASH : Math.round(otm * 100) + "%"],
+        ["Vega flow per unit delta", tilt === null ? DASH : neg(tilt.toFixed(2))],
+      ]));
+      host.append(el("p", "fc-note",
+        (otm === null && tilt === null
+          ? "Neither quality reading is measurable on this name: there was no directional " +
+            "delta flow to divide by, which is \"no directional view\", never infinite " +
+            "conviction — so both are withheld rather than floored at their best value. "
+          : "") +
+        (otm !== null
+          ? `${Math.round(otm * 100)}% of this name's directional delta flow traded ` +
+            `out-of-the-money. A high share is lottery tickets — cheap, convex, and ` +
+            `frequently written by someone with no view at all; a low one is near-money ` +
+            `conviction that has to be paid for. `
+          : "") +
+        (tilt !== null
+          ? `Each unit of gross delta flow came with ${neg(tilt.toFixed(2))} of gross vega ` +
+            `flow. A high tilt says this participant is trading VOLATILITY rather than ` +
+            `direction, which is the cleanest reason on the card to suppress a directional ` +
+            `read rather than to misinterpret it as a view. `
+          : "") +
+        "Both enter the score only through the O gauge, ranked against the rest of the " +
+        "board rather than against a fixed cut — there is no identified threshold at " +
+        "which a share becomes \"too high\"."));
+    }
 
     if (legacy) {
       host.append(el("p", "fc-note",

@@ -306,8 +306,25 @@ try {
     eq(absent.status, 200, "an unwritten key is not an error");
     eq((await absent.json()).status, "pending", "it reports pending");
 
-    eq((await fetch(url("/api/flows/ingest?key=board:long"), { method: "DELETE" })).status, 405,
-       "other methods are still refused");
+    /* DELETE IS AN ALLOWED VERB NOW, and this assertion used to prove it was
+       not. It exists so the pipeline can prune the dated boards it retains for
+       the track record; an archive with no prune is a table that grows forever
+       against a write budget shared with a live learning app.
+
+       Being allowed is not being open. Unauthenticated it is refused like
+       every other verb here, and the narrowing to dated-board keys is asserted
+       in flows-sections-contract.mjs, which owns that behaviour. */
+    eq((await fetch(url("/api/flows/ingest?key=board:long:2026-01-02"), { method: "DELETE" })).status, 401,
+       "DELETE without the bearer is refused like every other verb");
+
+    /* THE VERBS THAT ARE STILL NOT VERBS HERE. A route that quietly grew a
+       third method could grow a fourth, so the closed set is asserted rather
+       than assumed. */
+    for (const method of ["PUT", "PATCH"]) {
+      eq((await fetch(url("/api/flows/ingest?key=board:long"), {
+        method, headers: { Authorization: "Bearer " + INGEST_TOKEN },
+      })).status, 405, `${method} is still refused`);
+    }
 
     /* X-Payload-Updated is how a reader detects a stale card. Once a card has
        been written, a later pipeline failure leaves the old row in place and

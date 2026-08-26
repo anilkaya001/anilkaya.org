@@ -952,10 +952,28 @@ function partitionSides(scored, { deadBand = DEAD_BAND } = {}) {
      construction at any pool size (the old comment's requirement is met a
      fortiori), and a quiet session now yields a SHORT board rather than a
      full one made of noise. */
+  /* THE DEAD BAND WAS A COUNT AND NOTHING ELSE.
+
+     Roughly 48 of 60 fully scored names land inside +-20 on a normal session,
+     and every one of them was thrown away here — after five API calls, the
+     liquidity floor, the issuer collapse and a full pass through the scorer.
+     The payload said "48 neutral" and could not say WHICH 48, so a name sitting
+     at 19 the session before it breaks out was indistinguishable from one
+     sitting at 1, and the near-misses that are the most informative part of a
+     quiet session were the only part not published.
+
+     `neutral` STAYS AN INTEGER. It is a wire field the live board already
+     renders, and changing a published field's TYPE under a renderer that
+     reads it is the same class of break as renaming it: the deck would print a
+     count as an array. The list arrives beside it under a new name, and the
+     count is derived FROM the list so the two can never disagree — the failure
+     mode of publishing both is a payload that says 48 above a list of 40. */
+  const neutralRows = sorted.filter((r) => Math.abs(r.score) < deadBand);
   return {
     long: sorted.filter((r) => r.score >= deadBand),
     short: sorted.filter((r) => r.score <= -deadBand).reverse(),   // most negative first
-    neutral: sorted.filter((r) => Math.abs(r.score) < deadBand).length,
+    neutralRows,
+    neutral: neutralRows.length,
     deadBand,
   };
 }
@@ -1121,48 +1139,135 @@ function selectExtremes(ranked, n) {
 /** Round a horizon move for publication, or pass null straight through. */
 const hz = (v) => (v === null ? null : Number(v.toFixed(4)));
 
+/**
+ * ONE ROW VOCABULARY, built in exactly one place.
+ *
+ * The board rows and the watch rows describe the same quantities about the
+ * same names out of the same scored pool. Writing the object twice is how a
+ * second vocabulary gets invented for one quantity — a `px` here and a `close`
+ * there, a `s` here and a `score` there — and a downstream scorer that reads
+ * both surfaces then has to know which surface it is holding. It is also how
+ * the two drift: summarize() was written twice in this file and the copies
+ * diverged badly enough to take a whole run down after the boards had already
+ * committed. The row builder is shared for the same reason.
+ */
+function boardRow(r, s, rank) {
+  const close = num(s.close);
+  const prev = num(s.prev_close);
+  return {
+    t: r.ticker,
+    r: rank,
+    s: r.score,
+    cnv: r.conviction,
+    px: close || r.spot,
+    chg: prev > 0 ? (close - prev) / prev : null,
+    purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
+    gRegime: r.gRegime,
+    gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
+    netPrem: num(s.net_call_premium) - num(s.net_put_premium),
+    fam: r.fam,
+    // 42 sessions of closes, base-64 packed: two characters a session, so
+    // the whole sparkline costs 84 bytes on a card that already measures in
+    // kilobytes, and it needs no API call the pipeline was not making.
+    spark: packSpark(r.closes),
+    // Period returns in basis points, so the deck can rank without decoding
+    // the sparkline.
+    pr: [r.r5, r.r21, r.r42].map((x) => (x === null ? null : Math.round(x * 10000))),
+    w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
+    vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
+    ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
+    /* im is the VENDOR'S quote, to this name's own next listed expiry — a
+       different horizon for every row, so it is carried for the card and
+       never set beside another name's. hm is the same volatility scaled to a
+       FIXED number of sessions, which is what makes a column of them a
+       cross-section rather than a list of unrelated numbers. */
+    im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
+    hm: hz(horizonMove(r.iv30)),
+    hr: hz(horizonMove(r.rv30)),
+  };
+}
+
 function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
     pool.map((r) => r.ticker), previousIds,
     { entryRank: UNIVERSE.boardSize, exitRank: Math.round(UNIVERSE.boardSize * 1.4) },
   );
   const byTicker = new Map(pool.map((r) => [r.ticker, r]));
+  return ids.map((ticker, i) => boardRow(byTicker.get(ticker), screenerByTicker.get(ticker) || {}, i + 1));
+}
 
-  return ids.map((ticker, i) => {
-    const r = byTicker.get(ticker);
-    const s = screenerByTicker.get(ticker) || {};
-    const close = num(s.close);
-    const prev = num(s.prev_close);
+/**
+ * How many names the watch list publishes.
+ *
+ * The dead band holds ~48 of 60 scored names on a normal session, so 40 shows
+ * essentially all of the interesting end of it and truncates from the QUIET
+ * end: the rows are ranked by distance from neutral, so the names that fall
+ * off the bottom are the ones furthest from ever leaving the band, which are
+ * the ones with the least to say. It is a cap and not a target — a session
+ * with twelve neutral names publishes twelve.
+ *
+ * The number is also a payload budget. The ingest route rejects anything over
+ * 128KB (FLOWS_MAX_PAYLOAD_BYTES); a watch row measures ~440 bytes, most of it
+ * the packed sparkline, so forty rows is ~18KB. That is seven times inside the
+ * cap, which is where a payload whose row width may still grow should sit — a
+ * surface that publishes right up to a hard limit fails on the day a column is
+ * added, and it fails as a 413 from the Worker rather than here.
+ */
+const WATCH_ROWS = 40;
+
+/** A finite number rounded for publication, or null. Never 0 for "missing". */
+const fixed = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
+
+/**
+ * The names inside the dead band, ranked by how close they are to leaving it.
+ *
+ * WHAT THE THREE EXTRA COLUMNS ARE DOING HERE. surpriseTilt is options volume
+ * measured against the name's OWN 30-day norm — the most conventional "unusual
+ * activity" measure in this entire product — and it has never been displayed
+ * anywhere. It was computed in screenerTilt, used once as a pre-enrichment sort
+ * key, and dropped. relative_volume and put_call_ratio were parsed out of the
+ * same screener row and dropped in the same place. They belong on this surface
+ * in particular: a name pinned near zero on a signed composite can still be
+ * three times its own volume norm, and that is exactly the "why is this on the
+ * watch list" a reader needs when the score itself says nothing.
+ *
+ * None of the three enters a score, and none of them is presented as one. They
+ * are vendor observables republished at the precision the vendor states them
+ * to, which is what keeps this list inside the identification bar: nothing
+ * here needs a risk-free rate, a dividend yield, or any other parameter this
+ * project has refused to invent.
+ *
+ * THE 52-WEEK POSITION IS ALREADY HERE, as `w52` on every board row, computed
+ * from the 252 candles the pipeline fetches anyway. The screener also carries
+ * week_52_high / week_52_low, and deriving a second 52-week position from them
+ * would publish two numbers that mean the same thing, disagree in the third
+ * decimal (a vendor window against our own), and carry different names. That
+ * is the bug this file's shared row builder exists to prevent, so the screener
+ * pair stays unread and w52 arrives with the rest of the board vocabulary.
+ */
+function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } = {}) {
+  /* Order on the FULL-PRECISION residual, exactly as partitionSides does, and
+     for the same reason: `score` is a rounded integer and inside a +-20 band
+     ties are routine, so sorting on it hands the ranking to Array.prototype
+     .sort's stability rather than to the data. boundedScore is odd and
+     monotone in the residual, so |residual| descending IS |score| descending,
+     with the ties broken by the number that actually has the precision. */
+  const ranked = (pool || []).slice().sort((a, b) => Math.abs(b.residual) - Math.abs(a.residual));
+  const tilts = tiltByTicker || new Map();
+  return ranked.slice(0, cap).map((r, i) => {
+    const t = tilts.get(r.ticker) || {};
     return {
-      t: ticker,
-      r: i + 1,
-      s: r.score,
-      cnv: r.conviction,
-      px: close || r.spot,
-      chg: prev > 0 ? (close - prev) / prev : null,
-      purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
-      gRegime: r.gRegime,
-      gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
-      netPrem: num(s.net_call_premium) - num(s.net_put_premium),
-      fam: r.fam,
-      // 42 sessions of closes, base-64 packed: two characters a session, so
-      // the whole sparkline costs 84 bytes on a card that already measures in
-      // kilobytes, and it needs no API call the pipeline was not making.
-      spark: packSpark(r.closes),
-      // Period returns in basis points, so the deck can rank without decoding
-      // the sparkline.
-      pr: [r.r5, r.r21, r.r42].map((x) => (x === null ? null : Math.round(x * 10000))),
-      w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
-      vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
-      ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
-      /* im is the VENDOR'S quote, to this name's own next listed expiry — a
-         different horizon for every row, so it is carried for the card and
-         never set beside another name's. hm is the same volatility scaled to a
-         FIXED number of sessions, which is what makes a column of them a
-         cross-section rather than a list of unrelated numbers. */
-      im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
-      hm: hz(horizonMove(r.iv30)),
-      hr: hz(horizonMove(r.rv30)),
+      ...boardRow(r, screenerByTicker.get(r.ticker) || {}, i + 1),
+      /* PRECISION THE SOURCE ACTUALLY HAS. surpriseTilt is a log ratio of two
+         volume ratios and is meaningful to about a thousandth; the vendor
+         quotes relative_volume to two decimals and a put/call ratio past three
+         is noise dressed as measurement. A name whose 30-day norm is missing
+         gets null here, never 0 — zero is a real reading of this field and
+         means "as much call as put surprise", which is the opposite of
+         "unknown". */
+      surpriseTilt: fixed(t.surpriseTilt, 3),
+      relVolume: fixed(t.relVolume, 2),
+      putCallRatio: fixed(t.putCallRatio, 3),
     };
   });
 }
@@ -1183,6 +1288,192 @@ function toRows(pool, screenerByTicker, previousIds) {
  */
 function summarize(payload) {
   return Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
+}
+
+/* ---------- the dated archive -----------------------------------
+
+   THE STORE DESTROYED HISTORY. flows_payload is keyed `id TEXT PRIMARY KEY`
+   and the ingest route upserts, so every morning `board:long` overwrote
+   yesterday's `board:long`. Nothing in this product retained what a signal had
+   said. That is why nobody can answer "what did this say about NVDA last
+   week", and it is why the deck's footer can assert a 51-52% hit rate as PROSE
+   with no series anywhere behind it. A forecast that is never written down
+   cannot be shown to be wrong, which is the same statement as: it cannot be
+   shown to be right.
+
+   Each board is therefore ALSO written under an immutable dated key. The live
+   keys `board:long` and `board:short` are untouched and still published FIRST
+   — the board reads them, and breaking them takes the product down — and the
+   dated copy is the same payload object, so the archive cannot describe the
+   session differently from the board the reader actually saw.
+
+   TWO EXTRA ROW WRITES A RUN, and that number is the design constraint, not a
+   detail. D1's free tier allows 100,000 row writes a day and this database is
+   SHARED WITH THE LIVE LEARNING APP — the reason flows_login_failures writes
+   only on a failed login is the same budget. Two rows is nothing.
+
+   THE ~50 PER-TICKER CARDS ARE DELIBERATELY NOT ARCHIVED. Dating them would be
+   +50 rows a day, twenty-five times the cost, to retain the decorative half of
+   the product. Everything needed to score a published signal later — the
+   ticker, the side, the rank, the score, the conviction and the close it was
+   published at — is already on the board row. A card's gamma ladder and
+   congressional prints answer no question about whether the call was right,
+   and they can be re-derived from the vendor for any name that turns out to
+   matter. History is kept for the CLAIM, not for its illustrations. */
+
+/* How long a dated board is kept: 126 calendar days, i.e. 90 trading sessions
+   at five sessions a week.
+
+   The unit that matters is SESSIONS, because the forecast horizon is
+   HORIZON_SESSIONS = 10: a board published today cannot be scored until ten
+   sessions have elapsed. A window has to hold many multiples of that or the
+   archive is a buffer rather than a record; 90 sessions leaves ~80 cohorts
+   that are both stored and resolved.
+
+   Be honest about what 80 cohorts settle. At a hit rate near one half the
+   standard error on 80 draws is about 5.6 points, so 51-52% is not
+   distinguishable from a coin at this sample size — and the cohorts overlap on
+   a ten-session horizon, so they are not even 80 independent draws. Retaining
+   more would not fix that. The point of the window is to make the claim
+   MEASURABLE and its uncertainty STATEABLE, not to ratify the footer.
+
+   Steady-state cost: 90 x 2 = 180 rows, and two writes a day. The keys are
+   dated by CALENDAR date, so the retention window is expressed in calendar
+   days; this constant is the one place the two units meet. */
+const ARCHIVE_RETENTION_DAYS = 126;
+
+/* How far past the retention edge one run sweeps.
+
+   THE PRUNE MUST BE BOUNDED AND PREDICTABLE. There is no
+   `DELETE FROM flows_payload WHERE id LIKE 'board:%:%'` in this design and
+   there must not be: the pipeline holds a route-scoped bearer rather than a
+   Cloudflare API token — deliberately, because D1:Edit is ACCOUNT-scoped and
+   would reach the live learning database — and a pattern delete is exactly the
+   operation whose row count nobody can state before it runs. Instead this run
+   NAMES the keys it wants gone, computed from the session date.
+
+   A run sweeps the 30 calendar days that sit just past the retention edge, on
+   both sides: at most 60 named deletes, of which in steady state exactly two
+   match anything. A delete that matches no row writes no row and costs nothing
+   against the D1 budget. The 30-day skirt is what makes the sweep
+   self-healing: a pipeline that does not run for three weeks still collects
+   everything that expired while it was down. Past a month of silence, dated
+   keys leak — that is a chosen, stated bound, and the log line reports the
+   sweep every run so the leak would be visible rather than inferred. */
+const ARCHIVE_PRUNE_LOOKBACK_DAYS = 30;
+
+/** The one date shape a dated key may carry. Both sides of the archive use it. */
+const ARCHIVE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The immutable key one board is archived under, or null.
+ *
+ * sessionDate is genuinely allowed to be null in this pipeline —
+ * resolveSessionDate falls back to undated vendor calls and says so — so this
+ * cannot assume it has a date. Returning null and skipping the archive is the
+ * only safe answer: `board:long:null` would be a row that pruneKeys can never
+ * name, and the entire retention story here is that every dated key is
+ * recomputable from a date. One unprunable row a year is a slow leak; one a
+ * day is the unbounded table this exists to prevent.
+ */
+function datedKey(side, sessionDate) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
+  return `board:${side}:${sessionDate}`;
+}
+
+/**
+ * Exactly the keys this run should delete.
+ *
+ * Deterministic in the session date and bounded by construction at
+ * 2 * lookbackDays entries — the two properties that make this a prune rather
+ * than a liability. The oldest day RETAINED is exactly retentionDays behind
+ * the session; the newest day deleted is retentionDays + 1. Off by one in that
+ * boundary is the difference between a 90-session archive and an 89-session
+ * one that silently drops the cohort a scorer is about to read.
+ */
+function pruneKeys(sessionDate, {
+  retentionDays = ARCHIVE_RETENTION_DAYS,
+  lookbackDays = ARCHIVE_PRUNE_LOOKBACK_DAYS,
+} = {}) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return [];
+  const t0 = Date.parse(sessionDate + "T00:00:00Z");
+  if (!Number.isFinite(t0)) return [];
+  const keys = [];
+  for (let back = retentionDays + 1; back <= retentionDays + lookbackDays; back++) {
+    const day = new Date(t0 - back * 86400000).toISOString().slice(0, 10);
+    for (const side of ["long", "short"]) keys.push(`board:${side}:${day}`);
+  }
+  return keys;
+}
+
+/**
+ * Delete one stored key, reporting the outcome rather than throwing.
+ *
+ * A retention sweep must never be able to fail a run that has already
+ * published its boards — the same rule meta is under, and for a stronger
+ * reason: meta is a diagnostic, while this is housekeeping for data that is
+ * already safely written. The caller counts what came back and prints one
+ * line.
+ */
+async function retire(key) {
+  if (DRY_RUN) {
+    console.log(`  [dry-run] retire ${key}`);
+    return { ok: true, status: 0 };
+  }
+  try {
+    const response = await fetch(
+      ingestURL() + "?key=" + encodeURIComponent(key),
+      {
+        method: "DELETE",
+        redirect: "error",   // same reasoning as publish(): never redirect a bearer
+        headers: {
+          Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
+          "User-Agent": "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)",
+        },
+      },
+    );
+    await sleep(PUBLISH_SPACING_MS);
+    return { ok: response.ok, status: response.status };
+  } catch (error) {
+    return { ok: false, status: 0, message: error.message };
+  }
+}
+
+/**
+ * Sweep the dated keys that have aged out of the retention window.
+ *
+ * ABANDON ON A ROUTE THAT REFUSES. If the ingest endpoint does not accept
+ * DELETE at all, every one of the sixty attempts fails identically, and
+ * sixty pointless authenticated requests spaced 150ms apart is nine seconds of
+ * traffic a day plus sixty log lines that say the same thing. Three
+ * consecutive refusals that are not a plain 404 is enough evidence that the
+ * route, and not the key, is the problem; a 404 is the ordinary answer for a
+ * day this pipeline never published and must not stop the sweep.
+ */
+async function pruneArchive(sessionDate, options = {}) {
+  const stale = pruneKeys(sessionDate, options);
+  if (!stale.length) {
+    console.log("prune: no session date, so no dated key is computable — skipped");
+    return { removed: 0, refused: 0, abandoned: false };
+  }
+  let removed = 0, refused = 0, streak = 0, lastStatus = 0, abandoned = false;
+  for (const key of stale) {
+    const result = await retire(key);
+    if (result.ok) { removed++; streak = 0; continue; }
+    if (result.status === 404) { streak = 0; continue; }
+    refused++; streak++; lastStatus = result.status;
+    if (streak >= 3) { abandoned = true; break; }
+  }
+  console.log(
+    `prune: ${stale.length} dated keys past ${ARCHIVE_RETENTION_DAYS} days named` +
+    `, ${removed} removed` +
+    (refused ? `, ${refused} refused (last HTTP ${lastStatus})` : "") +
+    (abandoned
+      ? " — ABANDONED after three consecutive refusals. The ingest route is" +
+        " rejecting DELETE, so dated boards will accumulate until it accepts it."
+      : ""),
+  );
+  return { removed, refused, abandoned };
 }
 
 async function publish(key, payload) {
@@ -1696,6 +1987,13 @@ async function main() {
       `(same sector and market cap, return correlation ${d.corr.toFixed(3)})`);
   }
 
+  /* The cheap screener tilt, kept addressable by ticker. It was computed for
+     every universe name at step 2, used once to rank the enrichment picks, and
+     then dropped — including surpriseTilt, the most conventional unusual-
+     activity measure in the product, which no surface has ever displayed. The
+     watch list is where it finally gets published. */
+  const tiltByTicker = new Map(unique.map((e) => [e.features.ticker, e.tilt]));
+
   // 6. Score.
   const scored = scoreBoard(
     unique.map((e) => e.features),
@@ -1737,11 +2035,12 @@ async function main() {
   }
 
   const published = {};
+  const payloads = {};
   const first = scored[0] || {};
   for (const side of ["long", "short"]) {
     const rows = toRows(sides[side], screenerByTicker, previous[side]);
     published[side] = rows;
-    await publish("board:" + side, {
+    payloads[side] = {
       v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
       universe: universe.length,
@@ -1760,7 +2059,70 @@ async function main() {
       weights: first.weights || null,
       shareClasses,
       status: rows.length ? "ok" : "thin",
+    };
+    await publish("board:" + side, payloads[side]);
+  }
+
+  /* 7b. THE ARCHIVE, THE WATCH LIST, AND THE PRUNE — every one of them AFTER
+     both live boards are committed, and every one of them best-effort.
+
+     The ordering is the same argument the cards are under, and it is stronger
+     here because two of these three keys are NEW. A key the ingest route has
+     never seen is rejected at the door with a 400, and a throw at this point
+     would exit the job non-zero after both boards had already landed — a run
+     that succeeded reported as a failure, which is the exact lie the meta
+     publish told on the first live run. Each surface therefore reports its own
+     failure and the run continues.
+
+     They are also ordered among themselves by what a reader loses. The dated
+     copies are the record and go first; the watch list is a new product
+     surface and goes second; the prune is housekeeping for data already safely
+     written and goes last. */
+  for (const side of ["long", "short"]) {
+    const key = datedKey(side, sessionDate);
+    if (!key) {
+      console.warn(`  archive: session date is ${sessionDate === null ? "unresolved" : `"${sessionDate}"`}` +
+                   " — refusing to write a dated key no prune could ever name");
+      break;
+    }
+    try {
+      /* The SAME payload object the live board was published from, not a
+         reconstruction of it. Two builders for one payload is how the archive
+         comes to describe a session the reader never saw. */
+      await publish(key, payloads[side]);
+    } catch (error) {
+      console.warn(`  archive ${key}: ${error.message}`);
+    }
+  }
+
+  try {
+    const watchRows = toWatchRows(sides.neutralRows, screenerByTicker, tiltByTicker);
+    await publish("board:watch", {
+      v: BOARD_SCHEMA_VERSION,
+      side: "watch", generatedAt, sessionDate,
+      rows: watchRows,
+      universe: universe.length,
+      enriched: enriched.length,
+      scored: scored.length,
+      dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
+      deadBand: sides.deadBand,
+      /* `neutral` is the FULL count inside the band and rows.length is what fit
+         under the cap. Publishing both is what lets a reader see that the list
+         was truncated; publishing only the list would quietly redefine the
+         board's own neutral count on this one surface. */
+      neutral: sides.neutral,
+      horizonSessions: HORIZON_SESSIONS,
+      weights: first.weights || null,
+      status: watchRows.length ? "ok" : "thin",
     });
+  } catch (error) {
+    console.warn(`  watch: ${error.message}`);
+  }
+
+  try {
+    await pruneArchive(sessionDate);
+  } catch (error) {
+    console.warn(`  prune: ${error.message}`);
   }
 
   /* 8. CARDS — after the boards are safely committed, and best-effort.
@@ -1932,6 +2294,8 @@ export {
   candlesAscending, selectExtremes, scoreBoard, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
   computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
+  boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
+  WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —
