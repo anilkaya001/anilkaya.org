@@ -561,7 +561,18 @@ export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = 
  * aggressor split returns a live surface beside an unavailable ladder, and
  * nothing anywhere returns a zero it did not measure.
  */
-export function buildChainPanels(chainRows, { spot, asOf, ticker = null } = {}) {
+export function buildChainPanels(chainRows, {
+  spot, asOf, ticker = null,
+  /* THE EXPIRY THIS RESPONSE WAS EXPLICITLY ASKED FOR, if it was.
+
+     Passing it is what lifts the truncation refusal below, and it lifts it
+     for a reason rather than as a favour: when the vendor was asked for ONE
+     expiry and returned that expiry, "the nearest expiry" is no longer being
+     inferred from an arbitrary subset — it was chosen upstream, from a
+     complete enumeration of the name's expiries, and the response merely
+     confirms it. Identification comes from the REQUEST, not from the page. */
+  requestedExpiry = null,
+} = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
   const truncated = all.length >= CHAIN_PAGE_SIZE;
 
@@ -640,7 +651,25 @@ export function buildChainPanels(chainRows, { spot, asOf, ticker = null } = {}) 
      The panels still publish: a surface built from part of a book is a stated
      partial view and the coverage says so. The SCALARS do not, because they go
      onto a board row and into an archive where nothing carries their caveat. */
-  if (truncated) {
+  /* THE ONE CASE WHERE A FULL PAGE IS STILL IDENTIFIED.
+
+     Verified live on 2026-08-26: /option-contracts DOES accept an `expiry`
+     filter. The probe asked PEP for 2026-09-04 and got 58 rows, all of them
+     that expiry. So when this response is the answer to a single-expiry
+     request AND every contract in it carries that expiry, the subset is not
+     arbitrary — it is the expiry that was named, and the naming happened
+     against the complete expiry list from /greek-exposure/expiry.
+
+     BOTH HALVES ARE REQUIRED. A request for one expiry that comes back
+     carrying several means the filter was ignored, and then the rows are an
+     arbitrary page again no matter what was asked for. Checking only the
+     request would trust a parameter the vendor is free to drop — which is
+     exactly the class of assumption this file has been wrong about five
+     times. */
+  const answersRequest = requestedExpiry !== null &&
+    surface.expiries.length === 1 && surface.expiries[0].expiry === requestedExpiry;
+
+  if (truncated && !answersRequest) {
     const why = `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no ` +
       "documented order, so this is an arbitrary subset of the book and \"the nearest " +
       "expiry\" cannot be identified within it";
@@ -656,6 +685,9 @@ export function buildChainPanels(chainRows, { spot, asOf, ticker = null } = {}) 
     status: "ok",
     reason: null,
     truncated,
+    /* Whether the scalars survived the truncation check, and why. A reader of
+       the payload can otherwise only infer it from the scalars being present. */
+    identifiedExpiry: answersRequest ? requestedExpiry : null,
     rowsSeen: rows.length,
     /* THE SURFACE IS BUILT FROM QUOTED CONTRACTS ONLY. priceSale refuses a
        contract with no live bid, so the grid is the sellable book rather than

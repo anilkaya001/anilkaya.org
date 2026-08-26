@@ -737,6 +737,70 @@ function chain({
   ok(ivKeys <= 2, `the surface names "iv" ${ivKeys} time(s), not once per cell`);
 }
 
+/* ---------- the truncation refusal, and the one thing that lifts it --- */
+{
+  /* MEASURED LIVE ON 2026-08-26. The probe asked PEP for a single expiry and
+     got 58 rows, every one of them that expiry: /option-contracts honours an
+     `expiry` filter. That fact is what lets a full page still be identified —
+     but only when BOTH halves hold, and these assertions exist because
+     trusting either half alone is the shape of this file's oldest defect. */
+  const spot = 100;
+  const sym = (exp, cp, k) =>
+    `AAPL${exp.slice(2).replace(/-/g, "")}${cp}${String(k * 1000).padStart(8, "0")}`;
+  const row = (exp, cp, k, iv) => ({
+    option_symbol: sym(exp, cp, k), nbbo_bid: "1.00", nbbo_ask: "1.10",
+    implied_volatility: String(iv), volume: "100", ask_volume: "60", bid_volume: "40",
+    open_interest: "500", prev_oi: "480",
+  });
+
+  // A full page (500 rows) that all carries ONE expiry, as the vendor returns
+  // it when the filter is honoured.
+  const oneExpiry = [];
+  for (let i = 0; oneExpiry.length < 500; i++) {
+    const k = 60 + (i % 200) * 0.5;
+    oneExpiry.push(row("2026-09-04", k < spot ? "P" : "C", Number(k.toFixed(0)) || 1, 0.30));
+  }
+
+  const unasked = buildChainPanels(oneExpiry, { spot, asOf: "2026-08-26", ticker: "AAPL" });
+  eq(unasked.truncated, true, "a 500-row page is truncated whatever it contains");
+  eq(unasked.scalars.skew, null,
+     "and with NO expiry requested its scalars are refused — a page that happens to hold one " +
+     "expiry proves nothing about whether the book has a nearer one");
+  eq(unasked.identifiedExpiry, null, "so nothing is claimed as identified");
+
+  const asked = buildChainPanels(oneExpiry, {
+    spot, asOf: "2026-08-26", ticker: "AAPL", requestedExpiry: "2026-09-04",
+  });
+  eq(asked.truncated, true, "the same page is still a full page");
+  eq(asked.identifiedExpiry, "2026-09-04",
+     "but asked for that expiry AND answered with it, the subset is the one that was named");
+  ok(asked.scalars.atmIv !== null,
+     "so the at-the-money level publishes: identification came from the REQUEST, made against " +
+     "a complete expiry list, not from guessing at an arbitrary page");
+
+  /* THE HALF THAT MATTERS MOST. A vendor is free to ignore a parameter, and
+     this API has silently ignored parameters before. Trusting the request
+     alone would publish "the nearest expiry" off a page spanning four of
+     them. */
+  const mixed = oneExpiry.slice(0, 480)
+    .concat(Array.from({ length: 20 }, (_, i) => row("2026-10-16", "C", 100 + i, 0.28)));
+  const ignored = buildChainPanels(mixed, {
+    spot, asOf: "2026-08-26", ticker: "AAPL", requestedExpiry: "2026-09-04",
+  });
+  eq(ignored.identifiedExpiry, null,
+     "a single-expiry REQUEST answered with two expiries is the filter being ignored, and the " +
+     "refusal stands — the request is not taken on trust");
+  eq(ignored.scalars.skew, null, "so no scalar is published from it");
+
+  /* And asking for one expiry while being answered with a DIFFERENT one is
+     not identification either, however clean the response looks. */
+  const wrongExpiry = buildChainPanels(oneExpiry, {
+    spot, asOf: "2026-08-26", ticker: "AAPL", requestedExpiry: "2026-09-18",
+  });
+  eq(wrongExpiry.identifiedExpiry, null,
+     "one expiry back, but not the one that was asked for, identifies nothing");
+}
+
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +
   `wings that are the nearest listed strike or nothing at all, one at-the-money answer shared ` +
   `with the surface, an aggressor ladder signed by what the buyer is long and withheld rather ` +

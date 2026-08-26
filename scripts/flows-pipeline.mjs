@@ -2456,6 +2456,74 @@ async function pruneArchive(sessionDate, options = {}) {
   return { removed, refused, abandoned };
 }
 
+/**
+ * How many times a publish is re-attempted when the EDGE, not the Worker,
+ * refuses it.
+ *
+ * THE FIRST WIDE-BOARD RUN LOST TWO PAYLOADS THIS WAY. On 2026-08-26 the run
+ * published 50 cards instead of 11 and Cloudflare answered two of the writes
+ * with a 403 "Just a moment..." interstitial: `sector:trix` never landed, and
+ * the re-publish of `board:long` failed, so the long board kept its pre-chain
+ * copy while the short board got the new columns. Both are silent to a reader
+ * — one page is simply a day stale and one board is missing four columns.
+ *
+ * A 403 from the edge is not a decision about the request; it is a decision
+ * about the rate. It is therefore the one publish failure worth retrying, and
+ * retrying it slowly is the whole remedy: the challenge is triggered by burst
+ * shape, so the answer is to stop bursting rather than to give up.
+ *
+ * THIS IS A COUNT OF RETRIES, NOT OF ATTEMPTS: three retries is up to four
+ * HTTP requests, and the log line says "retry N of 3" so the two can never be
+ * read as the same number. The distinction matters because it is the
+ * difference between 14 and 5 seconds of waiting per failing key, and
+ * PUBLISH_RETRY_BUDGET_MS below is sized against the larger figure.
+ */
+const PUBLISH_RETRIES = 3;
+
+/**
+ * The TOTAL time this run may spend waiting on publish retries.
+ *
+ * Three retries is the right number for one unlucky write and the wrong
+ * arithmetic for a bad afternoon: 1 + 4 + 9 is fourteen seconds per failing
+ * key, and a run publishes two boards, two dated copies, a watch list, movers,
+ * a record, a sector panel and fifty cards. If the edge is challenging
+ * everything — which is precisely the state a burst-rate challenge produces —
+ * the per-key policy alone would spend FOURTEEN MINUTES of a thirty-minute
+ * deadline sleeping, and the cards at the end of the queue would be dropped to
+ * pay for retries at the front.
+ *
+ * So the retries are bounded twice: per key, and per run. Once the run has
+ * spent this much, later publishes fail fast and report it, which is the
+ * honest outcome — a systemic challenge is not something more waiting fixes,
+ * and losing one payload with a log line beats losing the twenty behind it in
+ * silence.
+ */
+const PUBLISH_RETRY_BUDGET_MS = 90_000;
+let publishRetrySpentMs = 0;
+
+/** Statuses that mean "later", not "no". */
+const PUBLISH_RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
+
+/**
+ * How long to wait before re-attempting a publish, or null to stop.
+ *
+ * PURE AND EXPORTED, because the only defect this repository has shipped twice
+ * is a retry policy whose comment and code disagreed. `spentMs` makes the
+ * global budget part of the function's answer rather than a check somewhere
+ * near it.
+ *
+ * Quadratic rather than doubling: an edge challenge clears on elapsed quiet
+ * rather than on attempt count, so the second wait wants to be meaningfully
+ * longer than the first without the third running away.
+ */
+export function publishRetryDelay(attempt, {
+  retries = PUBLISH_RETRIES, budgetMs = PUBLISH_RETRY_BUDGET_MS, spentMs = 0,
+} = {}) {
+  if (!(attempt >= 0) || attempt >= retries) return null;
+  const wait = 1000 * (attempt + 1) * (attempt + 1);
+  return spentMs + wait > budgetMs ? null : wait;
+}
+
 async function publish(key, payload) {
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
@@ -2466,7 +2534,9 @@ async function publish(key, payload) {
     console.log(`  [dry-run] ${key}: ${summarize(payload)}, ${body.length} bytes`);
     return;
   }
-  const response = await fetch(
+  let response, lastDetail = "";
+  for (let attempt = 0; ; attempt++) {
+  response = await fetch(
     ingestURL() + "?key=" + encodeURIComponent(key),
     {
       method: "POST",
@@ -2495,6 +2565,31 @@ async function publish(key, payload) {
   // a function of burst rate. 150ms puts the whole publish phase near six
   // seconds and well under the threshold, against a job budgeted in minutes.
   await sleep(PUBLISH_SPACING_MS);
+
+  /* THE EDGE SAYS "LATER", SO WAIT AND ASK AGAIN — up to three times, backing
+     off hard. 1s, then 4s, then 9s: quadratic rather than doubling, because
+     the challenge clears on elapsed quiet rather than on attempt count, and a
+     job budgeted in minutes can afford fourteen seconds far more easily than
+     it can afford a missing page. A status the Worker itself returns (400,
+     401, 413) is a decision about the payload and is not retried. */
+  const wait = PUBLISH_RETRYABLE.has(response.status)
+    ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
+    : null;
+  if (!response.ok && wait !== null) {
+    lastDetail = await response.text().catch(() => "");
+    publishRetrySpentMs += wait;
+    console.warn(
+      `  ingest ${key}: HTTP ${response.status} from ` +
+      `${response.headers.get("server") || "unknown"} — waiting ${wait}ms and retrying ` +
+      `(retry ${attempt + 1} of ${PUBLISH_RETRIES}; ` +
+      `${Math.round(publishRetrySpentMs / 1000)}s of the run's ` +
+      `${PUBLISH_RETRY_BUDGET_MS / 1000}s retry budget spent)`);
+    await sleep(wait);
+    continue;
+  }
+  break;
+  }
+
   if (!response.ok) {
     /* Report WHOSE rejection this is.
        The Worker's own failures are the project's JSON envelope; an edge
@@ -2502,7 +2597,7 @@ async function publish(key, payload) {
        reported, so a 403 from Cloudflare's WAF — a status this Worker never
        returns on the ingest path — was indistinguishable from an application
        error, and there was nothing in the log to act on. */
-    const detail = await response.text().catch(() => "");
+    const detail = (await response.text().catch(() => "")) || lastDetail;
     const ray = response.headers.get("cf-ray") || "none";
     const server = response.headers.get("server") || "unknown";
     throw new Error(
@@ -2709,13 +2804,23 @@ function card0Unusable(row) {
  * downstream is allowed to succeed by leaning on an order the vendor has never
  * documented.
  */
-export function fakeChain(ticker, spot, seed, { wide = false } = {}) {
+export function fakeChain(ticker, spot, seed, { wide = false, expiry = null } = {}) {
   const rnd = mulberry(seed);
   const rows = [];
-  const expiries = wide
+  const ladder = wide
     ? [["260831", 7], ["260904", 11], ["260911", 18], ["260918", 25], ["260925", 32],
        ["261016", 53], ["261120", 88], ["261218", 116], ["270115", 144], ["270618", 298]]
     : [["260831", 7], ["260918", 25], ["261016", 53], ["261218", 116]];
+
+  /* THE VENDOR HONOURS THE FILTER — verified live on 2026-08-26, when the
+     probe asked PEP for one expiry and got 58 rows all carrying it. The
+     fixture therefore honours it too, and returns ONLY that expiry: a fixture
+     that quietly ignored the parameter would let the caller's
+     identified-expiry check pass on a response that never proved anything,
+     which is the fifth variant of this repository's oldest failure. */
+  const expiries = expiry
+    ? ladder.filter(([code]) => `20${code.slice(0, 2)}-${code.slice(2, 4)}-${code.slice(4, 6)}` === expiry)
+    : ladder;
   for (const [code, dte] of expiries) {
     const halfWidth = wide ? 15 : 8;
     for (let i = -halfWidth; i <= halfWidth; i++) {
@@ -2765,7 +2870,8 @@ export function fakeChain(ticker, spot, seed, { wide = false } = {}) {
     open_interest: "5000", prev_oi: "4800", volume: "99999",
     ask_volume: "90000", bid_volume: "9999",
   });
-  if (!wide) return rows;
+  /* A single-expiry response is complete by construction and is never cut. */
+  if (expiry || !wide) return rows;
 
   /* THE PAGE CAP, SIMULATED THE WAY IT ACTUALLY BITES. A Fisher-Yates shuffle
      off the same seeded generator, then a cut at exactly CHAIN_PAGE_SIZE. The
@@ -3609,7 +3715,7 @@ async function main() {
       `${boardTickers.length} calls on panels that would land after the cards were abandoned`);
   } else {
     const chainDeadline = stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS;
-    let chainOk = 0, chainFailed = 0, chainSkipped = 0;
+    let chainOk = 0, chainFailed = 0, chainSkipped = 0, scalarsRecovered = 0;
     for (const ticker of boardTickers) {
       if (Date.now() > chainDeadline) {
         chainSkipped = boardTickers.length - chainOk - chainFailed;
@@ -3664,11 +3770,79 @@ async function main() {
           }
         }
 
-        const panels = buildChainPanels(rows, {
+        let panels = buildChainPanels(rows, {
           spot: spotByTicker.get(ticker) || null,
           asOf: sessionDate,
           ticker,
         });
+
+        /* THE SECOND CALL, AND THE MEASUREMENT THAT EARNED IT.
+
+           A chain that fills the vendor's 500-row page publishes no scalars,
+           because "the nearest expiry" cannot be identified inside an
+           arbitrarily-ordered subset. On the first wide-board run that refusal
+           fired on FORTY-FIVE OF FIFTY names: `chains: 50 built, 5 levelled`.
+           The leg was spending fifty calls to publish a skew for five names.
+
+           The probe built for exactly this question answered it in the same
+           run — `FILTER WORKS: 58 row(s) over expiries: 2026-09-04` — so the
+           endpoint does accept an expiry filter, and one more call buys a
+           COMPLETE single expiry rather than a slice of the book.
+
+           TWO CALLS, NOT ONE, and the split is not waste. The broad call is
+           the only thing that can build a surface, a term line and an
+           aggressor ladder across expiries; the narrow one is the only thing
+           that can identify a nearest. Neither substitutes for the other, and
+           this is the same name paying for two different questions.
+
+           Spent only where the first call actually truncated, and inside the
+           same deadline guard as the loop, so a slow morning drops it before
+           it drops a card. */
+        if (panels.status === "ok" && panels.truncated && Date.now() < chainDeadline) {
+          const near = nearestProbeExpiry(expiriesByTicker.get(ticker), {
+            asOf: sessionDate, minDays: SKEW_MIN_DAYS,
+          });
+          if (near) {
+            try {
+              const narrow = DRY_RUN
+                /* `wide` because recovery only runs on a name whose broad call
+                   truncated, and in this fixture that is exactly the wide book.
+                   Asking the narrow ladder for an expiry it does not list would
+                   return nothing and quietly exercise the failure path instead
+                   of the one under test. */
+                ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 8000 + chainOk,
+                  { wide: true, expiry: near })
+                : await uw(`/api/stock/${ticker}/option-contracts`, {
+                  expiry: near,
+                  exclude_zero_oi_chains: "true",
+                  limit: CHAIN_PAGE_SIZE,
+                });
+              const narrowPanels = buildChainPanels(narrow, {
+                spot: spotByTicker.get(ticker) || null,
+                asOf: sessionDate,
+                ticker,
+                requestedExpiry: near,
+              });
+              /* THE PANELS STAY BROAD; ONLY THE SCALARS COME FROM THE NARROW
+                 READ. A surface drawn from one expiry is one column, which is
+                 not a surface — and the scalars are the only thing the
+                 truncation refusal ever withheld. */
+              if (narrowPanels.status === "ok" && narrowPanels.identifiedExpiry) {
+                panels = {
+                  ...panels,
+                  scalars: narrowPanels.scalars,
+                  identifiedExpiry: narrowPanels.identifiedExpiry,
+                  skewTerm: narrowPanels.skewTerm.status === "ok"
+                    ? narrowPanels.skewTerm : panels.skewTerm,
+                };
+                scalarsRecovered++;
+              }
+            } catch (error) {
+              console.warn(`  chain ${ticker}: single-expiry read failed — ${error.message}`);
+            }
+          }
+        }
+
         chainByTicker.set(ticker, panels);
         if (panels.status === "ok") chainOk++; else chainFailed++;
 
@@ -3715,7 +3889,10 @@ async function main() {
     console.log(
       `  chains: ${chainOk} built, ${chainFailed} failed` +
       (chainSkipped ? `, ${chainSkipped} skipped for the deadline` : "") +
-      `; ${levelled} levelled, ${skewed} with a skew reading`);
+      `; ${levelled} levelled, ${skewed} with a skew reading` +
+      (scalarsRecovered
+        ? `, ${scalarsRecovered} of them recovered by a second single-expiry call`
+        : ""));
     /* THE UNMEASURED NAMES BY NAME, the way the sector leg reports its own.
        "15 built, 2 with a skew" is a number nobody can act on; which two, and
        why, is the line that gets read on the morning something is wrong. */
@@ -3803,10 +3980,26 @@ async function main() {
      empty array and the panel says so, which is what it did before. */
   const congressByTicker = new Map();
   if (onBoard.size) {
+    let marketWide = 0;
     try {
+      /* LIMIT 100, NOT 500, AND THAT NUMBER IS A MEASUREMENT.
+
+         The first wide-board run asked for 500 and the endpoint answered
+         422 — every card that morning published an empty congress panel, a
+         regression against the per-name call this replaced, and one that
+         renders as a legitimately empty section rather than as an error. The
+         per-name call passed `limit: 50` and had never been refused, so the
+         limit is the parameter that changed and 500 is over whatever this
+         route accepts. 100 is inside the range the desk already uses
+         elsewhere on this key.
+
+         The 422 also proves the shape of the failure is worth designing for:
+         a market-wide leg that silently degrades fifty panels is worse than
+         fifty calls, so it FALLS BACK below rather than shrugging. */
       const recent = DRY_RUN
         ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
-        : await uw("/api/congress/recent-trades", { limit: 500 });
+        : await uw("/api/congress/recent-trades", { limit: 100 });
+      marketWide = recent.length;
       for (const row of recent) {
         const t = row && (row.ticker || row.symbol);
         if (!t || !onBoard.has(t)) continue;
@@ -3817,9 +4010,33 @@ async function main() {
         `  congress: ${recent.length} disclosure(s) market-wide, ` +
         `${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
     } catch (error) {
-      /* A DEAD CONGRESS FEED IS ONE EMPTY PANEL, NOT A DEAD CARD LEG. It was
-         .catch(() => []) per name before and it stays non-fatal here. */
-      console.warn(`  congress: ${error.message} — every card publishes the panel empty`);
+      console.warn(`  congress: market-wide read failed — ${error.message}`);
+    }
+
+    /* THE FALLBACK, AND WHY IT IS WORTH FIFTY CALLS.
+
+       One market-wide call replacing fifty is the right trade only while it
+       WORKS. When it does not, the alternative is not "one fewer call" — it is
+       fifty cards each publishing a panel that says, in effect, "no member of
+       Congress has traded this name", which is a confident claim about the
+       filings rather than a report of a failed read. This project does not
+       publish a confident zero, and an empty panel is exactly that.
+
+       So a failed market-wide read pays the per-name price rather than passing
+       the loss to the reader. It runs LAST, after every payload that matters
+       has landed, and it is bounded by the same deadline as the cards. */
+    if (!marketWide && !DRY_RUN && Date.now() < stats.startedAt + DEADLINE_MS) {
+      let recovered = 0;
+      for (const ticker of onBoard.keys()) {
+        if (Date.now() > stats.startedAt + DEADLINE_MS) break;
+        const rows = await uw("/api/congress/recent-trades", { ticker, limit: 50 })
+          .catch(() => []);
+        if (rows.length) { congressByTicker.set(ticker, rows); recovered++; }
+      }
+      console.warn(
+        `  congress: fell back to ${onBoard.size} per-name calls; ${recovered} name(s) ` +
+        `carry disclosures. A panel built from a failed read is a confident zero, ` +
+        `which costs more than the calls do.`);
     }
   }
 

@@ -17,7 +17,7 @@ import {
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
-  DEEP_NAMES, deepNames,
+  DEEP_NAMES, deepNames, publishRetryDelay,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -1425,10 +1425,21 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
   eq(probeLines.length, 1,
      "exactly one truncation probe is spent per run, however many names truncate");
-  const refusals = runLog.split("\n").filter((l) => l.includes("no skew — the vendor returned a full page"));
-  ok(refusals.length >= 2,
-     `and the fixture really does truncate more than one name (${refusals.length}), so that ` +
-     "count is a measurement rather than an accident of there being only one candidate");
+  /* EVIDENCE THAT MORE THAN ONE NAME TRUNCATED, taken from the recovery count
+     rather than from the refusal messages.
+
+     It used to count "no skew — the vendor returned a full page" lines, which
+     was the right evidence right up until truncation stopped implying a
+     refusal. Once the single-expiry read landed, a truncated name recovers its
+     scalars and prints no refusal at all — so the old assertion read zero and
+     failed, correctly, on a change that made the product better. The count
+     that still measures truncation is the one that counts what truncation now
+     COSTS: a second vendor call. */
+  const recovered = /(\d+) of them recovered by a second single-expiry call/.exec(runLog);
+  ok(recovered && Number(recovered[1]) >= 2,
+     `and the fixture really does truncate more than one name (${recovered ? recovered[1] : 0} ` +
+     "recovered), so the probe count above is a measurement rather than an accident of there " +
+     "being only one candidate");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const board = read("board-long");
   const movers = read("movers");
@@ -1748,6 +1759,61 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(raiseRateFloor(RATE.minDelayMs) > RATE.minDelayMs * 1.5,
        "the first step is a real step: 1.5x of 60ms is below anything a limiter notices, " +
        "so the opening raise is floored at a meaningful delay instead");
+  }
+
+  /* ---------- the publish retry, bounded twice ------------------------
+
+     THE FIRST WIDE-BOARD RUN LOST TWO PAYLOADS TO THE EDGE. Publishing fifty
+     cards instead of eleven earned a Cloudflare 403 on `sector:trix` and on
+     the re-publish of `board:long`, so one page went a day stale and one board
+     shipped without four columns — both silent to a reader.
+
+     Retrying is right, and retrying without a global bound is a different bug
+     with the same shape. Three retries is 1 + 4 + 9 = fourteen seconds per
+     failing key; a run publishes upwards of sixty keys, and a burst-rate
+     challenge is by nature systemic rather than per-key. Unbounded, the policy
+     would spend fourteen minutes of a thirty-minute deadline asleep and then
+     drop the cards at the back of the queue to pay for the retries at the
+     front — trading twenty silent losses for two. */
+  {
+    eq(publishRetryDelay(0), 1000, "the first retry waits a second");
+    eq(publishRetryDelay(1), 4000, "the second, four");
+    eq(publishRetryDelay(2), 9000, "the third, nine — quadratic, because an edge challenge " +
+       "clears on elapsed quiet rather than on attempt count");
+    eq(publishRetryDelay(3), null, "and there is no fourth: three RETRIES, four attempts");
+    eq(publishRetryDelay(-1), null, "a nonsense attempt index retries nothing");
+
+    /* THE GLOBAL BUDGET IS PART OF THE ANSWER, not a check somewhere near it.
+       The only retry defect this repository has shipped twice is a policy
+       whose comment and code disagreed, so the arithmetic lives in one
+       function a test can call. */
+    eq(publishRetryDelay(0, { spentMs: 89_500 }), null,
+       "a wait that would exceed the run's remaining retry budget is refused outright, " +
+       "rather than truncated to fit — a shortened wait is the one length that neither " +
+       "clears the challenge nor saves the time");
+    eq(publishRetryDelay(0, { spentMs: 89_000 }), 1000,
+       "a wait that fits is granted in full");
+
+    /* THE BUDGET BINDS BEFORE THE DEADLINE DOES. Whatever the per-key policy
+       costs, a whole run of failures must not consume the window the cards
+       need — this is the relation, asserted rather than described. */
+    const worstPerKey = [0, 1, 2].reduce((sum, a) => sum + (publishRetryDelay(a) || 0), 0);
+    eq(worstPerKey, 14_000, "one key that fails every retry costs fourteen seconds");
+    let spent = 0, keys = 0;
+    while (publishRetryDelay(0, { spentMs: spent }) !== null) {
+      for (const a of [0, 1, 2]) {
+        const w = publishRetryDelay(a, { spentMs: spent });
+        if (w === null) break;
+        spent += w;
+      }
+      keys++;
+      if (keys > 500) break;
+    }
+    ok(spent <= 90_000,
+       `a run in which EVERY publish is challenged spends ${Math.round(spent / 1000)}s on ` +
+       "retries and then stops, rather than fourteen minutes");
+    ok(spent < DEADLINE_MS - CHAIN_RESERVE_MS,
+       "which is comfortably inside the window the cards still need after it");
   }
 
   /* ---------- the truncated-chain probe ------------------------------
