@@ -230,6 +230,13 @@ export function rankUnusual(rows, { namesSeen = 0, cap = UA_ROWS } = {}) {
     cap,
     perName,
     capBound: kept.length >= cap ? "rows" : (perNameBit ? "perName" : "eligible"),
+    /* WHAT `eligible` COUNTS, said here because the number is easy to misread
+       on the page. It is the population AFTER the volume and open-interest
+       floors — the contracts that could have been shown — not every contract
+       the vendor sent. So "50 of 5,953" sits beside a coverage list whose row
+       counts sum to far more than 5,953, and the two are not in conflict: the
+       difference is contracts the floors excluded, about which nothing is
+       claimed. A page printing both had better say so. */
     aggressorReported: kept.filter((r) => r.aggr !== null).length,
     notionalReported: kept.filter((r) => r.nlo !== null).length,
   };
@@ -311,7 +318,7 @@ export function rankUnusualNames(withTilt, { cap = UA_NAMES } = {}) {
 /**
  * What the flow-alerts endpoint actually answered.
  *
- * TEN OUTCOMES, NOT FIVE, and the count is the point. This probe exists to
+ * TWELVE OUTCOMES, AND THE COUNT IS THE POINT. This probe exists to
  * write a permanent answer into a comment that has asserted for months, with
  * no evidence, that the endpoint is unreachable on this key. An answer that
  * collapses "throttled" into "refused" would write the wrong permanent
@@ -479,9 +486,15 @@ export const UNUSUAL_NOTES = Object.freeze({
     "it does not say on which side.",
   zeroOi: "The chain request excludes strikes with no open interest, so a strike " +
     "opened between settlements never arrives and is invisible here.",
-  names: "The contract feed can only cover names whose option chain was bought — " +
+  /* "READ", NOT "BOUGHT". The word meant bought FROM THE VENDOR, and in any
+     other file it would be unambiguous — but it sits two lines from a volume
+     column on a page whose first refusal is that a counter is not a purchase.
+     A reader scanning this sentence beside that column has every reason to
+     take it the other way, which is the exact misreading the refusal exists
+     to prevent. */
+  names: "The contract feed can only cover names whose option chain was read — " +
     "a few dozen. The name panel is built from the screener rows held for every " +
-    "eligible name, which is why it exists: an order of magnitude more coverage, " +
+    "eligible name, which is why it exists: ten times that coverage or more, " +
     "for the same zero vendor calls.",
   refusals: "No delta, no probability, no expected value, no fair premium: each " +
     "needs a risk-free rate and a dividend yield, which this desk does not invent. " +

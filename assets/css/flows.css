@@ -3008,3 +3008,175 @@ body.is-stale .flows-tablewrap {
 .ft-how-s:hover { color: var(--ink); }
 .ft-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 .ft-how .fc-note { margin-top: 0.5rem; }
+
+/* =====================================================================
+   UNUSUAL ACTIVITY — /flows/unusual/ (assets/js/flows-unusual.js)
+
+   THE PAGE'S SUBJECT IS A CONTRACT AGGREGATE, NOT AN EVENT, and the two
+   rules that follow from that are visual as well as verbal.
+
+   HUE IS THE LAST CHANNEL. Every signed number on this page carries its
+   sign in a glyph before any class here is allowed to tint it, so the
+   tables survive greyscale, a printout and a reader who cannot separate
+   the two hues. Nothing below is the only carrier of a reading.
+
+   AND ONE COLUMN IS DELIBERATELY UNTINTED. The offer-side share has no
+   tone rule at all: above a half means more contracts met the offer
+   than rested at the bid, and colouring that green would supply exactly
+   the directional reading the basis panel refuses — the same contract
+   is equally a collar leg, a hedge or a closing purchase.
+   ===================================================================== */
+
+/* --- the two kinds of absence, which must not look alike ------------- */
+/* Copied in spirit from .ftt-aggr on the ticker page: a MEASURED zero is
+   a real reading and keeps full contrast; an em dash is the vendor not
+   reporting, is already saying so in the glyph, and is dimmed so it does
+   not read as a value in a column of values. */
+.ua-flat { color: inherit; }
+.ua-unreported { color: var(--ink-faint); }
+
+/* --- the truncated-chain marker -------------------------------------- */
+/* A superscript on the name, explained in the feed's note. It is the one
+   mark on the page that qualifies a whole row, so it sits on the row
+   header rather than on the cell it happens to affect most. */
+.ua-mark {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--gold-harvest);
+  margin-left: 0.15rem;
+  cursor: help;
+}
+
+/* A name with no card behind it: not a link, and not styled as one. A
+   disabled-looking link would read as temporarily broken; this is a
+   permanent, stated property of the name. */
+.ua-unlinked { color: var(--ink); }
+
+.ua-cp { font-family: var(--font-mono); }
+
+/* The ranking key. Tabular figures matter more here than anywhere else on
+   the page: the column's precision varies with magnitude by design, so the
+   decimal points have to stay in a line. */
+.ua-vor { font-variant-numeric: tabular-nums; }
+
+/* The notional bracket. Kept on one line inside its cell — a range broken
+   across two lines reads as two numbers. */
+.ua-range { white-space: nowrap; }
+
+/* --- the basis panel, which is the page's honesty --------------------- */
+
+.ua-b-item { margin: 0 0 var(--space-3); }
+.ua-b-item:last-child { margin-bottom: 0; }
+
+.ua-b-k {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+
+.ua-b-p {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  /* Payload prose, at any width. A long relation with no spaces in it must
+     break rather than push the panel wider than the page — the suite asserts
+     zero horizontal overflow at 320px. */
+  overflow-wrap: anywhere;
+}
+
+/* THE TWO REFUSALS STAY IN THE OPEN. They are the spine of the page: what
+   the unit is, and why there is no date on it. Everything else is behind a
+   disclosure; these two are marked as load-bearing with a rule down the
+   side and are never collapsed. */
+.ua-spine {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--gold-harvest);
+}
+
+/* --- a LABELLED CHOICE, drawn to look unlike a statement --------------- */
+/* `choice: true` on the wire means the pipeline is saying this could
+   defensibly have been decided otherwise. Rendering it as one more
+   paragraph of method would bury the most arguable thing on the page in
+   the least arguable-looking place, so it gets a box, a tag and its own
+   ground. */
+.ua-choice {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  border: 1px dashed var(--gold-mystic);
+  border-radius: var(--radius-1);
+  background: color-mix(in srgb, var(--gold-harvest) 5%, transparent);
+}
+.ua-choice:last-child { margin-bottom: 0; }
+
+.ua-choice-tag {
+  margin: 0 0 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-harvest);
+}
+
+/* The choice's own parameters, as a definition list rather than prose: a
+   number a reader may want to argue with should be findable without
+   reading a paragraph to locate it. */
+.ua-defs {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem var(--space-2);
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+}
+.ua-defs dt {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  align-self: center;
+}
+.ua-defs dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* --- the quarantine notice and its marker ------------------------------ */
+
+
+/* --- the disclosures ---------------------------------------------------- */
+/* The same affordance the ticker page's decoder uses, written here rather
+   than borrowed: nothing is removed, and the entries stay in the DOM,
+   selectable and findable by a find-in-page. But eight hundred words of
+   unbroken prose under two tables is a rule nobody finishes reading, and a
+   rule nobody finishes is a rule nobody was told. */
+.ua-how {
+  margin: 0 0 var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+.ua-how-s {
+  cursor: pointer;
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 0;
+  list-style: none;
+}
+.ua-how-s::-webkit-details-marker { display: none; }
+.ua-how-s::before { content: "+ "; color: var(--gold-harvest); }
+.ua-how[open] .ua-how-s::before { content: "\2212 "; }
+.ua-how-s:hover { color: var(--ink); }
+.ua-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ua-how[open] { padding-bottom: var(--space-2); }
+.ua-how .ua-b-item { margin-top: var(--space-2); }

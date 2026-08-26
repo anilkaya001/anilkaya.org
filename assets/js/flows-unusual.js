@@ -12,9 +12,9 @@
 
    REFUSAL 1 — THE UNIT. The counter is every contract that changed
    hands at that strike, summed. It is not one event. So the words a
-   per-execution feed uses are not available to this page, and the
-   REFUSED list below is applied to the PAYLOAD'S OWN PROSE as well
-   as to the prose written here — see the quarantine.
+   per-execution feed uses are not available to any string this file
+   writes. The payload's own prose is a separate question with a
+   separate answer — see the note above basisItem.
 
    REFUSAL 2 — THE DATE, and it is the load-bearing one. The
    endpoint accepts no date and returns none, and the pipeline reads
@@ -172,102 +172,61 @@
     return m[1] + " " + m[2] + " UTC";
   }
 
-  /* ---------- the vocabulary quarantine ---------------------------
+  /* ---------- the vocabulary this page does not use ----------------
 
-     THE BAN APPLIES TO THE PAYLOAD'S PROSE, NOT ONLY TO THIS FILE'S.
+     REFUSAL 1 IN PRACTICE. The source is a contract counter, so the words a
+     per-execution feed lives on — print, trade, block, sweep, bought, sold,
+     paid, and every "smart money" flourish built on them — assert something
+     it cannot support. None of them appears in a single string this file
+     writes: not in the status strip, not in a caption, not in a note, not in
+     a column title, not in an attribute. That is the copy a reader takes a
+     reading from.
 
-     The basis panel exists to publish the pipeline's own wording beside the
-     numbers, and most of it arrives verbatim. But several of those sentences
-     are REFUSALS — they name the per-execution vocabulary in order to say
-     the source cannot support it — and one of them uses that vocabulary
-     outright, having been harvested verbatim from a chain builder. Rendering
-     any of them puts the words on the page, where nothing downstream can tell
-     a refusal from a claim: not a reader skimming, not a find-in-page, and
-     not the test that greps this page's text.
+     THE PAYLOAD'S OWN PROSE IS A DIFFERENT CASE and renders as sent — see
+     the note above basisItem for why. The guard that used to sit here, and
+     paraphrase it, cost the page its clearest sentence and gave one relation
+     two spellings.
 
-     So the guard sits at the render boundary and is applied to every string
-     that reaches the DOM from the payload. A clean string is rendered
-     verbatim, which is the common case. A string that trips the guard is
-     replaced by this page's own wording for the same content, VISIBLY marked
-     as restated, with the count and the affected keys stated in the open and
-     the pipeline's unedited sentence one link away in the payload itself.
-     Nothing is hidden and nothing is summarised.
-
-     IT FAILS SAFE. A key that trips the guard with no restatement written for
-     it renders as a withheld notice rather than as its own text, so a future
-     rewording upstream cannot quietly ship the words. That is the whole
-     reason the guard is a substring match over a list rather than a fixed
-     rewrite of the five sentences that trip it today.
-
-     THE REAL FIX IS UPSTREAM, and this is not it: the strings in
-     shared/flows-unusual.js should be reworded so this page can quote them.
-     Two of the five trip on ordinary English — a vendor call that was
-     "bought", coverage "an order of magnitude" wider — which a word list
-     cannot tell from the vocabulary it is aimed at. */
-
-  const REFUSED = [
-    "print", "trade", "block", "sweep", "order", "bought", "sold", "paid",
-    "whale", "smart money", "institutional", "bullish bet", "bearish bet",
-    "aggressive",
-    /* The date words belong to the same guard. No payload string carries one
-       today; the point is that none ever silently starts to. */
-    "today", "this session", "the day's",
-  ];
-
-  function refusedIn(text) {
-    const hay = String(text === null || text === undefined ? "" : text)
-      .toLowerCase().replace(/’/g, "'");
-    for (const word of REFUSED) if (hay.includes(word)) return word;
-    return null;
-  }
+     The tripwire lives in tests/flows-unusual-contract.mjs instead: it runs
+     the ban over the payload with four phrase-pinned exceptions, and fails if
+     one of those exceptions ever goes dead. A word that reaches the prose by
+     accident fails a test rather than reaching a reader, which is where a
+     check like this belongs — a filter at the render boundary can only hide
+     the problem, and hid it well enough to make the page worse. */
 
   /**
-   * This page's wording for the entries whose published wording it cannot
-   * quote. Same content, same order of argument, none of the vocabulary.
+   * THE BAN IS ON THE CLAIM, NOT ON THE WORD, and this is where that
+   * distinction earns its keep.
+   *
+   * Five of the twelve basis entries carry a banned token, and every one of
+   * them carries it legitimately:
+   *
+   *   unit      — "A contract counter, NOT A TRADE … no sweep flag."
+   *   refusals  — "No 'bullish bet' … no 'smart money'."
+   *   aggr      — the vendor's own relation, harvested VERBATIM from
+   *               buildTopContracts so the page and the payload cannot end up
+   *               with two spellings of one definition.
+   *   lift      — defines a share of what the vendor classified.
+   *   names     — states what the two panels can and cannot see.
+   *
+   * The first two ARE the refusals. A page cannot refuse a vocabulary without
+   * naming it, and paraphrasing them costs the strongest sentence on the page:
+   * "not a trade" is this product's whole thesis about its own source, and any
+   * restatement that avoids the word necessarily says it less clearly.
+   *
+   * The third would be worse still. `basis.aggr` is taken verbatim from the
+   * builder precisely so that one relation has one wording; a second spelling
+   * here is exactly the divergence the verbatim harvest exists to prevent.
+   *
+   * So the payload's prose renders as sent. What the ban governs is the copy
+   * THIS FILE writes — the status strip, the captions, the notes, the column
+   * titles — where a banned word could only ever be a claim. That is the half
+   * a reader takes a reading from, and it carries none of them.
+   *
+   * The tripwire is a TEST, not a filter: the suite runs the ban over the
+   * payload with four phrase-pinned exceptions, so the day someone adds
+   * "smart money" to a note it fails a build rather than reaching a page.
    */
-  const RESTATED = {
-    unit: "A contract counter. The vendor reports one row per listed strike " +
-      "with a volume total, an open interest and a quote — no size, no " +
-      "timestamp, no execution price, no venue marker. It is a sum of the " +
-      "contracts that changed hands at that strike, not a record of any one " +
-      "of them, and nothing here says who was on either side, or why.",
-    aggr: "aggr = ask_volume − bid_volume, in contracts. The vendor classifies " +
-      "each contract by the side of the book it met and reports the two counts; " +
-      "this is their difference, and it counts contracts rather than dollars.",
-    lift: "lift = ask_volume / (ask_volume + bid_volume). The two reported legs " +
-      "need not sum to the volume total — this is a share of what the vendor " +
-      "classified, not of the whole counter. Absent on either leg it is " +
-      "withheld, and never shown as balanced.",
-    names: "The contract feed can only cover names whose option chain was read — " +
-      "a few dozen. The name panel is built from the screener rows held for " +
-      "every eligible name, which is why it exists: ten times that coverage or " +
-      "more, for the same zero vendor calls.",
-    refusals: "No delta, no probability, no expected value, no fair premium: " +
-      "each needs a risk-free rate and a dividend yield, which this desk does " +
-      "not invent. No directional-wager language either — a call met at the " +
-      "offer is equally a collar leg, a short-stock hedge, a closing purchase " +
-      "or a dealer hedge, and this source cannot tell them apart. And no claim " +
-      "about who was involved or how well informed they were: the tape carries " +
-      "no counterparty identity at any tier.",
-  };
-
-  const WITHHELD =
-    "This entry is withheld. The pipeline's wording for it uses vocabulary " +
-    "this page does not apply to a contract counter, and no restatement has " +
-    "been written for it. The sentence itself is in the payload.";
-
-  /** { text, restated } — the string to render, and whether it is ours. */
-  function quarantine(key, text) {
-    const raw = String(text === null || text === undefined ? "" : text).trim();
-    if (!raw) return null;
-    if (!refusedIn(raw)) return { text: raw, restated: false };
-    const own = RESTATED[key];
-    /* The restatement is checked against the same guard it exists to satisfy.
-       A restatement that trips is a mistake in this file, and shipping it
-       would be worse than shipping nothing. */
-    if (own && !refusedIn(own)) return { text: own, restated: true };
-    return { text: WITHHELD, restated: true };
-  }
 
   /* ---------- the contract feed -----------------------------------
 
@@ -478,17 +437,30 @@
     tr.append(liftCell(row));
     tr.append(notionalCell(row));
 
-    /* Implied volatility has no column — it is a per-chain convention and
-       reads DOWN a name rather than ACROSS a table of many. It rides on the
-       row's title instead, with its own name's divisor beside it, so it is
-       readable without ever being sortable or comparable between rows. */
+    /* TWO PUBLISHED FIELDS WITH NO COLUMN, and they have none for the same
+       reason: both read DOWN a name rather than ACROSS a table that mixes
+       many. Implied volatility sits on a per-chain convention, and
+       log-moneyness is measured against a spot that was read once per chain.
+       Given a column they would be sortable, and a sortable column is an
+       invitation to compare two rows that are not comparable. On the row's
+       title they are readable and nothing else. Undrawn published fields are
+       this product's recurring defect; a tooltip is the honest middle. */
     const iv = isNum(row.iv);
+    const m = isNum(row.m);
     const cov = ctx.coverage.get(ticker);
+    const said = [];
     if (iv !== null) {
-      tr.title = "Implied volatility on this contract: " + (iv * 100).toFixed(1) + "%" +
+      said.push("Implied volatility " + (iv * 100).toFixed(1) + "%" +
         (cov && cov.ivBasis ? ", on this name's own convention (" + cov.ivBasis + ")" : "") +
-        ". It reads down this name and not across the table.";
+        ", which reads down this name and not across the table.");
     }
+    if (m !== null) {
+      said.push("Log-moneyness " + (m > 0 ? "+" : m < 0 ? MINUS : "") +
+        Math.abs(m).toFixed(4) + ": the strike is " +
+        (m > 0 ? "above" : m < 0 ? "below" : "level with") +
+        " the price this name's chain was read against.");
+    }
+    if (said.length) tr.title = said.join(" ");
     return tr;
   }
 
@@ -571,7 +543,11 @@
     if (headCells.length !== FEED_COLUMNS) return;   // markup moved; leave it unsorted
     headCells.forEach((th, i) => {
       const col = FEED_COLS[i];
-      if (!col) return;
+      /* IDEMPOTENT. There is one fetch and one paint today, but a header
+         wrapped twice nests its own <abbr> inside a second button and loses
+         the click handler on the outer one — a failure that would look like
+         "sorting stopped working" and be traced anywhere but here. */
+      if (!col || th.querySelector(".fb-sort")) return;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "fb-sort";
@@ -587,10 +563,17 @@
 
   /* ---------- the name panel --------------------------------------- */
 
-  /* A price move, with the arrow first. The glyph carries the sign, U+2212
-     carries it again in the number, and the class — which is the only part a
-     colour-blind reader loses — is last. A measured zero gets neither arrow
-     nor sign: no direction is true at zero. */
+  /**
+   * A price move, with the arrow carrying the sign and the class carrying
+   * nothing a reader needs.
+   *
+   * THE ARROW IS THE SIGN GLYPH, and it is the only one. Writing U+2212 as
+   * well would spell the sign twice on the falling side and once on the
+   * rising side, which reads as a difference between the two columns rather
+   * than as emphasis. A measured zero gets neither arrow nor sign: no
+   * direction is true at zero, and drawing one there would be the same
+   * confident claim an absent reading gets a dash to avoid.
+   */
   function changeCell(v) {
     const n = isNum(v);
     if (n === null) {
@@ -599,9 +582,9 @@
     }
     const body = (Math.abs(n) * 100).toFixed(2) + "%";
     if (n === 0) return cell("0.00%", "c-num ua-flat", "Measured, and the close was unchanged.");
-    return cell((n > 0 ? UP : DOWN) + (n > 0 ? "" : MINUS) + body,
+    return cell((n > 0 ? UP : DOWN) + body,
       "c-num " + (n > 0 ? "fb-pos" : "fb-neg"),
-      "A fraction of the prior close.");
+      (n > 0 ? "Up " : "Down ") + body + " on the prior close, as a fraction of it.");
   }
 
   function surpriseCell(v, what) {
@@ -675,24 +658,13 @@
     { keys: ["names", "refusals"], summary: "What is counted, and what is refused" },
   ];
 
-  function restatedTag() {
-    const tag = el("span", "ua-restated", "restated");
-    tag.title = "The pipeline's sentence for this entry names the vocabulary this page " +
-      "does not apply to a contract counter. Repeating it here, even to refuse it, " +
-      "would put those words on the page — so the page states the same content in its " +
-      "own words. The unedited sentence is in the payload.";
-    return tag;
-  }
-
-  /** A plain statement: a label, the prose, and the marker if it is ours. */
+  /** A plain statement: a label and the payload's own sentence, as sent. */
   function basisItem(key, value) {
-    const said = quarantine(key, value);
-    if (!said) return null;
+    const text = String(value === null || value === undefined ? "" : value).trim();
+    if (!text) return null;
     const box = el("div", "ua-b-item");
-    const head = el("p", "ua-b-k", BASIS_LABELS[key] || key);
-    if (said.restated) head.append(restatedTag());
-    box.append(head);
-    box.append(el("p", "ua-b-p", said.text));
+    box.append(el("p", "ua-b-k", BASIS_LABELS[key] || key));
+    box.append(el("p", "ua-b-p", text));
     return box;
   }
 
@@ -724,12 +696,8 @@
     }
     if (any) box.append(defs);
 
-    const said = quarantine(key, obj.reason);
-    if (said) {
-      const p = el("p", "ua-b-p", said.text);
-      if (said.restated) p.prepend(restatedTag());
-      box.append(p);
-    }
+    const reason = String(obj.reason === null || obj.reason === undefined ? "" : obj.reason).trim();
+    if (reason) box.append(el("p", "ua-b-p", reason));
     return box;
   }
 
@@ -753,30 +721,6 @@
         "numbers were built. Treat everything above as unexplained."));
       if (basisPanel) basisPanel.hidden = false;
       return;
-    }
-
-    /* THE COUNT IS TAKEN BEFORE ANYTHING IS DRAWN, so the notice can name how
-       many entries were restated and which ones, rather than a reader having
-       to find the markers by scrolling. */
-    const restated = Object.keys(basis).filter((k) => {
-      const v = basis[k];
-      const text = v && typeof v === "object" ? (v.reason || v.line || "") : v;
-      return !!refusedIn(text);
-    });
-    if (restated.length) {
-      const notice = el("p", "ua-quarantine");
-      notice.append(document.createTextNode(
-        restated.length + " of the " + Object.keys(basis).length + " entries below (" +
-        restated.join(", ") + ") are this page's own wording rather than the " +
-        "pipeline's, and are marked. The pipeline writes them using the vocabulary " +
-        "this page does not apply to a contract counter — mostly in order to refuse " +
-        "it — and putting those words on the page is exactly what the refusal " +
-        "forbids. The content is unchanged. The unedited sentences are in "));
-      const link = el("a", null, "the payload itself");
-      link.href = PAYLOAD_URL;
-      notice.append(link);
-      notice.append(document.createTextNode("."));
-      basisHost.append(notice);
     }
 
     const drawn = new Set();
@@ -862,8 +806,18 @@
     const rows = Array.isArray(contracts.rows) ? contracts.rows : [];
     const nameRows = Array.isArray(names.rows) ? names.rows : [];
     const coverage = new Map();
+    /* THE CHAINS' OWN ROW COUNTS, SUMMED, because `eligible` is the population
+       AFTER the two floors and the difference between the two numbers is
+       otherwise invisible. A caption that says "50 of 5,953" beside a coverage
+       list adding to 7,526 looks like two numbers in conflict; they are not,
+       and the gap is contracts the floors excluded, about which this page
+       claims nothing. Saying so is cheaper than letting a reader find it. */
+    let listed = null;
     for (const c of Array.isArray(payload.coverage) ? payload.coverage : []) {
-      if (c && c.t) coverage.set(String(c.t), c);
+      if (!c || !c.t) continue;
+      coverage.set(String(c.t), c);
+      const n = isNum(c.rows);
+      if (n !== null) listed = (listed === null ? 0 : listed) + n;
     }
 
     const readAt = instant(payload.readAt);
@@ -898,17 +852,17 @@
        and the strip says which. */
     let bound;
     if (contracts.capBound === "rows") {
-      bound = "The " + (cap === null ? "row" : count(cap) + "-row") +
+      bound = "the " + (cap === null ? "row" : count(cap) + "-row") +
         " cap is what bound this list" +
         (perName === null ? "" : ", with at most " + count(perName) + " from any one name");
     } else if (contracts.capBound === "perName") {
-      bound = "The per-name allowance of " + (perName === null ? "one" : count(perName)) +
+      bound = "the per-name allowance of " + (perName === null ? "one" : count(perName)) +
         " is what bound this list; the " + (cap === null ? "row cap" : count(cap) + "-row cap") +
         " was never reached";
     } else if (contracts.capBound === "eligible") {
-      bound = "Neither cap bound this list: it is every contract that cleared the floors";
+      bound = "neither cap bound this list: it is every contract that cleared the floors";
     } else {
-      bound = "The payload did not say which cap bound this list";
+      bound = "the payload did not say which cap bound this list";
     }
 
     const strip = [];
@@ -948,6 +902,11 @@
         (complete === null || truncated === null ? "" :
           ": " + count(complete) + " the vendor returned whole and " + count(truncated) +
           " it cut short at its page limit") + ".");
+    }
+    if (listed !== null && eligible !== null && listed > eligible) {
+      capParts.push("Those chains listed " + count(listed) + " strikes between them; the " +
+        count(listed - eligible) + " that did not clear the floors are not in the " +
+        "population above and nothing is claimed about them.");
     }
     if (aggrReported !== null && shown !== null) {
       capParts.push(count(aggrReported) + " of " + count(shown) +
@@ -1008,11 +967,15 @@
       " ranked by call and put volume together against the sum of the same two " +
       "thirty-day averages.");
     if (universe !== null) {
+      /* A NAME WITH NO MEASURED RATIO IS NOT A NAME WITH A RATIO OF ZERO, and
+         the count of those is published rather than quietly dropped: a panel
+         that ranks 420 of 460 and says "420 names" has hidden forty names
+         behind a number that looks like the whole population. */
       nameParts.push("The population is every eligible name the screener returned — " +
         count(universe) + " of them" +
-        (unranked === null ? "" : ", " + count(unranked) +
-          (unranked === 1 ? " without a measurable ratio and left unranked"
-                          : " without a measurable ratio and left unranked")) + ".");
+        (unranked === null ? "" : ", " + count(unranked) + " of which had no measurable " +
+          "ratio and " + (unranked === 1 ? "was" : "were") + " left unranked rather than " +
+          "ranked at zero") + ".");
     }
     /* THE EARNINGS GATE IS THE BOARD'S, NOT THIS PANEL'S, and the difference
        is worth a sentence: the gate exists to keep event-driven noise out of
