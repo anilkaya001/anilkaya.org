@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "64";
+export const ASSET_VERSION = "65";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -679,6 +679,31 @@ ${shell("Track Record", "Options-flow intelligence", "history", username, `
         <tbody id="recBody"></tbody>
       </table>
     </div>
+  </section>
+
+  <section class="rec-block" aria-labelledby="recFeatH">
+    <h2 id="recFeatH">What actually predicted, feature by feature</h2>
+    <div class="flows-tablewrap" id="recFeatWrap" tabindex="0" role="region"
+         aria-label="Feature information coefficients" hidden>
+      <table class="flows-table rec-table rec-feat">
+        <caption class="flows-caption">
+          The rank correlation of each archived board column with the forward
+          price return, pooled across every retained session and both sides.
+          This is the research loop, in public: the features the score is
+          built from, measured against what happened next, with the sample
+          they were measured on. An IC near zero is a finding too.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Feature</th>
+            <th scope="col" class="c-num"><abbr title="Spearman information coefficient: rank correlation with the forward price return at the stated horizon">IC</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs. Consecutive sessions overlap, so the effective sample is far smaller">n</abbr></th>
+          </tr>
+        </thead>
+        <tbody id="recFeatBody"></tbody>
+      </table>
+    </div>
+    <div id="recFeatNotes" class="rec-notes"></div>
   </section>
 
   <p class="flows-foot">

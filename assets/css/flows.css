@@ -1998,8 +1998,32 @@ body.is-stale .flows-tablewrap {
   cursor: help;
 }
 
+/* The evidence table: a feature key, its rank correlation with what
+   happened next, and the sample it was measured on. The key is mono
+   because it is a payload field name rather than prose — the reader is
+   meant to recognise it from the board's own columns. */
+.rec-feat-key {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+  cursor: help;
+}
+
+/* The notes carry the methodology verbatim from the payload. They are set
+   at reading width rather than table width: they are the caveats that make
+   the numbers legible, not a caption. */
+.rec-notes { margin-top: 0.75rem; }
+.rec-notes .rec-note { margin-bottom: 0.5rem; font-size: 0.8rem; }
+
+/* An unmeasured coefficient renders as the em dash with its reason in the
+   title. It is dimmed rather than coloured: "nothing to measure" is not a
+   reading, and a hue would make it look like one. */
+.rec-feat td.c-num { cursor: default; }
+.rec-feat td.c-num[title] { color: var(--ink-faint); cursor: help; }
+
 @media (max-width: 40rem) {
   .rec-block h2 { font-size: 0.68rem; }
+  .rec-feat-key { font-size: 0.72rem; }
 }
 
 /* ---------- gamma surface (strike x expiry) --------------------

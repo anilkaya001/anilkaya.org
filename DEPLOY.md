@@ -488,7 +488,7 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 | `board:long`, `board:short` | each run | `/api/flows/board?side=` | overwritten daily |
 | `board:watch` | each run | `/api/flows/board?side=watch` | overwritten daily |
 | `board:<side>:YYYY-MM-DD` | each run | the pipeline's scorer | 126 days, then swept |
-| `record` | each run, once scoring is possible | `/api/flows/record` | overwritten |
+| `record` | each run (the scorer, step 7c') | `/api/flows/record` | overwritten |
 | `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten |
 | `meta` | each run | diagnostics | overwritten |
 
@@ -516,6 +516,20 @@ around one half. A 51–52% claim is therefore **not separable from a coin** at
 any window this free tier can hold. The archive makes the claim measurable; it
 does not ratify it, and the track-record page says so.
 
+**THE SCORER READS THE ARCHIVE BACK, AND THAT READ HAS A BUDGET.** Step 7c'
+walks the retention window newest-first and `GET`s each dated key through the
+ingest route: at steady state ~180 sequential reads per run (126 calendar days
+× 5/7 weekdays × 2 sides), once daily, against the same 100,000/day row budget
+shared with the learning app. It is worker reads only — no vendor call — so it
+sits outside the 30-minute deadline calculus, and it runs after today's boards,
+archive, watch list and movers are all committed, so a failure inside it can
+cost only the record.
+
+If that read count ever becomes the binding constraint, the escape hatch is
+additive and needs no schema change: cache each session's already-scored row
+inside the `record` blob itself and fetch only the dates not yet scored, which
+turns the steady state into ~2 reads per run.
+
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
@@ -541,6 +555,11 @@ The call count is derived, not estimated:
 + 2  reads of the live board, for hysteresis (Worker, not vendor)
                                                                      = 471, plus retries
 ```
+
+VENDOR CALLS ONLY. Two legs read the Worker's own store rather than the
+vendor: the 2 hysteresis reads above, and the track-record scorer's ~180
+archive reads (§10.4b). Neither touches the Unusual Whales quota or the
+rate limiter, and neither is counted in the 471.
 
 THE SECTOR LEG IS ELEVEN CALLS BECAUSE IT IS ONE PER SECTOR. That is the
 whole reason a top-down layer is affordable here: every other reading on this

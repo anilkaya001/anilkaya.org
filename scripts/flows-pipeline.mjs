@@ -31,6 +31,7 @@ import {
   boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
+import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -1115,7 +1116,18 @@ function ret(closes, n) {
  * A stale-board read must never stop today's board from publishing.
  */
 async function fetchPublishedTickers(key) {
-  if (DRY_RUN) return [];
+  const body = await fetchStoredPayload(key);
+  return body && Array.isArray(body.rows) ? body.rows.map((r) => r.t).filter(Boolean) : [];
+}
+
+/**
+ * One stored payload, read back through the same ingest route it was
+ * written through. Null on every failure — a store read must never stop a
+ * publish, and every caller treats "could not read" and "was never
+ * written" identically: as an absent session.
+ */
+async function fetchStoredPayload(key) {
+  if (DRY_RUN) return null;
   try {
     const response = await fetch(
       ingestURL() + "?key=" + encodeURIComponent(key),
@@ -1124,12 +1136,96 @@ async function fetchPublishedTickers(key) {
         headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN },
       },
     );
-    if (!response.ok) return [];
-    const body = await response.json();
-    return Array.isArray(body.rows) ? body.rows.map((r) => r.t).filter(Boolean) : [];
+    if (!response.ok) return null;
+    return await response.json();
   } catch {
-    return [];
+    return null;
   }
+}
+
+
+/* ---------- the track record, scored from the archive -------------
+
+   The `record` key has been accepted, served and rendered since the archive
+   shipped, and NOTHING EVER WROTE IT — the page promised a record that was
+   structurally impossible to fill. This leg is the writer.
+
+   Worker reads only: it re-reads the dated boards this pipeline itself
+   archived, joins forward closes from data already in memory, and publishes
+   the result. No vendor call, so it sits outside the deadline calculus, and
+   it runs after everything the reader already has is committed, so its
+   failure can cost only itself. */
+
+const RECORD_HORIZONS = [1, 5, 10, 21];
+const RECORD_IC_MIN_N = 20;
+const RECORD_MAX_SESSIONS = 30;
+
+const candleDate = (c) => {
+  const d = String((c && (c.start_time || c.end_time || c.date)) || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+};
+
+/**
+ * Every dated board still in the store, walked newest-first over the
+ * retention window. ~180 sequential worker reads on a full archive
+ * (126 days x 5/7 weekdays x 2 sides), documented in DEPLOY.md beside the
+ * shared D1 budget. In a dry run there is no store, so the current boards
+ * are replayed at prior candle dates — synthetic sessions over synthetic
+ * closes, exercising every joint in the scorer with numbers a contract
+ * test can recompute.
+ */
+async function collectDatedBoards(sessionDate, payloads, enriched) {
+  const boards = [];
+  if (DRY_RUN) {
+    const calendar = tradingCalendar(
+      enriched.map((e) => (e.raw.ohlc || []).map(candleDate)));
+    for (const d of calendar.filter((day) => day < sessionDate).slice(-22)) {
+      for (const side of ["long", "short"]) {
+        boards.push({ d, side, rows: payloads[side].rows });
+      }
+    }
+    return boards;
+  }
+  const base = Date.parse(sessionDate + "T00:00:00Z");
+  if (!Number.isFinite(base)) return boards;
+  for (let back = 1; back <= ARCHIVE_RETENTION_DAYS; back++) {
+    const t = new Date(base - back * 86400000);
+    const dow = t.getUTCDay();
+    if (dow === 0 || dow === 6) continue;      // a dated key is only ever written on a weekday
+    const d = t.toISOString().slice(0, 10);
+    for (const side of ["long", "short"]) {
+      const stored = await fetchStoredPayload(`board:${side}:${d}`);
+      if (stored && Array.isArray(stored.rows) && stored.rows.length) {
+        boards.push({ d, side, rows: stored.rows });
+      }
+    }
+  }
+  return boards;
+}
+
+/**
+ * Dated closes from the three places this run already holds them, cheapest
+ * claim first so the strongest overwrites: an archived row's published px
+ * (the screener close the board was built at), today's screener close, and
+ * finally the enriched names' own candle year, which is authoritative where
+ * it exists. All three are the same close-to-close basis.
+ */
+function buildRecordCloses(enriched, universe, datedBoards, sessionDate) {
+  const closes = new Map();
+  const put = (t, d, c) => {
+    const v = num(c);
+    if (!t || !d || !(v > 0)) return;
+    if (!closes.has(t)) closes.set(t, new Map());
+    closes.get(t).set(d, v);
+  };
+  for (const b of datedBoards) {
+    for (const row of b.rows || []) put(row.t, b.d, row && row.px);
+  }
+  for (const row of universe) put(row.ticker, sessionDate, row.close);
+  for (const e of enriched) {
+    for (const c of e.raw.ohlc || []) put(e.row.ticker, candleDate(c), c.close);
+  }
+  return closes;
 }
 
 function selectExtremes(ranked, n) {
@@ -2719,6 +2815,51 @@ async function main() {
     await pruneArchive(sessionDate);
   } catch (error) {
     console.warn(`  prune: ${error.message}`);
+  }
+
+  /* 7c'. THE TRACK RECORD — the archive finally scored. Best-effort like
+     everything in this stretch, and placed AFTER today's boards, archive and
+     watch list are committed: a record that fails to score must never cost
+     the reader today's session. */
+  try {
+    const datedBoards = await collectDatedBoards(sessionDate, payloads, enriched);
+    const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
+    const recordCalendar = tradingCalendar([
+      ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
+      datedBoards.map((b) => b.d),
+      [sessionDate],
+    ]);
+    const rec = scoreSessions(datedBoards, recordCloses, recordCalendar, {
+      horizons: RECORD_HORIZONS,
+      statedK: HORIZON_SESSIONS,
+      maxSessions: RECORD_MAX_SESSIONS,
+    });
+    const features = icTable(datedBoards, recordCloses, recordCalendar, {
+      k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
+    });
+    await publish("record", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      status: "ok",
+      statedHorizon: HORIZON_SESSIONS,
+      attrition: RECORD_NOTES.attrition,
+      ...rec,
+      features: {
+        k: features.k,
+        minN: features.minN,
+        method: RECORD_NOTES.method,
+        selection: RECORD_NOTES.selection,
+        overlap: RECORD_NOTES.overlap,
+        calendar: RECORD_NOTES.calendar,
+        cols: features.cols,
+      },
+    });
+    const measuredCols = features.cols.filter((c) => c.ic !== null).length;
+    console.log(
+      `  record: ${rec.retained} retained session(s), ${rec.sessions.length} scored at ` +
+      `k=${HORIZON_SESSIONS}; features ${measuredCols}/${features.cols.length} measured`);
+  } catch (error) {
+    console.warn(`  record: ${error.message}`);
   }
 
   /* 7d. SECTOR MOMENTUM — eleven candle calls, the only new requests this

@@ -1363,9 +1363,71 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(trix.sectors.some((s) => s.clamped === true),
      "and a saturated one, so the rail is exercised too");
 
+  /* ---------- the record, as the dry run emits it ----------
+
+     A dry run has no store to read, so the record leg replays the current
+     boards at prior candle dates — synthetic sessions over synthetic closes.
+     What can be asserted here is the WIRING and the payload's own coherence:
+     the pinned renderer shape, the horizons ladder, the honesty strings
+     carried verbatim, and the exclusions that keep the IC table from ranking
+     share prices. */
+  /* THE PUBLISH ITSELF IS THE ASSERTION. `record` was an accepted, served
+     and rendered key that NOTHING EVER WROTE — the page promised a record
+     the pipeline could not fill. A missing emit file must fail by name
+     here, not as an ENOENT stack trace fifty lines down. */
+  ok(fs.existsSync(`${prefix}-record.json`),
+     "THE PIPELINE PUBLISHES A RECORD: the key is written, not merely accepted and rendered");
+  const record = read("record");
+  eq(record.status, "ok", "the dry run publishes a record");
+  for (const key of ["retained", "firstSession", "lastSession", "horizons", "sessions"]) {
+    ok(key in record, `the record carries the renderer's pinned \`${key}\``);
+  }
+  eq(record.statedHorizon, HORIZON_SESSIONS,
+     "the sessions table is scored at the SAME horizon the boards quote");
+  assert.deepEqual(record.horizons.map((h) => h.k), [1, 5, 10, 21],
+    "the horizon ladder is the stated one"); checks++;
+  ok(record.retained >= 10, `the replay retains a real spread of sessions (${record.retained})`);
+  for (const h of record.horizons) {
+    ok(h.n <= record.retained, `${h.k}d: n counts sessions, so it cannot exceed retention`);
+    ok(h.ls === null || Number.isFinite(h.ls), `${h.k}d: the mean is a number or withheld, never NaN`);
+    ok((h.ls === null) === (h.n === 0), `${h.k}d: withheld exactly when nothing closed`);
+  }
+  for (const row of record.sessions) {
+    for (const key of ["d", "long", "short", "ls", "hit", "lost", "names"]) {
+      ok(key in row, `session ${row.d} carries \`${key}\``);
+    }
+    ok(row.names > 0, `session ${row.d} names its population`);
+    ok(row.lost >= 0 && row.lost <= row.names, `session ${row.d}: lost is bounded by names`);
+    ok(row.hit === null || (row.hit >= 0 && row.hit <= 1), `session ${row.d}: hit is a share`);
+  }
+
+  const feat = record.features;
+  ok(feat && Array.isArray(feat.cols) && feat.cols.length >= 15,
+     `the evidence table measures the board's own vocabulary (${feat.cols.length} columns)`);
+  eq(feat.k, HORIZON_SESSIONS, "at the stated horizon");
+  const featKeys = feat.cols.map((c) => c.key);
+  ok(!featKeys.includes("r") && !featKeys.includes("px"),
+     "rank and price level never become columns — one is the score restated, the other ranks share prices");
+  ok(["s", "cnv", "fam.F", "pr.0", "w52"].every((k) => featKeys.includes(k)),
+     "while the score, conviction, families, momentum and range position all join");
+  for (const c of feat.cols) {
+    if (c.ic === null) {
+      ok(typeof c.reason === "string" && c.reason.length > 5,
+         `${c.key}: an unmeasured IC says why, rather than publishing a confident zero`);
+    } else {
+      ok(Math.abs(c.ic) <= 1, `${c.key}: a measured IC is a correlation (${c.ic})`);
+      ok(c.n >= feat.minN, `${c.key}: measured only at or above the stated floor`);
+    }
+  }
+  for (const key of ["method", "selection", "overlap", "calendar"]) {
+    ok(typeof feat[key] === "string" && feat[key].length > 20,
+       `the ${key} statement rides the payload`);
+  }
+  ok(/not side-signed/.test(feat.method), "and the method names the return convention");
+
   /* BOTH PAYLOADS FIT. The ingest route refuses anything over 128KB, and it
      refuses it as a 413 from the Worker rather than here. */
-  for (const [key, payload] of [["movers", movers], ["sector:trix", trix]]) {
+  for (const [key, payload] of [["movers", movers], ["sector:trix", trix], ["record", record]]) {
     const bytes = JSON.stringify(payload).length;
     ok(bytes < 32 * 1024,
        `${key} is ${(bytes / 1024).toFixed(1)}KB, comfortably inside the 128KB ingest cap`);
