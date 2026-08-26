@@ -32,6 +32,7 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
+import { buildChainPanels, CHAIN_PAGE_SIZE } from "../shared/flows-chain.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -97,6 +98,43 @@ const RATE = {
    with the cards. Boards publish first, and card building abandons at this
    deadline and reports how many it managed. */
 const DEADLINE_MS = 30 * 60 * 1000;
+
+/* The tick row's field list is reported once per run, not once per name. */
+let tickFieldsReported = false;
+
+/** The four fields this pipeline reads off a /net-prem-ticks row. */
+const TICK_FIELDS_READ = Object.freeze([
+  "tape_time", "net_delta", "net_call_premium", "net_put_premium",
+]);
+
+/**
+ * The unread half of a tick row, as log lines.
+ *
+ * BOUNDED, and a pure function so it can be TESTED. A diagnostic that has
+ * never executed is a diagnostic that throws on the first live run — which is
+ * precisely the moment it exists for. The values are truncated because a tick
+ * row is vendor data of unknown width and a log line is not a payload.
+ */
+function describeTickFields(ticker, row, { max = 12, valueChars = 40 } = {}) {
+  const keys = Object.keys(row || {});
+  if (!keys.length) return [`  tick fields (${ticker}): the first row carried no keys at all`];
+  const unknown = keys.filter((k) => !TICK_FIELDS_READ.includes(k));
+  const lines = [`  tick fields (${ticker}): ${keys.length} keys, ${unknown.length} unread`];
+  if (unknown.length) {
+    const sample = unknown.slice(0, max)
+      .map((k) => `${k}=${String(JSON.stringify(row[k])).slice(0, valueChars)}`)
+      .join(" ");
+    lines.push(`    unread: ${sample}${unknown.length > max ? ` (+${unknown.length - max} more)` : ""}`);
+  }
+  return lines;
+}
+
+/* How much of the deadline the chain leg must leave for the cards.
+   Fifty chain calls at the limiter's 5s ceiling are four minutes; the cards
+   are three calls a name over up to fifty names and are the surface a reader
+   actually opens. The leg stops early rather than spending the card window on
+   panels that arrive after the cards were abandoned. */
+const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 
 /** Delay between publishes, to stay under the edge's burst-rate challenge. */
 const PUBLISH_SPACING_MS = 150;
@@ -266,6 +304,13 @@ function screenerTilt(row) {
        call and all of it previously computed and thrown away. */
     iv30: Number.isFinite(iv30) ? iv30 : null,
     ivMomentum: Number.isFinite(iv30) ? iv30 - num(row.iv30d_1w, NaN) : null,
+    /* THE OTHER TWO POINTS OF THE SAME STRIP, on the wire since the first
+       screener call and read by nothing. iv30d_1w was already used to make
+       ivMomentum a difference; _1d and _1m turn the same field into a
+       four-point history of this name's own 30-day implied vol — the cheapest
+       volatility series in the product, at zero additional calls. */
+    iv30d1d: num(row.iv30d_1d, NaN),
+    iv30d1m: num(row.iv30d_1m, NaN),
     ivRank: ivRankFraction(row.iv_rank),
     impliedMovePerc: num(row.implied_move_perc, NaN),
     impliedMove: num(row.implied_move, NaN),
@@ -451,6 +496,17 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
      volume the liquidity floor needs. Those three are required. Ticks (family
      D) and expiries (family V) degrade coverage instead, which conviction
      already discounts. */
+  /* WHAT ELSE IS ON A TICK ROW. /net-prem-ticks documents thirteen fields per
+     minute and this pipeline reads four of them; the other nine have never
+     been looked at, and one of them may be the bid/mid/ask split that would
+     let the session path separate a lifted tape from a hit one. PROBE ONLY —
+     nothing here is published, because a field whose semantics are guessed is
+     exactly how call_gex shipped wrong five times. One row, once per run. */
+  if (!tickFieldsReported && ticks.length) {
+    tickFieldsReported = true;
+    for (const line of describeTickFields(ticker, ticks[0])) console.log(line);
+  }
+
   const missing = [];
   if (!greekFlow.length) missing.push("greek-flow");
   if (!strikes.length) missing.push("spot-exposures/strike");
@@ -691,6 +747,17 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     vrp: iv30 !== null && rv30 !== null ? iv30 - rv30 : null,
     ivMomentum: tilt && tilt.ivMomentum !== null ? tilt.ivMomentum : null,
     ivRank: tilt && Number.isFinite(tilt.ivRank) ? tilt.ivRank : null,
+    /* The vendor's own at-the-money vol, and this name's 30-day implied vol at
+       four points of its own recent history. Both were parsed by screenerTilt
+       and dropped here; neither costs a call. Ordered oldest first. */
+    atmVol: tilt && Number.isFinite(tilt.atmVol) ? tilt.atmVol : null,
+    ivStrip: tilt ? [
+      { h: "−1m", v: Number.isFinite(tilt.iv30d1m) ? tilt.iv30d1m : null },
+      { h: "−1w", v: Number.isFinite(tilt.iv30) && Number.isFinite(tilt.ivMomentum)
+        ? Number((tilt.iv30 - tilt.ivMomentum).toFixed(4)) : null },
+      { h: "−1d", v: Number.isFinite(tilt.iv30d1d) ? tilt.iv30d1d : null },
+      { h: "now", v: Number.isFinite(tilt.iv30) ? tilt.iv30 : null },
+    ] : null,
     impliedMovePerc: tilt && Number.isFinite(tilt.impliedMovePerc) ? tilt.impliedMovePerc : null,
 
     // The last 42 sessions of closes, retained so the deck's sparkline and
@@ -1304,6 +1371,52 @@ function boardRow(r, s, rank) {
     hm: hz(horizonMove(r.iv30)),
     hr: hz(horizonMove(r.rv30)),
   };
+}
+
+/**
+ * Merge the chain scalars onto both boards and write each side twice.
+ *
+ * EXTRACTED SO THE ORDERING IS TESTABLE. "Dated first, then live" is the
+ * invariant the archive rests on, and an invariant that only exists inside a
+ * 3000-line main() is an invariant nothing can assert. `publishFn` is a
+ * parameter for the same reason: a test hands it a recorder and reads back the
+ * exact sequence of keys, and hands it a failing one to prove the live board
+ * is not written when its own archive copy could not be.
+ */
+async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn) {
+  const lines = [];
+  for (const side of ["long", "short"]) {
+    const payload = payloads[side];
+    if (!payload || !Array.isArray(payload.rows)) continue;
+    let merged = 0;
+    for (const row of payload.rows) {
+      const c = chainByTicker.get(row.t);
+      if (!c) continue;
+      /* APPENDED, NEVER INSERTED. The board table binds its columns
+         positionally, so a field added anywhere but the end shifts every
+         column after it under headings that no longer describe them. */
+      row.skew = c.scalars.skew;
+      row.term = c.scalars.term;
+      row.atmIv = c.scalars.atmIv;
+      merged++;
+    }
+    if (!merged) continue;
+    try {
+      /* THE DATED COPY GOES FIRST, and that order is the whole design. If the
+         archive write fails, the live board is left as the store already had
+         it — complete, consistent, and simply without the new columns — rather
+         than gaining a field its own archive copy will never carry. The
+         reverse order would publish a live board the history can never
+         reproduce, which is the one state the archive exists to prevent. */
+      const key = datedKey(side, sessionDate);
+      if (key) await publishFn(key, payload);
+      await publishFn("board:" + side, payload);
+      lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)`);
+    } catch (error) {
+      lines.push(`  re-publish ${side}: ${error.message} — the store keeps the pre-chain board`);
+    }
+  }
+  return lines;
 }
 
 function toRows(pool, screenerByTicker, previousIds) {
@@ -2171,6 +2284,8 @@ function fakeScreener(count) {
       iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4),
+      iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
+      iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4),
       // 0..100, matching the screener's own example object rather than the
       // schema $ref that points at the wrong field.
       iv_rank: (rnd() * 100).toFixed(4),
@@ -2274,6 +2389,53 @@ function card0Unusable(row) {
  * the real joint, which is exactly the substitution this panel exists to
  * refuse.
  */
+/**
+ * A dry-run option chain with a real equity smile.
+ *
+ * The fixture must exercise every branch the live leg has: a levelled front
+ * expiry, wings inside the skew tolerance, contracts that traded and contracts
+ * that did not, an aggressor split present on most rows and absent on some,
+ * and one no-bid line that the sale pricer must refuse while the volume tape
+ * keeps it. A fixture where everything is well-formed tests only the path
+ * nothing goes wrong on.
+ */
+function fakeChain(ticker, spot, seed) {
+  const rnd = mulberry(seed);
+  const rows = [];
+  const expiries = [["260831", 7], ["260918", 25], ["261016", 53], ["261218", 116]];
+  for (const [code, dte] of expiries) {
+    for (let i = -8; i <= 8; i++) {
+      const m = i * 0.035;
+      const strike = Math.round(spot * Math.exp(m) * 100) / 100;
+      const level = 0.34 - 0.03 * Math.log(dte / 7);
+      const iv = level + 0.55 * m * m - 0.22 * m;      // put wing bid over the call wing
+      const isPut = i <= 0;
+      const cp = isPut ? "P" : "C";
+      const intrinsic = isPut ? Math.max(0, strike - spot) : Math.max(0, spot - strike);
+      const bid = intrinsic + spot * iv * Math.sqrt(dte / 365) * 0.4 * Math.exp(-2 * m * m);
+      // One line in twelve never traded; one in nine has no aggressor split.
+      const traded = rnd() > 0.08;
+      const volume = traded ? Math.round(80 + 3000 * Math.exp(-7 * m * m) * rnd()) : 0;
+      const row = {
+        option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+        nbbo_bid: (i === 8 ? 0 : Math.max(0.05, bid)).toFixed(2),   // the far call: nobody bidding
+        nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
+        implied_volatility: iv.toFixed(6),
+        open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
+        prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m))),
+        volume: String(volume),
+      };
+      if (rnd() > 0.11) {
+        const lifted = Math.round(volume * (0.5 + 0.3 * Math.sign(m || 1)));
+        row.ask_volume = String(Math.max(0, lifted));
+        row.bid_volume = String(Math.max(0, volume - lifted));
+      }
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
 function fakeSurface(ticker, spot, expiries) {
   if (!(spot > 0) || !expiries || !expiries.length) return [];
   const rnd = mulberry(ticker.length * 421 + Math.round(spot * 7));
@@ -2945,6 +3107,136 @@ async function main() {
     }
   }
 
+  /* The names the chain leg will ask about, and the spot each was scored at.
+     Both boards, deduplicated: a name can only be on one side, but building
+     the list from the payloads rather than from a side keeps it in step with
+     what was actually published. */
+  const boardTickers = [...new Set(
+    ["long", "short"].flatMap((side) => payloads[side].rows.map((r) => r.t)))];
+  const spotByTicker = new Map();
+  for (const side of ["long", "short"]) {
+    for (const row of payloads[side].rows) {
+      const px = num(row.px);
+      if (px > 0) spotByTicker.set(row.t, px);
+    }
+  }
+  // The chain shape is reported once per run, not once per name.
+  let chainReported = false;
+
+  /* 7e. THE OPTION CHAIN, ONE CALL PER BOARD NAME.
+
+     Fifty calls, and they are the last vendor spend of the run. Every other
+     surface a reader already has is committed by this point: both boards, the
+     dated archive, the watch list, the movers band, the record and the sector
+     panel. The chain leg is therefore the FIRST thing a slow morning takes
+     away, which is the correct degradation order — it feeds panels a reader
+     can live without and a history that can be gappy and say so.
+
+     SEQUENTIALLY, never Promise.all, for the reason the sector leg states at
+     length: fifty concurrent calls all sleep the same delay and then arrive
+     together, which is exactly the burst shape that earns a 429 and
+     permanently raises the floor for the rest of the run.
+
+     TWO GUARDS, NOT ONE. The leg-level check refuses to start past the
+     deadline; the per-name check stops partway rather than eating the card
+     window, because a run that spends its last four minutes on chains and then
+     publishes no cards has traded a panel for a page. */
+  const chainByTicker = new Map();
+  if (Date.now() > stats.startedAt + DEADLINE_MS) {
+    console.warn(
+      `  chains: past the ${DEADLINE_MS / 60000}min deadline — not spending ` +
+      `${boardTickers.length} calls on panels that would land after the cards were abandoned`);
+  } else {
+    const chainDeadline = stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS;
+    let chainOk = 0, chainFailed = 0, chainSkipped = 0;
+    for (const ticker of boardTickers) {
+      if (Date.now() > chainDeadline) {
+        chainSkipped = boardTickers.length - chainOk - chainFailed;
+        console.warn(
+          `  chains: stopping after ${chainOk + chainFailed} names — within ` +
+          `${CHAIN_RESERVE_MS / 60000}min of the deadline and the cards still need it`);
+        break;
+      }
+      try {
+        const rows = DRY_RUN
+          ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + chainOk + chainFailed)
+          : await uw(`/api/stock/${ticker}/option-contracts`, {
+            /* NOT maybe_otm_only. The desk filters to the sellable book because
+               it is pricing a sale; this leg is measuring a SURFACE, and the
+               at-the-money contract — the single most load-bearing input in
+               ivSurface, since every skew cell in a column is measured against
+               it — is exactly what that filter removes.
+
+               exclude_zero_oi_chains stays: a listed contract nobody holds and
+               nobody traded is a row of nulls, and at a 500-row page ceiling
+               those rows are spent instead of real strikes. It is a stated
+               selection, published on the panel. */
+            exclude_zero_oi_chains: "true",
+            limit: CHAIN_PAGE_SIZE,
+          });
+
+        /* THE VENDOR HAS BEEN WRONG FIVE TIMES. One bounded dump of the first
+           row's actual keys, once per run, is what solved the call_gex mystery
+           in a single run — and the aggressor split in particular is a field
+           this leg publishes a whole panel from. */
+        if (!chainReported && rows.length) {
+          chainReported = true;
+          const first = rows[0];
+          const want = ["option_symbol", "nbbo_bid", "nbbo_ask", "implied_volatility",
+                        "volume", "ask_volume", "bid_volume", "open_interest", "prev_oi"];
+          const present = want.filter((k) => first[k] !== undefined);
+          const missing = want.filter((k) => first[k] === undefined);
+          console.log(`  chain fields (${ticker}, ${rows.length} rows): ${present.join(", ")}`);
+          if (missing.length) {
+            console.warn(`    NOTE: absent on the first row: ${missing.join(", ")}` +
+              ` — keys actually present: ${Object.keys(first).slice(0, 24).join(", ")}`);
+          }
+        }
+
+        const panels = buildChainPanels(rows, {
+          spot: spotByTicker.get(ticker) || null,
+          asOf: sessionDate,
+        });
+        chainByTicker.set(ticker, panels);
+        if (panels.status === "ok") chainOk++; else chainFailed++;
+      } catch (error) {
+        chainFailed++;
+        console.warn(`  chain ${ticker}: ${error.message}`);
+      }
+    }
+    const levelled = [...chainByTicker.values()].filter((c) => c.scalars.atmIv !== null).length;
+    const skewed = [...chainByTicker.values()].filter((c) => c.scalars.skew !== null).length;
+    console.log(
+      `  chains: ${chainOk} built, ${chainFailed} failed` +
+      (chainSkipped ? `, ${chainSkipped} skipped for the deadline` : "") +
+      `; ${levelled} levelled, ${skewed} with a skew reading`);
+  }
+
+  /* 7f. THE BOARDS, RE-PUBLISHED WITH WHAT THE CHAIN MEASURED.
+
+     The three scalars have to reach the DATED row or their history never
+     accumulates — a skew percentile exists only from the first session that
+     archived a skew, and every run that publishes the board without one is a
+     session that can never be recovered. But boards must publish BEFORE the
+     chain leg spends fifty calls, so the fields cannot be there the first
+     time. Hence a second write.
+
+     DATED FIRST, THEN LIVE, PER SIDE. At final state the two are byte-
+     identical, which is the invariant the archive rests on; if the dated write
+     fails, the live board is left as it was rather than gaining a field its
+     own archive copy will never have. A mid-leg failure therefore leaves the
+     pre-chain boards standing — complete, consistent, and simply without the
+     new columns.
+
+     If the chain leg never ran, this is skipped entirely and the session's row
+     is gappy. That is the honest outcome, and the IC table's per-column n
+     reports it without anyone having to remember. */
+  if (chainByTicker.size) {
+    for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish)) {
+      console.log(line);
+    }
+  }
+
   /* 8. CARDS — after the boards are safely committed, and best-effort.
 
      Ordering is deliberate. Cards are the decorative half; the ranking is the
@@ -3058,15 +3350,49 @@ async function main() {
         // card boundary; the roll-off staircase costs nothing to add.
         expiries: e.raw.expiries,
         surface,
+        chain: chainByTicker.get(ticker) || null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
       });
 
-      const body = JSON.stringify(card);
+      /* A CARD THAT WILL NOT FIT SHEDS ITS CHEAPEST PANELS IN A STATED
+         ORDER, and only then fails.
+
+         The four chain panels add ~6KB to a card that measures ~15KB, so this
+         is headroom rather than a live constraint today — but the order is
+         written down before it is needed rather than discovered on the
+         morning a wide chain pushes one name over the ingest cap and takes
+         its whole card down. What goes first is what a reader loses least:
+         the tape (reconstructible from the chain on the desk), then the
+         aggressor ladder, then the surface's far columns. The gamma profile,
+         the levels and the score derivation are never shed — they are the
+         card. Every drop is REPLACED with a stated reason, never a silent
+         absence, so a reader sees "dropped to fit" rather than a panel that
+         looks like the vendor had nothing. */
+      const shed = [
+        ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
+          "are on the premium desk for this symbol"],
+        ["aggressor", "dropped to fit the payload cap"],
+        ["ivSurface", "dropped to fit the payload cap"],
+        ["skewTerm", "dropped to fit the payload cap"],
+      ];
+      let body = JSON.stringify(card);
+      const dropped = [];
+      for (const [key, reason] of shed) {
+        if (body.length <= 100 * 1024) break;
+        if (!card.panels[key] || card.panels[key].status !== "ok") continue;
+        card.panels[key] = { status: "unavailable", reason };
+        dropped.push(key);
+        body = JSON.stringify(card);
+      }
+      if (dropped.length) {
+        console.warn(`  card ${ticker}: shed ${dropped.join(", ")} to fit the cap`);
+      }
       // Fail loudly at the source rather than as an opaque 413 from the
       // Worker, and never let one fat card abort the rest of the loop.
       if (body.length > 100 * 1024) {
-        throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB, over the ingest cap`);
+        throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB after shedding ` +
+          `${dropped.length} panel(s), still over the ingest cap`);
       }
       await publish("card:" + ticker, card);
       cardsBuilt++;
@@ -3119,6 +3445,7 @@ export {
   SECTOR_ETFS, TRIX_SPAN, TRIX_SERIES, TRIX_WARMUP, TRIX_MIN_CANDLES,
   TRIX_FULL_SCALE_BP, ema, trixSeriesBp, scaleTrix, sectorTrix,
   MOVER_ROWS, moverRow, buildMovers,
+  describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

@@ -14,6 +14,7 @@ import {
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
+  describeTickFields, TICK_FIELDS_READ, republishWithChain,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -518,6 +519,119 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
   ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
+}
+
+/* ---------- the re-publish writes DATED FIRST, or not at all -----
+
+   The ordering is the whole design of step 7f, and it is the kind of invariant
+   that lives inside a 3000-line main() and is asserted by nothing. A dry-run
+   emit cannot see it — both files end up on disk either way — so the function
+   takes its publisher as a parameter and this block hands it a recorder. */
+{
+  const board = (side, tickers) => ({
+    side, sessionDate: "2026-08-24",
+    rows: tickers.map((t, i) => ({ t, r: i + 1, s: 50, px: 100 })),
+  });
+  const chain = (skew, term, atmIv) => ({ scalars: { skew, term, atmIv } });
+
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA", "BBB"]), short: board("short", ["CCC"]) };
+    const chains = new Map([
+      ["AAA", chain(0.04, -0.02, 0.31)],
+      ["BBB", chain(null, null, null)],       // measured nothing: still merged, as nulls
+      ["CCC", chain(0.06, 0.01, 0.28)],
+    ]);
+    await republishWithChain(payloads, chains, "2026-08-24", async (key) => { seen.push(key); });
+
+    assert.deepEqual(seen,
+      ["board:long:2026-08-24", "board:long", "board:short:2026-08-24", "board:short"],
+      "THE DATED COPY IS WRITTEN FIRST ON EACH SIDE: a live board carrying a column its own " +
+      "archive copy will never have is the one state the archive exists to prevent"); checks++;
+
+    const row = payloads.long.rows[0];
+    eq(Object.keys(row).slice(-3).join(","), "skew,term,atmIv",
+       "the three columns are APPENDED, in order — the board table binds positionally");
+    eq(payloads.long.rows[1].skew, null,
+       "a name whose chain measured nothing carries null, not the previous row's reading");
+  }
+
+  /* THE FAILURE PATH IS THE POINT. When the archive write fails, the live
+     board must be left as the store already had it. */
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31)], ["CCC", chain(0.06, 0.01, 0.28)]]);
+    const lines = await republishWithChain(payloads, chains, "2026-08-24", async (key) => {
+      seen.push(key);
+      if (key === "board:long:2026-08-24") throw new Error("archive write refused");
+    });
+    ok(!seen.includes("board:long"),
+       `a failed archive write does NOT go on to publish the live board (${seen.join(", ")})`);
+    ok(lines.some((l) => /keeps the pre-chain board/.test(l)),
+       "and it says which copy the reader is left holding");
+    /* The OTHER side is independent: one failure must not cost both boards. */
+    ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
+       "while the other side re-publishes normally — sides fail independently");
+  }
+
+  /* No chain at all is a skip, not an empty write. */
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const lines = await republishWithChain(payloads, new Map(), "2026-08-24", async (key) => { seen.push(key); });
+    eq(seen.length, 0,
+       "a run whose chain leg never reached a board name re-publishes NOTHING — the session's " +
+       "row is simply gappy, which the IC table's per-column n reports on its own");
+    eq(lines.length, 0, "and says nothing it did not do");
+  }
+
+  /* An unresolved session date must not mint an unpruneable key. */
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31)], ["CCC", chain(0.06, 0.01, 0.28)]]);
+    await republishWithChain(payloads, chains, null, async (key) => { seen.push(key); });
+    ok(!seen.some((k) => /board:(long|short):/.test(k)),
+       `with no session date, no dated key is written at all (${seen.join(", ")})`);
+    ok(seen.includes("board:long") && seen.includes("board:short"),
+       "though the live boards still gain the columns");
+  }
+}
+
+/* ---------- the tick probe runs before it matters ----------------
+
+   A diagnostic that has never executed throws on the first live run, which is
+   exactly the moment it exists for. The dry run substitutes fakeEnrichment and
+   never calls enrich(), so this probe would otherwise reach production
+   untested — the same shape of blindness that let call_gex ship wrong. */
+{
+  const lines = describeTickFields("AAPL", {
+    tape_time: "2026-08-24T13:31:00Z", net_delta: "12",
+    net_call_premium: "900", net_put_premium: "-400",
+    bid_side_volume: "40", ask_side_volume: "60", net_volume: "20",
+  });
+  ok(/3 unread/.test(lines[0]), `the probe counts what is unread (${lines[0]})`);
+  ok(/7 keys/.test(lines[0]), "against the full key count");
+  ok(/bid_side_volume=/.test(lines[1]) && /ask_side_volume=/.test(lines[1]),
+     `and names the unknown fields with their values (${lines[1]})`);
+  for (const known of TICK_FIELDS_READ) {
+    ok(!lines[1].includes(known + "="), `${known} is already read, so the probe does not repeat it`);
+  }
+
+  /* BOUNDED. A tick row is vendor data of unknown width and a log line is not
+     a payload: an unbounded dump on a wide row floods the Actions log, which
+     is the one place a live diagnostic gets read. */
+  const wide = { tape_time: "x" };
+  for (let i = 0; i < 40; i++) wide["f" + i] = "y".repeat(500);
+  const bounded = describeTickFields("WIDE", wide);
+  ok(bounded[1].length < 900, `a forty-field row logs ${bounded[1].length} chars, not thousands`);
+  ok(/\+28 more/.test(bounded[1]), `with the remainder counted rather than dropped (${bounded[1].slice(-20)})`);
+
+  /* An empty row is a fact about the vendor, said out loud. */
+  const none = describeTickFields("EMPTY", {});
+  eq(none.length, 1, "an empty row logs one line");
+  ok(/no keys at all/.test(none[0]), `saying what came back (${none[0]})`);
 }
 
 /* ---------- a missing volume norm is unmeasured, not average ------ */
@@ -1425,8 +1539,90 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
   ok(/not side-signed/.test(feat.method), "and the method names the return convention");
 
+  /* ---------- the chain leg, as the dry run emits it ----------
+
+     The leg is fifty vendor calls the dry run does not make, so what is
+     asserted here is the WIRING: that the three scalars reached the board row
+     in the right place, that the dated copy carries them too (which is the
+     whole point — a skew percentile exists only from the first session that
+     archived a skew), and that the four panels reached the card. */
+  const boardShort = read("board-short");
+  const chainCols = ["skew", "term", "atmIv"];
+  for (const [side, b] of [["long", board], ["short", boardShort]]) {
+    ok(b.rows.length > 0, `the ${side} board has rows to carry the chain columns`);
+    const keys = Object.keys(b.rows[0]);
+    for (const col of chainCols) {
+      ok(keys.includes(col), `${side} rows carry \`${col}\``);
+    }
+    /* APPENDED, NEVER INSERTED. The board table binds columns positionally, so
+       a field added anywhere but the end shifts every column after it under a
+       heading that no longer describes it. */
+    eq(keys.slice(-3).join(","), chainCols.join(","),
+       `and they are the LAST three keys on a ${side} row, in order — the table binds positionally`);
+    ok(b.rows.some((r) => r.skew !== null),
+       `at least one ${side} row carries a measured skew`);
+    for (const r of b.rows) {
+      for (const col of chainCols) {
+        ok(r[col] === null || Number.isFinite(r[col]),
+           `${side} ${r.t}: ${col} is a number or null, never NaN`);
+      }
+    }
+  }
+
+  /* THE DATED COPY IS THE ARCHIVE, and it must carry what the live board
+     carries or the history the scalars exist for never accumulates. Byte
+     identity is the invariant: the re-publish writes the SAME object twice. */
+  const datedLong = JSON.parse(fs.readFileSync(`${prefix}-board-long:${board.sessionDate}.json`, "utf8"));
+  assert.deepEqual(datedLong, board,
+    "THE DATED BOARD IS BYTE-IDENTICAL TO THE LIVE ONE at final state, chain columns included — " +
+    "the re-publish writes one object to two keys rather than reconstructing it"); checks++;
+
+  /* The card's four chain panels. */
+  const cardFile = fs.readdirSync(path.dirname(prefix))
+    .find((f) => /-card-[A-Z0-9]+\.json$/.test(f));
+  ok(cardFile, "the dry run emitted a card");
+  const card = JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), cardFile), "utf8"));
+  /* THE SCHEMA VERSION DOES NOT MOVE FOR AN ADDITION. It is a contract with
+     the renderer about MEANING: it went to 2 when fam.V and fam.O stopped
+     being signed votes and became unsigned gauges, so a renderer switching on
+     it could refuse to redraw a published 53 as a 53%-full gauge it never
+     meant. Four new panels change nothing that already existed — an older
+     renderer simply has no host for them and an older payload simply lacks
+     the keys, which is the transitional story every panel here already tells.
+     Bumping the number for an addition would spend the one signal that means
+     "a field you already draw now means something else". */
+  eq(card.v, 2, "the schema version is unmoved: these panels are additions, not redefinitions");
+  for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
+    const panel = card.panels[key];
+    ok(panel, `the card carries panels.${key}`);
+    ok(panel.status === "ok" || (panel.status === "unavailable" && panel.reason),
+       `and it is either built or unavailable WITH a reason (${key}: ${panel.status})`);
+  }
+  /* The surface is parallel arrays, and every matrix is the same shape — a
+     renderer reads them by index, so a ragged one would draw a lie. */
+  const surf = card.panels.ivSurface;
+  if (surf.status === "ok") {
+    for (const key of ["iv", "skew", "traded", "strike"]) {
+      eq(surf[key].length, surf.rows.length, `surface.${key} has one row per ladder row`);
+      ok(surf[key].every((r) => r.length === surf.expiries.length),
+         `and one column per expiry (${key})`);
+    }
+  }
+
+  /* The two free screener readings that were parsed and dropped for months. */
+  const pm = card.panels.pricedMove;
+  ok("atmVol" in pm, "the priced-move panel finally publishes the vendor's own at-the-money vol");
+  ok(Array.isArray(pm.ivStrip) && pm.ivStrip.length === 4,
+     "and a four-point history of this name's 30-day implied vol, at zero extra calls");
+  assert.deepEqual(pm.ivStrip.map((p) => p.h), ["−1m", "−1w", "−1d", "now"],
+    "ordered oldest to newest, so a renderer draws it left to right without inventing an order"); checks++;
+
   /* BOTH PAYLOADS FIT. The ingest route refuses anything over 128KB, and it
      refuses it as a 413 from the Worker rather than here. */
+  const cardBytes = JSON.stringify(card).length;
+  ok(cardBytes < 100 * 1024,
+     `a card with all four chain panels is ${(cardBytes / 1024).toFixed(1)}KB, inside the ` +
+     "100KB self-check the builder enforces");
   for (const [key, payload] of [["movers", movers], ["sector:trix", trix], ["record", record]]) {
     const bytes = JSON.stringify(payload).length;
     ok(bytes < 32 * 1024,

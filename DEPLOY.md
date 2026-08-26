@@ -485,9 +485,9 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 
 | Key | Written | Read by | Lifetime |
 |---|---|---|---|
-| `board:long`, `board:short` | each run | `/api/flows/board?side=` | overwritten daily |
+| `board:long`, `board:short` | each run, then again after the chain leg | `/api/flows/board?side=` | overwritten daily |
 | `board:watch` | each run | `/api/flows/board?side=watch` | overwritten daily |
-| `board:<side>:YYYY-MM-DD` | each run | the pipeline's scorer | 126 days, then swept |
+| `board:<side>:YYYY-MM-DD` | each run, then again after the chain leg | the pipeline's scorer | 126 days, then swept |
 | `record` | each run (the scorer, step 7c') | `/api/flows/record` | overwritten |
 | `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten |
 | `meta` | each run | diagnostics | overwritten |
@@ -552,14 +552,38 @@ The call count is derived, not estimated:
         x boardSize (25) x 2                                         = 150
 + 11 sector ETF candles, one per SPDR sector (XLB XLC XLE XLF XLI XLK
      XLP XLRE XLU XLV XLY), for the sector momentum panel          =  11
++ 50 option chains, one per board name (25 x 2 sides), for the
+     implied volatility surface, the skew and term scalars, the
+     day's most-traded contracts and the aggressor ladder        =  50
 + 2  reads of the live board, for hysteresis (Worker, not vendor)
-                                                                     = 471, plus retries
+                                                                     = 521, plus retries
 ```
+
+THE CHAIN LEG IS THE LAST VENDOR SPEND AND THE FIRST THING DROPPED. It runs
+after both boards, the dated archive, the watch list, the movers band, the
+record and the sector panel are all committed, so a slow morning costs the
+reader four card panels and a gappy history column rather than a session.
+Two guards, not one: the leg refuses to start past the 30-minute deadline, and
+it stops partway if it comes within six minutes of it, because a run that
+spends its last four minutes on chains and then publishes no cards has traded
+a panel for a page.
+
+It does NOT pass `maybe_otm_only`. The premium desk does, because it is pricing
+a sale; this leg is measuring a surface, and the at-the-money contract — the
+single most load-bearing input in the grid, since every skew cell in a column
+is measured against it — is exactly what that filter removes.
+
+The boards are then RE-PUBLISHED with `skew`, `term` and `atmIv` merged onto
+their rows, dated key first and live second, per side. The second write exists
+because the fields cannot be there the first time: boards must publish before
+fifty calls are spent, but the scalars have to reach the DATED row or their
+history never accumulates. At final state the two copies are byte-identical.
 
 VENDOR CALLS ONLY. Two legs read the Worker's own store rather than the
 vendor: the 2 hysteresis reads above, and the track-record scorer's ~180
 archive reads (§10.4b). Neither touches the Unusual Whales quota or the
-rate limiter, and neither is counted in the 471.
+rate limiter, and neither is counted in the 521. The re-publish adds 4 more
+Worker writes (2 sides x dated + live).
 
 THE SECTOR LEG IS ELEVEN CALLS BECAUSE IT IS ONE PER SECTOR. That is the
 whole reason a top-down layer is affordable here: every other reading on this
@@ -577,7 +601,7 @@ carry close, prev_close, relative_volume and both premium legs for the whole
 eligible universe, and until now the pipeline read them for twenty-five board
 rows and discarded the rest.
 
-This figure was 403 until the gamma-surface leg landed, and this runbook still
+This figure was 403 until the gamma-surface leg landed and 471 until the chain leg did, and this runbook still
 said "2 per board name" for weeks after it became 3 — an understatement of up
 to 50 calls in the one number the rate-limit sizing depends on. The last live
 run made 367 calls in 122s with 36 rate-limited.
