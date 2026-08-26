@@ -1989,7 +1989,7 @@
        refused elsewhere. */
     const quality = card.quality;
     if (!quality) {
-      host.append(el("p", "fc-note",
+      if (!legacy) host.append(el("p", "fc-note",
         "The two quality readings behind the O gauge — the out-of-the-money share of " +
         "directional flow and the vega tilt — are not published on this card. It was " +
         "built before they were, so they are shown as unmeasured rather than as zeros: " +
