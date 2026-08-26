@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "67";
+export const ASSET_VERSION = "68";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -87,6 +87,7 @@ const rail = (active) => {
     ${item("/flows/long/", "Bullish", "long")}
     ${item("/flows/short/", "Bearish", "short")}
     ${item("/flows/watch/", "Watch", "watch")}
+    ${item("/flows/market/", "Market", "market")}
   </div>
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
@@ -617,6 +618,98 @@ ${cardDialog()}
 }
 
 
+/* ---------- the market level ------------------------------------ */
+
+/**
+ * THE ONE READING EVERY OTHER SURFACE HERE HAS NEUTRALISED AWAY.
+ *
+ * The board score is a residual within the day's cross-section, computed after
+ * sector and log-capitalisation have been divided out. That is deliberate and
+ * it is what makes the score a comparison between names rather than a bet on
+ * the tape — but it means a board reporting fifty bullish names is
+ * structurally incapable of saying whether the tape as a whole was bought or
+ * sold. The level was removed on purpose, upstream of everything.
+ *
+ * This page reads the level, and it costs nothing: the numbers come from the
+ * screener rows the universe was already built from.
+ *
+ * IT IS NOT "THE MARKET" AND NOTHING ON IT SAYS SO. The vendor's screener caps
+ * each band at about fifty rows, so the population is the names this run's
+ * ladder returned and the gate admitted. Every heading says "screened
+ * universe", and the count is on the page beside the numbers.
+ */
+export function marketPage({ username = "" } = {}) {
+  const lede = "Whether the screened universe was bought or sold, how broad " +
+    "that was, and how much of it is five names.";
+  return `${head("Flows \u2014 Market", lede)}
+${shell("Market Level", "Options-flow intelligence", "market", username, `
+  <div class="flows-status" id="mktStatus" role="status">Loading the session\u2026</div>
+  <p class="flows-stale" id="mktStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <section class="fc-panel" id="mktTiltPanel" hidden>
+    <h2 class="fc-panel-h">Bought or sold, two ways</h2>
+    <div id="mktTilt"></div>
+    <p class="fc-note" id="mktTiltNote"></p>
+  </section>
+
+  <section class="fc-panel" id="mktBreadthPanel" hidden>
+    <h2 class="fc-panel-h">Breadth, and what it is made of</h2>
+    <div id="mktBreadth"></div>
+    <p class="fc-note" id="mktBreadthNote"></p>
+  </section>
+
+  <section class="fc-panel" id="mktTapePanel" hidden>
+    <h2 class="fc-panel-h">The tape</h2>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Aggregate tape readings over the screened universe">
+      <table class="flows-table" id="mktTape">
+        <caption class="flows-caption">
+          Sums and ratios over the screened universe. Each row states the
+          population it was measured over, because a ratio whose numerator and
+          denominator come from different sets of names is not a ratio of
+          anything.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Reading</th>
+            <th scope="col" class="c-num">Value</th>
+            <th scope="col" class="c-num"><abbr title="How many names of the screened universe quoted every field this reading needs">Names</abbr></th>
+          </tr>
+        </thead>
+        <tbody id="mktTapeBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="fc-panel" id="mktSectorPanel" hidden>
+    <h2 class="fc-panel-h">Sector momentum</h2>
+    <div id="mktSectors"></div>
+    <p class="fc-note" id="mktSectorNote"></p>
+  </section>
+
+  <section class="fc-panel" id="mktMoversPanel" hidden>
+    <h2 class="fc-panel-h">The session&#39;s extremes</h2>
+    <div id="mktMovers"></div>
+    <p class="fc-note">
+      Ranked over the whole screened universe, not over the board. Tickers here
+      are plain text: a detail card exists only for the names the board went
+      deep on, and a link that usually leads nowhere is worse than no link.
+    </p>
+  </section>
+
+  <p class="flows-foot" id="mktFoot"></p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-market.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
 /* ---------- the track record ----------------------------------- */
 
 /**
@@ -729,5 +822,5 @@ function escapeHTML(value) {
 }
 
 export const FLOWS_PAGES = {
-  loginPage, overviewPage, sidePage, watchPage, historyPage, deskPage, ASSET_VERSION,
+  loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage, ASSET_VERSION,
 };

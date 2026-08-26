@@ -2578,3 +2578,90 @@ body.is-stale .flows-tablewrap {
 }
 
 .flows-lede { margin: 0; font-size: 0.9rem; color: var(--ink-dim); }
+
+/* ---------- the market level -------------------------------------
+
+   POSITION CARRIES THE SIGN ON EVERY MARK HERE. Each bar grows from a centre
+   rule — left of it negative, right positive — so the reading survives being
+   printed in greyscale or read by someone who cannot separate the two hues.
+   The colour is confirmation, never the carrier. */
+
+.mk-tilt { margin: 0 0 var(--space-3); }
+.mk-tilt + .mk-tilt { padding-top: var(--space-2); border-top: 1px solid var(--panel-border); }
+.mk-tilt-h { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.mk-tilt-k { color: var(--ink-dim); font-size: 0.9rem; }
+.mk-tilt-v { font-family: var(--font-mono); font-weight: 600; font-size: 1.05rem; }
+.mk-tilt-n { margin: 0.35rem 0 0; color: var(--ink-dim); font-size: 0.82rem; line-height: 1.5; }
+
+/* The fixed [-1,+1] axis. DELIBERATELY NOT scaled to the data: a tilt of
+   +0.03 drawn to fill the panel would read as a decisive session. */
+.mk-track {
+  position: relative;
+  display: block;
+  height: 0.55rem;
+  margin-top: 0.45rem;
+  background: color-mix(in srgb, var(--panel-head) 70%, transparent);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+}
+.mk-track-sm { height: 0.4rem; margin-top: 0; flex: 1 1 auto; }
+.mk-zero {
+  position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 1px; background: var(--panel-border);
+}
+.mk-bar { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-1); }
+.mk-bar.is-pos { background: var(--flow-up); }
+.mk-bar.is-neg { background: var(--flow-down); }
+
+/* Breadth as a proportion of names. The three segments sum to the priced
+   population, so the bar is a part-to-whole reading rather than a ranking. */
+.mk-stack {
+  display: flex; height: 1.1rem; border-radius: var(--radius-1);
+  overflow: hidden; background: var(--panel-head);
+}
+.mk-seg { display: block; height: 100%; }
+.mk-seg.is-pos { background: var(--flow-up); }
+.mk-seg.is-neg { background: var(--flow-down); }
+.mk-seg.is-flat { background: var(--flow-mag-dim); }
+.mk-legend {
+  display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem;
+  margin: 0.6rem 0 0; padding: 0; list-style: none;
+  color: var(--ink-dim); font-size: 0.82rem;
+}
+.mk-legend li { display: flex; align-items: center; gap: 0.4rem; }
+.mk-key { width: 0.7rem; height: 0.7rem; border-radius: 2px; display: inline-block; }
+.mk-key.is-pos { background: var(--flow-up); }
+.mk-key.is-neg { background: var(--flow-down); }
+.mk-key.is-flat { background: var(--flow-mag-dim); }
+
+.mk-sectors { margin: 0; padding: 0; list-style: none; }
+.mk-sector {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.3rem 0;
+}
+.mk-sector + .mk-sector { border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent); }
+.mk-sector-k { flex: 0 0 9.5rem; font-size: 0.86rem; }
+.mk-sector-v {
+  flex: 0 0 4.5rem; text-align: right;
+  font-family: var(--font-mono); font-size: 0.86rem;
+}
+
+.mk-movers-grid {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+.mk-movers-h {
+  margin: 0 0 0.4rem; font-size: 0.78rem; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim);
+}
+.mk-movers { margin: 0; padding: 0; list-style: none; }
+.mk-movers li {
+  display: flex; justify-content: space-between; gap: 0.6rem;
+  padding: 0.22rem 0; font-family: var(--font-mono); font-size: 0.84rem;
+}
+.mk-mv-t { font-weight: 600; }
+
+@media (max-width: 30rem) {
+  .mk-sector-k { flex-basis: 6.5rem; font-size: 0.8rem; }
+  .mk-sector-v { flex-basis: 3.6rem; }
+}

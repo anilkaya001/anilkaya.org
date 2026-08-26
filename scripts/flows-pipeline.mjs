@@ -34,6 +34,7 @@ import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS } from "../shared/flows-chain.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
+import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
   PICK_SIZE, PICK_INDEX,
@@ -2648,6 +2649,27 @@ function fakeScreener(count) {
        Deterministic rather than random, so a failure is reproducible and the
        affected tickers can be named in a log. */
     const quoted = i % 97 !== 3;
+
+    /* AND THE SAME DELIBERATE HOLES IN THE PREMIUM AND AGGRESSOR COLUMNS.
+
+       The market aggregate's whole correctness argument is a PRESENCE rule:
+       net premium is measured only where both legs were quoted, because
+       treating an unquoted leg as a measured zero would publish a name as
+       balanced when one side was never reported. Every one of the 420 rows
+       here quoted both legs, so that branch had no way to execute and a fixture
+       in which it cannot execute certifies an implementation the live wire will
+       break — the fourth time this file has had to say so.
+
+       Three separate holes, on three different moduli, so no single row carries
+       all of them and each branch is reached independently:
+         - one row in 61 quotes a call leg and no put leg
+         - one row in 83 quotes neither
+         - one row in 71 omits the aggressor split entirely
+         - one row in 53 omits iv30d, so the volatility median must skip it */
+    const putLeg = i % 61 !== 7;
+    const anyPremium = i % 83 !== 11;
+    const aggressorSplit = i % 71 !== 5;
+    const hasIv = i % 53 !== 9;
     rows.push({
       ticker: "SYN" + String(i).padStart(3, "0"),
       close: price.toFixed(2),
@@ -2667,15 +2689,17 @@ function fakeScreener(count) {
       avg_30_day_put_volume: String(Math.round(putVol * (0.5 + rnd()))),
       bullish_premium: String(Math.round(bull)),
       bearish_premium: String(Math.round(bear)),
-      net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)),
-      net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)),
+      ...(anyPremium ? { net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)) } : {}),
+      ...(anyPremium && putLeg ? { net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)) } : {}),
       call_premium: String(Math.round(bull + rnd() * 2e7)),
       put_premium: String(Math.round(bear + rnd() * 2e7)),
-      call_volume_ask_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
-      call_volume_bid_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
-      put_volume_ask_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
-      put_volume_bid_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
-      iv30d: (0.18 + rnd() * 0.5).toFixed(4),
+      ...(aggressorSplit ? {
+        call_volume_ask_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
+        call_volume_bid_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
+        put_volume_ask_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
+        put_volume_bid_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
+      } : {}),
+      ...(hasIv ? { iv30d: (0.18 + rnd() * 0.5).toFixed(4) } : {}),
       iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
       iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4),
@@ -3491,6 +3515,39 @@ async function main() {
      exit the job non-zero after both boards had already landed — a successful
      run reported as a failure, which is the exact lie the first live meta
      publish told. */
+  /* 7c-bis. THE MARKET LEVEL — zero vendor calls, and the reading no other
+     surface in this section is capable of giving.
+
+     Every score here is a RESIDUAL: neutralize() divides sector and log-cap out
+     of the composite before the ranking is taken, which is exactly what makes
+     the board a comparison between names rather than a bet on the tape. The
+     cost of that design is that a board reporting fifty bullish names cannot
+     say whether the tape as a whole was bought — the level was removed on
+     purpose, upstream of everything.
+
+     This reads the level, from the same screener rows the universe was built
+     from, already in memory. It spends nothing.
+
+     The tilts are passed alongside the rows rather than re-read from them,
+     because `iv_rank` arrives on 0..100 and screenerTilt().ivRank is a
+     FRACTION — the vendor's schema misdeclares the field, and this repository
+     has published "1352% of its year" once already. */
+  try {
+    await publish("market", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      ...marketAggregate(
+        withTilt.map((w) => w.row),
+        new Map(withTilt.map((w) => [w.row.ticker, w.tilt])),
+        { screened: screener.length },
+      ),
+      notes: MARKET_NOTES,
+      status: "ok",
+    });
+  } catch (error) {
+    console.warn(`  market: ${error.message}`);
+  }
+
   try {
     const movers = buildMovers(withTilt);
     await publish("movers", {
