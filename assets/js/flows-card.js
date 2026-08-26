@@ -251,10 +251,48 @@
 
     const lo = bars[0].k, hi = bars[bars.length - 1].k;
     const yOfIndex = (i) => padT + (bars.length - 1 - i) * ROW + ROW / 2;
+
+    /* THE TWO MAPPINGS HAVE TO AGREE ON THE LADDER, AND FOR A LONG TIME THEY
+       DID NOT.
+
+       The bars are a CATEGORICAL ladder: one row per strike, evenly spaced
+       down the panel, placed by yOfIndex. The price rules — spot, the gamma
+       flip, the call and put walls, the earned labels — are placed by price.
+       This function used to interpolate LINEARLY across the whole price span,
+       which agrees with the bar rows only when the strikes are uniformly
+       spaced.
+
+       Real chains are not uniformly spaced. Listed ladders tighten near the
+       money ($2.50 steps) and widen in the wings ($5, then $10), and on top of
+       that this panel DROPS any strike whose gamma the vendor did not report
+       — deliberately, so an absent reading is never drawn as a measured zero
+       — which punches gaps into whatever regularity was left.
+
+       Measured on a realistic 24-strike ladder from $100 to $270: the worst
+       divergence was 67.5px, or 4.8 bar rows, and the spot rule for $170
+       landed 35px away from the $170 bar. The panel drew a flip line pointing
+       at the wrong strike, on every non-uniform chain, and nothing about it
+       looked wrong.
+
+       PIECEWISE ON THE LADDER, therefore: find the two strikes bracketing the
+       price and interpolate between THEIR row positions. A price that is
+       exactly a listed strike lands exactly on that strike's bar, which is the
+       property the whole panel is read for. */
     const yOfPrice = (p) => {
+      if (!bars.length) return padT;
       if (!(hi > lo)) return padT + (bars.length * ROW) / 2;
-      const t = (p - lo) / (hi - lo);
-      return padT + (1 - Math.min(1, Math.max(0, t))) * (bars.length - 1) * ROW + ROW / 2;
+      if (p <= lo) return yOfIndex(0);
+      if (p >= hi) return yOfIndex(bars.length - 1);
+      /* bars are ascending in strike, so the first bar at or above p closes
+         the bracket and its predecessor opens it. */
+      let i = 1;
+      while (i < bars.length - 1 && bars[i].k < p) i++;
+      const kLo = bars[i - 1].k, kHi = bars[i].k;
+      const span = kHi - kLo;
+      /* Two strikes at the same price cannot define a fraction between them;
+         take the lower row rather than dividing by zero. */
+      const t = span > 0 ? (p - kLo) / span : 0;
+      return yOfIndex(i - 1) + t * (yOfIndex(i) - yOfIndex(i - 1));
     };
 
     const svg = svgEl("svg", {

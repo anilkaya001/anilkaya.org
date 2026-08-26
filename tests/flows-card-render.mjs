@@ -1139,6 +1139,75 @@ try {
   eq(legacy.dead, true, "it reports the panel unavailable");
   eq(legacy.svg, false, "and draws no chart at all rather than an empty grid");
 
+  /* ---------- the price rules land on their own bars ----------------
+
+     A LIVE DEFECT, MEASURED. The gamma panel draws bars on a CATEGORICAL
+     ladder — one row per strike, evenly spaced — and drew the price rules
+     (spot, the gamma flip, the walls, the earned labels) by interpolating
+     LINEARLY across the price span. Those two agree only when the strikes are
+     uniformly spaced, and real chains are not: listed ladders tighten near the
+     money and widen in the wings, and this panel additionally DROPS any strike
+     whose gamma the vendor did not report, punching gaps into whatever
+     regularity survived.
+
+     On the ladder below the old mapping put the spot rule 4.8 bar rows away
+     from the bar it names. Nothing about that looks wrong on screen — it is a
+     line pointing confidently at the wrong strike.
+
+     THE FIXTURE IS DELIBERATELY NON-UNIFORM, and the first assertion proves
+     it, because on a uniform ladder both mappings agree and every assertion
+     below would pass against the defect. */
+  {
+    const ladder = [100, 110, 120, 130, 140, 145, 150, 155, 160, 162.5, 165,
+                    167.5, 170, 172.5, 175, 180, 185, 190, 200, 210, 220, 240, 260, 270];
+    const gaps = ladder.slice(1).map((k, i) => k - ladder[i]);
+    ok(Math.max(...gaps) > 3 * Math.min(...gaps),
+       `the fixture ladder is genuinely non-uniform (steps ${Math.min(...gaps)} to ` +
+       `${Math.max(...gaps)}), so the two mappings CANNOT agree by construction — on a ` +
+       "uniform ladder this whole block would pass against the defect it exists to catch");
+
+    const placed = await page.evaluate((ks) => {
+      const host = document.getElementById("fcGamma");
+      window.__renderGamma(host, {
+        status: "ok",
+        bars: ks.map((k, i) => ({ k, g: (i % 5) - 2, cum: i - 10 })),
+        callWall: 190, putWall: 140, band: [100, 270],
+      }, {
+        ticker: "T", gammaFlip: 170, panels: {},
+        regime: { spotGammaShare: -0.4, flipSide: "short_below", bandMin: 100, bandMax: 270 },
+        row: { px: 170 },
+      });
+      const svg = host.querySelector("svg.gp");
+      if (!svg) return null;
+      const num = (n, a) => Number(n.getAttribute(a));
+      const bars = Array.from(svg.querySelectorAll(".gp-bar"))
+        .map((b) => ({ y: num(b, "y") + num(b, "height") / 2 }))
+        .sort((a, b) => a.y - b.y);
+      const flip = svg.querySelector(".gp-flip");
+      return {
+        barYs: bars.map((b) => b.y),
+        flipY: flip ? num(flip, "y1") : null,
+        rows: bars.length,
+      };
+    }, ladder);
+
+    ok(placed && placed.rows > 0, `the panel drew ${placed ? placed.rows : 0} bars`);
+
+    /* THE ASSERTION. The flip is set to exactly 170, which IS a listed strike,
+       so its rule must land on that strike's own bar — not near it. Bars are
+       sorted top-to-bottom and the ladder is ascending, so strike 170 is at
+       index (length - 1 - position). */
+    if (placed && placed.flipY !== null) {
+      const idx = ladder.indexOf(170);
+      const expected = placed.barYs[placed.barYs.length - 1 - idx];
+      const off = Math.abs(placed.flipY - expected);
+      ok(off < 1.5,
+         `the gamma-flip rule at a price that IS a listed strike lands on that strike's own ` +
+         `bar (off by ${off.toFixed(1)}px). Under the linear-on-price mapping it sat ` +
+         "4.8 bar rows away, pointing at a different strike entirely");
+    }
+  }
+
   console.log(`✓ flows-card-render: ${checks} assertions — cells reconcile against the grid, ` +
     `sign survives without hue, the shading ramp spends its range on the cells rather than ` +
     `on one outlier and is drawn as a key the note agrees with, not measured and measured ` +
