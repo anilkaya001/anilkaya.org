@@ -589,6 +589,30 @@ their coverage stated; `skew`, `term` and `atmIv` are withheld with that reason,
 because they go onto a board row and into an archive where nothing carries the
 caveat.
 
+**AND ON THE FIRST LIVE MORNING THAT REFUSAL FIRED ON TEN NAMES OF ELEVEN.**
+It was designed as the edge case for the largest names; it is the common case.
+Only PCG, small enough to fit one page, produced a skew and an at-the-money
+level. The leg is currently spending a call per name to publish scalars for
+one name in eleven — the panels are unaffected, and no renderer draws them yet,
+so nothing a reader sees is wrong; the history simply is not accumulating.
+
+Resolving it turns on one fact this repository does not have: whether
+`/option-contracts` accepts a filter narrowing the response to a single expiry.
+If it does, asking for the nearest expiry by name identifies "nearest" by
+construction at one call. If it does not, the fallback is `page`, which the
+premium desk already uses on this endpoint, at several calls a name. The vendor's
+documentation has been wrong about this API five times, so the pipeline does not
+guess: it spends ONE call per run, on the first name that truncates, and prints
+what came back. **Read `chain probe (TICKER, expiry=…)` in the Actions log.** It
+reports one of three verdicts, and they are deliberately not collapsible:
+
+| Log line | Meaning | Next step |
+|---|---|---|
+| `FILTER WORKS` | only the requested expiry came back, under the cap | drop the truncation refusal for scalars read off it |
+| `FILTER WORKS but this single expiry still fills the page` | narrowing helped, the strike set is still a subset | narrow further before trusting "nearest listed strike" |
+| `FILTER IGNORED` | several expiries came back for a single-expiry request | fall back to `page` pagination |
+| `returned NOTHING` | accepted and empty | neither of the above — do not read it as either |
+
 **THE SCALARS ARE ARCHIVED BUT NOT POOLED.** Each is read at that name's own
 nearest listed expiry past a floor — eight days out on SPY, ninety on a thin
 name — so they are excluded from the cross-sectional IC table for the reason
@@ -606,7 +630,46 @@ VENDOR CALLS ONLY. Two legs read the Worker's own store rather than the
 vendor: the 2 hysteresis reads above, and the track-record scorer's ~180
 archive reads (§10.4b). Neither touches the Unusual Whales quota or the
 rate limiter, and neither is counted in the 521. The re-publish adds 4 more
-Worker writes (2 sides x dated + live).
+Worker writes (2 sides x dated + live). The truncation probe adds at most 1.
+
+### 10.5b The rate limiter, and the number to watch
+
+Unusual Whales documents no rate limit anywhere — not in the OpenAPI spec, not
+in the docs — so the limiter discovers it. The last line of every run is the
+measurement:
+
+```
+done in 178.2s — 408 API calls, 0 retries, 43 rate-limited,
+achieved 2.29 req/s (final inter-call delay 60ms, learned floor 240ms)
+```
+
+**`learned floor` is the finding, not `final inter-call delay`.** The delay is
+wherever the last decay left it; the floor is what the run concluded about this
+key's tier. If it settles at the same value across several mornings, that value
+belongs in `RATE.startDelayMs` — at which point the run stops paying for the
+same discovery every day.
+
+The controller is AIMD: ×2 on a 429 and ×0.9 on a clean response, with the
+floor rising 1.5× per 429 and never falling within a run. A 5xx or a transport
+failure backs off but teaches the floor NOTHING — a server error is not a rate
+limit, and 5xx storms are when the run can least afford a permanent slowdown.
+
+The floor's ceiling (750 ms) is deliberately far below the per-call backoff
+ceiling (5 s). One call may sleep five seconds; every call may not, because
+`CALL_BUDGET × 5s` is 43 minutes against a 30-minute deadline — a run that
+publishes nothing at all, which is strictly worse than being rate-limited.
+`rateFloorSurvivesBudget()` asserts the relation and the contract test holds it
+from both sides, so raising the ceiling without raising the deadline fails the
+build rather than the morning.
+
+> This is a fix, not a description of how it always worked. Until 2026-08-26
+> the 429 branch carried the comment "raise the floor permanently" over code
+> that raised only the current delay, while the decay clamped to an immutable
+> 60 ms — so six clean responses undid every lesson. The live run that morning
+> made 408 calls, was rate-limited on 43 of them, and finished at exactly
+> 60 ms: a controller that observed 43 refusals and concluded nothing. Each 429
+> also consumes one of four retry attempts, so a sustained regime does not just
+> waste calls, it fails names.
 
 THE SECTOR LEG IS ELEVEN CALLS BECAUSE IT IS ONE PER SECTOR. That is the
 whole reason a top-down layer is affordable here: every other reading on this

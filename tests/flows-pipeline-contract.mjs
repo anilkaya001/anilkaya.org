@@ -15,12 +15,14 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
+  stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
+  DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1402,9 +1404,30 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
    is the board's count, and `ranked + unrankedChange` has to add up to it. */
 {
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-emit-")) + "/e";
-  execFileSync(process.execPath,
+  /* BOTH STREAMS. The probe reports through console.log and every refusal
+     through console.warn, so a capture of stdout alone reads "one probe, zero
+     truncations" — which is exactly the shape this assertion exists to rule
+     out, and it would have passed. */
+  const run = spawnSync(process.execPath,
                ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
-               { cwd: import.meta.dirname, stdio: "ignore" });
+               { cwd: import.meta.dirname, encoding: "utf8" });
+  eq(run.status, 0, "the dry run exits clean");
+  const runLog = run.stdout + run.stderr;
+
+  /* THE PROBE IS SPENT ONCE PER RUN, NOT ONCE PER TRUNCATED NAME.
+
+     This is a cost assertion, and it needs the whole run to make it: the
+     fixture truncates two names precisely so that "once" and "once per
+     truncated name" are different numbers here. On the live board of
+     2026-08-26 they differed by nine vendor calls — spent, at the very end of
+     the run, on re-asking a question whose answer cannot vary by ticker. */
+  const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
+  eq(probeLines.length, 1,
+     "exactly one truncation probe is spent per run, however many names truncate");
+  const refusals = runLog.split("\n").filter((l) => l.includes("no skew — the vendor returned a full page"));
+  ok(refusals.length >= 2,
+     `and the fixture really does truncate more than one name (${refusals.length}), so that ` +
+     "count is a measurement rather than an accident of there being only one candidate");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const board = read("board-long");
   const movers = read("movers");
@@ -1618,6 +1641,169 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   assert.deepEqual(pm.ivStrip.map((p) => p.h), ["−1m", "−1w", "−1d", "now"],
     "ordered oldest to newest, so a renderer draws it left to right without inventing an order"); checks++;
 
+  /* ---------- the rate limiter's floor -------------------------------
+
+     THE DEFECT THIS PINS WAS SHIPPED AND MEASURED. From the first version of
+     this pipeline until 2026-08-26, the 429 branch carried the comment "raise
+     the floor permanently" over code that raised only the current delay; the
+     decay on a clean response clamped to an immutable RATE.minDelayMs, so six
+     clean responses walked it back to the 60ms that had earned the 429 in the
+     first place. The live run of that morning: 408 calls, 43 rate-limited, and
+     a final inter-call delay of exactly 60ms — a controller that observed 43
+     refusals and concluded nothing.
+
+     The lesson is about WHERE the assertion goes. Every piece was individually
+     reasonable; the bug lived in the wiring between them, so the fix moved the
+     wiring into a pure function and these assertions hold the invariant over
+     the thing that actually runs. */
+  {
+    // The floor rises and never falls, no matter how long the quiet spell.
+    let s = { delayMs: RATE.startDelayMs, floorMs: RATE.minDelayMs };
+    s = stepRateController(s, "limited");
+    const afterLimit = s.floorMs;
+    ok(afterLimit > RATE.minDelayMs, "a 429 raises the floor above the starting minimum");
+    for (let i = 0; i < 200; i++) s = stepRateController(s, "ok");
+    eq(s.floorMs, afterLimit, "and two hundred clean responses do not lower it again");
+    ok(s.delayMs >= afterLimit,
+       `the delay decays to the raised floor and stops there (${Math.round(s.delayMs)}ms ` +
+       `>= ${Math.round(afterLimit)}ms) — the exact assertion the shipped code failed`);
+
+    /* THE MUTATION THIS KILLS: clamping the decay to RATE.minDelayMs instead
+       of to floorMs. That is not a hypothetical mutation — it is the code that
+       ran in production, and under it this next line reads 60. */
+    ok(s.delayMs > RATE.minDelayMs,
+       "and it does NOT settle back at RATE.minDelayMs, which is what the defect did");
+
+    // Repeated 429s converge on the ceiling rather than running away to maxDelayMs.
+    let t = { delayMs: RATE.startDelayMs, floorMs: RATE.minDelayMs };
+    for (let i = 0; i < 50; i++) t = stepRateController(t, "limited");
+    eq(t.floorMs, RATE.floorCeilingMs,
+       "fifty consecutive 429s pin the floor at its ceiling, not at maxDelayMs");
+    ok(RATE.floorCeilingMs < RATE.maxDelayMs,
+       "and the floor's ceiling is strictly below the per-call backoff ceiling: a single " +
+       "call may sleep 5s, but every call may not");
+
+    /* A 500 IS NOT A RATE LIMIT. Raising the floor on a transport failure
+       would slow the whole run for a reason that has nothing to do with the
+       key's tier — and 5xx storms are exactly when the run can least afford
+       it. */
+    const before = { delayMs: 300, floorMs: 240 };
+    eq(stepRateController(before, "error").floorMs, 240,
+       "a 5xx or a transport failure backs off WITHOUT teaching the floor anything");
+
+    /* THE DEADLINE HAS TO SURVIVE THE FLOOR. A floor that fits the budget but
+       eats the card window has only changed which surface goes missing, so the
+       reserve is subtracted. */
+    ok(rateFloorSurvivesBudget({
+      floorCeilingMs: RATE.floorCeilingMs, callBudget: CALL_BUDGET,
+      deadlineMs: DEADLINE_MS, reserveMs: CHAIN_RESERVE_MS,
+    }), `a full ${CALL_BUDGET}-call run at the ${RATE.floorCeilingMs}ms floor ceiling ` +
+        "still finishes inside the deadline with the chain reserve intact");
+    ok(!rateFloorSurvivesBudget({
+      floorCeilingMs: RATE.maxDelayMs, callBudget: CALL_BUDGET,
+      deadlineMs: DEADLINE_MS, reserveMs: CHAIN_RESERVE_MS,
+    }), "and the same run at the 5s per-call ceiling would NOT — which is why the " +
+        "floor needs a ceiling of its own rather than reusing maxDelayMs");
+
+    ok(raiseRateFloor(RATE.minDelayMs) > RATE.minDelayMs * 1.5,
+       "the first step is a real step: 1.5x of 60ms is below anything a limiter notices, " +
+       "so the opening raise is floored at a meaningful delay instead");
+  }
+
+  /* ---------- the truncated-chain probe ------------------------------
+
+     Ten of eleven board names filled the vendor's 500-row page on the first
+     live morning, so the truncation refusal — designed for the largest names —
+     is the common case. The probe spends one call asking whether the endpoint
+     can be narrowed to a single expiry. These assertions are about the probe
+     REPORTING HONESTLY, because a diagnostic that misreads its own answer is
+     worse than none: it would send the next release down the wrong design. */
+  {
+    const expiries = [
+      { expiry: "2026-08-27" },              // inside the 7-day floor
+      { expiry: "2026-09-04" }, { expiry: "2026-09-18" },
+      { expiry: "2026-08-20" },              // already past
+      { expiry: null }, { expiry: "not-a-date" },
+    ];
+    eq(nearestProbeExpiry(expiries, { asOf: "2026-08-26", minDays: 7 }), "2026-09-04",
+       "the probe aims at the nearest LISTED expiry past the skew floor, not the nearest " +
+       "of any kind — 2026-08-27 is one day out and 2026-08-20 has expired");
+    eq(nearestProbeExpiry([{ expiry: "2026-08-27" }], { asOf: "2026-08-26", minDays: 7 }), null,
+       "and when nothing qualifies it returns null rather than aiming at whatever sorts " +
+       "first — a probe with no target is skipped, not guessed");
+    eq(nearestProbeExpiry(expiries, { asOf: "nonsense" }), null,
+       "an unparseable session date yields no probe at all");
+    eq(nearestProbeExpiry(null, { asOf: "2026-08-26" }), null, "and neither does no input");
+
+    const sym = (exp, cp, strike) =>
+      `AAPL${exp.slice(2).replace(/-/g, "")}${cp}${String(strike * 1000).padStart(8, "0")}`;
+    const oneExpiry = [sym("2026-09-04", "C", 200), sym("2026-09-04", "P", 190)]
+      .map((option_symbol) => ({ option_symbol }));
+    const worked = describeChainProbe("AAPL", "2026-09-04", oneExpiry).join(" ");
+    ok(worked.includes("FILTER WORKS"),
+       "a response carrying only the requested expiry is reported as the filter working");
+
+    const many = [sym("2026-09-04", "C", 200), sym("2026-09-18", "C", 200)]
+      .map((option_symbol) => ({ option_symbol }));
+    const ignored = describeChainProbe("AAPL", "2026-09-04", many).join(" ");
+    ok(ignored.includes("FILTER IGNORED"),
+       "and two distinct expiries back from a single-expiry request is reported as ignored");
+    ok(!ignored.includes("FILTER WORKS"),
+       "with no chance of a reader skimming the wrong verdict out of the same line");
+
+    /* THE THIRD OUTCOME, which is neither of the other two and must not be
+       collapsed into either. An accepted-and-empty filter looks like success
+       to a row counter and like failure to a naive reader. */
+    const empty = describeChainProbe("AAPL", "2026-09-04", []).join(" ");
+    ok(!empty.includes("FILTER WORKS") && !empty.includes("FILTER IGNORED"),
+       "an empty response is reported as its own outcome, not as either verdict");
+
+    /* A single expiry that STILL fills the page is not a solved problem: the
+       strike set is then itself an arbitrary subset. */
+    const full = Array.from({ length: 500 }, (_, i) =>
+      ({ option_symbol: sym("2026-09-04", "C", 100 + i) }));
+    const stillFull = describeChainProbe("AAPL", "2026-09-04", full).join(" ");
+    ok(stillFull.includes("still fills the page"),
+       "and a filtered response that itself hits the cap says so rather than declaring victory");
+  }
+
+  /* ---------- the fixture's own honesty -------------------------------
+
+     THE FIXTURE IS THE THING THAT HAS BEEN WRONG MOST OFTEN IN THIS
+     REPOSITORY. Three times a dry run passed because the fixture agreed with
+     the code's guess instead of with the vendor: call_gamma against the wire's
+     call_gex, the aggressor split, and one option type per strike hiding the
+     put/call collision. A fourth was live for a release — the narrow book fit
+     the vendor's page, so the truncation branch that fires on ten names of
+     eleven never executed in any dry run.
+
+     So the fixture's claims get assertions of their own. The shuffle in
+     particular: a page cut from an already-sorted book leaves the front
+     expiries whole, which is exactly the convenience the vendor does not
+     promise and the refusal exists to survive. Without this assertion, dropping
+     the shuffle changes nothing any other test can see. */
+  {
+    const wide = fakeChain("AAPL", 200, 4242, { wide: true });
+    eq(wide.length, 500, "the wide fixture is cut at the vendor's page size, not merely large");
+
+    const seq = wide.map((r) => {
+      const m = /^AAPL(\d{6})[CP]/.exec(r.option_symbol);
+      return m ? m[1] : null;
+    }).filter(Boolean);
+    ok(new Set(seq).size > 4,
+       `the cut spans ${new Set(seq).size} expiries, so it is a slice through the book ` +
+       "rather than its first few expiries taken whole");
+    const sorted = seq.every((v, i) => i === 0 || seq[i - 1] <= v);
+    ok(!sorted,
+       "and the page is NOT in expiry order — a fixture cut from a sorted book would let " +
+       "downstream code identify 'nearest' by position, which the vendor documents nowhere");
+
+    const narrow = fakeChain("AAPL", 200, 4242);
+    ok(narrow.length < 500,
+       `the narrow fixture stays under the cap (${narrow.length} rows) so a dry run exercises ` +
+       "BOTH the truncated refusal and the path that publishes scalars, in one session");
+  }
+
   /* BOTH PAYLOADS FIT. The ingest route refuses anything over 128KB, and it
      refuses it as a 413 from the Worker rather than here. */
   const cardBytes = JSON.stringify(card).length;
@@ -1633,4 +1819,4 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   fs.rmSync(path.dirname(prefix), { recursive: true, force: true });
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts`);
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, and the truncated-chain probe's three distinct verdicts`);
