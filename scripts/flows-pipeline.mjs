@@ -2471,11 +2471,58 @@ async function pruneArchive(sessionDate, options = {}) {
  * about the rate. It is therefore the one publish failure worth retrying, and
  * retrying it slowly is the whole remedy: the challenge is triggered by burst
  * shape, so the answer is to stop bursting rather than to give up.
+ *
+ * THIS IS A COUNT OF RETRIES, NOT OF ATTEMPTS: three retries is up to four
+ * HTTP requests, and the log line says "retry N of 3" so the two can never be
+ * read as the same number. The distinction matters because it is the
+ * difference between 14 and 5 seconds of waiting per failing key, and
+ * PUBLISH_RETRY_BUDGET_MS below is sized against the larger figure.
  */
 const PUBLISH_RETRIES = 3;
 
+/**
+ * The TOTAL time this run may spend waiting on publish retries.
+ *
+ * Three retries is the right number for one unlucky write and the wrong
+ * arithmetic for a bad afternoon: 1 + 4 + 9 is fourteen seconds per failing
+ * key, and a run publishes two boards, two dated copies, a watch list, movers,
+ * a record, a sector panel and fifty cards. If the edge is challenging
+ * everything — which is precisely the state a burst-rate challenge produces —
+ * the per-key policy alone would spend FOURTEEN MINUTES of a thirty-minute
+ * deadline sleeping, and the cards at the end of the queue would be dropped to
+ * pay for retries at the front.
+ *
+ * So the retries are bounded twice: per key, and per run. Once the run has
+ * spent this much, later publishes fail fast and report it, which is the
+ * honest outcome — a systemic challenge is not something more waiting fixes,
+ * and losing one payload with a log line beats losing the twenty behind it in
+ * silence.
+ */
+const PUBLISH_RETRY_BUDGET_MS = 90_000;
+let publishRetrySpentMs = 0;
+
 /** Statuses that mean "later", not "no". */
 const PUBLISH_RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
+
+/**
+ * How long to wait before re-attempting a publish, or null to stop.
+ *
+ * PURE AND EXPORTED, because the only defect this repository has shipped twice
+ * is a retry policy whose comment and code disagreed. `spentMs` makes the
+ * global budget part of the function's answer rather than a check somewhere
+ * near it.
+ *
+ * Quadratic rather than doubling: an edge challenge clears on elapsed quiet
+ * rather than on attempt count, so the second wait wants to be meaningfully
+ * longer than the first without the third running away.
+ */
+export function publishRetryDelay(attempt, {
+  retries = PUBLISH_RETRIES, budgetMs = PUBLISH_RETRY_BUDGET_MS, spentMs = 0,
+} = {}) {
+  if (!(attempt >= 0) || attempt >= retries) return null;
+  const wait = 1000 * (attempt + 1) * (attempt + 1);
+  return spentMs + wait > budgetMs ? null : wait;
+}
 
 async function publish(key, payload) {
   const body = JSON.stringify(payload);
@@ -2525,13 +2572,18 @@ async function publish(key, payload) {
      job budgeted in minutes can afford fourteen seconds far more easily than
      it can afford a missing page. A status the Worker itself returns (400,
      401, 413) is a decision about the payload and is not retried. */
-  if (!response.ok && PUBLISH_RETRYABLE.has(response.status) && attempt < PUBLISH_RETRIES) {
+  const wait = PUBLISH_RETRYABLE.has(response.status)
+    ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
+    : null;
+  if (!response.ok && wait !== null) {
     lastDetail = await response.text().catch(() => "");
-    const wait = 1000 * (attempt + 1) * (attempt + 1);
+    publishRetrySpentMs += wait;
     console.warn(
       `  ingest ${key}: HTTP ${response.status} from ` +
       `${response.headers.get("server") || "unknown"} — waiting ${wait}ms and retrying ` +
-      `(${attempt + 1}/${PUBLISH_RETRIES})`);
+      `(retry ${attempt + 1} of ${PUBLISH_RETRIES}; ` +
+      `${Math.round(publishRetrySpentMs / 1000)}s of the run's ` +
+      `${PUBLISH_RETRY_BUDGET_MS / 1000}s retry budget spent)`);
     await sleep(wait);
     continue;
   }
