@@ -739,7 +739,7 @@ limit, and 5xx storms are when the run can least afford a permanent slowdown.
 
 The floor's ceiling (750 ms) is deliberately far below the per-call backoff
 ceiling (5 s). One call may sleep five seconds; every call may not, because
-`CALL_BUDGET × 5s` is 43 minutes against a 30-minute deadline — a run that
+`CALL_BUDGET × 5s` is 79 minutes against the 36-minute deadline — a run that
 publishes nothing at all, which is strictly worse than being rate-limited.
 `rateFloorSurvivesBudget()` asserts the relation and the contract test holds it
 from both sides, so raising the ceiling without raising the deadline fails the
@@ -821,3 +821,114 @@ Two failure modes to watch:
 A run that cannot complete its enrichment publishes **nothing** and exits
 non-zero, by design: a partially ingested day must never quietly produce a
 ranking that looks complete.
+
+### 10.5c The deadline, and why it is 36 minutes
+
+`DEADLINE_MS` was 30 minutes until 2026-08-26 and it was BINDING — on the
+wrong leg, which is why nothing looked wrong.
+
+The 18:04 run finished the whole pipeline in 1502 s (25.0 min), five minutes
+inside a 30-minute budget. But the chain leg's own cut-off is
+`DEADLINE_MS − CHAIN_RESERVE_MS` = 24 minutes, and enrichment alone had spent
+22.4 of them:
+
+```
+chains: stopping after 34 names — within 6min of the deadline and the cards still need it
+chains: 34 built, 0 failed, 16 skipped for the deadline; 33 levelled, 27 with a skew reading
+```
+
+Sixteen names lost their chain panels and the board's skew reading fell from
+46 of 50 to 27. **A constant produced that regression**, not the vendor.
+
+The two levers are not equivalent. Cutting `UNIVERSE.enrichCount` buys the
+time back by shrinking the board, which is the opposite of what the board is
+for. Raising the budget costs wall-clock on a runner that is idle anyway. At
+36 minutes the chain leg runs until minute 30 and 9 minutes of headroom remain
+under the runner's 45-minute kill — more slack than the entire chain leg
+consumes.
+
+**The cost centre is enrichment, not this constant.** 128 names at ~7.4 calls
+each are 950 of the run's 1022 attempts, and the limiter is already saturated
+against them: 170 of those came back 429 while the learned floor sat pinned at
+its 750 ms ceiling for the whole run. The controller asked to go slower and the
+ceiling refused. **Do not raise that ceiling on intuition** — a 429 costs a
+`Retry-After` wait, so a higher floor trades a certain per-call tax against an
+uncertain saving, and no run has ever been instrumented to say which is
+larger. Measure the 429 wait first.
+
+If enrichment keeps growing, the next thing to bind will be `DEADLINE_MS`
+again, and the line to watch is the one naming skipped names:
+
+```
+chains: N built, M failed, K skipped for the deadline
+```
+
+`K > 0` on a normal morning means the budget is binding again.
+
+### 10.5d The unusual-activity feed, and the two refusals it is built on
+
+`/flows/unusual/` costs **zero vendor calls**. Every contract row is built
+inside `buildChainPanels`, from the option chain the pipeline already buys for
+each board name; the name panel is built from screener rows already in memory.
+
+It is built there rather than by the caller for three reasons, each a
+correctness requirement:
+
+- `conv.divisor`, the implied-volatility convention decided once from that
+  chain's own median, is a local and is not on the returned object;
+- `rows` is ROOT-FILTERED, and the notional bracket multiplies by
+  `SHARES_PER_CONTRACT` — legal only after an adjusted series (an `AAPL1`
+  beside an `AAPL`, deliverable on something other than 100 shares) is gone;
+- `truncated` marks a chain the vendor returned a full page for, and it has to
+  ride per row because the feed mixes names.
+
+**Two refusals govern everything the page may say.**
+
+1. **The unit.** `/option-contracts` returns a contract AGGREGATE — one row per
+   listed strike with a volume total. No size, no timestamp, no execution
+   price, no sweep flag. So the page may never say print, trade, block, sweep,
+   order, bought, sold or paid. `tests/flows-worker-contract.mjs` greps the
+   served markup for those words; the page controller's own suite greps the
+   rendered DOM.
+
+2. **The date, and this is the load-bearing one.** The endpoint accepts no date
+   parameter and returns no as-of stamp, and the pipeline runs at 05:15
+   America/New_York — **four and a quarter hours before the opening bell**, so
+   at read time today has not happened. The counter's span is unobserved. The
+   payload publishes `readAt` and an explicit `volumeAsOf: null` with the
+   reason beside it, and the page may never say "today", "this session" or
+   "the day's". Attaching `sessionDate` to the counter would make a free
+   parameter out of the page's most important quantity.
+
+   `sessionDate` is legal in exactly one place — `dte` — and is published as
+   `dteAnchor: "sessionDate"` so a reader can see the horizon is measured from
+   the last completed session rather than from the counter's unknown date.
+
+**Two diagnostics ride along, and both are written not to overclaim.**
+
+`oi basis:` reports whether any contract's open-interest change exceeded its
+own volume. Open interest cannot move further across one settlement than the
+volume traded between them, so finding one FALSIFIES the pair and the counter
+being aligned in time. **Finding none proves nothing** — it is equally
+consistent with an intraday denominator, an aligned pair, and a quiet stretch —
+and the zero branch says INCONCLUSIVE in those words.
+
+`flow-alerts:` is one bounded call per run whose entire output is a log line.
+The pipeline has asserted in two places for months that the per-trade
+flow-alerts endpoint is unreachable on this key, with no status code behind it.
+The probe records what it actually answers. It deliberately does **not** use
+`uw()` — `uw()` coerces an unrecognised body to `[]`, so a vendor envelope this
+repo has never seen would read as a refusal — and it does **not** retry, which
+makes 429 one of the ten outcomes. A 429 is reported as THROTTLED and
+explicitly not as a refusal: writing "refused" because the probe was throttled
+would give a months-old assertion false provenance, which is worse than having
+none.
+
+Watch for, on the first live run:
+
+```
+flow-alerts: REACHABLE — ...      → the assertion is WRONG; the per-trade feed is buildable
+flow-alerts: 401/403 ...          → the assertion is right and finally has evidence
+flow-alerts: 429 ...              → still unanswered; do not touch the assertion
+flow-alerts: 404 ...              → the PATH is a guess; try /api/stock/{t}/flow-alerts
+```
