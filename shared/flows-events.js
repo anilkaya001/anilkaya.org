@@ -163,7 +163,7 @@ export function ivPathOf(tilt) {
  * horizons, and averaging them would produce a number quoted to neither.
  */
 export function eventRow(row, tilt, {
-  gateOrigin, features = null, score = null, stage = null, gateDte = undefined,
+  gateOrigin, features = null, score = null, stage = null,
 } = {}) {
   const t = tilt || {};
   const d = ISO.test(String(row && row.next_earnings_date || "")) ? row.next_earnings_date : null;
@@ -183,9 +183,29 @@ export function eventRow(row, tilt, {
      There is no right answer to "which rounding is correct" — there is only
      "which number did the gate actually use", and this is how the page gets
      that one instead of a second opinion about it. */
-  const dte = gateDte === undefined || gateDte === null
-    ? calendarDaysTo(d, gateOrigin)
-    : (gateDte < 0 ? null : gateDte);
+  /* ONE ORIGIN, ONE COMPUTATION, AND NO PASSTHROUGH.
+
+     This briefly took the gate's own count as a parameter, because
+     daysToEarnings rounded against Date.now() while this counted from
+     midnight — two origins about 21 hours apart, which published a row
+     labelled `gated` beside a dte of 13 against a stated gate of 12 and,
+     worse, let the WEEKDAY count overtake the CALENDAR count containing it on
+     8 of 60 rows. A subset cannot be larger than its superset; the contract
+     suite refused to pass and was right to.
+
+     The passthrough was the wrong fix for the right problem. It made this
+     page's number agree with the gate's by TRUSTING the caller, which left
+     the guard in buildEvents resting on a convention nothing enforced — an
+     undated name with a supplied count was seated on the calendar and counted
+     as undated at the same time. The root cause was upstream: the gate was a
+     function of the minute the runner fired rather than of the date.
+
+     daysToEarnings measures from an ISO date now, and from THIS date. So the
+     gate's count and this one are the same arithmetic against the same
+     origin, the passthrough is redundant, and the whole class of defect goes
+     with it. A reader holding the payload can now reproduce every dte from
+     the gateOrigin it publishes, which was never true before. */
+  const dte = calendarDaysTo(d, gateOrigin);
   const iv = numOrNull(t.iv30);
   const close = numOrNull(row && row.close);
 
@@ -239,7 +259,6 @@ export function buildEvents(withTilt, {
   stageOf = () => null,
   featuresOf = () => null,
   scoreOf = () => null,
-  gateDteOf = () => undefined,
 } = {}) {
   const rows = [];
   let dated = 0;
@@ -250,17 +269,15 @@ export function buildEvents(withTilt, {
       features: featuresOf(entry.row.ticker),
       score: scoreOf(entry.row.ticker),
       stage: stageOf(entry.row.ticker),
-      gateDte: gateDteOf(entry.row.ticker),
     });
     if (!row.t) continue;
     if (row.d) dated++;
     /* A NAME WITH NO EARNINGS DATE IS NOT A NAME REPORTING FAR AWAY. It is
        counted in `undated` and left out entirely; seating it at the end of a
        calendar would put a name nobody has scheduled after one scheduled in
-       three weeks, which reads as an ordering. */
-    /* A NAME WITH NO EARNINGS DATE IS NOT A NAME REPORTING FAR AWAY — see
-       below. Both horizons are null together, so testing either is testing
-       the same fact; `dte` is tested because `dte` is what the window means. */
+       three weeks, which reads as an ordering. `dte` is what is tested
+       because `dte` is what the window MEANS — and eventRow guarantees it is
+       null whenever the date is, rather than that guarantee living here. */
     if (row.dte === null) continue;
     if (row.dte > windowDays) continue;
     rows.push(row);

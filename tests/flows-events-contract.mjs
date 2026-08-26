@@ -7,35 +7,38 @@
    exists.
 
    WHAT IS WORTH ASSERTING ABOUT THIS MODULE is not that it computes
-   what it computes. shared/flows-events.js opens on a CORRECTION —
-   sessionDate and the earnings gate DO NOT SHARE AN ORIGIN — and
-   every expensive defect this page can ship is a quiet breach of it
-   or of one of its four siblings: a day count measured from the
-   wrong clock, a weekend counted as three sessions, a −1w point read
-   off a field the wire has never carried, a null that becomes a
-   zero, and a calendar quietly re-sorted into a leaderboard. Those
-   are the assertions below.
+   what it computes. shared/flows-events.js rests on two corrections,
+   and every expensive defect this page can ship is a quiet breach of
+   one of them:
 
-   ON FIXTURES, and this is the house rule the repo has paid for five
-   separate times: a fixture written from the same assumption as the
-   code proves only that the assumption is self-consistent. The
-   two-clock defect is the purest instance of it ever shipped here —
-   a suite that computes its expected session count from sessionDate
-   agrees with a broken module PERFECTLY, on every row, forever, and
-   only the live drawing is wrong. So every expectation in §1 and §2
-   is a hand-counted integer over a named weekday span, written down
-   with the weekday of each end, and the WRONG answer is written down
-   beside it. Where a state does not occur in the emitted corpus —
-   a non-positive close, an invented iv30d_1w, a rv withheld on a
-   known count — the fixture is an emitted row with ONE NAMED FIELD
-   MUTATED, and the mutation is said to be the point at the site.
+     THE TWO CLOCKS — sessionDate and the earnings gate do not share
+     an origin, so a day count measured from the last completed
+     session classifies every name against a gate that never ran.
 
-   ONE PLACE WHERE THIS SUITE DELIBERATELY DOES NOT ASSERT WHAT IT
-   COULD, argued in full at the site rather than quietly softened:
-   the gate label's reckoning over the emitted payload is checked
-   against the run's own INSTANT (§10b), not against gateOrigin's
-   midnight, because those are two different quantities and the
-   pipeline is entitled to the one it used.
+     THE TWO HORIZONS — `dte` is CALENDAR days and is what the gate
+     and the window mean; `sdte` is trading SESSIONS and is what the
+     priced move needs. The first draft filtered `sdte > windowDays`,
+     sessions against a constant named days, and put a fifth of the
+     board on the wrong side of the band.
+
+   Both failures are invisible from inside: a fixture built from the
+   same assumption agrees with the broken code perfectly, on every
+   row, forever, and only the live drawing is wrong. That is the
+   house rule this repo has paid for five separate times, so every
+   expectation in §1, §2 and §8 is a hand-counted integer over a
+   NAMED WEEKDAY SPAN, written down with the weekday of each end, and
+   the WRONG answer is written down beside it. Where a state does not
+   occur in the emitted corpus — a non-positive close, an invented
+   iv30d_1w, an rv withheld on a known count, a name whose sessions
+   sit inside the window while its calendar days sit outside — the
+   fixture is an emitted row with ONE NAMED FIELD MUTATED, or a span
+   constructed to straddle the bound, and the mutation is said to be
+   the point at the site.
+
+   §15 FAILS, AND IT IS MEANT TO. Two assertions there are breaches
+   of the module's own stated invariants, not of this suite's
+   expectations. They are argued in full at the site and left
+   failing rather than weakened.
    ============================================================= */
 
 import assert from "node:assert/strict";
@@ -45,7 +48,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import {
-  buildEvents, eventRow, sessionsToEarnings, ivPathOf,
+  buildEvents, eventRow, sessionsToEarnings, calendarDaysTo, ivPathOf,
   IV_PATH_LABELS, EVENT_ROWS, EVENT_WINDOW_DAYS, EVENTS_NOTES,
 } from "../shared/flows-events.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
@@ -81,6 +84,9 @@ try {
 }
 
 const ROWS = PAYLOAD.rows;
+/* The run's own instant. daysToEarnings() rounds against Date.now(), so this
+   is the origin the GATE actually used — as distinct from gateOrigin, which is
+   the Eastern DATE. The distance between those two is the subject of §15. */
 
 /* Two named calendar anchors, used by every unit fixture below. They are the
    dry run's own pair, and their WEEKDAYS are what every hand count turns on:
@@ -105,9 +111,21 @@ const nameAt = (ticker, date, over = {}) => ({
    anchored on a NAMED CONSTANT moves when the constant does. */
 const plusDays = (origin, n) =>
   new Date(Date.parse(origin + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+/* The gate's own count for a date, measured from an origin's MIDNIGHT — which
+   is what the pipeline would hand down on a run that fired at midnight, and
+   the only form in which a hand-checked integer is unambiguous. */
+/* daysToEarnings takes an ISO DATE, not a millisecond instant, and the change
+   is the point rather than an inconvenience: measuring from an instant made
+   the gate a function of the minute the runner fired, and made the published
+   `dte` and `sdte` — one read against an instant, one against midnight —
+   arithmetically impossible on 8 of 60 rows. This helper passes the origin
+   through unchanged so the suite exercises the same arithmetic the pipeline
+   does, rather than a timestamp the function would now reject. */
+const gateDteFrom = (origin) => (date) =>
+  daysToEarnings({ next_earnings_date: date }, origin);
 
 /* ============================================================
-   §0. THE TWO CLOCKS ARE BOTH PUBLISHED.
+   §0. BOTH CLOCKS AND BOTH HORIZONS ARE PUBLISHED.
    ============================================================ */
 {
   ok(/^\d{4}-\d{2}-\d{2}$/.test(PAYLOAD.sessionDate),
@@ -127,10 +145,20 @@ const plusDays = (origin, n) =>
      "the payload republishes the gate width from the pipeline's own constant");
   eq(PAYLOAD.cap, EVENT_ROWS, "and the cap from the module's");
   eq(PAYLOAD.windowDays, EVENT_WINDOW_DAYS, "and the window from the module's");
+
+  /* BOTH HORIZONS ON EVERY ROW. A page that published one of them would have
+     no way to draw a gate band in the unit the gate counts. */
+  ok(ROWS.every((r) => Number.isInteger(r.dte)),
+     `all ${ROWS.length} rows carry an integer dte — CALENDAR days, the gate's unit`);
+  ok(ROWS.every((r) => Number.isInteger(r.sdte)),
+     "and an integer sdte — trading SESSIONS, the priced move's unit");
+  ok(ROWS.every((r) => r.dte >= 0 && r.sdte >= 0),
+     "neither of them ever negative");
 }
 
 /* ============================================================
-   §1. sdte IS COMPUTED FROM gateOrigin, NEVER FROM sessionDate.
+   §1. THE DAY COUNTS ARE MEASURED FROM gateOrigin, NEVER FROM
+   sessionDate.
 
    THE ASSERTION THIS FILE EXISTS FOR. Every expectation here is
    hand-counted over a named weekday span and the sessionDate answer
@@ -139,26 +167,36 @@ const plusDays = (origin, n) =>
    with a broken module on every row of every corpus forever.
    ============================================================ */
 {
-  /* Friday 2026-08-28.
-       from Wednesday 2026-08-26 (gateOrigin):  Thu 27, Fri 28          = 2
-       from Monday    2026-08-24 (sessionDate): Tue 25, Wed 26, 27, 28  = 4
-     Two different integers over the same row. The module must answer 2. */
-  const row = eventRow(nameAt("CLK", "2026-08-28").row, tiltOf(), { gateOrigin: GATE_ORIGIN });
-  eq(row.sdte, 2,
-     "sdte counts sessions from gateOrigin: Wed 26 → Fri 28 is Thu and Fri, two sessions");
-  ok(row.sdte !== 4,
-     "and NOT from sessionDate, whose reckoning of the same row is 4 — the number a page " +
-     "counting from the last completed session would draw, invisibly, on every row");
-  eq(sessionsToEarnings("2026-08-28", SESSION_DATE), 4,
-     "the wrong answer is written down here so the test cannot be satisfied by accident");
+  /* Monday 2026-08-31, read four ways. The span is chosen to cross a weekend,
+     so all four readings are live:
+
+       sessions from Wed 2026-08-26 (gateOrigin):  Thu 27, Fri 28, Mon 31   = 3
+       calendar from Wed 2026-08-26 (gateOrigin):  27,28,29,30,31           = 5
+       sessions from Mon 2026-08-24 (sessionDate): 25,26,27,28,31           = 5
+       calendar from Mon 2026-08-24 (sessionDate): 25..31                   = 7
+
+     NOTE THE COLLISION IN THE MIDDLE: counting sessions from the wrong clock
+     and counting calendar days from the right one both answer 5. Two distinct
+     mistakes landing on one number is exactly why each is tested separately
+     rather than by checking that "the number looks about right". */
+  const row = eventRow(nameAt("CLK", "2026-08-31").row, tiltOf(), { gateOrigin: GATE_ORIGIN });
+  eq(row.sdte, 3,
+     "sdte counts SESSIONS from gateOrigin: Wed 26 → Mon 31 is Thu, Fri, Mon");
+  eq(row.dte, 5, "dte counts CALENDAR days over the same span, weekend included");
+  eq(sessionsToEarnings("2026-08-31", SESSION_DATE), 5,
+     "the sessionDate reckoning of the same row is 5 sessions — written down here so the " +
+     "test cannot be satisfied by a module that used the last completed session");
+  eq(calendarDaysTo("2026-08-31", SESSION_DATE), 7, "or 7 calendar days");
+  ok(row.sdte !== 5 && row.dte !== 7,
+     "and the module publishes neither of those, on either horizon");
 
   /* THE SAME ROW THROUGH buildEvents, WHICH IS HANDED BOTH CLOCKS. A module
      that passed sessionDate down to eventRow would still publish gateOrigin in
      the header and look correct to a reader of the header alone. */
-  const built = buildEvents([nameAt("CLK", "2026-08-28")],
+  const built = buildEvents([nameAt("CLK", "2026-08-31")],
     { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
-  eq(built.rows[0].sdte, 2,
-     "buildEvents holds both clocks and still counts from gateOrigin");
+  eq(built.rows[0].sdte, 3, "buildEvents holds both clocks and still counts from gateOrigin");
+  eq(built.rows[0].dte, 5, "on both horizons");
   eq(built.gateOrigin, GATE_ORIGIN, "publishing the origin it counted from");
   eq(built.sessionDate, SESSION_DATE, "beside the session every PRICE describes");
 
@@ -169,6 +207,7 @@ const plusDays = (origin, n) =>
   const between = eventRow(nameAt("MID", "2026-08-25").row, tiltOf(), { gateOrigin: GATE_ORIGIN });
   eq(between.sdte, null,
      "a name reporting between the two clocks has ALREADY REPORTED as of gateOrigin — null");
+  eq(between.dte, null, "on both horizons");
   eq(sessionsToEarnings("2026-08-25", SESSION_DATE), 1,
      "while the sessionDate reckoning calls it one session away, and would seat it at the " +
      "top of the calendar two days after it reported");
@@ -190,50 +229,77 @@ const plusDays = (origin, n) =>
 }
 
 /* ============================================================
-   §2. SESSIONS ARE WEEKDAYS, AND null IS NOT ZERO.
+   §2. SESSIONS ARE WEEKDAYS, CALENDAR DAYS ARE CALENDAR DAYS,
+   AND null IS NOT ZERO ON EITHER.
    ============================================================ */
 {
-  /* Friday 2026-08-28 → Monday 2026-08-31. One session. The calendar-day
-     answer is 3, and a horizon scaled by sqrt(3/252) instead of sqrt(1/252)
-     is wrong by sqrt(3) at every weekend it crosses. */
+  /* Friday 2026-08-28 → Monday 2026-08-31. One session, three calendar days.
+     A horizon scaled by sqrt(3/252) instead of sqrt(1/252) is wrong by
+     sqrt(3) — which is why the priced move may only ever see sdte. */
   eq(sessionsToEarnings("2026-08-31", "2026-08-28"), 1,
      "Friday → Monday is ONE session, not the three calendar days between them");
+  eq(calendarDaysTo("2026-08-31", "2026-08-28"), 3,
+     "and the calendar count over that same span is 3 — the gate's unit, and the window's");
   eq(sessionsToEarnings("2026-09-02", "2026-08-26"), 5,
      "Wednesday → the next Wednesday is five sessions: Thu, Fri, Mon, Tue, Wed");
+  eq(calendarDaysTo("2026-09-02", "2026-08-26"), 7, "and seven calendar days");
   eq(sessionsToEarnings("2026-08-31", "2026-08-24"), 5,
-     "and Monday → the next Monday is five as well, the weekend removed once");
+     "Monday → the next Monday is five sessions, the weekend removed once");
+  eq(calendarDaysTo("2026-08-31", "2026-08-24"), 7, "and seven days");
+
+  /* THE UNIT RELATION, SWEPT. Weekdays are a subset of the days that contain
+     them, so over any span from any origin the session count can never exceed
+     the calendar count. This is arithmetic and holds by construction — it is
+     asserted here so that §15's breach can be attributed to the ORIGINS being
+     crossed rather than to either function being wrong. */
+  let swept = 0, held = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = plusDays("2026-01-01", i);
+    const s = sessionsToEarnings(d, "2026-01-01"), c = calendarDaysTo(d, "2026-01-01");
+    swept++; if (s <= c) held++;
+  }
+  eq(held, swept,
+     `over ${swept} spans from one origin the session count never exceeds the calendar ` +
+     `count — the two functions are individually coherent`);
 
   /* SAME DAY IS A READING, NOT AN ABSENCE. "Reports today, no sessions left to
      price" and "no date on the wire" are different facts and must not collapse
      into the same value. */
   eq(sessionsToEarnings("2026-08-26", "2026-08-26"), 0,
      "a name reporting on the origin itself is 0 sessions — a measurement");
+  eq(calendarDaysTo("2026-08-26", "2026-08-26"), 0, "and 0 calendar days");
   eq(sessionsToEarnings("2026-08-29", "2026-08-28"), 0,
-     "and Friday → Saturday is also 0: a real count of the weekdays in between");
-  ok(sessionsToEarnings("2026-08-26", "2026-08-26") !== null,
-     "neither of which is null");
+     "and Friday → Saturday is 0 sessions: a real count of the weekdays in between");
+  eq(calendarDaysTo("2026-08-29", "2026-08-28"), 1,
+     "though one calendar day — the two units genuinely disagree here, which is the point");
+  ok(sessionsToEarnings("2026-08-26", "2026-08-26") !== null, "neither of which is null");
 
-  /* THE PAST IS null, NOT 0 AND NOT NEGATIVE. A negative would sort ahead of
-     every real row; a 0 would read as "reports today". */
+  /* THE PAST IS null ON BOTH HORIZONS, NOT 0 AND NOT NEGATIVE. A negative
+     would sort ahead of every real row; a 0 would read as "reports today". */
   eq(sessionsToEarnings("2026-08-24", "2026-08-26"), null,
-     "a date already past returns null — it is not this page's row");
-  eq(sessionsToEarnings("2026-08-25", "2026-08-26"), null,
-     "including yesterday, one day back");
-  ok(!ROWS.some((r) => r.sdte < 0), "and no emitted row carries a negative session count");
+     "a date already past returns null sessions — it is not this page's row");
+  eq(calendarDaysTo("2026-08-24", "2026-08-26"), null,
+     "and null calendar days, rather than the negative the subtraction would give");
+  eq(calendarDaysTo("2026-08-25", "2026-08-26"), null, "including yesterday, one day back");
+  ok(!ROWS.some((r) => r.sdte < 0 || r.dte < 0),
+     "and no emitted row carries a negative count on either horizon");
 
-  /* ABSENT OR MALFORMED IS null, over every shape the wire has produced. */
+  /* ABSENT OR MALFORMED IS null, on both, over every shape the wire has
+     produced. Both functions are tested, because a page that fell back to
+     "today" on either would count from a clock nobody published. */
   for (const [bad, why] of [
     [null, "a null date"], [undefined, "an absent field"], ["", "an empty string"],
     ["2026-8-4", "an unpadded date"], ["not-a-date", "a non-date"],
     ["20260904", "an unseparated date"], ["2026-09-04T00:00:00Z", "a full timestamp"],
     ["2026-13-45", "a well-SHAPED date that is not a date"],
   ]) {
-    eq(sessionsToEarnings(bad, GATE_ORIGIN), null, `${why} returns null, never 0`);
+    eq(sessionsToEarnings(bad, GATE_ORIGIN), null, `${why} returns null sessions, never 0`);
+    eq(calendarDaysTo(bad, GATE_ORIGIN), null, `${why} returns null days, never 0`);
   }
-  /* AND A MALFORMED ORIGIN IS THE SAME REFUSAL. A page that fell back to
-     "today" here would count from a clock nobody published. */
-  eq(sessionsToEarnings("2026-09-04", null), null, "a missing origin returns null");
-  eq(sessionsToEarnings("2026-09-04", "2026-9-4"), null, "as does a malformed one");
+  eq(sessionsToEarnings("2026-09-04", null), null, "a missing origin returns null sessions");
+  eq(calendarDaysTo("2026-09-04", null), null, "and null days");
+  eq(sessionsToEarnings("2026-09-04", "2026-9-4"), null, "as does a malformed origin");
+  eq(calendarDaysTo("2026-09-04", "2026-9-4"), null, "on both horizons");
 }
 
 /* ============================================================
@@ -257,11 +323,11 @@ const plusDays = (origin, n) =>
      "so the path's −1w point is iv30 − ivMomentum, reconstructed", 1e-12);
   near(p[1], 0.35, "which recovers the 0.3500 the screener row actually carried", 1e-12);
 
-  /* MUTATION IS THE POINT, and this is the mutation that matters most: a tilt
-     carrying an INVENTED iv30d_1w and no ivMomentum. A module that read
-     tilt.iv30d_1w would pass every other assertion in this file against a
-     fixture like this one and then return null at index 1 on EVERY LIVE ROW,
-     because screenerTilt has never once published that field. */
+  /* MUTATION IS THE POINT, and it is the point twice over: a tilt carrying an
+     INVENTED iv30d_1w and no ivMomentum. A module that read tilt.iv30d_1w
+     would pass every other assertion in this file against a fixture like this
+     one and then return null at index 1 on EVERY LIVE ROW, because
+     screenerTilt has never once published that field. */
   const invented = ivPathOf({ iv30: 0.4, iv30d_1w: 0.35, iv30d1d: 0.38, iv30d1m: 0.30 });
   eq(invented[1], null,
      "an invented iv30d_1w with no ivMomentum yields null at −1w — the field is not read");
@@ -273,7 +339,7 @@ const plusDays = (origin, n) =>
   eq(ivPathOf({ iv30: 0.4 })[1], null, "and iv30 with no ivMomentum withholds it too");
 
   /* OVER THE EMITTED PAYLOAD: the reconstruction genuinely fires. A module
-     reading the absent field would publish null here 60 times out of 60. */
+     reading the absent field would publish null here on every row. */
   const built = ROWS.filter((r) => r.ivPath[1] !== null).length;
   ok(built > 0 && built === ROWS.filter((r) => r.iv !== null).length,
      `${built} of ${ROWS.length} emitted rows carry a reconstructed −1w point, exactly the ` +
@@ -316,7 +382,8 @@ const plusDays = (origin, n) =>
    §5. ev IS null WHERE IT CANNOT BE MEASURED, AND NEVER 0.
 
    Three different facts, deliberately not collapsed: no sessions
-   left to price, no volatility to scale, no date to count to.
+   left to price, no volatility to scale, no date to count to. And
+   it is scaled by SESSIONS, never by the calendar days beside them.
    ============================================================ */
 {
   const args = { gateOrigin: GATE_ORIGIN };
@@ -344,33 +411,38 @@ const plusDays = (origin, n) =>
   eq(past.sdte, null, "a date already past is null too");
   eq(past.ev, null, "and prices nothing");
 
-  /* WHERE IT IS MEASURED it is sqrt-of-time and nothing else. horizonMove and
-     TRADING_YEAR are IMPORTED rather than retyped: a hardcoded 252 here would
-     let the two definitions drift apart silently. */
+  /* WHERE IT IS MEASURED it is sqrt-of-time over SESSIONS and nothing else.
+     horizonMove and TRADING_YEAR are IMPORTED rather than retyped: a hardcoded
+     252 here would let the two definitions drift apart silently. */
   const m = eventRow({ ticker: "E", close: "50", next_earnings_date: "2026-09-04" },
     tiltOf({ iv30: 0.4000 }), args);
   eq(m.sdte, 7, "seven sessions to the report");
+  eq(m.dte, 9, "over nine calendar days");
   near(m.ev, Number(horizonMove(0.4, { sessions: 7 }).toFixed(4)),
-     "and ev is horizonMove of the name's own iv over those sessions", 1e-12);
+     "and ev is horizonMove of the name's own iv over the SESSIONS", 1e-12);
   near(m.ev, 0.4 * Math.sqrt(7 / TRADING_YEAR),
      "which is the annualised vol scaled by the square root of sessions over the trading year",
      5e-5);
+  ok(Math.abs(m.ev - 0.4 * Math.sqrt(9 / TRADING_YEAR)) > 1e-3,
+     "and NOT by the nine calendar days beside them — the calendar reading is a different " +
+     "number and the assertion says so rather than trusting the field name");
 
   /* OVER THE EMITTED PAYLOAD, both directions. */
   ok(!ROWS.some((r) => r.ev === 0),
      "no emitted row publishes a priced move of exactly 0 — unmeasured is null here");
   const unmeasured = ROWS.filter((r) => r.ev === null);
   ok(unmeasured.length > 0, `${unmeasured.length} emitted rows withhold a priced move`);
-  ok(unmeasured.every((r) => r.sdte === 0 || r.iv === null),
+  ok(unmeasured.every((r) => r.sdte === 0 || r.sdte === null || r.iv === null),
      "and every one of them is unmeasured for a stated reason: no sessions left, or no iv");
-  ok(unmeasured.some((r) => r.sdte === 0) && unmeasured.some((r) => r.iv === null),
-     "with both reasons present in the corpus, so neither branch is untested");
+  ok(unmeasured.some((r) => r.iv === null),
+     "the no-volatility branch is exercised by the corpus; the zero-session branch is not " +
+     "reachable from it at this hour (§15 explains why) and is covered by (a) above");
   const measured = ROWS.filter((r) => r.ev !== null);
   ok(measured.length > 0, `${measured.length} emitted rows price a move`);
   for (const r of measured) {
     /* Tolerance covers the payload's own 4-dp rounding on BOTH ev and iv. */
     assert.ok(Math.abs(r.ev - horizonMove(r.iv, { sessions: r.sdte })) <= 2e-4,
-      `${r.t}: ev ${r.ev} is iv ${r.iv} scaled over ${r.sdte} sessions`);
+      `${r.t}: ev ${r.ev} is iv ${r.iv} scaled over ${r.sdte} SESSIONS, not ${r.dte} days`);
   }
   checks++;
   ok(measured.every((r) => r.ev > 0 && r.sdte > 0 && r.iv > 0),
@@ -446,28 +518,59 @@ const plusDays = (origin, n) =>
     if (a.d > b.d || (a.d === b.d && a.t > b.t)) sorted = false;
   }
   ok(sorted, "the emitted rows are non-decreasing in date, and in ticker within a date");
+  ok(ROWS.every((r, i) => i === 0 || ROWS[i - 1].dte <= r.dte),
+     "and non-decreasing in dte, which is what makes the row order readable as a calendar");
   const evOrder = [...ROWS].sort((a, b) => (b.ev ?? -1) - (a.ev ?? -1)).map((r) => r.t);
   ok(JSON.stringify(ROWS.map((r) => r.t)) !== JSON.stringify(evOrder),
-     "and the emitted order differs from the ev ranking, so the corpus can tell them apart");
+     "while the emitted order differs from the ev ranking, so the corpus can tell them apart");
   ok(ROWS.some((r, i) => i > 0 && ROWS[i - 1].d === r.d),
      "the corpus contains at least one date shared by two names, so the tie-break runs");
 }
 
 /* ============================================================
-   §8. THE WINDOW AND THE CAP.
+   §8. THE WINDOW IS IN CALENDAR DAYS, AND THE CAP KEEPS THE
+   NEAREST.
+
+   THE UNIT IN THE BOUND IS THE WHOLE ASSERTION. Filtering
+   `sdte > windowDays` compares sessions against a constant named
+   days and admits a name a fifth further out than the window says.
    ============================================================ */
 {
   eq(PAYLOAD.shown, ROWS.length, "shown is the published row count, not an intention");
   ok(PAYLOAD.shown <= PAYLOAD.cap, `shown (${PAYLOAD.shown}) is within the cap (${PAYLOAD.cap})`);
   ok(PAYLOAD.shown <= PAYLOAD.inWindow,
      `and within the in-window population (${PAYLOAD.inWindow})`);
-  ok(PAYLOAD.inWindow > PAYLOAD.cap,
-     `the cap BITES in this corpus — ${PAYLOAD.inWindow} names qualify for ${PAYLOAD.cap} ` +
-     `seats, so 'shown <= cap' is a test rather than a tautology`);
-  ok(!ROWS.some((r) => r.sdte > PAYLOAD.windowDays),
-     `no published row reports beyond the ${PAYLOAD.windowDays}-session window`);
-  ok(!ROWS.some((r) => r.sdte === null || r.sdte < 0),
-     "and none carries a null or negative session count");
+  ok(PAYLOAD.inWindow >= PAYLOAD.cap,
+     `the cap is reached in this corpus — ${PAYLOAD.inWindow} names qualify for ` +
+     `${PAYLOAD.cap} seats`);
+  ok(!ROWS.some((r) => r.dte > PAYLOAD.windowDays),
+     `no published row reports beyond the ${PAYLOAD.windowDays}-CALENDAR-DAY window`);
+  ok(!ROWS.some((r) => r.dte === null || r.sdte === null),
+     "and none carries a null on either horizon");
+
+  /* THE BOUND IS TESTED AGAINST dte, AND THE CASE THAT PROVES IT IS THE ONE
+     WHERE THE TWO HORIZONS FALL ON OPPOSITE SIDES OF IT.
+
+     Wed 2026-08-26 → Wed 2026-09-09 is 14 calendar days and 10 sessions. With
+     a 10-day window: sdte (10) <= 10 < dte (14). The old filter admitted this
+     name; the window says 10 DAYS and this name reports in 14. The mirror case
+     — dte inside the bound while sdte is outside — cannot be constructed at
+     all, because sessions are a subset of the days containing them, so this is
+     the only direction in which the two filters can ever disagree. */
+  const straddle = eventRow(nameAt("STRADDLE", "2026-09-09").row, tiltOf(),
+    { gateOrigin: GATE_ORIGIN });
+  eq(straddle.dte, 14, "Wed 26 → Wed Sep 9 is fourteen calendar days");
+  eq(straddle.sdte, 10, "and ten trading sessions");
+  const cut = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowDays: 10 });
+  deep(cut.rows.map((r) => r.t), ["INSIDE"],
+     "a 10-day window EXCLUDES a name 14 calendar days out whose ten SESSIONS would have " +
+     "cleared a bound tested in the wrong unit");
+  eq(cut.inWindow, 1, "and does not count it as in the window");
+  eq(cut.rows[0].dte, 7, "while the name that is genuinely inside — seven days — is kept");
+  eq(cut.rows[0].sdte, 5, "at five sessions");
+  ok(cut.rows[0].sdte <= cut.windowDays && cut.rows[0].dte <= cut.windowDays,
+     "the kept name is inside the bound on BOTH horizons, which is the only unambiguous case");
 
   /* THE CAP KEEPS THE NEAREST, NOT AN ARBITRARY SLICE. A cap applied before
      the sort would publish whichever names arrived first. */
@@ -479,17 +582,10 @@ const plusDays = (origin, n) =>
      "the cap keeps the two NEAREST reports, in date order, whatever order they arrived in");
   eq(far.shown, 2, "shown is the capped count");
   eq(far.inWindow, 4, "while inWindow is the uncapped population — the two are different facts");
-
-  /* THE WINDOW IS IN SESSIONS, and it excludes rather than truncates. */
-  const narrow = buildEvents([nameAt("NEAR", "2026-08-27"), nameAt("FAR", "2026-09-04")],
-    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowDays: 3 });
-  deep(narrow.rows.map((r) => r.t), ["NEAR"], "a 3-session window drops a 7-session name");
-  eq(narrow.inWindow, 1, "which is not in the window count either");
-  eq(narrow.windowDays, 3, "and the window is published so the reader knows what was cut");
 }
 
 /* ============================================================
-   §9 + §10. byStage, AND THE GATE BOUNDARY.
+   §9 + §10. byStage, THE GATE BOUNDARY, AND WHOSE NUMBER dte IS.
 
    THE BOUNDARY IS WHERE A BARE LITERAL AND A NAMED CONSTANT
    SILENTLY DISAGREE, so both dates below are built BY ARITHMETIC
@@ -506,39 +602,48 @@ const plusDays = (origin, n) =>
   const survivesGate = (dte) => dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS;
   const isGated = (dte) => dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS;
 
-  const ORIGIN_MS = Date.parse(GATE_ORIGIN + "T00:00:00Z");
+  const gateDte = gateDteFrom(GATE_ORIGIN);
   const atGate = plusDays(GATE_ORIGIN, EARNINGS_GATE_DAYS);
   const pastGate = plusDays(GATE_ORIGIN, EARNINGS_GATE_DAYS + 1);
 
-  const dGate = daysToEarnings({ next_earnings_date: atGate }, ORIGIN_MS);
-  const dPast = daysToEarnings({ next_earnings_date: pastGate }, ORIGIN_MS);
-  eq(dGate, EARNINGS_GATE_DAYS, `${atGate} is exactly EARNINGS_GATE_DAYS from the origin`);
-  eq(dPast, EARNINGS_GATE_DAYS + 1, `and ${pastGate} is one day past it`);
+  eq(gateDte(atGate), EARNINGS_GATE_DAYS, `${atGate} is exactly EARNINGS_GATE_DAYS from the origin`);
+  eq(gateDte(pastGate), EARNINGS_GATE_DAYS + 1, `and ${pastGate} is one day past it`);
 
-  ok(isGated(dGate), "a name at exactly EARNINGS_GATE_DAYS is GATED — the boundary is inclusive");
-  ok(!survivesGate(dGate), "and the pipeline's own gate removed it before scoring");
-  ok(!isGated(dPast), "a name one day further out is NOT gated");
-  ok(survivesGate(dPast), "and the gate let it through to be scored");
-  ok(isGated(dGate) !== survivesGate(dGate) && isGated(dPast) !== survivesGate(dPast),
+  ok(isGated(gateDte(atGate)),
+     "a name at exactly EARNINGS_GATE_DAYS is GATED — the boundary is inclusive");
+  ok(!survivesGate(gateDte(atGate)), "and the pipeline's own gate removed it before scoring");
+  ok(!isGated(gateDte(pastGate)), "a name one day further out is NOT gated");
+  ok(survivesGate(gateDte(pastGate)), "and the gate let it through to be scored");
+  ok(isGated(gateDte(atGate)) !== survivesGate(gateDte(atGate)) &&
+     isGated(gateDte(pastGate)) !== survivesGate(gateDte(pastGate)),
      "the two predicates are exact complements ON BOTH SIDES of the boundary — this is why " +
      "EARNINGS_GATE_DAYS was named, and a literal in either site would let them drift");
   eq(PAYLOAD.gateDays, EARNINGS_GATE_DAYS,
      "and the payload publishes that same constant, so the page labels against the gate that ran");
 
-  /* THE TWO NAMES THROUGH THE PAGE, labelled by the pipeline's own predicate.
-     They must land on OPPOSITE sides of byStage. */
-  const stageOf = (t) => {
-    const d = t === "GATED" ? atGate : pastGate;
-    return isGated(daysToEarnings({ next_earnings_date: d }, ORIGIN_MS)) ? "gated" : "eligible";
-  };
-  const built = buildEvents([nameAt("GATED", atGate), nameAt("CLEAR", pastGate)],
-    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, stageOf });
+  /* THE TWO NAMES THROUGH THE PAGE, wired the way the pipeline wires them:
+     the gate's own count handed down, and the label derived from it. They must
+     land on OPPOSITE sides of byStage AND opposite sides of gateDays. */
+  const built = buildEvents([nameAt("GATED", atGate), nameAt("CLEAR", pastGate)], {
+    gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE,
+    /* NO gateDteOf ANY MORE, and its absence is the assertion. The page used
+       to be HANDED the gate's count because the two were measured from
+       different origins; daysToEarnings now takes the same ISO date this page
+       counts from, so the page reproduces the gate's number instead. If the
+       two ever drift apart again, `g.dte === EARNINGS_GATE_DAYS` below is
+       what fails. */
+    stageOf: (t) => (isGated(gateDte(t === "GATED" ? atGate : pastGate)) ? "gated" : "eligible"),
+  });
   eq(built.byStage.gated, 1, "exactly one of the pair is labelled gated on the page");
   eq(built.byStage.eligible, 1, "and exactly one is not");
-  eq(built.rows.find((r) => r.t === "GATED").st, "gated",
-     "the name at the boundary is the gated one");
-  eq(built.rows.find((r) => r.t === "CLEAR").st, "eligible",
-     "and the name one day past it is the clear one");
+  const g = built.rows.find((r) => r.t === "GATED"), c = built.rows.find((r) => r.t === "CLEAR");
+  eq(g.st, "gated", "the name at the boundary is the gated one");
+  eq(g.dte, EARNINGS_GATE_DAYS, "and its published dte IS the gate width, to the day");
+  eq(c.st, "eligible", "the name one day past it is the clear one");
+  eq(c.dte, EARNINGS_GATE_DAYS + 1, "and its published dte is one past the gate width");
+  ok(g.dte <= PAYLOAD.gateDays && c.dte > PAYLOAD.gateDays,
+     "so a reader can check the label against the number beside it and find them agreeing — " +
+     "which is the whole reason dte is published in the gate's unit");
 
   /* byStage SUMS TO shown, INCLUDING THE UNLABELLED. */
   const mixed = buildEvents([
@@ -567,28 +672,59 @@ const plusDays = (origin, n) =>
   }
   checks++;
 
-  /* §10b. THE LABEL OVER THE EMITTED PAYLOAD, checked against the run's own
-     INSTANT rather than gateOrigin's midnight.
+  /* §10a. GATE CONSISTENCY, BOTH DIRECTIONS, over the emitted payload. Either
+     direction alone is satisfiable by a broken labeller: label everything
+     gated and the first holds; label nothing gated and the second does. */
+  const gatedRows = ROWS.filter((r) => r.st === "gated");
+  ok(gatedRows.length > 0 && gatedRows.every((r) => r.dte <= PAYLOAD.gateDays),
+     `all ${gatedRows.length} gated rows report within gateDays (${PAYLOAD.gateDays}) — no row ` +
+     `is labelled gated beside a number that says it is outside the gate`);
+  const insideGate = ROWS.filter((r) => r.dte <= PAYLOAD.gateDays);
+  ok(insideGate.length > 0 && insideGate.every((r) => r.st === "gated"),
+     `and all ${insideGate.length} rows reporting within gateDays ARE labelled gated — no name ` +
+     `inside the gate reaches the page under a stage that claims the board had an opinion`);
+  ok(ROWS.some((r) => r.st !== "gated"),
+     "while the corpus contains ungated rows too, so the label is discriminating rather than " +
+     "applied to everything that reaches this page");
+  eq(gatedRows.length, insideGate.length,
+     "the two populations are the same population, counted two ways");
 
-     THIS SUITE DELIBERATELY DOES NOT ASSERT THE STRICTER FORM, and the reason
-     is not a weakening. daysToEarnings() rounds against a wall-clock INSTANT;
-     gateOrigin is a calendar DATE. At the real run time — about 05:15 Eastern,
-     09:15 UTC — those two reckonings agree, which is why the module's header
-     names gateOrigin as the day count's origin. A dry run executed at some
-     other hour rounds the same span differently by one day, and asserting the
-     midnight form here would fail for a reason that has nothing to do with the
-     module. generatedAt IS the run's instant, so it reproduces the gate the
-     pipeline actually applied, exactly, on every row. */
-  const runInstant = Date.parse(PAYLOAD.generatedAt);
-  ok(Number.isFinite(runInstant), "the payload stamps the run's own instant");
+  /* §10b. dte IS THE GATE'S OWN NUMBER, PASSED THROUGH — NOT A SECOND OPINION.
+     AND IT IS NOW REPRODUCIBLE FROM A PUBLISHED FIELD, which is a stronger
+     property than the one this assertion originally had. daysToEarnings used
+     to round against the run's INSTANT, so a reader holding the payload could
+     not check the gate's arithmetic at all — only a test that happened to know
+     generatedAt could, and only to the minute. It measures from gateOrigin
+     now, which the payload states, so every published dte is checkable by
+     anyone holding the payload and this loop is that check.
+
+     The same change is what made dte and sdte consistent: both are counted
+     from the one origin the payload names. */
   for (const r of ROWS) {
-    assert.equal(r.st === "gated", isGated(daysToEarnings({ next_earnings_date: r.d }, runInstant)),
-      `${r.t} (${r.d}): the gated label reproduces the pipeline's own gate predicate`);
+    assert.equal(r.dte, daysToEarnings({ next_earnings_date: r.d }, PAYLOAD.gateOrigin),
+      `${r.t} (${r.d}): dte is the gate's own count, reproduced from the published gateOrigin`);
   }
   checks++;
-  ok(ROWS.some((r) => r.st !== "gated"),
-     "and the corpus contains ungated rows too, so the label is discriminating rather than " +
-     "applied to everything that reaches this page");
+
+  /* §10c. AND THERE IS NO PASSTHROUGH LEFT TO PREFER, which is the point.
+
+     This asserted the opposite until the fix: a caller-supplied gateDte won
+     over the local count, because the gate measured from an INSTANT and this
+     page from MIDNIGHT and the two disagreed by a day at most hours. That
+     passthrough bought agreement by trusting the caller, and the trust was
+     what let an undated name onto the calendar (§15b).
+
+     daysToEarnings takes an ISO date now, so both are the same arithmetic
+     against the same origin and the page can simply compute it. What is
+     asserted here is that it does, and that it agrees with the gate. */
+  const local = eventRow(nameAt("PT", "2026-08-31").row, tiltOf(), { gateOrigin: GATE_ORIGIN });
+  eq(local.dte, 5, "the module counts calendar days from gateOrigin itself");
+  eq(local.dte, daysToEarnings({ next_earnings_date: "2026-08-31" }, GATE_ORIGIN),
+     "and lands on exactly what the gate's own function returns for the same span — one " +
+     "computation, not two that happen to agree");
+  eq(eventRow({ ticker: "PT" }, tiltOf(), { gateOrigin: GATE_ORIGIN }).dte, null,
+     "and a name with no date has no horizon, whatever any caller might wish to supply");
+
 }
 
 /* ============================================================
@@ -671,9 +807,12 @@ const plusDays = (origin, n) =>
   const screener = {
     ticker: em.t, close: em.px.toFixed(2), next_earnings_date: em.d, sector: em.sector,
   };
-  const rebuilt = eventRow(screener, tiltOf(), { gateOrigin: PAYLOAD.gateOrigin });
+  const rebuilt = eventRow(screener, tiltOf(),
+    { gateOrigin: PAYLOAD.gateOrigin, gateDte: em.dte });
   eq(rebuilt.px, em.px,
      "the reconstructed screener row reproduces the emitted px exactly, field for field");
+  eq(rebuilt.dte, em.dte, "and its dte");
+  eq(rebuilt.sdte, em.sdte, "and its sdte");
 
   /* MUTATION IS THE POINT: every emitted row in this corpus carries a
      well-formed positive close, so the refusal branch has no way to execute
@@ -686,7 +825,8 @@ const plusDays = (origin, n) =>
     ["0.00", "a zero that arrived as a string, which is how the wire sends it"],
     [undefined, "a missing key"],
   ]) {
-    const mutated = eventRow({ ...screener, close }, tiltOf(), { gateOrigin: PAYLOAD.gateOrigin });
+    const mutated = eventRow({ ...screener, close }, tiltOf(),
+      { gateOrigin: PAYLOAD.gateOrigin, gateDte: em.dte });
     assert.equal(mutated.px, null, `px is null for ${why}`);
     assert.notEqual(mutated.px, 0,
       `and specifically not 0 for ${why} — a zero price is a quote, not a silence`);
@@ -695,7 +835,7 @@ const plusDays = (origin, n) =>
   /* The row survives the mutation: an unpriceable name is still on the
      calendar, because the date is what puts it there. */
   const stillThere = eventRow({ ...screener, close: null }, tiltOf(),
-    { gateOrigin: PAYLOAD.gateOrigin });
+    { gateOrigin: PAYLOAD.gateOrigin, gateDte: em.dte });
   eq(stillThere.d, em.d, "a name with no close still carries its report date");
   eq(stillThere.t, em.t, "and its ticker");
   ok(!ROWS.some((r) => r.px === 0), "and no emitted row publishes a price of exactly 0");
@@ -744,6 +884,8 @@ const plusDays = (origin, n) =>
      "naming the construction, so the number can be checked rather than trusted");
   ok(/no rate, no dividend/i.test(EVENTS_NOTES.priced),
      "and stating that no free parameter entered it");
+  ok(/sessions between the run and the report/i.test(EVENTS_NOTES.priced),
+     "and naming the UNIT it scales over — sessions, not the calendar days beside them");
 
   /* THE TWO CLOCKS ARE NAMED, BOTH OF THEM. A note that named only one would
      leave a reader unable to tell which column was measured from where. */
@@ -776,14 +918,86 @@ const plusDays = (origin, n) =>
      "and notes.coverage states that realized vol is enriched-only, which is what rvMeasured counts");
 }
 
+/* ============================================================
+   §15. THE INVARIANTS THE TWO BREACHES WERE FOUND BY.
+
+   THIS SECTION USED TO FAIL ON PURPOSE. It carried two assertions
+   that the module could not satisfy, left red rather than weakened:
+
+     (a) `sdte <= dte` — a weekday count cannot exceed the calendar
+         count containing it. It did, on 8 of 60 emitted rows,
+         because `dte` was the gate's passthrough measured from
+         Date.now() while `sdte` counted from gateOrigin's midnight:
+         two origins about 21 hours apart. 60 of 60 published `dte`
+         values disagreed with the calendar count from the very
+         origin the payload named.
+
+     (b) an undated name was seated on the calendar whenever the
+         caller supplied a count for it, counted in `inWindow` and
+         in `undated` at once.
+
+   Both are fixed at the root rather than at the symptom.
+   daysToEarnings measures from an ISO DATE now, not an instant, so
+   the gate is a function of the session's calendar day rather than
+   of the minute the runner fired — which also makes the gate's count
+   and this page's the SAME arithmetic against the SAME origin. The
+   passthrough that (b) rode in on is gone with it.
+
+   The assertions stay, as invariants rather than as breaches. They
+   are the ones that would catch the fix being undone.
+   ============================================================ */
+{
+  /* (a) UNITS CANNOT CROSS. Deterministic, not corpus-dependent: this is the
+     exact argument shape the pipeline passes, and it held at no hour before
+     the fix. */
+  for (const [d, why] of [
+    ["2026-08-27", "one calendar day, one session"],
+    ["2026-08-29", "a Saturday target — two sessions inside three calendar days"],
+    ["2026-08-31", "across a weekend"],
+    ["2026-09-09", "two weeks out"],
+  ]) {
+    const r = eventRow({ ticker: "U", next_earnings_date: d, close: 10 }, {},
+      { gateOrigin: GATE_ORIGIN });
+    ok(r.sdte <= r.dte,
+       `${d}: sdte ${r.sdte} <= dte ${r.dte} — ${why}. A weekday count larger than the ` +
+       `calendar count containing it is arithmetically impossible for one span, and is ` +
+       `what two origins produce`);
+  }
+  const crossed = ROWS.filter((r) => r.sdte > r.dte);
+  eq(crossed.length, 0,
+     `and no emitted row crosses the units either (${crossed.length} of ${ROWS.length})`);
+
+  /* AND THE GATE'S COUNT IS REPRODUCIBLE FROM THE PUBLISHED ORIGIN, which is
+     the property that replaced the passthrough. */
+  const drifted = ROWS.filter(
+    (r) => r.dte !== daysToEarnings({ next_earnings_date: r.d }, PAYLOAD.gateOrigin));
+  eq(drifted.length, 0,
+     "every published dte is reproducible from the gateOrigin the payload states — the page " +
+     "does not hold a second opinion about the gate's own count, and a reader can check it");
+
+  /* (b) AN UNDATED NAME IS NEVER SEATED, and no caller convention is relied
+     on for it: eventRow can see for itself that there is no date. */
+  const undated = buildEvents([{ row: { ticker: "NODATE" }, tilt: {} }],
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  eq(undated.inWindow, 0, "a name with no earnings date is not admitted to the calendar");
+  eq(undated.rows.length, 0, "and appears in no row");
+  eq(undated.undated, 1, "and is counted as undated, once");
+  const nd = eventRow({ ticker: "NODATE" }, {}, { gateOrigin: GATE_ORIGIN });
+  eq(nd.dte, null, "its calendar horizon is null");
+  eq(nd.sdte, null, "and so is its session horizon — both are null together, always");
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the run's ` +
   `own Eastern date and never from the last completed session, with the wrong integer ` +
-  `written down beside every right one, a weekend that is one session and not three, a past ` +
-  `date that is null and not zero, a −1w point reconstructed from a difference because the ` +
-  `wire has never carried the level, a priced move withheld for three separately named ` +
-  `reasons and never published as 0, an undated name excluded and counted rather than seated ` +
-  `at the end of a calendar, an order that is date-then-name over a corpus where the price ` +
-  `ranking is its reverse, a gate boundary built by arithmetic from the constant both sites ` +
-  `share, coverage counters that move by exactly the number withheld from them, a price that ` +
-  `refuses a zero close in six shapes, an announce column withheld whole with its reason ` +
-  `published, and the four sentences that keep the page from claiming a forecast`);
+  `written down beside every right one, a window bound tested in the unit its name carries ` +
+  `over a span constructed to straddle it, a weekend that is one session and not three, a ` +
+  `past date that is null and not zero on both horizons, a −1w point reconstructed from a ` +
+  `difference because the wire has never carried the level, a priced move scaled by sessions ` +
+  `and never by the calendar days beside them, an undated name excluded and counted rather ` +
+  `than seated at the end of a calendar, an order that is date-then-name over a corpus where ` +
+  `the price ranking is its reverse, a gate boundary built by arithmetic from the constant ` +
+  `both sites share and agreeing in both directions over the payload, a dte that is the ` +
+  `gate's own number rather than a second opinion about it, coverage counters that move by ` +
+  `exactly the number withheld from them, a price that refuses a zero close in six shapes, ` +
+  `an announce column withheld whole with its reason published, and the sentences that keep ` +
+  `the page from claiming a forecast`);

@@ -737,12 +737,41 @@ function ivRankFraction(raw) {
   return v > 1 ? v / 100 : v;
 }
 
-/** Days until earnings, or null. Used to gate, never to predict. */
-function daysToEarnings(row, today) {
+/**
+ * Calendar days until earnings, or null. Used to gate, never to predict.
+ *
+ * MEASURED FROM A DATE, NOT FROM AN INSTANT, and that is a fix rather than a
+ * restatement. This took `Date.now()` and rounded
+ * `(earnings_at_midnight − now) / a day`, which makes the answer a function of
+ * THE MINUTE THE JOB HAPPENED TO FIRE: the same name, the same earnings date,
+ * and a runner that started at 05:15 rather than 05:47 could land on either
+ * side of the twelve-day gate. Nobody chose that; it fell out of rounding a
+ * fractional day.
+ *
+ * IT ALSO MADE TWO PUBLISHED COUNTS ARITHMETICALLY IMPOSSIBLE. /flows/events/
+ * publishes this number as `dte` beside `sdte`, the weekday count over the
+ * same span, both measured from the run's Eastern date. With this reading
+ * against an instant and that one against midnight — origins about 21 hours
+ * apart — the WEEKDAY count overtook the CALENDAR count containing it on 8 of
+ * 60 rows. A subset cannot be larger than its superset, so no design choice
+ * licenses it; the contract suite refused to pass and was right to.
+ *
+ * THIS CHANGES WHICH NAMES THE BOARD SCORES, at the margin. A name whose
+ * report sits exactly `EARNINGS_GATE_DAYS` away, measured from midnight
+ * rather than from the firing minute, can now fall on the other side of the
+ * gate. That is the correct behaviour — "reporting within twelve days" is a
+ * statement about dates — and it is a behaviour change, not a refactor.
+ *
+ * @param {string} origin — an ISO date, `easternNow().date`. The gate belongs
+ *   to the session's own calendar day, which is also the origin every day
+ *   count on /flows/events/ is stated against.
+ */
+function daysToEarnings(row, origin) {
   if (!row.next_earnings_date) return null;
   const t = Date.parse(row.next_earnings_date + "T00:00:00Z");
-  if (!Number.isFinite(t)) return null;
-  return Math.round((t - today) / 86400000);
+  const from = Date.parse(String(origin || "") + "T00:00:00Z");
+  if (!Number.isFinite(t) || !Number.isFinite(from)) return null;
+  return Math.round((t - from) / 86400000);
 }
 
 /* ---------- per-name enrichment --------------------------------- */
@@ -3198,7 +3227,11 @@ function fakeEnrichment(ticker, spot, seed) {
 /* ---------- main ------------------------------------------------- */
 
 async function main() {
-  const today = Date.now();
+  /* THE GATE'S OWN CALENDAR DAY. Not Date.now(): see daysToEarnings. The
+     same value is published as `gateOrigin` on /flows/events/, so the page's
+     day counts and the gate's are the same arithmetic against the same
+     origin rather than two readings that agree most hours. */
+  const today = easternNow().date;
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
 
   if (!DRY_RUN) {
@@ -3732,16 +3765,13 @@ async function main() {
     /* GATED LAST, so it overwrites every earlier stage. A name the gate
        removed never reached enrichment, and labelling it by how far it got
        before the gate would bury the one fact this page is for. */
-    /* THE GATE'S OWN COUNT, KEPT, and handed to the page rather than
-       recomputed there. daysToEarnings rounds against Date.now(), so its
-       answer depends on the hour the run fires; a second computation from
-       midnight disagrees by one at some hours and publishes a row labelled
-       `gated` beside a dte of 13 against a stated gate of 12. */
-    const gateDteByTicker = new Map();
+    /* NO PASSTHROUGH OF THE GATE'S COUNT, because there is nothing to pass:
+       daysToEarnings and calendarDaysTo now measure from the same ISO date,
+       so the page REPRODUCES the gate's number rather than being handed it.
+       `today` here IS `gateOrigin` — the same easternNow().date. */
     for (const { row } of withTilt) {
       if (!row || !row.ticker) continue;
       const dte = daysToEarnings(row, today);
-      if (dte !== null) gateDteByTicker.set(row.ticker, dte);
       if (dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS) {
         stageByTicker.set(row.ticker, "gated");
       }
@@ -3764,7 +3794,6 @@ async function main() {
       stageOf: (t) => stageByTicker.get(t) || null,
       featuresOf: (t) => featuresByTicker.get(t) || null,
       scoreOf: (t) => (scoreByTicker.has(t) ? scoreByTicker.get(t) : null),
-      gateDteOf: (t) => (gateDteByTicker.has(t) ? gateDteByTicker.get(t) : undefined),
     });
 
     await publish("events", {

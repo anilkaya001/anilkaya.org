@@ -3180,3 +3180,289 @@ body.is-stale .flows-tablewrap {
 .ua-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 .ua-how[open] { padding-bottom: var(--space-2); }
 .ua-how .ua-b-item { margin-top: var(--space-2); }
+
+/* =====================================================================
+   /flows/events/ — what reports next, and what is priced into it.
+
+   TWO PREFIXES BECAUSE THERE ARE TWO SURFACES with different failure
+   modes: .ew-* is the window chart, where every length is a viewBox unit
+   and one of them is one CSS pixel, and .ev-* is the table, where the
+   only lengths are rems. Sharing a prefix is how a chart rule ends up
+   resizing a table cell.
+   ===================================================================== */
+
+/* --- the window chart ------------------------------------------------
+
+   HUE IS THE LAST CHANNEL HERE, and the chart is built so that removing
+   it entirely costs nothing:
+
+     - the funnel stage is carried by LANE (position) first,
+     - then by MARK SHAPE — a filled square is gated, a filled diamond
+       reached the board, a hollow ring passed the gate and stopped,
+     - and only then by colour.
+
+   The gate band is a flat wash AND a 45-degree hatch for the same
+   reason: on a greyscale print, or to a reader who cannot separate gold
+   from ink, the hatch is what still says "this region is different". */
+
+.ew { display: block; width: 100%; }
+
+.ew-bandbg { fill: color-mix(in srgb, var(--gold-mystic) 8%, transparent); }
+/* NO `fill` RULE ON .ew-band. Its fill is the hatch pattern, set as a
+   presentation attribute, and a CSS fill would win and erase it. */
+.ew-hatch { color: color-mix(in srgb, var(--gold-mystic) 55%, transparent); }
+
+.ew-edge {
+  stroke: var(--gold-harvest);
+  stroke-width: 1.1;
+  opacity: 0.8;
+}
+.ew-grid { stroke: var(--hairline); stroke-width: 1; }
+.ew-axis { stroke: var(--panel-border); stroke-width: 1; }
+.ew-lanerule {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+/* Every <text> in the chart is sized in px on the element itself — an
+   unsized SVG <text> inherits the document's 16px and outgrows the gutter
+   it was measured for. These rules set family and colour only. */
+.ew-tick,
+.ew-axislab,
+.ew-bandlab,
+.ew-lane {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ew-tick { fill: var(--ink-faint); }
+.ew-axislab { fill: var(--ink-faint); letter-spacing: 0.04em; }
+.ew-bandlab {
+  fill: var(--gold-harvest);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+.ew-lane {
+  fill: var(--ink-dim);
+  letter-spacing: 0.11em;
+  font-weight: 600;
+}
+.ew-lane.is-gated { fill: var(--gold-harvest); }
+
+/* The three mark shapes. Legible with the colours removed. */
+.ew-m.is-gated {
+  fill: var(--gold-harvest);
+  stroke: var(--bg-deep);
+  stroke-width: 0.6;
+}
+.ew-m.is-board {
+  fill: var(--ink-dim);
+  stroke: var(--bg-deep);
+  stroke-width: 0.6;
+}
+.ew-m.is-board.is-long { fill: var(--flow-up); }
+.ew-m.is-board.is-short { fill: var(--flow-down); }
+.ew-m.is-open {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.3;
+}
+
+.ew-empty {
+  margin: 0;
+  padding: 0.9rem 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* --- the table -------------------------------------------------------
+
+   THE TWO DAY-COUNT COLUMNS ARE IN DIFFERENT UNITS and sit two cells
+   apart: Reports carries a date whose title gives CALENDAR days, and
+   Sessions counts WEEKDAYS. Nothing in the styling may suggest they are
+   the same quantity, so neither gets an accent the other lacks. */
+
+.ev-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  cursor: help;
+}
+
+.ev-priced { color: var(--ink); }
+
+/* THE TWO KINDS OF EM DASH, WHICH MUST NOT LOOK LIKE A NUMBER. A missing
+   reading is dimmed and carries the help cursor, so the title that says
+   WHICH absence it is announces itself as worth reading. It is never a
+   zero and it is never styled like one. */
+.ev-priced.is-none,
+.ev-rv.is-none {
+  color: var(--ink-faint);
+  cursor: help;
+}
+
+/* A ROW WHERE THE TWO PUBLISHED DAY COUNTS DISAGREE — more weekdays than
+   calendar days, which no single span can contain. Marked so the reader
+   who subtracts finds an explanation instead of a contradiction, and
+   marked by a RULE rather than by colour, so it survives greyscale and
+   does not read as a good or bad value. The class is applied only when a
+   row actually shows the gap, so it disappears on its own once the
+   payload's two origins agree. */
+.ev-clash {
+  text-decoration: underline dotted var(--gold-harvest);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.ev-iv { cursor: help; }
+.ev-ivv { margin-left: 0.4rem; }
+
+/* The implied-volatility path, one scale for the whole table so two rows
+   can be compared. Sized in px on the element: 46x14 viewBox units are
+   46x14 CSS pixels, and nothing here may scale them. */
+.ev-spark {
+  display: inline-block;
+  vertical-align: -0.2em;
+  overflow: visible;
+}
+.ev-spark-l {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  fill: none;
+}
+.ev-spark-d { fill: var(--ink-faint); }
+.ev-spark-d.is-now { fill: var(--gold-celadon); }
+
+/* --- the stage chip, and the one value that must never read as a score --
+
+   "gated" IS A PROHIBITION, NOT A LOW SCORE, and it is the only value on
+   this page a reader can misread into its opposite. So it does not merely
+   get a different colour from the others: it gets a different SHAPE
+   (square corners against the pill), a hatched ground, a heavier weight
+   and a rule down the whole row. All four survive greyscale; the colour
+   is the fifth and least of them. */
+
+.ev-stagecell { white-space: nowrap; }
+
+.ev-st {
+  display: inline-block;
+  padding: 0.14rem 0.45rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  cursor: help;
+}
+
+.ev-st.is-gated {
+  border-radius: var(--radius-1);
+  border-color: var(--gold-harvest);
+  color: var(--gold-harvest);
+  font-weight: 700;
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--gold-mystic) 22%, transparent) 0 2px,
+    transparent 2px 5px);
+}
+
+.ev-st.is-board-long,
+.ev-st.is-board-short {
+  color: var(--ink);
+  border-color: var(--panel-border);
+  background: var(--bg-deep);
+}
+.ev-st.is-board-long { color: var(--flow-up); }
+.ev-st.is-board-short { color: var(--flow-down); }
+
+/* The row rule repeats the chip's claim at the scale of the whole row, so
+   a reader scanning the Priced column still sees which names the board
+   was never allowed an opinion on. */
+.flows-table tbody tr.is-gated th.fb-tk {
+  box-shadow: inset 2px 0 0 var(--gold-harvest);
+}
+
+.ev-empty {
+  padding: 1.1rem 1rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  white-space: normal;
+}
+
+/* --- the basis panel, which is the page's honesty --------------------
+   The payload's own sentences, verbatim. Styled to read as prose rather
+   than as a caption, because that is what it is. */
+
+.ev-spine { margin: 0 0 var(--space-2); }
+
+.ev-b-item { margin: 0 0 var(--space-3); }
+.ev-b-item:last-child { margin-bottom: 0; }
+
+.ev-b-k {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+.ev-b-p {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+/* A DELIBERATE REFUSAL, DRAWN TO LOOK UNLIKE A MEASUREMENT. The announce
+   time is not missing data; it is a column that was costed and declined,
+   and filing it under the same heading as a description of something that
+   WAS measured would lose that distinction. */
+.ev-withheld {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--gold-mystic);
+  background: color-mix(in srgb, var(--gold-mystic) 6%, transparent);
+  border-radius: 0 var(--radius-1) var(--radius-1) 0;
+}
+.ev-withheld-tag {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-harvest);
+}
+.ev-withheld .ev-b-p { color: var(--ink-dim); }
+
+/* The disclosures. Nothing is removed — every entry stays in the DOM,
+   selectable and found by a find-in-page — but two thousand words of
+   unbroken prose under a table is a rule nobody finishes reading, and a
+   rule nobody finishes is a rule nobody was told. */
+.ev-how {
+  margin: 0 0 var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+.ev-how-s {
+  cursor: pointer;
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 0;
+  list-style: none;
+}
+.ev-how-s::-webkit-details-marker { display: none; }
+.ev-how-s::before { content: "+ "; color: var(--gold-harvest); }
+.ev-how[open] .ev-how-s::before { content: "\2212 "; }
+.ev-how-s:hover { color: var(--ink); }
+.ev-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ev-how[open] { padding-bottom: var(--space-2); }
+.ev-how .ev-b-item { margin-top: var(--space-2); }
