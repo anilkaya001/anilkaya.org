@@ -38,6 +38,7 @@ import {
   rankUnusual, rankUnusualNames, describeFlowAlerts, describeOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
+import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -159,6 +160,18 @@ export const RATE = {
    request, against 867 modelled. The model is now within 2% of the meter,
    which is the only reason to keep writing it down. */
 export const CALL_BUDGET = 950;
+
+/**
+ * How near an earnings date has to be for a name to leave the board.
+ *
+ * NAMED BECAUSE TWO SURFACES NOW READ IT. It was a bare 12 inside the gate's
+ * own filter, which was fine while the gate was the only thing that knew it.
+ * /flows/events/ marks a row `gated` using the same rule, and a bare literal
+ * in one file against a reference in another is how two surfaces come to
+ * disagree about which names the board was allowed to score — silently, and
+ * only for names sitting exactly on the boundary.
+ */
+export const EARNINGS_GATE_DAYS = 12;
 
 /* The screener's undocumented page cap, measured: every band that has ever had
    more names than this returned exactly this many. Named so the saturation
@@ -3304,7 +3317,7 @@ async function main() {
   const withTilt = universe.map((row) => ({ row, tilt: screenerTilt(row) }));
   const tilted = withTilt.filter(({ row }) => {
     const dte = daysToEarnings(row, today);
-    return dte === null || dte < 0 || dte > 12;
+    return dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS;
   });
   console.log(`after earnings gate: ${tilted.length}`);
 
@@ -3683,6 +3696,92 @@ async function main() {
       (movers.unrankedPremium ? `, ${movers.unrankedPremium} unquoted` : ""));
   } catch (error) {
     console.warn(`  movers: ${error.message}`);
+  }
+
+  /* 7e. THE EVENTS CALENDAR — the names the gate removed, finally published.
+
+     ZERO VENDOR CALLS. Every field is a screener field the run already holds:
+     screenerTilt() is computed for every eligible name at step 3 and then
+     thrown away for all but the enriched, and next_earnings_date is read once
+     to filter and never published.
+
+     THE FUNNEL STAGE IS THE COLUMN THIS PAGE EXISTS FOR. The gate removes the
+     most event-exposed names in the universe BY CONSTRUCTION — it has to,
+     because the composite is a predictive ranking and a scheduled binary event
+     is not the process it prices — and until now those names reached the
+     reader as one integer in a log line. `gated` says the board was FORBIDDEN
+     from holding an opinion, which is a different fact from having none.
+
+     THE ORIGIN IS THE RUN'S EASTERN DATE, NOT sessionDate. The gate itself
+     counted from Date.now(); sessionDate is the last COMPLETED session, which
+     at 05:15 Eastern is one to three days earlier. Counting from sessionDate
+     would draw the window early and classify every name against a gate that
+     never ran — and a fixture built the same way would agree with it. */
+  try {
+    const gateOrigin = easternNow().date;
+    const stageByTicker = new Map();
+    for (const { row } of withTilt) if (row && row.ticker) stageByTicker.set(row.ticker, "screened");
+    for (const { row } of tilted) if (row && row.ticker) stageByTicker.set(row.ticker, "eligible");
+    for (const p of picks) if (p && p.row && p.row.ticker) stageByTicker.set(p.row.ticker, "enriched");
+    for (const e of liquid) if (e && e.row && e.row.ticker) stageByTicker.set(e.row.ticker, "liquid");
+    for (const side of ["long", "short"]) {
+      for (const r of (payloads[side] && payloads[side].rows) || []) {
+        if (r && r.t) stageByTicker.set(r.t, side === "long" ? "board:long" : "board:short");
+      }
+    }
+    /* GATED LAST, so it overwrites every earlier stage. A name the gate
+       removed never reached enrichment, and labelling it by how far it got
+       before the gate would bury the one fact this page is for. */
+    for (const { row } of withTilt) {
+      if (!row || !row.ticker) continue;
+      const dte = daysToEarnings(row, today);
+      if (dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS) {
+        stageByTicker.set(row.ticker, "gated");
+      }
+    }
+
+    const featuresByTicker = new Map();
+    for (const e of enriched) {
+      if (e && e.row && e.row.ticker) featuresByTicker.set(e.row.ticker, e.features);
+    }
+    const scoreByTicker = new Map();
+    for (const side of ["long", "short"]) {
+      for (const r of (payloads[side] && payloads[side].rows) || []) {
+        if (r && r.t && Number.isFinite(r.s)) scoreByTicker.set(r.t, r.s);
+      }
+    }
+
+    const events = buildEvents(withTilt, {
+      gateOrigin,
+      sessionDate,
+      stageOf: (t) => stageByTicker.get(t) || null,
+      featuresOf: (t) => featuresByTicker.get(t) || null,
+      scoreOf: (t) => (scoreByTicker.has(t) ? scoreByTicker.get(t) : null),
+    });
+
+    await publish("events", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt,
+      /* BOTH CLOCKS, AND WHICH QUANTITY USES WHICH. */
+      sessionDate,
+      gateOrigin,
+      gateDays: EARNINGS_GATE_DAYS,
+      status: events.shown ? "ok" : "quiet",
+      /* The announce time is not on the screener and this page does not spend
+         forty-four calls to find it. Stated, not half-filled. */
+      announce: { status: "unavailable", reason: EVENTS_NOTES.announce },
+      ...events,
+      notes: EVENTS_NOTES,
+    });
+    const gatedShown = events.byStage.gated || 0;
+    console.log(
+      `  events: ${events.shown} of ${events.inWindow} names reporting within ` +
+      `${events.windowDays} days, of ${events.universe} screened` +
+      (events.undated ? ` (${events.undated} carry no earnings date)` : "") +
+      `; ${gatedShown} of them the board was gated out of, ` +
+      `${events.evMeasured} with a priced move, ${events.rvMeasured} with realized vol`);
+  } catch (error) {
+    console.warn(`  events: ${error.message}`);
   }
 
   try {

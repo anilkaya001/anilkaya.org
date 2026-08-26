@@ -91,6 +91,7 @@ const rail = (active) => {
     ${item("/flows/watch/", "Watch", "watch")}
     ${item("/flows/market/", "Market", "market")}
     ${item("/flows/unusual/", "Unusual", "unusual")}
+    ${item("/flows/events/", "Events", "events")}
   </div>
   <p class="rail-group" id="railName">Name</p>
   <div class="rail-items" role="group" aria-labelledby="railName">
@@ -727,6 +728,90 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
 }
 
 
+/* ---------- the events calendar --------------------------------- */
+
+/**
+ * THE NAMES THE BOARD WAS FORBIDDEN TO SCORE.
+ *
+ * The pipeline's earnings gate removes every name reporting inside twelve
+ * days before the composite is built, and it is right to: the score is a
+ * PREDICTIVE ranking, and a name with a scheduled binary event is not being
+ * priced by the process that ranking models. But the names it removes are,
+ * by construction, the most event-exposed in the universe — and until this
+ * page existed they reached the reader as a single integer in a log line and
+ * were otherwise discarded.
+ *
+ * So the funnel stage is a COLUMN here, and `gated` is its most important
+ * value: it says the board was forbidden from holding an opinion on this
+ * name, which is a different fact from the board having found nothing in it.
+ *
+ * TWO CLOCKS, AND THE PAGE STATES WHICH IS WHICH. Every price describes the
+ * last completed session; every day count is measured from the run's own
+ * Eastern date, because that is the origin the gate itself used. At 05:15
+ * those differ by one to three days, and counting from the wrong one draws
+ * the window early and classifies every name against a gate that never ran —
+ * silently, and in a way a fixture built the same way would agree with.
+ *
+ * ZERO VENDOR CALLS, the second such surface after the movers band.
+ */
+export function eventsPage({ username = "" } = {}) {
+  const lede = "What the screened universe reports next, what the option market " +
+    "is charging for the sessions between now and the report, and where each name " +
+    "stopped in the board's own funnel — including the ones the board was gated " +
+    "out of scoring at all.";
+  return `${head("Flows — Events", "What reports next, and what is priced into it.")}
+${shell("Events", "Options-flow intelligence", "events", username, `
+  <div class="flows-status" id="evStatus" role="status">Loading the calendar…</div>
+  <p class="flows-stale" id="evStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <section class="fc-panel" id="evWindowPanel" hidden aria-labelledby="evWindowH">
+    <h2 class="fc-panel-h" id="evWindowH">The window, and where the gate falls</h2>
+    <div id="evWindow"></div>
+    <p class="fc-note" id="evWindowNote"></p>
+  </section>
+
+  <section class="fc-panel" id="evTablePanel" hidden aria-labelledby="evTableH">
+    <h2 class="fc-panel-h" id="evTableH">Reporting next</h2>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Names reporting inside the window">
+      <table class="flows-table" id="evTable">
+        <caption class="flows-caption" id="evCap"></caption>
+        <thead><tr>
+          <th scope="col">Name</th>
+          <th scope="col">Reports</th>
+          <th scope="col" class="c-num"><abbr title="Trading sessions between the run's own Eastern date and the report, counted as weekdays. Market holidays are not removed.">Sessions</abbr></th>
+          <th scope="col" class="c-num">Last</th>
+          <th scope="col" class="c-num"><abbr title="The name's 30-day implied volatility scaled to the sessions before the report by the square root of time. What the option market is charging for that stretch — not a forecast.">Priced</abbr></th>
+          <th scope="col" class="c-num"><abbr title="The vendor's own implied move, quoted to the vendor's own next expiry — a different horizon from the column beside it, and deliberately not reconciled with it.">Vendor</abbr></th>
+          <th scope="col" class="c-num"><abbr title="30-day implied volatility.">IV</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Realized 30-day volatility. Measured only for the enriched names, so most rows withhold it.">RV</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Where iv30 sits in its own year, as a fraction.">IV rank</abbr></th>
+          <th scope="col"><abbr title="How far this name got in the board&#39;s funnel. &quot;gated&quot; means the board was FORBIDDEN from scoring it, not that it scored badly.">Stage</abbr></th>
+        </tr></thead>
+        <tbody id="evBody"></tbody>
+      </table>
+    </div>
+    <p class="fc-note" id="evTableNote"></p>
+  </section>
+
+  <section class="fc-panel" id="evBasisPanel" hidden aria-labelledby="evBasisH">
+    <h2 class="fc-panel-h" id="evBasisH">What these numbers are, and what they are not</h2>
+    <div id="evBasis"></div>
+  </section>
+
+  <p class="flows-foot" id="evFoot"></p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-events.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
 /* ---------- unusual activity ----------------------------------- */
 
 /**
@@ -1051,5 +1136,5 @@ function escapeHTML(value) {
 
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
-  tickerPage, unusualPage, ASSET_VERSION,
+  tickerPage, unusualPage, eventsPage, ASSET_VERSION,
 };
