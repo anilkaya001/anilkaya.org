@@ -58,7 +58,13 @@ export const TICKER_PANELS = Object.freeze([
   { key: "skewTerm", id: "ftTerm", span: 2,
     title: "Term structure and skew",
     question: "Is the front bid over the back, and which wing is bid?" },
-  { key: "topContracts", id: "ftTop", span: 1,
+  /* SPAN 2 BECAUSE THE COLUMN THAT PAYS IS THE LAST ONE. Nine columns in a
+     span-1 host (456px at a 1216px viewport) push `Net aggr` outside the
+     scroll wrapper's visible width, so the panel's whole answer — which lines
+     were LIFTED — is off-screen until a reader thinks to scroll a table they
+     have no reason to think scrolls. The wrapper still scrolls at phone
+     widths, where nothing can fit nine columns. */
+  { key: "topContracts", id: "ftTop", span: 2,
     title: "The day’s most-traded contracts",
     question: "Which single lines carried the volume?" },
   { key: "levels", id: "ftLevels", span: 1,

@@ -696,6 +696,14 @@ function chainPanel(chain, key) {
     ...panel,
     coverage: {
       truncated: chain.truncated === true,
+      /* THREE COUNTS, NOT ONE, because they are three different populations
+         and a renderer holding only the middle one cannot explain itself.
+         `rowsReturned` is what the vendor sent and is what `truncated` is
+         decided on; `rowsSeen` is what survived the adjusted-series filter;
+         `pricedRows` is what carried a live bid and reached the surface. A
+         card publishing "a full page of 500 contracts" beside rowsSeen 499
+         looks like a contradiction until the first of these is present. */
+      rowsReturned: numOrNull(chain.rowsReturned),
       rowsSeen: numOrNull(chain.rowsSeen),
       pricedRows: numOrNull(chain.pricedRows),
       filter: "contracts with no open interest are excluded upstream by the vendor",

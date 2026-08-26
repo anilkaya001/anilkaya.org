@@ -2718,6 +2718,8 @@ body.is-stale .flows-tablewrap {
 }
 .ft-link:hover { text-decoration: underline; }
 .ft-link:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+/* The glyph, so the cell's textContent stays the ticker alone. */
+.ft-link-glyph::after { content: "\2197"; }
 .fb-tk .ft-link { margin-left: 0.4rem; opacity: 0.55; }
 .fb-tk:hover .ft-link, .fb-tk .ft-link:focus-visible { opacity: 1; }
 
@@ -2733,12 +2735,29 @@ body.is-stale .flows-tablewrap {
 }
 .ft-zoom-open {
   position: relative; flex: none; background: none; border: 0;
-  color: var(--ink-faint); font: inherit; font-size: 0.95rem; line-height: 1;
+  color: var(--ink-faint); font: inherit; font-size: 1.05rem; line-height: 1;
   padding: 0; cursor: pointer;
 }
-/* A 44px touch target without a 44px box: the glyph stays 1.6rem and the
-   pseudo-element extends the hit area past it. */
-.ft-zoom-open::after { content: ""; position: absolute; inset: -12px; }
+/* A 44px TOUCH TARGET WITHOUT A 44px BOX — declared at its true size rather
+   than reconstructed from an inset.
+
+   A NEGATIVE INSET MAKES THE TARGET A FUNCTION OF THE GLYPH'S OWN METRICS,
+   and that is a number nobody has. Two attempts sized it by arithmetic and
+   both were wrong in the same direction: -12px measured 39.2 x 36, -14px
+   measured 47.2 x 42. The height passed on the second and the width did not,
+   because U+2921 is 14px wide in a 16.8px em — a ratio that is a property of
+   the font, changes with a fallback, and is not derivable from the CSS.
+
+   A centred fixed box is 44 x 44 whatever the glyph turns out to be. It
+   reaches about 14px past the flex gap into the title's trailing edge, which
+   is deliberate: the title belongs to the same panel, so a click there
+   enlarging that panel is the right outcome. Giving the BUTTON a 44px box
+   instead would have grown all fourteen panel headers by 20px. */
+.ft-zoom-open::after {
+  content: ""; position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 44px; height: 44px;
+}
 .ft-zoom-open:hover, .ft-panel:hover .ft-zoom-open { color: var(--gold-harvest); }
 .ft-zoom-open:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 .ft-panel-t { min-width: 0; }
@@ -2783,7 +2802,19 @@ body.is-stale .flows-tablewrap {
   overscroll-behavior: contain;
 }
 .ft-zoom::backdrop { background: rgba(0, 0, 0, 0.62); }
-.ft-zoom-inner { padding: clamp(1rem, 3vw, 1.7rem); }
+/* THE CONTENT BOX IS CAPPED AT EXACTLY THE 1200 THE DRAWERS CLAMP TO, and
+   the two numbers have to agree or the invariant breaks in the one place a
+   reader is looking hardest. panelWidth() stops at 1200; at a 1600px viewport
+   this dialog's host would otherwise be 1481.6px, so `width: 100%` would
+   stretch a 1200-unit drawing by 1.235 and every 9px label would render at
+   11.1. Border-box means this max-width INCLUDES the padding, so the content
+   box lands on 1200 exactly and the clamp never has to fight the layout.
+   Raising one without the other reintroduces the stretch. */
+.ft-zoom-inner {
+  padding: clamp(1rem, 3vw, 1.7rem);
+  max-width: calc(1200px + 2 * clamp(1rem, 3vw, 1.7rem));
+  margin: 0 auto;
+}
 .ft-zoom-close {
   flex: none; background: none; border: 0; color: var(--ink-dim);
   font: inherit; font-size: 1.3rem; line-height: 1; padding: 0 0.2rem;
@@ -2810,3 +2841,170 @@ body.is-stale .flows-tablewrap {
   border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
 }
 .ft-grid.is-stale .ft-panel svg { opacity: 0.72; }
+
+/* ==============================================================
+   The four chain panels — first drawn on /flows/ticker/.
+
+   These payloads shipped in every card for weeks with no renderer.
+   Everything below is new ink for data that was already on the wire.
+   ============================================================== */
+
+/* --- the IV surface (own prefix; deliberately NOT .ivs-*) ------------ */
+/* TWO PROPERTIES THIS BLOCK MUST NEVER SET, in the same words flows.css
+   already uses for the desk: `fill-opacity` on .fts-cell carries the
+   MAGNITUDE of the skew and `stroke-dasharray` carries the AGE of the print.
+   Both are computed per cell; a blanket rule here would flatten one of the
+   chart's channels into a constant, and nothing would look wrong.
+
+   AND IT USES NEITHER GOLD NOR THE SIGNED PAIR. .ivs-cell.is-pos and
+   .gs-cell.is-pos are `fill: var(--gold-mystic)` — gold as data ink, not to
+   be copied. A cell's skew against its own column level is signed but not
+   DIRECTIONAL, so the up/down pair is as wrong here as gold. One neutral
+   fill, magnitude by fill-opacity, sign carried entirely by the hatch. */
+.fts-svg { display: block; width: 100%; height: auto; }
+.fts-cell { fill: var(--flow-mag); stroke: var(--ink-faint); stroke-width: 0.75; }
+.fts-cell.is-nolevel { fill: none; stroke: var(--ink-faint); stroke-width: 1; }
+.fts-cell.is-stale, .fts-cell.is-unknown-age { stroke: var(--ink-dim); }
+/* The hollow cell's second mark. `fill: none` means TWO OPPOSITE THINGS in
+   this one grid: .gs-cell.is-zero is the gamma surface's MEASURED EXACTLY
+   ZERO, and .fts-cell.is-nolevel is this surface's UNKNOWN POSITION ON THE
+   SMILE. Both panels are span 2 and sit in the same column, so a reader who
+   learns one mark learns the wrong fact about the other. The diagonal is what
+   keeps them apart. */
+.fts-nolevel-mark { stroke: var(--ink-faint); stroke-width: 1; }
+/* The past-the-cap mark. The shading ramp saturates at skewCap, so every cell
+   beyond it is drawn at the same top opacity and the shade lies about all of
+   them. A background-coloured slash is legible on exactly those cells,
+   because a clipped cell is at full opacity by construction — which is why
+   this mark can be a hole rather than a fourth ink. */
+.fts-clip { stroke: var(--bg-deep); stroke-width: 1.2; }
+.fts-void { fill: var(--bg-deep); fill-opacity: 0.55; }
+.fts-hatch, .fts-negpat { color: var(--bg-deep); opacity: 0.5; }
+/* Sizes in px for the same reason as the ladder below: an unsized SVG <text>
+   inherits 16px from the document and silently outgrows its gutter. */
+.fts-exp, .fts-days, .fts-iv, .fts-m, .fts-level, .fts-key
+  { font-family: var(--font-mono); }
+.fts-exp { fill: var(--ink-dim); font-size: 9px; }
+.fts-days { fill: var(--ink-faint); font-size: 8.5px; }
+.fts-iv { fill: var(--ink); font-size: 9px; }
+.fts-iv.is-stale { fill: var(--ink-dim); }
+.fts-level { fill: var(--ink-dim); font-size: 9px; }
+.fts-level.is-missing { fill: var(--ink-faint); }
+.fts-m { fill: var(--ink-faint); font-size: 9.5px; }
+.fts-m.is-atm { fill: var(--ink); font-weight: 700; }
+.fts-colrule { stroke: var(--hairline); stroke-width: 0.5; opacity: 0.5; }
+.fts-key { fill: var(--ink-faint); font-size: 9px; }
+.fts-cellgroup, .fts-colhead { cursor: help; }
+
+/* --- the term structure ---------------------------------------------- */
+/* NO SIGNED PAIR HERE EITHER. An at-the-money implied volatility is an
+   unsigned LEVEL; tinting it green or red would assert a direction the
+   number does not carry. currentColor resolves against --flow-mag. */
+.ftm { display: block; width: 100%; height: auto; color: var(--flow-mag); }
+.ftm-bar { fill: currentColor; fill-opacity: 0.28; }
+.ftm-line { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.ftm-dot { fill: currentColor; }
+/* A REFUSED LEVEL IS NOT DRAWN ON THE BASELINE. The baseline is y = 0, which
+   is the position meaning ZERO IMPLIED VOLATILITY — so a level the surface
+   declined to vouch for would be drawn at the one place that reads as a
+   confident measurement of nothing. It goes on the rail below the axis. */
+.ftm-dot.is-missing { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.ftm-missrail { stroke: var(--ink-faint); stroke-width: 1; stroke-opacity: 0.28; }
+.ftm-axis { stroke: var(--hairline); stroke-width: 1; stroke-opacity: 0.16; }
+.ftm-base { stroke: var(--hairline); stroke-width: 1; stroke-opacity: 0.5; }
+.ftm-lab { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9.5px; }
+.ftm-lab.is-tenor { fill: var(--ink-faint); font-size: 9px; }
+
+/* --- the aggressor ladder -------------------------------------------- */
+/* THE SIGN CHANNELS, IN ORDER: position relative to the drawn .fa-zero
+   first, the hatch second, hue last and duplicative. Here the flow pair IS
+   correct — polarityOf("net") is +1, calls lifted at the offer. */
+.fa-svg { display: block; width: 100%; height: auto; }
+.fa-zero { stroke: var(--hairline); stroke-width: 1; }
+.fa-bar.is-pos { fill: var(--flow-up); }
+.fa-bar.is-neg { fill: var(--flow-down); stroke: none; }
+.fa-barhatch { opacity: 0.55; }
+.fa-negpat { color: var(--bg-deep); }
+/* A STRIKE THAT TRADED AND NETTED EXACTLY ZERO. It must not read as the
+   1px zero rule it crosses, or a measured balance looks like an absence. */
+.fa-zeromark { stroke: var(--ink); stroke-width: 1.8; }
+/* EVERY SIZE IS DECLARED HERE, in px, mirroring the .gp-* rules this ladder
+   is a sibling of. Omitting one is not a cosmetic slip: an SVG <text> with no
+   font-size inherits the DOCUMENT's 16px, and a 5-character strike label then
+   measures 48 units against a 46-unit gutter and is clipped away at 320px.
+   That is precisely how this block was first shipped and what the render
+   sweep caught. */
+.fa-price, .fa-rail, .fa-ticklabel, .fa-axis { font-family: var(--font-mono); }
+.fa-price { fill: var(--ink-faint); font-size: 10.5px; }
+.fa-rail { fill: var(--ink-dim); font-size: 9.5px; }
+/* A TOTAL OVER ONLY THE CONTRACTS THAT REPORTED is not the total, and
+   printing it bare is a completeness claim the data does not support. Third
+   channel, not the only one: the text also ends in an ellipsis and carries a
+   title naming the unreported count. */
+.fa-rail.is-partial {
+  fill: var(--ink-faint);
+  text-decoration: underline dotted;
+}
+.fa-ticklabel { fill: var(--ink-faint); font-size: 9px; }
+/* The 0.04em is load-bearing, not decoration: it is exactly the gap between
+   the 5.81px measured mono advance and the AXIS_CH = 6 every width estimate
+   in these drawers is built on. */
+.fa-axis { fill: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
+.fa-tick { stroke: var(--hairline); stroke-width: 1; opacity: 0.5; }
+
+/* --- the top-contracts table ------------------------------------------ */
+/* THE SPECIFICITY DEFECT flows.css:313 documents, in the one place it was
+   still live: `.fc-levels th { text-align: left }` is (0,1,1) and beats a
+   bare `.c-num`, so numeric HEADERS landed left over right-aligned cells. */
+.ftt-table th.c-num { text-align: right; }
+.ft-panel .fc-tablewrap { max-width: 100%; }
+
+.ftt-table thead th .ftt-sort {
+  display: flex; align-items: center; gap: 0.3rem;
+  font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; text-align: inherit; width: 100%;
+}
+.ftt-table thead th.c-num .ftt-sort { justify-content: flex-end; }
+.ftt-table thead th .ftt-sort:hover:not(:disabled) { text-decoration: underline; }
+/* A COLUMN WITH NOTHING MEASURED IN IT CANNOT BE RANKED, and the control says
+   so by being disabled rather than by sorting a column of em dashes. */
+.ftt-table thead th .ftt-sort:disabled { cursor: default; opacity: 0.55; }
+.ftt-table thead th .ftt-sort:focus-visible {
+  outline: 2px solid var(--gold-harvest); outline-offset: 2px;
+}
+.ftt-sort-ind { font-size: 0.85em; line-height: 1; font-family: var(--font-mono); }
+.ftt-greek { font-family: var(--font-mono); }
+
+/* THE FLOW PAIR IS CORRECT HERE and nowhere else in this table: aggr is
+   ask_volume minus bid_volume, and polarityOf("aggr") is +1 — contracts
+   lifted at the offer. ΔOI gets NO directional hue: open interest building
+   is not bullish or bearish on its own, and colouring it would assert a
+   direction the number does not carry. */
+.ftt-aggr.is-lifted { color: var(--flow-up); }
+.ftt-aggr.is-hit { color: var(--flow-down); }
+/* NOT DIMMED. A measured zero and an unreported split are different facts:
+   the first is a real reading and keeps full contrast, the second is an em
+   dash that is already saying what it is. */
+.ftt-aggr.is-flat, .ftt-doi.is-flat { color: inherit; }
+.ftt-aggr.is-unreported, .ftt-doi.is-unknown,
+.ftt-exp.is-unknown, .ftt-cp.is-unknown { color: var(--ink-faint); }
+
+/* --- the panel decoder, behind a disclosure -------------------------- */
+/* NOTHING IS REMOVED — a chart whose marks are unexplained is a chart a
+   reader misreads confidently, which is the failure this product is built
+   against. But four hundred words of unbroken prose under a chart is a rule
+   nobody finishes, and a rule nobody finishes is a rule nobody was told. The
+   readings and the coverage line stay in the open; the decoder is one click
+   away, still in the DOM, still selectable, still found by find-in-page. */
+.ft-how { margin: var(--space-2) 0 0; }
+.ft-how-s {
+  cursor: pointer; color: var(--ink-dim); font-size: 0.82rem;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 0.35rem 0; list-style: none;
+}
+.ft-how-s::-webkit-details-marker { display: none; }
+.ft-how-s::before { content: "+ "; color: var(--gold-harvest); }
+.ft-how[open] .ft-how-s::before { content: "\2212 "; }
+.ft-how-s:hover { color: var(--ink); }
+.ft-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-how .fc-note { margin-top: 0.5rem; }

@@ -151,9 +151,15 @@ async function mount(page, card, { ticker = null, boards = null } = {}) {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
-      const body = String(url).includes("/api/flows/card")
+      /* THE TWO SIDES ARE DIFFERENT REQUESTS, and answering both with the
+         same payload double-counts every name in the picker — which is a
+         defect in this stub, not in the page. `boards` stands for the LONG
+         side; the short side answers empty unless a test says otherwise. */
+      const u = String(url);
+      const body = u.includes("/api/flows/card")
         ? card
-        : (boards || { rows: [], status: "pending" });
+        : (u.includes("side=long") ? (boards || { rows: [], status: "pending" })
+                                   : { rows: [], status: "pending" });
       return Promise.resolve({
         ok: true, status: 200,
         headers: { get: () => String(Date.now()) },
@@ -175,12 +181,19 @@ async function mount(page, card, { ticker = null, boards = null } = {}) {
   }, null, { timeout: 5000 });
 }
 
-/** Every panel's rendered state, read out of the DOM rather than asserted from source. */
-const SWEEP = `() => {
+/** Every panel's rendered state, read out of the DOM rather than from source. */
+function sweepPanels() {
   const out = [];
   for (const section of document.querySelectorAll(".ft-panel[data-panel]")) {
     const host = section.querySelector("div");
-    const svgs = [...host.querySelectorAll("svg")];
+    /* DECORATIVE SVGs ARE EXCLUDED, and the exclusion is the aria-hidden
+       attribute the markup already sets rather than a size heuristic. The
+       path panel's legend swatches are 26x10 marks that mean nothing on
+       their own and are correctly hidden from the accessibility tree; an
+       aria-label on one would make a screen reader announce a colour chip. */
+    const svgs = [...host.querySelectorAll("svg")]
+      .filter((s) => s.getAttribute("aria-hidden") !== "true");
+    const decorative = [...host.querySelectorAll('svg[aria-hidden="true"]')];
     let minText = Infinity, clipped = false;
     for (const svg of svgs) {
       const box = svg.getBoundingClientRect();
@@ -188,6 +201,9 @@ const SWEEP = `() => {
         const r = t.getBoundingClientRect();
         if (r.width === 0) continue;
         if (r.height > 0) minText = Math.min(minText, r.height);
+        /* TWO PIXELS, not zero. Text metrics carry sub-pixel rounding and a
+           glyph's ink box is not its advance box, so a strict edge test
+           reports overhang on captions that are visually flush. */
         if (r.left < box.left - 2 || r.right > box.right + 2) clipped = true;
       }
     }
@@ -201,16 +217,21 @@ const SWEEP = `() => {
       minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
       clipped,
       scales: svgs.map((s) => {
-        const vb = (s.getAttribute("viewBox") || "").split(/\\s+/);
+        const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
         return [Number(vb[2]), Math.round(s.getBoundingClientRect().width),
                 getComputedStyle(s).transform];
       }),
       labelled: svgs.every((s) => !!s.getAttribute("aria-label") && s.getAttribute("role") === "img"),
+      unlabelled: svgs.filter((s) => !s.getAttribute("aria-label")).length,
       svgCount: svgs.length,
+      /* A decorative mark must carry NEITHER a role nor a label, or it is
+         announced twice — once as itself and once as part of its caption. */
+      decorativeClean: decorative.every(
+        (s) => !s.getAttribute("aria-label") && s.getAttribute("role") !== "img"),
     });
   }
   return out;
-}`;
+}
 
 const browser = await chromium.launch();
 try {
@@ -224,7 +245,7 @@ try {
 
     eq(errors.length, 0, `${width}px: the ticker page paints a real card without throwing (${errors.join("; ")})`);
 
-    const swept = await page.evaluate(SWEEP);
+    const swept = await page.evaluate(sweepPanels);
     eq(swept.length, TICKER_PANELS.length, `${width}px: every registry panel is mounted`);
 
     for (const p of swept) {
@@ -241,8 +262,12 @@ try {
       }
       eq(p.clipped, false, `${width}px ${p.key}: draws no text outside its own canvas`);
       if (p.svgCount) {
-        ok(p.labelled, `${width}px ${p.key}: every chart carries role=img and an aria-label`);
+        ok(p.labelled,
+           `${width}px ${p.key}: every non-decorative chart carries role=img and an ` +
+           `aria-label (${p.unlabelled} without one)`);
       }
+      ok(p.decorativeClean,
+         `${width}px ${p.key}: decorative marks stay out of the accessibility tree`);
 
       /* ONE VIEWBOX UNIT IS ONE CSS PIXEL. A viewBox fixed in absolute units
          under width:100% scales the type down with the drawing — 9px axis
@@ -277,6 +302,44 @@ try {
       const term = swept.find((p) => p.key === "skewTerm");
       ok(Math.abs(ivs.boxW - term.boxW) <= 1,
          `1280px: the surface and the term line mount at the same width (${ivs.boxW} vs ${term.boxW})`);
+
+      /* THE COLUMNS THEMSELVES LINE UP — and the assertion is written the way
+         it is because the obvious form of it is ILL-FORMED on the case this
+         page was built for.
+
+         The spec claimed skewTerm.points IS ivSurface.expiries in the same
+         order, citing shared/flows-chain.js, where it is true. The PIPELINE
+         then splices two different calls together: on a truncated chain it
+         keeps the broad-call ivSurface and replaces skewTerm wholesale with a
+         second single-expiry read (flows-pipeline.mjs, the recovery leg). The
+         two panels stop sharing a column list at exactly that point —
+         measured, freshly emitted: 8 surface expiries against 1 term point.
+         A per-index sweep of both arrays is then comparing different things,
+         not failing.
+
+         So the term drawer borrows the surface's column POSITIONS by matching
+         expiry, never its levels, and what is asserted here is what a reader
+         can actually see: every term column centre sits on a surface column
+         centre. On the spliced card that is one marker under the right
+         column; on a clean card it is all of them. */
+      const align = await page.evaluate(() => {
+        const xs = (sel, attr) => [...document.querySelectorAll(sel)]
+          .map((n) => Number(n.getAttribute(attr)))
+          .filter((v) => Number.isFinite(v));
+        return {
+          surface: xs('.ft-panel[data-panel="ivSurface"] text.fts-exp', "x"),
+          term: xs('.ft-panel[data-panel="skewTerm"] .ftm-dot', "cx"),
+        };
+      });
+      ok(align.surface.length > 0, "1280px: the surface draws column heads to align against");
+      if (align.term.length) {
+        for (const cx of align.term) {
+          const nearest = Math.min(...align.surface.map((x) => Math.abs(x - cx)));
+          ok(nearest <= 1,
+             `1280px: a term marker at ${cx.toFixed(1)} sits on a surface column ` +
+             `(nearest ${nearest.toFixed(2)}px)`);
+        }
+      }
     }
     await page.close();
   }
@@ -521,12 +584,19 @@ try {
     const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
+    /* THE HIT AREA IS MEASURED, NOT RECONSTRUCTED. Deriving it as
+       `glyph + 2 * inset` requires knowing the glyph's advance, which is a
+       property of the font file and silently different under a fallback —
+       and it reads a `top` that is now a percentage. The pseudo-element
+       declares its own size; read that. */
     const hit = await page.evaluate(() => {
       const b = document.querySelector(".ft-zoom-open");
-      const r = b.getBoundingClientRect();
       const cs = getComputedStyle(b, "::after");
-      const inset = Math.abs(parseFloat(cs.top) || 0);
-      return { h: r.height + inset * 2, w: r.width + inset * 2 };
+      const r = b.getBoundingClientRect();
+      return {
+        h: Math.max(r.height, parseFloat(cs.height) || 0),
+        w: Math.max(r.width, parseFloat(cs.width) || 0),
+      };
     });
     ok(hit.h >= 44, `the enlarge control is at least 44px tall including its hit extension (${hit.h})`);
     ok(hit.w >= 44, `and at least 44px wide (${hit.w})`);

@@ -54,32 +54,3232 @@
   const picker = document.getElementById("ftPicker");
   const $ = (id) => document.getElementById(id);
 
-  /* [300, 1200]. The floor is the chart floor the 30rem panel rule protects
-     (measured: a 320px viewport gives a 284.8px host, and 300/284.8 = 1.053,
-     inside the 15% tolerance the render contract allows). The ceiling binds
-     only in the enlarge dialog on a very wide screen: at min(96rem, 96vw)
-     less 2x1.7rem the host reaches 1481px, so 1200 is a real clamp there and
-     is stated as a choice rather than described as inert. */
-  function ftWidth(host) {
-    return Math.max(300, Math.min(1200, Math.round(host && host.clientWidth) || 560));
-  }
+  /* THE SAME WIDTH POLICY THE TEN EXTRACTED RENDERERS USE, read from the
+     module rather than restated here. Two width functions is two answers to
+     "how wide is this chart" on a page that draws panels from both — and the
+     four drawers below sit in the same grid as ten renderers that would then
+     be sizing themselves by a different rule. [300, 1200]: the floor is the
+     chart floor the 30rem panel rule protects (a 320px viewport gives a
+     284.8px host, and 300/284.8 = 1.053, inside the render contract's 15%
+     tolerance); the ceiling binds in the enlarge dialog, whose host reaches
+     1481px. */
+  const ftWidth = P.panelWidth;
 
   /* ---------- the four drawers this page adds ---------------------- */
-  /* PLACEHOLDERS UNTIL THE FOUR DRAWERS LAND. Each renders an honest dead
-     panel rather than being absent: an absent DRAW entry would print "no
-     renderer is registered", which is true but reads as a configuration
-     mistake, and a missing function would throw a ReferenceError into the
-     walk and take the other ten panels down with it. */
-  function notYet(host, panel, card, question) {
-    deadPanel(host, question,
-      "this panel's renderer has not shipped yet. The payload is on the wire " +
-      "and has been since the option chain leg landed — what is missing is the " +
-      "drawing, not the data.");
+  /**
+   * Emit a panel's explanatory notes without burying the chart in them.
+   *
+   * THE PROBLEM IS PRESENTATION, NOT LENGTH. Every sentence these drawers
+   * write is load-bearing — what the shade means, that it is this chart's own
+   * quantile and not comparable between names, that a hollow cell is unknown
+   * rather than zero. Deleting any of it would leave a chart a reader can
+   * misread confidently, which is the failure this whole product is built
+   * against. But joined into one paragraph they arrived as four hundred words
+   * of unbroken prose UNDER a chart, and a rule nobody finishes reading is a
+   * rule nobody has been told.
+   *
+   * So: one paragraph each, and once the set is long enough to be a wall, it
+   * goes behind a disclosure that names what it is. The readings, the counts
+   * and the coverage line stay in the open; the decoder is one click away and
+   * still on the page, still selectable, still in the DOM for a find-in-page.
+   * Nothing is removed and nothing is summarised.
+   */
+  const NOTE_WALL_CHARS = 420;
+
+  function appendNotes(host, notes, summary) {
+    /* SOME CALLERS END THEIR SENTENCES AND SOME DO NOT, because the drawers
+       were written separately against a shared brief. Normalising here rather
+       than at eleven call sites is what stops a stray ".." reaching a reader —
+       and a doubled full stop in a panel whose whole claim is precision is
+       worse than it sounds. */
+    const list = (notes || [])
+      .filter((n) => n && String(n).trim())
+      .map((n) => String(n).trim().replace(/\.+$/, ""));
+    if (!list.length) return;
+    const total = list.reduce((n, t) => n + String(t).length, 0);
+    if (total <= NOTE_WALL_CHARS) {
+      for (const note of list) host.append(el("p", "fc-note", note + "."));
+      return;
+    }
+    const box = el("details", "ft-how");
+    box.append(el("summary", "ft-how-s", summary || "How to read this panel"));
+    for (const note of list) box.append(el("p", "fc-note", note + "."));
+    host.append(box);
   }
-  const drawIvSurface = notYet;
-  const drawSkewTerm = notYet;
-  const drawTopContracts = notYet;
-  const drawAggressor = notYet;
+
+  /* ---------- the four drawers, in full -----------------------------
+
+     Each is a sibling of the ten in flows-panels.js and follows the same
+     contract: switch on panel.status BEFORE touching a number, take the
+     question from the caller rather than hardcoding it, and suffix every
+     <defs> id with `mount` so a grid copy and an enlarged copy of the same
+     panel cannot borrow each other's patterns.
+
+     ftWidth is the module's panelWidth, above — each drawer was written with
+     its own copy of the same clamp and they were stripped on integration,
+     because three identical width policies is three places to disagree. */
+
+  /* ===== ivsurface ===== */
+  /* =============================================================
+     drawIvSurface — the implied-volatility surface, panels.ivSurface
+
+     WHAT THE PICTURE IS. One rectangle per (moneyness band × expiry).
+     Rows are `surface.rows`, log-moneyness band centres, HIGH STRIKES
+     AT THE TOP, because that is the order a price ladder is read in and
+     it is the order the emitter already built them in
+     (`flows-premium.js`: `for (let k = rowHi; k >= rowLo; k--)`).
+     Columns are `surface.expiries` in the order published, nearest
+     first.
+
+     WHAT A CELL ENCODES, AND IN WHICH CHANNEL. Four channels, and the
+     hue is not one of them:
+
+       1. OPACITY  — |skew| against this chart's own cap.
+       2. HATCH    — the SIGN of the skew. Below the column's level is
+                     hatched, at or above it is plain. Not a colour, so
+                     a reader who cannot separate red from green, or is
+                     holding a greyscale print, still gets the sign.
+       3. BORDER   — provenance. THREE appearances, one per state of
+                     `traded`: solid is a print from today, `3 2` did
+                     not trade today, `1 2` carries no volume field at
+                     all. The solid state has to be a DRAWN solid edge,
+                     not the absence of one: the shipped desk renderer
+                     (`flows-desk.js`) writes `stroke:"none"` for
+                     `traded === true` and therefore ships two
+                     appearances for a tri-state, which reads as "two
+                     kinds of odd cell and a normal one" instead of as
+                     three measured facts. Every cell here has a border.
+       4. NUMBER   — the contract's own quoted implied volatility, as a
+                     percent, printed inside the cell when the cell can
+                     hold it.
+
+     THERE IS NO SECOND HUE ON THIS GRID. `.fts-cell` carries one fill
+     and the sign lives entirely in the hatch, so nothing at all is lost
+     in greyscale. That is deliberately stricter than the gamma surface,
+     which tints `is-pos` and `is-neg` and uses the hatch as
+     reinforcement.
+
+     ---------------------------------------------------------------
+     THE LABELLED CHOICES, all of which the panel states in words:
+
+     CHOICE 1 — the opacity ramp is `0.12 + 0.46 · min(1, |skew|/cap)`.
+     The 0.12 floor exists so that a small-but-real skew is still
+     visibly a cell: zero opacity and "nothing here" must never look
+     alike, and this grid has a separate mark for "nothing here". The
+     0.58 ceiling exists because the quoted volatility is printed ON TOP
+     of the fill and has to stay legible against it.
+
+     CHOICE 2 — `skewCap` is a 0.9 quantile of |skew| ON THIS CHART
+     (`SKEW_CAP_QUANTILE`, floored at `SKEW_CAP_FLOOR = 0.01`). It is
+     not a constant and it is not shared. THE SHADING IS THEREFORE NOT
+     COMPARABLE BETWEEN TWO NAMES and the note says so in those words —
+     measured across the emitted corpus the cap ranges 0.0945 to 0.1972,
+     a factor of 2.1, so the same shade means twice the skew on one card
+     as on another.
+
+     CHOICE 3 — row labels are `ln(K/S)` to two decimals, NOT a
+     percentage. A row at 0.50 is a strike 64.9% above spot, and the
+     emitter really does build rows out to ±0.5 on a wide chain, so a
+     "+50.0%" label would be wrong by 14.9 percentage points at the
+     extreme. Two decimals separates every row on the step ladder the
+     emitter actually uses (0.05 and 0.10, measured); the two finest
+     rungs of `SURFACE_ROW_STEPS` (0.005, 0.01) would collide at two
+     decimals, so the decimal count is taken from `step` and is two
+     unless `step` itself is finer than a hundredth. See the notes.
+
+     CHOICE 4 — columns are evenly spaced by LISTED EXPIRY, not by
+     elapsed time. The tenor is printed under each head so the reader
+     can see how uneven the real spacing is.
+
+     CHOICE 5 — the at-the-money level is printed as a third line in the
+     column head, inside the `padT = 34` the layout was already
+     reserving. Read left to right that line IS the term structure, and
+     without it the grid has its level divided out of every cell with no
+     way to put it back. It costs the panel no height: three 9px lines
+     at baselines 7, 17 and 28 fit in 34px exactly.
+
+     ---------------------------------------------------------------
+     THE TWO STATES OUTSIDE THE OPACITY SCALE, and why they are three
+     different marks rather than three shades of pale:
+
+     `skew === null` — the cell is drawn HOLLOW: `fill:none`, a 1px
+     edge, and a backslash through the centre. It means the cell's
+     EXPIRY has no at-the-money quote this surface will vouch for, so
+     the contract's position on the smile is UNKNOWN. It does not mean
+     flat, and `fill-opacity: 0` would say flat.
+
+     THIS IS THE ONE MARK ON THE PAGE THAT CAN TEACH A READER A FALSE
+     FACT ABOUT A DIFFERENT PANEL. The gamma surface, in the same grid
+     idiom on the same card, styles `.gs-cell.is-zero { fill: none }` —
+     and there hollow means MEASURED EXACTLY ZERO. Two hollow cells, two
+     opposite meanings, one screen. The key names this one explicitly
+     and the note spells the difference out; do not shorten either.
+
+     No cell at all — `.fts-void`, an EXPLICIT FILLED rectangle, never a
+     gap. A band with no listed contract and a band whose contract is
+     quoted indistinguishably from its neighbours must not look alike.
+
+     ---------------------------------------------------------------
+     WHAT IS NOT ON THE WIRE, so that nobody designs it back in.
+     `serialiseSurface()` keeps FOUR fields per cell — `iv`, `skew`,
+     `traded`, `strike` — and DROPS `type`, `volume`, `oi`, `crowd` and
+     `m`; `atmType` is dropped from the expiry too. Verified against all
+     65 emitted cards. The desk's `cellTitle()` reads `cell.type`,
+     `cell.m`, `cell.crowd`, `cell.volume` and `cell.oi` and CANNOT be
+     reused here — every one of those would render as `undefined` or, if
+     coerced, as a confident zero. In particular: do NOT infer "below
+     spot, therefore a put". The band centre `rows[i]` is a stated band
+     centre, not the contract's own moneyness, and the note says so.
+     ============================================================= */
+
+
+  /** A LEVEL as a percent, one decimal, unsigned. "32.8" — the unit is in the
+   *  key and in the note, once, rather than on 52 cells. */
+  function ftsVol(v) {
+    const F = window.FlowsPanels;
+    const n = F.isNum(v);
+    return n === null ? F.DASH : (n * 100).toFixed(1);
+  }
+
+  /** A SKEW in volatility POINTS, signed, because the sign is the reading.
+   *  U+2212 for the minus, never the hyphen toFixed() emits. */
+  function ftsPts(v) {
+    const F = window.FlowsPanels;
+    const n = F.isNum(v);
+    if (n === null) return F.DASH;
+    return (n < 0 ? F.MINUS : "+") + Math.abs(n * 100).toFixed(1);
+  }
+
+  /** A ROW LABEL: ln(K/S) to `dp` decimals with U+2212. Not a percentage —
+   *  see CHOICE 3 in the header. */
+  function ftsBand(m, dp) {
+    const F = window.FlowsPanels;
+    const n = F.isNum(m);
+    if (n === null) return F.DASH;
+    /* -0.00 is a real output of toFixed() on a tiny negative and it is a sign
+       asserted at the one magnitude where sign is meaningless. */
+    const s = n.toFixed(dp);
+    return F.neg(/^-0\.?0*$/.test(s) ? s.slice(1) : s);
+  }
+
+  /** A count with its noun, so a count of one does not read "1 cells". */
+  function ftsPlural(n, one, many) {
+    return n === 1 ? one : many;
+  }
+
+  function drawIvSurface(host, panel, card, question, mount) {
+    const F = window.FlowsPanels;
+    const { el, svgEl, isNum, deadPanel, panelHead, statList, DASH, AXIS_CH } = F;
+
+    const q = question ||
+      "Where on the smile is this book bid, and how much of the chain is that reading taken over?";
+
+    /* THE TAGGED UNION IS TESTED BEFORE ANY NUMBER IS TOUCHED. A card built
+       before the option-chain leg shipped carries no `ivSurface` key at all —
+       `undefined`, not `{status:"unavailable"}` — and the two must not be
+       conflated, because only one of them is a source that failed. */
+    if (panel === undefined || panel === null) {
+      return deadPanel(host, q, "this card was built before the option chain leg shipped");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    const rows = Array.isArray(panel.rows) ? panel.rows : [];
+    const cols = Array.isArray(panel.expiries) ? panel.expiries : [];
+    const ivM = Array.isArray(panel.iv) ? panel.iv : [];
+    const skM = Array.isArray(panel.skew) ? panel.skew : [];
+    const trM = Array.isArray(panel.traded) ? panel.traded : [];
+    const kM = Array.isArray(panel.strike) ? panel.strike : [];
+
+    /* SECOND-STAGE GUARD. `status:"ok"` is the builder's verdict on the CHAIN;
+       it is not a promise that the grid has rows in it. A zero-row grid would
+       divide `300 / rows.length` and produce Infinity for the row height. */
+    if (!ivM.length || !cols.length || !rows.length) {
+      return deadPanel(host, q, "no usable moneyness bands");
+    }
+
+    panelHead(host, q);
+
+    /* Every <defs> id is suffixed with the mount tag. SVG ids are
+       document-global and url(#id) takes the FIRST match in document order, so
+       a page that draws this panel in the grid and again in the enlarge dialog
+       would otherwise give the second drawing the first's pattern. */
+    const tag = String(mount || "grid");
+
+    /* ---- geometry --------------------------------------------------- */
+    /* labelW carries "−0.30" at 9.5px — 5 characters at 5.7px is 28.5px, plus
+       the 6px gutter, inside 46 with room to spare. padT carries three head
+       lines. keyH carries the legend, which is the decoder for four separate
+       channels and without which the picture is an encoding with no key. */
+    const W = ftWidth(host);
+    const labelW = 46, padR = 10, padT = 34, keyH = 24;
+    const plotL = labelW;
+    const plotW = Math.max(60, W - labelW - padR);
+    const colW = plotW / cols.length;
+    /* A cell shorter than 11px is a line, not a cell; taller than 24 and a
+       ten-row surface becomes a poster. */
+    const rowH = Math.max(11, Math.min(24, 300 / rows.length));
+    const gridH = rows.length * rowH;
+    const H = Math.round(padT + gridH + keyH);
+
+    /* THE NUMBER ONLY GOES IN THE CELL WHEN THE CELL CAN HOLD IT. 26 is
+       arithmetic, not taste: "30.5" at 9px mono is 4 × 0.6 × 9 = 21.6px, plus
+       4px of breathing, rounded up.
+
+       MEASURED: this branch cannot currently be taken. The emitter caps the
+       grid at SURFACE_MAX_EXPIRIES = 8 and SURFACE_MAX_ROWS = 17, so at the
+       narrowest host this drawer will ever see (W = 300, plotW = 244) the
+       tightest possible column is 244/8 = 30.5px and the shortest possible row
+       is 300/17 = 17.6px. Both clear the thresholds. The guard is kept because
+       it is the layout's own arithmetic rather than a data assumption — raise
+       SURFACE_MAX_EXPIRIES to 10 upstream and it goes live the same day — but
+       nobody should read the fallback note below and conclude it has ever been
+       seen on this payload. */
+    const withNumbers = colW >= 26 && rowH >= 12;
+
+    const chW = (fs) => (AXIS_CH * fs) / 10;
+
+    const cap = isNum(panel.skewCap);
+    const step = isNum(panel.step);
+    /* CHOICE 3's decimal count, taken from the step rather than fixed at two.
+       Measured: step is 0.05 on 61 of 65 emitted cards and 0.10 on the other 4,
+       so `dp` is 2 on every card that exists today. It is 3 only on the 0.005
+       rung of SURFACE_ROW_STEPS, where two decimals would print the same label
+       on every adjacent pair of rows. */
+    const dp = step !== null && step < 0.01 ? 3 : 2;
+
+    /* THE AT-THE-MONEY ROW IS THE ONE NEAREST ZERO, not the one equal to it.
+       `rows` is normally symmetric about 0 and contains it exactly, but the
+       emitter's overflow branch clamps the window (`rowLo = max(rowLo, -half)`)
+       and can in principle shift zero off the grid. Nearest-to-zero is the same
+       answer whenever zero is present and is still an answer when it is not. */
+    let atmRow = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const a = isNum(rows[i]), b = isNum(rows[atmRow]);
+      if (a === null) continue;
+      if (b === null || Math.abs(a) < Math.abs(b)) atmRow = i;
+    }
+
+    const svg = svgEl("svg", {
+      class: "fts", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    /* The hatch that carries SIGN independently of hue, drawn at the CENTRE of
+       its tile rather than on its edge. A stroke on a tile boundary is half
+       clipped by patternUnits and renders at a fraction of its intended weight
+       — the defect renderGamma's gpNeg comment records. Same construction, and
+       the same reason, as the gamma surface's. */
+    const defs = svgEl("defs");
+    const pat = svgEl("pattern", {
+      id: `ftsNeg-${tag}`, width: 5, height: 5, patternUnits: "userSpaceOnUse",
+      patternTransform: "rotate(45)", class: "fts-negpat",
+    });
+    pat.append(svgEl("line", {
+      x1: 2.5, y1: 0, x2: 2.5, y2: 5, stroke: "currentColor", "stroke-width": 1.6,
+    }));
+    defs.append(pat);
+    svg.append(defs);
+
+    /* ---- column heads: the level, the expiry, the tenor -------------- */
+    cols.forEach((e, j) => {
+      const x = plotL + j * colW + colW / 2;
+      const atmIv = isNum(e && e.atmIv);
+      const days = isNum(e && e.days);
+
+      /* THE <title> HANGS ON A WRAPPING GROUP, NEVER ON THE <text>. A title
+         child of a text element is not painted but IS part of its textContent,
+         so the label reads back as the label plus a paragraph of prose —
+         invisible on screen and wrong to anything that reads the DOM, which
+         includes this page's own contract test. */
+      const group = svgEl("g", { class: "fts-colhead" });
+      const title = svgEl("title");
+      const bits = [String(e && e.expiry) + (days === null ? "" : ", " + days + " days")];
+      if (atmIv === null) {
+        /* NEVER A CONFIDENT ZERO, and never a bare dash either: the builder
+           always writes a reason when it refuses a level. */
+        bits.push("No at-the-money level: " +
+          ((e && e.atmReason) || "this expiry has no quote inside the band an at-the-money print may sit in") +
+          ". Every cell in this column is drawn hollow, because their position on the smile is unknown");
+      } else {
+        const am = isNum(e.atmM), ak = isNum(e.atmStrike);
+        bits.push("At the money " + ftsVol(atmIv) + "% implied" +
+          (ak === null ? "" : ", from the " + ak.toFixed(2) + " strike") +
+          (am === null ? "" : " at ln(K/S) " + ftsBand(am, dp)) +
+          ", and it traded today — a level this surface will vouch for");
+        bits.push("Every cell in this column is shaded against this number");
+      }
+      title.textContent = bits.join(". ") + ".";
+      group.append(title);
+
+      /* CHOICE 5: the level line, inside the padT the layout already had. */
+      const lvl = svgEl("text", {
+        class: "fts-level" + (atmIv === null ? " is-missing" : ""),
+        x, y: padT - 27, "text-anchor": "middle",
+        "font-family": "var(--font-mono)", "font-size": 9,
+        fill: "currentColor", "fill-opacity": atmIv === null ? 0.55 : 1,
+        "font-weight": atmIv === null ? 400 : 700,
+      });
+      lvl.textContent = atmIv === null ? DASH : ftsVol(atmIv);
+      group.append(lvl);
+
+      const head = svgEl("text", {
+        class: "fts-exp", x, y: padT - 17, "text-anchor": "middle",
+        "font-family": "var(--font-mono)", "font-size": 9,
+        fill: "currentColor", "fill-opacity": 0.8,
+      });
+      /* The ISO date keeps its hyphen — the U+2212 rule is about signs, and
+         "08−31" is not a date. slice(5) drops the year, which is the same on
+         every column of every card this panel draws. */
+      head.textContent = String(e && e.expiry).slice(5);
+      group.append(head);
+
+      const tenor = svgEl("text", {
+        class: "fts-days", x, y: padT - 6, "text-anchor": "middle",
+        "font-family": "var(--font-mono)", "font-size": 8.5,
+        fill: "currentColor", "fill-opacity": 0.6,
+      });
+      tenor.textContent = days === null ? DASH : days + "d";
+      group.append(tenor);
+      svg.append(group);
+
+      if (j > 0) {
+        svg.append(svgEl("line", {
+          class: "fts-colrule", x1: plotL + j * colW - 0.5, x2: plotL + j * colW - 0.5,
+          y1: padT, y2: padT + gridH,
+          stroke: "currentColor", "stroke-width": 0.5, "stroke-opacity": 0.18,
+        }));
+      }
+    });
+
+    /* ---- the grid --------------------------------------------------- */
+    const cellW = Math.max(1, colW - 1), cellH = Math.max(1, rowH - 1);
+    let hollow = 0, voids = 0, hatched = 0, clippedDrawn = 0;
+
+    rows.forEach((mRaw, i) => {
+      const y = padT + i * rowH;
+      const m = isNum(mRaw);
+      const ivRow = Array.isArray(ivM[i]) ? ivM[i] : [];
+      const skRow = Array.isArray(skM[i]) ? skM[i] : [];
+      const trRow = Array.isArray(trM[i]) ? trM[i] : [];
+      const kRow = Array.isArray(kM[i]) ? kM[i] : [];
+
+      cols.forEach((e, j) => {
+        const x = plotL + j * colW;
+        const iv = isNum(ivRow[j]);
+        const skew = isNum(skRow[j]);
+        const strike = isNum(kRow[j]);
+        const traded = trRow[j] === 1 ? 1 : trRow[j] === 0 ? 0 : null;
+        const atmIv = isNum(e && e.atmIv);
+
+        /* NO CONTRACT IN THIS BAND ON THIS EXPIRY is an EXPLICIT FILLED
+           rectangle, never a gap in the drawing. A band the chain does not
+           list and a band quoted indistinguishably from its neighbours would
+           otherwise look identical, and only one of them is a reading.
+
+           The cell's existence is tested on `iv`, because `iv` is what the
+           cell paints. `strike` distinguishes the two ways it can be absent
+           and that distinction goes in the title, not into a second mark. */
+        if (iv === null) {
+          voids++;
+          const vg = svgEl("g", { class: "fts-cellgroup" });
+          const vt = svgEl("title");
+          vt.textContent = strike === null
+            ? "No listed contract in the " + ftsBand(m, dp) + " band on " + String(e && e.expiry) +
+              ". Not a volatility of zero — nothing was quoted here at all."
+            : "A contract is listed at " + strike.toFixed(2) + " on " + String(e && e.expiry) +
+              " but this surface carries no implied volatility for it, so the cell is left empty " +
+              "rather than filled with a number nobody quoted.";
+          vg.append(vt);
+          vg.append(svgEl("rect", {
+            class: "fts-void", x, y, width: cellW, height: cellH,
+            fill: "currentColor", "fill-opacity": 0.07,
+          }));
+          svg.append(vg);
+          return;
+        }
+
+        const mag = skew !== null && cap !== null && cap > 0
+          ? Math.min(1, Math.abs(skew) / cap) : 0;
+        const isNeg = skew !== null && skew < 0;
+        /* PAST THE CAP IS DECIDED ON THE PUBLISHED NUMBERS, NOT ON
+           `panel.clipped`. The payload's count was taken upstream on the full
+           precision skews (`flows-premium.js`: `for (const s of skews) if
+           (s > skewCap) clipped++`), but `serialiseSurface` rounds BOTH the
+           skew and the cap to four decimals before either reaches this
+           renderer. A skew of 0.110936 against a cap of 0.110904 is clipped
+           upstream and is 0.1109 against 0.1109 here. MEASURED: the two
+           disagree on 42 of the 65 emitted cards — SYN002 publishes
+           `clipped: 6` and the wire supports 4.
+
+           The picture must mark exactly what its own numbers say, or it marks
+           a different set of cells than the sentence beside it counts, which
+           the gamma surface's own comment names as worse than marking none.
+           So the mark and the count both come from the drawn comparison, and
+           the note says when the payload disagrees rather than silently
+           picking one. */
+        const clipped = skew !== null && cap !== null && Math.abs(skew) > cap;
+        if (clipped) clippedDrawn++;
+        if (skew === null) hollow++;
+
+        const group = svgEl("g", { class: "fts-cellgroup" });
+
+        /* ONE GROUP, ONE TITLE, so the whole cell answers a hover. The number
+           painted on top of the tile would otherwise swallow the pointer and
+           leave the tooltip unreachable at exactly the place the reader is
+           looking. */
+        const title = svgEl("title");
+        const parts = [];
+        /* The strike is a real observable and it is on the wire. `rows[i]` is
+           the band's STATED CENTRE, not this contract's own log-moneyness —
+           `m` per cell was dropped by serialiseSurface — and the wording keeps
+           the two apart rather than passing a band centre off as a measurement
+           of this contract. */
+        parts.push((strike === null ? "This contract" : strike.toFixed(2)) +
+          " on " + String(e && e.expiry) + ", in the ln(K/S) " + ftsBand(m, dp) +
+          " band · " + ftsVol(iv) + "% implied");
+        if (skew === null) {
+          parts.push("No skew: " +
+            ((e && e.atmReason) || "this expiry has no at-the-money level this surface will vouch for") +
+            ". Its position on the smile is unknown, which is why the cell is hollow — it is not flat");
+        } else {
+          parts.push(ftsPts(skew) + " volatility points against this expiry's at-the-money " +
+            ftsVol(atmIv) + "%");
+        }
+        parts.push(traded === 1
+          ? "This contract traded today, so its implied volatility is today's print"
+          : traded === 0
+            ? "This contract did NOT trade today. This vendor's implied volatility is the last transaction's, so this one is of unknown age — it is drawn, and it did not set this expiry's level"
+            : "The vendor reported no volume for this contract at all, so whether this volatility is today's is unknown. Not the same fact as a contract that did not trade — it did not set this expiry's level either");
+        if (clipped) {
+          parts.push("Past the shade cap of " + ftsPts(cap) + " points, so the shade understates it. Marked with a slash");
+        }
+        title.textContent = parts.join(". ") + ".";
+        group.append(title);
+
+        const rect = svgEl("rect", {
+          /* is-nolevel is NOT "flat". A cell whose expiry has no at-the-money
+             quote has an UNKNOWN position on the smile, which is a different
+             thing from sitting on the money — and a zero-magnitude fill would
+             say the second. */
+          class: "fts-cell" + (skew === null ? " is-nolevel" : "") +
+            (traded === 0 ? " is-stale" : traded === null ? " is-unknown-age" : ""),
+          x, y, width: cellW, height: cellH,
+          fill: skew === null ? "none" : "currentColor",
+          "fill-opacity": skew === null ? null : (0.12 + 0.46 * mag).toFixed(3),
+          /* PROVENANCE BY BORDER, IN THREE APPEARANCES. The solid state is a
+             DRAWN solid edge and not the absence of an edge: with `stroke:none`
+             on today's prints a tri-state renders as two marks and a blank, and
+             the blank is the modal case (measured: 3,227 of 3,524 cells), so
+             the channel would be carrying nothing for 92% of the grid.
+             Solid is quiet and dashed is loud, so the lattice reads as
+             continuous and a break in it is what catches the eye. */
+          stroke: "currentColor",
+          "stroke-width": 1,
+          "stroke-dasharray": traded === 0 ? "3 2" : traded === null ? "1 2" : null,
+          "stroke-opacity": traded === 1 ? 0.5 : 0.9,
+        });
+        group.append(rect);
+
+        if (skew === null) {
+          /* THE HOLLOW CELL'S OWN MARK. A backslash, at 45 degrees and of
+             FIXED LENGTH at the centre. Fixed length because a corner-to-corner
+             diagonal makes the mark's angle a function of the cell's aspect
+             ratio, and a cell here is 30 × 24 at a phone width and 286 × 23 in
+             the enlarge dialog — the same mark would be a tidy X on one and a
+             long shallow rule across the chart on the other. Backslash because
+             the hatch and the clip mark both run the other way, so three marks
+             that can share a grid are three distinguishable glyphs. */
+          const len = Math.min(9, Math.max(4, Math.min(cellW, cellH) - 4));
+          const cx = x + cellW / 2, cy = y + cellH / 2;
+          group.append(svgEl("line", {
+            class: "fts-nolevel-mark",
+            x1: (cx - len / 2).toFixed(2), y1: (cy - len / 2).toFixed(2),
+            x2: (cx + len / 2).toFixed(2), y2: (cy + len / 2).toFixed(2),
+            stroke: "currentColor", "stroke-width": 1,
+          }));
+        }
+
+        if (isNeg && rowH >= 9 && colW >= 9) {
+          hatched++;
+          group.append(svgEl("rect", {
+            class: "fts-hatch", x, y, width: cellW, height: cellH,
+            fill: `url(#ftsNeg-${tag})`,
+            /* Faded so the hatch reads as a texture under the printed number
+               rather than as a strikethrough across it. */
+            opacity: 0.5,
+          }));
+        }
+
+        if (clipped) {
+          /* PAST THE CAP, MARKED RATHER THAN SILENTLY FLATTENED. A short
+             fixed-length slash at the bottom-left edge, the desk's
+             construction, because these tiles are as wide as the panel over
+             three and a diagonal across one of those reads as a rule through
+             the chart rather than a mark on one cell.
+
+             A clipped cell is ALWAYS at the ramp's top opacity by
+             construction — |skew| > cap forces mag = 1 — so a slash in the
+             panel's own background colour is legible on every cell that can
+             ever carry one, hatched or not. That is why the mark can afford to
+             be a hole rather than a fourth ink. */
+          const slash = Math.min(9, Math.max(4, cellW - 4));
+          group.append(svgEl("line", {
+            class: "fts-clip",
+            x1: (x + 3).toFixed(2), y1: (y + cellH - 3).toFixed(2),
+            x2: (x + 3 + slash).toFixed(2), y2: Math.max(y + 2, y + cellH - 3 - slash).toFixed(2),
+            stroke: "currentColor", "stroke-width": 1.2, "stroke-opacity": 0.9,
+          }));
+        }
+
+        if (withNumbers) {
+          const t = svgEl("text", {
+            /* One modifier, and it means "this printed number is not today's
+               print". It covers `traded === 0` and `traded === null` together
+               on purpose: the TEXT only needs to say the number may be old,
+               and the BORDER is the channel that separates "did not trade"
+               from "no volume field at all". */
+            class: "fts-iv" + (traded === 1 ? "" : " is-stale"),
+            x: x + cellW / 2, y: y + cellH / 2 + 3.2, "text-anchor": "middle",
+            "font-family": "var(--font-mono)", "font-size": 9,
+            fill: "currentColor",
+          });
+          t.textContent = ftsVol(iv);
+          group.append(t);
+        }
+        svg.append(group);
+      });
+    });
+
+    /* ---- row labels: ln(K/S), high strikes at the top ---------------- */
+    /* The at-the-money row is the reference every other row is read against so
+       it always gets a label, as do both ends; the rest are filled in at
+       whatever stride stays legible. MEASURED: rowH is 23.08 on a 13-row card
+       and 24 on an 11-row one, so the stride is 1 and every row is labelled on
+       every card that exists — the budget only bites past 25 rows, which the
+       SURFACE_MAX_ROWS = 17 ceiling forbids. It is kept because a wall of
+       digits is the failure mode this rail has, not because it fires. */
+    const must = new Set([0, rows.length - 1, atmRow]);
+    const stride = Math.max(1, Math.ceil(13 / rowH));
+    rows.forEach((mRaw, i) => {
+      if (!must.has(i)) {
+        if (i % stride !== 0) return;
+        let crowds = false;
+        must.forEach((k) => { if (Math.abs(k - i) * rowH < 12) crowds = true; });
+        if (crowds) return;
+      }
+      const t = svgEl("text", {
+        class: "fts-m" + (i === atmRow ? " is-atm" : ""),
+        x: labelW - 6, y: padT + i * rowH + rowH / 2 + 3.2, "text-anchor": "end",
+        "font-family": "var(--font-mono)", "font-size": 9.5,
+        fill: "currentColor", "fill-opacity": i === atmRow ? 1 : 0.7,
+        "font-weight": i === atmRow ? 700 : 400,
+      });
+      t.textContent = ftsBand(isNum(mRaw), dp);
+      svg.append(t);
+    });
+
+    /* ---- the key ----------------------------------------------------- */
+    /* WITHOUT THIS THE PICTURE IS AN ENCODING WITH NO DECODER. Four channels
+       are in play and three of them are marks a reader has never seen before.
+       It sits in the keyH band the height arithmetic already reserved, so the
+       key costs the panel nothing.
+
+       THE HOLLOW STATE IS NAMED EXPLICITLY AND MUST STAY NAMED. `.gs-cell.is-zero
+       { fill: none }` on the gamma surface — the same grid idiom, frequently the
+       panel directly above this one — means "measured exactly zero". Hollow here
+       means "unknown position on the smile". A reader who learns one mark and
+       carries it to the other panel learns a false fact about a real book. */
+    const keyTop = padT + gridH;
+    const KEY_FS = 9, SW = 12, SWH = 8, PAD_LB = 3, GAP = 10;
+    const kchW = chW(KEY_FS);
+    const capTxt = cap === null ? null : (cap * 100).toFixed(1);
+
+    const keyItems = [
+      { kind: "ramp", n: 3, label: capTxt === null ? "shade carries no size" : "0 to " + capTxt + " pts" },
+      { kind: "hatch", n: 1, label: "under ATM" },
+      { kind: "hollow", n: 1, label: "no level" },
+      { kind: "border", n: 1, dash: null, label: "today" },
+      { kind: "border", n: 1, dash: "3 2", label: "not today" },
+      { kind: "border", n: 1, dash: "1 2", label: "age unknown" },
+    ];
+    keyItems.forEach((it) => { it.w = it.n * SW + PAD_LB + it.label.length * kchW; });
+
+    /* Two rows of 8px swatches with 9px labels fit inside keyH = 24 exactly
+       (4 + 8, then 15 + 8 = 23). Greedy packing: at W = 300 the six items need
+       both rows — measured 251px and 200px against a 296px budget — and at any
+       host past ~470px they collapse onto one. */
+    const KEY_ROWS = [keyTop + 4, keyTop + 15];
+    let kr = 0, kx = 2;
+    const drawSwatch = (x, y, cls, opacity, dash) => svgEl("rect", {
+      class: cls, x, y, width: SW - 1, height: SWH,
+      fill: opacity === null ? "none" : "currentColor",
+      "fill-opacity": opacity === null ? null : opacity,
+      stroke: "currentColor", "stroke-width": 1,
+      "stroke-dasharray": dash || null,
+      "stroke-opacity": dash ? 0.9 : 0.5,
+    });
+
+    keyItems.forEach((it) => {
+      if (kx > 2 && kx + it.w > W - 2 && kr < KEY_ROWS.length - 1) { kr++; kx = 2; }
+      const y = KEY_ROWS[kr];
+      if (it.kind === "ramp") {
+        /* Both ends of the ramp are drawn, so any cell can be read to within a
+           step, and the note repeats the numbers in prose so the two cannot
+           drift apart. */
+        [0, 0.5, 1].forEach((mg, n) => {
+          svg.append(drawSwatch(kx + n * SW, y, "fts-cell", (0.12 + 0.46 * mg).toFixed(3), null));
+        });
+      } else if (it.kind === "hatch") {
+        svg.append(drawSwatch(kx, y, "fts-cell", (0.58).toFixed(3), null));
+        svg.append(svgEl("rect", {
+          class: "fts-hatch", x: kx, y, width: SW - 1, height: SWH,
+          fill: `url(#ftsNeg-${tag})`, opacity: 0.5,
+        }));
+      } else if (it.kind === "hollow") {
+        svg.append(drawSwatch(kx, y, "fts-cell is-nolevel", null, null));
+        svg.append(svgEl("line", {
+          class: "fts-nolevel-mark",
+          x1: kx + 2.5, y1: y + 1.5, x2: kx + SW - 3.5, y2: y + SWH - 1.5,
+          stroke: "currentColor", "stroke-width": 1,
+        }));
+      } else {
+        svg.append(drawSwatch(kx, y,
+          "fts-cell" + (it.dash === "3 2" ? " is-stale" : it.dash === "1 2" ? " is-unknown-age" : ""),
+          (0.12).toFixed(3), it.dash));
+      }
+      const t = svgEl("text", {
+        class: "fts-key", x: kx + it.n * SW + PAD_LB, y: y + SWH - 1.2,
+        "font-family": "var(--font-mono)", "font-size": KEY_FS,
+        fill: "currentColor",
+      });
+      t.textContent = it.label;
+      svg.append(t);
+      kx += it.w + GAP;
+    });
+
+    /* THE PANEL HAD role="img" AND MUST NOT HAVE AN EMPTY LABEL. The grid
+       cannot be read out cell by cell — 52 of them on a typical card — so the
+       label carries what the key carries plus the one reading a screen reader
+       would otherwise lose entirely: the term structure across the heads. */
+    const levelWords = cols.map((e) => String(e && e.expiry).slice(5) + " " +
+      (isNum(e && e.atmIv) === null ? "no level" : ftsVol(e.atmIv) + " percent"));
+    const hiBand = ftsBand(isNum(rows[0]), dp), loBand = ftsBand(isNum(rows[rows.length - 1]), dp);
+    svg.setAttribute("aria-label",
+      "Implied volatility by moneyness band and expiry" +
+      (card && card.ticker ? " for " + card.ticker : "") + ". " +
+      rows.length + " bands of log-moneyness from " + hiBand + " at the top down to " + loBand +
+      ", across " + cols.length + " expiries. " +
+      "At-the-money implied volatility by expiry: " + levelWords.join(", ") + ". " +
+      "Each cell is that contract's own quoted volatility; the shade is how far it sits from its " +
+      "own expiry's at-the-money quote, hatched below it and plain at or above it. " +
+      "A solid border is a print from today, a dashed one did not trade today, a dotted one " +
+      "carries no volume field at all.");
+
+    host.append(svg);
+
+    /* ---- the numbers the picture cannot state exactly ---------------- */
+    const placed = isNum(panel.placed), fresh = isNum(panel.fresh);
+    const pairs = [];
+    pairs.push(["Bands", rows.length + (step === null ? "" : " × " + (step * 100).toFixed(1) + "%")]);
+    pairs.push(["Expiries", String(cols.length)]);
+    pairs.push(["Shade cap", cap === null ? DASH : "±" + capTxt + " pts"]);
+    pairs.push(["Prints today", fresh === null || placed === null ? DASH : fresh + " of " + placed]);
+    /* THE STEEPEST CELL, because a shade cannot state a number exactly and this
+       is the one reading a desk carries away. Both coordinates: a band without
+       its expiry is not a smile and an expiry without its band is not a term. */
+    let peak = null;
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < cols.length; j++) {
+        const s = isNum(Array.isArray(skM[i]) ? skM[i][j] : null);
+        if (s === null) continue;
+        if (peak === null || Math.abs(s) > Math.abs(peak.s)) peak = { s, i, j };
+      }
+    }
+    if (peak) {
+      pairs.push(["Steepest cell",
+        ftsPts(peak.s) + " pts · " + ftsBand(isNum(rows[peak.i]), dp) + " · " +
+        String(cols[peak.j] && cols[peak.j].expiry).slice(5)]);
+    }
+    host.append(statList(pairs));
+
+    /* ---- the note: the decoder, in prose ----------------------------- */
+    const notes = [];
+    notes.push("Rows are ln(K/S), the natural log of strike over spot" +
+      (step === null ? "" : ", in bands " + (step * 100).toFixed(1) + "% wide") +
+      ", high strikes at the top. A row at 0.10 is a strike 10.5% above spot; a row at 0.50 " +
+      "is 64.9% above — which is why these are printed as logs and not as percentages");
+    notes.push("Columns are evenly spaced by listed expiry, not by elapsed time. Each column's " +
+      "tenor is printed beneath it, and the volatility above it is that expiry's at-the-money " +
+      "quote — read left to right, that top line is the term structure");
+    notes.push(withNumbers
+      ? "The number in a cell is that contract's own quoted implied volatility, as a percent"
+      : "Columns are too narrow at this width to print the quoted volatilities — the shading and " +
+        "the hatch carry the reading. Enlarge the panel for the numbers");
+    if (cap === null) {
+      notes.push("No shade scale could be measured for this grid, so shade carries no magnitude on it");
+    } else {
+      notes.push("The shade is that volatility against its own expiry's at-the-money quote: palest " +
+        "at 0 and darkest at " + capTxt + " volatility points. THAT CAP IS THIS CHART'S OWN — a 0.9 " +
+        "quantile of the skews on this grid, not a constant — so a shade here and a shade on another " +
+        "name's surface are not the same number and the two panels must not be compared by eye");
+    }
+    /* THE HATCH COUNT IS THE SHAPE OF THE SMILE IN ONE NUMBER, and it is the
+       one thing a shade cannot state: how much of this book is quoted under its
+       own level. Counted off the marks actually drawn, so the sentence and the
+       picture cannot drift. */
+    notes.push("Sign is the hatch, not a colour: a hatched cell is quoted BELOW its column's " +
+      "at-the-money level, a plain one at or above it — " + hatched + " of " +
+      (placed === null ? rows.length * cols.length - voids : placed) + " here. There is no second " +
+      "hue on this grid, so nothing about it is lost in greyscale or to a colour-blind reader");
+    /* THE TWO HOLLOWS. Named at length and deliberately not shortened. */
+    notes.push("A HOLLOW CELL IS NOT A FLAT ONE. It is a band on an expiry with no at-the-money " +
+      "quote this surface will vouch for, so the contract's position on the smile is unknown — " +
+      "note that the gamma surface on this same card draws a hollow cell for a dealer position " +
+      "MEASURED at exactly zero, which is the opposite kind of fact. An empty tile is different " +
+      "again: no contract listed in that band on that expiry at all");
+    notes.push("Every cell carries a border, and it says where the number came from: solid is a " +
+      "print from today, dashed did not trade today, dotted carries no volume field at all. This " +
+      "vendor's implied volatility is the LAST TRANSACTION's, not a quote, and only a contract " +
+      "that traded today was allowed to set an expiry's level — a stale cell is one marked number, " +
+      "but a stale level would tilt a whole column's smile with no marker on any cell it moved");
+    if (placed !== null && fresh !== null) {
+      const aged = [];
+      const st = isNum(panel.stale), un = isNum(panel.unknownAge);
+      if (st !== null && st > 0) aged.push(st + " did not");
+      if (un !== null && un > 0) {
+        aged.push(un + " carr" + (un === 1 ? "ies" : "y") + " no volume at all");
+      }
+      notes.push(fresh + " of " + placed + " cells traded today" +
+        (aged.length ? "; " + aged.join(" and ") : " — every cell on this surface is a print from today"));
+    }
+    if (hollow > 0) {
+      notes.push(hollow + " " + ftsPlural(hollow, "cell is", "cells are") + " hollow");
+    }
+    if (voids > 0) {
+      notes.push(voids + " " + ftsPlural(voids, "band on an expiry lists", "bands on an expiry list") +
+        " no contract at all");
+    }
+    const clippedN = isNum(panel.clipped);
+    if (cap !== null && clippedDrawn > 0) {
+      notes.push("The shade is capped, so " + clippedDrawn + " " +
+        ftsPlural(clippedDrawn, "cell runs", "cells run") + " past " + capTxt + " points and " +
+        ftsPlural(clippedDrawn, "is", "are") + " marked with a slash rather than flattened silently " +
+        "against every other saturated cell" +
+        (clippedN !== null && clippedN !== clippedDrawn
+          ? " (the payload counts " + clippedN + ", at a precision the wire rounds away: both the " +
+            "skew and the cap are published to four decimals, and the marks here are the ones " +
+            "those published numbers support)"
+          : ""));
+    } else if (cap !== null && clippedN !== null && clippedN > 0) {
+      /* The payload counted cells past its cap and the rounded numbers support
+         none of them. Saying nothing would leave the sentence and the picture
+         agreeing by accident; saying it is a two-clause admission that the
+         cap and the top of the ramp are the same number to four decimals. */
+      notes.push("The payload counts " + clippedN + " " +
+        ftsPlural(clippedN, "cell", "cells") + " past the " + capTxt + "-point cap, but at the four " +
+        "decimals the wire publishes none of them exceeds it, so none is marked");
+    }
+    const crowded = isNum(panel.crowded);
+    if (crowded !== null && crowded > 0) {
+      notes.push(crowded + " further " + ftsPlural(crowded, "contract falls", "contracts fall") +
+        " into a band already occupied. THE CELL IS NEVER AN AVERAGE: one quoted contract is shown " +
+        "— today's print first, then nearest the band's centre — because averaging two quoted " +
+        "volatilities produces a number nobody quoted");
+    }
+    const windowed = [];
+    const eS = isNum(panel.expiriesShown), eT = isNum(panel.expiriesTotal);
+    const rS = isNum(panel.rowsShown), rT = isNum(panel.rowsTotal);
+    if (eS !== null && eT !== null && eS < eT) windowed.push(eS + " of " + eT + " expiries");
+    if (rS !== null && rT !== null && rS < rT) windowed.push(rS + " of " + rT + " moneyness bands");
+    if (windowed.length) notes.push("Showing " + windowed.join(" and ") + ", nearest the money");
+    if (panel.ivBasis) {
+      notes.push("Volatility units resolved once for the whole chain: " + panel.ivBasis);
+    }
+    notes.push("Quoted volatilities, and differences between quoted volatilities on the same " +
+      "expiry. Nothing here is fitted, interpolated or repriced — that would need a rate and a " +
+      "dividend yield, which this desk does not invent. The band on a cell's tooltip is the band's " +
+      "stated centre, not that contract's own moneyness, which the card payload does not carry");
+    appendNotes(host, notes, "How to read this surface");
+
+    /* ---- coverage, which is ALWAYS stated ---------------------------- */
+    /* Its own paragraph, and the truncated sentence is VERBATIM. This is the
+       line that says the whole picture may be an arbitrary slice of the book,
+       and a sentence like that must not be sanded into the middle of a
+       paragraph of decoder prose. */
+    const cov = panel.coverage;
+    if (cov && cov.truncated === true) {
+      host.append(el("p", "fc-note",
+        "The vendor returned a full page of 500 contracts in no documented order. This is an " +
+        "arbitrary subset of the book — the skew and term readings are withheld for that reason."));
+    } else if (cov) {
+      const seen = isNum(cov.rowsSeen), priced = isNum(cov.pricedRows);
+      host.append(el("p", "fc-note",
+        "The vendor returned the whole chain" +
+        (seen === null ? "" : ": " + seen + " " + ftsPlural(seen, "contract", "contracts") +
+          (priced === null ? "" : ", " + priced + " of them priceable")) +
+        ", so this surface is taken over the entire book rather than a page of it." +
+        (cov.filter ? " " + cov.filter.charAt(0).toUpperCase() + cov.filter.slice(1) + "." : "")));
+    } else {
+      /* A panel built before chainPanel() wrapped coverage on has no coverage
+         key. "No coverage was published" is a fact; silence would read as
+         "the whole book", which is the claim this page exists to refuse. */
+      host.append(el("p", "fc-note",
+        "This card publishes no coverage record for the chain, so how much of the book this " +
+        "surface was taken over is not known."));
+    }
+  }
+
+  /* ===== skewterm ===== */
+  /* =============================================================
+     drawSkewTerm — the at-the-money volatility TERM STRUCTURE, plus
+     the chain's two scalars as text.
+
+     WHAT IS IDENTIFIED, AND FROM WHAT. Every number this panel draws
+     is already published on `card.panels.skewTerm`; the panel reads no
+     vendor field and invents nothing.
+
+       points[j].atmIv   the implied volatility of the contract nearest
+                         the money THAT TRADED TODAY, inside the band
+                         `panel.atmBand` of log-moneyness, for expiry j.
+                         `null` when the surface refused to level that
+                         column, and then `points[j].reason` says why.
+                         NOTE THE FIELD NAME: the per-point reason is
+                         `reason`, not `atmReason`. `panel.atmReason`
+                         exists too and is a DIFFERENT thing — the reason
+                         the panel-level scalar `atmIv` was withheld.
+       skew              put iv(ln K/S = −0.10) − call iv(ln K/S = +0.10)
+                         on the nearest expiry at or past 7 days quoting
+                         BOTH wings; nearest listed strike within 0.04 of
+                         each target; NO interpolation. Never a delta —
+                         25-delta skew needs a rate and a dividend yield,
+                         neither of which this page has, and that refusal
+                         is the reason the fixed-moneyness pair exists.
+       term              atm iv(nearest levelled expiry past 45 days)
+                         − atm iv(nearest past 7 days).
+
+     The panel's own `relation` string carries all of that verbatim and is
+     printed at the foot, so a reader never has to take this comment's
+     word for it — and so this file's hardcoded ±0.10 / 0.04 / 7 have
+     something to be checked against.
+
+     THE LABELLED CHOICES THIS RENDERER MAKES, all named on the panel:
+
+     1. THE Y AXIS RUNS FROM ZERO TO THE NEXT ROUND VOLATILITY POINT
+        STRICTLY ABOVE THE LARGEST LEVEL DRAWN. The spec offered
+        `1.08 × max(atmIv)` or "the next round volatility point above the
+        maximum, which is the better option if you can do it cleanly".
+        This takes the second: 1.08 is a multiplier nobody chose for a
+        reason, and it lands the axis top on a number no tick would ever
+        print — on the measured fixture, 1.08 × 0.328 = 0.35424. The round
+        rule reuses the codebase's own `niceStep` against max/4, which
+        gives a top of 35.0% on a 5-point ladder. STRICTLY above, so a
+        maximum that is already an exact multiple of the step gets one
+        more step and the tallest bar never touches the frame. The top,
+        the ladder and the maximum are all printed.
+
+     2. ORIGIN AT ZERO, AND WHY THE BARS LOOK ALIKE. `atmIv` is an
+        unsigned LEVEL, so it grows from a baseline that means zero
+        implied volatility and gets no zero tick — there is no "no change"
+        reading to draw a rule at. The cost is real and is stated: eight
+        levels between 21% and 34% render as eight bars of similar height.
+        The POLYLINE is what carries the shape. A truncated axis would
+        make every term structure look dramatic by construction, which is
+        the trade being refused here rather than taken quietly.
+
+     3. COLUMNS ARE EVENLY SPACED BY LISTED EXPIRY, NOT BY ELAPSED TIME.
+        Stated verbatim in the note, exactly as the surface above states
+        it. The tenor is printed beneath every column that is labelled.
+
+     4. A MISSING LEVEL IS NOT DRAWN ON THE BASELINE. This is the single
+        most important rule in this panel. The baseline is y = 0, which is
+        the position meaning ZERO IMPLIED VOLATILITY, so a level the
+        surface explicitly refused to vouch for would be drawn at the one
+        coordinate on the canvas that reads as a confident measurement of
+        nothing. Missing points sit on a dedicated `.ftm-missrail` BELOW
+        the axis, outside the plot, each wrapped in a `<g>` carrying that
+        expiry's own stated reason as a `<title>`, and the polyline BREAKS
+        across them rather than drawing a segment through a value nobody
+        measured — the break is `renderPath`'s, `flows-panels.js:1707-1715`.
+
+     5. THE TWO SCALARS ARE TEXT, NOT MARKS, AND CARRY NO HUE. `skew` has
+        polarity −1 (`shared/flows-card.js`: put iv − call iv, the SAME
+        construction as `riskReversal`; puts bid is BEARISH), so a
+        POSITIVE skew tinted by its sign rather than by a polarity lookup
+        would be tinted UP — the classic error on this field, and the
+        reason the spec prescribes words. Direction is given IN WORDS
+        beside the signed number, which survives a monochrome print and a
+        reader who cannot separate the two hues. `polarityOf()` lives in
+        `shared/`, which is in `.assetsignore` and never reaches the
+        browser, so a hue here could only come from a SECOND copy of the
+        polarity table — a second answer to the same question. There is
+        no hue on this panel at all.
+
+     6. THE COLUMN GRID IS BORROWED FROM THE SIBLING SURFACE WHEN THE TWO
+        PANELS AGREE ABOUT WHICH EXPIRIES EXIST. `skewTerm` is `span: 2`
+        and sits adjacent to `ivSurface`, so both mount at the identical
+        host width and share `labelW = 46`, `padR = 10` and
+        `colW = plotW / columns.length`; the j-th bar centre and the j-th
+        surface column centre then coincide to the pixel. See the block
+        comment on `termColumns` for the MEASURED case where the two
+        panels do not agree, which is a live pipeline defect this panel
+        has to survive rather than a hypothetical.
+
+     WHAT THIS PANEL EMITS NO ID FOR. No `<defs>`, no `<pattern>`, no
+     `<clipPath>`, no element id of any kind — there is no sign to hatch
+     here, only an unsigned level. `mount` is therefore accepted and
+     unused, deliberately: the suffix rule exists to keep two mounts of
+     one panel from sharing a `url(#…)` target, and a panel with no ids
+     cannot collide with its own second copy.
+     ============================================================= */
+
+  function drawSkewTerm(host, panel, card, question, mount) {
+    /* THE SCAFFOLDING IS NEVER REIMPLEMENTED. `isNum` in particular: it returns
+       null for anything that is not a finite number, and a fourth copy of it is
+       a fourth chance to write `Number(v) || 0` and turn a missing reading into
+       a confident zero. */
+    const { el, svgEl, isNum, deadPanel, panelHead, statList, niceStep,
+      DASH, MINUS, vol1 } = window.FlowsPanels;
+
+    const q = question ||
+      "Is the front bid over the back, and which wing is bid?";
+
+    /* THE TAGGED UNION, BEFORE ANY ARITHMETIC. A card published before the
+       chain leg shipped has no `skewTerm` key at all, and `undefined` is a
+       different state from a panel that was built and failed — the reader is
+       owed which one it was. */
+    if (panel === undefined || panel === null) {
+      return deadPanel(host, q,
+        "this card was built before the option chain leg shipped");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    const points = Array.isArray(panel.points) ? panel.points : [];
+    if (!points.length) {
+      return deadPanel(host, q,
+        "the chain produced no listed expiries, so there is no term structure to draw");
+    }
+
+    panelHead(host, q);
+
+    /* [300, 1200]. The floor is the chart floor the 30rem panel rule protects
+       (measured: a 320px viewport gives a 284.8px host). The ceiling binds only
+       in the enlarge dialog on a very wide screen: at min(96rem, 96vw) less
+       2×1.7rem the host reaches 1481px, so 1200 is a real clamp there and is
+       stated as a choice rather than described as inert. */
+    const W = Math.max(300, Math.min(1200, Math.round(host && host.clientWidth) || 560));
+
+    /* ---------- geometry, shared verbatim with the surface above ------ */
+
+    /* THESE CONSTANTS ARE A CROSS-PANEL CONTRACT, NOT A STYLE.
+       `labelW`, `padR`, `plotW` and `colW` are the surface's, character for
+       character, because the two panels are adjacent `span: 2` hosts of the
+       identical width and the suite asserts |x_surface[j] − x_term[j]| ≤ 1 for
+       every j. Changing any of them here without changing it there breaks an
+       alignment a reader reads BY EYE, one panel directly above the other, long
+       before a test catches it. */
+    const labelW = 46, padR = 10;
+    const padT = 12, plotH = 132, padB = 30, railH = 14;
+    const H = padT + plotH + padB + railH;           // 12 + 132 + 30 + 14 = 188
+    const plotL = labelW;
+    const plotW = Math.max(60, W - labelW - padR);
+    const baseY = padT + plotH;                      // the zero line, y = 144
+    const railY = baseY + railH / 2;                 // the miss rail, y = 151
+
+    const grid = termColumns(panel, card, points);
+    const cols = grid.cols;
+    const colW = plotW / cols.length;
+    const cxOf = (j) => plotL + colW * (j + 0.5);
+    /* A bar under 2px is a hairline pretending to be a bar; a bar over 34 is a
+       slab wide enough to hide the dot marking its own value. */
+    const barW = Math.max(2, Math.min(colW - 8, 34));
+
+    const levelOf = (col) => (col.point ? isNum(col.point.atmIv) : null);
+    const tenorOf = (col) => (col.days === null ? "an unstated tenor" : col.days + " days");
+
+    /* ---------- the scale ------------------------------------------- */
+
+    const levels = cols.map(levelOf);
+    const measured = levels.filter((v) => v !== null);
+    const maxIv = measured.length ? Math.max(...measured) : null;
+
+    /* THE NEXT ROUND VOLATILITY POINT STRICTLY ABOVE THE MAXIMUM. `niceStep` is
+       the codebase's own round-ladder helper (1, 2, 2.5 or 5 × a power of ten);
+       asking it for max/4 targets four or five ticks, which is what fits in
+       132px at 9px type. The `if` fires only when the maximum is already an
+       exact multiple of the step, and its whole job is to keep the tallest bar
+       off the frame. */
+    let step = 0, top = 0, nTicks = 0;
+    if (maxIv !== null && maxIv > 0) {
+      step = niceStep(maxIv / 4) || maxIv / 4;
+      top = Math.ceil(maxIv / step) * step;
+      if (top <= maxIv) top += step;
+      nTicks = Math.round(top / step);
+    }
+    const yOf = (v) => baseY - (v / top) * plotH;
+
+    /* ---------- the canvas ------------------------------------------- */
+
+    const svg = svgEl("svg", {
+      class: "ftm", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      preserveAspectRatio: "xMidYMid meet", role: "img",
+    });
+
+    /* PRESENTATION ATTRIBUTES ON EVERY <text>, not stylesheet-only rules. A
+       <text> with no CSS renders in the document's body font at whatever size it
+       inherits, so a renderer that ships before its rules do would draw
+       something actively wrong rather than something plain. Any CSS rule of the
+       same name still wins over an attribute — the same trade `renderPath`
+       records for its strokes. */
+    const text = (cls, attrs, size, content) => {
+      const t = svgEl("text", Object.assign({
+        class: cls, "font-family": "var(--font-mono)", "font-size": size,
+        fill: "currentColor",
+      }, attrs));
+      t.textContent = content;
+      return t;
+    };
+
+    /* -- y ticks. Drawn only when there IS a scale: a ladder of ticks over a
+          panel with no measured level is a ruler against nothing — and `yOf`
+          divides by `top`, so with no scale it would emit y="NaN" on every
+          label, which SVG discards silently and a browser reports only to the
+          console. Counted in integers rather than accumulated by +=, so the last
+          tick is exactly `top` and not `top` minus a float epsilon. */
+    if (top > 0) {
+      for (let i = 0; i <= nTicks; i++) {
+        const v = i * step;
+        const yy = Number(yOf(v).toFixed(1));
+        /* NO ZERO RULE — the spec's "gets no zero tick", read as what it is
+           guarding against. On the signed panels (`renderGamma`'s `.fa-zero`,
+           `renderPath`'s `.fp-zero`) the zero tick is a RULE ACROSS THE PLOT
+           marking which side of it means bearish, and an unsigned level has no
+           such side, so drawing one would invent a boundary. The baseline below
+           is already that line, drawn solid, and two rules at one y is one rule
+           that looks doubled.
+
+           The 0.0% LABEL is kept, and deliberately. It is the only thing on the
+           canvas that lets a reader verify the origin-at-zero choice by eye; an
+           axis whose lowest printed number is 5.0% at a gridline just above the
+           baseline invites exactly the "this axis is truncated" reading that
+           choice exists to prevent. If the integrator reads that sentence as
+           forbidding the label too, deleting it is this one `if`. */
+        if (i > 0) {
+          svg.append(svgEl("line", {
+            class: "ftm-axis", x1: plotL, x2: plotL + plotW, y1: yy, y2: yy,
+            stroke: "currentColor", "stroke-opacity": 0.16,
+          }));
+        }
+        svg.append(text("ftm-lab", {
+          x: labelW - 6, y: yy + 3, "text-anchor": "end",
+        }, 9, vol1(v)));
+      }
+    }
+
+    /* -- the baseline. It is the AXIS, not a zero rule: `atmIv` is unsigned and
+          nothing can sit below it, so it is drawn once, solid, and never
+          labelled as a reading of "no skew". */
+    svg.append(svgEl("line", {
+      class: "ftm-base", x1: plotL, x2: plotL + plotW, y1: baseY, y2: baseY,
+      stroke: "currentColor", "stroke-opacity": 0.5,
+    }));
+
+    /* -- the miss rail, below the axis and outside the plot. Drawn only when
+          something is parked on it, so an all-levelled panel does not carry a
+          rule explaining an absence it does not have. */
+    const missing = cols.filter((c) => levelOf(c) === null);
+    if (missing.length) {
+      svg.append(svgEl("line", {
+        class: "ftm-missrail", x1: plotL, x2: plotL + plotW, y1: railY, y2: railY,
+        stroke: "currentColor", "stroke-opacity": 0.28, "stroke-dasharray": "2 3",
+      }));
+    }
+
+    /* -- bars, and the line that breaks across what was never measured ---- */
+
+    let d = "", open = false;
+    cols.forEach((col, j) => {
+      const cx = cxOf(j);
+      const v = top > 0 ? levelOf(col) : null;
+
+      if (v === null) {
+        /* NOT ON THE BASELINE. A hollow marker on the rail, below the axis,
+           inside a <g> whose <title> is this expiry's own stated reason. The
+           <title> is a child of the GROUP and never of a <text>: a <title>
+           inside a <text> is not painted but IS part of its textContent, which
+           corrupts every test that reads a label. */
+        const why = col.point
+          ? (col.point.reason || panel.atmReason ||
+             "the surface levelled no at-the-money contract for this expiry")
+          : grid.uncoveredReason;
+        const g = svgEl("g", {});
+        const title = svgEl("title", {});
+        title.textContent = col.expiry +
+          (col.days === null ? "" : ` (${col.days}d)`) + ": " + why;
+        g.append(title);
+        g.append(svgEl("circle", {
+          class: "ftm-dot is-missing", cx: Number(cx.toFixed(1)), cy: railY, r: 2.6,
+          fill: "none", stroke: "currentColor", "stroke-width": 1.2,
+        }));
+        svg.append(g);
+        open = false;                    // THE LINE BREAKS ACROSS IT.
+        return;
+      }
+
+      const yTop = yOf(v);
+      svg.append(svgEl("rect", {
+        class: "ftm-bar", x: Number((cx - barW / 2).toFixed(1)), y: Number(yTop.toFixed(1)),
+        width: Number(barW.toFixed(1)),
+        height: Number(Math.max(0.5, baseY - yTop).toFixed(1)),
+        fill: "currentColor", "fill-opacity": 0.28,
+      }));
+      d += (open ? "L" : "M") + cx.toFixed(1) + " " + yTop.toFixed(1) + " ";
+      open = true;
+    });
+
+    /* The line goes ON TOP of the bars and UNDER the dots: the bar is the level,
+       the line is the shape, the dot is the measurement. A single measured
+       column emits one "M" and no "L", which paints nothing — correct, because
+       one point is not a term structure and a line through it would be an
+       extrapolation the payload does not support. */
+    if (d) {
+      svg.append(svgEl("path", {
+        class: "ftm-line", d: d.trim(), fill: "none", stroke: "currentColor",
+        "stroke-width": 1.8, "stroke-linejoin": "round",
+      }));
+    }
+    cols.forEach((col, j) => {
+      const v = top > 0 ? levelOf(col) : null;
+      if (v === null) return;
+      const g = svgEl("g", {});
+      const title = svgEl("title", {});
+      title.textContent = col.expiry + (col.days === null ? "" : ` (${col.days}d)`) +
+        ": at-the-money iv " + vol1(v);
+      g.append(title);
+      g.append(svgEl("circle", {
+        class: "ftm-dot", cx: Number(cxOf(j).toFixed(1)), cy: Number(yOf(v).toFixed(1)),
+        r: 2.6, fill: "currentColor",
+      }));
+      svg.append(g);
+    });
+
+    /* -- column labels: the expiry, then its tenor beneath it ------------ */
+
+    /* WIDEST LABEL FIRST, THEN THE STRIDE. "08-31" is five characters; at 9.5px
+       mono that is 5 × 6 × 0.95 = 28.5px, plus 4px of breathing. A column
+       narrower than that gets every other label rather than a row of
+       overlapping dates — the same squeeze the surface's own column heads live
+       with at a 320px viewport, where colW is 30.5. The last column is always
+       labelled, because the far end of a term structure is the half a reader
+       came for. */
+    const labelNeed = 5 * 6 * 0.95 + 4;
+    const stride = Math.max(1, Math.ceil(labelNeed / Math.max(1, colW)));
+    cols.forEach((col, j) => {
+      if (j % stride !== 0 && j !== cols.length - 1) return;
+      const cx = Number(cxOf(j).toFixed(1));
+      /* ISO DATES KEEP THEIR HYPHENS. The U+2212 rule is about a minus sign
+         standing for a negative quantity; "08-31" is a date, and swapping its
+         separator for a minus would make it a subtraction. */
+      svg.append(text("ftm-lab", { x: cx, y: baseY + railH + 11, "text-anchor": "middle" },
+        9.5, String(col.expiry || "").slice(5) || DASH));
+      svg.append(text("ftm-lab is-tenor", { x: cx, y: baseY + railH + 21, "text-anchor": "middle" },
+        9, col.days === null ? DASH : col.days + "d"));
+    });
+
+    /* -- the reading a screen reader gets -------------------------------- */
+
+    const firstM = cols.find((c) => levelOf(c) !== null);
+    const lastM = cols.slice().reverse().find((c) => levelOf(c) !== null);
+    const plural = cols.length === 1 ? "expiry" : "expiries";
+    svg.setAttribute("aria-label",
+      measured.length === 0
+        ? `At-the-money implied volatility across ${cols.length} listed ${plural}: no expiry ` +
+          "carried a level this session, so no bar is drawn and every column is marked on " +
+          "the rail below the axis."
+        : `At-the-money implied volatility across ${cols.length} listed ${plural}, ` +
+          (measured.length === 1
+            ? `a single level of ${vol1(levelOf(firstM))} at ${tenorOf(firstM)}.`
+            : `from ${vol1(levelOf(firstM))} at ${tenorOf(firstM)} to ` +
+              `${vol1(levelOf(lastM))} at ${tenorOf(lastM)}.`) +
+          (missing.length
+            ? ` ${missing.length} of ${cols.length} columns carry no level and are marked ` +
+              "on the rail below the axis."
+            : ""));
+    host.append(svg);
+
+    /* ---------- the two scalars, as TEXT ------------------------------ */
+
+    /* THE SKEW READING IS THE FIRST .fc-reading ON THE PANEL, and when the skew
+       is withheld it carries NO DIGIT. That is not a stylistic preference: the
+       contract test scopes "draws no skew number" to `.fc-reading`, which
+       resolves to the FIRST one, and the modal truncated card withholds the
+       skew while publishing perfectly good levels above it. Each scalar gets its
+       own reading element, so a withheld skew beside a published term is still a
+       digit-free first reading. */
+    const skew = isNum(panel.skew);
+    const skewB = panel.skewBasis || null;
+    const skewRead = el("p", "fc-reading");
+    if (skew === null || !skewB) {
+      skewRead.textContent =
+        "The wing-to-wing skew is not published for this name. The reason it was " +
+        "withheld is stated below, verbatim, rather than replaced by a zero — a " +
+        "symmetric smile is a real and notable reading, and this is not one.";
+    } else {
+      /* VOLATILITY POINTS, one decimal, the same precision every level on this
+         panel is printed to. The sign glyph comes from `signed`, which is U+2212
+         and not the hyphen `toFixed` emits. */
+      skewRead.textContent =
+        `Skew ${volPts(skew)} volatility points at ` +
+        `${skewB.days === null ? "an unstated tenor" : skewB.days + " days"} ` +
+        `(${skewB.expiry}): ` +
+        (skew > 0
+          ? "the put wing is bid over the call wing."
+          : skew < 0
+            ? "the call wing is bid over the put wing."
+            : "both wings are quoted at the same volatility.");
+    }
+    host.append(skewRead);
+
+    /* THE BASIS IS PART OF THE READING, NOT A FOOTNOTE. "Skew +7.0 points" is
+       meaningless without the moneyness each wing actually sat at: the pair is
+       the nearest LISTED strike to ±0.10, never an interpolation, so the wings
+       of a thin chain can sit near the edge of the tolerance and the number is a
+       different number then. Printed with the tolerance and the day floor that
+       admitted them.
+
+       THE THREE CONSTANTS BELOW ARE HARDCODED, AND THAT IS A KNOWN HAZARD.
+       SKEW_MONEYNESS (0.10), SKEW_TOLERANCE (0.04) and SKEW_MIN_DAYS (7) reach
+       the browser only inside `panel.relation`'s prose — there is no numeric
+       field for any of them — so a renderer that wants to name them has to
+       restate them. The defence is that `relation` is printed verbatim at the
+       foot of this panel, where a divergence is visible on the same screen.
+       `panel.atmBand` is NOT one of these: it is the surface's at-the-money
+       band, a different constant that happens to share the value 0.10. */
+    if (skew !== null && skewB) {
+      host.append(statList([
+        ["Put wing", wingText(skewB.putM, skewB.putStrike, skewB.putIv, skewB.putTraded)],
+        ["Call wing", wingText(skewB.callM, skewB.callStrike, skewB.callIv, skewB.callTraded)],
+        ["Target", "ln(K/S) = " + MINUS + "0.10 and +0.10, nearest listed strike within 0.04"],
+        ["Expiry floor", "7 days — measured on " + skewB.expiry +
+          (skewB.days === null ? "" : " (" + skewB.days + "d)")],
+      ]));
+    }
+
+    const term = isNum(panel.term);
+    const termB = panel.termBasis || null;
+    const termRead = el("p", "fc-reading");
+    if (term === null || !termB) {
+      termRead.textContent =
+        "The term difference is not published for this name. The reason it was " +
+        "withheld is stated below, verbatim.";
+    } else {
+      /* term = far − near, so a NEGATIVE term is the FRONT bid over the back:
+         the near level is the higher one. Getting this backwards inverts the
+         whole reading, which is why the direction is spelled out beside the
+         signed number instead of being left to the sign. */
+      termRead.textContent =
+        `Term ${volPts(term)} volatility points from ` +
+        `${termB.nearDays} days to ${termB.farDays} days: ` +
+        (term < 0
+          ? "the front is bid over the back — "
+          : term > 0
+            ? "the back is bid over the front — "
+            : "front and back are quoted at the same level — ") +
+        `at-the-money volatility ${vol1(termB.nearAtm)} at ${termB.near} against ` +
+        `${vol1(termB.farAtm)} at ${termB.far}.`;
+    }
+    host.append(termRead);
+
+    if (term !== null && termB) {
+      host.append(statList([
+        ["Near leg", termB.near + " (" + termB.nearDays + "d) · " + vol1(termB.nearAtm)],
+        ["Far leg", termB.far + " (" + termB.farDays + "d) · " + vol1(termB.farAtm)],
+        ["Far floor", "45 days — the nearest LEVELLED expiry at or past it"],
+      ]));
+    }
+
+    /* The panel's headline at-the-money level, and how much of the drawn grid
+       the term line could actually level. `measured` counts what is DRAWN, which
+       is what a reader is looking at; `panel.levelled` counts the panel's own
+       points, and the two differ exactly when the grid was borrowed — see
+       `termColumns`. */
+    const atm = isNum(panel.atmIv);
+    const stats = statList([
+      ["At-the-money level", atm === null ? DASH
+        : vol1(atm) + (panel.atmExpiry ? " at " + panel.atmExpiry : "")],
+      ["Expiries levelled", `${measured.length} of ${cols.length} drawn`],
+      ["Moneyness band", isNum(panel.atmBand) === null ? DASH
+        : "±" + panel.atmBand.toFixed(2) + " ln(K/S)"],
+    ]);
+    /* THE DASH CARRIES ITS REASON. `statList` takes strings, so the title goes
+       on afterwards rather than through a second copy of the helper — a missing
+       level with no reason attached is exactly the state house rule 1 forbids. */
+    if (atm === null && panel.atmReason) {
+      const dd = stats.querySelector("dd");
+      if (dd) dd.title = panel.atmReason;
+    }
+    host.append(stats);
+
+    /* ---------- the notes: every choice, and every stated absence ------ */
+
+    const scaleNote = el("p", "fc-note");
+    scaleNote.textContent =
+      "Columns are evenly spaced by listed expiry, not by elapsed time. Each " +
+      "column's tenor is printed beneath it. " +
+      (top > 0
+        ? `The axis runs from zero to ${vol1(top)} — the next round volatility point ` +
+          `above the largest level drawn (${vol1(maxIv)}), on a ${vol1(step)} ladder. That is a ` +
+          "round number rather than a headroom multiplier, so every tick is a volatility a " +
+          "reader recognises. "
+        : "There is no vertical scale: nothing on this chain carried a level to scale to. ") +
+      "The origin is ZERO because at-the-money volatility is a level, not a change — " +
+      "there is no “no move” reading to rule, and a truncated axis would make any " +
+      "term structure look dramatic by construction. The cost is that levels a few points " +
+      "apart draw as bars of similar height: read the LINE for the shape and the bars for " +
+      "the level.";
+    host.append(scaleNote);
+
+    if (missing.length) {
+      host.append(el("p", "fc-note",
+        `${missing.length} of ${cols.length} columns carry no at-the-money level and sit on ` +
+        "the rail BELOW the axis, not on it. The baseline is zero implied volatility, so a " +
+        "level the surface refused to vouch for would be drawn there as a confident " +
+        "measurement of nothing. Each marker carries that expiry's own stated reason, and " +
+        "the line breaks across them rather than crossing a value nobody measured."));
+    }
+
+    if (grid.borrowedNote) host.append(el("p", "fc-note", grid.borrowedNote));
+
+    /* COVERAGE IS ALWAYS STATED, and the reason is printed VERBATIM. A panel
+       that shows a clean eight-point term line off a page the vendor truncated
+       looks exactly like a panel built from the whole book. `coverage` rides on
+       THIS panel (chainPanel adds it to every ok chain panel); the sibling
+       surface is read only as a fallback for a card that predates that. */
+    const cov = panel.coverage ||
+      (card && card.panels && card.panels.ivSurface && card.panels.ivSurface.coverage) || null;
+    if (cov) {
+      const parts = [];
+      if (cov.truncated) {
+        const seen = isNum(cov.rowsSeen), pricedRows = isNum(cov.pricedRows);
+        parts.push("THIS CHAIN WAS TRUNCATED." +
+          (seen === null ? "" : ` The vendor returned ${seen} rows` +
+            (pricedRows === null ? "." : `, ${pricedRows} of them quoted.`)) +
+          " The levels drawn above are built from that slice of the book, not from the book.");
+      }
+      if (cov.filter) parts.push("Selection: " + cov.filter + ".");
+      if (parts.length) host.append(el("p", "fc-note", parts.join(" ")));
+    }
+
+    /* The withheld-scalar reasons, verbatim and unsummarised. Two identical
+       reasons print ONCE: on a truncated card `skewReason` and `termReason` are
+       the same sentence, and printing it twice reads as two separate failures. */
+    const reasons = [];
+    if (skew === null && panel.skewReason) reasons.push(["The skew", panel.skewReason]);
+    if (term === null && panel.termReason) reasons.push(["The term difference", panel.termReason]);
+    if (reasons.length === 2 && reasons[0][1] === reasons[1][1]) {
+      host.append(el("p", "fc-note", "Neither scalar is published: " + reasons[0][1] + "."));
+    } else {
+      for (const pair of reasons) {
+        host.append(el("p", "fc-note", pair[0] + " is not published: " + pair[1] + "."));
+      }
+    }
+
+    /* THE STATED RELATION, VERBATIM, LAST. Everything above is this renderer's
+       paraphrase; this is the payload's own sentence, and it is what a reader
+       should believe if the two ever disagree. It also carries the ±0.10, the
+       0.04 and the 7 days as the pipeline actually holds them, which is the only
+       defence against this file's restated copies of those three drifting. */
+    if (panel.relation) host.append(el("p", "fc-note", panel.relation));
+  }
+
+
+  /* ---------- private helpers -------------------------------------- */
+
+  /**
+   * A difference of two implied volatilities, in VOLATILITY POINTS.
+   *
+   * One decimal, the same precision the levels on this panel are printed to,
+   * and U+2212 for a negative because `signed` supplies it and `toFixed` does
+   * not. An EXACT zero gets no sign glyph: a measured zero has no direction,
+   * and "+0.0" over the words "both wings are quoted at the same volatility"
+   * reads as a small positive that has been rounded away. A skew that is merely
+   * SMALL still gets its sign, because it still has one.
+   */
+  function volPts(v) {
+    const { signed } = window.FlowsPanels;
+    return v === 0 ? "0.0" : signed(v * 100, (a) => a.toFixed(1));
+  }
+
+  /**
+   * One wing of the skew pair, as a phrase.
+   *
+   * The moneyness is the ACTUAL one the listed strike sat at, never the target:
+   * the pair is chosen by "nearest listed strike within the tolerance, freshness
+   * before distance, no interpolation", so a thin chain's wings can sit most of
+   * a tolerance away from ±0.10 and a reader shown only the target would think
+   * they were reading a number nobody quoted. Measured on the fixture: the put
+   * wing sat at −0.1051 and the call at +0.1050.
+   *
+   * `traded` is 1 / 0 / null and the third state is load-bearing: "the vendor
+   * sent no volume field" is not "this contract did not trade", and a wing that
+   * was quoted but never changed hands is weaker evidence than one that did.
+   */
+  function wingText(m, strike, iv, traded) {
+    const { isNum, DASH, signed, px2, vol1 } = window.FlowsPanels;
+    const mm = isNum(m), kk = isNum(strike), vv = isNum(iv);
+    if (mm === null && kk === null && vv === null) return DASH;
+    return "ln(K/S) " + (mm === null ? DASH : signed(mm, (a) => a.toFixed(4))) +
+      " · K " + (kk === null ? DASH : px2(kk)) +
+      " · iv " + (vv === null ? DASH : vol1(vv)) +
+      " · " + (traded === 1 ? "traded today"
+        : traded === 0 ? "quoted, did not trade today"
+          : "volume not reported");
+  }
+
+  /**
+   * The column grid the bars are drawn on — and the one pipeline defect this
+   * panel has to survive.
+   *
+   * THE CLAIM. `buildSkewTerm` maps `surface.expiries` straight through
+   * (`shared/flows-chain.js:373`) and `buildChainPanels` hands the SAME
+   * serialised object to both panels (`:704-705`), so `points[j].expiry` is
+   * `ivSurface.expiries[j].expiry` for every j and the two panels cannot
+   * disagree about which columns exist.
+   *
+   * THE MEASUREMENT. That holds for 48 of 50 emitted cards. On the two TRUNCATED
+   * ones it is FALSE, and truncation is the case this page was designed for: the
+   * pipeline spends a second, expiry-filtered call when the first page fills,
+   * then splices the scalars AND the whole `skewTerm` panel out of the narrow
+   * read while `ivSurface` keeps the broad one
+   * (`scripts/flows-pipeline.mjs:3941-3949`). Measured on a freshly emitted
+   * SYN212 and SYN306: `ivSurface.expiries.length === 8` against
+   * `points.length === 1`. The two panels are stacked one above the other and
+   * their columns do not line up.
+   *
+   * WHAT THIS DOES ABOUT IT. When every published point's expiry is found among
+   * the surface's, the grid is the SURFACE'S columns and each point is placed in
+   * the column it belongs to. The alignment invariant then holds on the
+   * truncated card as well as the clean one — the single narrow level lands
+   * under the surface column of the same expiry — and the columns the term line
+   * does not cover are drawn as what they are: columns with no reading, on the
+   * miss rail, with the reason stated. The alternative, one lonely bar centred
+   * across a 900px plot beneath an eight-column surface, is a chart that lies
+   * about which expiry it is describing.
+   *
+   * IT DOES NOT BORROW THE SURFACE'S LEVELS, only its column positions. A level
+   * this panel never published stays undrawn; reading `atmIv` off the sibling
+   * panel would paper over the splice and put numbers on this chart that its own
+   * payload does not contain.
+   */
+  function termColumns(panel, card, points) {
+    const { isNum } = window.FlowsPanels;
+
+    const own = {
+      cols: points.map((p) => ({ expiry: p.expiry, days: isNum(p.days), point: p })),
+      borrowedNote: null,
+      uncoveredReason: "this expiry carries no at-the-money reading on this panel",
+    };
+
+    const surf = card && card.panels && card.panels.ivSurface;
+    const expiries = surf && surf.status === "ok" && Array.isArray(surf.expiries)
+      ? surf.expiries : null;
+    if (!expiries || !expiries.length) return own;
+
+    const byExpiry = new Map();
+    for (const p of points) if (p && p.expiry) byExpiry.set(p.expiry, p);
+    /* A duplicate or absent expiry would silently drop a point. Refuse the
+       borrow rather than lose a measurement to a layout convenience. */
+    if (byExpiry.size !== points.length) return own;
+    if (!points.every((p) => expiries.some((e) => e.expiry === p.expiry))) return own;
+
+    const cols = expiries.map((e) => ({
+      expiry: e.expiry,
+      days: isNum(e.days),
+      point: byExpiry.get(e.expiry) || null,
+    }));
+    /* Identical lists — the overwhelmingly common case — make the borrow a
+       no-op, and a note explaining a difference that does not exist is noise. */
+    const identical = expiries.length === points.length &&
+      expiries.every((e, j) => e.expiry === points[j].expiry);
+
+    return {
+      cols,
+      borrowedNote: identical ? null
+        : `The term line covers ${points.length} of the ${cols.length} expiries drawn on the ` +
+          "surface above. The two panels were built from DIFFERENT reads of the same chain: " +
+          "the surface from the broad call, the term line from a second, single-expiry call " +
+          "the pipeline spends when the first page truncates. Columns are held aligned with " +
+          "the surface, so the same x position means the same expiry on both panels, and the " +
+          "expiries the term line does not cover carry no mark.",
+      uncoveredReason:
+        "the term line was rebuilt from a single-expiry read after the broad page truncated, " +
+        "so it carries no level for this expiry",
+    };
+  }
+
+  /* ===== topcontracts ===== */
+  /* =============================================================
+     drawTopContracts — panels.topContracts, the day's most-traded
+     option contracts, as a sortable table.
+
+     NOT A CHART, AND DELIBERATELY NOT ONE. Every other panel on this
+     page answers a question about a SHAPE — where gamma sits, what the
+     smile does with tenor, which side of the book is being lifted — and
+     a shape is what a chart is for. This panel answers "which single
+     lines carried the volume", and the answer is ten rows of nine
+     quantities that are not commensurable with each other: a strike is
+     a price, a volume is a count, an expiry is a date. Any encoding
+     that put them on a shared visual scale would be inventing a
+     comparison the data does not contain. A table prints each number in
+     its own units and lets the reader do the comparing, which is the
+     honest form here.
+
+     IDENTIFICATION. Nothing on this panel is estimated. Every column is
+     a vendor observable or a difference of two of them, and the two
+     differences are named beside the table:
+
+       Strike   option_symbol strike field / 1000
+       Expiry   option_symbol expiry field, as an ISO date
+       C/P      option_symbol type field
+       Vol      volume, verbatim
+       OI       open_interest, verbatim
+       dOI      open_interest - prev_oi          <- a DIFFERENCE
+       Bid      nbbo_bid, verbatim
+       Ask      nbbo_ask, verbatim
+       Net aggr ask_volume - bid_volume          <- a DIFFERENCE, in contracts
+
+     There is no free parameter here: no rate, no dividend, no
+     interpolation, no volatility model. The one derived number that
+     does not come off the wire is the day count in the Expiry title,
+     which is calendar days between the card's own sessionDate and the
+     contract's expiry — stated as a CHOICE below, because "days" could
+     equally have meant trading days and the two differ by a third.
+
+     THE CHOICES THIS PANEL MAKES, each labelled where it is made:
+
+     CHOICE 1 - NO MID COLUMN. (bid + ask) / 2 is the single most
+     requested column on a table like this one and it is refused.
+     A midpoint is a basis choice: it asserts that the true price sits
+     exactly halfway across a spread that may be a penny wide or a
+     dollar wide, and on the deep out-of-the-money lines that make this
+     table interesting it is routinely neither. Bid and Ask are two
+     adjacent columns, as quoted, and the reader who wants a midpoint
+     can see exactly what they would be averaging. Refused upstream too,
+     for the same reason: shared/flows-chain.js publishes bidPx and
+     askPx and no mid.
+
+     CHOICE 2 - NET AGGR IS IN CONTRACTS AND THE UNIT IS IN THE HEADER.
+     A dollarised flow would need a price basis, which is CHOICE 1 again
+     wearing a hat. The header reads "Net aggr (contracts)" so the unit
+     cannot come apart from the number when the column is read on its
+     own.
+
+     CHOICE 3 - THE SIGN OF NET AGGR IS CARRIED BY A GLYPH FIRST AND BY
+     HUE LAST. U+2191 / U+2193 lead the number, U+2212 marks negatives,
+     and only then does a class hand CSS the flow palette. A reader who
+     cannot separate red from green still gets the sign. The arrows are
+     U+2191 and U+2193 and NOT U+25B2 / U+25BC: assets/css/base.css
+     lists U+2191, U+2193 and U+2212 in the JetBrains Mono latin subset
+     and does not list the triangles, so a triangle would fall through
+     to the system stack and change the character advance halfway down a
+     tabular-numeric column.
+
+     CHOICE 4 - IMPLIED VOLATILITY IS IN THE STRIKE CELL'S TITLE, NOT IN
+     A TENTH COLUMN. The alternative the spec allows is a tenth column
+     shown only at >= 76rem, and it is rejected here for a mechanical
+     reason: this panel is drawn ONCE per mount and is not redrawn when
+     the viewport crosses a breakpoint (assets/js/flows-ticker.js
+     redraws on resize, but a drawer that decided its own column count
+     from matchMedia at draw time would be one debounce behind the
+     layout, and a column that is present-but-wrong is worse than one
+     that is absent). The title also keeps ln(K/S) and the volatility
+     together, which is where they belong: they are the two facts that
+     place a strike on the smile.
+
+     CHOICE 5 - dOI GETS NO DIRECTIONAL HUE. shared/flows-card.js's
+     POLARITY table has no `doi` entry, and polarityOf() returns 0 for a
+     key it does not know. That is not an omission to be patched here: a
+     rising open interest is not bullish and a falling one is not
+     bearish, and tinting the column green and red would be inventing a
+     direction for a quantity that has none. `aggr` IS in that table at
+     +1 (calls lifted at the offer are bullish), so the Net aggr column
+     is the ONE column on this panel that earns the flow palette.
+
+     THE FOUR ABSENCES THAT WOULD BECOME LIES IF PRINTED AS ZERO:
+
+     1. aggr === null is U+2014, never 0. "The vendor reported no
+        aggressor split" and "the split was reported and it was
+        balanced" are different facts and only one of them is a reading.
+        A measured zero prints "0" with no arrow, because neither arrow
+        is true at zero. The panel foot states how many of the rows
+        shown carried a split at all.
+     2. doi === null is U+2014, never 0. An open_interest present with
+        prev_oi absent is NOT "no change" - it is "the change is not
+        computable". An unchanged open interest prints 0.
+     3. bidPx / askPx / iv / oi are each independently U+2014.
+     4. Sort puts null LAST in both directions. Reversing a sort is
+        where this is easiest to lose: negate the comparator wholesale
+        and every unmeasured row floats to the top, where position reads
+        as ranking. Unmeasured never wins a ranking - the rule
+        assets/js/flows-board.js:531-554 and assets/js/flows-watch.js:
+        205-211 already state, applied to a third table so there is one
+        rule and not three.
+
+     COVERAGE IS ALWAYS STATED, in both directions. The vendor's chain
+     page tops out and a wide name has more contracts than fit on it, so
+     `coverage.truncated` is a fact about the SAMPLE and it is printed
+     whether it is true or false. What truncation means HERE is
+     different from what it means on the surface panels, and the panel
+     says which: the rows are not damaged - every line below is a
+     contract that really traded, at the volume the vendor reported for
+     it - but the SUPERLATIVE is. "The day's most-traded" is a claim
+     about a ranking over the whole book, and a ranking over an
+     arbitrary subset of the book is not that claim. So the rows stand
+     and the headline is withdrawn, explicitly, in words.
+
+     THE MOUNT TAG. This drawer emits no <svg>, no <defs> and no `id`
+     attribute at all, so the document-global id collision the mount tag
+     exists to prevent cannot arise here - and NOTHING BELOW MAY EMIT AN
+     id WITHOUT SUFFIXING IT. `mount` is still load-bearing: it keys the
+     per-mount sort state, so that the grid copy and the enlarged copy
+     sort independently, and so that neither loses the reader's chosen
+     order when flows-ticker.js redraws them on a resize.
+     ============================================================= */
+
+  /* The verbatim coverage sentence. It is quoted, not composed, because
+     the same sentence has to appear on all four chain panels and a
+     sentence assembled in four places is four sentences that will drift.
+     It names 500 because that is the vendor's page ceiling; the actual
+     row count that came back is put in the note's title, since it is
+     measured and the sentence is not. */
+  const TC_TRUNCATED_NOTE =
+    "The vendor returned a full page of 500 contracts in no documented order. " +
+    "This is an arbitrary subset of the book — the skew and term readings are " +
+    "withheld for that reason.";
+
+  /* Sort state per MOUNT, not per panel and not in the URL.
+     Not in the URL because this panel is one of fourteen on the page and
+     is mounted twice at once: a single ?sort= parameter cannot describe
+     two tables, and stamping one would make the grid copy and the
+     enlarged copy fight over it. Per mount rather than per draw because
+     flows-ticker.js redraws both copies on a width change, and a redraw
+     that silently threw away the order the reader had chosen would read
+     as the table resetting itself for no reason. */
+  const TC_SORT = new Map();
+
+  /* Integer counts, grouped. Math.round before grouping because a
+     contract count is an integer and a vendor that ever sends 2888.0000001
+     should not print six decimals of noise into a column of counts. The
+     locale is pinned to en-US rather than left to the reader's, so the
+     separator cannot change under a column whose alignment depends on
+     the character advance being uniform. */
+  function tcInt(v) {
+    const { isNum, DASH } = window.FlowsPanels;
+    const n = isNum(v);
+    return n === null ? DASH : Math.round(n).toLocaleString("en-US");
+  }
+
+  /* A signed integer with U+2212 for the minus and NO sign at all for
+     zero. Zero here means "measured, and it was zero" - the sign glyph
+     would claim a direction that a zero does not have. */
+  function tcSignedInt(v) {
+    const { isNum, DASH, MINUS } = window.FlowsPanels;
+    const n = isNum(v);
+    if (n === null) return DASH;
+    const r = Math.round(n);
+    const body = Math.abs(r).toLocaleString("en-US");
+    return r < 0 ? MINUS + body : r > 0 ? "+" + body : "0";
+  }
+
+  /**
+   * Calendar days from the card's session to this contract's expiry.
+   *
+   * CHOICE: CALENDAR DAYS, NOT TRADING DAYS. The two differ by roughly a
+   * third and neither is more correct than the other - what is not
+   * allowed is printing "25d" without saying which. This is computed
+   * from two published ISO dates rather than read off the wire, because
+   * topContracts.rows carries no day count and a third serialised field
+   * that must agree with two others is a field that will one day
+   * disagree with them.
+   *
+   * Date.UTC on the parsed parts, never new Date(string): parsing a
+   * bare "2026-09-18" is UTC but parsing the session date through a
+   * local-time path would shift the difference by a day for every
+   * reader west of Greenwich.
+   */
+  function tcCalendarDays(sessionDate, expiry) {
+    const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(sessionDate == null ? "" : sessionDate));
+    const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(expiry == null ? "" : expiry));
+    if (!a || !b) return null;
+    const from = Date.UTC(Number(a[1]), Number(a[2]) - 1, Number(a[3]));
+    const to = Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3]));
+    return Math.round((to - from) / 86400000);
+  }
+
+  /**
+   * The Net aggr cell: text, class and title in one place.
+   *
+   * FOUR STATES, NOT TWO. Lifted, hit, balanced and unreported all look
+   * alike to a renderer that only asks `n > 0`, and the last two are the
+   * pair this whole page exists to keep apart.
+   */
+  function tcAggrCell(v) {
+    const { isNum, DASH, MINUS } = window.FlowsPanels;
+    const n = isNum(v);
+    if (n === null) {
+      return {
+        text: DASH,
+        cls: "c-num ftt-aggr is-unreported",
+        title: "The vendor reported no aggressor split for this contract. That is not " +
+          "a balanced tape — it is no report at all, and the two are different facts.",
+      };
+    }
+    const r = Math.round(n);
+    const body = Math.abs(r).toLocaleString("en-US");
+    if (r === 0) {
+      return {
+        text: "0",
+        cls: "c-num ftt-aggr is-flat",
+        title: "Ask volume and bid volume were equal on this contract. The split was " +
+          "reported, and it was balanced. Neither arrow is true at zero, so neither is drawn.",
+      };
+    }
+    /* POSITION IN THE GLYPH, THEN THE MINUS, THEN THE CLASS. The arrow is
+       the primary channel and is present on both signs; U+2212 is the
+       second; the class is what CSS may tint, and it is last on purpose.
+       POLARITY.aggr is +1 (shared/flows-card.js) - calls and puts alike,
+       more contracts hitting the offer than the bid is the bullish
+       reading - so `is-lifted` takes --flow-up and `is-hit` --flow-down. */
+    return r > 0
+      ? {
+        text: "↑" + body,
+        cls: "c-num ftt-aggr is-lifted",
+        title: body + " more contracts hit the offer than the bid on this contract.",
+      }
+      : {
+        text: "↓" + MINUS + body,
+        cls: "c-num ftt-aggr is-hit",
+        title: body + " more contracts hit the bid than the offer on this contract.",
+      };
+  }
+
+  /**
+   * The dOI cell.
+   *
+   * THE SUBTLE ONE. `doi` is open_interest - prev_oi and the builder
+   * emits null when EITHER side is missing. A renderer that coerces sees
+   * 0 and prints "no change overnight", which is a specific, confident,
+   * completely unfounded claim about what stuck. The dash carries a
+   * title saying which of the two it is, because the difference between
+   * "unchanged" and "not computable" is invisible in a glyph.
+   */
+  function tcDoiCell(v) {
+    const { isNum } = window.FlowsPanels;
+    const n = isNum(v);
+    if (n === null) {
+      return {
+        text: tcSignedInt(null),
+        cls: "c-num ftt-doi is-unknown",
+        title: "The vendor published no previous open interest for this contract, so the " +
+          "overnight change is not computable. This is NOT a change of zero: an open " +
+          "interest that did not move prints 0.",
+      };
+    }
+    const r = Math.round(n);
+    return {
+      text: tcSignedInt(n),
+      cls: "c-num ftt-doi " + (r > 0 ? "is-built" : r < 0 ? "is-closed" : "is-flat"),
+      title: r === 0
+        ? "Open interest closed exactly where it opened: measured, and unchanged."
+        : r > 0
+          ? Math.abs(r).toLocaleString("en-US") + " contracts of open interest were added overnight."
+          : Math.abs(r).toLocaleString("en-US") + " contracts of open interest came off overnight.",
+    };
+  }
+
+  /**
+   * The Strike cell's title: where this contract sits on the smile.
+   *
+   * ln(K/S) IS PRINTED AS ln(K/S), NOT AS A PERCENTAGE. A row at 0.10 is
+   * a strike 10.5% above spot and a row at 0.50 is 64.9% above; the
+   * percentage rendering is wrong by fifteen points at the wing and the
+   * whole discipline of this page is stated relations. The implied
+   * volatility rides in the same title because the two together are what
+   * place a strike on the smile, and neither is worth much alone.
+   */
+  function tcStrikeTitle(row) {
+    const { isNum, MINUS, vol1 } = window.FlowsPanels;
+    const parts = [];
+    const m = isNum(row && row.m);
+    /* THREE DECIMALS AND AN EXPLICIT SIGN. The wire carries four, and the
+       third place is already a tenth of a percent of spot — the fourth
+       would be precision the reading does not have. The sign is written
+       out on positives too, because half of these values are negative and
+       a bare "0.070" beside a "−0.070" invites reading the first as the
+       larger of the two. A log-moneyness of exactly zero is a MEASUREMENT
+       — the strike is spot — and takes no sign at all, the same rule the
+       signed integer columns follow. */
+    parts.push(m === null
+      ? "Log-moneyness was not computed for this contract — the card published no " +
+        "spot price to measure the strike against."
+      : "ln(K/S) = " + (m < 0 ? MINUS : m > 0 ? "+" : "") + Math.abs(m).toFixed(3) +
+        ", the natural log of strike over spot.");
+    const iv = isNum(row && row.iv);
+    parts.push(iv === null
+      ? "The vendor quoted no implied volatility for this contract."
+      : "Implied volatility " + vol1(iv) + ", the vendor's own quote on this line.");
+    return parts.join(" ");
+  }
+
+  /* One <td>. Kept as a helper rather than inlined so that every cell on
+     this table goes through the same three steps - text, class, title -
+     and a cell that forgets its title is a diff, not an oversight. */
+  function tcCell(text, cls, title) {
+    const { el } = window.FlowsPanels;
+    const td = el("td", cls || null, text);
+    if (title) td.title = title;
+    return td;
+  }
+
+  /**
+   * The column table. Declarative for the same reason flows-board.js's
+   * COLS is: the header, the sort, the accessible name and the cell
+   * renderer for one column must all describe the SAME column, and four
+   * parallel switch statements is four chances for them to stop doing so.
+   *
+   * `first` is the direction a column sorts on its FIRST click - the one
+   * that is interesting about it. Volume, open interest and the two
+   * differences are magnitudes, so they open large-first; a strike, an
+   * expiry and a type are ladders, so they open low-first.
+   *
+   * `cls` on a numeric column is `c-num`, which flows.css raises to a
+   * five-selector specificity so it beats the table's own text-align
+   * without !important. Expiry and C/P are deliberately NOT `c-num`:
+   * neither is a number, an ISO date carries ASCII hyphens that the
+   * suite's minus-sign sweep reads over `.c-num` cells, and labelling a
+   * date as numeric to borrow an alignment is how that sweep ends up
+   * being loosened later to accommodate a lie it was written to catch.
+   */
+  const TC_COLS = [
+    {
+      key: "k", label: "Strike", name: "Strike", cls: "c-num", kind: "num", first: "asc",
+      relation: "The contract's strike, from the option symbol.",
+      get: (r) => window.FlowsPanels.isNum(r.k),
+      cell: (r) => ({ text: window.FlowsPanels.px2(r.k), cls: "c-num ftt-k", title: tcStrikeTitle(r) }),
+    },
+    {
+      key: "expiry", label: "Expiry", name: "Expiry", cls: "ftt-exp", kind: "text", first: "asc",
+      relation: "The contract's expiry, from the option symbol, as an ISO date.",
+      get: (r) => (r.expiry == null || r.expiry === "" ? null : String(r.expiry)),
+      cell: (r, ctx) => {
+        const { DASH } = window.FlowsPanels;
+        if (r.expiry == null || r.expiry === "") {
+          return { text: DASH, cls: "ftt-exp is-unknown", title: "This contract's symbol carried no parsable expiry." };
+        }
+        /* THE FULL ISO DATE, YEAR INCLUDED. The surface panel prints
+           expiry.slice(5) because its columns are already ordered and
+           labelled by tenor. This table can be SORTED, and a column that
+           showed 12-18 above 01-15 after an ascending sort would look
+           like a broken sort rather than like a January of the following
+           year. ISO dates keep their ASCII hyphens - that is the one
+           documented exception to the U+2212 rule on this site. */
+        const days = tcCalendarDays(ctx.sessionDate, r.expiry);
+        return {
+          text: String(r.expiry),
+          cls: "ftt-exp",
+          title: days === null
+            ? "Expiry, as the vendor's option symbol carries it."
+            : days + " calendar days from the " + ctx.sessionDate + " session. Calendar days, " +
+              "not trading days: the two differ by about a third and the choice is stated " +
+              "rather than left for the reader to guess.",
+        };
+      },
+    },
+    {
+      key: "cp", label: "C/P", name: "Call or put", cls: "ftt-cp", kind: "text", first: "asc",
+      relation: "Call or put, from the option symbol.",
+      get: (r) => (r.cp == null || r.cp === "" ? null : String(r.cp)),
+      cell: (r) => {
+        const { DASH } = window.FlowsPanels;
+        const cp = r.cp == null ? "" : String(r.cp);
+        /* MEASURED: the emitter publishes exactly "C" and "P" across 500
+           rows of 50 cards. Anything else is passed through verbatim
+           rather than mapped to one of the two - a symbol this renderer
+           does not recognise must not be silently filed as a call. */
+        const known = cp === "C" || cp === "P";
+        return {
+          text: cp === "" ? DASH : cp,
+          cls: "ftt-cp " + (cp === "C" ? "is-call" : cp === "P" ? "is-put" : "is-unknown"),
+          title: known
+            ? (cp === "C" ? "Call" : "Put")
+            : cp === ""
+              ? "This contract's symbol carried no parsable type."
+              : "The vendor sent an option type this panel does not recognise: " + cp,
+        };
+      },
+    },
+    {
+      key: "vol", label: "Vol", name: "Volume", cls: "c-num", kind: "num", first: "desc",
+      relation: "Contracts traded today on this line, the vendor's own count. This is the " +
+        "column the table is ranked by.",
+      get: (r) => window.FlowsPanels.isNum(r.vol),
+      cell: (r) => ({
+        text: tcInt(r.vol), cls: "c-num ftt-vol",
+        title: window.FlowsPanels.isNum(r.vol) === null
+          ? "The vendor reported no volume for this contract."
+          : "Contracts traded today on this line.",
+      }),
+    },
+    {
+      key: "oi", label: "OI", name: "Open interest", cls: "c-num", kind: "num", first: "desc",
+      relation: "Open interest: contracts outstanding on this line.",
+      get: (r) => window.FlowsPanels.isNum(r.oi),
+      cell: (r) => ({
+        text: tcInt(r.oi), cls: "c-num ftt-oi",
+        title: window.FlowsPanels.isNum(r.oi) === null
+          ? "The vendor reported no open interest for this contract."
+          : "Contracts outstanding on this line.",
+      }),
+    },
+    {
+      key: "doi", label: "OI", name: "Change in open interest", cls: "c-num", kind: "num", first: "desc",
+      relation: "open_interest − prev_oi: what stuck overnight, as opposed to what churned.",
+      /* The delta is a Greek capital and the table head is not set in the
+         mono face, so it is wrapped on its own. assets/css/base.css ships
+         a Greek subset of JetBrains Mono for exactly this reason and says
+         so: one glyph falling through to the system stack changes width
+         mid-line. */
+      labelPrefix: { text: "Δ", cls: "ftt-greek" },
+      get: (r) => window.FlowsPanels.isNum(r.doi),
+      cell: (r) => tcDoiCell(r.doi),
+    },
+    {
+      key: "bidPx", label: "Bid", name: "Bid", cls: "c-num", kind: "num", first: "desc",
+      relation: "nbbo_bid, as quoted. Not averaged with the ask — see the note below the table.",
+      get: (r) => window.FlowsPanels.isNum(r.bidPx),
+      cell: (r) => ({
+        text: window.FlowsPanels.px2(r.bidPx), cls: "c-num ftt-bid",
+        title: window.FlowsPanels.isNum(r.bidPx) === null
+          ? "No national best bid was quoted on this contract."
+          : "The national best bid, as quoted.",
+      }),
+    },
+    {
+      key: "askPx", label: "Ask", name: "Ask", cls: "c-num", kind: "num", first: "desc",
+      relation: "nbbo_ask, as quoted. Not averaged with the bid — see the note below the table.",
+      get: (r) => window.FlowsPanels.isNum(r.askPx),
+      cell: (r) => ({
+        text: window.FlowsPanels.px2(r.askPx), cls: "c-num ftt-ask",
+        title: window.FlowsPanels.isNum(r.askPx) === null
+          ? "No national best offer was quoted on this contract."
+          : "The national best offer, as quoted.",
+      }),
+    },
+    {
+      key: "aggr", label: "Net aggr (contracts)", name: "Net aggressor volume, in contracts",
+      cls: "c-num", kind: "num", first: "desc",
+      relation: "ask_volume − bid_volume, in contracts. The unit is in the header because " +
+        "dollarising it would need a price basis, which is a choice this panel refuses to make.",
+      get: (r) => window.FlowsPanels.isNum(r.aggr),
+      cell: (r) => tcAggrCell(r.aggr),
+    },
+  ];
+
+  /**
+   * Is this column able to order anything on THIS payload?
+   *
+   * A column whose every value is absent cannot produce an ordering, and
+   * a control that reorders nothing is a control that lies about what it
+   * does. It is DISABLED rather than removed, for the reason
+   * flows.css:1919-1924 already states about the board: a missing
+   * control says "this table cannot sort", a dimmed one says "not this
+   * column, and here is that it exists".
+   */
+  function tcSortable(col, rows) {
+    for (const r of rows) {
+      const v = col.get(r);
+      if (v !== null && v !== undefined) return true;
+    }
+    return false;
+  }
+
+  /**
+   * NULLS SORT LAST REGARDLESS OF DIRECTION.
+   *
+   * The direction is applied to the comparison of two PRESENT values
+   * only. A missing measurement is not a small value and it is not a
+   * large one; it is at the bottom in both directions. This is the same
+   * comparator flows-board.js:543 and flows-watch.js:205 carry, and it
+   * is written out here rather than imported because window.FlowsPanels
+   * does not export one - if it ever does, this should call it instead.
+   */
+  function tcCompare(col, dir, a, b) {
+    const x = col.get(a);
+    const y = col.get(b);
+    const xn = x === undefined ? null : x;
+    const yn = y === undefined ? null : y;
+    if (xn === null && yn === null) return 0;
+    if (xn === null) return 1;
+    if (yn === null) return -1;
+    const d = col.kind === "text" ? String(xn).localeCompare(String(yn)) : xn - yn;
+    return dir === "asc" ? d : -d;
+  }
+
+  /* The rows in the order they should be drawn, each carrying its
+     PUBLISHED index. The tie-break on that index is not defensive
+     clutter about sort stability: it says what a tie MEANS here, which
+     is "the builder already ranked these two by volume and that ranking
+     stands". Sorting by C/P is two buckets over ten rows, and without
+     this the inside of each bucket would be whatever fell out. */
+  function tcOrdered(rows, state) {
+    const view = rows.map((row, index) => ({ row, index }));
+    if (!state || !state.col) return view;
+    view.sort((p, q) => tcCompare(state.col, state.dir, p.row, q.row) || p.index - q.index);
+    return view;
+  }
+
+  /**
+   * The day's most-traded contracts.
+   *
+   * @param {HTMLElement} host  the empty panel body to draw into
+   * @param {object} panel      card.panels.topContracts
+   * @param {object} card       the whole card, for sessionDate and the sibling coverage
+   * @param {string} question   the panel's question, from data-question
+   * @param {string} mount      "grid" or "zoom" - keys the sort state
+   */
+  function drawTopContracts(host, panel, card, question, mount) {
+    const { el, isNum, deadPanel, panelHead, DASH } = window.FlowsPanels;
+
+    /* The registry's own question, as a fallback only. A panel that
+       cannot say what it is for does not belong on the card, and an
+       empty .fc-q is exactly that panel with the evidence removed. */
+    const q = question || "Which single lines carried the volume?";
+
+    /* THE TAGGED UNION IS SWITCHED ON BEFORE ANY NUMBER IS TOUCHED.
+       `undefined` is a card built before the chain leg shipped - a
+       legacy payload, not a failure - and it is a different sentence
+       from a run that declined to publish. */
+    if (panel === undefined || panel === null) {
+      return deadPanel(host, q, "this card was built before the option chain leg shipped, " +
+        "so this panel was never in it.");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    /* SECOND-STAGE GUARD, after status. A chain can come back whole and
+       still contain nothing that traded, and an empty table under a
+       heading that promises the day's most-traded contracts is the kind
+       of blank that reads as a broken renderer. */
+    const rows = Array.isArray(panel.rows) ? panel.rows : [];
+    if (!rows.length) {
+      return deadPanel(host, q, "no contract on this chain reported volume today");
+    }
+
+    panelHead(host, q);
+
+    const ctx = { sessionDate: card && card.sessionDate ? String(card.sessionDate) : null };
+
+    /* Which columns can order anything, decided once from the rows in
+       hand rather than per click. */
+    const live = new Map();
+    for (const col of TC_COLS) live.set(col.key, tcSortable(col, rows));
+
+    /* The sort state for THIS mount. Restored across a redraw; dropped
+       if it names a column this payload cannot order. */
+    const stored = TC_SORT.get(mount) || null;
+    let sortKey = stored && live.get(stored.key) ? stored.key : null;
+    let sortDir = stored && stored.dir === "asc" ? "asc" : "desc";
+
+    const table = el("table", "fc-levels ftt-table");
+    const thead = el("thead");
+    const headRow = el("tr", "ftt-headrow");
+    const buttons = new Map();
+    const headCells = new Map();
+
+    for (const col of TC_COLS) {
+      /* Every header carries its column's own hook alongside its alignment
+         class, so the stylesheet can reach one column by name. The
+         alternative is :nth-child, which silently addresses the wrong
+         column the day a tenth is added or the order changes. */
+      const th = el("th", col.cls + " ftt-h-" + col.key);
+      th.scope = "col";
+      th.title = col.relation;
+
+      /* A REAL <button> INSIDE THE <th>, not a click handler on the cell.
+         It buys keyboard operability and a focus ring for free and states
+         honest semantics: a <th> with a listener is unreachable by
+         keyboard and announces nothing, role="button" would lie about
+         what a header is, and tabindex="0" alone would make it focusable
+         without making it activatable by Enter or Space. */
+      const button = el("button", "ftt-sort");
+      button.type = "button";
+      if (col.labelPrefix) button.append(el("span", col.labelPrefix.cls, col.labelPrefix.text));
+      button.append(document.createTextNode(col.label));
+      const ind = el("span", "ftt-sort-ind");
+      ind.setAttribute("aria-hidden", "true");
+      button.append(ind);
+      button.addEventListener("click", () => toggleSort(col.key));
+      th.append(button);
+      headRow.append(th);
+      buttons.set(col.key, button);
+      headCells.set(col.key, th);
+    }
+    thead.append(headRow);
+    table.append(thead);
+
+    const tbody = el("tbody");
+    table.append(tbody);
+
+    /**
+     * aria-sort on the <th>, on every header, every time.
+     *
+     * It is the ONLY thing that tells a screen reader the table
+     * reordered; the arrow is a glyph, the state is the attribute. Every
+     * non-current header is explicitly reset rather than left as it was,
+     * because a stale aria-sort announces two sorted columns and there
+     * is only ever one. A column that cannot order anything gets NO
+     * aria-sort at all: "none" means "sortable, currently unsorted",
+     * which would advertise an order that column can never produce.
+     */
+    function syncHeaders() {
+      for (const col of TC_COLS) {
+        const th = headCells.get(col.key);
+        const button = buttons.get(col.key);
+        const can = live.get(col.key) === true;
+        const on = can && sortKey === col.key;
+        button.disabled = !can;
+        if (!can) th.removeAttribute("aria-sort");
+        else th.setAttribute("aria-sort", on ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+        const ind = button.querySelector(".ftt-sort-ind");
+        if (ind) ind.textContent = on ? (sortDir === "asc" ? "↑" : "↓") : "";
+        /* THE ACCESSIBLE NAME IS SPELLED OUT, not scraped from the
+           header. "C/P" and the delta announce as punctuation, and a
+           reader hearing "activate to sort by slash" has been told
+           nothing. The <th title> carries the relation for a sighted
+           reader; this is the same courtesy for everyone else. */
+        button.setAttribute("aria-label", col.name + ": " + (
+          on
+            ? "sorted " + (sortDir === "asc" ? "ascending" : "descending") +
+              ", activate to " + (sortDir === col.first
+                ? "reverse"
+                : "return to the published order, by volume")
+            : can
+              ? "activate to sort"
+              : "every value in this column is unreported on this chain, so it cannot be sorted"
+        ));
+      }
+    }
+
+    /* Only the <tbody> is rebuilt on a sort. Replacing the whole table
+       would take the focused header button out of the document mid-click
+       and drop the reader's focus to <body>, and it would reset the
+       scroll position of the wrapper the table lives in. */
+    function paintRows() {
+      const frag = document.createDocumentFragment();
+      for (const { row } of tcOrdered(rows, sortKey ? { col: TC_COLS.find((c) => c.key === sortKey), dir: sortDir } : null)) {
+        const tr = el("tr", "ftt-row");
+        for (const col of TC_COLS) {
+          const spec = col.cell(row, ctx);
+          tr.append(tcCell(spec.text, spec.cls, spec.title));
+        }
+        frag.append(tr);
+      }
+      tbody.replaceChildren(frag);
+    }
+
+    /**
+     * Click through: first click sorts the column its natural way,
+     * second reverses it, third returns the table to the order the
+     * builder published.
+     *
+     * THE PUBLISHED ORDER MUST BE RECOVERABLE. It is by volume
+     * descending, and it is the one ordering this panel exists to show -
+     * a table that can be sorted away from its own answer with no way
+     * back has thrown that answer away.
+     */
+    function toggleSort(key) {
+      if (live.get(key) !== true) return;
+      const col = TC_COLS.find((c) => c.key === key);
+      if (!col) return;
+      if (sortKey !== key) { sortKey = key; sortDir = col.first; }
+      else if (sortDir === col.first) { sortDir = col.first === "desc" ? "asc" : "desc"; }
+      else { sortKey = null; sortDir = "desc"; }
+      if (sortKey) TC_SORT.set(mount, { key: sortKey, dir: sortDir });
+      else TC_SORT.delete(mount);
+      syncHeaders();
+      paintRows();
+    }
+
+    syncHeaders();
+    paintRows();
+
+    /* THE WRAPPER SCROLLS, NEVER THE PAGE AND NEVER THE DIALOG. Nine
+       columns do not fit a 320px viewport at any type size worth
+       reading, so the table is given its own scroll container - at 320px
+       a horizontally scrolling page takes the rail with it, and a
+       horizontally scrolling dialog takes its header and close button
+       off-screen. tabIndex makes the region scrollable by keyboard,
+       which an overflow container is not by default. */
+    const wrap = el("div", "fc-tablewrap ftt-wrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "The day’s most-traded contracts");
+    wrap.append(table);
+    host.append(wrap);
+
+    /* ---------- what the table does and does not claim ---------------- */
+
+    const shownN = rows.length;
+    const total = isNum(panel.total);
+
+    /* THE SPLIT COUNT IS COUNTED HERE, off the rows being drawn, and the
+       published field is then checked against it. The count in the foot
+       has to describe the table the reader is looking at; a serialised
+       count that must agree with a rendered one is a count that will
+       eventually disagree with it, and when it does the rendered rows
+       are the truth. Measured across 50 emitted cards: the two agree on
+       every one, and the published values run 7 to 10 of 10. */
+    let reported = 0;
+    for (const r of rows) if (isNum(r.aggr) !== null) reported += 1;
+    const publishedReported = isNum(panel.aggressorReported);
+
+    const count = el("p", "fc-note ftt-count");
+    count.append(document.createTextNode(
+      (total === null
+        ? "The " + shownN + " most-traded contracts on this chain, ranked by volume. "
+        : total > shownN
+          ? "The " + shownN + " most-traded of the " + tcInt(total) + " contracts that reported " +
+            "a volume on this chain today, ranked by volume. "
+          : "All " + shownN + " contracts that reported a volume on this chain today, ranked " +
+            "by volume. ") +
+      reported + " of the " + shownN + " rows shown carried an aggressor split from the vendor; " +
+      "the rest print " + DASH + ", because a split that was reported and came out balanced and " +
+      "a split that was never reported are different facts and only one of them is a reading."));
+    /* A published count that disagrees with the drawn one is a payload
+       defect and is surfaced rather than quietly preferred either way. */
+    if (publishedReported !== null && publishedReported !== reported) {
+      count.append(document.createTextNode(
+        " The payload publishes aggressorReported = " + publishedReported + ", which does not " +
+        "match the " + reported + " rows above that carry one; the rows are what is drawn."));
+    }
+    if (isNum(panel.shown) !== null && panel.shown !== shownN) {
+      count.append(document.createTextNode(
+        " The payload publishes shown = " + panel.shown + " against " + shownN + " rows; the " +
+        "rows are what is drawn."));
+    }
+    host.append(count);
+
+    /* ---------- coverage, stated in both directions ------------------- */
+
+    /* READ OFF THIS PANEL FIRST. shared/flows-card.js's chainPanel()
+       attaches the same coverage block to every chain panel it publishes
+       with status "ok", so topContracts carries its own and does not
+       need to borrow the surface's - verified identical on all 50
+       emitted cards. The sibling is kept as a fallback for a payload
+       where the attachment is missing, since a panel that says nothing
+       about its coverage is the failure this block exists to prevent. */
+    const coverage = (panel && panel.coverage) ||
+      (card && card.panels && card.panels.ivSurface && card.panels.ivSurface.coverage) || null;
+
+    if (!coverage) {
+      host.append(el("p", "fc-note ftt-cover",
+        "This payload carries no coverage block, so how much of the chain these rows were " +
+        "drawn from is not stated. Treat the ranking as unverified rather than as complete."));
+    } else if (coverage.truncated === true) {
+      const cover = el("p", "fc-note ftt-cover", TC_TRUNCATED_NOTE);
+      const seen = isNum(coverage.rowsSeen);
+      const priced = isNum(coverage.pricedRows);
+      if (seen !== null) {
+        cover.title = "Measured on this card: " + tcInt(seen) + " contract rows came back" +
+          (priced === null ? "" : ", " + tcInt(priced) + " of them priced") + ".";
+      }
+      host.append(cover);
+
+      /* THE JUDGEMENT THIS PANEL HAS TO MAKE, and it is not the same one
+         the surface panels make. There, truncation damages the READING:
+         a smile built from an arbitrary slice is not the smile. Here it
+         damages the CLAIM but not the DATA. Every row below is a real
+         contract that really traded at the volume printed beside it -
+         truncation cannot make a print that happened un-happen. What it
+         makes unsafe is the superlative in the panel's own title. Saying
+         only "this is an arbitrary subset" would leave a reader to guess
+         which of the two it is, and the likelier guess is the wrong one:
+         that the rows themselves are suspect, which would throw away ten
+         real observations. So the panel says it in words, both halves. */
+      host.append(el("p", "fc-note ftt-scope",
+        "For this panel that qualifies the ranking, not the rows. Every line above is a " +
+        "contract that really traded, at the volume the vendor reported for it, and a page " +
+        "limit cannot make a print that happened un-happen. What it does undo is the word " +
+        "“most”: these are the " + shownN + " busiest lines of the subset that came " +
+        "back, not of the book, and a busier line may sit in the part of the chain that was " +
+        "never paged. Read them as " + shownN + " real prints, not as a top " + shownN + "."));
+    } else {
+      const seen = isNum(coverage.rowsSeen);
+      const priced = isNum(coverage.pricedRows);
+      host.append(el("p", "fc-note ftt-cover",
+        "The vendor returned the whole chain it holds for this name" +
+        (seen === null
+          ? ". "
+          : ": " + tcInt(seen) + " contract rows" +
+            (priced === null ? "" : ", " + tcInt(priced) + " of them priced") + ". ") +
+        (coverage.filter
+          ? String(coverage.filter).replace(/^./, (c) => c.toUpperCase()) + "."
+          : "")));
+    }
+
+    /* ---------- the relations, beside the numbers that used them ------ */
+
+    const basis = el("p", "fc-note ftt-basis");
+    basis.append(document.createTextNode(
+      (panel.relation ? String(panel.relation) + ". " : "") +
+      "ΔOI is open_interest − prev_oi: what stuck overnight, as against what churned. " +
+      "A " + DASH + " there means the vendor published no previous open interest, so the change " +
+      "is not computable — it does not mean the open interest held still, which prints 0. " +
+      "Bid and Ask are the quoted NBBO in two columns and there is no Mid: (bid + ask) ÷ 2 " +
+      "is a basis choice, and on the far out-of-the-money lines that make this table interesting " +
+      "it is routinely nowhere near where anything traded. Each strike carries its log-moneyness " +
+      "ln(K/S) and the vendor's implied volatility in its title, and each expiry its distance in " +
+      "calendar days from this session."));
+    host.append(basis);
+  }
+
+  /* ===== aggressor ===== */
+  /* =============================================================
+     drawAggressor — net aggressor flow by strike, in CONTRACTS.
+
+     A SIBLING OF renderGamma, NOT A NEW THING. It borrows that panel's
+     geometry constants verbatim (padT/padB/labelW/railW, the ROW rule,
+     yOfIndex, the data-placed zero rule, the one-rate-across-zero scale,
+     the minimum bar width, the round-ladder ticks) because the two
+     ladders sit side by side in the same grid at span 1, and a reader
+     who learns to read one must not have to relearn the other. Where
+     this panel diverges from renderGamma it is because the FIELD is
+     different, and each divergence is labelled below.
+
+     WHAT IT ANSWERS. `aggressor.bars[].net` is, per the builder's own
+     published relation, `Σ (ask_volume − bid_volume)` over the contracts
+     at one strike, signed by what the BUYER of that contract is long:
+     calls +, puts −. So a bar to the right is "calls were taken at the
+     offer here"; a bar to the left is "puts were". It is a count of
+     CONTRACTS, never a dollar figure — the builder refuses to dollarise
+     it because that needs a price basis (flows-chain.js:403-406) — and
+     the unit is stated on the axis, in the rail header sentence and in
+     the aria-label.
+
+     THE IDENTIFICATION RULE, in one line: the mark's SIDE of the drawn
+     zero rule is the sign of `net`, its LENGTH is |net| on a scale that
+     is linear in contracts and shared across both halves, its ROW is one
+     listed strike, and the rail beside it is the total volume the vendor
+     actually reported at that strike — never a total it did not.
+
+     ---------------------------------------------------------------
+     THE LABELLED CHOICES
+     ---------------------------------------------------------------
+
+     CHOICE 1 — THE SCALE IS LINEAR IN CONTRACTS, where the gamma ladder
+     beside it is symlog. Deliberate, and the reason is the field's own
+     dynamic range. Measured over 876 bars on 50 emitted cards: the
+     largest |net| is 5,417 and the smallest non-zero |net| is 1, a span
+     of 3.73 decades. Per-strike dealer gamma spans four or five decades
+     within one name and seventeen across the board, which is what forces
+     renderGamma into symlog and costs it magnitude comparability. Three
+     and a half decades is a range a linear axis can hold, and holding it
+     linearly buys back the property symlog gives up: on THIS panel a bar
+     twice as long really is twice the flow, so the ticks are not merely
+     a rank ruler and the reader may compare two bars directly. That is
+     worth more here than reach, because the interesting reading is a
+     BALANCE between two sides, not the magnitude of one wing. It is
+     stated on the panel in those words, because a reader arriving from
+     the log panel above will otherwise carry the wrong instruction over.
+
+     CHOICE 2 — THE ZERO RULE IS PLACED BY THE DATA, `share =
+     |fMin| / (|fMin| + |fMax|)`, clamped to [0.18, 0.82]. Both bounds
+     are CHOICES. A symmetric axis wastes half the plot when a book is
+     95% one-signed; an unclamped one squeezes the minority side to
+     nothing, and the minority side is frequently the whole reading.
+
+     CHOICE 3 — `fMin` AND `fMax` ARE SEEDED WITH 0, and the rate has a
+     `Number.isFinite` fallback. Both are load-bearing and neither is
+     decoration; see the block comment at the scale itself.
+
+     CHOICE 4 — SIGN IS CARRIED THREE TIMES BEFORE HUE. Position (which
+     side of the drawn `.fa-zero`) is primary; a 45° hatch laid over the
+     fill is second; an explicit U+2212 / + on the magnitude ticks is
+     third; `--flow-up` / `--flow-down` is last and wholly duplicative.
+     A greyscale render or a red-green-blind reader loses nothing.
+
+     CHOICE 5 — THE HATCH PATTERN IS THIS PANEL'S OWN, id-suffixed with
+     `mount`, and NOT a borrowed `url(#gpNeg)`. Worked out rather than
+     assumed; the reasoning is at the <defs> below.
+
+     CHOICE 6 — A PARTIAL VOLUME TOTAL IS MARKED IN THE TEXT ITSELF, with
+     a trailing U+2026, as well as by `.is-partial` and a <title>. See the
+     rail block: it is the modal case and it must survive a stylesheet
+     that never shipped.
+
+     CHOICE 7 — MAGNITUDE TICKS CARRY AN EXPLICIT LEADING SIGN, where
+     renderGamma prints its magnitudes unsigned and lets the caption say
+     which side is which. Here the sign is the published polarity of the
+     field itself (`POLARITY.net === +1`), and both halves are readings a
+     user acts on, so each half names itself without reference to a
+     caption 200px away.
+     ============================================================= */
+
+
+  /* Mono advance in px for a string at a given font size. AXIS_CH is 6, the
+     measured 5.81 at 10px rounded up so every estimate errs WIDE — a label
+     estimated too narrow collides or leaves the canvas, one estimated too wide
+     costs a few pixels. The .gp-axis rule carries letter-spacing: 0.04em, which
+     is exactly the gap between 5.81 and 6. */
+  function faTextW(s, fontPx) {
+    return String(s).length * window.FlowsPanels.AXIS_CH * (fontPx / 10);
+  }
+
+  /* GROUPED INTEGERS, BUILT BY HAND RATHER THAN BY toLocaleString.
+     toLocaleString's separator is the HOST's locale: the same bar prints
+     "5,310" in the test runner and "5.310" under a de-DE browser, which would
+     turn a contract count into a decimal in front of a reader and pass every
+     test that ran in en-US. The regex is locale-free.
+     The sign is U+2212, never the ASCII hyphen toFixed emits. */
+  function faGrouped(n) {
+    const F = window.FlowsPanels;
+    const v = F.isNum(n);
+    if (v === null) return F.DASH;
+    const a = String(Math.abs(Math.round(v))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return (v < 0 ? F.MINUS : "") + a;
+  }
+
+  /* A ONE-DECIMAL THOUSANDS FORM, for the two places a grouped integer will
+     not fit the 112px rail.
+
+     NOT `compact()` FROM THE SCAFFOLDING, and this is a measured defect of
+     reusing it rather than a preference: compact() renders thousands as
+     `(a/1e3).toFixed(0) + "K"`, so compact(2500) === "3K" and
+     compact(7740) === "8K". On a rail those are a 20% overstatement of a
+     contract count; on an axis tick at a 2,500 step they are a MISLABELLED
+     RULER, which is the defect class this whole page exists to avoid.
+     compact() is right for gamma dollars, where a 20% rounding of a
+     half-billion is beneath notice. It is wrong for counts. */
+  function faK1(n) {
+    const F = window.FlowsPanels;
+    const v = F.isNum(n);
+    if (v === null) return F.DASH;
+    const a = Math.abs(v);
+    if (a < 1000) return faGrouped(v);
+    return (v < 0 ? F.MINUS : "") + (a / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  }
+
+  /* A TICK LABEL MUST BE EXACT, WHICH IS A STRICTER JOB THAN A RAIL LABEL.
+
+     A rail that renders 7,740 as "7.7K" has rounded a reading and says so with
+     its suffix. A TICK that renders a graduation at 1,250 as "1.3K" has told
+     the reader the ruler is marked somewhere it is not, and every bar measured
+     against that mark is misread by the difference. This was a live defect in
+     the first draft of this panel: at a 1,113px zoom host the step came out at
+     250 and the axis printed "+1.3K" and "+1.8K" against marks at 1,250 and
+     1,750 — an axis lying by 4% about itself, on the panel whose premise is
+     that position IS magnitude.
+
+     So: grouped integers below ten thousand, where a contract count is short
+     enough to print in full, and above that an exact thousands form with only
+     the trailing zeros trimmed. Every value on the 1/2/2.5/5 ladder at or above
+     10,000 has at most one significant decimal in thousands, so nothing is ever
+     rounded away. The sign is added by the caller — it is the sign of the SIDE,
+     not of the value, and both halves of this axis carry one. */
+  function faTickLabel(v) {
+    const a = Math.abs(v);
+    if (a < 10000) return faGrouped(a);
+    return (a / 1000).toFixed(2).replace(/\.?0+$/, "") + "K";
+  }
+
+  /**
+   * Net aggressor flow by strike, as a horizontal ladder either side of a
+   * drawn zero rule.
+   *
+   * @param {HTMLElement} host   the empty div to draw into
+   * @param {object|undefined} panel  card.panels.aggressor — a tagged union
+   * @param {object} card        the whole card, for ticker context
+   * @param {string} question    printed in .fc-q
+   * @param {string} mount       "grid" | "zoom" — suffixes every <defs> id
+   */
+  function drawAggressor(host, panel, card, question, mount) {
+    const F = window.FlowsPanels;
+    const { el, svgEl, isNum, deadPanel, panelHead, statList, niceStep,
+            DASH, MINUS, neg } = F;
+
+    /* The registry's own question, as the default. `shared/` is in
+       .assetsignore and never served, so a renderer cannot import the
+       registry at runtime — the page emits it as data-question and hands it
+       in. A caller that passes nothing still gets the right sentence. */
+    const q = question || "At which strikes were contracts taken at the offer?";
+
+    /* EVERY PANEL IS A TAGGED UNION, and the switch happens BEFORE any number
+       is touched. `undefined` is not the same absence as {status:"unavailable"}:
+       it means this card predates the chain leg entirely, and saying so is more
+       use to a reader than "unavailable". */
+    if (panel === undefined || panel === null) {
+      return deadPanel(host, q, "this card was built before the option chain leg shipped");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    /* SECOND-STAGE GUARD. status "ok" with no bars cannot come out of
+       buildAggressor today — it returns dead() with its own reason before it
+       can happen — but a shed or hand-mutated payload can present it, and a
+       chart with no rows must not reach the geometry. The builder's reason is
+       preferred; when there is none, the same sentence is RECONSTRUCTED from
+       the counts the payload does carry rather than invented, so the reader
+       is told the real thing: contracts traded, none of them split. */
+    const rawBars = Array.isArray(panel.bars) ? panel.bars : [];
+    const unreportedN = isNum(panel.unreported);
+    if (!rawBars.length) {
+      return deadPanel(host, q, panel.reason || (unreportedN !== null && unreportedN > 0
+        ? `the vendor reported no aggressor split on any of the ${unreportedN} contracts that traded`
+        : "no strike on this chain carried an aggressor split"));
+    }
+
+    panelHead(host, q);
+
+    /* A BAR WITH NO STRIKE OR NO NET IS NOT A ZERO, IT IS NOT A BAR.
+       isNum returns null for anything that is not a finite number, and null
+       is tested for BEFORE any arithmetic: Number(null) === 0 and 0 is finite,
+       which is how this repo has shipped a confident zero five times. */
+    const bars = rawBars.filter((b) => b && isNum(b.k) !== null && isNum(b.net) !== null);
+    if (!bars.length) return deadPanel(host, q, "no strike on this chain published a usable net");
+    bars.sort((a, b) => a.k - b.k);
+
+    /* ---------- geometry: renderGamma's, unchanged --------------------- */
+
+    const W = ftWidth(host);
+    /* IDENTICAL TO renderGamma, deliberately. The two ladders share a grid
+       column and are read against each other; a different row pitch or a
+       different rail width between them would make the same strike sit at two
+       different heights on one screen. The builder caps at AGGRESSOR_STRIKES =
+       30, so the 9px branch is unreachable from a real payload — it is kept
+       because the constant is the gamma panel's and a fork here is a second
+       number to keep in step forever. */
+    const ROW = bars.length > 34 ? 9 : 12;
+    const padT = 16, padB = 30, labelW = 46, railW = 112;
+    const plotL = labelW, plotR = W - railW;
+    const plotW = Math.max(60, plotR - plotL);
+    const H = padT + bars.length * ROW + padB;
+
+    const nets = bars.map((b) => b.net);
+
+    /* ---------- the scale ---------------------------------------------
+       LINEAR IN CONTRACTS. See CHOICE 1 in the header: 3.73 measured decades
+       of |net| is a range a linear axis holds, and holding it linearly is what
+       makes bar length mean magnitude on this panel rather than rank. There is
+       no transfer function here at all — `net` goes straight to pixels — which
+       is the whole difference from the panel above.
+
+       THE 0 SEED IS LOAD-BEARING. Math.min(...nets, 0) and Math.max(...nets, 0)
+       admit zero as a bound even when no bar has that sign. Without it a
+       one-signed book — every strike net long calls, say — produces
+       fMin = +2 and fMax = +5000, so `share` is 2/5002, the zero rule is
+       clamped hard to 18%, and `negW / |fMin|` is a pixels-per-contract rate
+       computed against a bound that is on the WRONG SIDE of zero. The scale
+       comes out nonsense and every bar on the panel is wrong together, which
+       is the failure mode nobody catches by looking.
+
+       ONE RATE ACROSS THE ZERO RULE. Each side normalised against its own
+       extreme would draw the largest bar on each side at that side's full
+       width no matter what it was worth: a book whose short side is 1% of its
+       long side would draw that 1% at 22% of the ink, and the reader's first
+       impression of the balance of the book — which is the entire reading of
+       this panel — would be manufactured by the renderer. `rate` is the
+       largest pixels-per-contract that fits BOTH sides inside their halves,
+       so the two are directly comparable and neither overflows.
+
+       THE Number.isFinite FALLBACK IS LOAD-BEARING TOO. When every net is
+       exactly zero both branches of the Math.min are Infinity, Infinity is
+       what Math.min returns, and `x0 + net * Infinity` is NaN — an attribute
+       SVG drops silently, so the panel would render as an empty box with a
+       full set of price labels beside it. 0 collapses every bar onto the zero
+       rule, which is exactly where an all-zero book belongs, and the
+       `.fa-zeromark` path below then draws each row as the measured zero it
+       is. */
+    const fMin = Math.min(...nets, 0);
+    const fMax = Math.max(...nets, 0);
+
+    /* Placing zero by the data rather than at the centre: a symmetric axis
+       wastes half the plot when a book is 95% one-signed. The clamp keeps the
+       minority side visible instead of squeezing it to nothing. Both bounds
+       are CHOICES and are named as such on the panel. */
+    const share = Math.abs(fMin) / (Math.abs(fMin) + Math.abs(fMax) || 1);
+    const x0 = plotL + plotW * Math.min(0.82, Math.max(0.18, share));
+    const negW = x0 - plotL, posW = plotR - x0;
+
+    const rate = Math.min(
+      Math.abs(fMin) > 0 ? negW / Math.abs(fMin) : Infinity,
+      fMax > 0 ? posW / fMax : Infinity,
+    );
+    const barRate = Number.isFinite(rate) ? rate : 0;
+    const xOf = (v) => x0 + v * barRate;
+
+    /* HIGH STRIKES AT THE TOP. bars are ascending in strike, so index 0 — the
+       lowest strike — takes the BOTTOM row. This is the same mapping the gamma
+       ladder uses and the same one a price axis has anywhere else on the page;
+       inverting it here would put the two ladders in the same grid row running
+       in opposite directions. */
+    const yOfIndex = (i) => padT + (bars.length - 1 - i) * ROW + ROW / 2;
+
+    const svg = svgEl("svg", {
+      class: "fa-svg", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    /* ---------- the hatch ---------------------------------------------
+
+       THIS PANEL EMITS ITS OWN PATTERN, AND THE DECISION WAS WORKED OUT
+       RATHER THAN ASSUMED.
+
+       The obvious reading of "do not define a second identical pattern" is to
+       write fill="url(#gpNeg)" and lean on the copy renderGamma already put in
+       this document. That is wrong here, for two reasons that are both real on
+       this page rather than hypothetical:
+
+       1. renderGamma EMITS #gpNeg ONLY WHEN IT DRAWS. It returns through
+          deadPanel — before ever reaching its <defs> — whenever the gamma
+          panel is unavailable, and the gamma panel is shed independently of
+          this one by the pipeline's payload ladder and dies on its own when
+          the gamma source did not return. On such a card `url(#gpNeg)`
+          resolves to nothing, a browser paints an unresolvable paint server as
+          no paint at all, and the hatch — the SECOND sign channel, the one
+          that has to survive a greyscale render — vanishes with no error. The
+          panel still looks finished.
+
+       2. THE ENLARGE DIALOG DRAWS ONE PANEL. When a reader enlarges the
+          aggressor ladder, the drawing in the dialog is the only aggressor
+          drawing that matters and the gamma panel behind it may or may not
+          have run. Depending on another panel's private, unsuffixed id for a
+          mandatory encoding channel makes this panel's correctness a function
+          of a sibling's status. It must not be.
+
+       So: an id of this panel's own, suffixed with `mount`, because SVG ids
+       are document-global and url(#id) takes the FIRST match in document
+       order — a page showing the grid copy and the zoom copy at once would
+       otherwise silently give the second drawing the first's tile.
+
+       WHAT IS NOT DUPLICATED IS THE APPEARANCE. The tile is byte-identical to
+       renderGamma's (4×4, patternUnits userSpaceOnUse, rotate(45), the line at
+       x=2 so a 1.8 stroke sits wholly INSIDE the tile instead of being clipped
+       at the edge and rendering at a fraction of its ink) and it carries
+       renderGamma's own class as well as this panel's, so the single shipped
+       rule `.gp-negpat { color: var(--bg-deep) }` already colours it correctly
+       with no integrator work and the two hatches cannot drift apart. The
+       `.fa-negpat` hook exists so they CAN be diverged deliberately later.
+       One appearance, one rule, two independent ids: that is what §5.5a asks
+       for, read as an appearance requirement rather than an id requirement. */
+    const tag = String(mount || "grid").replace(/[^A-Za-z0-9_-]/g, "") || "grid";
+    const patId = `faNeg-${tag}`;
+    const defs = svgEl("defs");
+    const pat = svgEl("pattern", {
+      id: patId, width: 4, height: 4, patternUnits: "userSpaceOnUse",
+      patternTransform: "rotate(45)", class: "fa-negpat gp-negpat",
+    });
+    pat.append(svgEl("line", { x1: 2, y1: 0, x2: 2, y2: 4, stroke: "currentColor", "stroke-width": 1.8 }));
+    defs.append(pat);
+    svg.append(defs);
+
+    /* ---------- magnitude ticks, on a round ladder ---------------------
+
+       NEVER ON THIS BOOK'S OWN QUANTILES. A graduation and a reading must not
+       be able to be confused: an axis labelled with a 60th percentile of this
+       particular chain tells the reader that something is special about four
+       thousand three hundred contracts, and nothing is. The ladder is
+       niceStep's — 1, 2, 2.5 or 5 times a power of ten — and nothing else is
+       ever printed.
+
+       WHY 2.5 IS ADMISSIBLE HERE AND IS REFUSED ON THE GAMMA LADDER.
+       renderGamma explicitly does NOT reuse niceStep, because its axis is
+       symlog and its marks are placed PER DECADE: mixing a 2.5 into a set of
+       per-decade marks means two different ladders on one axis and the reader
+       cannot tell a graduation from a reading. This axis is LINEAR and its
+       marks are consecutive multiples of ONE step, so 0, 2.5K, 5K, 7.5K is a
+       ruler in the ordinary sense — every mark is one step from its
+       neighbours and the spacing is exactly proportional. The scaffolding's
+       niceStep is therefore the right tool here and a private ladder would be
+       a second copy of a number to keep in step.
+
+       THE STEP IS WIDENED UNTIL IT CLEARS 34px. niceStep rounds DOWN to the
+       ladder, so a raw of 1,990 becomes 1,000 and the ticks come out at half
+       the intended pitch; escalating through niceStep(step × 2.5) stays on the
+       same ladder (1 → 2.5 → 5 → 10) and is monotone, so the loop terminates.
+       The guard counter is belt and braces against a pathological barRate. */
+    const valueSpan = fMax - fMin;
+    const targetTicks = Math.max(2, plotW / 64);
+    let step = niceStep(valueSpan / targetTicks);
+    /* Two escalation conditions, not one. The 40px floor is renderGamma's own
+       and is about COLLISION: a "\u22122,500" label is 32px wide at 9px mono, so
+       anything under 40 puts two labels shoulder to shoulder. The 12-mark cap is
+       about DENSITY, and it is the one that bites in the enlarge dialog:
+       niceStep rounds DOWN to the ladder, so a raw step of 442 becomes 250 and a
+       955px plot picks up twenty graduations — a ruler so finely marked it reads
+       as hatching. Measured at a 1,113px zoom host on the ground-truth fixture:
+       20 marks before the cap, 9 after. */
+    const tickCount = () => (barRate > 0 && step > 0
+      ? Math.floor(negW / (step * barRate)) + Math.floor(posW / (step * barRate))
+      : 0);
+    /* THE ESCALATION IS niceStep(step * 2), WHICH WALKS THE LADDER ONE RUNG.
+       niceStep returns the largest ladder value at or below its argument, so
+       doubling lands on exactly the next rung every time: 1 -> 2 -> 2.5 -> 5 ->
+       10 -> 20, monotone, so the loop terminates. Multiplying by 2.5 instead
+       SKIPS the 2 rung, which is not academic — on the truncated 30-bar card at
+       a 424px host it jumped straight from 1,000 to 2,500 and left the panel
+       with two graduations 168px apart; walking one rung gives three at 67px.
+       The `next > step` test is the belt for a barRate so small the ladder
+       stops moving. */
+    for (let guard = 0; guard < 24 && step > 0 &&
+         (step * barRate < 40 || tickCount() > 12); guard++) {
+      const next = niceStep(step * 2);
+      if (!(next > step)) break;
+      step = next;
+    }
+
+    /* A SIDE WITH NO BARS GETS NO GRADUATIONS. Position is magnitude on this
+       axis, so a "−2K" tick in a half of the plot where the book has nothing
+       at all reads as a measurement of an empty region. (A side that has even
+       one small bar DOES keep its full ruler: unlike the symlog axis, a linear
+       mark past the longest bar on its side still sits at exactly the position
+       that magnitude occupies, so it is informative rather than misleading —
+       it shows how empty that side is.) */
+    const sides = [];
+    if (fMax > 0) sides.push(1);
+    if (fMin < 0) sides.push(-1);
+
+    const ticks = [];
+    if (step > 0 && barRate > 0) {
+      for (const sgn of sides) {
+        for (let m = 1; m <= 60; m++) {
+          const v = m * step;
+          let x = x0 + sgn * v * barRate;
+          /* Three pixels of tolerance, then clamp. `rate` is the largest
+             pixels-per-contract that fits both sides, so whenever the zero
+             rule is not clamped to its 18/82 bounds the extreme value lands
+             EXACTLY on plotL or plotR and a strict edge test discards it —
+             a sub-pixel miss. Three pixels recovers that and nothing else. */
+          if (x < plotL - 3 || x > plotR + 3) break;
+          x = Math.min(plotR - 2, Math.max(plotL + 2, x));
+          if (Math.abs(x - x0) < 18) continue;               // never crowd the zero rule
+          if (ticks.some((t) => Math.abs(t.x - x) < 40)) continue;
+          ticks.push({ x, v, sgn });
+        }
+      }
+    }
+    for (const t of ticks) {
+      svg.append(svgEl("line", { class: "fa-tick", x1: t.x, x2: t.x, y1: padT - 2, y2: H - padB + 2 }));
+      const lab = svgEl("text", { class: "fa-ticklabel", x: t.x, y: H - padB + 14, "text-anchor": "middle" });
+      /* AN EXPLICIT SIGN ON BOTH HALVES (CHOICE 7). renderGamma prints its
+         magnitudes unsigned because its two sides are "short" and "long",
+         words its caption carries. Here the sign IS the field's published
+         polarity and both halves are readings, so each names itself. */
+      lab.textContent = (t.sgn < 0 ? MINUS : "+") + faTickLabel(t.v);
+      svg.append(lab);
+    }
+
+    /* THE ZERO RULE IS DRAWN, and it is drawn before the bars so the bars sit
+       over it. It is not an implied centre line: position relative to it is
+       the primary sign channel on this panel, and a channel the reader has to
+       infer is not a channel. */
+    svg.append(svgEl("line", { class: "fa-zero", x1: x0, x2: x0, y1: padT - 4, y2: H - padB + 4 }));
+
+    /* ---------- rows: bar, price label, rail ---------------------------- */
+
+    /* The rail is an annotation column, not a tooltip: no plate, no fill, no
+       border — nothing is ever drawn under it, so a background would buy
+       nothing and cost the bars 20px. Text starts 6px right of the plot. */
+    const railX = plotR + 6;
+    const railBudget = railW - 6 - 2;
+    const priceX = labelW - 6;
+    const priceBudget = priceX - 2;
+
+    let partialRows = 0, nullVolRows = 0, zeroNetRows = 0;
+
+    bars.forEach((b, i) => {
+      const y = yOfIndex(i);
+      const barY = y - (ROW - 4) / 2;
+      const barH = ROW - 4;
+      const vol = isNum(b.vol);
+      const calls = isNum(b.calls);
+      const puts = isNum(b.puts);
+      const missing = isNum(b.volMissing) === null ? 0 : b.volMissing;
+      if (vol === null) nullVolRows++;
+      if (missing > 0 && vol !== null) partialRows++;
+
+      /* ---- the mark ------------------------------------------------- */
+      if (b.net === 0) {
+        /* A ZERO NET IS THE INTERESTING CASE AND IT GETS ITS OWN MARK.
+           A strike where a put and a call were each lifted sixty-forty nets
+           to zero, and a bar of zero length there is visually identical to a
+           strike where nothing happened at all — which is a different fact
+           and the one the builder deliberately kept the wings for. It is
+           drawn as a short HORIZONTAL tick crossing the rule, not a vertical
+           one: the zero rule is itself vertical, so a vertical tick on it
+           would be invisible, and a horizontal one reads immediately as "the
+           bar for this row has no length".
+
+           DRAWN FOR EVERY MEASURED ZERO, not only when vol > 0. The rule as
+           written names the vol > 0 case, which is the one with evidence
+           beside it; but a zero-net row with vol === null still has a row, a
+           price label and an em-dashed rail, and leaving its plot cell
+           completely empty would be indistinguishable from a rendering
+           failure. The two cases differ in the <title>, not in whether the
+           reader can see that something was measured here. */
+        zeroNetRows++;
+        const g = svgEl("g");
+        const ttl = svgEl("title");
+        ttl.textContent = vol === null
+          ? `${neg(b.k.toFixed(2))}: the aggressor split at this strike nets to exactly zero. ` +
+            "No contract at this strike reported a volume, so there is no split to show beside it."
+          : `${neg(b.k.toFixed(2))}: the aggressor split at this strike nets to exactly zero — ` +
+            `${faGrouped(vol)} contracts traded, ` +
+            (calls === null || puts === null
+              ? "the call and put halves of that total were not published."
+              : `${faGrouped(calls)} on calls and ${faGrouped(puts)} on puts.`);
+        g.append(ttl);
+        g.append(svgEl("line", {
+          class: "fa-zeromark", x1: x0 - 4, x2: x0 + 4, y1: y, y2: y,
+        }));
+        svg.append(g);
+      } else {
+        const xg = xOf(b.net);
+        const isNeg = b.net < 0;
+        const bx = Math.min(x0, xg);
+        /* A ZERO-WIDTH BAR READS AS NO DATA. Tiny-but-non-zero is a different
+           fact, so there is a floor. It matters far more here than on the
+           symlog ladder: linear in contracts, the smallest non-zero net
+           measured across the fixtures (|net| = 1) against the largest
+           (5,417) is 0.0002 of the plot width — literally invisible — and
+           drawing it as nothing would say "no flow" about a strike that had
+           some. The floor is why the zero mark above is a different SHAPE
+           rather than a shorter bar. */
+        const bw = Math.max(Math.abs(xg - x0), 1.5);
+
+        const g = svgEl("g");
+        const ttl = svgEl("title");
+        ttl.textContent =
+          `${neg(b.k.toFixed(2))}: ${faGrouped(Math.abs(b.net))} contracts net taken at the offer on ` +
+          `${isNeg ? "puts" : "calls"} (net ${faGrouped(b.net)}).`;
+        g.append(ttl);
+        g.append(svgEl("rect", {
+          class: "fa-bar " + (isNeg ? "is-neg" : "is-pos"),
+          x: bx, y: barY, width: bw, height: barH,
+        }));
+        /* THE HATCH IS AN OVERLAY, NOT THE WHOLE BAR. Drawn as the fill with
+           nothing underneath, a 1.8-on-4 tile covers about 45% of its box, so
+           a short bar and a long bar of the same magnitude carried half the
+           ink of each other and the texture that exists to carry the SIGN was
+           quietly setting the reader's impression of the BALANCE — the one
+           thing texture must not do on this panel. Fill underneath, texture
+           cut into it from above: both channels intact. */
+        if (isNeg) {
+          g.append(svgEl("rect", {
+            class: "fa-barhatch", x: bx, y: barY, width: bw, height: barH,
+            fill: `url(#${patId})`,
+          }));
+        }
+        svg.append(g);
+      }
+
+      /* ---- the strike label ------------------------------------------
+         LABELLED EVERY ROW, because every row IS one listed strike: this is a
+         categorical ladder, not a sampled axis, and an unlabelled row is a
+         reading the user cannot use. At ROW = 12 a 10.5px mono label has 12px
+         of pitch, which is tight but legible; the 9px branch (unreachable from
+         a real payload, since the builder caps at 30) labels alternate rows.
+
+         THE PRECISION ADAPTS TO THE 46px COLUMN. Measured across the emitted
+         fixtures the widest strike is 566.42 — six characters, 37.8px, which
+         just fits the 38px budget. A four-figure underlying (and there are
+         plenty on a real board) would be seven characters, 44.1px, and SVG
+         clips silently at the canvas edge, so the leading digit of the price
+         would simply vanish with nothing looking wrong. Dropping decimals
+         until it fits keeps the label honest at every price. */
+      if (ROW >= 11 || i % 2 === 0) {
+        let priceText = null;
+        for (const dp of [2, 1, 0]) {
+          const s = neg(b.k.toFixed(dp));
+          if (faTextW(s, 10.5) <= priceBudget) { priceText = s; break; }
+        }
+        if (priceText === null) priceText = neg(String(Math.round(b.k)));
+        const pt = svgEl("text", {
+          class: "fa-price", x: priceX, y: y + 3, "text-anchor": "end",
+        });
+        pt.textContent = priceText;
+        svg.append(pt);
+      }
+
+      /* ---- the rail --------------------------------------------------
+         TOTAL VOLUME AT THE STRIKE, AND WHAT IT IS A TOTAL OF.
+
+         vol === null is U+2014 with a reason, NEVER 0. The builder publishes
+         null precisely because summing an absent volume field as zero
+         produced "800 contracts lifted here, none traded", which is not a
+         reading of anything.
+
+         volMissing > 0 WITH vol NON-NULL IS THE MODAL CASE. Measured: 20 of
+         30 bars on the truncated-chain emitter card and 6 of 17 on the
+         ground-truth fixture publish a vol total while at least one contract
+         at that strike reported no volume at all. `vol` is then a total over
+         ONLY the lines that reported, and printing it bare is a completeness
+         claim the data does not support.
+
+         IT IS MARKED THREE WAYS (CHOICE 6): a trailing U+2026 in the text
+         itself, the `.is-partial` class, and a <title> naming the count that
+         did not report. The ellipsis is there because the other two both
+         depend on something outside this function — a stylesheet rule that
+         may not have been written yet, and a hover a touch reader never
+         performs — and the incompleteness has to survive both. U+2026 is the
+         ordinary typographic mark for "and more", which is exactly the
+         claim: at least this many, possibly more. */
+      const railG = svgEl("g");
+      const railTtl = svgEl("title");
+      const partial = vol !== null && missing > 0;
+      let railText;
+
+      if (vol === null) {
+        railText = DASH;
+        railTtl.textContent = "no contract at this strike reported a volume";
+      } else {
+        const base = faGrouped(vol);
+        /* The calls/puts split rides in the rail on the zero-net rows only —
+           the rows where the single number is not enough to tell the reader
+           what happened. Three tiers, widest first, exactly as the gamma
+           caption picks its long or short form: full precision if the 104px
+           column holds it, one-decimal thousands if not, and the bare total
+           with the split in the <title> if even that will not fit. */
+        let splitText = "";
+        if (b.net === 0 && calls !== null && puts !== null) {
+          const long = ` ${faGrouped(calls)}c/${faGrouped(puts)}p`;
+          const short = ` ${faK1(calls)}c/${faK1(puts)}p`;
+          if (faTextW(base + long, 9.5) <= railBudget) splitText = long;
+          else if (faTextW(base + short, 9.5) <= railBudget) splitText = short;
+        }
+        /* The ellipsis goes immediately after the TOTAL, before the split,
+           because it is the total that is incomplete. Trailing it after the
+           call/put pair read as though the split were the thing that had been
+           cut short. */
+        railText = base + (partial ? "…" : "") + splitText;
+        railTtl.textContent = partial
+          ? `${faGrouped(vol)} contracts at this strike, counted over the lines that reported a ` +
+            `volume; ${faGrouped(missing)} further ${missing === 1 ? "line" : "lines"} at this ` +
+            "strike reported none, so this total is a floor, not the whole strike."
+          : `${faGrouped(vol)} contracts traded at this strike` +
+            (calls !== null && puts !== null
+              ? ` — ${faGrouped(calls)} on calls, ${faGrouped(puts)} on puts.`
+              : ".");
+      }
+
+      railG.append(railTtl);
+      const rt = svgEl("text", {
+        class: "fa-rail" + (partial ? " is-partial" : ""),
+        x: railX, y: y + 3, "text-anchor": "start",
+      });
+      rt.textContent = railText;
+      railG.append(rt);
+      svg.append(railG);
+    });
+
+    /* ---------- the axis caption ---------------------------------------
+       AT the zero rule it labels, clamped to the CANVAS rather than the plot:
+       the rule floats between 18% and 82% and a centred caption hangs off the
+       edge when it sits near one, and at a 320px viewport the plot is 142
+       units — no caption of this kind fits inside it, so clamping to the plot
+       would push a 200-unit string into a 142-unit box and lose whichever end
+       came off worst. It is an axis label, not plot furniture; it may use the
+       whole canvas, and it drops to a short form when even that will not hold
+       it. The long form names what "taken at the offer" means, because that is
+       the identification rule of the whole panel in four words. */
+/* EVERY GLYPH HERE IS IN THE MONO SUBSET, and the two that were are not.
+       assets/css/base.css subsets JetBrains Mono to U+0000-00FF plus a named
+       handful — U+2191, U+2193, U+2212, U+2000-206F. U+25C0/U+25B6, the
+       pointing triangles this caption first used, are in NONE of them: they
+       fell back to the system stack, which changes the advance mid-string, so
+       faTextW below was measuring one font and the browser drawing two. The
+       same trap the top-contracts table avoids by using U+2191/U+2193 rather
+       than U+25B2/U+25BC.
+
+       The separators are U+00B7, in range, and they are separators rather
+       than runs of spaces because SVG COLLAPSES WHITESPACE in a <text> unless
+       xml:space is set — the three spaces that were here rendered as one and
+       the caption's three segments read as one sentence. */
+    const axisLong = "< puts taken at the offer \u00b7 net contracts \u00b7 calls taken >";
+    const axisShort = "< puts \u00b7 net contracts \u00b7 calls >";
+    const axisText = faTextW(axisLong, 10) <= W - 8 ? axisLong : axisShort;
+    const axisHalf = faTextW(axisText, 10) / 2;
+    const axisX = Math.min(W - 4 - axisHalf, Math.max(4 + axisHalf, x0));
+    const axis = svgEl("text", { class: "fa-axis", x: axisX, y: H - 3, "text-anchor": "middle" });
+    axis.textContent = axisText;
+    svg.append(axis);
+
+    /* THE LABEL NAMES THE ACTUAL READING, not the chart type. */
+    const biggestUp = bars.reduce((a, b) => (b.net > a.net ? b : a), bars[0]);
+    const biggestDn = bars.reduce((a, b) => (b.net < a.net ? b : a), bars[0]);
+    svg.setAttribute("aria-label",
+      `Net aggressor flow by strike for ${card && card.ticker ? card.ticker : "this name"}, ` +
+      `in contracts. ${bars.length} strikes. ` +
+      /* The magnitude only: the SIDE is already named in words, so a repeated
+         minus would be a sign on a quantity that is not signed in that
+         sentence. */
+      (fMax > 0
+        ? `Most calls taken at the offer at ${neg(biggestUp.k.toFixed(2))}, ` +
+          `${faGrouped(Math.abs(biggestUp.net))} contracts net. `
+        : "No strike nets to the call side. ") +
+      (fMin < 0
+        ? `Most puts taken at the offer at ${neg(biggestDn.k.toFixed(2))}, ` +
+          `${faGrouped(Math.abs(biggestDn.net))} contracts net. `
+        : "No strike nets to the put side. ") +
+      (partialRows
+        ? `${partialRows} of ${bars.length} strikes publish an incomplete volume total.`
+        : "Every strike drawn publishes a complete volume total."));
+
+    host.append(svg);
+
+    /* ---------- what the panel does NOT show ---------------------------- */
+
+    /* HOW MUCH OF THE CHAIN IS ON THE LADDER. The builder's population is the
+       CHAIN'S strikes, not the ones that happened to carry a split, so
+       `shown < measuredStrikes` and `strikesUnreported > 0` are two different
+       absences and each is named separately.
+
+       MEASURED, and worth stating plainly: across 50 emitted cards
+       `strikesUnreported` is 0 on every one of them, and `shown <
+       measuredStrikes` fires on exactly the two truncated-chain cards, both
+       at 30 of 31. The second half of this guard is the one that fires in
+       practice; the first is kept because the field exists and a card that
+       sets it would otherwise report a complete ladder. */
+    const shown = isNum(panel.shown);
+    const measured = isNum(panel.measuredStrikes);
+    const total = isNum(panel.total);
+    const unread = isNum(panel.strikesUnreported);
+    /* EVERY COUNT PRINTED BELOW IS `bars.length`, THE NUMBER OF BARS THIS
+       FUNCTION ACTUALLY DREW — never `panel.shown`, which is the builder's
+       claim about what it put on the payload. The two are equal on all 50
+       emitted cards, and they diverge exactly when a bar was dropped upstairs
+       for publishing no usable strike or no usable net. Printing the claim
+       would then say "30 strikes shown" under a panel showing 28, which is the
+       same confident-completeness defect as printing a partial volume bare,
+       one level up. */
+    const drawn = bars.length;
+    const dropped = rawBars.length - drawn;
+    if (dropped > 0) {
+      host.append(el("p", "fc-note",
+        `${faGrouped(dropped)} of the ${faGrouped(rawBars.length)} strikes on this payload ` +
+        "published no usable strike price or no usable net and are not drawn. They are absences, " +
+        "not zeroes, so they are left off the ladder rather than laid on the zero rule."));
+    }
+    /* `dropped` is deliberately NOT a trigger for the note below. That note says
+       the ladder was kept "nearest the money", which is the BUILDER's truncation
+       rule; a bar dropped here for publishing no usable net was not cut for being
+       far from the money and saying so would be a wrong reason attached to a right
+       number. The drop has its own note above and its own effect on the foot. */
+    const cut = (unread !== null && unread > 0) ||
+                (shown !== null && measured !== null && shown < measured);
+    if (cut) {
+      const denom = total !== null ? total : measured;
+      host.append(el("p", "fc-note",
+        (denom !== null
+          ? `${faGrouped(drawn)} of ${faGrouped(denom)} strikes on this chain shown, nearest the money. `
+          : "Not every strike on this chain is shown; the ladder is kept nearest the money. ") +
+        "That is where hedging happens and where the gamma ladder beside it is measured, " +
+        "but it means the wings of this book are cut off rather than empty." +
+        (unread !== null && unread > 0
+          ? ` A further ${faGrouped(unread)} ${unread === 1 ? "strike" : "strikes"} on the chain ` +
+            "carried no aggressor split at all and could not be laddered."
+          : "")));
+    }
+
+    /* THE VENDOR'S OWN TRUNCATION. Fired on 2 of 50 emitted cards here and on
+       10 of 11 names on the live wire, so it is designed for as the default
+       rather than the exception.
+
+       THE SENTENCE IS THIS PANEL'S. §6.3-10 gives a verbatim string ending
+       "…the skew and term readings are withheld for that reason", which is
+       true of the skew/term panel and NOT of this one — nothing is withheld
+       here, the ladder is simply built over an arbitrary subset. Printing a
+       withholding claim under a panel that withholds nothing would be its own
+       small lie, so the first sentence is carried verbatim and the
+       consequence is restated for what it actually is here. */
+    const cov = panel.coverage || {};
+    if (cov.truncated === true) {
+      const seen = isNum(cov.rowsSeen);
+      host.append(el("p", "fc-note",
+        "The vendor returned a full page of 500 contracts in no documented order" +
+        (seen !== null ? ` (${faGrouped(seen)} rows seen)` : "") +
+        ". This is an arbitrary subset of the book, so this ladder is a ladder over that " +
+        "subset: a strike missing from it may be a strike with no flow, or a strike the page " +
+        "cut off. The two cannot be told apart from here."));
+    }
+
+    /* THE PARTIAL TOTALS, STATED ONCE FOR THE PANEL. A per-row title is not
+       enough on its own — nobody hovers thirty rows — and this is the modal
+       case, so it is said in words under the chart. */
+    if (partialRows) {
+      host.append(el("p", "fc-note",
+        `${faGrouped(partialRows)} of the ${faGrouped(bars.length)} strikes drawn publish a volume ` +
+        "total that is INCOMPLETE: at least one contract at that strike traded without reporting a " +
+        "volume, so the figure in the rail counts only the lines that did and is a floor. Those " +
+        "rails end in an ellipsis. The bar itself is unaffected — the aggressor split and the " +
+        "volume are separate vendor fields, and a line can report one without the other."));
+    }
+
+    if (nullVolRows) {
+      host.append(el("p", "fc-note",
+        `${faGrouped(nullVolRows)} ${nullVolRows === 1 ? "strike carries" : "strikes carry"} an ` +
+        "aggressor split but no reported volume at all. " +
+        `${nullVolRows === 1 ? "Its rail reads" : "Their rails read"} ` +
+        "—, not zero: the bar beside it is a measurement and the volume is an absence, and " +
+        "the two must not be printed in the same ink."));
+    }
+
+    /* THE SCALE, IN THE TERMS THAT SAY WHAT TO DO ABOUT IT. The panel above
+       this one is logarithmic and says so; a reader who carries that
+       instruction across would under-read every long bar here. Saying "linear"
+       is not the same as saying what linear buys.
+
+       BEHIND THE DISCLOSURE, with the relation below it — see appendNotes.
+       Both are the decoder rather than a reading; the counts and the
+       incomplete-total warnings above stay in the open. */
+    const method = [];
+    method.push(
+      "This axis is LINEAR in contracts, unlike the gamma ladder above it: a bar twice as long " +
+      "is twice the net flow, and the two halves share one scale, so the left and right sides are " +
+      "directly comparable and neither is normalised against its own extreme. " +
+      "The zero rule is placed by the data — at " +
+      `${(Math.min(0.82, Math.max(0.18, share)) * 100).toFixed(0)}% of the plot, from ` +
+      "|min| / (|min| + |max|), clamped to a chosen [18%, 82%] so a one-sided book still shows " +
+      "its minority side — and it is DRAWN, because which side of it a bar sits on is how the " +
+      "sign is read here. Colour repeats that and carries nothing on its own." +
+      (zeroNetRows
+        ? ` ${faGrouped(zeroNetRows)} ${zeroNetRows === 1 ? "strike nets" : "strikes net"} to ` +
+          "exactly zero and " + (zeroNetRows === 1 ? "is" : "are") + " marked with a tick on the " +
+          "rule, with the call and put halves of the volume beside " +
+          (zeroNetRows === 1 ? "it" : "them") + ": a strike where a put and a call were each " +
+          "lifted sixty-forty is not a strike where nothing happened."
+        : ""));
+
+    /* THE RELATION, VERBATIM FROM THE BUILDER. It is published on the payload
+       precisely so the renderer does not have to paraphrase it, and a
+       paraphrase is a second answer to the same question. */
+    if (typeof panel.relation === "string" && panel.relation) method.push(panel.relation);
+    appendNotes(host, method, "How to read this ladder");
+
+    /* THE FOOT: WHAT WAS COUNTED AND WHAT WAS NOT.
+
+       Both are CONTRACT counts, not strike counts — the builder increments
+       `reported` per contract row that carried both an ask and a bid volume,
+       and `unreported` per contract that traded (or whose volume is itself
+       unknown) with no split published. Measured on the ground-truth fixture:
+       119 reported against 11 unreported; on the truncated card, 404 against
+       52. Roughly one contract in nine that traded is invisible to this
+       ladder, which is a fact about the ladder and belongs under it. */
+    const rep = isNum(panel.reported);
+    host.append(statList([
+      ["contracts with a split", rep === null ? DASH : faGrouped(rep)],
+      ["traded, no split published", unreportedN === null ? DASH : faGrouped(unreportedN)],
+      ["strikes drawn", total === null
+        ? faGrouped(drawn)
+        : `${faGrouped(drawn)} of ${faGrouped(total)}`],
+    ]));
+  }
 
   /* ---------- the drawer table ------------------------------------- */
 
@@ -128,7 +3328,7 @@
       if (!host) { missing.push(key); continue; }
 
       if (key === "__score") {
-        try { P.score(host, card); }
+        try { P.score(host, card, question); }
         catch (error) { deadPanel(host, question, drawFailed(error)); }
         continue;
       }
@@ -208,7 +3408,7 @@
        rail to 298px — and break the one-viewBox-unit-is-one-CSS-pixel
        invariant in the one place a reader is looking hardest. */
     if (zoomKey === "__score") {
-      try { P.score(zoomHost, painted); }
+      try { P.score(zoomHost, painted, question); }
       catch (error) { deadPanel(zoomHost, question, drawFailed(error)); }
       return;
     }

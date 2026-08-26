@@ -72,6 +72,20 @@
     if (n === null) return DASH;
     return (n < 0 ? MINUS : "") + "$" + compact(Math.abs(n));
   };
+  /**
+   * A magnitude, shortened — WITHOUT throwing away a fifth of it.
+   *
+   * The thousands branch rounded to whole K: compact(2500) returned "3K",
+   * which is 20% high, and compact(1500) returned "2K", 33% high. Every other
+   * branch keeps a decimal (2 for billions, 1 for millions) and the smallest
+   * one, where the relative cost of rounding is LARGEST, kept none. On a tick
+   * label that is a ruler mark that lies about where it is — a gridline drawn
+   * at 2,500 with "3K" printed beside it — and the label is the only thing a
+   * reader can measure a bar against.
+   *
+   * One decimal below 10K, none above it, so "9.8K" is precise where it must
+   * be and "47K" does not carry a digit nobody reads.
+   */
   const compact = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
@@ -79,19 +93,36 @@
     const s = n < 0 ? MINUS : "";
     if (a >= 1e9) return s + (a / 1e9).toFixed(2) + "B";
     if (a >= 1e6) return s + (a / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return s + (a / 1e3).toFixed(0) + "K";
+    if (a >= 1e4) return s + (a / 1e3).toFixed(0) + "K";
+    if (a >= 1e3) return s + (a / 1e3).toFixed(1) + "K";
     return s + a.toFixed(0);
   };
 
   /* Mono character advance, in px per px of font-size divided by 10.
-     5.81 measured at 10px, rounded up so every width estimate errs wide —
-     a label that is estimated too narrow collides, one estimated too wide
-     merely wastes a few pixels. Hoisted to module scope from inside
-     renderGamma when the renderers were extracted: it is the only text-metric
-     constant on the page and a second copy of it in a new drawer is a second
-     number to keep in step. Scale it by the actual font size rather than
-     using 6 at 9px. */
-  const AXIS_CH = 6;
+
+     6.5, AND THE OLD 6 WAS TOO NARROW IN THE ONE DIRECTION THAT MATTERS. The
+     comment this replaces said "5.81 measured, rounded up so every estimate
+     errs wide" and reasoned that the .gp-axis letter-spacing of 0.04em was
+     "exactly the gap between 5.81 and 6". It is not: 5.81 + 0.4 is 6.21, so
+     the rounding was already short before the spacing was counted.
+
+     MEASURED, in Chromium, on a real .fa-axis caption in the shipped webfont:
+     getComputedTextLength() / length = 6.421 at font-size 10px with
+     letter-spacing 0.4px. A 57-character axis caption is therefore 366 units
+     where the old constant predicted 342 — and a caption centred on a
+     24-unit-too-small half-width had its first glyph clipped off the canvas.
+     The same latent error sits under every renderGamma caption; it has simply
+     never had a string long enough to expose it.
+
+     ERRS WIDE ON PURPOSE. A label estimated too narrow collides or leaves the
+     canvas silently; one estimated too wide falls back to a shorter form a
+     little sooner. Only one of those is a defect a reader can see.
+
+     Hoisted to module scope from inside renderGamma when the renderers were
+     extracted: it is the only text-metric constant on the page, and a second
+     copy of it in a new drawer is a second number to keep in step. Scale it by
+     the actual font size rather than using it raw at 9px. */
+  const AXIS_CH = 6.5;
 
   /* ---------- panel scaffolding ----------------------------------- */
 
@@ -168,11 +199,35 @@
    * 10.5px one at 5.4. Unreadable, and silently so, because nothing overflows.
    *
    * The gamma and path panels already sized themselves from the host; the four
-   * added later did not. Same bounds as the gamma panel, so a wide desktop gets
-   * a wider plot rather than a magnified one.
+   * added later did not. A wide desktop gets a wider plot rather than a
+   * magnified one.
+   *
+   * THE CEILING WAS THE DIALOG'S, AND IT STOPPED BEING RIGHT THE MOMENT A
+   * SECOND SURFACE DREW THESE PANELS. It was 760, chosen when the modal was
+   * the only host. Two measurements say that number is now wrong in two
+   * different places:
+   *
+   *   - /flows/ticker/, is-wide panel, 1280px viewport: host 958px, viewBox
+   *     760, so width:100% stretches the drawing by 1.261. Every 9px label
+   *     renders at 11.3 and the one-unit-one-pixel invariant is broken in the
+   *     direction nobody looks for — the original bug shrank type, this one
+   *     magnifies it, and neither overflows.
+   *   - The card dialog itself: .fc is min(52rem, 94vw) = 832px less 2x1.7rem
+   *     of padding = a 777.6px host. The old ceiling bound there too, by
+   *     17.6px — a 1.023 stretch that has always been live and sat just
+   *     inside the suite's 15% tolerance, which is why nothing caught it.
+   *
+   * 1200 is the ticker page's enlarge dialog: at min(96rem, 96vw) less
+   * 2x1.7rem the host reaches 1481px, so the clamp is REAL there and is a
+   * stated choice rather than an inert guard. Below it every host draws at
+   * exactly its own width, which is the whole invariant.
+   *
+   * ONE FUNCTION, NOT TWO. flows-ticker.js reads this rather than defining its
+   * own: two width policies is two answers to "how wide is this chart", and
+   * the panels are now drawn by two different controllers.
    */
   function panelWidth(host) {
-    return Math.max(300, Math.min(760, (host && host.clientWidth) || 560));
+    return Math.max(300, Math.min(1200, Math.round((host && host.clientWidth) || 560)));
   }
 
   /** A round tick interval at or just below `raw`: 1, 2, 2.5 or 5 times a power of ten. */
@@ -190,8 +245,31 @@
     return s[i];
   }
 
-  function renderGamma(host, panel, card) {
-    const question =
+  /**
+   * Suffix an SVG <defs> id with the mount it belongs to.
+   *
+   * SVG IDS ARE DOCUMENT-GLOBAL AND url(#id) TAKES THE FIRST MATCH IN
+   * DOCUMENT ORDER. The card dialog was the only surface that drew these
+   * panels, so one copy of each pattern was the only copy and a bare id was
+   * safe. /flows/ticker/ holds a grid copy and an enlarged copy of the same
+   * panel at once — two <pattern id="gpNeg"> in one document, and the second
+   * drawing silently borrows the first's tile. Today the two tiles are
+   * identical so it happens to look right; the moment one scales with its
+   * drawing it is wrong and NOTHING LOOKS WRONG.
+   *
+   * The default keeps every existing caller byte-identical: a renderer called
+   * without a mount emits exactly the id it always did.
+   */
+  const mountId = (base, mount) => (mount ? base + "-" + mount : base);
+
+  function renderGamma(host, panel, card, questionIn, mount) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn ||
       "Where does dealer hedging flip from damping moves to amplifying them, " +
       "and how far is that from spot?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.bars) || !panel.bars.length) {
@@ -317,7 +395,7 @@
        greyscale render or a colour-blind reader loses nothing that matters. */
     const defs = svgEl("defs");
     const pat = svgEl("pattern", {
-      id: "gpNeg", width: 4, height: 4, patternUnits: "userSpaceOnUse",
+      id: mountId("gpNeg", mount), width: 4, height: 4, patternUnits: "userSpaceOnUse",
       patternTransform: "rotate(45)", class: "gp-negpat",
     });
     /* The hatch line sits at the CENTRE of the tile, not on its edge. At x=0
@@ -448,7 +526,8 @@
          not encode short gamma differently from the panel beside it. */
       if (neg) {
         svg.append(svgEl("rect", {
-          class: "gp-barhatch", x: bx, y, width: bw, height: ROW - 4, fill: "url(#gpNeg)",
+          class: "gp-barhatch", x: bx, y, width: bw, height: ROW - 4,
+          fill: `url(#${mountId("gpNeg", mount)})`,
         }));
       }
     });
@@ -751,8 +830,14 @@
    * between them is the signal: two dots on one price axis, with spot marked,
    * so the direction is read off position rather than off a sign.
    */
-  function renderDisplacement(host, panel) {
-    const question = "Is today's flow building dealer gamma where the book already is, or somewhere else?";
+  function renderDisplacement(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Is today's flow building dealer gamma where the book already is, or somewhere else?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
     panelHead(host, question);
 
@@ -932,8 +1017,14 @@
     };
   }
 
-  function renderSurface(host, panel, card) {
-    const question =
+  function renderSurface(host, panel, card, questionIn, mount) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn ||
       "Where is dealer gamma concentrated, and when does it expire?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.grid) || !panel.grid.length) {
       return deadPanel(host, question, panel && panel.reason);
@@ -966,7 +1057,7 @@
        its intended weight. */
     const defs = svgEl("defs");
     const pat = svgEl("pattern", {
-      id: "gsNeg", width: 5, height: 5, patternUnits: "userSpaceOnUse",
+      id: mountId("gsNeg", mount), width: 5, height: 5, patternUnits: "userSpaceOnUse",
       patternTransform: "rotate(45)", class: "gs-negpat",
     });
     pat.append(svgEl("line", { x1: 2.5, y1: 0, x2: 2.5, y2: 5, stroke: "currentColor", "stroke-width": 1.6 }));
@@ -1031,7 +1122,7 @@
         if (neg && rowH >= 9 && colW >= 9) {
           svg.append(svgEl("rect", {
             class: "gs-hatch", x, y, width: cellW, height: cellH,
-            fill: "url(#gsNeg)",
+            fill: `url(#${mountId("gsNeg", mount)})`,
           }));
         }
         /* Cells beyond the PUBLISHED cap are marked rather than silently
@@ -1203,7 +1294,8 @@
         class: "gs-key-sw is-neg", x: hatchX, y: keyY, width: sw - 1, height: swH, "fill-opacity": "0.81",
       }));
       svg.append(svgEl("rect", {
-        class: "gs-hatch", x: hatchX, y: keyY, width: sw - 1, height: swH, fill: "url(#gsNeg)",
+        class: "gs-hatch", x: hatchX, y: keyY, width: sw - 1, height: swH,
+        fill: `url(#${mountId("gsNeg", mount)})`,
       }));
       const negT = svgEl("text", { class: "gs-key", x: hatchX + sw + 2, y: keyY + swH });
       negT.textContent = "short";
@@ -1297,8 +1389,14 @@
     host.append(el("p", "fc-note", notes.join(". ") + "."));
   }
 
-  function renderCalendar(host, panel) {
-    const question = "When does this dealer positioning expire, and what is left after it does?";
+  function renderCalendar(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "When does this dealer positioning expire, and what is left after it does?";
     if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
       return deadPanel(host, question, panel && panel.reason);
     }
@@ -1390,8 +1488,14 @@
    * The gap between the implied band and the realized band IS the variance risk
    * premium, in the units a reader sizes in rather than in vol points.
    */
-  function renderMove(host, panel) {
-    const question =
+  function renderMove(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn ||
       "What move is priced over a fixed horizon, and is that band rich against " +
       "what this stock has actually been delivering?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
@@ -1517,8 +1621,14 @@
 
   /* ---------- price context ------------------------------------------ */
 
-  function renderContext(host, panel) {
-    const question = "Where has this name been, before any of today's flow?";
+  function renderContext(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Where has this name been, before any of today's flow?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
     panelHead(host, question);
 
@@ -1567,8 +1677,14 @@
 
   /* ---------- level rail ------------------------------------------- */
 
-  function renderLevels(host, panel) {
-    const question = "Where are the levels that matter, and how far is each in units I can size against?";
+  function renderLevels(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Where are the levels that matter, and how far is each in units I can size against?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
     panelHead(host, question);
 
@@ -1652,8 +1768,14 @@
    * would draw something actively wrong rather than something plain. Any CSS
    * rule of the same name still wins over an attribute.
    */
-  function renderPath(host, panel) {
-    const question = "Did this arrive as one print, or as a bid that persisted all session?";
+  function renderPath(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
       return deadPanel(host, question, panel && panel.reason);
     }
@@ -1876,8 +1998,14 @@
 
   /* ---------- congress ---------------------------------------------- */
 
-  function renderCongress(host, panel) {
-    const question = "Who in Congress disclosed a trade in this name, and how old is that information?";
+  function renderCongress(host, panel, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Who in Congress disclosed a trade in this name, and how old is that information?";
     if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
     panelHead(host, question);
 
@@ -1954,8 +2082,14 @@
    * the composite in the first place. A gauge at zero is a real reading; a
    * signed axis at null is an absent one, and those must not look alike.
    */
-  function renderScore(host, card) {
-    const question = "Why is this name on the board, and how much of the score came from where?";
+  function renderScore(host, card, questionIn) {
+    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
+       The dialog passes nothing and gets exactly the string it always did;
+       /flows/ticker/ passes the registry's question, read out of the panel's
+       data-question attribute. Written this way rather than as a default
+       parameter because the string below is the documentation of what this
+       chart is FOR, and moving it out of the function would separate the two. */
+    const question = questionIn || "Why is this name on the board, and how much of the score came from where?";
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
 
