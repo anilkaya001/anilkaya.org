@@ -279,11 +279,83 @@ try {
       eq(bareMarket.status, 308, "/flows/market without its trailing slash redirects too");
     }
 
+    /* THE UNUSUAL-ACTIVITY FEED. Its own block because the thing that can go
+       wrong here is not routing but VOCABULARY: the page is built on a
+       contract aggregate and may never call it a trade, and may never date a
+       counter the endpoint refuses to date. */
+    {
+      const ua = await get("/flows/unusual/", { headers: { Cookie: "flows_session=" + token } });
+      eq(ua.status, 200, "/flows/unusual/ renders for an authenticated session");
+      const uaHtml = await ua.text();
+      ok(uaHtml.includes("/assets/js/flows-unusual.js"),
+         "the unusual page loads its own controller");
+      ok(uaHtml.includes('id="uaFeedBody"'), "and carries the contract feed's table body");
+      ok(uaHtml.includes('id="uaNameBody"'), "and the name panel's");
+      ok(uaHtml.includes('id="uaBasis"'), "and the basis panel, which is the page's honesty");
+
+      /* THE BAN, AND IT IS A BAN ON THE CLAIM RATHER THAN ON THE WORD.
+
+         The source is one row per listed strike with a volume total — no
+         size, no timestamp, no execution price — so calling it a print or a
+         trade asserts something the data cannot support. But a page whose
+         entire design is that refusal has to be ALLOWED TO NAME WHAT IT
+         REFUSES: its lede says "A counter, not a trade", which is the most
+         important sentence on the page and would fail a blanket sweep.
+
+         So the assertion is two-sided and stronger than "never appears":
+         every occurrence must sit inside the prose whose job is to state the
+         refusals — the lede and the basis panel. One anywhere else, in a
+         table header, a caption or a status strip, is the page claiming it.
+
+         "order" is excluded from the vocabulary because it occurs in ordinary
+         prose ("in no documented order"); the per-trade words are the ones
+         that carry a claim. */
+      const banned = /\b(print|trade|block|sweep|bought|sold|paid|whale|smart money|institutional)\b/ig;
+      const refusalProse = [
+        ...uaHtml.matchAll(/<p class="flows-lede">[\s\S]*?<\/p>/g),
+        ...uaHtml.matchAll(/<section[^>]*id="uaBasisPanel"[\s\S]*?<\/section>/g),
+      ].map((x) => x[0]).join("\n");
+      const strayClaims = [];
+      for (const hit of uaHtml.matchAll(banned)) {
+        const around = uaHtml.slice(Math.max(0, hit.index - 60), hit.index + 60);
+        if (!refusalProse.includes(around.slice(10, -10))) strayClaims.push(hit[0] + ": " + around);
+      }
+      eq(strayClaims.length, 0,
+         `the unusual page names a trade only where it is refusing to call it one ` +
+         `(${strayClaims.slice(0, 2).join(" | ")})`);
+      ok(/not a trade/i.test(uaHtml),
+         "and the lede states that refusal in so many words, rather than leaving it implied");
+      /* AND IT NEVER DATES THE COUNTER. The endpoint accepts no date and the
+         pipeline reads it four hours before the bell, so "today" would be a
+         free parameter on the page's most load-bearing quantity. */
+      const dated = /\b(today|this session|the day's|the day\u2019s)\b/i;
+      const d = uaHtml.match(dated);
+      ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}")`);
+
+      const anonUa = await get("/flows/unusual/");
+      eq(anonUa.status, 200, "/flows/unusual/ serves a page to an anonymous visitor");
+      ok(!(await anonUa.text()).includes('id="uaFeedBody"'),
+         "/flows/unusual/ leaks nothing to an anonymous visitor");
+
+      const bareUa = await get("/flows/unusual");
+      eq(bareUa.status, 308, "/flows/unusual without its trailing slash redirects");
+
+      /* The API answers honestly before the pipeline has ever written the key. */
+      const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
+      eq(api.status, 200, "an authenticated unusual request succeeds");
+      const payload = await api.json();
+      ok(payload.status === "pending" || Array.isArray(payload.contracts && payload.contracts.rows),
+         "and answers pending or a real feed, never a half-shaped object");
+
+      const anonApi = await get("/api/flows/unusual");
+      eq(anonApi.status, 401, "and refuses an anonymous reader");
+    }
+
     /* Every gated page carries the rail, and the rail carries every
        destination — a nav that omits a route is a route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
-                        "/flows/market/", "/flows/ticker/", "/flows/desk/",
-                        "/flows/history/"]) {
+                        "/flows/market/", "/flows/unusual/", "/flows/ticker/",
+                        "/flows/desk/", "/flows/history/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
 

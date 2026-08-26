@@ -32,7 +32,12 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS } from "../shared/flows-chain.js";
+import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS }
+  from "../shared/flows-chain.js";
+import {
+  rankUnusual, rankUnusualNames, describeFlowAlerts, describeOiBasis,
+  UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
+} from "../shared/flows-unusual.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -455,6 +460,49 @@ let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * One bounded request, whose only product is a sentence in the log.
+ *
+ * WHY NOT uw(). uw() ends with `return Array.isArray(body) ? body : (body &&
+ * body.data) || [];` — it coerces any body it does not recognise to an empty
+ * array. That is right for a data call and catastrophic here: a vendor
+ * envelope this repo has never seen would be reported as "returned nothing",
+ * which is indistinguishable from a refusal, and this probe would then write
+ * the WRONG permanent answer into a comment that has asserted the same thing
+ * for months with no evidence behind it. An answer with false provenance is
+ * worse than no answer.
+ *
+ * NO RETRY, ON PURPOSE, WHICH MAKES 429 AN OUTCOME. The live run of
+ * 2026-08-26 was rate-limited on 170 of 1022 calls, so throttling is the
+ * single most likely thing this probe meets. describeFlowAlerts() reports it
+ * as THROTTLED and explicitly not as a refusal.
+ *
+ * DRY-RUN GUARDED, because the test suite runs this pipeline: an unguarded
+ * fetch would fire a live request with `Bearer undefined` out of `npm test`.
+ */
+async function uwProbe(path, params = {}) {
+  if (DRY_RUN) return { status: 0, body: null, raw: "", dryRun: true };
+  const url = new URL(BASE + path);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+  await sleep(delayMs);
+  stats.calls++;
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Authorization: "Bearer " + process.env.UW_API_KEY,
+        Accept: "application/json",
+      },
+    });
+  } catch (error) {
+    return { status: -1, body: null, raw: String(error && error.message), network: true };
+  }
+  const text = await response.text();
+  let body = null, parsed = true;
+  try { body = JSON.parse(text); } catch { parsed = false; }
+  return { status: response.status, body, parsed, raw: text.slice(0, 400) };
+}
+
 async function uw(path, params = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
@@ -635,6 +683,15 @@ function screenerTilt(row) {
     atmVol: num(row.volatility, NaN),
     relVolume: num(row.relative_volume, NaN),
     putCallRatio: num(row.put_call_ratio, NaN),
+    /* THE TWO SURPRISE RATIOS, RETURNED RATHER THAN RECOMPUTED. Both are
+       computed above with the null-on-absent-average guard the comment there
+       explains, and until now neither left this function — only the log-ratio
+       built from them did. /flows/unusual/ needs the ratios themselves, and a
+       second implementation of `call_volume / avg_30_day_call_volume` in
+       another file would be a second chance to reintroduce the fallback-to-1
+       bug this repo has already shipped once. Reused, not reimplemented. */
+    callSurprise,
+    putSurprise,
     week52High: num(row.week_52_high, NaN),
     week52Low: num(row.week_52_low, NaN),
   };
@@ -4049,6 +4106,128 @@ async function main() {
       console.log(line);
     }
   }
+
+  /* 7f'. THE UNUSUAL-ACTIVITY FEED — every chain's contribution, pooled.
+
+     ZERO MARGINAL VENDOR CALLS. Each chain already built its own rows inside
+     buildChainPanels, where the implied-volatility divisor and the
+     root-filtered rows live; this leg only pools, ranks and publishes them.
+     The name panel below costs nothing either — it is the screener rows the
+     run has held since step 2.
+
+     AFTER THE BOARDS, LIKE EVERYTHING IN THIS STRETCH. A feed that fails to
+     build must never cost the reader the session's ranking. */
+  try {
+    const pooled = [];
+    const coverage = [];
+    let namesTruncated = 0, foreign = 0;
+    const divisors = new Set();
+    for (const [ticker, c] of chainByTicker) {
+      if (!c || c.status !== "ok" || !Array.isArray(c.unusualRows)) continue;
+      pooled.push(...c.unusualRows);
+      if (c.truncated) namesTruncated++;
+      foreign += Number(c.foreignRows) || 0;
+      if (Number.isFinite(c.ivDivisor)) divisors.add(c.ivDivisor);
+      coverage.push({
+        t: ticker,
+        rows: Number(c.rowsSeen) || 0,
+        p: c.truncated ? 1 : 0,
+        ivDivisor: Number.isFinite(c.ivDivisor) ? c.ivDivisor : null,
+        ivBasis: c.ivBasis || null,
+      });
+    }
+    const namesSeen = coverage.length;
+    const contracts = rankUnusual(pooled, { namesSeen });
+    const names = rankUnusualNames(withTilt);
+
+    await publish("unusual", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* WHEN THE CHAIN WAS READ, and it is deliberately NOT a claim about
+         what the counter counts. The two are published side by side with the
+         reason, because a single timestamp on this page would be read as the
+         counter's date and there is no such thing. */
+      readAt: generatedAt,
+      volumeAsOf: null,
+      volumeAsOfReason: "the endpoint accepts no date parameter and carries no as-of stamp",
+      dteAnchor: "sessionDate",
+      status: contracts.shown ? "ok" : (namesSeen ? "quiet" : "pending"),
+      /* null, NOT false, when no chain contributed. "Incomplete" is a claim
+         about coverage and there is no coverage to be incomplete about. */
+      complete: namesSeen ? namesTruncated === 0 : null,
+      namesSeen,
+      namesTruncated,
+      namesComplete: namesSeen - namesTruncated,
+      foreign,
+      ivConventionsSeen: divisors.size,
+      coverage,
+      contracts,
+      names: { ...names, earningsGated: withTilt.length - tilted.length },
+      basis: {
+        unit: UNUSUAL_NOTES.unit,
+        date: UNUSUAL_NOTES.date,
+        rank: { key: "vor", choice: true, relation: "vor = volume / open_interest",
+          reason: UNUSUAL_NOTES.rank },
+        floors: { minVolume: UA_MIN_VOLUME, minOi: UA_MIN_OI, perName: contracts.perName,
+          choice: true,
+          reason: "A minimum volume keeps a 200-lot on a five-contract open interest " +
+            "from dominating the ranking with a vor of forty; a minimum open interest " +
+            "is the denominator, and is what makes vor finite by construction." },
+        /* VERBATIM FROM THE BUILDER, taken off a chain that actually built
+           one. Two spellings of one relation is how a page and its payload
+           start disagreeing — and calling the builder with an empty array to
+           harvest the string would get a dead panel with no relation on it,
+           which is how the first attempt published `null` here. */
+        aggr: (() => {
+          for (const c of chainByTicker.values()) {
+            const r = c && c.topContracts && c.topContracts.relation;
+            if (typeof r === "string" && r) return r;
+          }
+          return null;
+        })(),
+        lift: UNUSUAL_NOTES.lift,
+        notional: UNUSUAL_NOTES.notional,
+        iv: UNUSUAL_NOTES.iv,
+        oi: UNUSUAL_NOTES.oi,
+        zeroOi: UNUSUAL_NOTES.zeroOi,
+        names: UNUSUAL_NOTES.names,
+        refusals: UNUSUAL_NOTES.refusals,
+      },
+    });
+    console.log(
+      `  unusual: ${contracts.shown} of ${contracts.eligible} contracts over ` +
+      `${namesSeen} chain(s) (cap bound by ${contracts.capBound}, ${contracts.perName} per name); ` +
+      `${names.shown} of ${names.ranked} names ranked of ${names.universe}` +
+      (names.unranked ? `, ${names.unranked} unranked for want of a 30-day average` : "") +
+      (divisors.size > 1 ? `; ${divisors.size} IV conventions in one table` : ""));
+
+    /* THE OPEN-INTEREST BASIS DIAGNOSTIC. Costs nothing, run on the first
+       chain that produced feed rows, and its zero branch reports itself as
+       INCONCLUSIVE rather than as evidence — see describeOiBasis. */
+    const firstChain = [...chainByTicker.values()].find(
+      (c) => c && c.status === "ok" && c.oiBasis && c.oiBasis.seen > 0);
+    if (firstChain) {
+      console.log("  " + (DRY_RUN ? "[dry-run] " : "") + firstChain.oiBasis.line +
+        (DRY_RUN
+          ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
+            " and is not evidence about the vendor."
+          : ""));
+    }
+    /* THE PROBE THAT SETTLES THE ASSERTION. One call, once per run, whose
+       entire output is a line in the log — no payload, no page, no reader.
+       It exists because this file states in two places that the per-trade
+       flow-alerts endpoint is unreachable on this key, and has never once
+       recorded a status code to back it. Roughly 0.1% of the run's calls. */
+    try {
+      const probe = await uwProbe("/api/option-trades/flow-alerts", { limit: 5 });
+      console.log("  " + describeFlowAlerts(probe).line);
+    } catch (error) {
+      console.warn(`  flow-alerts: the probe itself threw — ${error.message}`);
+    }
+  } catch (error) {
+    console.warn(`  unusual: ${error.message}`);
+  }
+
   } catch (error) {
     console.warn(`  chains: ${error.message} — the boards published before this leg ran ` +
       "and are unaffected");

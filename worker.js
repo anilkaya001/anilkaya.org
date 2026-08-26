@@ -2176,6 +2176,7 @@ async function route(request, env, url, ctx) {
        missed path can only ever 404. ?t= is also the parameter the card
        dialog's deep link already uses. */
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
+    "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2199,7 +2200,8 @@ async function route(request, env, url, ctx) {
      which would have had the identical hole. */
   if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
       || path === "/flows/watch" || path === "/flows/history"
-      || path === "/flows/market" || path === "/flows/ticker") {
+      || path === "/flows/market" || path === "/flows/ticker"
+      || path === "/flows/unusual") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2242,7 +2244,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^unusual$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2345,6 +2347,17 @@ async function route(request, env, url, ctx) {
          costs no vendor call at all. Served here like everything else: read a
          stored blob, hand back the bytes. */
       const stored = await readFlowsPayload(env, "market");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/unusual") {
+      /* THE CONTRACT FEED, AND IT SPENDS NO VENDOR CALL AT ALL. Every row was
+         built inside buildChainPanels from the option chain the pipeline
+         already buys for each board name, and the name panel from screener
+         rows already in memory. Served the way everything here is: read one
+         stored blob, hand back the bytes, parse nothing. */
+      const stored = await readFlowsPayload(env, "unusual");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }

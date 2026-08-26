@@ -90,6 +90,7 @@ const rail = (active) => {
     ${item("/flows/short/", "Bearish", "short")}
     ${item("/flows/watch/", "Watch", "watch")}
     ${item("/flows/market/", "Market", "market")}
+    ${item("/flows/unusual/", "Unusual", "unusual")}
   </div>
   <p class="rail-group" id="railName">Name</p>
   <div class="rail-items" role="group" aria-labelledby="railName">
@@ -726,6 +727,112 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
 }
 
 
+/* ---------- unusual activity ----------------------------------- */
+
+/**
+ * A COUNTER, NOT A TRADE — and the page is built around that sentence.
+ *
+ * The recognisable Unusual Whales surface is a per-trade feed: individual
+ * prints with a size, a timestamp, an execution price and a sweep flag. Its
+ * source is an endpoint this pipeline asserts it cannot reach; a probe now
+ * records what that endpoint actually answers, so the assertion will finally
+ * have provenance either way.
+ *
+ * Meanwhile this is what can be built honestly and for nothing. The option
+ * chain the pipeline already buys for every board name carries one row per
+ * listed strike with a volume total, an open interest and a two-sided quote.
+ * That is a contract AGGREGATE. It has no size, no timestamp, no execution
+ * price and no counterparty, so this page may never say print, trade, block,
+ * sweep, order, bought, sold or paid — a rule a test enforces rather than a
+ * habit anyone has to remember.
+ *
+ * AND IT MAY NEVER SAY "TODAY". The endpoint accepts no date and returns no
+ * as-of stamp, and the pipeline reads it four and a quarter hours before the
+ * opening bell — so at read time today has not happened. What the counter
+ * spans is unobserved. The page publishes readAt, and volumeAsOf: null with
+ * the reason beside it, rather than borrowing the session date and quietly
+ * turning a free parameter into a fact.
+ *
+ * TWO PANELS BECAUSE THEY SEE DIFFERENT POPULATIONS. The contract feed can
+ * only cover names whose chain was bought — a few dozen, the honest ceiling
+ * of a zero-call design. The name panel is built from the screener rows held
+ * for every eligible name, hundreds of them, for the same zero calls. Saying
+ * so on the surface is what stops the first panel being read as the market.
+ */
+export function unusualPage({ username = "" } = {}) {
+  const lede = "Contracts whose volume counter stands far above the open interest " +
+    "beside it. A counter, not a trade: the vendor reports a total for each strike " +
+    "with no size, no time and no execution price — and this endpoint carries no " +
+    "as-of date, so the counter is stamped with when it was read and nothing more. " +
+    "Nothing here says who traded, or why.";
+  return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
+${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
+  <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
+  <p class="flows-stale" id="uaStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <section class="fc-panel" id="uaFeedPanel" hidden aria-labelledby="uaFeedH">
+    <h2 class="fc-panel-h" id="uaFeedH">Contracts by volume over open interest</h2>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Contracts ranked by volume over open interest">
+      <table class="flows-table" id="uaFeed">
+        <caption class="flows-caption" id="uaFeedCap"></caption>
+        <thead><tr>
+          <th scope="col">Name</th>
+          <th scope="col" class="c-num">Strike</th>
+          <th scope="col">Expiry</th>
+          <th scope="col">C/P</th>
+          <th scope="col" class="c-num"><abbr title="The vendor's volume counter for this strike. Undated: this endpoint carries no as-of stamp.">Vol</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Open interest as the vendor reported it on this response, undated.">OI</abbr></th>
+          <th scope="col" class="c-num"><abbr title="volume divided by open interest — a ratio of two counts, and the ranking key">Vol/OI</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Open interest minus the previous open interest: contracts that stuck between two settlements. It does not say on which side.">&#916;OI</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Share of the volume the vendor classified that hit the offer. Not a share of all volume, and not a claim about buying.">Lift</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Volume times the quote times 100 shares, both ends. A scale for the money involved, not a bound on it.">Notional</abbr></th>
+        </tr></thead>
+        <tbody id="uaFeedBody"></tbody>
+      </table>
+    </div>
+    <p class="fc-note" id="uaFeedNote"></p>
+  </section>
+
+  <section class="fc-panel" id="uaNamePanel" hidden aria-labelledby="uaNameH">
+    <h2 class="fc-panel-h" id="uaNameH">Names against their own thirty-day average</h2>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Names ranked by option volume against their own average">
+      <table class="flows-table" id="uaNames">
+        <caption class="flows-caption" id="uaNameCap"></caption>
+        <thead><tr>
+          <th scope="col">Name</th>
+          <th scope="col" class="c-num">Last</th>
+          <th scope="col" class="c-num">Change</th>
+          <th scope="col" class="c-num"><abbr title="Call plus put volume over the sum of both thirty-day averages. Withheld when either average is missing.">Both</abbr></th>
+          <th scope="col" class="c-num">Calls</th>
+          <th scope="col" class="c-num">Puts</th>
+          <th scope="col" class="c-num"><abbr title="The vendor's own put/call ratio, passed through.">P/C</abbr></th>
+        </tr></thead>
+        <tbody id="uaNameBody"></tbody>
+      </table>
+    </div>
+    <p class="fc-note" id="uaNameNote"></p>
+  </section>
+
+  <section class="fc-panel" id="uaBasisPanel" hidden aria-labelledby="uaBasisH">
+    <h2 class="fc-panel-h" id="uaBasisH">What these numbers are, and what they are not</h2>
+    <div id="uaBasis"></div>
+  </section>
+
+  <p class="flows-foot" id="uaFoot"></p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-unusual.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
 /* ---------- the ticker page ------------------------------------ */
 
 /**
@@ -944,5 +1051,5 @@ function escapeHTML(value) {
 
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
-  tickerPage, ASSET_VERSION,
+  tickerPage, unusualPage, ASSET_VERSION,
 };

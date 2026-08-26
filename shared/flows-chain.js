@@ -27,6 +27,7 @@ import {
   parseOptionSymbol, ivConvention, priceSale, ivSurface,
   SURFACE_MAX_EXPIRIES, SURFACE_MAX_ROWS,
 } from "./flows-premium.js";
+import { buildUnusualRows, describeOiBasis } from "./flows-unusual.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -720,6 +721,33 @@ export function buildChainPanels(chainRows, {
     skewTerm: buildSkewTerm(serial, scalars),
     topContracts: buildTopContracts(rows, { spot, ivDivisor: conv.divisor }),
     aggressor: buildAggressor(rows, { spot }),
+    /* THE UNUSUAL-ACTIVITY FEED'S CONTRIBUTION FROM THIS CHAIN, built HERE
+       and not by the caller, because three things it needs exist only in this
+       scope and every one of them is a correctness requirement rather than a
+       convenience:
+
+         - conv.divisor, the implied-volatility convention decided once from
+           THIS chain's own median. It is a local; the returned object has
+           only conv.basis. A caller outside would have to re-derive it, which
+           is a second answer to a question already answered.
+         - `rows`, which is root-FILTERED. An adjusted series (an AAPL1 beside
+           an AAPL) is deliverable on something other than 100 shares, and the
+           feed multiplies by SHARES_PER_CONTRACT. That multiplication is only
+           legal after this filter, and the filter's output never leaves here.
+         - `truncated`, so a row can carry whether its own chain was a full
+           page rather than the page carrying one flag for a mix of names.
+
+       Not a panel: this does not go on the card. It is collected across every
+       name the chain leg reached and published once, under `unusual`. */
+    unusualRows: buildUnusualRows(rows, {
+      ticker, spot, ivDivisor: conv.divisor, sessionDate: asOf, truncated,
+    }),
+    ivDivisor: conv.divisor,
+    /* THE OPEN-INTEREST BASIS CHECK, computed here for the same reason the
+       feed is: it needs the root-filtered rows, which never leave this scope.
+       Pure arithmetic over rows already in memory, so running it on every
+       chain costs nothing and the pipeline reports one of them. */
+    oiBasis: describeOiBasis(rows),
     /* THE HORIZON TRAVELS WITH THE READING. "Nearest expiry past seven days" is
        eight days out on SPY and ninety on a thin name, so the number alone is
        not comparable across names — carrying the days is what lets anyone
