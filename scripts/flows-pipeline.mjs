@@ -3732,9 +3732,16 @@ async function main() {
     /* GATED LAST, so it overwrites every earlier stage. A name the gate
        removed never reached enrichment, and labelling it by how far it got
        before the gate would bury the one fact this page is for. */
+    /* THE GATE'S OWN COUNT, KEPT, and handed to the page rather than
+       recomputed there. daysToEarnings rounds against Date.now(), so its
+       answer depends on the hour the run fires; a second computation from
+       midnight disagrees by one at some hours and publishes a row labelled
+       `gated` beside a dte of 13 against a stated gate of 12. */
+    const gateDteByTicker = new Map();
     for (const { row } of withTilt) {
       if (!row || !row.ticker) continue;
       const dte = daysToEarnings(row, today);
+      if (dte !== null) gateDteByTicker.set(row.ticker, dte);
       if (dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS) {
         stageByTicker.set(row.ticker, "gated");
       }
@@ -3757,6 +3764,7 @@ async function main() {
       stageOf: (t) => stageByTicker.get(t) || null,
       featuresOf: (t) => featuresByTicker.get(t) || null,
       scoreOf: (t) => (scoreByTicker.has(t) ? scoreByTicker.get(t) : null),
+      gateDteOf: (t) => (gateDteByTicker.has(t) ? gateDteByTicker.get(t) : undefined),
     });
 
     await publish("events", {

@@ -50,6 +50,29 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 /** How many rows the table publishes, and how far ahead it looks. */
 export const EVENT_ROWS = 60;
+
+/**
+ * The window, in CALENDAR DAYS — and the unit in the name is load-bearing.
+ *
+ * TWO HORIZONS LIVE ON THIS PAGE AND THEY ARE NOT THE SAME QUANTITY.
+ *
+ *   dte  — CALENDAR days to the report. This is what the earnings gate
+ *          counts (daysToEarnings is a plain millisecond subtraction), so it
+ *          is the only unit in which "inside the gate" is a true statement,
+ *          and the only one the window and the chart's axis may use.
+ *   sdte — trading SESSIONS to the report, weekdays only. This is what the
+ *          priced move needs, because horizonMove scales by sqrt(sessions /
+ *          trading year) and feeding it calendar days overstates every move
+ *          that crosses a weekend by sqrt(7/5) — about 18%.
+ *
+ * The first draft of this file filtered `sdte > EVENT_WINDOW_DAYS`: sessions
+ * compared against a constant named days. It also would have had the chart
+ * hatch a gate band measured in calendar days across marks placed in
+ * sessions, so a name gated at 12 calendar days would have been drawn at 8
+ * and appeared to sit OUTSIDE the band that removed it. Both numbers were
+ * individually correct and the comparison between them was not, which is why
+ * the unit is in the name now.
+ */
 export const EVENT_WINDOW_DAYS = 21;
 
 /**
@@ -70,6 +93,15 @@ export const EVENT_WINDOW_DAYS = 21;
  * Returns null rather than 0 for an unparseable or absent date — "reports
  * today" and "no date on the wire" are different facts.
  */
+export function calendarDaysTo(earningsDate, origin) {
+  if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
+  const end = Date.parse(earningsDate + "T00:00:00Z");
+  const start = Date.parse(origin + "T00:00:00Z");
+  if (!Number.isFinite(end) || !Number.isFinite(start)) return null;
+  const days = Math.round((end - start) / 86400000);
+  return days < 0 ? null : days;
+}
+
 export function sessionsToEarnings(earningsDate, origin) {
   if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
   const end = Date.parse(earningsDate + "T00:00:00Z");
@@ -130,16 +162,39 @@ export function ivPathOf(tilt) {
  * published and deliberately not reconciled: they are quoted to different
  * horizons, and averaging them would produce a number quoted to neither.
  */
-export function eventRow(row, tilt, { gateOrigin, features = null, score = null, stage = null } = {}) {
+export function eventRow(row, tilt, {
+  gateOrigin, features = null, score = null, stage = null, gateDte = undefined,
+} = {}) {
   const t = tilt || {};
   const d = ISO.test(String(row && row.next_earnings_date || "")) ? row.next_earnings_date : null;
   const sdte = sessionsToEarnings(d, gateOrigin);
+  /* THE GATE'S OWN NUMBER WHEN THE CALLER HAS IT, and a local computation
+     only as a fallback.
+
+     daysToEarnings() rounds `(earnings_at_midnight − Date.now()) / a day`, so
+     its answer depends on the TIME OF DAY the run happens: late in the day it
+     shaves most of a day off. calendarDaysTo() measures from midnight of the
+     Eastern date. The two agree at some hours and differ by one at others —
+     and when they differ, a row can be labelled `gated` while the `dte` beside
+     it reads 13 against a stated gate of 12, which is a contradiction a reader
+     is entitled to take as a bug in the gate rather than in the arithmetic.
+     Measured on a 20:52 UTC dry run: exactly that, on the boundary rows.
+
+     There is no right answer to "which rounding is correct" — there is only
+     "which number did the gate actually use", and this is how the page gets
+     that one instead of a second opinion about it. */
+  const dte = gateDte === undefined || gateDte === null
+    ? calendarDaysTo(d, gateOrigin)
+    : (gateDte < 0 ? null : gateDte);
   const iv = numOrNull(t.iv30);
   const close = numOrNull(row && row.close);
 
   return {
     t: String((row && row.ticker) || ""),
     d,
+    /* BOTH HORIZONS, because they answer different questions and one of them
+       is the gate's. See EVENT_WINDOW_DAYS. */
+    dte,
     sdte,
     /* THE ANNOUNCE TIME IS NOT ON THE SCREENER, and this page does not spend
        44 calls to find it. Null with a published reason beats a column
@@ -184,6 +239,7 @@ export function buildEvents(withTilt, {
   stageOf = () => null,
   featuresOf = () => null,
   scoreOf = () => null,
+  gateDteOf = () => undefined,
 } = {}) {
   const rows = [];
   let dated = 0;
@@ -194,6 +250,7 @@ export function buildEvents(withTilt, {
       features: featuresOf(entry.row.ticker),
       score: scoreOf(entry.row.ticker),
       stage: stageOf(entry.row.ticker),
+      gateDte: gateDteOf(entry.row.ticker),
     });
     if (!row.t) continue;
     if (row.d) dated++;
@@ -201,8 +258,11 @@ export function buildEvents(withTilt, {
        counted in `undated` and left out entirely; seating it at the end of a
        calendar would put a name nobody has scheduled after one scheduled in
        three weeks, which reads as an ordering. */
-    if (row.sdte === null) continue;
-    if (row.sdte > windowDays) continue;
+    /* A NAME WITH NO EARNINGS DATE IS NOT A NAME REPORTING FAR AWAY — see
+       below. Both horizons are null together, so testing either is testing
+       the same fact; `dte` is tested because `dte` is what the window means. */
+    if (row.dte === null) continue;
+    if (row.dte > windowDays) continue;
     rows.push(row);
   }
   rows.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)));
