@@ -2228,7 +2228,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2315,6 +2315,27 @@ async function route(request, env, url, ctx) {
       if (stored === null) {
         return json({ side, rows: [], generatedAt: null, status: "pending" });
       }
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/movers" || path === "/api/flows/sectors") {
+      /* TWO MARKET-WIDE READINGS, both precomputed and both served as bytes.
+
+         Everything else in this section is bottom-up: a residual WITHIN the
+         day's cross-section, with sector and log-cap deliberately neutralised
+         out of it. So the board could say twelve names lean bullish and never
+         say whether that was breadth or one sector, and it could not say
+         whether the tape itself was risk-on. These two answer that.
+
+         `movers` costs the pipeline nothing — the screener already returns the
+         whole universe with price and change, and the pipeline discarded all
+         but the enriched sixty. `sector:trix` costs eleven candle calls of a
+         hundred-odd headroom, because a sector reading is one call per SECTOR
+         rather than one per name, which is what makes a top-down layer
+         affordable at all where a per-name one would not be. */
+      const key = path.endsWith("/movers") ? "movers" : "sector:trix";
+      const stored = await readFlowsPayload(env, key);
+      if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }
 

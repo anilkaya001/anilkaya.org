@@ -15,6 +15,8 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
+  SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
+  trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 
@@ -805,4 +807,375 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(toWatchRows([], screener, tilts).length, 0, "an empty band publishes an empty list, not a crash");
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor`);
+/* ---------- sector TRIX: the mathematics ------------------------- */
+{
+  /** A constant log drift of `driftBp` per session, oldest first. */
+  const ramp = (n, driftBp, p0 = 100) => {
+    const out = [];
+    let logPx = Math.log(p0);
+    for (let i = 0; i < n; i++) { out.push(Math.exp(logPx)); logPx += driftBp / 10000; }
+    return out;
+  };
+  const last = (xs) => xs[xs.length - 1];
+
+  /* THE RELATION HAS NO FREE PARAMETER IN IT. Under a constant log drift d the
+     triple EMA converges on the same ramp and its first difference is exactly
+     d, so a 200 bp/session ramp must read 200.00 bp and not 200-ish. */
+  const up = trixSeriesBp(ramp(200, 200));
+  near(last(up), 200, 1e-6,
+       "TRIX of a constant 200 bp/session log ramp settles at exactly 200 bp");
+
+  /* THE LOG IS LOAD-BEARING, and this is the assertion that proves it rather
+     than asserting it. A difference of logs is exactly antisymmetric: a ramp
+     down reads the negative of the same ramp up, to machine precision. The
+     textbook percentage form (e3[t] - e3[t-1]) / e3[t-1] is NOT — it reads
+     +202.0 against -198.0 on this pair, because a 2% gain and a 2% loss are
+     not the same size in percent. */
+  const down = trixSeriesBp(ramp(200, -200));
+  near(last(up), -last(down), 1e-6,
+       "THE LOG: a ramp down reads exactly the negative of the same ramp up");
+
+  const flatSeries = trixSeriesBp(new Array(200).fill(100));
+  eq(last(flatSeries), 0, "a price that never moves reads exactly 0 bp, not epsilon");
+
+  /* THE PUBLISHED SCALING, applied by hand rather than by calling the code it
+     is meant to check. */
+  eq(scaleTrix(0), 50, "zero momentum is the midpoint of the scale, not the bottom");
+  eq(scaleTrix(TRIX_FULL_SCALE_BP), 100, "the positive rail is the full-scale band");
+  eq(scaleTrix(-TRIX_FULL_SCALE_BP), 0, "and the negative rail its mirror");
+  eq(scaleTrix(TRIX_FULL_SCALE_BP * 4), 100, "past the rail it clamps rather than overflowing");
+  eq(scaleTrix(NaN), null, "an unmeasurable reading scales to null, never to 50");
+  ok(scaleTrix(TRIX_FULL_SCALE_BP / 2) > scaleTrix(TRIX_FULL_SCALE_BP / 4),
+     "and inside the rails it is strictly monotone in the raw reading");
+}
+
+/* ---------- sector TRIX: the scaling rule is the product --------- */
+{
+  const ramp = (n, driftBp, p0 = 100) => {
+    const out = [];
+    let logPx = Math.log(p0);
+    for (let i = 0; i < n; i++) { out.push(Math.exp(logPx)); logPx += driftBp / 10000; }
+    return out;
+  };
+  const candles = (closes) => closes.map((c, i) => ({
+    start_time: new Date(Date.UTC(2026, 1, 2, 14, 30) + i * 86400000).toISOString(),
+    close: c.toPrecision(15),
+    high: String(c * 1.005), low: String(c * 0.995), volume: 5e6,
+  }));
+  /** One session's eleven sectors, each on its own constant drift. */
+  const day = (driftsBp, { sessions = 200 } = {}) => new Map(
+    SECTOR_ETFS.map((s, i) => [s.etf, candles(ramp(sessions, driftsBp[i]))]));
+  const spread = (rows) => {
+    const xs = rows.filter((r) => r.trix !== null).map((r) => r.trix);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+
+  eq(SECTOR_ETFS.length, 11, "eleven GICS sectors, eleven vendor tickers");
+  eq(SECTOR_ETFS.map((s) => s.etf).join(" "),
+     "XLB XLC XLE XLF XLI XLK XLP XLRE XLU XLV XLY",
+     "the standard SPDR sector ETFs, in one named constant");
+
+  /* THE TEST THE BRIEF ASKS FOR, AND THE REASON MIN-MAX WAS REJECTED.
+
+     A session in which every sector sat within half a basis point of flat, and
+     a session in which the sectors ran from -40 bp to +45 bp, must not render
+     the same. Under a cross-sectional min-max they render IDENTICALLY: both
+     span exactly 0 to 100, because min-max always emits exactly one 0 and
+     exactly one 100 whatever the inputs were. */
+  const flat = sectorTrix(day([0, 0.4, -0.3, 0.2, 0, -0.1, 0.3, 0, -0.2, 0.1, 0]));
+  const rotating = sectorTrix(day([-40, -30, -20, -10, 0, 8, 15, 22, 30, 38, 45]));
+
+  eq(flat.filter((r) => r.trix !== null).length, 11, "all eleven sectors measured on the flat day");
+  eq(rotating.filter((r) => r.trix !== null).length, 11, "and all eleven on the rotating day");
+
+  ok(spread(flat) < 2,
+     `THE TEST: a flat session renders flat — all eleven inside ${spread(flat).toFixed(2)} points of each other`);
+  ok(spread(rotating) > 60,
+     `and a genuinely rotating session spreads across the range (${spread(rotating).toFixed(1)} points)`);
+  ok(spread(rotating) > 30 * spread(flat),
+     "so the two sessions are not merely different, they are an order of magnitude apart");
+  for (const r of flat) {
+    ok(Math.abs(r.trix - 50) < 1,
+       `${r.etf} sat near the neutral midpoint on a flat day, not at a rail (${r.trix})`);
+  }
+
+  /* THE IDENTIFICATION BAR, checked on the payload itself: every scaled
+     reading is the PUBLISHED relation applied to the PUBLISHED raw reading,
+     with no third input. The arithmetic is written out here rather than
+     borrowed from scaleTrix, so this is a statement about the payload and not
+     a tautology about the function.
+
+     This is also what rules out the second rejected scaling. A percentile of
+     each sector's own history is not a function of that sector's trixBp alone
+     — two sectors on the same raw reading would scale differently — so it
+     cannot satisfy this assertion at all. */
+  for (const r of [...flat, ...rotating]) {
+    const want = Number(
+      (50 + 50 * Math.max(-1, Math.min(1, r.trixBp / TRIX_FULL_SCALE_BP))).toFixed(1));
+    eq(r.trix, want,
+       `${r.etf}: the scaled reading is exactly the published relation applied to the published raw bp`);
+  }
+
+  /* THE AXIS DOES NOT MOVE WITH THE COMPANY IT KEEPS. The same sector on the
+     same drift must read the same number whether its ten neighbours were
+     asleep or on fire — which is the property that makes yesterday's 62 and
+     today's 62 the same basis points, and therefore the property that makes
+     the published trend line mean anything. */
+  const quiet = sectorTrix(day([20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+  const wild = sectorTrix(day([20, -90, 80, -70, 60, -50, 90, -80, 70, -60, 95]));
+  eq(quiet[0].trix, wild[0].trix,
+     "XLB on a 20 bp drift reads the same beside ten flat sectors as beside ten extreme ones");
+  near(quiet[0].trix, 70, 0.2, "and that reading is the fixed relation's answer, 70");
+
+  /* SATURATION ANNOUNCES ITSELF. Past the rail the scale stops
+     distinguishing, so a reading that is sitting on one has to say so —
+     otherwise a historic trend and an unprecedented one both print 100 and
+     nothing in the payload separates them. */
+  const extreme = sectorTrix(day([200, 10, -200, -10, 0, 0, 0, 0, 0, 0, 0]));
+  eq(extreme[0].trix, 100, "a 200 bp sector prints the top of the scale");
+  eq(extreme[0].clamped, true, "and declares itself clamped");
+  eq(extreme[0].clampedPoints, TRIX_SERIES, "with every point of its drawn line on the rail");
+  eq(extreme[2].trix, 0, "a -200 bp sector prints the bottom");
+  eq(extreme[2].clamped, true, "and declares itself clamped too");
+  eq(extreme[1].clamped, false, "a 10 bp sector is nowhere near a rail");
+  eq(extreme[1].clampedPoints, 0, "and none of its line is pinned");
+
+  /* THE SERIES IS DRAWABLE. Long enough for a shape, on the same 0-100 axis
+     as the scalar, and ending on it. */
+  for (const r of rotating) {
+    eq(r.series.length, TRIX_SERIES, `${r.etf} publishes ${TRIX_SERIES} sessions of history`);
+    ok(r.series.every((v) => Number.isFinite(v) && v >= 0 && v <= 100),
+       `${r.etf}'s whole line sits on the published 0-100 axis`);
+    eq(last_(r.series), r.trix, `${r.etf}'s line ends on the scalar it is published beside`);
+  }
+  function last_(xs) { return xs[xs.length - 1]; }
+}
+
+/* ---------- sector TRIX: unmeasured is null, never zero ---------- */
+{
+  const ramp = (n, driftBp, p0 = 100) => {
+    const out = [];
+    let logPx = Math.log(p0);
+    for (let i = 0; i < n; i++) { out.push(Math.exp(logPx)); logPx += driftBp / 10000; }
+    return out;
+  };
+  const candles = (closes) => closes.map((c, i) => ({
+    start_time: new Date(Date.UTC(2026, 1, 2, 14, 30) + i * 86400000).toISOString(),
+    close: c.toPrecision(15),
+    high: String(c * 1.005), low: String(c * 0.995), volume: 5e6,
+  }));
+
+  const rows = sectorTrix(new Map([
+    ["XLB", candles(ramp(200, 20))],                 // healthy
+    ["XLC", []],                                      // the endpoint answered nothing
+    ["XLE", candles(ramp(46, 30))],                   // enough to compute, not enough to settle
+    ["XLF", candles(ramp(200, 20)).map((c, i) => (i === 197 ? { ...c, close: "0" } : c))],
+    ["XLI", candles(ramp(230, 20)).map((c, i) => (i === 5 ? { ...c, close: "0" } : c))],
+  ]));
+  const by = new Map(rows.map((r) => [r.etf, r]));
+
+  eq(rows.length, 11,
+     "ALL ELEVEN SECTORS ARE ALWAYS PRESENT — a panel must not quietly shrink when the vendor stops answering");
+  eq(rows.map((r) => r.etf).join(" "), SECTOR_ETFS.map((s) => s.etf).join(" "),
+     "in the constant's order, so a renderer can index them");
+
+  ok(by.get("XLB").trix !== null, "the healthy sector is measured");
+
+  for (const etf of ["XLC", "XLE", "XLF", "XLU"]) {
+    const r = by.get(etf);
+    eq(r.trix, null, `${etf} is null when it cannot be measured`);
+    /* NEVER A CONFIDENT ZERO. On this scale 0 is the bottom rail — a maximal
+       DOWNTREND — and 50 is "no momentum". Either would be a confident, wrong,
+       readable claim about a sector nobody measured. */
+    ok(r.trix !== 0 && r.trix !== 50, `${etf} is not rendered as a confident reading`);
+    eq(r.trixBp, null, `${etf} publishes no raw reading either`);
+    eq(r.series, null, `${etf} publishes no trend line`);
+    eq(r.clamped, null, `${etf}'s clamp flag is null, not a definite false`);
+    ok(typeof r.reason === "string" && r.reason.length > 10,
+       `${etf} states WHY it is unmeasured: "${r.reason}"`);
+  }
+  eq(by.get("XLB").reason, null, "and a measured sector carries no reason");
+
+  ok(/no candles/.test(by.get("XLC").reason), "an empty response says so");
+  ok(/106/.test(by.get("XLE").reason) && /46/.test(by.get("XLE").reason),
+     `a short series names both what it had and what it needed: "${by.get("XLE").reason}"`);
+
+  /* THE WARM-UP GATE IS SUBSTANTIVE, not a formality. 46 candles is plenty to
+     run the arithmetic — it just runs it on a smoother that is still
+     remembering its seed, and the answer is materially wrong. */
+  const unsettled = trixSeriesBp(ramp(46, 30));
+  ok(Math.abs(unsettled[unsettled.length - 1] - 30) > 1.5,
+     `and the unsettled reading really was different (${unsettled[unsettled.length - 1].toFixed(2)} bp against a true 30.00)`);
+  const settled = trixSeriesBp(ramp(TRIX_MIN_CANDLES, 30));
+  near(settled[settled.length - 1], 30, 0.1,
+       "while at the published minimum the same ramp reads its true drift");
+
+  /* THE CLEAN TAIL. A bad candle inside the published window takes the sector
+     out; a bad patch from a year earlier does not, because the reading is
+     computed on the longest run of good closes ENDING AT THE LAST BAR. */
+  ok(/^2 usable XLF closes of 200 returned/.test(by.get("XLF").reason),
+     `a zero close three sessions ago takes the sector out: "${by.get("XLF").reason}"`);
+  ok(by.get("XLI").trix !== null,
+     "but a bad candle 224 sessions ago does NOT — the reading is computed on the clean tail");
+  near(by.get("XLI").trixBp, 20, 0.05,
+     "and that tail reads its true drift, so the bad bar left nothing behind in the smoother");
+}
+
+/* ---------- movers and premium: zero API calls ------------------- */
+{
+  const mk = (ticker, opts = {}) => ({
+    ticker,
+    close: String(opts.close === undefined ? 100 : opts.close),
+    prev_close: String(opts.prev_close === undefined ? 100 : opts.prev_close),
+    sector: opts.sector === undefined ? "Technology" : opts.sector,
+    net_call_premium: String(opts.nc === undefined ? 0 : opts.nc),
+    net_put_premium: String(opts.np === undefined ? 0 : opts.np),
+  });
+  /* Columns are removed by DELETING them, not by setting them to 0 or "".
+     Every one of these tests is about the difference between "the vendor sent
+     zero" and "the vendor sent nothing", so a helper that conflated the two
+     would test the opposite of what it claims. */
+  const strip = (row, ...keys) => {
+    const out = { ...row };
+    for (const k of keys) delete out[k];
+    return out;
+  };
+  const tilt = (relVolume, surpriseTilt) => ({ relVolume, surpriseTilt });
+
+  /* THE ZERO-CALL GUARANTEE, made structural. A synchronous function cannot
+     await a fetch, so this surface cannot quietly acquire an API cost later
+     without the change being obvious in the diff. The whole justification for
+     the movers band is that the screener rows were already paid for. */
+  const probe = buildMovers([{ row: mk("A", { close: 101 }), tilt: {} }]);
+  ok(!(probe instanceof Promise),
+     "THE BUDGET: buildMovers is synchronous — a surface that cannot await cannot make an API call");
+
+  /* A day with a clear top and bottom, plus the two things that must not be
+     fabricated: a name the vendor quoted no prior close for, and a name it
+     quoted no premium for at all. */
+  const rows = [
+    { row: mk("UP1", { close: 110, prev_close: 100, nc: 9e6, np: -1e6 }), tilt: tilt(3.2, 0.51) },
+    { row: mk("UP2", { close: 104, prev_close: 100, nc: 4e6, np: 1e6 }), tilt: tilt(1.1, 0.02) },
+    { row: mk("FLAT", { close: 100, prev_close: 100, nc: 1e6, np: 1e6 }), tilt: tilt(0.9, 0) },
+    { row: mk("DN1", { close: 90, prev_close: 100, nc: -2e6, np: 7e6 }), tilt: tilt(2.4, -0.4) },
+    { row: mk("DN2", { close: 97, prev_close: 100, nc: 0, np: 3e6 }), tilt: tilt(1.4, -0.1) },
+    { row: strip(mk("NOPREV", { close: 150, nc: 5e6, np: 0 }), "prev_close"), tilt: tilt(2, 0.1) },
+    { row: strip(mk("NOPREM", { close: 120, prev_close: 100 }), "net_call_premium", "net_put_premium"),
+      tilt: tilt(5, 1.2) },
+  ];
+  const m = buildMovers(rows);
+
+  /* BOTH DIRECTIONS, CLEARLY SEPARATED, AND EACH LEADING WITH ITS LARGEST. */
+  eq(m.risers.map((r) => r.t).join(","), "NOPREM,UP1,UP2",
+     "the risers lead with the largest gain and descend");
+  eq(m.fallers.map((r) => r.t).join(","), "DN1,DN2",
+     "THE FALLERS LEAD WITH THE LARGEST DECLINE, not the smallest");
+  ok(m.fallers[0].chg < m.fallers[m.fallers.length - 1].chg,
+     "so the faller list is ordered by depth of fall, not by proximity to zero");
+
+  const both = m.risers.map((r) => r.t).filter((t) => m.fallers.some((f) => f.t === t));
+  eq(both.length, 0, "no name can appear on both sides — a move cannot be positive and negative");
+  ok(!m.risers.some((r) => r.t === "FLAT") && !m.fallers.some((r) => r.t === "FLAT"),
+     "and an unchanged name is on neither list, because flat is not a move");
+
+  /* THE UNIT. chg is a FRACTION of the prior close, exactly as boardRow
+     publishes it: 0.1 is +10%, not 10 and not 0.001. */
+  eq(m.risers.find((r) => r.t === "UP1").chg, 0.1, "chg is a fraction of the prior close");
+  eq(m.fallers.find((r) => r.t === "DN1").chg, -0.1, "signed, with the same unit in both directions");
+
+  /* A MISSING PRIOR CLOSE IS NOT A ZERO MOVE. The name is excluded from the
+     ranking and COUNTED, so that if the vendor ever stops sending prev_close
+     the payload reports "nothing could be ranked" instead of "nothing moved". */
+  eq(moverRow(strip(mk("X"), "prev_close"), {}).chg, null,
+     "a name with no prior close reports a null move, never 0");
+  eq(m.unrankedChange, 1, "and is counted as unranked rather than silently dropped");
+  eq(m.ranked, rows.length - 1, "the ranked population is published beside the lists");
+  ok(!m.risers.some((r) => r.t === "NOPREV") && !m.fallers.some((r) => r.t === "NOPREV"),
+     "it appears on neither list");
+
+  /* LARGEST NET PREMIUM, BY NAME, IN EACH DIRECTION. */
+  eq(m.premium.basis, "byName",
+     "the premium lists say they are BY NAME — per-contract needs a flow-alerts endpoint this key cannot reach");
+  eq(m.premium.bullish.map((r) => r.t).join(","), "UP1,NOPREV,UP2",
+     "the bullish list leads with the largest net call-over-put premium");
+  /* THE TWO RANKINGS ARE INDEPENDENT. NOPREV cannot be ranked on change at all
+     and still carries the second-largest premium of the day, which is the
+     whole reason the unranked counts are per-question rather than one number:
+     a name is missing from a list because THAT column was missing, not because
+     the name was unusable. */
+  ok(m.premium.bullish.some((r) => r.t === "NOPREV"),
+     "a name with no prior close is still ranked on premium — the two lists gate independently");
+  eq(m.premium.bearish.map((r) => r.t).join(","), "DN1,DN2",
+     "and the bearish list leads with the largest net put-over-call premium");
+  eq(m.premium.bullish[0].netPrem, 10_000_000,
+     "netPrem is net call premium minus net put premium, in signed dollars");
+  eq(m.premium.bearish[0].netPrem, -9_000_000, "negative on the put side");
+  ok(!m.premium.bullish.some((r) => r.t === "FLAT") && !m.premium.bearish.some((r) => r.t === "FLAT"),
+     "a name whose two premium legs cancel is on neither list");
+
+  /* AN UNQUOTED PREMIUM IS NOT A BALANCED ONE. num() answers 0 for a column
+     the vendor never sent, and on a surface whose whole subject is premium
+     that 0 would be a published claim of perfect balance. */
+  eq(m.risers.find((r) => r.t === "NOPREM").netPrem, null,
+     "a name the screener quoted no premium for reports null, never a balanced zero");
+  eq(m.unrankedPremium, 1, "and is counted out of the premium population");
+  eq(m.priced, rows.length - 1, "which is published too");
+
+  /* THE COLUMNS THE BRIEF ASKS FOR, at the precision their source has. */
+  const up1 = m.risers.find((r) => r.t === "UP1");
+  eq(up1.relVolume, 3.2, "relative volume rides along at the two decimals the vendor quotes");
+  eq(up1.surpriseTilt, 0.51, "so does surpriseTilt, at three");
+  eq(up1.sector, "Technology", "and the vendor's own sector string, verbatim");
+  eq(moverRow(mk("Y", { sector: null }), {}).sector, null, "an absent sector is null, not an empty string");
+  eq(moverRow(mk("Y"), {}).relVolume, null, "a name with no tilt row reports null rather than 0x volume");
+  eq(moverRow(mk("Y"), null).surpriseTilt, null, "and does not throw when there is no tilt at all");
+}
+
+/* ---------- movers: one vocabulary, and the thin-side rule ------- */
+{
+  const screenerRow = {
+    ticker: "T", close: "110", prev_close: "100",
+    net_call_premium: "9000000", net_put_premium: "-1000000",
+    sector: "Energy",
+  };
+  const scored = {
+    ticker: "T", score: 40, conviction: 0.5, spot: 110, purity: 0.1, gRegime: "long",
+    flipDist: 0.2, fam: {}, closes: [], r5: null, r21: null, r42: null,
+    week52Pos: null, vrp: null, ivRank: null, impliedMovePerc: null, iv30: null, rv30: null,
+  };
+  const b = boardRow(scored, screenerRow, 1);
+  const mrow = moverRow(screenerRow, { relVolume: 2, surpriseTilt: 0.3 });
+
+  /* ONE ROW VOCABULARY ACROSS SURFACES. This file already carries the scar
+     from inventing a `px` on one surface and a `close` on another; a renderer
+     then has to know which surface it is holding. */
+  for (const k of ["t", "px", "chg", "netPrem"]) {
+    ok(k in mrow, `the mover row uses the board's name for \`${k}\``);
+    eq(mrow[k], k === "netPrem" ? Math.round(b[k]) : b[k],
+       `and the board's RELATION for \`${k}\`, not a second one that disagrees`);
+  }
+  for (const k of ["relVolume", "surpriseTilt"]) {
+    ok(k in mrow, `and the watch list's name for \`${k}\``);
+  }
+
+  /* A THIN SIDE IS INFORMATION. On a day the whole market rose, the fallers
+     list is EMPTY — not filled with the fifteen names that rose least under a
+     heading that says they fell. */
+  const allUp = Array.from({ length: 40 }, (_, i) => ({
+    row: { ticker: "U" + i, close: String(100 + i), prev_close: "100",
+           net_call_premium: String(1000 * (i + 1)), net_put_premium: "0" },
+    tilt: {},
+  }));
+  const rising = buildMovers(allUp);
+  eq(rising.fallers.length, 0, "a day on which nothing fell publishes no fallers");
+  eq(rising.premium.bearish.length, 0, "and a day on which nothing was net-bearish publishes no bearish names");
+  eq(rising.risers.length, MOVER_ROWS, `while the risers are capped at ${MOVER_ROWS}`);
+  eq(rising.risers[0].t, "U39", "and the cap keeps the LARGEST movers, not the first ones seen");
+
+  const nothing = buildMovers([]);
+  eq(nothing.risers.length, 0, "an empty universe publishes empty lists rather than throwing");
+  eq(nothing.ranked, 0, "with an honest count of zero");
+  eq(nothing.unrankedChange, 0, "and no phantom unranked names");
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts`);

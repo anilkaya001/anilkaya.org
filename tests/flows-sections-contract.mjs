@@ -62,6 +62,20 @@ try {
     const rec = await (await fetch(url("/api/flows/record"), { headers: auth })).json();
     eq(rec.status, "pending", "an unscored record reports pending");
     assert.deepEqual(rec.horizons, [], "with no horizons invented"); checks++;
+
+    /* THE SAME ORDERING TRAP, TWICE. These were written down in the
+       market-wide block below and failed there for exactly the reason the
+       comment above this block records: the key validator POSTs to every key
+       it proves is accepted, `movers` and `sector:trix` among them. An
+       empty-store assertion has to be taken before the file writes anything,
+       or it is an assertion about the test's own writes. */
+    for (const route of ["/api/flows/movers", "/api/flows/sectors"]) {
+      const anon = await fetch(url(route), { redirect: "manual" });
+      eq(anon.status, 401, `${route} is gated like every other flows API`);
+      const pending = await (await fetch(url(route), { headers: auth })).json();
+      eq(pending.status, "pending", `${route} reports pending before the pipeline has run`);
+      assert.deepEqual(pending.rows, [], `and ${route} invents no rows`); checks++;
+    }
   }
 
   /* ---------- the key validator, from both sides ------------------ */
@@ -70,6 +84,7 @@ try {
        validator that rejected one would present as a silently missing
        section rather than as an error anyone would see. */
     for (const key of ["board:long", "board:short", "board:watch", "meta", "record",
+                       "movers", "sector:trix",
                        "board:long:2026-08-26", "board:short:2026-08-26", "card:AAPL"]) {
       const res = await put(key, { ok: true });
       eq(res.status, 200, `the store accepts ${key}`);
@@ -88,11 +103,39 @@ try {
       ["", "an empty key"],
       ["../etc", "a traversal-shaped key"],
       ["card:lowercase", "a lowercase ticker the read path would uppercase"],
+      ["sector:momentum", "a sector reading nothing publishes"],
+      ["sector:trix:2026-08-26", "a dated sector reading, which nothing publishes"],
+      ["movers:long", "a sided movers list, which nothing publishes"],
     ];
     for (const [key, why] of bad) {
       const res = await put(key, { ok: true });
       eq(res.status, 400, `the store refuses ${why} (${key})`);
     }
+  }
+
+  /* ---------- the two market-wide readings -----------------------
+
+     Everything else in this section is a residual WITHIN the day's
+     cross-section — sector and log-cap are neutralised out of the score by
+     construction — so the board could report twelve bullish names and never
+     say whether that was breadth or one sector. These two are the top-down
+     layer, and both are precomputed: the Worker serves bytes because it has
+     10ms of CPU and parsing is the one cost this architecture exists to
+     avoid. */
+  {
+    for (const [route, key] of [["/api/flows/movers", "movers"], ["/api/flows/sectors", "sector:trix"]]) {
+      await put(key, { marker: key, rows: [{ t: "AAA" }] });
+      const got = await (await fetch(url(route), { headers: auth })).json();
+      eq(got.marker, key, `${route} reads ${key} and not some other blob`);
+    }
+
+    /* THE TWO ROUTES MUST NOT BE THE SAME ROUTE. They are matched by two
+       different path tests against one handler, and a handler that picked its
+       key by anything looser than an exact suffix would serve one payload
+       under both names — which renders perfectly and is silently wrong. */
+    const m = await (await fetch(url("/api/flows/movers"), { headers: auth })).json();
+    const sct = await (await fetch(url("/api/flows/sectors"), { headers: auth })).json();
+    ok(m.marker !== sct.marker, "and the two routes serve different payloads");
   }
 
   /* ---------- the prune route, which the archive depends on ------
