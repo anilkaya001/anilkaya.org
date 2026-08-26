@@ -545,7 +545,26 @@ p.fb-empty {
   padding-left: 0.8rem;
 }
 
+/* FIVE OF THE SEVEN CHARTS WERE MISSING FROM THIS RULE. It reached `.gp` and
+   `.fp` only, so on a stale card the gamma ladder and the session path dimmed
+   while the book displacement, the gamma surface, the roll-off, the priced
+   move and the price context did not. Charts disagreeing with the staleness
+   band on their own card is worse than no dimming at all: it reads as "these
+   five are current", which is the one thing the band exists to deny.
+
+   Enumerated from the class each renderer actually emits — `gp`, `bd`, `gs`,
+   `gc`, `pm`, `px`, `fp` — rather than from a list in a spec, which named a
+   `.gr` this codebase has never had.
+
+   OPACITY ON CHARTS ONLY, NEVER ON GLYPHS. The rule above this one puts a
+   rule down the panel's left edge for the same reason: dimming a number drops
+   it below the 4.5:1 floor and it is still read as a number. */
 .fc.is-stale .gp,
+.fc.is-stale .bd,
+.fc.is-stale .gs,
+.fc.is-stale .gc,
+.fc.is-stale .pm,
+.fc.is-stale .px,
 .fc.is-stale .fp { opacity: 0.72; }
 
 /* A PANEL IS A BOX NOW, and the box is the point.
@@ -2201,7 +2220,13 @@ body.is-stale .flows-tablewrap {
    reading — a diverging heatmap where hue is the only channel is the
    commonest way this chart is drawn and the commonest way it fails. */
 
-.gs-cell.is-pos { fill: var(--gold-mystic); }
+/* THE SIGNED PAIR, WHOLE. is-neg was --flow-down and is-pos was
+   --gold-mystic: the pair broken in half, on the one chart where the pair is
+   the reading. A reader who learns red-is-negative here has no reason to read
+   GOLD as its opposite — gold is chrome everywhere else in this section, and
+   the same card's gamma ladder draws its own positive bars --flow-up. One
+   card, two answers to "what colour is positive". */
+.gs-cell.is-pos { fill: var(--flow-up); }
 .gs-cell.is-neg { fill: var(--flow-down); }
 .gs-hatch { color: var(--bg-deep); opacity: 0.55; }
 
@@ -2228,7 +2253,8 @@ body.is-stale .flows-tablewrap {
    The 9px is load-bearing: with no font-size an SVG <text> defaults to 16px
    and the key overruns the band it is drawn in. */
 .gs-key { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
-.gs-key-sw.is-pos { fill: var(--gold-mystic); }
+/* The key has to match the cells it decodes, or it is a second legend. */
+.gs-key-sw.is-pos { fill: var(--flow-up); }
 .gs-key-sw.is-neg { fill: var(--flow-down); }
 
 /* A cell past the colour cap, marked rather than silently flattened. */
@@ -2247,7 +2273,10 @@ body.is-stale .flows-tablewrap {
    Filled for the call wall, hollow for the put wall: a FORM, so the two are
    still distinguishable in greyscale and to a colour-blind reader. Hue only
    ever duplicates it. */
-.gs-callwall { color: var(--gold-celadon); }
+/* A wall pair IS signed, so it takes the signed pair. The filled-versus-hollow
+   polygon below stays the primary channel — hue only ever duplicates it — but
+   the hue it duplicates has to be the one the rest of the card uses. */
+.gs-callwall { color: var(--flow-up); }
 .gs-putwall  { color: var(--flow-down); }
 .gs-wallmark {
   fill: currentColor; stroke: currentColor;

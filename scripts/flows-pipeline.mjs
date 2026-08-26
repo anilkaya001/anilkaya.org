@@ -397,6 +397,69 @@ export function nearestProbeExpiry(expiryRows, { asOf, minDays = SKEW_MIN_DAYS }
 }
 
 /**
+ * How many orders of magnitude one name's per-strike dealer gamma spans.
+ *
+ * THIS EXISTS TO SETTLE AN ARGUMENT WITH EVIDENCE INSTEAD OF TASTE.
+ *
+ * The gamma ladder draws a SYMLOG axis and then spends three lines of its own
+ * note telling the reader not to trust bar length: "a bar twice as long is
+ * nowhere near twice the gamma… treat bar length as rank". A chart that
+ * disclaims its primary channel in prose is worth re-examining, and the
+ * obvious alternative — a linear axis with a declared cap and clip marks on
+ * whatever exceeds it — is only better if the data is tame enough for a cap
+ * to leave the wings readable.
+ *
+ * SYMLOG'S OWN JUSTIFICATION IS A MEASUREMENT NOBODY HAS TAKEN: "per-strike
+ * dealer gamma spans four or five orders of magnitude within one name". If
+ * that is true, a linear cap collapses every wing strike to a sliver and
+ * symlog is right. If it is not, the note is apologising for a compression
+ * the data never needed.
+ *
+ * The synthetic corpus CANNOT settle it and nearly produced the wrong answer:
+ * capped-linear measured better there on every legibility statistic — fewer
+ * sub-2px bars, longer median bar — but the fixture spans a median of 1.72
+ * orders of magnitude, not four or five. It does not exhibit the problem
+ * symlog exists to solve, so a result from it is a result about different
+ * data. This prints the real number, once per run, from the rows the
+ * enrichment already bought.
+ *
+ * Read it as: median at or above ~4 means symlog stays and the note is
+ * honest; median near 2 means the cap is affordable and the axis should be
+ * linear with the overflow marked.
+ */
+export function describeGammaRange(profiles) {
+  const decades = [];
+  for (const bars of profiles || []) {
+    const mags = (Array.isArray(bars) ? bars : [])
+      .map((b) => Math.abs(num(b && b.g, NaN)))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (mags.length < 5) continue;
+    decades.push(Math.log10(Math.max(...mags) / Math.min(...mags)));
+  }
+  if (!decades.length) {
+    return { names: 0, median: null, p90: null,
+      line: "gamma range: no name carried five non-zero strikes, so the axis " +
+        "question is not measurable on this run." };
+  }
+  decades.sort((a, b) => a - b);
+  const at = (p) => decades[Math.min(decades.length - 1, Math.floor(p * decades.length))];
+  const median = at(0.5), p90 = at(0.9);
+  const verdict = median >= 3.5
+    ? "SYMLOG IS EARNED — a linear cap would collapse the wings, and the axis " +
+      "note is describing the data rather than apologising for a choice."
+    : "SYMLOG MAY NOT BE EARNED at this range: a declared cap with clip marks " +
+      "would leave the wings readable and let bar length mean magnitude again. " +
+      "Worth re-measuring before changing anything.";
+  return {
+    names: decades.length, median: Number(median.toFixed(2)), p90: Number(p90.toFixed(2)),
+    line: `gamma range: per-name dealer gamma spans ${median.toFixed(2)} orders of ` +
+      `magnitude at the median and ${p90.toFixed(2)} at the 90th, over ` +
+      `${decades.length} name(s). The symlog axis justifies itself on "four or five". ` +
+      verdict,
+  };
+}
+
+/**
  * What the probe response actually was, as log lines.
  *
  * BOUNDED AND PURE, for the reason describeTickFields states: a diagnostic
@@ -4467,6 +4530,7 @@ async function main() {
   }
 
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
+  const gammaProfiles = [];
   // The surface shape is reported once per run, not once per card.
   let surfaceReported = false;
   const deadline = stats.startedAt + DEADLINE_MS;
@@ -4606,6 +4670,11 @@ async function main() {
       }
       await publish("card:" + ticker, card);
       cardsBuilt++;
+      /* THE AXIS QUESTION'S ONE MEASUREMENT, collected free from a card that
+         was being built anyway. See describeGammaRange. */
+      if (card.panels && card.panels.gamma && card.panels.gamma.status === "ok") {
+        gammaProfiles.push(card.panels.gamma.bars);
+      }
     } catch (error) {
       cardsFailed++;
       console.warn(`  card ${ticker}: ${error.message}`);
@@ -4616,6 +4685,18 @@ async function main() {
     (cardsFailed ? `, ${cardsFailed} failed` : "") +
     (cardsSkipped ? `, ${cardsSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline` : ""),
   );
+  /* ONE LINE, ONCE PER RUN, AND IT DECIDES A DESIGN ARGUMENT. The gamma
+     ladder's own note tells the reader to treat bar length as rank rather
+     than magnitude — a chart disclaiming its primary channel — and the
+     alternative is only better if the real data is tame enough for a cap. The
+     synthetic corpus cannot answer that and nearly gave the wrong answer.
+     This is the number that can. */
+  console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
+    (DRY_RUN
+      ? " ON SYNTHETIC ROWS THIS SETTLES NOTHING: the fixture spans about 1.7" +
+        " orders of magnitude, so it does not exhibit the problem symlog exists" +
+        " to solve. Only a live run answers this."
+      : ""));
 
   /* meta is a DIAGNOSTIC, not the product, so its failure must not fail the
      run. The first live publish proved why: both boards and all 34 cards
