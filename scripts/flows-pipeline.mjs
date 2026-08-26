@@ -1682,7 +1682,7 @@ function buildMovers(withTilt, { cap = MOVER_ROWS } = {}) {
   const risers = byChange.filter((r) => r.chg > 0).slice(0, cap);
   // Descending order, so the fallers are the tail; reversed so the list leads
   // with the LARGEST decline rather than the smallest one.
-  const fallers = byChange.filter((r) => r.chg < 0).slice(0, cap);
+  const fallers = byChange.filter((r) => r.chg < 0).slice(-cap).reverse();
 
   const priced = rows.filter((r) => r.netPrem !== null);
   const byPremium = priced.slice().sort((a, b) => b.netPrem - a.netPrem);
