@@ -109,13 +109,21 @@ export const RATE = {
 
      `delayMs` may spike to maxDelayMs for ONE call after a 429; the floor is
      what every subsequent call pays for the rest of the run. A floor allowed
-     to reach 5s would cost CALL_BUDGET x 5s = 43 minutes against a 30-minute
+     to reach 5s would cost CALL_BUDGET x 5s = 79 minutes against a 36-minute
      deadline — the run would publish nothing at all, which is a strictly worse
      failure than being rate-limited. At 750ms the same budget costs
-     800 x 0.75 = 600s, comfortably inside the window the chain leg reserves.
+     950 x 0.75 = 713s, comfortably inside the window the chain leg reserves.
      rateFloorSurvivesBudget() below is the assertion, and it is tested — and
      it is the assertion, not this comment, that fails the build if the budget
-     is raised past what the deadline can absorb (1,919 calls at this floor). */
+     is raised past what the deadline can absorb (2,399 calls at this floor).
+
+     THIS CEILING IS NOW BINDING, WHICH IS A FINDING AND NOT A SETTING. On
+     2026-08-26 the floor sat pinned at 750ms for the whole run and 170 of
+     1022 attempts still came back 429: the controller asked to go slower and
+     this constant refused. Raising it is NOT obviously right — a 429 costs a
+     Retry-After wait, so a higher floor trades a certain per-call tax against
+     an uncertain saving, and the run has never been instrumented to say which
+     is larger. Do not raise it on intuition; measure the 429 wait first. */
   floorCeilingMs: 750,
 };
 
@@ -126,18 +134,26 @@ export const RATE = {
    + 3  dating probes
    + 32 screener bands  (was 6; the ~50-row cap per band is what made the old
         ladder a 300-name ceiling on the entire investable universe)
-   + 500 enrichment      (5 calls x UNIVERSE.enrichCount = 100)
+   + 640 enrichment      (5 calls x 128 names: enrichCount = 100 by market cap
+        PLUS the Nasdaq-100 members not already in that hundred. The pool is
+        ADDITIVE by construction — see selectCoverage() — so this term is not
+        5 x enrichCount and never was; the old comment said 500 while the run
+        spent 640.)
    + 11 sector ETF candles
    + 1  chain truncation probe
    + 50 option chains    (top 50 board names by |score|)
+   + 29 chain recoveries (the second single-expiry call, on names the first
+        call truncated — spent on roughly 3 names in 5)
    + 100 cards           (2 per name x 50: max-pain and the gamma surface;
         congress went market-wide and is the one call below)
    + 1  congress, market-wide
-   = 699 modelled, ~772 attempts at the 10.5% retry rate observed on 2026-08-26.
+   = 867 modelled.
 
-   The run of 2026-08-26 spent 408 attempts on an ELEVEN-name board. This
-   budget buys a hundred. */
-export const CALL_BUDGET = 800;
+   MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
+   170 were 429s that were then retried — so ~852 attempts carried a distinct
+   request, against 867 modelled. The model is now within 2% of the meter,
+   which is the only reason to keep writing it down. */
+export const CALL_BUDGET = 950;
 
 /* The screener's undocumented page cap, measured: every band that has ever had
    more names than this returned exactly this many. Named so the saturation
@@ -252,8 +268,33 @@ export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs =
    so a sustained 429 regime just walks into the timeout — and because cards
    are built before the boards publish, a slow day would take the RANKING down
    with the cards. Boards publish first, and card building abandons at this
-   deadline and reports how many it managed. */
-export const DEADLINE_MS = 30 * 60 * 1000;
+   deadline and reports how many it managed.
+
+   MEASURED, NOT GUESSED, AND RAISED BECAUSE THE BOARD GREW UNDER IT. At 30
+   minutes this budget was not spare capacity going unused — it was BINDING,
+   and it bound on the wrong leg. The 2026-08-26 18:04 run finished the whole
+   pipeline in 1502s (25.0 min) but the chain leg stopped at 34 of 50 names:
+   its own cut-off is DEADLINE_MS − CHAIN_RESERVE_MS = 24 min, and enrichment
+   alone had already spent 22.4 of them. Sixteen names lost their chain panels
+   and the skew reading fell from 46 of 50 on the previous run to 27 — a
+   VISIBLE regression on the board, produced entirely by a constant, not by
+   anything the vendor did.
+
+   The two levers are not equivalent. Cutting the enrichment pool would buy
+   the time back by shrinking the board, which is the opposite of what the
+   board is for; raising this budget costs only wall-clock on a machine that
+   is idle anyway. 36 minutes gives the chain leg until minute 30 — six more
+   than it had — and still leaves 9 minutes of headroom under the runner's
+   45-minute kill, which is more slack than the entire chain leg consumes.
+
+   THE COST CENTRE IS ENRICHMENT, NOT THIS NUMBER. 128 names at ~7.4 calls
+   each is 950 of the run's 1022 calls, and the limiter is already SATURATED
+   against them: 170 of those calls came back 429 and the learned floor sat
+   pinned at its 750ms ceiling for the whole run, meaning the controller
+   wanted to go slower and was not allowed to. Raising this budget buys the
+   chain leg room; it does not make the pipeline faster, and if enrichment
+   keeps growing the next thing to bind will be this constant again. */
+export const DEADLINE_MS = 36 * 60 * 1000;
 
 /* The tick row's field list is reported once per run, not once per name. */
 let tickFieldsReported = false;
@@ -1542,23 +1583,33 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
         boards.push({ d, side, rows: payloads[side].rows });
       }
     }
-    return boards;
+    return { boards, probed: boards.length };
   }
   const base = Date.parse(sessionDate + "T00:00:00Z");
-  if (!Number.isFinite(base)) return boards;
+  if (!Number.isFinite(base)) return { boards, probed: 0 };
+  let probed = 0;
   for (let back = 1; back <= ARCHIVE_RETENTION_DAYS; back++) {
     const t = new Date(base - back * 86400000);
     const dow = t.getUTCDay();
     if (dow === 0 || dow === 6) continue;      // a dated key is only ever written on a weekday
     const d = t.toISOString().slice(0, 10);
     for (const side of ["long", "short"]) {
+      probed++;
       const stored = await fetchStoredPayload(`board:${side}:${d}`);
       if (stored && Array.isArray(stored.rows) && stored.rows.length) {
         boards.push({ d, side, rows: stored.rows });
       }
     }
   }
-  return boards;
+  /* HOW HARD IT LOOKED, published alongside what it found.
+
+     fetchStoredPayload() returns null for an absent key and null for a failed
+     read — the two are indistinguishable from here, and no amount of care at
+     this call site changes that. What CAN be stated is the denominator: a
+     `retained: 0` that probed 180 keys is a cold archive, and a `retained: 0`
+     that probed 0 is a broken date. Without this the page can only say "zero",
+     which is the one thing a reader already knows by looking at it. */
+  return { boards, probed };
 }
 
 /**
@@ -3588,7 +3639,8 @@ async function main() {
      watch list are committed: a record that fails to score must never cost
      the reader today's session. */
   try {
-    const datedBoards = await collectDatedBoards(sessionDate, payloads, enriched);
+    const { boards: datedBoards, probed: archiveProbed } =
+      await collectDatedBoards(sessionDate, payloads, enriched);
     const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
     const recordCalendar = tradingCalendar([
       ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
@@ -3612,6 +3664,7 @@ async function main() {
       generatedAt, sessionDate,
       status: "ok",
       statedHorizon: HORIZON_SESSIONS,
+      archiveProbed,
       attrition: RECORD_NOTES.attrition,
       epochNote: RECORD_NOTES.epoch,
       ...rec,
@@ -3627,8 +3680,9 @@ async function main() {
     });
     const measuredCols = features.cols.filter((c) => c.ic !== null).length;
     console.log(
-      `  record: ${rec.retained} retained session(s), ${rec.sessions.length} scored at ` +
-      `k=${HORIZON_SESSIONS}; features ${measuredCols}/${features.cols.length} measured`);
+      `  record: ${rec.retained} retained session(s) of ${archiveProbed} dated key(s) probed, ` +
+      `${rec.sessions.length} scored at k=${HORIZON_SESSIONS}; ` +
+      `features ${measuredCols}/${features.cols.length} measured`);
   } catch (error) {
     console.warn(`  record: ${error.message}`);
   }

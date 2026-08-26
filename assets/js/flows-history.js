@@ -420,6 +420,39 @@
       return;
     }
 
+    /* THE COLD START, NAMED. Before this branch existed the page answered
+       "why is there nothing here?" with the string "0 sessions retained." —
+       true, and the single least useful true sentence available, because a
+       reader staring at an empty chart already knows the count is zero. What
+       they cannot know is whether zero means BROKEN or means NEW.
+
+       It means new, and the payload can prove it: `archiveProbed` is how many
+       dated keys the run asked the store for. Zero retained out of a hundred
+       and eighty probed is a cold archive; zero out of zero would be a broken
+       session date, and reads the same on the page unless the denominator is
+       said out loud. The word is "readable", not "exists", on purpose — a
+       missing key and a failed read are indistinguishable from the pipeline,
+       so the page claims only what the pipeline actually observed. */
+    if (retained === 0) {
+      const probed = isNum(payload.archiveProbed);
+      const k = isNum(payload.statedHorizon);
+      statusEl.textContent =
+        "Nothing has been scored yet, and this is the ordinary first state of " +
+        "the record rather than a failure. A board is scored only against " +
+        "closes that come AFTER the session it was published for, so today's " +
+        "board" + (payload.sessionDate ? " (" + payload.sessionDate + ")" : "") +
+        " cannot score itself" +
+        (probed !== null
+          ? ", and no earlier dated board was readable — " + probed +
+            " dated key" + (probed === 1 ? " was" : "s were") + " probed."
+          : ".") +
+        " The first measured session appears on the next pipeline run" +
+        (k !== null
+          ? ", and the " + k + "-session horizon " + k + " runs after that."
+          : ".");
+      return;
+    }
+
     const parts = [];
     if (retained !== null) parts.push(retained + " session" + (retained === 1 ? "" : "s") + " retained");
     if (sessions.length) parts.push(sessions.length + " scored");
