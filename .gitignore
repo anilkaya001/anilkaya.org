@@ -26,3 +26,12 @@ tests/*_tmp.mjs
 tests/.tmp-*
 tests/probe-*.mjs
 tests/cardshot-*.mjs
+
+# Emitted-payload scratch directories. Several suites run the pipeline's own
+# emitter into tests/ and clean up in a `finally` — which does not run when a
+# suite is killed mid-assertion, and leaves a directory of JSON that `git add
+# -A` then offers to commit. The dot prefix is the convention those suites
+# already use; ignoring the shape rather than the names is the same argument
+# the underscore rule above makes.
+tests/.*-emit/
+tests/.*-probe/
