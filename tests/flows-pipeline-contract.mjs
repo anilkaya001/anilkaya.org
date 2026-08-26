@@ -1425,10 +1425,21 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
   eq(probeLines.length, 1,
      "exactly one truncation probe is spent per run, however many names truncate");
-  const refusals = runLog.split("\n").filter((l) => l.includes("no skew — the vendor returned a full page"));
-  ok(refusals.length >= 2,
-     `and the fixture really does truncate more than one name (${refusals.length}), so that ` +
-     "count is a measurement rather than an accident of there being only one candidate");
+  /* EVIDENCE THAT MORE THAN ONE NAME TRUNCATED, taken from the recovery count
+     rather than from the refusal messages.
+
+     It used to count "no skew — the vendor returned a full page" lines, which
+     was the right evidence right up until truncation stopped implying a
+     refusal. Once the single-expiry read landed, a truncated name recovers its
+     scalars and prints no refusal at all — so the old assertion read zero and
+     failed, correctly, on a change that made the product better. The count
+     that still measures truncation is the one that counts what truncation now
+     COSTS: a second vendor call. */
+  const recovered = /(\d+) of them recovered by a second single-expiry call/.exec(runLog);
+  ok(recovered && Number(recovered[1]) >= 2,
+     `and the fixture really does truncate more than one name (${recovered ? recovered[1] : 0} ` +
+     "recovered), so the probe count above is a measurement rather than an accident of there " +
+     "being only one candidate");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const board = read("board-long");
   const movers = read("movers");
