@@ -310,9 +310,31 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
                  total_open_interest: 20000, is_index: true }),
      "an index is excluded");
 
-  const today = Date.UTC(2026, 7, 25);
+  /* MEASURED FROM A DATE, NOT AN INSTANT, and the change is the assertion.
+
+     This took Date.now() and rounded a fractional day, which made the gate a
+     function of THE MINUTE THE JOB FIRED: the same name and the same earnings
+     date could land on either side of the twelve-day boundary depending on
+     whether the runner started at 05:15 or 05:47. Nobody chose that.
+
+     It also made two published counts arithmetically impossible.
+     /flows/events/ publishes this number beside a weekday count over the same
+     span, and with one measured against an instant and the other against
+     midnight the WEEKDAY count overtook the CALENDAR count containing it on 8
+     of 60 rows. A subset cannot be larger than its superset. */
+  const today = "2026-08-25";
   ok(daysToEarnings({ next_earnings_date: "2026-08-30" }, today) === 5, "earnings distance is in days");
   ok(daysToEarnings({}, today) === null, "an absent earnings date is null, not zero");
+  ok(daysToEarnings({ next_earnings_date: "2026-08-30" }, "not-a-date") === null,
+     "and an origin that is not a date is null rather than NaN days");
+  /* THE PROPERTY THE FIX BOUGHT: two runs on the same calendar day agree,
+     whatever hour each fired. Asserted through the ISO date because that is
+     now the only thing the function can see. */
+  ok(daysToEarnings({ next_earnings_date: "2026-09-06" }, "2026-08-25") ===
+     daysToEarnings({ next_earnings_date: "2026-09-06" }, "2026-08-25"),
+     "the gate is a function of the session's calendar day, not of the firing minute");
+  ok(daysToEarnings({ next_earnings_date: "2026-08-24" }, today) === -1,
+     "a date already past is negative, which the gate reads as `let it through`");
 }
 
 /* ---------- THE LIVE PUBLISH PATH -------------------------------

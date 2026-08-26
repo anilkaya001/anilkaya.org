@@ -38,6 +38,7 @@ import {
   rankUnusual, rankUnusualNames, describeFlowAlerts, describeOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
+import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -159,6 +160,18 @@ export const RATE = {
    request, against 867 modelled. The model is now within 2% of the meter,
    which is the only reason to keep writing it down. */
 export const CALL_BUDGET = 950;
+
+/**
+ * How near an earnings date has to be for a name to leave the board.
+ *
+ * NAMED BECAUSE TWO SURFACES NOW READ IT. It was a bare 12 inside the gate's
+ * own filter, which was fine while the gate was the only thing that knew it.
+ * /flows/events/ marks a row `gated` using the same rule, and a bare literal
+ * in one file against a reference in another is how two surfaces come to
+ * disagree about which names the board was allowed to score — silently, and
+ * only for names sitting exactly on the boundary.
+ */
+export const EARNINGS_GATE_DAYS = 12;
 
 /* The screener's undocumented page cap, measured: every band that has ever had
    more names than this returned exactly this many. Named so the saturation
@@ -381,6 +394,69 @@ export function nearestProbeExpiry(expiryRows, { asOf, minDays = SKEW_MIN_DAYS }
     })
     .sort();
   return dates.length ? dates[0] : null;
+}
+
+/**
+ * How many orders of magnitude one name's per-strike dealer gamma spans.
+ *
+ * THIS EXISTS TO SETTLE AN ARGUMENT WITH EVIDENCE INSTEAD OF TASTE.
+ *
+ * The gamma ladder draws a SYMLOG axis and then spends three lines of its own
+ * note telling the reader not to trust bar length: "a bar twice as long is
+ * nowhere near twice the gamma… treat bar length as rank". A chart that
+ * disclaims its primary channel in prose is worth re-examining, and the
+ * obvious alternative — a linear axis with a declared cap and clip marks on
+ * whatever exceeds it — is only better if the data is tame enough for a cap
+ * to leave the wings readable.
+ *
+ * SYMLOG'S OWN JUSTIFICATION IS A MEASUREMENT NOBODY HAS TAKEN: "per-strike
+ * dealer gamma spans four or five orders of magnitude within one name". If
+ * that is true, a linear cap collapses every wing strike to a sliver and
+ * symlog is right. If it is not, the note is apologising for a compression
+ * the data never needed.
+ *
+ * The synthetic corpus CANNOT settle it and nearly produced the wrong answer:
+ * capped-linear measured better there on every legibility statistic — fewer
+ * sub-2px bars, longer median bar — but the fixture spans a median of 1.72
+ * orders of magnitude, not four or five. It does not exhibit the problem
+ * symlog exists to solve, so a result from it is a result about different
+ * data. This prints the real number, once per run, from the rows the
+ * enrichment already bought.
+ *
+ * Read it as: median at or above ~4 means symlog stays and the note is
+ * honest; median near 2 means the cap is affordable and the axis should be
+ * linear with the overflow marked.
+ */
+export function describeGammaRange(profiles) {
+  const decades = [];
+  for (const bars of profiles || []) {
+    const mags = (Array.isArray(bars) ? bars : [])
+      .map((b) => Math.abs(num(b && b.g, NaN)))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (mags.length < 5) continue;
+    decades.push(Math.log10(Math.max(...mags) / Math.min(...mags)));
+  }
+  if (!decades.length) {
+    return { names: 0, median: null, p90: null,
+      line: "gamma range: no name carried five non-zero strikes, so the axis " +
+        "question is not measurable on this run." };
+  }
+  decades.sort((a, b) => a - b);
+  const at = (p) => decades[Math.min(decades.length - 1, Math.floor(p * decades.length))];
+  const median = at(0.5), p90 = at(0.9);
+  const verdict = median >= 3.5
+    ? "SYMLOG IS EARNED — a linear cap would collapse the wings, and the axis " +
+      "note is describing the data rather than apologising for a choice."
+    : "SYMLOG MAY NOT BE EARNED at this range: a declared cap with clip marks " +
+      "would leave the wings readable and let bar length mean magnitude again. " +
+      "Worth re-measuring before changing anything.";
+  return {
+    names: decades.length, median: Number(median.toFixed(2)), p90: Number(p90.toFixed(2)),
+    line: `gamma range: per-name dealer gamma spans ${median.toFixed(2)} orders of ` +
+      `magnitude at the median and ${p90.toFixed(2)} at the 90th, over ` +
+      `${decades.length} name(s). The symlog axis justifies itself on "four or five". ` +
+      verdict,
+  };
 }
 
 /**
@@ -724,12 +800,41 @@ function ivRankFraction(raw) {
   return v > 1 ? v / 100 : v;
 }
 
-/** Days until earnings, or null. Used to gate, never to predict. */
-function daysToEarnings(row, today) {
+/**
+ * Calendar days until earnings, or null. Used to gate, never to predict.
+ *
+ * MEASURED FROM A DATE, NOT FROM AN INSTANT, and that is a fix rather than a
+ * restatement. This took `Date.now()` and rounded
+ * `(earnings_at_midnight − now) / a day`, which makes the answer a function of
+ * THE MINUTE THE JOB HAPPENED TO FIRE: the same name, the same earnings date,
+ * and a runner that started at 05:15 rather than 05:47 could land on either
+ * side of the twelve-day gate. Nobody chose that; it fell out of rounding a
+ * fractional day.
+ *
+ * IT ALSO MADE TWO PUBLISHED COUNTS ARITHMETICALLY IMPOSSIBLE. /flows/events/
+ * publishes this number as `dte` beside `sdte`, the weekday count over the
+ * same span, both measured from the run's Eastern date. With this reading
+ * against an instant and that one against midnight — origins about 21 hours
+ * apart — the WEEKDAY count overtook the CALENDAR count containing it on 8 of
+ * 60 rows. A subset cannot be larger than its superset, so no design choice
+ * licenses it; the contract suite refused to pass and was right to.
+ *
+ * THIS CHANGES WHICH NAMES THE BOARD SCORES, at the margin. A name whose
+ * report sits exactly `EARNINGS_GATE_DAYS` away, measured from midnight
+ * rather than from the firing minute, can now fall on the other side of the
+ * gate. That is the correct behaviour — "reporting within twelve days" is a
+ * statement about dates — and it is a behaviour change, not a refactor.
+ *
+ * @param {string} origin — an ISO date, `easternNow().date`. The gate belongs
+ *   to the session's own calendar day, which is also the origin every day
+ *   count on /flows/events/ is stated against.
+ */
+function daysToEarnings(row, origin) {
   if (!row.next_earnings_date) return null;
   const t = Date.parse(row.next_earnings_date + "T00:00:00Z");
-  if (!Number.isFinite(t)) return null;
-  return Math.round((t - today) / 86400000);
+  const from = Date.parse(String(origin || "") + "T00:00:00Z");
+  if (!Number.isFinite(t) || !Number.isFinite(from)) return null;
+  return Math.round((t - from) / 86400000);
 }
 
 /* ---------- per-name enrichment --------------------------------- */
@@ -3185,7 +3290,11 @@ function fakeEnrichment(ticker, spot, seed) {
 /* ---------- main ------------------------------------------------- */
 
 async function main() {
-  const today = Date.now();
+  /* THE GATE'S OWN CALENDAR DAY. Not Date.now(): see daysToEarnings. The
+     same value is published as `gateOrigin` on /flows/events/, so the page's
+     day counts and the gate's are the same arithmetic against the same
+     origin rather than two readings that agree most hours. */
+  const today = easternNow().date;
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
 
   if (!DRY_RUN) {
@@ -3304,7 +3413,7 @@ async function main() {
   const withTilt = universe.map((row) => ({ row, tilt: screenerTilt(row) }));
   const tilted = withTilt.filter(({ row }) => {
     const dte = daysToEarnings(row, today);
-    return dte === null || dte < 0 || dte > 12;
+    return dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS;
   });
   console.log(`after earnings gate: ${tilted.length}`);
 
@@ -3683,6 +3792,96 @@ async function main() {
       (movers.unrankedPremium ? `, ${movers.unrankedPremium} unquoted` : ""));
   } catch (error) {
     console.warn(`  movers: ${error.message}`);
+  }
+
+  /* 7e. THE EVENTS CALENDAR — the names the gate removed, finally published.
+
+     ZERO VENDOR CALLS. Every field is a screener field the run already holds:
+     screenerTilt() is computed for every eligible name at step 3 and then
+     thrown away for all but the enriched, and next_earnings_date is read once
+     to filter and never published.
+
+     THE FUNNEL STAGE IS THE COLUMN THIS PAGE EXISTS FOR. The gate removes the
+     most event-exposed names in the universe BY CONSTRUCTION — it has to,
+     because the composite is a predictive ranking and a scheduled binary event
+     is not the process it prices — and until now those names reached the
+     reader as one integer in a log line. `gated` says the board was FORBIDDEN
+     from holding an opinion, which is a different fact from having none.
+
+     THE ORIGIN IS THE RUN'S EASTERN DATE, NOT sessionDate. The gate itself
+     counted from Date.now(); sessionDate is the last COMPLETED session, which
+     at 05:15 Eastern is one to three days earlier. Counting from sessionDate
+     would draw the window early and classify every name against a gate that
+     never ran — and a fixture built the same way would agree with it. */
+  try {
+    const gateOrigin = easternNow().date;
+    const stageByTicker = new Map();
+    for (const { row } of withTilt) if (row && row.ticker) stageByTicker.set(row.ticker, "screened");
+    for (const { row } of tilted) if (row && row.ticker) stageByTicker.set(row.ticker, "eligible");
+    for (const p of picks) if (p && p.row && p.row.ticker) stageByTicker.set(p.row.ticker, "enriched");
+    for (const e of liquid) if (e && e.row && e.row.ticker) stageByTicker.set(e.row.ticker, "liquid");
+    for (const side of ["long", "short"]) {
+      for (const r of (payloads[side] && payloads[side].rows) || []) {
+        if (r && r.t) stageByTicker.set(r.t, side === "long" ? "board:long" : "board:short");
+      }
+    }
+    /* GATED LAST, so it overwrites every earlier stage. A name the gate
+       removed never reached enrichment, and labelling it by how far it got
+       before the gate would bury the one fact this page is for. */
+    /* NO PASSTHROUGH OF THE GATE'S COUNT, because there is nothing to pass:
+       daysToEarnings and calendarDaysTo now measure from the same ISO date,
+       so the page REPRODUCES the gate's number rather than being handed it.
+       `today` here IS `gateOrigin` — the same easternNow().date. */
+    for (const { row } of withTilt) {
+      if (!row || !row.ticker) continue;
+      const dte = daysToEarnings(row, today);
+      if (dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS) {
+        stageByTicker.set(row.ticker, "gated");
+      }
+    }
+
+    const featuresByTicker = new Map();
+    for (const e of enriched) {
+      if (e && e.row && e.row.ticker) featuresByTicker.set(e.row.ticker, e.features);
+    }
+    const scoreByTicker = new Map();
+    for (const side of ["long", "short"]) {
+      for (const r of (payloads[side] && payloads[side].rows) || []) {
+        if (r && r.t && Number.isFinite(r.s)) scoreByTicker.set(r.t, r.s);
+      }
+    }
+
+    const events = buildEvents(withTilt, {
+      gateOrigin,
+      sessionDate,
+      stageOf: (t) => stageByTicker.get(t) || null,
+      featuresOf: (t) => featuresByTicker.get(t) || null,
+      scoreOf: (t) => (scoreByTicker.has(t) ? scoreByTicker.get(t) : null),
+    });
+
+    await publish("events", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt,
+      /* BOTH CLOCKS, AND WHICH QUANTITY USES WHICH. */
+      sessionDate,
+      gateOrigin,
+      gateDays: EARNINGS_GATE_DAYS,
+      status: events.shown ? "ok" : "quiet",
+      /* The announce time is not on the screener and this page does not spend
+         forty-four calls to find it. Stated, not half-filled. */
+      announce: { status: "unavailable", reason: EVENTS_NOTES.announce },
+      ...events,
+      notes: EVENTS_NOTES,
+    });
+    const gatedShown = events.byStage.gated || 0;
+    console.log(
+      `  events: ${events.shown} of ${events.inWindow} names reporting within ` +
+      `${events.windowDays} days, of ${events.universe} screened` +
+      (events.undated ? ` (${events.undated} carry no earnings date)` : "") +
+      `; ${gatedShown} of them the board was gated out of, ` +
+      `${events.evMeasured} with a priced move, ${events.rvMeasured} with realized vol`);
+  } catch (error) {
+    console.warn(`  events: ${error.message}`);
   }
 
   try {
@@ -4331,6 +4530,7 @@ async function main() {
   }
 
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
+  const gammaProfiles = [];
   // The surface shape is reported once per run, not once per card.
   let surfaceReported = false;
   const deadline = stats.startedAt + DEADLINE_MS;
@@ -4470,6 +4670,11 @@ async function main() {
       }
       await publish("card:" + ticker, card);
       cardsBuilt++;
+      /* THE AXIS QUESTION'S ONE MEASUREMENT, collected free from a card that
+         was being built anyway. See describeGammaRange. */
+      if (card.panels && card.panels.gamma && card.panels.gamma.status === "ok") {
+        gammaProfiles.push(card.panels.gamma.bars);
+      }
     } catch (error) {
       cardsFailed++;
       console.warn(`  card ${ticker}: ${error.message}`);
@@ -4480,6 +4685,18 @@ async function main() {
     (cardsFailed ? `, ${cardsFailed} failed` : "") +
     (cardsSkipped ? `, ${cardsSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline` : ""),
   );
+  /* ONE LINE, ONCE PER RUN, AND IT DECIDES A DESIGN ARGUMENT. The gamma
+     ladder's own note tells the reader to treat bar length as rank rather
+     than magnitude — a chart disclaiming its primary channel — and the
+     alternative is only better if the real data is tame enough for a cap. The
+     synthetic corpus cannot answer that and nearly gave the wrong answer.
+     This is the number that can. */
+  console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
+    (DRY_RUN
+      ? " ON SYNTHETIC ROWS THIS SETTLES NOTHING: the fixture spans about 1.7" +
+        " orders of magnitude, so it does not exhibit the problem symlog exists" +
+        " to solve. Only a live run answers this."
+      : ""));
 
   /* meta is a DIAGNOSTIC, not the product, so its failure must not fail the
      run. The first live publish proved why: both boards and all 34 cards

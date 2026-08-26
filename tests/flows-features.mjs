@@ -635,6 +635,8 @@ const near = (a, b, tol, msg) => {
     "../assets/js/flows-panels.js",
     "../assets/js/flows-card.js",
     "../assets/js/flows-ticker.js",
+    "../assets/js/flows-unusual.js",
+    "../assets/js/flows-events.js",
   ]) {
     ok(existsSync(new URL(asset, import.meta.url)), `${asset} exists`);
   }

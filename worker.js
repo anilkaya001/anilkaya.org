@@ -2177,6 +2177,7 @@ async function route(request, env, url, ctx) {
        dialog's deep link already uses. */
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
     "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
+    "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2201,7 +2202,7 @@ async function route(request, env, url, ctx) {
   if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
       || path === "/flows/watch" || path === "/flows/history"
       || path === "/flows/market" || path === "/flows/ticker"
-      || path === "/flows/unusual") {
+      || path === "/flows/unusual" || path === "/flows/events") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2244,7 +2245,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^unusual$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2347,6 +2348,15 @@ async function route(request, env, url, ctx) {
          costs no vendor call at all. Served here like everything else: read a
          stored blob, hand back the bytes. */
       const stored = await readFlowsPayload(env, "market");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/events") {
+      /* WHAT REPORTS NEXT, AND WHICH NAMES THE BOARD WAS GATED OUT OF. Built
+         from screener rows already in memory — no vendor call — and served
+         like everything here: one stored blob, handed back as bytes. */
+      const stored = await readFlowsPayload(env, "events");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }

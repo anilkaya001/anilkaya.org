@@ -351,11 +351,51 @@ try {
       eq(anonApi.status, 401, "and refuses an anonymous reader");
     }
 
+    /* THE EVENTS CALENDAR. The thing that can go wrong here is the two
+       clocks: a page that counts days from sessionDate rather than from the
+       run's own Eastern date draws its window one to three days early and
+       classifies every name against a gate that never ran. The markup cannot
+       assert the arithmetic — that is the module suite's job — but it can
+       assert the page SAYS which clock governs what, because a page that does
+       not say it cannot be checked by a reader either. */
+    {
+      const ev = await get("/flows/events/", { headers: { Cookie: "flows_session=" + token } });
+      eq(ev.status, 200, "/flows/events/ renders for an authenticated session");
+      const evHtml = await ev.text();
+      ok(evHtml.includes("/assets/js/flows-events.js"), "the events page loads its own controller");
+      ok(evHtml.includes('id="evBody"'), "and carries the calendar's table body");
+      ok(evHtml.includes('id="evWindow"'), "and the window chart's host");
+      ok(evHtml.includes('id="evBasis"'), "and the basis panel");
+      /* `gated` is the column the page exists for, and its meaning is the one
+         thing a reader will get wrong by default: it means the board was
+         FORBIDDEN from scoring the name, not that it scored badly. */
+      ok(/FORBIDDEN/i.test(evHtml),
+         "the Stage column states that a gated name was forbidden from being scored, " +
+         "rather than leaving it to read as a low score");
+
+      const anonEv = await get("/flows/events/");
+      eq(anonEv.status, 200, "/flows/events/ serves a page to an anonymous visitor");
+      ok(!(await anonEv.text()).includes('id="evBody"'),
+         "/flows/events/ leaks nothing to an anonymous visitor");
+
+      const bareEv = await get("/flows/events");
+      eq(bareEv.status, 308, "/flows/events without its trailing slash redirects");
+
+      const evApi = await get("/api/flows/events", { headers: { Cookie: "flows_session=" + token } });
+      eq(evApi.status, 200, "an authenticated events request succeeds");
+      const evPayload = await evApi.json();
+      ok(evPayload.status === "pending" || Array.isArray(evPayload.rows),
+         "and answers pending or a real calendar, never a half-shaped object");
+
+      const anonEvApi = await get("/api/flows/events");
+      eq(anonEvApi.status, 401, "and refuses an anonymous reader");
+    }
+
     /* Every gated page carries the rail, and the rail carries every
        destination — a nav that omits a route is a route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
-                        "/flows/market/", "/flows/unusual/", "/flows/ticker/",
-                        "/flows/desk/", "/flows/history/"]) {
+                        "/flows/market/", "/flows/unusual/", "/flows/events/",
+                        "/flows/ticker/", "/flows/desk/", "/flows/history/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
 

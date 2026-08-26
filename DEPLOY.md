@@ -932,3 +932,83 @@ flow-alerts: 401/403 ...          → the assertion is right and finally has evi
 flow-alerts: 429 ...              → still unanswered; do not touch the assertion
 flow-alerts: 404 ...              → the PATH is a guess; try /api/stock/{t}/flow-alerts
 ```
+
+### 10.5e The events calendar, and the two clocks that do not share an origin
+
+`/flows/events/` costs **zero vendor calls** — the second such surface after
+the movers band. Every field is a screener field the run already holds:
+`screenerTilt()` is computed for every eligible name and then thrown away for
+all but the enriched, and `next_earnings_date` is read once to filter and
+never published.
+
+**The page exists for one column.** The earnings gate removes every name
+reporting inside `EARNINGS_GATE_DAYS` before the composite is built, and it is
+right to: the score is a PREDICTIVE ranking, and a name with a scheduled
+binary event is not being priced by the process that ranking models. But those
+names are, by construction, the most event-exposed in the universe — 40 of 420
+in the dry run — and until this page existed they reached the reader as a
+single integer in a log line. `st: "gated"` says the board was FORBIDDEN from
+holding an opinion, which is a different fact from the board having found
+nothing.
+
+#### THE TWO CLOCKS — the thing to get right
+
+`sessionDate` and the earnings gate **do not share an origin**, and mixing
+them draws a window that is silently one to three days early.
+
+| Quantity | Origin | Why |
+|---|---|---|
+| every **price** (`px`) | `sessionDate` | the last COMPLETED session |
+| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `easternNow().date` — the run's own Eastern date, which is what `daysToEarnings(row, Date.now())` counted from |
+
+`resolveSessionDate()` returns the last session that has closed; at 05:15
+America/New_York that is always the previous trading day — yesterday on a
+normal morning, **Friday on a Monday**. In the dry-run payload the two are
+`2026-08-24` and `2026-08-26`, two days apart.
+
+A page that counted `sdte` from `sessionDate` would classify every name
+against a gate that never ran — and, worse, **a fixture built the same way
+would agree with it perfectly**. Both dates are published, and which quantity
+uses which is stated in the payload's own prose.
+
+`EARNINGS_GATE_DAYS` is now a named export for the same reason. It was a bare
+`12` inside the gate's own filter, which was fine while the gate was the only
+thing that knew it; two surfaces reading one rule, one by literal and one by
+reference, is how they come to disagree about names sitting exactly on the
+boundary.
+
+#### What is refused, and what is published instead
+
+- **The announce time** (before open / after close) is not on the screener.
+  The endpoints that carry it are scoped to a single date, so covering a
+  21-day window costs **44 calls** — a 12% increase on the run for one column.
+  `announce.status` is `"unavailable"` with the reason published, and every
+  `when` is `null`. A column populated for the first fortnight and blank after
+  invites the wrong inference about everything in the blank half.
+- **Sessions are counted as weekdays, holidays not removed**, and the payload
+  says so. This desk holds no holiday calendar and inventing one would be a
+  free parameter; a count right to within about one session a quarter is
+  honest, one that assumes an unpublished calendar is not.
+- **The priced move is a price, not a forecast.** `horizonMove` scales the
+  name's 30-day implied volatility by the square root of sessions — no rate,
+  no dividend, no distribution. It is what the option market is CHARGING for
+  the stretch before the report.
+- **The vendor's own implied move is quoted to a different horizon** and is
+  published beside it without being reconciled into it. An average of two
+  numbers quoted to two horizons is quoted to neither.
+- **Realized volatility is enriched-only**, so most rows withhold it. The
+  count that carry one is published beside the column rather than left to be
+  inferred from the em dashes.
+
+The log line to read:
+
+```
+events: 60 of 62 names reporting within 21 days, of 420 screened
+  (358 carry no earnings date); 40 of them the board was gated out of,
+  57 with a priced move, 2 with realized vol
+```
+
+`60 of 62` bounded by the row cap is ordinary. **`0 of 0` with a large
+`universe` is not** — it would mean `next_earnings_date` stopped arriving on
+the screener, and the page would render an empty calendar rather than an
+error.
