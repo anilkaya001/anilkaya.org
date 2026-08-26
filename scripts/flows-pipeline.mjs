@@ -32,7 +32,8 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE } from "../shared/flows-chain.js";
+import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS } from "../shared/flows-chain.js";
+import { parseOptionSymbol } from "../shared/flows-premium.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -86,10 +87,87 @@ const UNIVERSE = {
    conservative, obey Retry-After when offered, back off on 429, and
    record the achieved rate so the real ceiling can be discovered
    from the logs. */
-const RATE = {
+export const RATE = {
   startDelayMs: 120, minDelayMs: 60, maxDelayMs: 5000, maxRetries: 4,
   maxRetryAfterMs: 30_000,   // the ceiling on a vendor-supplied Retry-After
+  /* THE CEILING ON THE FLOOR, which is a different number from maxDelayMs and
+     has to be, or the deadline is not survivable.
+
+     `delayMs` may spike to maxDelayMs for ONE call after a 429; the floor is
+     what every subsequent call pays for the rest of the run. A floor allowed
+     to reach 5s would cost CALL_BUDGET x 5s = 43 minutes against a 30-minute
+     deadline — the run would publish nothing at all, which is a strictly worse
+     failure than being rate-limited. At 750ms the same budget costs
+     521 x 0.75 = 391s, comfortably inside the window the chain leg reserves.
+     rateFloorSurvivesBudget() below is the assertion, and it is tested. */
+  floorCeilingMs: 750,
 };
+
+/* The call budget this pipeline is designed around, named so the floor ceiling
+   can be checked against it rather than against a number in a comment:
+   1 dating probe + 6 screener bands + 5 per enriched name x 60 + 1 chain call
+   per board name x 50 + 3 per card x 50 + a handful of publishes. The live run
+   of 2026-08-26 spent 408 on an 11-name board. */
+export const CALL_BUDGET = 521;
+
+/**
+ * Can a run at the floor ceiling still finish inside the deadline?
+ *
+ * PURE AND EXPORTED so the contract test asserts the relation rather than
+ * re-stating the arithmetic in a comment that can rot. The chain reserve is
+ * subtracted because the cards must still be buildable after the floor has
+ * risen — a floor that fits the deadline but eats the card window has only
+ * moved which surface goes missing.
+ */
+export function rateFloorSurvivesBudget(
+  { floorCeilingMs, callBudget, deadlineMs, reserveMs } = {},
+) {
+  return floorCeilingMs * callBudget < deadlineMs - reserveMs;
+}
+
+/**
+ * The new floor after a 429.
+ *
+ * MONOTONIC AND CAPPED. Multiplicative so a badly wrong starting guess is
+ * corrected in a few observations rather than a few hundred, with a 150ms
+ * opening step because doubling 60ms takes five 429s to reach a delay any
+ * limiter would notice.
+ *
+ * Pure, because the defect this replaces was a comment claiming an invariant
+ * the code did not implement, and the only durable fix for that is a function
+ * whose invariant a test can hold.
+ */
+export function raiseRateFloor(floor, { minStepMs = 150, ceilingMs = RATE.floorCeilingMs } = {}) {
+  return Math.min(Math.max(floor * 1.5, minStepMs), ceilingMs);
+}
+
+/**
+ * The whole limiter, as one pure step.
+ *
+ * NO ARITHMETIC IS LEFT IN uw(). That is the point, and it is a direct
+ * response to how the bug this replaces survived: the pieces were individually
+ * defensible and the WIRING clamped the decay to an immutable constant instead
+ * of to the floor it had just raised. A test can only hold an invariant over
+ * code it can call, so the controller is code a test can call, and uw() does
+ * nothing but hand it an outcome.
+ *
+ * `outcome` is one of:
+ *   "ok"      a clean response — decay toward the floor, never through it
+ *   "limited" a 429 — raise the floor, and lift the delay to at least it
+ *   "error"   a transport failure or 5xx — back off, but learn nothing about
+ *             the tier, because a 500 is not a rate limit and a floor raised
+ *             on one would slow every later call for the wrong reason
+ */
+export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs = RATE.maxDelayMs } = {}) {
+  if (outcome === "limited") {
+    const raised = raiseRateFloor(floorMs);
+    return { floorMs: raised, delayMs: Math.min(Math.max(delayMs * 2, raised), maxDelayMs) };
+  }
+  if (outcome === "error") {
+    return { floorMs, delayMs: Math.min(delayMs * 2, maxDelayMs) };
+  }
+  return { floorMs, delayMs: Math.max(floorMs, delayMs * 0.9) };
+}
 
 /* The wall-clock budget.
    GitHub kills the job at 45 minutes. The backoff above has no notion of that,
@@ -97,7 +175,7 @@ const RATE = {
    are built before the boards publish, a slow day would take the RANKING down
    with the cards. Boards publish first, and card building abandons at this
    deadline and reports how many it managed. */
-const DEADLINE_MS = 30 * 60 * 1000;
+export const DEADLINE_MS = 30 * 60 * 1000;
 
 /* The tick row's field list is reported once per run, not once per name. */
 let tickFieldsReported = false;
@@ -129,6 +207,107 @@ function describeTickFields(ticker, row, { max = 12, valueChars = 40 } = {}) {
   return lines;
 }
 
+/* ---------- the truncated-chain probe ----------------------------
+
+   THE FIRST LIVE RUN OF THE CHAIN LEG MEASURED ITS OWN CENTRAL ASSUMPTION AND
+   FOUND IT BACKWARDS. buildChainPanels refuses to publish scalars from a
+   response that filled the vendor's 500-row page, because every scalar's
+   relation begins "on the nearest expiry" and nearest cannot be identified
+   inside an arbitrarily-ordered subset of a book. That refusal is correct. It
+   was designed as the edge case for the largest names, and on 2026-08-26 it
+   fired on TEN OF ELEVEN board names: only PCG, small enough to fit in one
+   page, produced a skew and an at-the-money level. The leg is spending a call
+   per name to publish scalars for one name in eleven.
+
+   The fix depends on one fact this repository does not have: whether
+   /option-contracts accepts a filter narrowing the response to a single
+   expiry. If it does, the whole problem dissolves — ask for the nearest
+   expiry by name and "nearest" is identified by construction, one call, no
+   ordering assumption. If it does not, the fallback is `page`, which the
+   premium desk already uses on this endpoint, at several calls a name.
+
+   GUESSING WHICH IS NOT AN OPTION. The vendor's documentation has been wrong
+   about this API five times, twice in ways that published confident wrong
+   numbers for days. So this run does not guess: it spends ONE call, on ONE
+   name, asking the question, and prints what came back. That is the discipline
+   that turned the call_gex mystery into an observation in a single run.
+
+   The candidate expiry comes from /greek-exposure/expiry, which every enriched
+   name has already been charged for — a COMPLETE enumeration of the name's
+   listed expiries from a different endpoint, so it identifies "nearest"
+   without reference to whatever the chain page happened to contain. */
+
+/**
+ * The nearest listed expiry at least `minDays` out, from the expiry rows the
+ * enrichment already holds.
+ *
+ * Pure and exported for the contract test. Returns null rather than a guess
+ * when nothing qualifies — a probe with no target is skipped, not aimed at
+ * whatever sorts first.
+ */
+export function nearestProbeExpiry(expiryRows, { asOf, minDays = SKEW_MIN_DAYS } = {}) {
+  const base = Date.parse(String(asOf) + "T00:00:00Z");
+  if (!Number.isFinite(base)) return null;
+  const dates = (Array.isArray(expiryRows) ? expiryRows : [])
+    .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
+    .filter((d) => d && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .filter((d) => {
+      const t = Date.parse(d + "T00:00:00Z");
+      return Number.isFinite(t) && (t - base) / 86400000 >= minDays;
+    })
+    .sort();
+  return dates.length ? dates[0] : null;
+}
+
+/**
+ * What the probe response actually was, as log lines.
+ *
+ * BOUNDED AND PURE, for the reason describeTickFields states: a diagnostic
+ * that has never executed is a diagnostic that throws on the first live run,
+ * which is the one moment it exists for.
+ *
+ * The three outcomes this has to distinguish are the three that decide the
+ * next design, so each gets its own sentence rather than a row count a reader
+ * has to interpret:
+ *   - every row carries the requested expiry, under the page cap -> the filter
+ *     works and one call a name identifies "nearest" by construction;
+ *   - several expiries came back -> the parameter was ignored, fall back to
+ *     `page`;
+ *   - nothing came back -> the filter is accepted and empty, which is a third
+ *     thing again and must not be read as either of the other two.
+ */
+export function describeChainProbe(ticker, expiry, rows, { pageSize = CHAIN_PAGE_SIZE, maxList = 6 } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  /* THE SHARED PARSER, not a local one. The first draft of this probe carried
+     its own regex, which required a letters-only root and so returned NOTHING
+     for the dry run's SYN308 — a diagnostic reporting "no expiries" for a
+     response that had ten of them. Writing a second symbol parser is how the
+     put/call blindness got in; there is one, and it is this. */
+  const seen = [...new Set(list
+    .map((r) => {
+      const p = parseOptionSymbol(r && r.option_symbol);
+      return p ? p.expiry : null;
+    })
+    .filter(Boolean))].sort();
+  const head = `  chain probe (${ticker}, expiry=${expiry}): ${list.length} row(s)`;
+  if (!list.length) {
+    return [`${head} — the filter was accepted and returned NOTHING, which is` +
+      " neither working nor ignored; do not read it as either"];
+  }
+  const shown = seen.slice(0, maxList).join(", ") + (seen.length > maxList ? ` (+${seen.length - maxList} more)` : "");
+  if (seen.length === 1 && seen[0] === expiry) {
+    return [`${head} over expiries: ${shown}`,
+      list.length >= pageSize
+        ? "    FILTER WORKS but this single expiry still fills the page, so the" +
+          " strike set is itself a subset — narrowing further is still needed"
+        : "    FILTER WORKS: one call identifies the nearest expiry by" +
+          " construction. Drop the truncation refusal for scalars read off it."];
+  }
+  return [`${head} over expiries: ${shown}`,
+    `    FILTER IGNORED — ${seen.length} distinct expiries came back for a` +
+    " single-expiry request, so narrowing must use `page` instead."];
+}
+
 /* How much of the deadline the chain leg must leave for the cards.
    Fifty chain calls at the limiter's 5s ceiling are four minutes; the cards
    are three calls a name over up to fifty names and are the surface a reader
@@ -141,6 +320,19 @@ const PUBLISH_SPACING_MS = 150;
 
 const stats = { calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now() };
 let delayMs = RATE.startDelayMs;
+
+/* THE FLOOR IS A VARIABLE, and it was not one until 2026-08-26.
+
+   The 429 branch below has always carried the comment "raise the floor
+   permanently", and for as long as it has, the code underneath it raised only
+   the CURRENT delay: the decay on a clean response clamped to RATE.minDelayMs,
+   an immutable 60. Six clean responses after any 429 walked the delay straight
+   back to the minimum that earned it. The first live run of the chain leg
+   measured the consequence — 43 rate-limited calls out of 408, and a final
+   inter-call delay of exactly 60ms, the controller having learned nothing
+   across the whole run — and a 429 costs one of four retry attempts, so a
+   sustained regime does not merely waste calls, it fails names. */
+let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -174,7 +366,8 @@ async function uw(path, params = {}) {
       });
     } catch (error) {
       stats.retries++;
-      delayMs = Math.min(delayMs * 2, RATE.maxDelayMs);
+      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
+        { delayMs, floorMs: delayFloorMs }, "error"));
       if (attempt === RATE.maxRetries) throw error;
       continue;
     }
@@ -190,16 +383,19 @@ async function uw(path, params = {}) {
       const wait = Number.isFinite(retryAfter) && retryAfter > 0
         ? Math.min(retryAfter * 1000, RATE.maxRetryAfterMs)
         : Math.min(delayMs * 4, RATE.maxDelayMs);
-      // Raise the floor permanently: hitting 429 once means the
-      // starting guess was wrong for this key's tier.
-      delayMs = Math.min(Math.max(delayMs * 2, 250), RATE.maxDelayMs);
+      /* Raise the floor, and this time actually raise the floor. Hitting 429
+         once means the starting guess was wrong for this key's tier, and that
+         fact does not expire six clean responses later. */
+      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
+        { delayMs, floorMs: delayFloorMs }, "limited"));
       await sleep(wait);
       continue;
     }
 
     if (response.status >= 500) {
       stats.retries++;
-      delayMs = Math.min(delayMs * 2, RATE.maxDelayMs);
+      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
+        { delayMs, floorMs: delayFloorMs }, "error"));
       if (attempt === RATE.maxRetries) throw new Error(`${path} -> HTTP ${response.status}`);
       continue;
     }
@@ -207,8 +403,11 @@ async function uw(path, params = {}) {
     if (!response.ok) throw new Error(`${path} -> HTTP ${response.status}`);
 
     // A clean response earns a small speed-up, floored so we never
-    // creep back into the rate limiter.
-    delayMs = Math.max(RATE.minDelayMs, delayMs * 0.9);
+    // creep back into the rate limiter. THE FLOOR IS delayFloorMs, not
+    // RATE.minDelayMs: the whole point of raising it on a 429 is that the
+    // decay is not allowed to undo it.
+    ({ delayMs, floorMs: delayFloorMs } = stepRateController(
+      { delayMs, floorMs: delayFloorMs }, "ok"));
     const body = await response.json();
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
@@ -2404,13 +2603,27 @@ function card0Unusable(row) {
  * and one no-bid line that the sale pricer must refuse while the volume tape
  * keeps it. A fixture where everything is well-formed tests only the path
  * nothing goes wrong on.
+ *
+ * `wide` IS THE COMMON CASE, NOT THE EDGE ONE, and this fixture said otherwise
+ * for a whole release. The narrow book below is 137 rows, so every dry run
+ * built a chain that comfortably fit the vendor's 500-row page and the
+ * truncation branch — the branch that fired on ten of eleven names on the
+ * first live morning — never executed once. A wide book overflows the page and
+ * is then CUT the way a real page cap cuts: after a deterministic shuffle, so
+ * the subset is arbitrary rather than conveniently sorted by expiry. Nothing
+ * downstream is allowed to succeed by leaning on an order the vendor has never
+ * documented.
  */
-function fakeChain(ticker, spot, seed) {
+export function fakeChain(ticker, spot, seed, { wide = false } = {}) {
   const rnd = mulberry(seed);
   const rows = [];
-  const expiries = [["260831", 7], ["260918", 25], ["261016", 53], ["261218", 116]];
+  const expiries = wide
+    ? [["260831", 7], ["260904", 11], ["260911", 18], ["260918", 25], ["260925", 32],
+       ["261016", 53], ["261120", 88], ["261218", 116], ["270115", 144], ["270618", 298]]
+    : [["260831", 7], ["260918", 25], ["261016", 53], ["261218", 116]];
   for (const [code, dte] of expiries) {
-    for (let i = -8; i <= 8; i++) {
+    const halfWidth = wide ? 15 : 8;
+    for (let i = -halfWidth; i <= halfWidth; i++) {
       const m = i * 0.035;
       const strike = Math.round(spot * Math.exp(m) * 100) / 100;
       const level = 0.34 - 0.03 * Math.log(dte / 7);
@@ -2431,7 +2644,7 @@ function fakeChain(ticker, spot, seed) {
         const row = {
           option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
           // The far call: quoted with nobody bidding, and it still trades.
-          nbbo_bid: (i === 8 && !isPut ? 0 : Math.max(0.05, bid)).toFixed(2),
+          nbbo_bid: (i === halfWidth && !isPut ? 0 : Math.max(0.05, bid)).toFixed(2),
           nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
           implied_volatility: iv.toFixed(6),
           open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
@@ -2457,7 +2670,18 @@ function fakeChain(ticker, spot, seed) {
     open_interest: "5000", prev_oi: "4800", volume: "99999",
     ask_volume: "90000", bid_volume: "9999",
   });
-  return rows;
+  if (!wide) return rows;
+
+  /* THE PAGE CAP, SIMULATED THE WAY IT ACTUALLY BITES. A Fisher-Yates shuffle
+     off the same seeded generator, then a cut at exactly CHAIN_PAGE_SIZE. The
+     shuffle is the load-bearing half: cutting a list already sorted by expiry
+     would leave the front expiry whole and complete, which is precisely the
+     convenience the vendor does not promise and the refusal exists for. */
+  for (let i = rows.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [rows[i], rows[j]] = [rows[j], rows[i]];
+  }
+  return rows.slice(0, CHAIN_PAGE_SIZE);
 }
 
 function fakeSurface(ticker, spot, expiries) {
@@ -3153,6 +3377,10 @@ async function main() {
   }
   // The chain shape is reported once per run, not once per name.
   let chainReported = false;
+  /* The truncation probe is spent once per run, on the first name that fills
+     the page. One call, and it answers the question for all fifty. */
+  let chainProbed = false;
+  const expiriesByTicker = new Map(liquid.map((e) => [e.features.ticker, e.raw.expiries || []]));
 
   /* 7e. THE OPTION CHAIN, ONE CALL PER BOARD NAME.
 
@@ -3189,7 +3417,17 @@ async function main() {
       }
       try {
         const rows = DRY_RUN
-          ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + chainOk + chainFailed)
+          /* THE FIRST TWO NAMES FILL THE PAGE, the rest fit. Both shapes are
+             live — the 2026-08-26 run truncated on ten names of eleven — and a
+             dry run that only ever sees one of them exercises the refusal or
+             the happy path but never both in the same session, nor the
+             re-publish that has to carry a mix of the two.
+
+             TWO rather than one, because one cannot distinguish "the probe
+             runs once per run" from "the probe runs once per truncated name",
+             and the difference is nine wasted vendor calls on a live morning. */
+          ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + chainOk + chainFailed,
+            { wide: chainOk + chainFailed < 2 })
           : await uw(`/api/stock/${ticker}/option-contracts`, {
             /* NOT maybe_otm_only. The desk filters to the sellable book because
                it is pricing a sale; this leg is measuring a SURFACE, and the
@@ -3230,6 +3468,39 @@ async function main() {
         });
         chainByTicker.set(ticker, panels);
         if (panels.status === "ok") chainOk++; else chainFailed++;
+
+        /* ONE CALL, ONCE, ON THE FIRST TRUNCATED NAME. Its own try/catch and
+           its own flag: a diagnostic that can fail the leg it is diagnosing is
+           worse than no diagnostic, and a probe that repeats is a second call
+           per name for an answer that does not vary by name. */
+        if (!chainProbed && panels.truncated) {
+          const probeExpiry = nearestProbeExpiry(expiriesByTicker.get(ticker), {
+            asOf: sessionDate, minDays: SKEW_MIN_DAYS,
+          });
+          if (probeExpiry) {
+            chainProbed = true;
+            try {
+              const probeRows = DRY_RUN
+                /* THE FIXTURE ANSWERS "IGNORED", NOT "WORKS". A fixture that
+                   agrees with the code's hope is the failure mode this file
+                   has hit three times — call_gamma, the aggressor split, the
+                   put/call collision — so the dry run exercises the branch
+                   that must not be mistaken for success. */
+                ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 9000).slice(0, 40)
+                : await uw(`/api/stock/${ticker}/option-contracts`, {
+                  expiry: probeExpiry,
+                  exclude_zero_oi_chains: "true",
+                  limit: CHAIN_PAGE_SIZE,
+                });
+              for (const line of describeChainProbe(ticker, probeExpiry, probeRows)) {
+                console.log(line);
+              }
+            } catch (error) {
+              console.warn(`  chain probe (${ticker}, expiry=${probeExpiry}): ${error.message}` +
+                " — the parameter may be rejected outright, which is itself an answer");
+            }
+          }
+        }
       } catch (error) {
         chainFailed++;
         console.warn(`  chain ${ticker}: ${error.message}`);
@@ -3485,7 +3756,13 @@ async function main() {
     `\ndone in ${elapsed.toFixed(1)}s — ${stats.calls} API calls` +
     `, ${stats.retries} retries, ${stats.rateLimited} rate-limited` +
     `, achieved ${(stats.calls / Math.max(elapsed, 1)).toFixed(2)} req/s` +
-    ` (final inter-call delay ${Math.round(delayMs)}ms)`,
+    ` (final inter-call delay ${Math.round(delayMs)}ms` +
+    /* THE LEARNED FLOOR IS THE FINDING, not the final delay. The delay is
+       wherever the last decay left it; the floor is what this run concluded
+       about the key's tier, and it is the number to carry into RATE if it
+       settles at the same place across several mornings. */
+    `, learned floor ${Math.round(delayFloorMs)}ms` +
+    (delayFloorMs > RATE.minDelayMs ? "" : ", never raised") + ")",
   );
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 }
