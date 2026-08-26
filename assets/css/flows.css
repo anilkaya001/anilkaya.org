@@ -2665,3 +2665,148 @@ body.is-stale .flows-tablewrap {
   .mk-sector-k { flex-basis: 6.5rem; font-size: 0.8rem; }
   .mk-sector-v { flex-basis: 3.6rem; }
 }
+
+/* ==============================================================
+   /flows/ticker/ — one name, every panel
+   ============================================================== */
+
+/* --- the panel grid ------------------------------------------------ */
+.ft-grid {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Grid items default to min-width:auto, which lets a wide child (the top
+   contracts table, a 30-bar ladder) push its column past 1fr and take the
+   whole page into horizontal overflow. Both the item and its drawing host
+   have to say min-width:0 — the item alone is not enough. */
+.ft-panel { min-width: 0; }
+.ft-panel > div { min-width: 0; }
+
+/* WHY 76rem AND NOT THE EXISTING 60rem BREAKPOINT.
+   The panel that pays for this number is the AGGRESSOR ladder, not the IV
+   surface: the surface is .is-wide at every width above the breakpoint and
+   the grid is single-column below it, so the surface is never in a
+   two-column box and cannot be what the measurement is about.
+
+   The ladder's plot is W - 46 (strike labels) - 112 (volume rail). In a
+   two-column host at 60rem the viewport is 960, content 675.2, column 329.6,
+   host 297.6 — which floors to the 300 chart minimum and leaves a 142-unit
+   plot: the same squeeze as a 320px phone, on a desktop. At 76rem the host
+   is 424 and the plot is 266, which is where a 30-bar ladder's strike labels
+   and volume rail stop colliding. */
+@media (min-width: 76rem) {
+  .ft-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ft-panel.is-wide { grid-column: 1 / -1; }
+}
+
+/* --- the identity block --------------------------------------------- */
+.ft-head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--space-2); margin: 0 0 var(--space-3);
+}
+.ft-head > * { min-width: 0; }
+.ft-head h2 {
+  margin: 0; font-family: var(--font-mono); font-size: 1.5rem;
+  letter-spacing: 0.02em;
+}
+
+/* The link out of the card dialog and off a board row. Chrome, not data:
+   gold is allowed here precisely because it carries no reading. */
+.ft-link {
+  color: var(--gold-harvest); text-decoration: none; font-size: 0.82rem;
+  white-space: nowrap;
+}
+.ft-link:hover { text-decoration: underline; }
+.ft-link:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.fb-tk .ft-link { margin-left: 0.4rem; opacity: 0.55; }
+.fb-tk:hover .ft-link, .fb-tk .ft-link:focus-visible { opacity: 1; }
+
+.ft-picker { margin: 0 0 var(--space-3); }
+.ft-picker h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+
+/* --- the enlarge affordance ----------------------------------------- */
+/* SCOPED TO .ft-panel. Making .fc-panel h3 a flex container would reflow the
+   header of every panel on the card dialog, the desk and the board. */
+.ft-panel h3 {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-2);
+}
+.ft-zoom-open {
+  position: relative; flex: none; background: none; border: 0;
+  color: var(--ink-faint); font: inherit; font-size: 0.95rem; line-height: 1;
+  padding: 0; cursor: pointer;
+}
+/* A 44px touch target without a 44px box: the glyph stays 1.6rem and the
+   pseudo-element extends the hit area past it. */
+.ft-zoom-open::after { content: ""; position: absolute; inset: -12px; }
+.ft-zoom-open:hover, .ft-panel:hover .ft-zoom-open { color: var(--gold-harvest); }
+.ft-zoom-open:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-panel-t { min-width: 0; }
+
+/* --- pointer response (decoration only) ------------------------------ */
+.ft-panel {
+  position: relative;
+  transition: border-color 120ms ease, box-shadow 160ms ease;
+}
+.ft-panel:hover {
+  border-color: color-mix(in srgb, var(--gold-mystic) 55%, var(--panel-border));
+  box-shadow: 0 12px 30px rgba(6, 6, 4, 0.5);
+}
+.ft-panel::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  pointer-events: none; opacity: 0; transition: opacity 160ms var(--ease);
+  background: radial-gradient(16rem 12rem at calc(var(--mx, 50) * 1%) calc(var(--my, 50) * 1%),
+    color-mix(in srgb, var(--gold-mystic) 13%, transparent), transparent 70%);
+}
+.ft-panel:hover::after { opacity: 1; }
+/* PLACED IMMEDIATELY AFTER WHAT IT OVERRIDES, exactly as the .fd-card block
+   does. The two existing reduced-motion blocks name specific classes and
+   cannot reach these rules — a reduced-motion reader would otherwise get the
+   spotlight this page just added. No lift is defined at all: .fd-card's
+   translateY is right for a card that IS a button and wrong for a panel
+   containing a scrollable table. */
+@media (prefers-reduced-motion: reduce) {
+  .ft-panel { transition: none; }
+  .ft-panel:hover { box-shadow: var(--shadow-card); }
+  .ft-panel::after { display: none; }
+}
+
+/* --- the enlarge dialog ---------------------------------------------- */
+/* WIDTH IS min(96rem, 96vw), NOT min(74rem, 96vw). At 74rem the drawable host
+   tops out at 1184 - 2x1.7rem = 1129.6px, while an .is-wide grid panel at a
+   >=1328px viewport is already 1136px — so "enlarge" would SHRINK the two
+   widest panels on the page, which are the two the button matters most for. */
+.ft-zoom {
+  margin: auto; width: min(96rem, 96vw); max-width: none; max-height: 92dvh;
+  padding: 0; border: 1px solid var(--hairline); border-radius: var(--radius-3);
+  background: var(--bg-elev); color: var(--ink); overflow: auto;
+  overscroll-behavior: contain;
+}
+.ft-zoom::backdrop { background: rgba(0, 0, 0, 0.62); }
+.ft-zoom-inner { padding: clamp(1rem, 3vw, 1.7rem); }
+.ft-zoom-close {
+  flex: none; background: none; border: 0; color: var(--ink-dim);
+  font: inherit; font-size: 1.3rem; line-height: 1; padding: 0 0.2rem;
+  cursor: pointer;
+}
+.ft-zoom-close:hover { color: var(--ink); }
+.ft-zoom-close:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-zoom #ftZoomPanel h3 {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-2);
+}
+@media (max-width: 640px) {
+  .ft-zoom {
+    inset: 0; width: 100vw; height: 100dvh; max-height: none;
+    border: 0; border-radius: 0;
+  }
+}
+
+/* --- staleness, the same two channels the dialog uses ---------------- */
+/* Words in the band above, chrome here. NEVER opacity on a glyph: dimming a
+   number drops it below the 4.5:1 floor and it is still read as a number.
+   Charts may take 0.72; text may not. */
+.ft-grid.is-stale .ft-panel {
+  border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
+}
+.ft-grid.is-stale .ft-panel svg { opacity: 0.72; }

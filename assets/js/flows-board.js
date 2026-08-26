@@ -744,6 +744,20 @@
       open.title = NO_CARD_SAID;
     }
     tk.append(open);
+    /* THE DIALOG IS THE QUICK LOOK; THE PAGE IS THE DRILL. A real anchor, not
+       a second button: /flows/ticker/?t= is a place, so it must be linkable,
+       middle-clickable and sendable to someone. Only a deep row gets one —
+       the page would render honestly for a name with no card, but a link that
+       usually leads to "no card for this name" is worse than no link. */
+    if (deep) {
+      const full = document.createElement("a");
+      full.className = "ft-link";
+      full.href = "/flows/ticker/?t=" + encodeURIComponent(String(row.t || ""));
+      full.textContent = "\u2197";
+      full.setAttribute("aria-label", "Full page for " + String(row.t || ""));
+      full.title = "Open the full page for " + String(row.t || "");
+      tk.append(full);
+    }
     tr.append(tk);
 
     const px = document.createElement("td");

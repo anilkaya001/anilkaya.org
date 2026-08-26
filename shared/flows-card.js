@@ -124,6 +124,23 @@ export const POLARITY = Object.freeze({
   gammaFrontLoad: 0,
   gammaMeanLifeDays: 0,
   week52Pos: 0,
+  /* The chain block, added when /flows/ticker/ gave the four chain panels a
+     renderer for the first time.
+
+     NAMED AFTER THE FIELDS THAT EXIST, which is the whole discipline of this
+     table and is easy to get wrong here. The ticker spec first proposed an
+     entry called `netAggr`. No payload field is called netAggr — the fields
+     are `aggressor.bars[].net` and `topContracts.rows[].aggr`. polarityOf()
+     returns 0 for a key it does not know, so that entry would have been a
+     silent NEUTRAL on the one panel where the flow pair is genuinely correct,
+     and the sign colour would simply have vanished with nothing failing. */
+  skew: -1,     // put iv - call iv, the SAME construction as riskReversal:
+                // a larger number is the put wing bid over the call wing,
+                // which is bearish. If these two ever disagree, one is wrong.
+  term: 0,      // far atm iv - near atm iv: a SHAPE, not a direction
+  atmIv: 0,     // a level
+  net: +1,      // aggressor.bars[].net - calls lifted +, puts lifted -
+  aggr: +1,     // topContracts.rows[].aggr = ask_volume - bid_volume
 });
 
 /** Look up a field's polarity. Unknown fields are neutral, never guessed. */

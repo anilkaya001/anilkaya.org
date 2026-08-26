@@ -624,7 +624,18 @@ const near = (a, b, tol, msg) => {
   ok(ASSET_VERSION === onDisk,
      `flows-pages ASSET_VERSION (${ASSET_VERSION}) matches assets/version.txt (${onDisk})`);
 
-  for (const asset of ["../assets/css/flows.css", "../assets/js/flows-board.js"]) {
+  /* Every file shared/flows-pages.js emits a <script> or <link> tag for. A
+     page that references an asset the bundle does not carry is a 404 the
+     reader sees as a page that half works — and flows-panels.js in particular
+     is a load-bearing dependency of two controllers, both of which fail
+     closed with a console error rather than a visible one. */
+  for (const asset of [
+    "../assets/css/flows.css",
+    "../assets/js/flows-board.js",
+    "../assets/js/flows-panels.js",
+    "../assets/js/flows-card.js",
+    "../assets/js/flows-ticker.js",
+  ]) {
     ok(existsSync(new URL(asset, import.meta.url)), `${asset} exists`);
   }
 }
