@@ -150,8 +150,29 @@ const famV2 = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .f
 })));
 const v2 = (k) => famV2.find((f) => f.k === k);
 const px = (w) => parseFloat(w) || 0;
-const legacyNoteOnV2 = await page.evaluate(() =>
-  [...document.querySelectorAll("#fcWhy .fc-note")].some((n) => n.textContent.includes("built before")));
+/* NARROWED, AND THE NARROWING IS THE POINT.
+
+   This read `.includes("built before")` and matched ANY such note in the
+   panel. That was fine while there was exactly one — the note explaining that
+   V and O could not be redrawn as gauges on a v1 payload. It broke the moment
+   a second, entirely correct one appeared: the quality pair (otmShare and
+   vegaTilt) is newer than this fixture, so a v2 card that predates it says so,
+   which is exactly the behaviour the transitional design demands.
+
+   A schema boundary accumulates these notes by construction — every field
+   added after a stored payload earns one. So an assertion here must name the
+   note it means, or it becomes a tripwire that fires on every future addition
+   and has to be loosened each time until it means nothing. */
+const V_O_NOTE = "volatility and quality readings became";
+const QUALITY_NOTE = "not published on this card";
+const notesOnV2 = await page.evaluate(() =>
+  [...document.querySelectorAll("#fcWhy .fc-note")].map((n) => n.textContent));
+const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
+/* The other side of the same coin: a card genuinely missing a newer field
+   must SAY so rather than render a zero. The fixture predates the quality
+   pair, so this note is required to be present — which turns the collision
+   above into a guard instead of a nuisance. */
+const qualityNoteOnV2 = notesOnV2.some((t) => t.includes(QUALITY_NOTE));
 await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
 await page.click('.flows-view[data-view="table"]');
@@ -173,7 +194,11 @@ const assertions = [
   [v2("V").gauge && v2("O").gauge, "and draws them as gauges, not signed axes"],
   [px(v2("V").width) > 10 && px(v2("O").width) > 10,
     `with real width (V ${v2("V").width}, O ${v2("O").width})`],
-  [!legacyNoteOnV2, "and without the legacy explanation"],
+  [!legacyNoteOnV2, "and without the V/O legacy explanation, which is a v1 fact"],
+  [qualityNoteOnV2,
+    "while a field NEWER than this fixture is named as unpublished rather than " +
+    "drawn as zero: zero is the best possible reading of both quality axes once " +
+    "oriented, so imputing it would reward a name for having no data"],
   [v2Purity !== "\u2014" && v2Purity.length > 0,
     `a v2 board publishes purity rather than withholding it (got "${v2Purity}")`],
   [v2("F").v === "−73", "signed axes are unaffected by the version"],
