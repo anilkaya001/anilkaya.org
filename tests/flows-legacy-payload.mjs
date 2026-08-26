@@ -101,6 +101,25 @@ const glyph = await page.evaluate(() => {
 });
 
 
+/* A DEEP-LINKED SORT ON A WITHHELD COLUMN. purity changed meaning at v2, so
+   on this v1 board the column renders the em dash and sortable() is false —
+   but ?sort=purity arrives from links minted while it was sortable. The table
+   must stay in the published order AND SAY SO: announcing "sorted descending"
+   over unsorted rows is a lie only a screen reader hears, and even
+   aria-sort="none" would claim the column is sortable-but-unsorted. The
+   withheld column carries no aria-sort at all. */
+await page.goto(url("/flows/long/?sort=purity&dir=desc"), { waitUntil: "networkidle" });
+await page.click('.flows-view[data-view="table"]');
+await page.waitForSelector("#flowsBody tr");
+const withheldSort = await page.evaluate(() => ({
+  announced: [...document.querySelectorAll("#flowsTable thead th")]
+    .map((th) => th.getAttribute("aria-sort"))
+    .filter((v) => v === "ascending" || v === "descending").length,
+  purityAria: document.querySelectorAll("#flowsTable thead th")[6].hasAttribute("aria-sort"),
+  firstTicker: document.querySelector("#flowsBody tr .fb-tk").textContent.trim(),
+}));
+
+
 await page.click('.flows-view[data-view="deck"]');
 await page.click('.fd-card[data-t="INTC"]');
 await page.waitForSelector("#fcWhy .fc-fam li");
@@ -110,8 +129,15 @@ const fam = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-
   note: li.querySelector(".fc-fam-l").textContent,
   width: getComputedStyle(li.querySelector(".fc-fam-track i")).width,
 })));
-const legacyNote = await page.evaluate(() =>
-  [...document.querySelectorAll("#fcWhy .fc-note")].some((n) => n.textContent.includes("built before")));
+/* NAMED, NOT SUBSTRING-HUNTED. Two notes on this card legitimately contain
+   "built before" (the V/O explanation and the quality pair's), so a broad
+   .includes() here could never fail — the assertion it feeds was satisfied by
+   the WRONG note the moment the second one shipped. Both constants are used
+   on both sides of the boundary below. */
+const V_O_NOTE = "volatility and quality readings became";
+const QUALITY_NOTE = "not published on this card";
+const legacyNote = await page.evaluate((needle) =>
+  [...document.querySelectorAll("#fcWhy .fc-note")].some((n) => n.textContent.includes(needle)), V_O_NOTE);
 
 
 // No negative or absurd widths anywhere on the card.
@@ -163,8 +189,6 @@ const px = (w) => parseFloat(w) || 0;
    added after a stored payload earns one. So an assertion here must name the
    note it means, or it becomes a tripwire that fires on every future addition
    and has to be loosened each time until it means nothing. */
-const V_O_NOTE = "volatility and quality readings became";
-const QUALITY_NOTE = "not published on this card";
 const notesOnV2 = await page.evaluate(() =>
   [...document.querySelectorAll("#fcWhy .fc-note")].map((n) => n.textContent));
 const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
@@ -183,12 +207,18 @@ const assertions = [
   [fam.find((f) => f.k === "V").v === "—", "V is withheld on a v1 card"],
   [fam.find((f) => f.k === "O").v === "—", "O is withheld on a v1 card"],
   [fam.find((f) => f.k === "F").v === "−73", "F still renders, because its meaning did not change"],
-  [legacyNote, "and the card says why"],
+  [legacyNote, "and the card says why, in the V/O note specifically"],
   [bad.length === 0, "no negative bar widths"],
   [glyph.nullMarks === 2, "the table glyph marks V and O absent"],
   /* purity changed meaning at v2 too — from a net over a gross to gross over
      gross — and renders in the same column under the same heading. */
   [glyph.purity === "\u2014", `a v1 board withholds purity as well (got "${glyph.purity}")`],
+  [withheldSort.announced === 0,
+    "a ?sort= deep link to the withheld column announces no sorted header"],
+  [!withheldSort.purityAria,
+    "and the withheld column carries no aria-sort at all — 'none' would claim it is sortable"],
+  [withheldSort.firstTicker === "INTC",
+    `while the rows stay in the published order (first row ${withheldSort.firstTicker})`],
   // ...and the same renderer draws them on a current payload.
   [v2("V").v === "59" && v2("O").v === "71", "a v2 card publishes both gauges"],
   [v2("V").gauge && v2("O").gauge, "and draws them as gauges, not signed axes"],

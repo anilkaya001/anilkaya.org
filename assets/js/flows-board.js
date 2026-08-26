@@ -554,6 +554,12 @@
       // an invisible column silently reordering the board is worse than a
       // link that lands on the published order.
       if (colIndex(col.key) >= headCells.length) return;
+      /* The same refusal for a column already known to be withheld. Most
+         withholding is decided by the payload, which has not arrived when
+         this runs — render() re-checks sortKey against sortable() once it
+         has — but a key unsortable before any payload should not become the
+         sort either. */
+      if (!sortable(col)) return;
       sortKey = col.key;
       sortDir = q.get("dir") === "asc" ? "asc" : q.get("dir") === "desc" ? "desc" : col.first;
     } catch { /* deep-linking is a convenience, never a requirement */ }
@@ -612,9 +618,16 @@
          it on the families header would advertise an order that header can
          never produce. */
       if (!col || !button) { th.removeAttribute("aria-sort"); return; }
-      const on = sortKey === col.key;
-      button.disabled = !sortable(col);
-      th.setAttribute("aria-sort", on ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+      /* THE ANNOUNCED STATE MUST AGREE WITH THE TABLE. A column withheld on
+         this payload (sortable() false — e.g. a v1 board's purity) cannot
+         have ordered anything, so it gets no aria-sort even when sortKey
+         still names it; announcing "sorted descending" over rows in the
+         published order is a lie only a screen reader hears. */
+      const live = sortable(col);
+      const on = live && sortKey === col.key;
+      button.disabled = !live;
+      if (!live) th.removeAttribute("aria-sort");
+      else th.setAttribute("aria-sort", on ? (sortDir === "asc" ? "ascending" : "descending") : "none");
       const ind = button.querySelector(".fb-sort-ind");
       if (ind) ind.textContent = on ? (sortDir === "asc" ? "↑" : "↓") : "";
       /* THE ACCESSIBLE NAME IS SPELLED OUT, not scraped from the header.
@@ -815,6 +828,10 @@
    * about where a row happens to be sitting.
    */
   function paintRows() {
+    /* NOTHING TO PAINT MEANS NOTHING TO ERASE. On an empty or errored board
+       the tbody holds the explanation row render() wrote — a header click
+       must not replace it with a silent zero-row table. */
+    if (!currentRows.length) return;
     const view = orderedRows();
     const tableFrag = document.createDocumentFragment();
     for (const { row, index } of view) tableFrag.append(rowFor(row, index));
@@ -965,6 +982,11 @@
       horizonSessions = isNum(payload.horizonSessions);
 
       currentRows = rows;
+      /* A deep-linked sort keyed to a column THIS payload withholds is
+         dropped, not half-honoured: nulls-last already leaves the table in
+         the published order, so keeping the key would only make every header
+         disagree with the rows. */
+      if (sortKey && !sortable(colByKey(sortKey))) { sortKey = null; sortDir = "desc"; writeSort(); }
       syncHeaders();      // Π's sortability depends on the payload version
       paintRows();
       painted = which;

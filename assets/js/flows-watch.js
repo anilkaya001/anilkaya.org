@@ -33,7 +33,13 @@
   const MINUS = "−";            // U+2212, not a hyphen
   const DASH = "—";
 
+  /* The missing-value test comes BEFORE the coercion. Number(null) is 0 and
+     0 is finite, so the naive shape turns an absent reading into a confident
+     zero — on this page that rendered "0.00×" in the Surprise column of every
+     row, which is a real reading of that field ("balanced") and not what a
+     missing one means. */
   const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) ? n : null;
   };
@@ -49,9 +55,9 @@
     return n === null ? DASH : n.toFixed(d);
   };
 
-  /* A MULTIPLE, NOT A PERCENTAGE. surpriseTilt is today's options volume over
-     this name's own thirty-day average, so 2.4x is the honest rendering and
-     "+140%" would invite reading it as a return. */
+  /* A MULTIPLE, NOT A PERCENTAGE. relVolume is today's share volume over the
+     vendor's own recent norm, so 2.4x is the honest rendering and "+140%"
+     would invite reading it as a return. */
   const multiple = (v) => {
     const n = isNum(v);
     return n === null ? DASH : n.toFixed(2) + "×";
@@ -116,21 +122,25 @@
 
     tr.append(cell(isNum(row.cnv) === null ? DASH : String(Math.round(row.cnv)), "c-num"));
 
-    /* SURPRISE IS RELATIVE TO THE NAME, NOT THE MARKET. A 3x day on a name
-       that trades two hundred contracts is six hundred contracts, and the
-       column would read identically to a 3x day on SPY. So the multiple is
-       marked when it is large but never dressed as significance. */
-    const sur = isNum(row.sur);
-    const surCell = cell(multiple(sur), "c-num");
-    if (sur !== null && sur >= 3) {
+    /* SURPRISE IS A SIGNED TILT, NOT A VOLUME MULTIPLE. The pipeline
+       publishes log((callSurprise + 0.1) / (putSurprise + 0.1)) — each side's
+       surprise being its volume over the name's OWN thirty-day norm — so zero
+       means a balanced day for this name and the sign says which side is
+       doing the surprising. Relative to the name, not the market: a big tilt
+       on a name that trades two hundred contracts reads identically to one on
+       SPY, so it is marked when large but never dressed as significance. */
+    const sur = isNum(row.surpriseTilt);
+    const surCell = cell(signed(sur, 2), "c-num");
+    if (sur !== null && Math.abs(sur) >= Math.log(3)) {
       surCell.className = "c-num is-surprise";
-      surCell.title = "Three times this name's own thirty-day options volume or more. " +
-        "A multiple of its own norm, which says nothing about the size of that norm.";
+      surCell.title = "One side's volume surprise is at least three times the " +
+        "other's, against this name's own thirty-day norms. A tilt of its own " +
+        "tape, which says nothing about the size of that tape.";
     }
     tr.append(surCell);
 
-    tr.append(cell(isNum(row.rv) === null ? DASH : multiple(row.rv), "c-num"));
-    tr.append(cell(fixed(row.pcr, 2), "c-num"));
+    tr.append(cell(multiple(row.relVolume), "c-num"));
+    tr.append(cell(fixed(row.putCallRatio, 2), "c-num"));
     tr.append(cell(pct(row.w52, 0), "c-num"));
 
     return tr;
@@ -165,8 +175,11 @@
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const band = payload.deadBand;
 
+    /* The badge stays hidden until there is something measured to count. A
+       pending payload has rows.length 0 by construction, and "0" in the rail
+       is a confident reading of a store that has simply never been written. */
     const slot = document.querySelector('[data-rail-count="watch"]');
-    if (slot) { slot.textContent = String(rows.length); slot.hidden = false; }
+    if (slot && rows.length) { slot.textContent = String(rows.length); slot.hidden = false; }
 
     if (payload.status === "pending" || !rows.length) {
       /* AN EMPTY WATCH LIST IS ALMOST ALWAYS A MISSING PUBLISH, not a quiet

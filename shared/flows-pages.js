@@ -17,7 +17,7 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "63";
+export const ASSET_VERSION = "64";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -578,10 +578,11 @@ ${shell("Watch List", "Options-flow intelligence", "watch", username, `
       <caption class="flows-caption">
         Every name the pipeline scored and published on neither side. Distance is
         how far the score sits from the band edge, so a row near zero is one
-        session from appearing on a board. Surprise is today&#39;s options volume
-        against this name&#39;s own thirty-day norm &#8212; the most conventional
-        reading of &#8220;unusual activity&#8221; there is, and one this product
-        computed and never showed.
+        session from appearing on a board. Surprise is the log ratio of
+        call-side to put-side volume surprise, each side against this
+        name&#39;s own thirty-day norm &#8212; the most conventional reading of
+        &#8220;unusual activity&#8221; there is, signed by which side is doing
+        the surprising, and one this product computed and never showed.
       </caption>
       <thead>
         <tr>
@@ -590,7 +591,7 @@ ${shell("Watch List", "Options-flow intelligence", "watch", username, `
           <th scope="col" class="c-num">Score</th>
           <th scope="col" class="c-num"><abbr title="How far this score sits from the nearest edge of the dead band, in score units. Zero means it would publish">To band</abbr></th>
           <th scope="col" class="c-num">Conv</th>
-          <th scope="col" class="c-num"><abbr title="Today&#39;s options volume against this name&#39;s own thirty-day average, as a multiple. 1.0 is an ordinary day for this name, not for the market">Surprise</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Log ratio of call to put volume surprise, each side against this name&#39;s own thirty-day average. 0 is a balanced day for this name; positive means the call side is doing the surprising, negative the put side">Surprise</abbr></th>
           <th scope="col" class="c-num"><abbr title="Today&#39;s share volume against its own recent norm, as the vendor reports it">Rel vol</abbr></th>
           <th scope="col" class="c-num"><abbr title="Put contracts traded per call contract. A ratio of the tape, not a positioning estimate">P/C</abbr></th>
           <th scope="col" class="c-num"><abbr title="Where the last price sits between the 52-week low and high. 0% is the low, 100% the high">52w</abbr></th>

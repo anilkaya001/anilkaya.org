@@ -41,7 +41,14 @@
      reading the number cannot support. Stated, not hidden. */
   const MIN_SESSIONS = 5;
 
+  let drawnHorizons = null;          // the last horizons handed to renderCurve
+
+  /* The missing-value test comes BEFORE the coercion — Number(null) is 0 and
+     0 is finite, so the naive shape turns an absent hit rate into "0%" and
+     plots an absent horizon ON the zero line, both of them confident readings
+     of nothing. */
   const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) ? n : null;
   };
@@ -79,13 +86,19 @@
      the single most common way this kind of plot lies. */
 
   function renderCurve(horizons) {
+    drawnHorizons = horizons;             // kept for the resize repaint
     curveHost.replaceChildren();
 
-    const usable = horizons.filter((h) => isNum(h.ls) !== null && (isNum(h.n) ?? 0) >= MIN_SESSIONS);
+    /* Each horizon passes through isNum ONCE, here, and everything below
+       plots the result — filtering on the coercion and then drawing the raw
+       field is how a string survives to arithmetic. */
+    const usable = horizons
+      .map((h) => ({ k: h.k, ls: isNum(h.ls), n: isNum(h.n) ?? 0 }))
+      .filter((h) => h.ls !== null && h.n >= MIN_SESSIONS);
     if (!usable.length) {
       const p = document.createElement("p");
       p.className = "rec-empty";
-      const best = horizons.reduce((m, h) => Math.max(m, isNum(h.n) ?? 0), 0);
+      const best = horizons.reduce((m, h) => Math.max(m, isNum(h && h.n) ?? 0), 0);
       p.textContent = best > 0
         ? "No horizon has reached " + MIN_SESSIONS + " scored sessions yet — the " +
           "longest has " + best + ". Nothing is plotted, because a mean of " +
@@ -97,7 +110,11 @@
       return;
     }
 
-    const W = 720, H = 220;
+    /* SIZED FROM THE HOST, the way every card panel is. A fixed 720-unit
+       viewBox at width:100% scales — 9px axis type becomes 5px on a phone and
+       oversized on a wide desk — which is the exact defect flows-card.js
+       documents. One viewBox unit here is one CSS pixel. */
+    const W = Math.max(300, Math.min(760, curveHost.clientWidth || 720)), H = 220;
     const padL = 54, padR = 18, padT = 18, padB = 40;
     const plotW = W - padL - padR, plotH = H - padT - padB;
 
@@ -259,6 +276,21 @@
   }
 
   /* ---------- load -------------------------------------------------- */
+
+  /* Redraw at the new width rather than letting the browser scale the old
+     drawing — the same discipline as the card panels. */
+  let resizeT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+      if (!drawnHorizons) return;
+      const svg = curveHost.querySelector("svg");
+      const drawnW = svg ? Number(String(svg.getAttribute("viewBox")).split(/\s+/)[2]) : 0;
+      const w = Math.max(300, Math.min(760, curveHost.clientWidth || 720));
+      if (svg && Math.abs(w - drawnW) < 8) return;
+      renderCurve(drawnHorizons);
+    }, 160);
+  });
 
   fetch("/api/flows/record", {
     credentials: "same-origin",

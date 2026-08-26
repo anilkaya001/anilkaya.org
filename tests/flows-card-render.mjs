@@ -745,6 +745,7 @@ try {
       window.__renderScore(host, card);
       out.scoreText = host.textContent;
       out.scoreStats = Array.from(host.querySelectorAll(".fc-stat dt")).map((n) => n.textContent);
+      out.scoreNotes = Array.from(host.querySelectorAll(".fc-note")).map((n) => n.textContent);
       return out;
     }, { card: v1 });
 
@@ -766,8 +767,15 @@ try {
 
     ok(!r.scoreStats.includes("OTM share of directional flow"),
        "a card with no quality pair shows no quality stats");
-    ok(/not published on this card/.test(r.scoreText),
-       "and says the two suppression reasons were not measured rather than printing zeros");
+    /* SCOPED TO THE NOTES, AND NAMED. The original match — /not published on
+       this card/ over the whole panel's textContent — was satisfied by the
+       legacy gauge LABEL (renderScore appends exactly that phrase to every
+       unsigned axis on a v1 card), so deleting the explanatory note entirely
+       left it green: an assertion about an explanation that a decoration
+       could satisfy. On a v1 card the explanation is the legacy note, so
+       that note is what must exist. */
+    ok(r.scoreNotes.some((t) => /built before the volatility and quality readings became/.test(t)),
+       "and a NOTE explains the suppression reasons were not measured rather than printing zeros");
     ok(!/\b0%\b/.test(r.scoreText),
        "with no zero anywhere in that explanation — zero is the BEST reading of both");
   }

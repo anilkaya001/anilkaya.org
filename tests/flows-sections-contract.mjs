@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
+import { toWatchRows } from "../scripts/flows-pipeline.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -75,6 +76,46 @@ try {
       const pending = await (await fetch(url(route), { headers: auth })).json();
       eq(pending.status, "pending", `${route} reports pending before the pipeline has run`);
       assert.deepEqual(pending.rows, [], `and ${route} invents no rows`); checks++;
+    }
+
+    /* THE PENDING STATE, RENDERED — not just served. The watch page has two
+       empty states ("never published" vs "published empty, likely a fault")
+       and only the second was ever put in front of a browser; a renderer
+       that showed the fault copy for a store that was simply never written
+       would have passed every assertion in this file. Has to happen HERE:
+       the key-validator block below writes board:watch to prove the key is
+       accepted, and after that the store is never empty again. */
+    {
+      const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+      await context.addCookies([{
+        name: "flows_session", value: token, domain: "127.0.0.1", path: "/",
+        httpOnly: true, sameSite: "Lax",
+      }]);
+      const page = await context.newPage();
+      await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".flows-empty", { timeout: 15000 });
+      const pendingText = await page.locator(".flows-empty").textContent();
+      ok(/has been published yet/.test(pendingText) && !/publishing fault/.test(pendingText),
+         `an unwritten store renders the never-published copy, not the fault copy (${pendingText})`);
+      /* And the rail badge stays hidden: "0" over a store that has never been
+         written is a confident reading of nothing. */
+      eq(await page.locator('[data-rail-count="watch"]').isHidden(), true,
+         "the watch badge stays hidden on a pending payload");
+
+      /* A SORT CLICK ON AN EMPTY BOARD MUST NOT EAT THE EXPLANATION. The
+         tbody of an unpublished board holds one full-width row saying WHY it
+         is empty; paintRows() redraws the tbody from currentRows, and with
+         nothing loaded a header click used to replace the explanation with a
+         silent zero-row table. Same reason as the badge: this has to run
+         against the never-written store. */
+      await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
+      await page.click('.flows-view[data-view="table"]');
+      await page.waitForSelector("#flowsBody .fb-empty", { timeout: 15000 });
+      const sortBtn = page.locator(".fb-sort:enabled").first();
+      if (await sortBtn.count()) await sortBtn.click();
+      eq(await page.locator("#flowsBody .fb-empty").count(), 1,
+         "a header click on an empty board leaves the explanation standing");
+      await context.close();
     }
   }
 
@@ -195,7 +236,12 @@ try {
       eq(inn.status, 200, `${route} renders for a session`);
       const html = await inn.text();
       ok(html.includes('class="flows-rail"'), `${route} carries the rail`);
-      ok(/aria-current="page"/.test(html), `${route} marks itself current in the rail`);
+      /* ANCHORED TO THE ROUTE. A bare /aria-current/ test passes when the
+         rail marks the WRONG page current; the item template emits the
+         attribute inside the same tag as its href, so the adjacency is what
+         proves the self-link is the one marked. */
+      ok(new RegExp('href="' + route + '"[^>]*aria-current="page"').test(html),
+         `${route} marks ITSELF current in the rail, not merely something`);
 
       const anon = await fetch(url(route), { redirect: "manual" });
       eq(anon.status, 200, `${route} answers an anonymous visitor`);
@@ -272,50 +318,90 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
 
-    /* THE FIXTURE IS ORDERED SO THE CORRECT ANSWER INTERLEAVES.
-
-       Sorting is by DISTANCE TO THE BAND, not by score. With band 20:
-         BBB  s=-19  -> distance 1
-         CCC  s= 18  -> distance 2
-         AAA  s=  4  -> distance 16
-       So the correct order is BBB, CCC, AAA. A score sort descending gives
-       CCC, AAA, BBB; ascending gives BBB, AAA, CCC; and arrival order is
-       AAA, BBB, CCC. All four differ, so this fixture can tell them apart —
-       which a fixture already in the right order could not. */
+    /* THE FIXTURE CROSSES THE WIRE BOUNDARY. The first version of this test
+       hand-wrote row objects with its own field names (sur/rv/pcr) while the
+       pipeline emitted surpriseTilt/relVolume/putCallRatio — each side's test
+       validated its own vocabulary and every live cell rendered a dash or,
+       worse, a confident 0.00. So the rows here are built by the pipeline's
+       OWN exported toWatchRows: the renderer is driven by the real payload
+       shape, and the two ends cannot diverge silently again. */
+    const mkPool = (ticker, score, extra = {}) => ({
+      ticker, score, residual: score / 100,
+      conviction: 50, spot: 100, purity: 0.5, gRegime: "long", flipDist: 0.1,
+      fam: { F: score, P: 0, D: 0, O: 50, V: 40 },
+      closes: Array.from({ length: 60 }, (_, i) => 100 + i),
+      r5: 0.01, r21: 0.02, r42: 0.03,
+      week52Pos: 0.42, vrp: 0.03, ivRank: 0.61,
+      impliedMovePerc: 0.05, iv30: 0.4, rv30: 0.3,
+      ...extra,
+    });
+    const screener = new Map([
+      ["AAA", { close: "51.2" }], ["BBB", { close: "12.7" }],
+      ["CCC", { close: "240.5" }], ["DDD", { close: "77.0" }],
+    ]);
+    /* DDD has NO tilt entry and no 52-week position: the exact live shape of
+       a name the vendor said nothing about, and the row on which a coercion
+       bug renders "0.00" where the truth is "unmeasured". */
+    const tilts = new Map([
+      ["AAA", { surpriseTilt: 0.1, relVolume: 1.1, putCallRatio: 0.8 }],
+      ["BBB", { surpriseTilt: 1.386, relVolume: 2.1, putCallRatio: 1.9 }],
+      ["CCC", { surpriseTilt: -0.51, relVolume: 1.4, putCallRatio: 0.6 }],
+    ]);
+    const watchRows = toWatchRows(
+      [mkPool("AAA", 4), mkPool("BBB", -19), mkPool("CCC", 18),
+       mkPool("DDD", 9, { week52Pos: null })],
+      screener, tilts);
+    /* THE ARRIVAL ORDER MUST INTERLEAVE. toWatchRows emits rows already in
+       distance order, so publishing them as returned could not tell a
+       renderer that sorts from one that trusts the wire. The renderer owns
+       the ordering claim, so the payload is shuffled to alphabetical:
+         arrival  AAA, BBB, CCC, DDD
+         correct  BBB(1), CCC(2), DDD(11), AAA(16)   [distance to band 20]
+         score ↓  CCC, DDD, AAA, BBB;  score ↑  BBB, AAA, DDD, CCC
+       All four orders differ. */
+    watchRows.sort((a, b) => a.t.localeCompare(b.t));
     await put("board:watch", {
       side: "watch", sessionDate: "2026-08-24", deadBand: 20, scored: 60, status: "ok",
-      rows: [
-        { t: "AAA", s: 4, cnv: 30, px: 51.2, sur: 1.1, rv: 0.9, pcr: 0.8, w52: 0.42 },
-        { t: "BBB", s: -19, cnv: 55, px: 12.7, sur: 4.4, rv: 2.1, pcr: 1.9, w52: 0.08 },
-        { t: "CCC", s: 18, cnv: 48, px: 240.5, sur: 2.0, rv: 1.4, pcr: 0.6, w52: 0.97 },
-      ],
+      rows: watchRows,
     });
 
     await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#watchBody tr", { timeout: 15000 });
 
     const order = (await page.locator("#watchBody th").allTextContents()).map((t) => t.trim());
-    assert.deepEqual(order, ["BBB", "CCC", "AAA"],
+    assert.deepEqual(order, ["BBB", "CCC", "DDD", "AAA"],
       "the watch list is ranked by distance to the band, not by score"); checks++;
 
     /* Distance is DERIVED here, not trusted from the payload — a third
        serialised field that must agree with two others eventually disagrees. */
     const dist = (await page.locator("#watchBody td.c-toband").allTextContents()).map((t) => t.trim());
-    assert.deepEqual(dist, ["1", "2", "16"],
+    assert.deepEqual(dist, ["1", "2", "11", "16"],
       "and the distance shown is the band minus the absolute score"); checks++;
 
     const near = await page.locator("#watchBody td.c-toband.is-near").count();
     eq(near, 2, "rows within three of the edge are marked");
 
     const surprised = await page.locator("#watchBody td.is-surprise").count();
-    eq(surprised, 1, "and a name at three times its own options-volume norm is marked");
+    eq(surprised, 1, "and only a tilt past log 3 — one side surprising 3× the other — is marked");
 
-    /* A MULTIPLE, NOT A PERCENTAGE. Rendering 4.4x as "+340%" invites reading
-       an activity ratio as a return. */
+    /* A SIGNED TILT, NOT A MULTIPLE. surpriseTilt is log(callSurprise over
+       putSurprise); dressing it in "×" sold a log ratio as a volume multiple. */
     const surTexts = await page.locator("#watchBody tr").first().locator("td").nth(4).textContent();
-    ok(/×/.test(surTexts), `surprise renders as a multiple (${surTexts})`);
+    ok(/^\+1\.39$/.test(surTexts.trim()), `surprise renders as a signed tilt (${surTexts})`);
+    const negTilt = await page.locator("#watchBody tr").nth(1).locator("td").nth(4).textContent();
+    ok(/^\u22120\.51$/.test(negTilt.trim()),
+       `a put-side tilt carries a real minus, U+2212 (${negTilt})`);
 
-    eq(await page.locator('[data-rail-count="watch"]').textContent(), "3",
+    /* THE UNMEASURED ROW IS THE REGRESSION TEST. Number(null) is 0 and 0 is
+       finite, so an unguarded coercion renders DDD's absent tilt as a
+       confident "0.00" — a real reading of this field meaning "balanced" —
+       and its absent 52-week position as "0%", which the header defines as
+       the 52-week low. Every unmeasured cell must be the em dash. */
+    const dddCells = await page.locator("#watchBody tr").nth(2).locator("td").allTextContents();
+    assert.deepEqual(dddCells.slice(4).map((t) => t.trim()), ["—", "—", "—", "—"],
+      `DDD's surprise, rel vol, P/C and 52w are all withheld, never zero (${dddCells.join("|")})`); checks++;
+
+    eq(await page.locator('[data-rail-count="watch"]').textContent(), "4",
        "the rail badges the watch count");
 
     /* THE TWO EMPTY STATES ARE DIFFERENT FACTS. "The pipeline has not run
@@ -378,8 +464,14 @@ try {
          "a horizon below the stated session floor is not plotted");
       const note = await page.locator(".rec-empty").textContent();
       ok(/3/.test(note), `and the note names how many sessions there actually are (${note})`);
-      ok(await page.locator("#recBody tr").count() >= 1,
-         "though the per-session table still shows what was measured");
+      /* NOT "any row" — the empty state renders a full-width explanation row,
+         so a tr-count floor is true in every reachable state. The session row
+         is the only thing that can put the session's own date in a row header
+         and two measurement-styled leg cells beside it. */
+      eq(await page.locator("#recBody th").first().textContent(), "2026-08-20",
+         "though the per-session table still shows the session that was measured");
+      eq(await page.locator("#recBody td.c-leg").count(), 2,
+         "with both legs rendered as measurements");
     }
 
     /* ---- above the floor: the curve draws ---- */
@@ -391,10 +483,15 @@ try {
           { k: 5, ls: -0.011, n: 35 },
           { k: 10, ls: 0.024, n: 30 },
           { k: 21, ls: 0.041, n: 2 },
+          /* MEASURED n, UNMEASURED MEAN. Number(null) is 0, so an unguarded
+             coercion sails this through the plot filter and draws a dot ON
+             the zero line — a confident "flat at 42 sessions" the store never
+             said. It must simply not be plotted. */
+          { k: 42, ls: null, n: 28 },
         ],
         sessions: [
           { d: "2026-08-24", long: 0.021, short: -0.010, ls: 0.031, hit: 0.61, lost: 1, names: 24 },
-          { d: "2026-08-21", long: -0.008, short: 0.004, ls: -0.012, hit: 0.44, lost: 9, names: 22 },
+          { d: "2026-08-21", long: -0.008, short: 0.004, ls: -0.012, hit: null, lost: 9, names: 22 },
         ],
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
@@ -417,8 +514,16 @@ try {
       });
 
       /* The 21-session horizon has n=2, below the floor, so three of four plot. */
-      eq(plot.dots, 3, "only horizons past the session floor are plotted");
+      eq(plot.dots, 3,
+         "only horizons past the session floor AND with a measured mean are plotted");
       eq(plot.negs, 1, "and a negative horizon is drawn as negative");
+
+      /* A NULL HIT RATE IS A DASH, NOT "0%". Zero percent is a real reading —
+         "every long-short call this session was wrong" — and the second row's
+         store value is null. */
+      const hitCell = await page.evaluate(() =>
+        document.querySelectorAll("#recBody tr")[1].querySelectorAll("td")[3].textContent.trim());
+      eq(hitCell, "\u2014", "a session with no hit rate shows the em dash, never a confident 0%");
 
       /* THE ZERO LINE IS AT ZERO AND INSIDE THE FRAME. A returns chart whose
          baseline floats to the data's minimum turns a uniformly negative
@@ -540,13 +645,30 @@ try {
       () => document.documentElement.scrollWidth > window.innerWidth + 1);
     eq(overflow, false, "and the track record overflows nothing at 390px");
 
-    /* The chart is the thing most likely to break the promise: it is drawn at
-       a fixed 720-unit viewBox and has to scale down rather than push the page. */
-    const chartFits = await page.evaluate(() => {
+    /* THE CHART IS DRAWN AT ITS HOST'S WIDTH, not scaled to it. A fixed
+       720-unit viewBox at width:100% "fits" any phone by shrinking — 9px axis
+       type becomes 5px — which is the defect every card panel documents. On a
+       390px viewport the host is ~350px, so the drawn-vs-rendered ratio is
+       the assertion a letterboxed chart cannot pass. */
+    /* The redraw is debounced, so WAIT for it rather than racing it — the
+       assertion is about the settled state, not the animation frame. */
+    await page.waitForFunction(() => {
       const svg = document.querySelector("#recCurve svg");
-      return !svg || Math.round(svg.getBoundingClientRect().width) <= window.innerWidth;
+      if (!svg) return false;
+      const drawn = Number(svg.getAttribute("viewBox").split(/\s+/)[2]);
+      const shown = svg.getBoundingClientRect().width;
+      return shown > 0 && drawn / shown > 0.85 && drawn / shown < 1.15;
+    }, { timeout: 10000 }).catch(() => {});
+    const chart = await page.evaluate(() => {
+      const svg = document.querySelector("#recCurve svg");
+      if (!svg) return null;
+      const vb = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+      return { drawn: vb[2], shown: svg.getBoundingClientRect().width,
+               fits: Math.round(svg.getBoundingClientRect().width) <= window.innerWidth };
     });
-    eq(chartFits, true, "and its chart scales to the viewport instead of widening it");
+    ok(chart && chart.fits, "its chart stays inside the viewport");
+    ok(chart && chart.shown > 0 && chart.drawn / chart.shown > 0.85 && chart.drawn / chart.shown < 1.15,
+       `and one viewBox unit is one CSS pixel (drew ${chart && chart.drawn} for ${chart && chart.shown})`);
 
     await context.close();
   }

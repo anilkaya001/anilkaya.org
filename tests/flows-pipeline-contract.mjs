@@ -520,6 +520,26 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
 
+/* ---------- a missing volume norm is unmeasured, not average ------ */
+{
+  const base = {
+    ticker: "T", close: "100", prev_close: "100",
+    bullish_premium: "1", bearish_premium: "1", call_premium: "1", put_premium: "1",
+    call_volume: 9000, put_volume: 6000, total_open_interest: 10,
+  };
+  const both = screenerTilt({ ...base, avg_30_day_call_volume: 3000, avg_30_day_put_volume: 3000 });
+  ok(Math.abs(both.surpriseTilt - Math.log(3.1 / 2.1)) < 1e-12,
+     "with both norms on the wire, surpriseTilt is the log ratio of the two surprises");
+  /* THE CONFIDENT ZERO. The old fallback answered 1 — "an average day" — for
+     a side the vendor never averaged, so a name with no norm at all published
+     surpriseTilt 0, which is a real reading of this field ("exactly as much
+     call as put surprise") and rendered as such on the watch list. */
+  eq(screenerTilt(base).surpriseTilt, null,
+     "a name with NO 30-day volume norm publishes null, never a balanced zero");
+  eq(screenerTilt({ ...base, avg_30_day_call_volume: 3000 }).surpriseTilt, null,
+     "and one norm alone cannot measure a ratio of two surprises");
+}
+
 /* ---------- a probe that learns nothing must not act -------------- */
 {
   /* THE MISFIRE, from the first live run on main. verifyDating drops `date`
@@ -732,9 +752,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 /* ---------- the watch board ---------------------------------------
    The names inside the dead band, ranked by how close they are to leaving it,
    carrying the three screener observables the pipeline has always computed and
-   never displayed. surpriseTilt in particular — options volume against the
-   name's OWN 30-day norm — is the most conventional unusual-activity measure
-   in the product and was used once as a pre-enrichment sort key and dropped. */
+   never displayed. surpriseTilt in particular — the log ratio of call-side to
+   put-side volume surprise, each against the name's OWN 30-day norm — is the
+   most conventional unusual-activity measure in the product and was used once
+   as a pre-enrichment sort key and dropped. */
 {
   const mk = (ticker, score, extra = {}) => ({
     ticker, score, residual: score / 100,
@@ -750,8 +771,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const screener = new Map([["A", { close: "101", prev_close: "100" }]]);
   const tilts = new Map([
     ["A", { surpriseTilt: 1.23456, relVolume: 2.718, putCallRatio: 0.87654 }],
-    // B's 30-day volume norm is missing, which the vendor reports as no field
-    // at all; screenerTilt turns that into NaN rather than into a number.
+    /* B's 30-day volume norm is missing, which the vendor reports as no field
+       at all. screenerTilt now answers null for that; NaN is kept here because
+       the row builder must flatten EITHER unmeasured shape to null on the
+       wire, and NaN is the one JSON would otherwise mangle. */
     ["B", { surpriseTilt: NaN, relVolume: NaN, putCallRatio: NaN }],
   ]);
 

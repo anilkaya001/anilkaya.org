@@ -223,12 +223,15 @@ function screenerTilt(row) {
   const grossPremium = Math.abs(num(row.call_premium)) + Math.abs(num(row.put_premium));
   const netTilt = grossPremium > 0 ? (netCall - netPut) / grossPremium : null;
 
-  // Volume surprise relative to the name's own 30-day norm, so a
-  // mega-cap's ordinary Tuesday does not outrank a real event.
+  /* Volume surprise relative to the name's own 30-day norm, so a
+     mega-cap's ordinary Tuesday does not outrank a real event. A side with no
+     norm is UNMEASURED, not average: the old fallback of 1 published a
+     balanced surpriseTilt of exactly 0 for a name the vendor never averaged,
+     and 0 is a real reading of this field ("as much call as put surprise"). */
   const callSurprise = num(row.avg_30_day_call_volume) > 0
-    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : 1;
+    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : null;
   const putSurprise = num(row.avg_30_day_put_volume) > 0
-    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : 1;
+    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : null;
 
   // Open-interest change: what actually stuck from yesterday, as a share of
   // the standing book rather than in raw contracts.
@@ -254,7 +257,8 @@ function screenerTilt(row) {
     premiumTilt,
     netTilt,
     volTilt,
-    surpriseTilt: Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
+    surpriseTilt: (callSurprise === null || putSurprise === null)
+      ? null : Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
     oiTilt: oiBase > 0 ? (callOiChange - putOiChange) / oiBase : null,
 
     /* The volatility surface, all of it already paid for by the one screener
@@ -1240,10 +1244,11 @@ const fixed = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : n
 /**
  * The names inside the dead band, ranked by how close they are to leaving it.
  *
- * WHAT THE THREE EXTRA COLUMNS ARE DOING HERE. surpriseTilt is options volume
- * measured against the name's OWN 30-day norm — the most conventional "unusual
- * activity" measure in this entire product — and it has never been displayed
- * anywhere. It was computed in screenerTilt, used once as a pre-enrichment sort
+ * WHAT THE THREE EXTRA COLUMNS ARE DOING HERE. surpriseTilt is the log ratio
+ * of call-side to put-side volume surprise, each side measured against the
+ * name's OWN 30-day norm — the most conventional "unusual activity" measure in
+ * this entire product, signed by which side is doing the surprising — and it
+ * has never been displayed anywhere. It was computed in screenerTilt, used once as a pre-enrichment sort
  * key, and dropped. relative_volume and put_call_ratio were parsed out of the
  * same screener row and dropped in the same place. They belong on this surface
  * in particular: a name pinned near zero on a signed composite can still be
@@ -2452,7 +2457,7 @@ async function main() {
        identically zero, so the selection composite silently lost a third of
        itself the moment the column was made unit-free. */
     rough: (tilt.premiumTilt || 0) + (tilt.netTilt || 0) + (tilt.volTilt || 0) +
-           Math.tanh(tilt.surpriseTilt),
+           Math.tanh(tilt.surpriseTilt || 0),
   })).sort((a, b) => b.rough - a.rough);
 
   // 3. Enrich only the extremes. This two-stage split is the entire
