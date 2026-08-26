@@ -1164,7 +1164,26 @@ function boardRow(r, s, rank) {
     purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
     gRegime: r.gRegime,
     gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
-    netPrem: num(s.net_call_premium) - num(s.net_put_premium),
+    /* NULL WHEN THE VENDOR QUOTED NEITHER LEG, not zero.
+
+       num() answers 0 for a column that was never sent, so this published a
+       flat $0 for a name with no premium on the wire — and the board renders
+       that column with fmtMoney and a tone class, so the reader saw an
+       explicit "$0" and a neutral tint where the truth was "not quoted". A
+       confident zero the reader cannot distinguish from a measurement is the
+       defect this codebase hunts hardest, and it was sitting on the board's
+       own table the whole time.
+
+       It survived because the argument for tolerating it was about RANKING:
+       zero never reaches either tail, so a ranking of extremes is unaffected.
+       That argument is sound and irrelevant — this is a displayed column, not
+       just a sort key, and moverRow already reached the opposite conclusion
+       on the same two fields. Two builders disagreeing about the degenerate
+       case of one quantity is how a renderer ends up needing to know which
+       surface produced its row. */
+    netPrem: onWire(s.net_call_premium) || onWire(s.net_put_premium)
+      ? num(s.net_call_premium) - num(s.net_put_premium)
+      : null,
     fam: r.fam,
     // 42 sessions of closes, base-64 packed: two characters a session, so
     // the whole sparkline costs 84 bytes on a card that already measures in
@@ -1629,14 +1648,16 @@ const onWire = (v) => v !== undefined && v !== null && v !== "";
  * holding. It is a separate builder only because it takes a screener row where
  * boardRow takes a scored record; every field name and unit is the same.
  *
- * WHERE IT DELIBERATELY DIFFERS FROM boardRow: `netPrem`. boardRow computes
+ * `netPrem` USED TO BE THE ONE PLACE THESE TWO DISAGREED. boardRow computed
  * num(net_call) - num(net_put), and num() answers 0 for a column the vendor
- * did not send — which on a ranking of extremes is harmless, since 0 never
- * reaches either tail. Here the same 0 would be a published claim that a name
- * carried exactly balanced premium, on a surface whose entire subject is
- * premium. So the two columns are checked for presence on the wire first and
- * the row reports null when neither was quoted, which is also what keeps that
- * name out of both premium lists instead of parking it in the middle.
+ * never sent, so a name with no quoted premium published a flat $0. The
+ * argument for tolerating it was that a ranking of extremes never sees a
+ * zero — sound, and beside the point, because the board DISPLAYS that column.
+ * boardRow now checks the same two fields for presence on the wire and
+ * reports null exactly as this does, so a renderer no longer has to know
+ * which surface produced the row it is holding. Reporting null is also what
+ * keeps an unquoted name out of both premium lists rather than parking it in
+ * the middle of them.
  */
 function moverRow(row, tilt) {
   const close = num(row.close);

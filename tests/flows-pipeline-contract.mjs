@@ -779,6 +779,44 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(board[0][key] !== undefined, `the board row still emits \`${key}\``);
     ok(rows[0][key] !== undefined, `and the watch row carries \`${key}\` too`);
   }
+  /* THE TWO BUILDERS AGREE ON THE DEGENERATE CASE TOO.
+
+     boardRow published `netPrem: 0` for a name the vendor quoted neither
+     premium leg for, because num() answers 0 for an absent column. The board
+     renders that column with fmtMoney and a tone class, so the reader was
+     shown an explicit "$0" and a neutral tint where the truth was "not
+     quoted" — a confident zero on the board's own table.
+
+     It survived on the argument that a ranking of extremes never sees a zero.
+     True, and beside the point: this is a DISPLAYED column. moverRow had
+     already reached the opposite conclusion on the same two fields, and two
+     builders disagreeing about one quantity is how a renderer ends up needing
+     to know which surface produced its row. */
+  {
+    const base = screener.get("A");
+    const withScreener = (extra) => new Map([["A", { ...base, ...extra }]]);
+    const row = (map) => toRows([mk("A", -19)], map, new Map())[0];
+
+    eq(row(withScreener({ net_call_premium: "900000", net_put_premium: "400000" })).netPrem,
+       500000, "a quoted name publishes call premium minus put premium");
+
+    /* NEITHER LEG ON THE WIRE. `base` carries no premium columns at all, which
+       is exactly the shape the vendor sends for a name it did not quote. */
+    eq(row(withScreener({})).netPrem, null,
+       "and a name the vendor quoted NEITHER leg for publishes null, never a balanced zero");
+
+    /* ZERO IS STILL A REAL READING when both legs are on the wire and cancel.
+       A fix that turned every zero into null would trade one lie for another. */
+    eq(row(withScreener({ net_call_premium: "250000", net_put_premium: "250000" })).netPrem, 0,
+       "while two legs that genuinely cancel still publish zero, which is a measurement");
+
+    /* ONE LEG IS ENOUGH TO BE A MEASUREMENT. A name with call premium quoted
+       and no put premium has a real, signed net — treating it as unquoted
+       would discard a reading the vendor actually sent. */
+    eq(row(withScreener({ net_call_premium: "700000" })).netPrem, 700000,
+       "and one quoted leg alone is a measurement, not an absence");
+  }
+
   eq(board[0].w52, 0.42, "w52 is the 52-week position from the candles, unchanged in name and unit");
   eq(rows[0].w52, 0.42, "and the watch row publishes the SAME 52-week position, not a second one");
 
