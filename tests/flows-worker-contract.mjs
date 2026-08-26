@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
+import { TICKER_PANELS } from "../shared/flows-panels.js";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER,
 } from "./worker-server.mjs";
@@ -224,9 +225,65 @@ try {
       eq(bare.status, 308, `${route} without its trailing slash redirects`);
     }
 
+    /* THE TICKER PAGE — a route with a query parameter, which is the one
+       shape the rest of this section does not use. Its own block rather than
+       another entry in the loop above, because the ?t= handling is the part
+       that can go wrong and the loop asserts board markup this page does not
+       carry. */
+    {
+      const tick = await get("/flows/ticker/", { headers: { Cookie: "flows_session=" + token } });
+      eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
+      const tickHtml = await tick.text();
+      ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
+      ok(tickHtml.includes("/assets/js/flows-panels.js"),
+         "and the extracted renderers it cannot draw without");
+      ok(tickHtml.indexOf("/assets/js/flows-panels.js") < tickHtml.indexOf("/assets/js/flows-ticker.js"),
+         "with flows-panels.js FIRST — the controller fails closed without it");
+      ok(tickHtml.includes('id="ftGrid"'), "the ticker page carries the panel grid");
+      ok(tickHtml.includes('id="ftZoom"'), "and the enlarge dialog");
+
+      /* EVERY REGISTRY PANEL REACHES THE MARKUP, with its question. A panel
+         whose host is missing is a chart that silently never draws, which is
+         the exact failure the shared registry exists to make impossible. */
+      for (const p of TICKER_PANELS) {
+        const idCount = tickHtml.split(`id="${p.id}"`).length - 1;
+        eq(idCount, 1, `the ticker page emits ${p.id} exactly once`);
+        ok(tickHtml.includes(`data-panel="${p.key}"`), `and mounts panel ${p.key}`);
+      }
+      ok(tickHtml.includes("data-question="), "each panel carries its question as an attribute");
+      /* shared/ is in .assetsignore and is never served, so the browser cannot
+         import the registry. If the question did not reach the DOM the drawers
+         would print an empty question with nothing failing. */
+      for (const p of TICKER_PANELS) {
+        ok(tickHtml.includes(p.question.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")),
+           `panel ${p.key}'s question reaches the markup`);
+      }
+
+      const anonTick = await get("/flows/ticker/");
+      eq(anonTick.status, 200, "/flows/ticker/ serves a page to an anonymous visitor");
+      const anonTickHtml = await anonTick.text();
+      ok(!anonTickHtml.includes('id="ftGrid"'),
+         "/flows/ticker/ leaks nothing to an anonymous visitor");
+      ok(anonTickHtml.includes('action="/flows/login"'),
+         "/flows/ticker/ offers the sign-in form IN PLACE");
+
+      const bareTick = await get("/flows/ticker");
+      eq(bareTick.status, 308, "/flows/ticker without its trailing slash redirects");
+
+      /* THE HOLE THIS FOUND. /flows/market shipped with the slashed route in
+         the dispatch table and NOTHING in the trailing-slash list, so the bare
+         path fell through to the static bundle and 404ed. Nothing failed: the
+         rail always writes the slash, so only a hand-typed URL ever found it. */
+      const bareMarket = await get("/flows/market");
+      eq(bareMarket.status, 308, "/flows/market without its trailing slash redirects too");
+    }
+
     /* Every gated page carries the rail, and the rail carries every
        destination — a nav that omits a route is a route nobody finds. */
-    for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/desk/"]) {
+    for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
+                        "/flows/market/", "/flows/ticker/", "/flows/desk/",
+                        "/flows/history/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
 

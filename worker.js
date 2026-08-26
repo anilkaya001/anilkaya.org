@@ -2170,6 +2170,12 @@ async function route(request, env, url, ctx) {
     "/flows/market/": (u) => FLOWS_PAGES.marketPage({ username: u }),
     "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
     "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
+    /* Query parameter, never a path segment: dispatch here is
+       Object.hasOwn(FLOWS_ROUTES, path), so /flows/ticker/NVDA would have to
+       introduce a prefix match into a table whose exactness is the reason a
+       missed path can only ever 404. ?t= is also the parameter the card
+       dialog's deep link already uses. */
+    "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2185,8 +2191,15 @@ async function route(request, env, url, ctx) {
 
   /* Canonical trailing slash for every gated page, so a link without one is a
      redirect rather than a 404 handed to the static bundle. */
+  /* `/flows/market` was missing from this list from the day the page shipped —
+     the route table had the slashed form and this list did not, so the bare
+     path fell straight through to env.ASSETS.fetch() and 404ed. Nothing failed:
+     the page worked, every link in the rail carries the slash, and only a
+     hand-typed or hand-edited URL ever found it. Added with the ticker page,
+     which would have had the identical hole. */
   if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
-      || path === "/flows/watch" || path === "/flows/history") {
+      || path === "/flows/watch" || path === "/flows/history"
+      || path === "/flows/market" || path === "/flows/ticker") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }

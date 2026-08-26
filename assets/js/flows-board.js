@@ -744,6 +744,25 @@
       open.title = NO_CARD_SAID;
     }
     tk.append(open);
+    /* THE DIALOG IS THE QUICK LOOK; THE PAGE IS THE DRILL. A real anchor, not
+       a second button: /flows/ticker/?t= is a place, so it must be linkable,
+       middle-clickable and sendable to someone. Only a deep row gets one —
+       the page would render honestly for a name with no card, but a link that
+       usually leads to "no card for this name" is worse than no link. */
+    if (deep) {
+      const full = document.createElement("a");
+      full.className = "ft-link ft-link-glyph";
+      full.href = "/flows/ticker/?t=" + encodeURIComponent(String(row.t || ""));
+      /* THE ARROW IS DRAWN BY CSS, NOT WRITTEN INTO THE CELL. An anchor with
+         textContent "↗" makes the cell's own text "INTC↗" — which a screen
+         reader announces, and which a test reading the first row's ticker to
+         check the published ORDER reads as a different ticker. The accessible
+         name comes from aria-label; the glyph is decoration and lives in the
+         stylesheet where decoration belongs. */
+      full.setAttribute("aria-label", "Full page for " + String(row.t || ""));
+      full.title = "Open the full page for " + String(row.t || "");
+      tk.append(full);
+    }
     tr.append(tk);
 
     const px = document.createElement("td");

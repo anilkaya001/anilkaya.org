@@ -17,7 +17,9 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-export const ASSET_VERSION = "70";
+import { TICKER_PANELS } from "./flows-panels.js";
+
+export const ASSET_VERSION = "71";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -88,6 +90,10 @@ const rail = (active) => {
     ${item("/flows/short/", "Bearish", "short")}
     ${item("/flows/watch/", "Watch", "watch")}
     ${item("/flows/market/", "Market", "market")}
+  </div>
+  <p class="rail-group" id="railName">Name</p>
+  <div class="rail-items" role="group" aria-labelledby="railName">
+    ${item("/flows/ticker/", "Ticker page", "ticker")}
   </div>
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
@@ -168,6 +174,13 @@ const cardDialog = () => `
         <span class="fc-score" id="fcScore"></span>
         <span class="fc-meta" id="fcConv"></span>
         <span class="fc-meta" id="fcRegime"></span>
+        <!-- THE WAY OUT OF THE MODAL, and it lives here rather than on the
+             deck card because .fd-card IS a <button> and an <a> inside a
+             button is invalid HTML — interactive content cannot nest. Putting
+             it in the dialog reaches every surface that opens a card at once,
+             which the deck-card version would not have. href is filled by
+             paint(); the anchor stays hidden until a card is painted. -->
+        <a class="ft-link fc-full" id="fcFull" hidden>Full page &#8599;</a>
       </div>
       <button type="button" class="fc-close" id="fcClose" aria-label="Close">&times;</button>
     </header>
@@ -287,6 +300,7 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
 ${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
+<script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
@@ -374,6 +388,7 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
 ${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
+<script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
@@ -612,6 +627,7 @@ ${shell("Watch List", "Options-flow intelligence", "watch", username, `
 ${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-watch.js")}" defer></script>
+<script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
@@ -705,6 +721,111 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
 `)}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
+/* ---------- the ticker page ------------------------------------ */
+
+/**
+ * ONE NAME, THE WHOLE BOOK — and the four panels nothing has ever drawn.
+ *
+ * The card dialog answers "what about this name?" in a modal over the board,
+ * which is right for a quick look and wrong for the drill: a modal cannot be
+ * linked to, cannot be sent to anyone, and has to give every panel the same
+ * cramped width. This page is the drill. The dialog stays.
+ *
+ * THE HALF OF THE PAYLOAD THAT WAS NEVER RENDERED. `ivSurface`, `skewTerm`,
+ * `topContracts` and `aggressor` have been built, published, served and
+ * cached in every card since the chain leg shipped, and no renderer has ever
+ * touched them — 42.8% of the mean card's bytes, drawn by nothing. They are
+ * the first four panels here for that reason.
+ *
+ * IT SPENDS NO VENDOR CALL. Every field on this page is already in
+ * `card:<TICKER>`, already allow-listed, already served by /api/flows/card.
+ * The chain call it depends on was paid for at 05:15 and thrown away at the
+ * renderer. This is the highest-value work available per API call in the
+ * whole product, because the API call is zero.
+ *
+ * THE PANEL LIST IS NOT HERE. It is shared/flows-panels.js, which the browser
+ * cannot import (`shared/` is in .assetsignore and is never served), so each
+ * panel's question is emitted into a data-question attribute and read back
+ * out of the DOM. See that file for why one list beats three.
+ */
+export function tickerPage({ username = "" } = {}) {
+  const lede = "One name, the whole option book — including the four panels " +
+    "the card has published since the chain leg shipped and nothing has drawn.";
+
+  /* Emitted from the registry rather than hand-written, unlike the card
+     dialog's ten <section> blocks above. Every id, title, question and span
+     comes from the one array, so adding a panel is a one-line edit that the
+     markup, the drawer table and the pipeline's shed order all pick up. */
+  const panels = TICKER_PANELS.map((p) => `
+  <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : ""}"
+           data-panel="${escapeHTML(p.key)}" data-question="${escapeHTML(p.question)}"
+           aria-labelledby="${p.id}H">
+    <h3 id="${p.id}H"><span class="ft-panel-t">${p.title}</span>
+      <button type="button" class="ft-zoom-open" data-panel="${escapeHTML(p.key)}"
+              aria-label="Enlarge: ${escapeHTML(p.title)}">&#10529;</button></h3>
+    <div id="${p.id}"></div>
+  </section>`).join("");
+
+  return `${head("Flows — Ticker", lede)}
+${shell("Ticker", "Options-flow intelligence", "ticker", username, `
+  <div class="flows-status" id="ftStatus" role="status">Loading the name…</div>
+  <p class="flows-stale fc-staleband" id="ftStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <header class="ft-head" id="ftHead" hidden>
+    <h2 id="ftTicker" tabindex="-1">&nbsp;</h2>
+    <span class="fc-score" id="ftScore"></span>
+    <span class="fc-meta" id="ftConv"></span>
+    <span class="fc-meta" id="ftRegime"></span>
+    <span class="fc-meta" id="ftDates"></span>
+  </header>
+
+  <!-- THE INDEX, not an error state. With no ?t= this page is the list of
+       every name the board published, which is the only place in the section
+       that offers one. -->
+  <section class="ft-picker" id="ftPicker" hidden aria-labelledby="ftPickerH">
+    <h2 id="ftPickerH">Every name on today’s board</h2>
+    <p class="fc-note" id="ftPickerNote"></p>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Board names">
+      <table class="flows-table" id="ftPickerTable">
+        <thead><tr>
+          <th scope="col">Ticker</th>
+          <th scope="col">Side</th>
+          <th scope="col" class="c-num">Rank</th>
+          <th scope="col" class="c-num">Score</th>
+        </tr></thead>
+        <tbody id="ftPickerBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="ft-grid" id="ftGrid" hidden>${panels}
+  </div>
+
+  <p class="flows-foot" id="ftFoot"></p>
+`)}
+<dialog id="ftZoom" class="ft-zoom" aria-labelledby="ftZoomH">
+  <div class="ft-zoom-inner">
+    <section class="fc-panel" id="ftZoomPanel">
+      <h3 id="ftZoomH"><span class="ft-panel-t"></span>
+        <button type="button" class="ft-zoom-close" id="ftZoomClose"
+                aria-label="Close">&times;</button></h3>
+      <div id="ftZoomHost"></div>
+    </section>
+  </div>
+</dialog>
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-panels.js")}" defer></script>
+<script src="${v("/assets/js/flows-ticker.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -822,5 +943,6 @@ function escapeHTML(value) {
 }
 
 export const FLOWS_PAGES = {
-  loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage, ASSET_VERSION,
+  loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
+  tickerPage, ASSET_VERSION,
 };

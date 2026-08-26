@@ -357,7 +357,12 @@ HTML rewriting and is therefore not a complete test environment.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, and `toast`.
+  `LEARNING_PATHS`, `toast`, `flowsCardPrefetch`, and `FlowsPanels`.
+  This list is an ALLOWLIST: a global that is not on it is an undocumented
+  one. `FlowsPanels` is the ten card-panel renderers plus their scaffolding,
+  extracted from `flows-card.js` so the card dialog and `/flows/ticker/` draw
+  the SAME code — the alternative was duplicating 2,003 of that file's 2,325
+  lines and fixing every future chart bug twice.
   `CURRICULUM` is an authoring/generator input, not a production course-page
   payload.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin

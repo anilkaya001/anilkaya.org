@@ -688,6 +688,21 @@ export function buildChainPanels(chainRows, {
     /* Whether the scalars survived the truncation check, and why. A reader of
        the payload can otherwise only infer it from the scalars being present. */
     identifiedExpiry: answersRequest ? requestedExpiry : null,
+    /* WHAT THE VENDOR SENT, before this file dropped anything — and it is
+       published beside rowsSeen because the two are DIFFERENT POPULATIONS and
+       the difference reads as a contradiction without it.
+
+       `truncated` is decided on this number (>= CHAIN_PAGE_SIZE) and the
+       refusal sentence names CHAIN_PAGE_SIZE, but `rowsSeen` is the count
+       AFTER the adjusted-series filter above. So a card can honestly publish
+       `truncated: true`, a note saying "a full page of 500 contracts", and
+       `rowsSeen: 499` — the vendor sent 500 and one of them was an AAPL1-style
+       root deliverable on something other than 100 shares. A careful reader
+       who saw only 499 beside the word 500 concluded the sentence was a lie;
+       it is not, and this field is what shows that in one line. */
+    rowsReturned: all.length,
+    /* Rows belonging to THIS ticker's root. Not "rows the vendor sent" — see
+       rowsReturned above, and foreignRows for the difference. */
     rowsSeen: rows.length,
     /* THE SURFACE IS BUILT FROM QUOTED CONTRACTS ONLY. priceSale refuses a
        contract with no live bid, so the grid is the sellable book rather than

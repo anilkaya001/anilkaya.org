@@ -91,16 +91,22 @@ function fixture() {
 const panel = fixture();
 ok(panel.status === "ok", "the fixture builds a surface");
 
-/* Test-only: the module is an IIFE with no export. The rewrite happens in
-   memory; the source on disk is never touched. */
+/* Test-only: both modules are IIFEs with no export. The rewrite happens in
+   memory; the sources on disk are never touched.
+
+   TWO FILES NOW, AND THE SPLIT IS THE POINT. The ten renderers moved to
+   flows-panels.js so a second page could draw them; flows-card.js kept the
+   dialog. This suite reaches the renderers through the SAME public surface
+   the ticker page uses — window.FlowsPanels — rather than through a private
+   hook, so an export that goes missing fails here instead of only on the
+   page nobody tests. `paint` is dialog-internal and still needs a hook. */
+const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
+assert.ok(panelsSrc.lastIndexOf("})();") > 0, "flows-panels.js is still an IIFE");
+
 let src = fs.readFileSync(path.join(ROOT, "assets/js/flows-card.js"), "utf8");
 const close = src.lastIndexOf("})();");
 assert.ok(close > 0, "flows-card.js is still an IIFE");
 src = src.slice(0, close) +
-  "  window.__renderSurface = renderSurface;\n" +
-  "  window.__renderPath = renderPath;\n" +
-  "  window.__renderGamma = renderGamma;\n" +
-  "  window.__renderScore = renderScore;\n" +
   "  window.__paint = paint;\n" + src.slice(close);
 
 const browser = await chromium.launch();
@@ -123,7 +129,16 @@ try {
   await page.setContent(boardHTML);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
+  await page.addScriptTag({ content: panelsSrc });
   await page.addScriptTag({ content: src });
+  /* Through the module's own exported surface, not a private hook — see above. */
+  await page.evaluate(() => {
+    const P = window.FlowsPanels;
+    window.__renderSurface = P.surface;
+    window.__renderPath = P.path;
+    window.__renderGamma = P.gamma;
+    window.__renderScore = P.score;
+  });
   eq(errors.length, 0, "the card module loads against the real board markup without throwing");
 
   ok(await page.evaluate(() => !!document.getElementById("fcSurface")),
