@@ -22,6 +22,7 @@ import {
   parseOptionSymbol, daysToExpiry, priceSale, rankChain, ivConvention,
   numOrNull, DEFAULT_GATES, SHARES_PER_CONTRACT, DAYS_PER_YEAR, crossesEarnings,
   sizeToBuyingPower, planBuyingPower,
+  ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
 } from "../shared/flows-premium.js";
 
 let checks = 0;
@@ -394,6 +395,428 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(planBuyingPower(null, 50000).rows.length, 0, "a null chain is empty, not a throw");
 }
 
+/* ---------- the implied volatility surface --------------------
+
+   Every contract on this chain arrives carrying an implied volatility beside
+   its strike and its expiry, and priceSale() spent all of it on one scalar.
+   The surface those numbers describe was already paid for.
+
+   THE FIXTURE IS A REAL SMILE, WHICH IS THE ONLY KIND THAT PROVES ANYTHING.
+   Three fixtures in this repository have been built where the naive answer and
+   the correct one coincided, and every one of them passed against code that
+   did the wrong thing. So this chain is tuned so that four different naive
+   implementations each produce a DIFFERENT answer from the correct one:
+
+     THE SMILE IS NON-MONOTONE. Volatility falls from the put wing to the
+     money and rises again into the call wing, and the minimum is strictly
+     inside. A surface that could only represent a monotone skew — or one that
+     painted every cell in a column with that column's level — cannot draw it.
+
+     THE TWO LIVE EXPIRIES SIT AT DIFFERENT LEVELS. 30.5 at the front, 24.0 at
+     the back, so anything that shades cells against a single chain-wide
+     at-the-money quote gets both columns wrong in opposite directions.
+
+     THE LEVEL AND THE SKEW ORDER ONE ROW THE OPPOSITE WAY. At 10% below the
+     money the FRONT quotes the higher volatility (38.0 against 34.0) and the
+     BACK carries the steeper skew (+10.0 against +7.5). A surface shaded on
+     the raw level says the front wing is the dramatic one; the smile says the
+     back one is. Only one of those is what a seller is choosing between.
+
+     THE CONTRACT SITTING EXACTLY AT THE MONEY HAS NOT TRADED TODAY, and a
+     fresh one sits 2% out. The level is the fresh one's, so "nearest the
+     money" and "the level" are different contracts and a build that ignores
+     freshness picks 30.0 where the answer is 30.5.
+
+   Spot is 100 and asOf is the day the chain was taken, so every moneyness is
+   an exact logarithm of a round ratio and can be checked by hand. */
+{
+  const spot = 100, asOf = "2026-08-24";
+  const C = (sym, bid, ask, iv, oi, volume) => ({
+    option_symbol: sym, nbbo_bid: String(bid), nbbo_ask: String(ask),
+    implied_volatility: String(iv), open_interest: String(oi), volume: String(volume),
+  });
+
+  /* THE FRONT, 2026-09-18, 25 days out. */
+  const front = [
+    C("CCC260918P00085000", 0.80, 0.85, 0.46, 150, 150),   // -16.3%, +15.5 skew
+    C("CCC260918P00090000", 1.40, 1.48, 0.38, 220, 220),   // -10.5%,  +7.5 skew
+    C("CCC260918P00095000", 2.30, 2.40, 0.32, 400, 400),   //  -5.1%,  +1.5 skew
+    /* EXACTLY AT THE MONEY AND NOT TRADED TODAY. Its 30.0 is the last
+       transaction's, of unknown age. It must not become the column's level. */
+    C("CCC260918C00100000", 2.10, 2.20, 0.30, 900, 0),
+    /* TWO PERCENT OUT AND TRADED 300 TIMES TODAY. This is the level. It also
+       shares a row with the contract above, so the crowding rule is exercised
+       on the same pair. */
+    C("CCC260918C00102000", 1.60, 1.68, 0.305, 700, 300),
+    C("CCC260918C00105000", 1.05, 1.10, 0.31, 500, 500),   //  +4.9%,  +0.5 skew
+    C("CCC260918C00110000", 0.55, 0.60, 0.35, 300, 300),   //  +9.5%,  +4.5 skew
+    C("CCC260918C00115000", 0.30, 0.34, 0.41, 120, 120),   // +14.0%, +10.5 skew
+  ];
+  /* THE MIDDLE, 2026-10-16. Everything within reach of the money is a stale
+     print and the only contract that traded today is 24.8% out — outside the
+     band an at-the-money quote may sit in. This expiry therefore has NO
+     level, and its cells must carry their quoted volatilities and no skew. */
+  const middle = [
+    C("CCC261016P00078000", 0.65, 0.72, 0.44, 300, 300),
+    C("CCC261016P00095000", 2.90, 3.05, 0.33, 260, 0),
+    C("CCC261016C00100000", 3.10, 3.25, 0.28, 340, 0),
+    C("CCC261016C00110000", 1.05, 1.15, 0.31, 180, 0),
+  ];
+  /* THE BACK, 2026-12-18, 116 days out, at a lower level and with a call wing
+     that dips BELOW its own at-the-money quote — the one negative skew on the
+     chain, and the only cell that can prove the sign is carried at all. */
+  const back = [
+    C("CCC261218P00080000", 1.50, 1.62, 0.40, 90, 90),     // -22.3%, +16.0 skew
+    C("CCC261218P00090000", 3.20, 3.35, 0.34, 140, 140),   // -10.5%, +10.0 skew
+    C("CCC261218C00100000", 5.10, 5.30, 0.24, 260, 260),   //   0.0%, the level
+    C("CCC261218C00110000", 2.05, 2.18, 0.23, 110, 110),   //  +9.5%,  -1.0 skew
+    C("CCC261218C00120000", 1.10, 1.20, 0.32, 70, 70),     // +18.2%,  +8.0 skew
+  ];
+  const chain = [...front, ...middle, ...back];
+
+  const ranked = rankChain(chain, { spot, asOf, ticker: "CCC" });
+  const s = ranked.ivSurface;
+  eq(s.status, "ok", "the chain the desk already fetched carries a surface, at no extra call");
+  eq(s.expiriesShown, 3, "one column per expiry");
+
+  /* Cells of one column, lowest strike first — the order a smile is read in. */
+  const column = (surface, j) => surface.grid.map((r) => r[j]).filter(Boolean).reverse();
+
+  /* WHAT UNIVERSE THIS SURFACE IS TAKEN OVER comes FIRST, before anything
+     about its shape. Every assertion below about a smile, a level or a band
+     width is an assertion about a particular set of contracts, so a defect
+     that changes the SET has to be reported here rather than three blocks
+     later as "the band width is not what was expected" — which is true, and
+     names neither the rule that broke nor why. */
+  /* ---- the gates decide what is SELLABLE, not what is quoted ---- */
+  {
+    /* A contract nobody else is in — eleven of open interest against a floor of
+       a hundred — is not a sale. Its implied volatility is still a quote, and
+       it sits on the wing, which is the part of a smile there is least other
+       evidence about. */
+    const thin = C("CCC260918P00080000", 0.45, 0.50, 0.55, 11, 40);
+    const withThin = rankChain([...chain, thin], { spot, asOf, ticker: "CCC" });
+    ok(!withThin.rows.some((r) => r.strike === 80 && r.expiry === "2026-09-18"),
+       "the thin contract is gated out of the sellable table");
+    eq(withThin.gated.openInterest, ranked.gated.openInterest + 1,
+       "and counted under the gate that dropped it");
+    ok(withThin.ivSurface.grid.flat().some((c) => c && c.strike === 80 && c.expiry === "2026-09-18"),
+       "and it is STILL on the surface — the gate says it is not worth selling, not that its quoted vol is fiction");
+
+    /* The same for the Sell toggle: a covered-call screen must not amputate
+       the put wing of the surface it is read beside. */
+    const callsOnly = rankChain(chain, { spot, asOf, ticker: "CCC", strategy: "cc" });
+    ok(callsOnly.rows.every((r) => r.type === "C"), "a covered-call screen ranks only calls");
+    ok(callsOnly.ivSurface.grid.flat().some((c) => c && c.type === "P"),
+       "and its surface still carries the put wing — half a smile is a different smile");
+    eq(callsOnly.ivSurface.placed, s.placed,
+       "the Sell toggle changes the table and leaves the surface alone");
+
+    /* And an adjusted series is excluded from BOTH, because its strike is
+       struck against an unknown deliverable and is not a moneyness at all. */
+    const adjusted = { ...front[1], option_symbol: "CCC1260918P00090000" };
+    const withAdjusted = rankChain([...chain, adjusted], { spot, asOf, ticker: "CCC" });
+    eq(withAdjusted.gated.nonStandard, 1, "the adjusted series is excluded from the ranking");
+    eq(withAdjusted.ivSurface.placed, s.placed,
+       "and from the surface — its strike is struck against an unknown deliverable, so strike over spot is not a moneyness");
+  }
+
+  /* ---- the smile, and the fact that it is not a skew ---- */
+  {
+    const ivs = column(s, 0).map((c) => c.iv);
+    const low = Math.min(...ivs);
+    const at = ivs.indexOf(low);
+    ok(at > 0 && at < ivs.length - 1,
+       `the front expiry's volatility bottoms strictly INSIDE its strike range (${ivs.map((v) => (v * 100).toFixed(1)).join(" ")})`);
+    ok(ivs[0] > low && ivs[ivs.length - 1] > low,
+       "and rises into BOTH wings — a monotone skew cannot represent this chain");
+    /* And the cells carry the CONTRACTS' volatilities, not their column's
+       level: a surface that painted each column with its at-the-money quote
+       would flatten the sequence above into one repeated number. */
+    ok(new Set(ivs.map((v) => v.toFixed(4))).size >= 5,
+       "each cell carries its own contract's quoted volatility, not its column's level");
+  }
+
+  /* ---- the term structure, which is a level and not a shape ---- */
+  {
+    const levels = s.expiries.map((e) => e.atmIv);
+    near(levels[0], 0.305, 1e-12, "the front's at-the-money level is the 102 call's 30.5");
+    ok(levels[2] !== null && levels[0] > levels[2],
+       `the front is bid over the back (${(levels[0] * 100).toFixed(1)} against ${(levels[2] * 100).toFixed(1)}) — two expiries at different levels`);
+    near(levels[2], 0.24, 1e-12, "and the back's is the 100 call's 24.0");
+  }
+
+  /* ---- THE LEVEL IS TODAY'S PRINT, not the nearest print ---- */
+  {
+    const e = s.expiries[0];
+    eq(e.atmStrike, 102,
+       "the level is the 102 call, which traded today — NOT the 100 that sits exactly at the money and has not");
+    near(e.atmIv, 0.305, 1e-12,
+       "so the front level is 30.5, the number a build that ignored freshness would miss by half a vol point");
+    ok(Math.abs(e.atmM) > 0 && Math.abs(e.atmM) <= s.atmBand,
+       "and the contract it came from is inside the band an at-the-money quote may sit in");
+  }
+
+  /* ---- an expiry with no fresh print near the money has NO level ---- */
+  {
+    const e = s.expiries[1];
+    eq(e.atmIv, null,
+       "an expiry whose only print today is 24.8% out gets no at-the-money level at all");
+    ok(/nearest contract that traded today is 24\.8%/.test(e.atmReason || ""),
+       `and says exactly how far out it was (${e.atmReason})`);
+    ok(/outside the 10% band/.test(e.atmReason || ""),
+       "and names the band, because the band is a choice rather than a measurement");
+    const cells = column(s, 1);
+    ok(cells.length >= 3, "its contracts are still on the surface");
+    ok(cells.every((c) => c.skew === null),
+       "and every one of them carries a NULL skew rather than a zero — an unknown position on the smile is not the middle of it");
+    ok(cells.every((c) => c.iv > 0),
+       "while still carrying the volatility that was actually quoted, which is an observable either way");
+  }
+
+  /* ---- THE SKEW REVERSES THE LEVEL, which is the whole reason for it ---- */
+  {
+    /* THE ROW IS FOUND BY THE CONTRACT ON IT, not by a tolerance around a
+       target moneyness. A tolerance has to be chosen against a band width the
+       surface picks from its own range, so any fixture change that moves the
+       range silently re-points it at the wrong row — which it did, and the
+       block then reported "no contract here" for a defect three blocks away. */
+    let row = -1;
+    for (let i = 0; i < s.grid.length; i++) {
+      const c = s.grid[i][0];
+      if (c && c.strike === 90) { row = i; break; }
+    }
+    ok(row >= 0, "the front expiry's 90 put is on the grid");
+    const f = s.grid[row][0], b = s.grid[row][2];
+    ok(f && b, "and the back expiry's 90 put shares its row — the same moneyness at two tenors, which is the comparison the axis exists for");
+    ok(f.iv > b.iv,
+       `10% below the money the FRONT quotes the higher volatility (${(f.iv * 100).toFixed(1)} against ${(b.iv * 100).toFixed(1)})`);
+    ok(f.skew < b.skew,
+       `and the BACK carries the steeper skew (${(f.skew * 100).toFixed(1)} against ${(b.skew * 100).toFixed(1)}) — a surface shaded on the raw level reads this row backwards`);
+    near(f.skew, 0.38 - 0.305, 1e-12, "the front's skew is measured against the FRONT's own level");
+    near(b.skew, 0.34 - 0.24, 1e-12, "and the back's against the BACK's, never against one chain-wide number");
+  }
+
+  /* ---- a cell is never an average of two quotes ---- */
+  {
+    const crowded = s.grid.flat().filter((c) => c && c.crowd > 1);
+    eq(crowded.length, 1, "the 100 and the 102 call fall in one row of one column");
+    eq(s.crowded, 1, "and the surface counts the contract that lost the cell");
+    near(crowded[0].iv, 0.305, 1e-12,
+       "the cell shows the 102's 30.5 — the print from today, NOT the 30.25 mean of the two");
+    eq(crowded[0].strike, 102, "and names which contract it is showing");
+  }
+
+  /* ---- stale prints are marked, counted, and kept out of every level ---- */
+  {
+    eq(s.stale, 3, "three cells on this chain have not traded today");
+    eq(s.fresh, s.placed - s.stale - s.unknownAge, "and the ages partition the cells drawn");
+    ok(s.grid.flat().filter(Boolean).every((c) => c.traded === true || c.traded === false || c.traded === null),
+       "every cell states which of the three it is rather than leaving it to be inferred");
+    for (const e of s.expiries) {
+      if (e.atmIv === null) continue;
+      ok(e.fresh > 0,
+         `${e.expiry}'s level came from a column that has a print today`);
+    }
+  }
+
+  /* THIS BLOCK RUNS AFTER THE CROWDING ONE, not before it. Order is part of a
+     test's diagnosis: the front expiry's at-the-money cell sits exactly ON its
+     own level, so ANY change to which contract occupies that cell manufactures
+     a second negative skew — and with this block first, every crowding defect
+     was being reported as "there is more than one negative cell", which names
+     neither the rule that broke nor the cell that broke it. */
+  /* ---- sign exists on this chain, so the sign channel has something to carry ---- */
+  {
+    const negatives = s.grid.flat().filter((c) => c && c.skew !== null && c.skew < 0);
+    eq(negatives.length, 1, "exactly one cell on this chain quotes BELOW its expiry's at-the-money vol");
+    near(negatives[0].skew, 0.23 - 0.24, 1e-12, "the back 110 call, a vol point under the money");
+  }
+
+  /* ---- THE UNIT TRAP -------------------------------------------------
+     ivConvention() decides ONCE PER CHAIN whether this vendor sent fractions
+     or percent, because the vendor is inconsistent about it and the same
+     ambiguity already cost this project an iv_rank card that read "1352% of
+     its year". A surface that read the raw field instead would be exactly
+     right on every symbol the vendor quotes as a fraction and exactly 100x
+     wrong on the rest — which is the worst available failure, because it
+     renders perfectly either way and nothing on the page reveals which.
+
+     So the same chain is served twice, in the two conventions, and the two
+     surfaces have to be the same surface. */
+  {
+    const asPercent = chain.map((c) => ({
+      ...c, implied_volatility: String(Number(c.implied_volatility) * 100),
+    }));
+    const p = rankChain(asPercent, { spot, asOf, ticker: "CCC" });
+    ok(/reads as percent/.test(p.ivBasis), `the percent chain is recognised as one (${p.ivBasis})`);
+    ok(/reads as a fraction/.test(ranked.ivBasis), `and the fraction chain as one (${ranked.ivBasis})`);
+
+    eq(p.ivSurface.status, "ok", "the percent chain still builds a surface");
+    eq(p.ivSurface.placed, s.placed, "with the same cells");
+    let worst = 0, worstAt = "";
+    for (let i = 0; i < s.grid.length; i++) {
+      for (let j = 0; j < s.grid[i].length; j++) {
+        const a = s.grid[i][j], b = p.ivSurface.grid[i][j];
+        ok((a === null) === (b === null), "the two conventions place the same cells");
+        if (!a) continue;
+        const d = Math.abs(a.iv - b.iv);
+        if (d > worst) { worst = d; worstAt = `${a.strike} ${a.expiry}`; }
+      }
+    }
+    ok(worst <= 1e-12,
+       `a chain quoted in percent draws the IDENTICAL surface to one quoted in fractions (worst cell ${worstAt} off by ${worst})`);
+    for (let j = 0; j < s.expiries.length; j++) {
+      const a = s.expiries[j].atmIv, b = p.ivSurface.expiries[j].atmIv;
+      ok(a === null ? b === null : Math.abs(a - b) <= 1e-12,
+         `and the same at-the-money level on ${s.expiries[j].expiry}`);
+    }
+    ok(/percent/.test(p.ivSurface.ivBasis || ""),
+       "and the surface carries the evidence for the units it is in, so the answer is auditable");
+  }
+
+  /* ---- THE TRIPWIRE, for values that reached the surface undivided ---- */
+  {
+    /* The structural guard is that ivSurface() reads `iv`, which only exists
+       on a priced row, and never `implied_volatility`, which is the raw field.
+       This is the guard for everything else: numbers that arrive on a percent
+       scale by any route at all. */
+    const priced = [
+      { expiry: "2026-09-18", days: 25, strike: 95, type: "P", moneyness: -0.05, iv: 32, ivTraded: true, volume: 10, oi: 100 },
+      { expiry: "2026-09-18", days: 25, strike: 100, type: "C", moneyness: 0, iv: 30, ivTraded: true, volume: 10, oi: 100 },
+      { expiry: "2026-09-18", days: 25, strike: 105, type: "C", moneyness: 0.05, iv: 31, ivTraded: true, volume: 10, oi: 100 },
+    ];
+    const refused = ivSurface(priced);
+    eq(refused.status, "empty",
+       "implied volatility that reaches the surface on a percent scale is REFUSED, not drawn");
+    ok(/100x/.test(refused.reason || ""),
+       `and the reason names the size of the error it stopped (${refused.reason})`);
+    eq(refused.placed, 0, "with nothing drawn");
+
+    /* The same numbers as fractions do draw, so the guard is discriminating
+       something real rather than refusing everything. */
+    const fine = ivSurface(priced.map((r) => ({ ...r, iv: r.iv / 100 })));
+    eq(fine.status, "ok", "the same chain as fractions draws");
+
+    /* And raw vendor rows produce NOTHING rather than something wrong: they
+       carry `implied_volatility`, which this module does not read. */
+    const raw = ivSurface(chain);
+    eq(raw.status, "empty",
+       "raw vendor rows build no surface at all — the module reads the divided field and no raw one");
+    eq(raw.placed, 0, "so there is no way to draw an undivided surface by accident");
+  }
+
+  /* ---- no confident zeros ---- */
+  {
+    /* THE STRIKE IS CHOSEN TO SIT IN AN EMPTY ROW. At 92 this contract shared a
+       band with the 90 put and lost the cell to the crowding rule, so the
+       assertion below passed against a build that placed zero-volatility cells
+       — it was measuring the wrong guard entirely. 82 is four bands out, where
+       the front expiry has nothing. */
+    const noVol = { option_symbol: "CCC260918P00082000", nbbo_bid: "0.55", nbbo_ask: "0.60",
+                    open_interest: "300", volume: "50" };
+    const r = rankChain([...chain, noVol], { spot, asOf, ticker: "CCC" });
+    ok(!r.ivSurface.grid.flat().some((c) => c && c.strike === 82),
+       "a contract the vendor quoted no implied volatility for is ABSENT from the surface");
+    eq(r.ivSurface.placed, s.placed,
+       "rather than drawn as a zero-volatility cell, which would be the palest cell on the chart and a lie");
+  }
+
+  /* ---- the age of a print with no volume field is UNKNOWN, not false ---- */
+  {
+    const noVolume = { option_symbol: "CCC260918C00122000", nbbo_bid: "0.20", nbbo_ask: "0.24",
+                       implied_volatility: "0.48", open_interest: "300" };
+    const r = rankChain([...chain, noVolume], { spot, asOf, ticker: "CCC" });
+    const cell = r.ivSurface.grid.flat().find((c) => c && c.strike === 122);
+    ok(cell, "a contract with no volume field is still placed");
+    eq(cell.traded, null,
+       "and its age is NULL — 'no volume field' and 'zero volume today' are different facts");
+    eq(r.ivSurface.unknownAge, 1, "counted apart from the ones known not to have traded");
+  }
+}
+
+/* ---------- the surface's axes are stated, and symmetric ---------- */
+{
+  /* Rows are a stated ladder of round widths rather than (range / 17). A width
+     derived from the range is a different width on every symbol and every
+     session, so the same reader comparing two names is comparing two axes
+     without being told which. */
+  const at = (m, iv, expiry, traded) => ({
+    expiry, days: 30, strike: 100 * Math.exp(m), type: m < 0 ? "P" : "C",
+    moneyness: Math.expm1(m), iv, ivTraded: traded === undefined ? true : traded,
+    volume: 10, oi: 100,
+  });
+
+  /* A RANGE OF +-25% FORCES THE 5% BAND: 2.5% would need 21 rows and the cap
+     is 17. Then the pair at exactly +-12.5% sits exactly on a band boundary,
+     which is the only case that can tell a symmetric rounding from JavaScript's
+     own — Math.round(2.5) is 3 and Math.round(-2.5) is -2, so a bare round
+     pushes one wing of every smile half a band further out than the other. */
+  const mirror = ivSurface([
+    at(-0.25, 0.40, "2026-09-18"), at(0.25, 0.40, "2026-09-18"),
+    at(-0.125, 0.34, "2026-09-18"), at(0.125, 0.34, "2026-09-18"),
+    at(0, 0.30, "2026-09-18"),
+  ]);
+  eq(mirror.status, "ok", "the mirrored chain builds");
+  eq(mirror.step, 0.05, "and lands on the 5% band of the stated ladder");
+  ok(SURFACE_ROW_STEPS.includes(mirror.step), "which is a width from the published ladder, not a derived one");
+
+  const rowOfStrike = (surface, strike) => {
+    for (let i = 0; i < surface.grid.length; i++) {
+      for (const c of surface.grid[i]) {
+        if (c && Math.abs(c.strike - strike) < 1e-9) return surface.rows[i].k;
+      }
+    }
+    return null;
+  };
+  const up = rowOfStrike(mirror, 100 * Math.exp(0.125));
+  const down = rowOfStrike(mirror, 100 * Math.exp(-0.125));
+  eq(up, 3, "a strike exactly two and a half bands above the money rounds out to the third");
+  eq(down, -3,
+     "and one exactly two and a half bands BELOW rounds out to the third as well — a bare Math.round biases one wing of every smile");
+
+  const centre = rowOfStrike(mirror, 100);
+  eq(centre, 0, "and the money itself is a row rather than a boundary between two");
+}
+
+/* ---------- the term structure keeps its ends ---------------------- */
+{
+  const many = [];
+  for (let w = 1; w <= 14; w++) {
+    const month = String(((w - 1) % 12) + 1).padStart(2, "0");
+    const day = String(((w * 2) % 27) + 1).padStart(2, "0");
+    many.push({
+      expiry: `2027-${month}-${day}`, days: w * 14, strike: 100, type: "C",
+      moneyness: 0, iv: 0.2 + w * 0.005, ivTraded: true, volume: 5, oi: 100,
+    });
+  }
+  const s = ivSurface(many);
+  eq(s.expiriesShown, SURFACE_MAX_EXPIRIES, "a chain with more expiries than fit is windowed");
+  eq(s.expiriesTotal, 14, "and says how many there were");
+  eq(s.expiries[0].days, 14, "the NEAREST expiry is kept");
+  eq(s.expiries[s.expiries.length - 1].days, 196,
+     "and so is the FURTHEST — a term structure missing its back end is a different and much weaker statement");
+  for (let i = 1; i < s.expiries.length; i++) {
+    ok(s.expiries[i].days > s.expiries[i - 1].days, "columns run nearest-first");
+  }
+}
+
+/* ---------- an expiry nobody traded today ------------------------- */
+{
+  const dead = [
+    { expiry: "2026-09-18", days: 25, strike: 95, type: "P", moneyness: -0.05, iv: 0.32, ivTraded: false, volume: 0, oi: 400 },
+    { expiry: "2026-09-18", days: 25, strike: 100, type: "C", moneyness: 0, iv: 0.30, ivTraded: false, volume: 0, oi: 900 },
+  ];
+  const s = ivSurface(dead);
+  eq(s.status, "ok", "a fully stale expiry still draws its quoted volatilities");
+  eq(s.expiries[0].atmIv, null, "but it gets no level");
+  ok(/nothing on this expiry traded today/.test(s.expiries[0].atmReason || ""),
+     `and says so in those words rather than as a distance (${s.expiries[0].atmReason})`);
+  eq(s.stale, 2, "with both cells marked as prints of unknown age");
+  ok(s.grid.flat().filter(Boolean).every((c) => c.skew === null),
+     "and no cell claims a position on a smile the surface has no reference for");
+}
+
 /* ---------- hygiene ------------------------------------------- */
 {
   eq(numOrNull(""), null); eq(numOrNull(null), null); eq(numOrNull("abc"), null);
@@ -405,4 +828,5 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 }
 
 console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
-  `example, per-chain IV units, sale priced at the bid, covered-call caps, and gates that are reported`);
+  `example, per-chain IV units, sale priced at the bid, covered-call caps, gates that are reported, ` +
+  `and an implied volatility surface whose smile survives the units, the gates and the stale prints`);

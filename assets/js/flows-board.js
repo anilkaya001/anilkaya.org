@@ -20,7 +20,20 @@
   const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl) return;
 
-  const COLUMNS = 10;                // keep in sync with the <thead> in flows-pages.js
+  const table = document.getElementById("flowsTable");
+  const headCells = table
+    ? Array.from(table.querySelectorAll("thead th"))
+    : [];
+
+  /* THE COLUMN COUNT IS READ, NOT DECLARED.
+     It used to be the constant 10 with a comment asking the next person to
+     keep it in sync with the <thead> in flows-pages.js. Two files holding one
+     number is how the empty-state row ends up spanning nine of eleven columns
+     and the "no name cleared the band" explanation sits under a ragged edge —
+     a silent, cosmetic-looking break that nothing tests. The header is the
+     authority on how many columns there are, so it is asked. The literal
+     survives only as the fallback for a page that somehow has no table. */
+  const COLUMNS = headCells.length || 10;
   const cache = new Map();           // side -> payload
   const inflight = new Map();        // side -> { promise, controller }
   const side = initialSide();        // fixed by the route, not by a control
@@ -36,7 +49,20 @@
   const MINUS = "−";            // U+2212, not a hyphen
   const DASH = "—";
 
+  /* NULL IS NOT ZERO, AND Number() DISAGREES.
+     `Number(null)` is 0 and `Number("")` is 0, both finite, so the original
+     coercion answered "0" for a value the payload had explicitly declared
+     missing — and every formatter below trusts this function to tell it the
+     difference. That is precisely the confident zero the rule above forbids,
+     manufactured by the one helper meant to prevent it: a name with no
+     variance premium printed "0.0", a name with no conviction printed
+     "0 conv", and a board with a null dispersion took `payload.dispersion !==
+     null` as true and then threw on `.toFixed`. The one place it was noticed,
+     `gFlipDist`, works around it with an inline `== null` guard rather than
+     fixing it here; the guard is now redundant and harmless.
+     Missing is tested BEFORE coercion, so only a real number gets through. */
   const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) ? n : null;
   };
@@ -82,6 +108,45 @@
     if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(1) + "M";
     if (abs >= 1e3) return sign + "$" + Math.round(abs / 1e3) + "K";
     return sign + "$" + Math.round(abs);
+  }
+
+  /* A POSITION IN A RANGE, printed as a whole percent.
+
+     Used for `w52` (where the last close sits between the 52-week low and
+     high) and `ivr` (where 30-day implied vol sits in its own past year).
+     Both arrive as FRACTIONS on 0..1 and both are positions rather than
+     changes, so they get no sign: "+72%" of a range would read as a move.
+
+     `w52` is published to three decimals and `ivr` to three, so a tenth of a
+     percent is available and deliberately not printed. Whole percents are
+     less precision than the data has, which is the safe direction; the
+     unsafe direction is the one this file's formatting rule forbids. */
+  function fmtPosition(v) {
+    const n = isNum(v);
+    return n === null ? DASH : Math.round(n * 100) + "%";
+  }
+
+  /* THE VARIANCE RISK PREMIUM, in annualised volatility points.
+
+     `vrp` is iv30 − rv30: the screener's 30-day implied volatility minus
+     close-to-close realised volatility over the 21 sessions that span the
+     same thirty calendar days. Both legs are annualised fractions of the same
+     underlying over the same horizon, so their difference is annualised
+     volatility points and nothing else — no rate, no dividend, no free
+     parameter anywhere in it.
+
+     It is a DIFFERENCE BETWEEN TWO MEASUREMENTS and it is printed as one. It
+     is not an edge, not an expected return, and not a variance premium in the
+     swap sense (that is a variance, quoted in variance units, and this is a
+     difference of vols). Signed, because the sign is the whole content of the
+     number, and with U+2212 for the negative like every other signed column.
+
+     Published to four decimals, so a hundredth of a point is available; one
+     decimal is printed because a column of 25 names is read by comparison and
+     0.01 vol points is below the noise of either leg. */
+  function fmtVolPoints(v) {
+    const n = isNum(v);
+    return n === null ? DASH : signed(n * 100, 1);
   }
 
   /* ---------- DOM helpers ---------------------------------------- */
@@ -333,6 +398,282 @@
     return DASH;
   }
 
+  /* ---------- the column model -------------------------------------
+
+     ONE ARRAY, IN THEAD ORDER. Sorting needs a value getter per column and
+     the header needs to know which getter belongs to which <th>; the markup
+     lives in shared/flows-pages.js, which this file does not own and cannot
+     stamp with data attributes. So the binding is POSITIONAL: COLS[i]
+     describes the i-th <th>. That makes the array's order load-bearing in
+     exactly the way the old COLUMNS constant was, with one difference that
+     matters — get it wrong and every header sorts by the wrong column
+     visibly, on the first click, rather than failing silently.
+
+     `get` returns a comparable value or null. Null is not a value here: see
+     the comparator. `first` is the direction the FIRST click applies, which
+     is descending for every measurement — nobody opens a ranked board to find
+     the least convicted name — and ascending for the two columns where small
+     is the natural start of the list, rank and ticker.
+
+     The families column has no entry. F·P·D·V·O is five numbers on three
+     signed axes plus two unsigned gauges, and there is no single order over
+     it that is not an invented weighting; a header that sorted by, say, F
+     alone while showing all five would be a lie about what was ranked. It
+     stays unsortable and says nothing rather than guessing. */
+  const RANK = (row, index) => (row.r != null ? isNum(row.r) : index + 1);
+
+  const COLS = [
+    { key: "r",     kind: "num",  first: "asc",  name: "Rank", get: RANK },
+    { key: "t",     kind: "text", first: "asc",  name: "Ticker", get: (row) => (row.t ? String(row.t) : null) },
+    // "Last" holds a price and a day change in one cell. It sorts by the
+    // price, because that is the number in the larger type; sorting by the
+    // change would reorder against the digits the eye is tracking.
+    { key: "px",    kind: "num",  first: "desc", name: "Last price", get: (row) => isNum(row.px) },
+    { key: "s",     kind: "num",  first: "desc", get: (row) => isNum(row.s) },
+    { key: "cnv",   kind: "num",  first: "desc", get: (row) => isNum(row.cnv) },
+    null,                                        // F·P·D·V·O — see above
+    /* Π IS WITHHELD ON A v1 BOARD and so is the sort. The value is still in
+       the payload, so a naive comparator would happily rank 25 rows by a
+       number every one of which renders as an em dash: an order the reader
+       can see but cannot account for, produced by the exact quantity this
+       renderer just refused to show them. When it is not drawn it is not
+       sortable, and the header says so. */
+    { key: "purity", kind: "num", first: "desc", name: "Purity", withheld: () => legacyFamilies,
+      get: (row) => (legacyFamilies ? null : isNum(row.purity)) },
+    { key: "gRegime", kind: "text", first: "asc", name: "Gamma regime",
+      get: (row) => (row.gRegime === "long" || row.gRegime === "short" ? row.gRegime : null) },
+    { key: "gFlipDist", kind: "num", first: "desc", name: "Distance to the gamma flip", get: (row) => isNum(row.gFlipDist) },
+    { key: "netPrem", kind: "num", first: "desc", name: "Net premium", get: (row) => isNum(row.netPrem) },
+    { key: "w52",   kind: "num",  first: "desc", name: "52-week range position", get: (row) => isNum(row.w52) },
+    { key: "vrp",   kind: "num",  first: "desc", name: "Implied minus realised volatility", get: (row) => isNum(row.vrp) },
+    { key: "ivr",   kind: "num",  first: "desc", name: "Implied volatility rank", get: (row) => isNum(row.ivr) },
+  ];
+
+  /* THE THREE COLUMNS THAT ARRIVE LAST need markup this file cannot write,
+     so every one of them is FEATURE-DETECTED against the header rather than
+     assumed. Until the <th> exists the cell is not built, and the row stays
+     exactly as wide as the header it sits under. A tbody one cell wider than
+     its thead is not a layout bug that shows up in review; it is a table
+     whose last column has no accessible name at all. */
+  const EXTRA_CELLS = [
+    { at: 10, build: (row) => cell(fmtPosition(row.w52), "c-num") },
+    { at: 11, build: (row) => cell(fmtVolPoints(row.vrp), "c-num") },
+    { at: 12, build: (row) => cell(fmtPosition(row.ivr), "c-num") },
+  ];
+
+  /* ---------- sorting ----------------------------------------------
+
+     SORTING IS A PROPERTY OF ROWS ALREADY IN THE BROWSER. The whole payload
+     is here — 25 rows, every column of them — so a sort never touches the
+     network, never invalidates the cache and never repaints the status line.
+     It reorders an array and redraws.
+
+     BOTH RENDERERS REORDER. The deck and the table are two drawings of one
+     row set, and letting them disagree about the order would mean the answer
+     to "which name is at the top" depended on which button was pressed last.
+     The rank badge on each card keeps saying what the pipeline ranked it, so
+     a reordered deck is still legible as a departure from the published
+     order rather than a replacement for it. */
+  let sortKey = null;       // null is the published order, which is a state
+  let sortDir = "desc";
+  let currentRows = [];
+
+  const colByKey = (key) => COLS.find((c) => c && c.key === key) || null;
+  const colIndex = (key) => COLS.findIndex((c) => c && c.key === key);
+
+  /** Is this column drawn on the page as it stands, and sortable right now? */
+  function sortable(col) {
+    if (!col) return false;
+    const i = colIndex(col.key);
+    if (i < 0 || i >= headCells.length) return false;   // header not shipped yet
+    return !(col.withheld && col.withheld());
+  }
+
+  /**
+   * NULLS SORT LAST REGARDLESS OF DIRECTION.
+   *
+   * This is the rule the desk table already states as "unmeasured never wins
+   * a ranking", and reversing a sort is where it is easiest to lose: negate
+   * the comparator wholesale and every name the pipeline could not measure
+   * floats to the top of the board, where the reader reads position as
+   * ranking and concludes that the absence of a number was the strongest
+   * reading of it. A missing measurement is not a small value and it is not a
+   * large one. It is at the bottom in both directions, and the direction is
+   * applied to the comparison of two PRESENT values only.
+   */
+  function compareBy(col, dir, a, b, ai, bi) {
+    const x = col.get(a, ai);
+    const y = col.get(b, bi);
+    const xn = x === undefined ? null : x;
+    const yn = y === undefined ? null : y;
+    if (xn === null && yn === null) return 0;
+    if (xn === null) return 1;
+    if (yn === null) return -1;
+    const d = col.kind === "text"
+      ? String(xn).localeCompare(String(yn))
+      : xn - yn;
+    return dir === "asc" ? d : -d;
+  }
+
+  /** The rows in the order they should be drawn, each with its PUBLISHED index. */
+  function orderedRows() {
+    const view = currentRows.map((row, index) => ({ row, index }));
+    const col = sortKey ? colByKey(sortKey) : null;
+    if (!col || !sortable(col)) return view;
+    /* The tie-break on the published index is written out rather than left to
+       the engine's stable sort. It is not defensive clutter about stability:
+       it says what a tie MEANS on this board, which is "the pipeline already
+       ranked these two and that ranking stands". Sorting by Γ regime is two
+       buckets over 25 names; without this the inside of each bucket would be
+       whatever order fell out. */
+    view.sort((p, q) => compareBy(col, sortDir, p.row, q.row, p.index, q.index) || p.index - q.index);
+    return view;
+  }
+
+  /**
+   * The sort state in the URL, for the same three reasons the view toggle is
+   * there — read the comment on selectView(). This page is credential-gated
+   * and per-user, so nothing it writes should outlive a sign-out on a shared
+   * browser; storage.js owns browser-local persistence on this site and this
+   * page does not load it; and a URL is shareable where a per-browser flag is
+   * not. A sorted board is exactly the kind of thing one reader sends another
+   * — "look at this by conviction" is a link, not an instruction — which is
+   * the argument the view toggle makes and it is stronger here.
+   *
+   * The published order is the default, so it is spelled by the parameters'
+   * ABSENCE, the same rule ?view=deck follows: stamping ?sort=r&dir=asc on
+   * every visit would turn a default into a decision the reader has to have
+   * made.
+   */
+  function readSort() {
+    try {
+      const q = new URL(location.href).searchParams;
+      const col = colByKey(q.get("sort"));
+      if (!col) return;
+      // A key whose header has not shipped is ignored rather than honoured:
+      // an invisible column silently reordering the board is worse than a
+      // link that lands on the published order.
+      if (colIndex(col.key) >= headCells.length) return;
+      /* The same refusal for a column already known to be withheld. Most
+         withholding is decided by the payload, which has not arrived when
+         this runs — render() re-checks sortKey against sortable() once it
+         has — but a key unsortable before any payload should not become the
+         sort either. */
+      if (!sortable(col)) return;
+      sortKey = col.key;
+      sortDir = q.get("dir") === "asc" ? "asc" : q.get("dir") === "desc" ? "desc" : col.first;
+    } catch { /* deep-linking is a convenience, never a requirement */ }
+  }
+
+  function writeSort() {
+    try {
+      const url = new URL(location.href);
+      if (sortKey) {
+        url.searchParams.set("sort", sortKey);
+        url.searchParams.set("dir", sortDir);
+      } else {
+        url.searchParams.delete("sort");
+        url.searchParams.delete("dir");
+      }
+      history.replaceState(null, "", url);
+    } catch { /* as above */ }
+  }
+
+  /**
+   * Click through: first click sorts the column its natural way, second
+   * reverses it, third returns the board to the order the pipeline published.
+   *
+   * THE PUBLISHED RANK MUST BE RECOVERABLE. It is the one ordering this page
+   * exists to show, and a table that can be sorted away from it with no way
+   * back has thrown away its own answer. Two routes back, deliberately: the
+   * third click on any column, and the "#" column, which sorts by rank and
+   * ascending rank IS the published order.
+   */
+  function toggleSort(key) {
+    const col = colByKey(key);
+    if (!col || !sortable(col)) return;
+    if (sortKey !== key) { sortKey = key; sortDir = col.first; }
+    else if (sortDir === col.first) { sortDir = col.first === "desc" ? "asc" : "desc"; }
+    else { sortKey = null; sortDir = "desc"; }
+    writeSort();
+    syncHeaders();
+    paintRows();
+  }
+
+  /**
+   * aria-sort on the <th>, on every header, every time.
+   *
+   * It is the ONLY thing that tells a screen reader the table reordered. The
+   * arrow is a glyph; the state is the attribute. Every non-current header is
+   * explicitly reset to "none" rather than left as it was, because a stale
+   * aria-sort on the column you just sorted away from announces two sorted
+   * columns and there is only ever one.
+   */
+  function syncHeaders() {
+    headCells.forEach((th, i) => {
+      const col = COLS[i];
+      const button = th.querySelector(".fb-sort");
+      /* A column with no sort gets NO aria-sort at all. "none" does not mean
+         "not sortable" — it means "sortable, currently unsorted" — so putting
+         it on the families header would advertise an order that header can
+         never produce. */
+      if (!col || !button) { th.removeAttribute("aria-sort"); return; }
+      /* THE ANNOUNCED STATE MUST AGREE WITH THE TABLE. A column withheld on
+         this payload (sortable() false — e.g. a v1 board's purity) cannot
+         have ordered anything, so it gets no aria-sort even when sortKey
+         still names it; announcing "sorted descending" over rows in the
+         published order is a lie only a screen reader hears. */
+      const live = sortable(col);
+      const on = live && sortKey === col.key;
+      button.disabled = !live;
+      if (!live) th.removeAttribute("aria-sort");
+      else th.setAttribute("aria-sort", on ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+      const ind = button.querySelector(".fb-sort-ind");
+      if (ind) ind.textContent = on ? (sortDir === "asc" ? "↑" : "↓") : "";
+      /* THE ACCESSIBLE NAME IS SPELLED OUT, not scraped from the header.
+         Half these headings are symbols — "#", "Π", "Γ₀ dist" — and a screen
+         reader announcing "number sign, activate to sort" or "activate to
+         sort by pi" names nothing a reader can act on. The <abbr title> in
+         the markup carries the full explanation for a sighted reader; this
+         is the same courtesy for everyone else. */
+      button.setAttribute("aria-label",
+        (col.name || (th.textContent || col.key).replace(/[↑↓]/g, "").trim()) + ": " +
+        (on
+          ? "sorted " + (sortDir === "asc" ? "ascending" : "descending") +
+            ", activate to " + (sortDir === col.first ? "reverse" : "return to the published rank")
+          : sortable(col)
+            ? "activate to sort"
+            : "not sortable on this board"));
+    });
+  }
+
+  /* A REAL <button> INSIDE THE <th>, not a click handler on the cell.
+     The same argument the ticker cell already makes: it buys keyboard
+     operability and a focus ring for free, and it states honest semantics.
+     A <th> with a click listener is unreachable by keyboard and announces
+     nothing; giving it role="button" would lie about what a header is, and
+     tabindex="0" alone would make it focusable without making it activatable
+     by Enter or Space. The header text moves INTO the button so the <abbr>
+     and its title survive — the explanation of what a column means must not
+     be the price of being able to sort by it. */
+  function wireHeaders() {
+    headCells.forEach((th, i) => {
+      const col = COLS[i];
+      if (!col) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "fb-sort";
+      while (th.firstChild) button.append(th.firstChild);
+      const ind = document.createElement("span");
+      ind.className = "fb-sort-ind";
+      ind.setAttribute("aria-hidden", "true");
+      button.append(ind);
+      button.addEventListener("click", () => toggleSort(col.key));
+      th.append(button);
+    });
+    syncHeaders();
+  }
+
   function rowFor(row, index) {
     const tr = document.createElement("tr");
     tr.className = "fb-row";
@@ -380,6 +721,22 @@
     tr.append(cell(regimeText(row.gRegime), "c-num " + (row.gRegime === "short" ? "fb-neg" : "fb-flat")));
     tr.append(cell(row.gFlipDist == null ? DASH : fmtPct(row.gFlipDist, 1), "c-num"));
     tr.append(cell(fmtMoney(row.netPrem), "c-num " + toneClass(row.netPrem)));
+
+    /* 52w, VRP AND IVR. All three have been in every board row since the
+       pipeline started emitting them and none of them was ever drawn, so the
+       table could not tell a name at its 52-week high from one at its low and
+       the V gauge stayed a single opaque digit whose components were sitting
+       in the same object.
+
+       NO TONE CLASS ON ANY OF THEM, which is the whole reason they are built
+       here rather than passed through toneClass like netPrem. Green and red
+       on this board mean bullish and bearish. A high 52-week position is not
+       bullish — on the short side it is the setup — implied volatility above
+       realised is not good news, and a percentile has no direction at all.
+       Colouring them would import a claim none of the three makes. */
+    for (const extra of EXTRA_CELLS) {
+      if (extra.at < headCells.length) tr.append(extra.build(row));
+    }
     return tr;
   }
 
@@ -450,6 +807,39 @@
       note.className = "fb-empty";
       note.textContent = text;
       deck.replaceChildren(note);
+    }
+  }
+
+  /**
+   * Draw both renderers from `currentRows` in the current sort order.
+   *
+   * Split out of render() because a sort is not a load. render() fetches,
+   * assesses staleness, fills the rail badge and writes the status line; none
+   * of that changes when a column header is clicked, and calling it would
+   * flash "Loading the long board…" over a status line describing data that
+   * never left the page.
+   *
+   * Each card and row is handed its PUBLISHED index, not its position in the
+   * sorted array. The rank shown is `row.r` when the payload carries it and
+   * the position otherwise, and on a payload with no `r` the position-as-rank
+   * fallback would renumber the board on every sort — the reader would sort
+   * by conviction and watch a column headed "#" report 1, 2, 3 down a
+   * conviction ranking. The published rank is a fact about the pipeline, not
+   * about where a row happens to be sitting.
+   */
+  function paintRows() {
+    /* NOTHING TO PAINT MEANS NOTHING TO ERASE. On an empty or errored board
+       the tbody holds the explanation row render() wrote — a header click
+       must not replace it with a silent zero-row table. */
+    if (!currentRows.length) return;
+    const view = orderedRows();
+    const tableFrag = document.createDocumentFragment();
+    for (const { row, index } of view) tableFrag.append(rowFor(row, index));
+    body.replaceChildren(tableFrag);              // one insertion, 50 rows
+    if (deck) {
+      const deckFrag = document.createDocumentFragment();
+      for (const { row, index } of view) deckFrag.append(deckCard(row, index));
+      deck.replaceChildren(deckFrag);
     }
   }
 
@@ -591,14 +981,14 @@
       legacyFamilies = (isNum(payload.v) ?? 1) < 2;
       horizonSessions = isNum(payload.horizonSessions);
 
-      const tableFrag = document.createDocumentFragment();
-      rows.forEach((row, i) => tableFrag.append(rowFor(row, i)));
-      body.replaceChildren(tableFrag);            // one insertion, 50 rows
-      if (deck) {
-        const deckFrag = document.createDocumentFragment();
-        rows.forEach((row, i) => deckFrag.append(deckCard(row, i)));
-        deck.replaceChildren(deckFrag);
-      }
+      currentRows = rows;
+      /* A deep-linked sort keyed to a column THIS payload withholds is
+         dropped, not half-honoured: nulls-last already leaves the table in
+         the published order, so keeping the key would only make every header
+         disagree with the rows. */
+      if (sortKey && !sortable(colByKey(sortKey))) { sortKey = null; sortDir = "desc"; writeSort(); }
+      syncHeaders();      // Π's sortability depends on the payload version
+      paintRows();
       painted = which;
 
       const when = payload.generatedAt
@@ -686,6 +1076,14 @@
     button.addEventListener("click", () => selectView(button.dataset.view));
   }
   selectView(readView());
+
+  /* THE SORT SURVIVES THE VIEW TOGGLE for free, and that is by construction
+     rather than by a handler: selectView() only flips `hidden`, and the
+     order lives in `sortKey`/`sortDir` and in the DOM both renderers already
+     hold. Nothing here re-reads the payload and nothing re-fetches it. */
+  wireHeaders();
+  readSort();
+  syncHeaders();
 
   render(side);
 })();

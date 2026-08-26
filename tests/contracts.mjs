@@ -842,4 +842,55 @@ assert.equal(await verifySession(expired, secret), null, "expired session accept
 assert.equal(getCookie(new Request("https://example.test", { headers: { Cookie: "session=%" } }), "session"), null, "malformed cookie must fail closed");
 assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie max-age missing");
 
+/* ---------- no tracked file carries a developer's absolute path ----------
+
+   SCRATCH PROBES HAVE ESCAPED INTO THIS PUBLIC REPOSITORY FOUR TIMES.
+   `tests/_d2.mjs` actually shipped in #18; `__chip_probe.html` was one
+   `--amend` from shipping; `tests/zz-probe.mjs` appeared while the ignore
+   rules were being widened for the previous one. Each author picked a new
+   name, so each name-based rule caught the last case and missed the next —
+   .gitignore has accumulated `*_tmp.mjs`, `probe-*`, `cardshot-*` and `_*`
+   and is still losing.
+
+   So this asserts on a PROPERTY instead of a name. Every one of those files
+   hardcoded an absolute path to the machine that produced it, because that is
+   what makes a throwaway script convenient; every real file here resolves
+   paths relative to its own location, because that is what makes it portable.
+   A name can be chosen freshly each time. This cannot be evaded by choosing a
+   different name, only by writing a file that is actually portable — which is
+   the thing being asked for.
+
+   It also closes a small disclosure: this repository is public, and a
+   committed absolute path names a directory layout that nothing here needs
+   to publish. */
+{
+  const HOME_PATH = /\/home\/[a-z_][a-z0-9_-]*\/[A-Za-z0-9._-]+/;
+  /* TRACKED FILES ONLY, from git rather than from the filesystem.
+
+     A first version walked the directories and therefore failed on UNTRACKED
+     scratch files too — which is stricter than this assertion's own claim and
+     the wrong behaviour: a probe sitting in a working tree has escaped
+     nothing, and breaking the suite over one would train whoever hits it to
+     reach for --no-verify. What must never happen is that such a file gets
+     COMMITTED, and the index is exactly the boundary that decides it. */
+  const scanned = execFileSync("git", ["ls-files", "-z", "--", "*.js", "*.mjs"],
+    { cwd: ROOT, encoding: "utf8", maxBuffer: 8 << 20 })
+    .split("\0")
+    .filter((f) => f && !f.includes("node_modules"));
+
+  let checkedFiles = 0;
+  for (const file of scanned) {
+    if (!existsSync(path.join(ROOT, file))) continue;
+    checkedFiles++;
+    const hit = HOME_PATH.exec(read(file));
+    assert(
+      hit === null,
+      `${file} hardcodes an absolute path (${hit && hit[0]}). Every scratch probe that ` +
+      `has escaped into this public repo did exactly this. Resolve paths relative to the ` +
+      `file — import.meta.url, or a ROOT computed from it — or do not commit the file.`,
+    );
+  }
+  assert(checkedFiles > 40, `the absolute-path scan found only ${checkedFiles} files to read`);
+}
+
 console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);

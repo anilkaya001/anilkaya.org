@@ -576,11 +576,18 @@ p.fb-empty {
 
 /* currentColor inside a <pattern> resolves against the pattern element's own
    computed colour, not the referencing shape's — so the hue is set here. */
-.gp-negpat { color: var(--flow-down); }
+/* THE HATCH IS A TEXTURE OVER THE FILL, NOT THE FILL ITSELF. Drawn as
+   `fill: url(#gpNeg)` with nothing underneath, a short bar covered about 45%
+   of its box against a long bar's 100% — so two bars meaning the same number
+   carried half the ink, and the channel that encodes the SIGN was quietly
+   setting the reader's impression of the BALANCE of the book. Same
+   construction as the gamma surface now: solid fill, hatch laid over it. */
+.gp-negpat { color: var(--bg-deep); }
 
 .gp-zero { stroke: var(--hairline); stroke-width: 1; }
 .gp-bar.is-pos { fill: var(--gold-mystic); }
-.gp-bar.is-neg { stroke: none; }
+.gp-bar.is-neg { fill: var(--flow-down); stroke: none; }
+.gp-barhatch { opacity: 0.55; }
 
 .gp-cum { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
 .gp-cum.is-pos { stroke: var(--gold-celadon); }
@@ -589,7 +596,6 @@ p.fb-empty {
 .gp-spot { stroke: var(--ink); stroke-width: 1.5; }
 .gp-flip { stroke: var(--gold-harvest); stroke-width: 1.5; stroke-dasharray: 6 4; }
 
-.gp-plate rect { fill: var(--bg-elev); stroke: var(--hairline); }
 /* Drawn when a plate had to be nudged off its rule to avoid a collision, so
    the label is never silently detached from the level it names. */
 .gp-leader { stroke: var(--hairline); stroke-width: 1; }
@@ -598,8 +604,6 @@ p.fb-empty {
 .gp-plate.is-flip .gp-plate-k { fill: var(--gold-harvest); }
 
 .gp-price { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
-.gp-price.is-spot { fill: var(--ink); }
-.gp-price.is-flip { fill: var(--gold-harvest); }
 .gp-axis {
   fill: var(--ink-faint);
   /* The caption used to inherit the page serif inside an otherwise wholly
@@ -610,7 +614,9 @@ p.fb-empty {
 }
 
 /* Decade rules on the symlog axis: the magnitude the bar length cannot carry. */
-.gp-tick { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.7; }
+/* The ruler behind the earned labels. Solid and faint rather than dashed:
+   a dashed rule at this weight competes with the bars it sits behind. */
+.gp-tick { stroke: var(--hairline); stroke-width: 1; opacity: 0.5; }
 .gp-ticklabel { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
 /* Unlabelled price ticks, so the rail is a ruler between earned labels. */
 .gp-ptick { stroke: var(--hairline); stroke-width: 1; }
@@ -1680,6 +1686,322 @@ body.is-stale .flows-tablewrap {
   .desk-chip__note { max-width: 9rem; }
 }
 
+/* ---------- session path: the premium leg, the centroid, the legend ----
+
+   The panel shipped a cumulative PREMIUM series on every card from the day
+   it was written and the renderer plotted only the delta leg — roughly
+   seventy-eight points per card, computed, serialised and dropped. Delta
+   and premium diverging intraday is the spread-versus-directional tell:
+   flow that moves premium without moving net delta is being spent on
+   structure rather than on direction. */
+
+/* Dashed, not merely recoloured. Two lines separated only by hue are one
+   line in greyscale and for a colour-blind reader — the same argument the
+   gamma surface's hatch already makes. The renderer also sets these as
+   presentation attributes, because an unstyled <path> is fill:black,
+   stroke:none — a blob — and assets deploy before a cache-busted
+   stylesheet is guaranteed to have landed. These rules win where both apply. */
+.fp-prem {
+  fill: none;
+  stroke: var(--ink-dim);
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  stroke-linejoin: round;
+}
+
+.fp-prem-end { fill: none; stroke: var(--ink-dim); stroke-width: 1.4; }
+.fp-line-end.is-pos { fill: var(--flow-up); }
+.fp-line-end.is-neg { fill: var(--flow-down); }
+.fp-centroid { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 1 3; }
+
+.fp-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: baseline; }
+.fp-key { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+/* FIXED PIXELS, NOT RELATIVE UNITS. flows-card-render.mjs asserts that one
+   viewBox unit is one CSS pixel on every svg inside a panel — the invariant
+   that replaced an earlier assertion about type size which could not fail —
+   and these swatches are svgs inside the path panel. A width in % or em
+   breaks it, and the failure would read as a type-scaling bug somewhere else
+   entirely. */
+.fp-swatch { flex: none; width: 26px; height: 10px; vertical-align: middle; }
+
+/* ---------- sortable headers -----------------------------------
+   The control fills its header cell so the whole <th> is the target,
+   and inherits the header's own type. A button that looked like a
+   button would put ten chrome widgets across a data table, which is
+   how a dense table stops being readable. */
+
+.flows-table thead th .fb-sort {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3em;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.flows-table thead th.c-num .fb-sort,
+.flows-table thead th.c-rank .fb-sort { justify-content: flex-end; }
+
+.flows-table thead th .fb-sort:hover:not(:disabled) { text-decoration: underline; }
+
+/* Disabled, not hidden. The families glyph is five numbers on three signed
+   axes plus two unsigned gauges, and any single order over it is an invented
+   weighting; Pi is unsortable on a legacy payload because every value would
+   render as an em dash. A missing control says "this table cannot sort";
+   a dimmed one says "not this column, and here is that it exists". */
+.flows-table thead th .fb-sort:disabled { cursor: default; opacity: 0.55; }
+
+.flows-table thead th .fb-sort:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+/* The indicator is empty on every unsorted column, so it must not reserve
+   width — headers that jump sideways when a sort lands read as a layout bug. */
+.fb-sort-ind { font-size: 0.85em; line-height: 1; }
+
+/* The <abbr> inside the button keeps its own help affordance rather than
+   inheriting the button's pointer. */
+.flows-table thead th .fb-sort abbr { text-decoration: inherit; cursor: inherit; }
+
+/* ---------- the implied volatility surface (moneyness x expiry) ----
+
+   Drawn by assets/js/flows-desk.js beneath the desk's own footnote, from
+   contracts priceSale() had already built — a second sweep of rows already
+   in hand, at zero additional vendor calls.
+
+   THE SHADE IS THE SMILE, THE NUMBER IS THE QUOTE, THE LEVEL IS A STRIP.
+   A heatmap of raw vol on a name whose front trades 45 and whose January
+   trades 26 paints one column dark and the other light, and the smile inside
+   each is invisible — the level swamps the shape. So the cell is shaded by
+   its vol MINUS its own expiry's at-the-money quote, its printed number is
+   the quoted vol unmodified, and the levels ride a separate strip which read
+   left to right is the term structure.
+
+   The renderer sets every colour and type size as a PRESENTATION ATTRIBUTE
+   too, so the panel is legible with none of these rules applied: assets
+   deploy before a cache-busted stylesheet is guaranteed to have landed, and
+   an unstyled <rect> is fill:black. These rules win wherever both apply,
+   because a presentation attribute is the lowest-priority declaration there is.
+
+   TWO PROPERTIES THIS BLOCK MUST NEVER SET. `fill-opacity` on .ivs-cell
+   carries the MAGNITUDE of the skew, and `stroke-dasharray` carries the AGE
+   of the print. Both are computed per cell; a blanket rule here would flatten
+   one of the chart's five channels into a constant, and nothing would look
+   wrong. */
+
+.desk-surface { margin: 1.6rem 0 0; }
+
+.desk-surface__head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0.5rem 1rem; margin-bottom: 0.5rem;
+}
+
+.desk-surface__title {
+  font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-dim); font-weight: 400;
+}
+
+.desk-surface__field label {
+  font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-faint); margin-right: 0.4rem;
+}
+
+.desk-surface__field select {
+  font: inherit; font-size: 0.8rem; color: var(--ink);
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+  border-radius: 4px; padding: 0.2rem 0.4rem;
+}
+
+.desk-surface__field select:focus-visible {
+  outline: 2px solid var(--gold-harvest); outline-offset: 1px;
+}
+
+/* One symbol is not a choice; the control stays so the block does not jump
+   when a second arrives, and must stay legible while disabled. */
+.desk-surface__field select:disabled { color: var(--ink-dim); opacity: 1; }
+
+.desk-surface__plot { margin: 0.2rem 0 0.6rem; }
+.ivs { display: block; max-width: 100%; }
+
+.desk-surface__note {
+  color: var(--ink-faint); font-size: 0.78rem; line-height: 1.6;
+  max-width: var(--measure);
+}
+
+/* Cells: `fill` only. */
+.ivs-cell.is-pos { fill: var(--gold-mystic); }
+.ivs-cell.is-neg { fill: var(--flow-down); }
+
+/* A cell whose expiry has no at-the-money quote is HOLLOW rather than pale:
+   an unknown place on the smile is not the middle of it. The renderer gives
+   it fill:none — this tints only its outline. */
+.ivs-cell.is-nolevel { stroke: var(--ink-faint); }
+
+/* Age of the print, by border. Dashed did not trade today; dotted carries no
+   volume field at all. Forms, so both survive greyscale and colour-blindness. */
+.ivs-cell.is-stale,
+.ivs-cell.is-unknown-age { stroke: var(--ink-dim); }
+
+/* Sign, independent of hue. Dark like the gamma surface's, so it reads as
+   texture under the printed volatility rather than as a strikethrough. */
+.ivs-hatch { color: var(--bg-deep); opacity: 0.5; }
+
+/* No listed strike at this moneyness on this expiry — an explicit void, which
+   is not the same fact as a contract quoted at the money. */
+.ivs-void { fill: var(--bg-deep); fill-opacity: 0.55; }
+
+/* Past the shade cap, marked rather than silently flattened. */
+.ivs-clip { stroke: var(--bg); }
+
+.ivs-colrule,
+.ivs-termrule { stroke: var(--hairline); stroke-opacity: 1; }
+
+.ivs-exp, .ivs-days, .ivs-iv, .ivs-m, .ivs-level { font-family: var(--font-mono); }
+.ivs-exp  { fill: var(--ink-dim);   fill-opacity: 1; letter-spacing: 0.04em; }
+.ivs-days { fill: var(--ink-faint); fill-opacity: 1; }
+.ivs-iv   { fill: var(--ink);       fill-opacity: 1; }
+
+/* A volatility that is a print of unknown age — dimmed to match the stale
+   cushion in the table above it. */
+.ivs-iv.is-stale { fill: var(--ink-dim); }
+
+.ivs-m { fill: var(--ink-faint); fill-opacity: 1; }
+
+/* The at-the-money row is the reference every other row is read against, so
+   it is the one that is NOT dimmed. */
+.ivs-m.is-atm { fill: var(--ink); font-weight: 700; }
+
+.ivs-level { fill: var(--ink); fill-opacity: 1; }
+.ivs-level.is-missing { fill: var(--ink-faint); }
+
+.ivs-dot { fill: var(--ink); }
+.ivs-termline { stroke: var(--ink); }
+
+/* An expiry that outlives the next earnings report. The warning glyph carries
+   the fact; the tint is a second channel, never the only one. */
+.ivs-exp.crosses-earnings { fill: var(--flow-down); }
+
+.ivs-cellgroup, .ivs-colhead, .ivs-levelgroup { cursor: help; }
+
+/* ---------- the watch list -------------------------------------
+   Deliberately quieter than the board. Nothing here cleared the bar,
+   so the page gets no score bars, no rank badges and no colour
+   weight beyond the sign of the score itself — the visual language
+   of a candidate would be a claim the data does not make. */
+
+.watch-table th[scope="row"] a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.watch-table th[scope="row"] a:hover { color: var(--gold-harvest); border-bottom-color: currentColor; }
+.watch-table th[scope="row"] a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* The one column this page exists for. Marked, not coloured by magnitude:
+   a gradient would imply a continuous strength reading, and the only fact
+   here is proximity to a threshold. */
+.watch-table td.c-toband { color: var(--ink-dim); }
+
+.watch-table td.c-toband.is-near {
+  color: var(--gold-harvest);
+  font-weight: 600;
+  cursor: help;
+}
+
+/* A large surprise multiple is worth the eye, but it is a multiple of the
+   NAME's own norm and says nothing about the size of that norm — so it is
+   marked with weight rather than with an alarm colour. */
+.watch-table td.is-surprise { color: var(--ink); font-weight: 600; cursor: help; }
+
+/* ---------- the track record -----------------------------------
+   The zero line is always drawn and always at zero. A returns chart
+   whose baseline floats to the data's minimum turns a uniformly
+   negative record into a rising line, and that is the commonest way
+   this kind of plot lies. */
+
+.rec-block { margin: 2rem 0 0; }
+
+.rec-block h2 {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 0.5rem;
+}
+
+.rec-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  max-width: 62ch;
+}
+
+.rec-empty {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  border: 1px dashed var(--hairline);
+  border-radius: 4px;
+  color: var(--ink-faint);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.rc { display: block; overflow: visible; }
+.rc-zero { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3; }
+.rc-line { fill: none; stroke: var(--gold-harvest); stroke-width: 1.8; }
+.rc-dot.is-pos { fill: var(--flow-up); }
+.rc-dot.is-neg { fill: var(--flow-down); }
+
+/* The legs of the spread are measurements, not results: a positive SHORT
+   return means the names the board leaned against went up. Colouring it green
+   beside a green long leg would read as two wins where there is one of each. */
+.rec-table td.c-leg { color: var(--ink-dim); }
+
+.rc-axislabel.is-zero { fill: var(--ink-dim); }
+
+.rc-axislabel,
+.rc-ticklabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--ink-faint);
+}
+
+/* The sample size rides every point. A percentage without its n is the
+   thing this page exists to stop printing, so it is drawn smaller but
+   never omitted. */
+.rc-nlabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--ink-faint);
+  opacity: 0.75;
+}
+
+/* Attrition is a DATA-QUALITY reading, not a result. Names that leave the
+   universe before a horizon closes are not a random sample — they are
+   disproportionately the ones something happened to — so a row losing many
+   of them is close to no measurement at all rather than a noisy one. */
+.rec-table td.is-attrition {
+  color: var(--flow-down);
+  cursor: help;
+}
+
+@media (max-width: 40rem) {
+  .rec-block h2 { font-size: 0.68rem; }
+}
+
 /* ---------- gamma surface (strike x expiry) --------------------
    Sign is carried by the hatch, magnitude by fill-opacity, price by
    row and time by column. Hue is the LAST channel and duplicates the
@@ -1696,19 +2018,52 @@ body.is-stale .flows-tablewrap {
    different facts, and only one of them is tradeable. */
 .gs-void { fill: var(--bg-deep); opacity: 0.35; }
 
+/* MEASURED ZERO IS ITS OWN STATE. `is-pos` was assigned by `v < 0`, so a pair
+   measured at exactly zero rendered as the palest LONG cell — a sign the book
+   does not have, at the one magnitude where sign is meaningless. Three facts,
+   three appearances: a value, a measured zero, and a pair never returned. */
+.gs-cell.is-zero { fill: none; }
+.gs-zeromark { stroke: var(--ink-faint); stroke-width: 1; }
+
+.gs-price.is-call,
+.gs-price.is-put { fill: var(--ink-dim); }
+
+/* THE DECODER. "Magnitude by opacity" with nothing to read a shade against is
+   a mood, not a quantity — so the ramp is stepped, and the steps are drawn.
+   It lives in the 34px of bottom padding the panel already reserved and never
+   drew into, which is why it costs no height.
+
+   The 9px is load-bearing: with no font-size an SVG <text> defaults to 16px
+   and the key overruns the band it is drawn in. */
+.gs-key { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9px; }
+.gs-key-sw.is-pos { fill: var(--gold-mystic); }
+.gs-key-sw.is-neg { fill: var(--flow-down); }
+
 /* A cell past the colour cap, marked rather than silently flattened. */
 .gs-clip { stroke: var(--bg); stroke-width: 1; opacity: 0.85; }
 
 .gs-colrule { stroke: var(--hairline); stroke-width: 0.5; opacity: 0.5; }
 
-.gs-spot { stroke: var(--ink); stroke-width: 1.5; }
+.gs-spot { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 6 3; }
 
 /* The walls are outlined, not filled: a fill would fight the cell
    opacity that is carrying the magnitude underneath them. */
-.gs-callwall,
-.gs-putwall { fill: none; stroke-width: 1.4; }
-.gs-callwall { stroke: var(--gold-celadon); }
-.gs-putwall { stroke: var(--flow-down); stroke-dasharray: 5 3; }
+/* THE WALLS WERE FULL-WIDTH OUTLINED RECTS at stroke-width 1.4 — more ink
+   than the cells they were annotating. A marker in the gutter and a tick at
+   the far edge says the same thing and lets the data hold the middle.
+
+   Filled for the call wall, hollow for the put wall: a FORM, so the two are
+   still distinguishable in greyscale and to a colour-blind reader. Hue only
+   ever duplicates it. */
+.gs-callwall { color: var(--gold-celadon); }
+.gs-putwall  { color: var(--flow-down); }
+.gs-wallmark {
+  fill: currentColor; stroke: currentColor;
+  stroke-width: 1.4; stroke-linejoin: round;
+}
+.gs-putwall .gs-wallmark { fill: var(--bg); }
+.gs-walltick { stroke: currentColor; stroke-width: 1.5; }
+.gs-putwall .gs-walltick { stroke-dasharray: 3 2; }
 
 .gs-price {
   fill: var(--ink-faint);

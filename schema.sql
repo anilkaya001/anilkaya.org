@@ -151,10 +151,43 @@ CREATE TABLE IF NOT EXISTS project_progress (
 );
 
 -- Flows: the credential-gated options-flow board.
--- Published board payloads, keyed "board:long" / "board:short". The value is
--- already-serialized JSON: the Worker hands the stored string straight to the
--- response body without parsing it, so serving cost is constant in payload
--- size. That matters because Workers Free allows 10 ms of CPU per invocation.
+-- Published board payloads. The value is already-serialized JSON: the Worker
+-- hands the stored string straight to the response body without parsing it, so
+-- serving cost is constant in payload size. That matters because Workers Free
+-- allows 10 ms of CPU per invocation.
+--
+-- THE KEY SPACE, which is the whole retention story:
+--
+--   board:long, board:short   the LIVE boards the deck reads. Overwritten
+--                             every session, exactly as before.
+--   board:watch               the names inside the score's dead band, ranked
+--                             by how close they are to leaving it. Overwritten
+--                             every session.
+--   board:<side>:YYYY-MM-DD   the IMMUTABLE dated copy of that session's
+--                             board, byte-identical to what the reader saw.
+--   card:<TICKER>             per-name detail. Overwritten; never dated.
+--   meta                      one run diagnostic. Overwritten.
+--
+-- Before the dated keys existed this table could not answer "what did this
+-- signal say about NVDA last week", because every morning's board:long
+-- destroyed the previous one — while the product's own footer asserted a
+-- 51-52% hit rate with no stored series capable of measuring it.
+--
+-- Growth is bounded by the pipeline, not by this schema: two dated rows are
+-- written per run and the run deletes the dated keys older than 126 calendar
+-- days (90 trading sessions), so the dated set settles at ~180 rows. The
+-- deletes are issued one named key at a time, never as a LIKE pattern, so the
+-- row count of a prune is knowable before it runs. That matters because the
+-- free tier's 100,000 row writes a day are SHARED WITH THE LIVE LEARNING APP
+-- above; the same budget is why flows_login_failures writes only on failure.
+-- The ~50 cards are deliberately not dated: +50 rows a day to archive the
+-- decorative half of the product, when every quantity needed to score a past
+-- signal already sits on the board row.
+--
+-- No secondary index. Every access is by exact primary key — the reader asks
+-- for one key, and the prune names the keys it deletes rather than scanning
+-- for them — so an index on a prefix or a date would be write cost buying
+-- nothing.
 CREATE TABLE IF NOT EXISTS flows_payload (
   id         TEXT PRIMARY KEY,
   payload    TEXT NOT NULL,

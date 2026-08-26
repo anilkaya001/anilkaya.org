@@ -479,6 +479,43 @@ curl -s -H "Cookie: session=<existing token>" "$BASE/api/me"   # expect the user
 If this returns `null` for a session that worked before the deploy, stop and
 roll back — the legacy allowance in `isLearnAudience()` has regressed.
 
+### 10.4b What the store holds, and what prunes it
+
+`flows_payload` is a keyed blob store. Every key it accepts:
+
+| Key | Written | Read by | Lifetime |
+|---|---|---|---|
+| `board:long`, `board:short` | each run | `/api/flows/board?side=` | overwritten daily |
+| `board:watch` | each run | `/api/flows/board?side=watch` | overwritten daily |
+| `board:<side>:YYYY-MM-DD` | each run | the pipeline's scorer | 126 days, then swept |
+| `record` | each run, once scoring is possible | `/api/flows/record` | overwritten |
+| `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten |
+| `meta` | each run | diagnostics | overwritten |
+
+THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
+morning's `board:long` overwrote the previous one, so by the time any forward
+return existed there was no surviving record of what had been claimed — which
+is how this product asserted a hit rate in its own footer for months while
+being structurally incapable of measuring one.
+
+Retention is 126 calendar days (~90 trading sessions, nine times the 10-session
+forecast horizon). Steady state is about 180 rows and +2 row writes per run,
+against a 100,000/day budget **shared with the live learning app**.
+
+The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
+**dated boards only**. That is a blast-radius limit rather than a privilege
+one: the same bearer can already overwrite the live board, but a sweep with an
+off-by-one in its date arithmetic that could name `board:long` would take the
+section down in a way that reads as "the pipeline has never run". A miss
+answers 404 and is an ordinary empty day — the sweep names a fixed skirt of
+dates past the edge so a month of downtime self-heals, and in steady state
+almost every name it tries was never written.
+
+Eighty overlapping cohorts give a standard error near 5.6 points on a hit rate
+around one half. A 51–52% claim is therefore **not separable from a coin** at
+any window this free tier can hold. The archive makes the claim measurable; it
+does not ratify it, and the track-record page says so.
+
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
@@ -489,14 +526,52 @@ back a stored string.
 The call count is derived, not estimated:
 
 ```
-  1  screener call (the whole universe, filtered server-side)
-+ 5  per enriched name x 2 sides x enrichPerSide (30)   = 300
-+ 2  per board name (max-pain, congress) x boardSize x 2 = 100
-+ 2  reads of the live board, for hysteresis
-                                                        = 403, plus retries
+  1  screener call, x6 market-cap bands (the endpoint caps at ~50 rows
+     and takes no page or offset, so the universe is walked by band) =  6
+     -- which puts the LIVE universe at <=300 names, not the 420 the
+     dry-run fixture carries. Anything sized against 420 is sized
+     against a fixture.
++ 3  dating probe (AAPL, dated and undated, plus candles)            =  3
++ 1  SPY candles, to resolve the session date                        =  1
++ 5  per enriched name x 2 sides x enrichPerSide (30)                = 300
++ 3  per board name (max-pain, congress, gamma surface)
+        x boardSize (25) x 2                                         = 150
++ 11 sector ETF candles, one per SPDR sector (XLB XLC XLE XLF XLI XLK
+     XLP XLRE XLU XLV XLY), for the sector momentum panel          =  11
++ 2  reads of the live board, for hysteresis (Worker, not vendor)
+                                                                     = 471, plus retries
 ```
 
-Earlier revisions of this runbook claimed 600–800, which is two to three times
+THE SECTOR LEG IS ELEVEN CALLS BECAUSE IT IS ONE PER SECTOR. That is the
+whole reason a top-down layer is affordable here: every other reading on this
+site costs one call per NAME, so a single extra leg on the board costs fifty.
+They are issued SEQUENTIALLY rather than as a Promise.all — eleven concurrent
+calls all sleep the same delay and then arrive together, which is precisely
+the burst shape that earns a 429 and permanently raises the floor for the rest
+of the run. They are spent after the boards and the watch list commit and
+before the cards, and skipped entirely past the 30-minute deadline: a stale
+sector panel with a visibly older timestamp beats overwriting a good one with
+eleven nulls.
+
+The day's movers cost NOTHING. The screener rows the pipeline already fetches
+carry close, prev_close, relative_volume and both premium legs for the whole
+eligible universe, and until now the pipeline read them for twenty-five board
+rows and discarded the rest.
+
+This figure was 403 until the gamma-surface leg landed, and this runbook still
+said "2 per board name" for weeks after it became 3 — an understatement of up
+to 50 calls in the one number the rate-limit sizing depends on. The last live
+run made 367 calls in 122s with 36 rate-limited.
+
+THE BINDING CONSTRAINT IS NOT A QUOTA. The vendor documents no rate limit
+anywhere, so the limiter is adaptive: 120 ms between calls, doubling on any 429
+and decaying back by 10% on clean responses, with a floor that a 429
+permanently raises. That is what makes the call count matter — at the 5 s
+ceiling the 30-minute card deadline allows only ~360 calls, fewer than a
+healthy run makes, and the boards publish before the cards precisely so that a
+degraded run loses the decorative half rather than the product.
+
+Earlier revisions of this runbook claimed 600–800, which is well above
 the real figure. That matters because it is the number the rate-limit sizing
 below is done against: an operator reading "301 API calls" in the log against a
 runbook promising 600–800 would reasonably conclude the job had silently

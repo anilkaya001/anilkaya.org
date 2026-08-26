@@ -74,6 +74,93 @@ const CHAINS = {
   },
 };
 
+/* ---------- CCC: a chain that is actually a VOLATILITY SURFACE ----
+
+   AAA and BBB were built to break a ranking and they have one expiry each and
+   three IVs between them, which cannot show anything about a smile. A surface
+   fixture has to contain the shapes the surface exists to draw, or every
+   assertion about it passes against code that draws a flat grid.
+
+   Spot is 100 and there is no live print for CCC, so it is priced off its own
+   daily close and every moneyness is the logarithm of a round ratio.
+
+   FOUR PLACES WHERE THE NAIVE ANSWER AND THE CORRECT ONE DIVERGE:
+
+     THE SMILE IS NON-MONOTONE. 46.0 38.0 32.0 30.5 31.0 35.0 41.0 across the
+     front expiry's strikes — down into the money and up again into the call
+     wing, with the minimum strictly inside. Nothing that can only draw a
+     monotone skew, and nothing that paints a column with its own level, can
+     produce that sequence.
+
+     TWO LIVE EXPIRIES AT DIFFERENT LEVELS. 30.5 at 25 days against 24.0 at
+     116, so a surface shaded against one chain-wide at-the-money quote is
+     wrong on both columns and in opposite directions.
+
+     THE LEVEL AND THE SKEW ORDER ONE ROW THE OPPOSITE WAY. At 10% below the
+     money the front quotes 38.0 and the back 34.0, while the back's skew is
+     the steeper of the two — +10.0 against +7.5. A grid of raw volatility
+     says the front wing is the dramatic one. The smile says it is the back.
+
+     THE CONTRACT EXACTLY AT THE MONEY HAS NOT TRADED TODAY. The 100 call's
+     30.0 is a print of unknown age; the 102, two percent out, traded 300 times
+     this morning. The level is 30.5. A build that took the nearest contract
+     regardless of age reads 30.0, and every cell in that column is then half a
+     vol point out with no marker on any of them.
+
+   The 10-16 expiry is the fourth case on its own: everything within reach of
+   the money is a stale print and the only contract that traded today is 24.8%
+   out, so that column gets NO level at all. */
+const CCC_ROWS = [
+  // 2026-09-18, 25 days out.
+  ["P00085000", 0.80, 0.85, 0.46, 150, 150],
+  ["P00090000", 1.40, 1.48, 0.38, 220, 220],
+  ["P00095000", 2.30, 2.40, 0.32, 400, 400],
+  ["C00100000", 2.10, 2.20, 0.30, 900, 0],      // at the money, and NOT traded today
+  ["C00102000", 1.60, 1.68, 0.305, 700, 300],   // 2% out, traded today — this is the level
+  ["C00105000", 1.05, 1.10, 0.31, 500, 500],
+  ["C00110000", 0.55, 0.60, 0.35, 300, 300],
+  ["C00115000", 0.30, 0.34, 0.41, 120, 120],
+].map(([tail, bid, ask, iv, oi, volume]) => ({ tail: "260918" + tail, bid, ask, iv, oi, volume }))
+  .concat([
+    // 2026-10-16: nothing near the money traded today.
+    ["P00078000", 0.65, 0.72, 0.44, 300, 300],
+    ["P00095000", 2.90, 3.05, 0.33, 260, 0],
+    ["C00100000", 3.10, 3.25, 0.28, 340, 0],
+    ["C00110000", 1.05, 1.15, 0.31, 180, 0],
+  ].map(([tail, bid, ask, iv, oi, volume]) => ({ tail: "261016" + tail, bid, ask, iv, oi, volume })))
+  .concat([
+    // 2026-12-18, 116 days out, at a lower level — and one call quoted BELOW
+    // its own at-the-money vol, which is the only cell on the chain that can
+    // prove the sign is carried by something other than a colour.
+    ["P00080000", 1.50, 1.62, 0.40, 190, 90],
+    ["P00090000", 3.20, 3.35, 0.34, 140, 140],
+    ["C00100000", 5.10, 5.30, 0.24, 260, 260],
+    ["C00110000", 2.05, 2.18, 0.23, 110, 110],
+    ["C00120000", 1.10, 1.20, 0.32, 170, 70],
+  ].map(([tail, bid, ask, iv, oi, volume]) => ({ tail: "261218" + tail, bid, ask, iv, oi, volume })));
+
+const ccRow = (ticker, r, ivScale) => ({
+  option_symbol: ticker + r.tail,
+  nbbo_bid: String(r.bid), nbbo_ask: String(r.ask),
+  implied_volatility: String(r.iv * ivScale),
+  open_interest: String(r.oi), volume: String(r.volume),
+});
+
+/* DDD IS CCC QUOTED IN PERCENT, and it exists for one assertion.
+
+   ivConvention() decides ONCE PER CHAIN whether this vendor sent fractions or
+   percent, from the median, because the vendor is inconsistent about it — the
+   same ambiguity that nearly shipped a card reading "1352% of its year" off
+   iv_rank. A surface that read the raw field would be exactly right on every
+   symbol quoted as a fraction and exactly 100x wrong on the rest, and it would
+   render perfectly in both cases. Nothing on the page could reveal which one
+   the reader was looking at.
+
+   So the identical chain is served under two conventions and the two surfaces
+   have to draw the same numbers. */
+CHAINS.CCC = { spot: 100, rows: CCC_ROWS.map((r) => ccRow("CCC", r, 1)) };
+CHAINS.DDD = { spot: 100, rows: CCC_ROWS.map((r) => ccRow("DDD", r, 100)) };
+
 const upstream = http.createServer((req, res) => {
   upstreamCalls++;
   const url = new URL(req.url, "http://x");
@@ -89,11 +176,18 @@ const upstream = http.createServer((req, res) => {
   if (url.pathname.endsWith("/info")) {
     /* AAA reports between its two expiries; BBB has no info at all. One page
        therefore carries a marked row, an unmarked-for-a-reason row, and a
-       cannot-tell row — the three states that are currently one silence. */
-    if (ticker !== "AAA") { res.writeHead(404); res.end("{}"); return; }
+       cannot-tell row — the three states that are currently one silence.
+
+       CCC reports 11-05, which falls between its 10-16 and 12-18 expiries. Its
+       surface therefore has one column that outlives a report and two that do
+       not, which is the reading a term structure is for: a front that is bid
+       relative to the back is a different statement when the back is the leg
+       carrying the event. */
+    const dates = { AAA: "2026-09-10", CCC: "2026-11-05", DDD: "2026-11-05" };
+    if (!dates[ticker]) { res.writeHead(404); res.end("{}"); return; }
     res.writeHead(200);
     res.end(JSON.stringify({ data: {
-      next_earnings_date: "2026-09-10", announce_time: "premarket",
+      next_earnings_date: dates[ticker], announce_time: "premarket",
       issue_type: "Common Stock" } }));
     return;
   }
@@ -723,10 +817,21 @@ try {
        `the arrow keys narrow the pane (${before.w} -> ${narrower.w})`);
     eq(narrower.h, before.h, "and leave the height alone");
 
+    /* OFF THE FLOOR BEFORE ASKING IT TO SHRINK. A three-row table's natural
+       height lands within a pixel or two of the 160px minimum, so "press
+       ArrowUp and check it got shorter" was asking a pane already AT its floor
+       to go below it — an assertion that passed or failed on where the last
+       row's baseline happened to land, and did both across consecutive runs of
+       an unchanged file. Growing it one step first makes the shrink a real
+       measurement rather than a coin toss, and the floor itself is asserted
+       explicitly further down. */
     await page.focus("#deskGripY");
+    await page.keyboard.press("ArrowDown");
+    const taller = await size();
+    ok(taller.h > narrower.h, `the height grip grows the pane (${narrower.h} -> ${taller.h})`);
     await page.keyboard.press("ArrowUp");
     const shorter = await size();
-    ok(shorter.h < narrower.h, `and the height grip shortens it (${narrower.h} -> ${shorter.h})`);
+    ok(shorter.h < taller.h, `and the height grip shortens it (${taller.h} -> ${shorter.h})`);
 
     /* THE CORNER IS BOTH AT ONCE, which is the whole reason it exists. */
     await page.focus("#deskGripXY");
@@ -759,6 +864,276 @@ try {
     await page.setViewportSize({ width: 390, height: 900 });
   }
 
+  /* ---------- the implied volatility surface --------------------
+
+     Every contract the chain route returns has always carried a quoted
+     implied volatility beside its strike and its expiry, and the page spent
+     all of it on the cushion column and dropped the rest. This block drives
+     the surface those numbers describe through a real browser: the smile down
+     a column, the term structure across the strip, the columns that have no
+     level and must say so, and the unit convention that decides whether every
+     number on the chart is right or exactly a hundred times wrong. */
+  {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(server.baseURL + "/flows/desk/?t=CCC,DDD&strategy=both&rank=annualized",
+      { waitUntil: "domcontentloaded" });
+    await settle(3);
+    await page.waitForFunction(
+      () => document.querySelectorAll("#deskSurface .ivs-cell").length > 0,
+      null, { timeout: 10000 });
+
+    /* Everything the chart says, read out of the DOM rather than off a
+       screenshot. The <title>s hang on wrapping groups precisely so these
+       textContents are the labels and not the labels plus their prose. */
+    const readSurface = () => page.evaluate(() => {
+      const q = (sel) => Array.from(document.querySelectorAll("#deskSurface " + sel));
+      const svg = document.querySelector("#deskSurface .ivs");
+      return {
+        symbol: document.getElementById("deskSurfaceSymbol").value,
+        cells: q(".ivs-cell").map((el) => ({
+          expiry: el.getAttribute("data-expiry"),
+          strike: Number(el.getAttribute("data-strike")),
+          iv: Number(el.getAttribute("data-iv")),
+          skew: el.getAttribute("data-skew"),
+          traded: el.getAttribute("data-traded"),
+          crowd: Number(el.getAttribute("data-crowd")),
+          dash: el.getAttribute("stroke-dasharray"),
+          fill: el.getAttribute("fill"),
+          opacity: Number(el.getAttribute("fill-opacity")),
+        })),
+        numbers: q(".ivs-iv").map((t) => t.textContent),
+        levels: q(".ivs-level").map((t) => t.textContent),
+        columns: q(".ivs-exp").map((t) => ({
+          text: t.textContent, crosses: t.classList.contains("crosses-earnings"),
+        })),
+        rowLabels: q(".ivs-m").map((t) => t.textContent),
+        voids: q(".ivs-void").length,
+        hatches: q(".ivs-hatch").length,
+        clips: q(".ivs-clip").length,
+        dots: q(".ivs-dot").length,
+        termLines: q(".ivs-termline").length,
+        note: (document.querySelector("#deskSurface .desk-surface__note") || {}).textContent || "",
+        aria: svg ? svg.getAttribute("aria-label") : null,
+        svgW: svg ? Math.round(svg.getBoundingClientRect().width) : 0,
+        viewW: svg ? Number((svg.getAttribute("viewBox") || "").split(/\s+/)[2]) : 0,
+      };
+    });
+
+    const ccc = await readSurface();
+    eq(ccc.symbol, "CCC", "the surface opens on the first symbol on the desk");
+    eq(ccc.columns.length, 3, "one column per expiry on the chain");
+    eq(ccc.cells.length, 16, "sixteen contracts are placed on the grid");
+
+    /* ---- THE SMILE, down one column ---- */
+    {
+      /* The front expiry's cells, lowest strike first — the order a smile is
+         actually read in. */
+      const front = ccc.cells
+        .filter((c) => c.expiry === "2026-09-18")
+        .sort((a, b) => a.strike - b.strike)
+        .map((c) => Number((c.iv * 100).toFixed(1)));
+      assert.deepEqual(front, [46, 38, 32, 30.5, 31, 35, 41],
+        "the front expiry's smile is drawn contract by contract, not flattened to its level"); checks++;
+      const low = Math.min(...front);
+      const at = front.indexOf(low);
+      ok(at > 0 && at < front.length - 1,
+         `and it bottoms strictly INSIDE the strike range (${front.join(" ")}) — a monotone skew cannot represent this chain`);
+      ok(front[0] > low && front[front.length - 1] > low,
+         "rising into both wings, which is the shape a seller is choosing between");
+    }
+
+    /* ---- THE TERM STRUCTURE, across the strip ---- */
+    {
+      assert.deepEqual(ccc.levels, ["30.5", "—", "24.0"],
+        "the at-the-money level is published per expiry — the term structure, read left to right"); checks++;
+      eq(ccc.levels[0], "30.5",
+         "the front level is the 102 call's, which TRADED today — not the 30.0 of the 100 that sits exactly at the money and has not");
+      ok(/30\.5/.test(ccc.note) && /24\.0/.test(ccc.note),
+         "and the levels are repeated in text, where a strip of dots is unreadable");
+
+      /* THE LINE MUST NOT BRIDGE A MISSING LEVEL. Joining 09-18 to 12-18
+         across an expiry with no at-the-money print would draw a level
+         straight through the gap, which is an interpolation — the invented
+         number this desk does not publish. */
+      eq(ccc.dots, 2, "each measurable level is a dot on the term strip");
+      eq(ccc.termLines, 0,
+         "and the line does NOT bridge the expiry between them — a bridged segment would be an interpolated level");
+    }
+
+    /* ---- AN EXPIRY WITH NO LEVEL SAYS SO ---- */
+    {
+      const middle = ccc.cells.filter((c) => c.expiry === "2026-10-16");
+      ok(middle.length >= 3, "the expiry nobody traded near the money is still on the chart");
+      ok(middle.every((c) => c.skew === ""),
+         "with every cell carrying NO skew rather than a zero one — an unknown place on the smile is not the middle of it");
+      ok(middle.every((c) => c.fill === "none"),
+         "so those cells are drawn hollow rather than shaded as if they sat at the money");
+      ok(middle.every((c) => c.iv > 0),
+         "while still showing the volatility that was actually quoted, which is an observable either way");
+      ok(/nearest contract that traded today is 24\.8%/.test(ccc.note),
+         `and the page says exactly why that column has no level (${ccc.note.slice(0, 40)}…)`);
+      ok(/does not bridge/.test(ccc.note),
+         "and that the term-structure line refuses to cross it");
+    }
+
+    /* ---- STALE PRINTS ARE MARKED, AND THE MARK IS NOT A COLOUR ---- */
+    {
+      const stale = ccc.cells.filter((c) => c.traded === "false");
+      eq(stale.length, 3, "three contracts on this chain have not traded today");
+      ok(stale.every((c) => c.dash === "3 2"),
+         "each is drawn with a BROKEN border — a form, so it survives a greyscale print and a colour-blind reader");
+      const fresh = ccc.cells.filter((c) => c.traded === "true");
+      ok(fresh.length > 0 && fresh.every((c) => c.dash === null),
+         "and a contract that traded today carries no such border, or the mark would mean nothing");
+      ok(/LAST TRANSACTION/.test(ccc.note),
+         "the note says this vendor's implied volatility is a fill and not a quote");
+      ok(/13 of 16 cells traded today/.test(ccc.note),
+         `and how much of the surface is today's (${(ccc.note.match(/\d+ of \d+ cells traded today/) || [])[0]})`);
+      ok(/NONE of them set an expiry's level/.test(ccc.note),
+         "and that a stale print never sets a level — a stale cell is one marked number, a stale level tilts a whole column with no marker on it");
+    }
+
+    /* ---- SIGN IS CARRIED BY A HATCH, NOT BY HUE ---- */
+    {
+      const negative = ccc.cells.filter((c) => c.skew !== "" && Number(c.skew) < 0);
+      eq(negative.length, 1, "one contract on this chain is quoted BELOW its own expiry's at-the-money vol");
+      eq(negative[0].strike, 110, "the back 110 call");
+      eq(ccc.hatches, 1,
+         "and it is HATCHED — the sign survives a greyscale render and a deuteranope reader, which a diverging hue does not");
+      ok(/hatched below it/.test(ccc.note), "the note says what the hatch means");
+    }
+
+    /* ---- the cap is a cap, and the cells past it say so ---- */
+    {
+      eq(ccc.clips, 2, "two cells run past the shade cap and are marked with a slash");
+      ok(/capped at/.test(ccc.note), "rather than being flattened silently against everything else");
+    }
+
+    /* ---- a cell is one quoted contract, never an average ---- */
+    {
+      const crowded = ccc.cells.filter((c) => c.crowd > 1);
+      eq(crowded.length, 1, "the 100 and 102 calls fall in the same band of the same column");
+      eq(crowded[0].strike, 102,
+         "and the cell shows the 102 — today's print — not the 30.25 average of the two quotes");
+      ok(/never an average/.test(ccc.note), "and the page says a cell is never an average");
+    }
+
+    /* ---- the axis is stated, and the money is a row ---- */
+    {
+      ok(ccc.rowLabels.includes("ATM"), "the at-the-money band is labelled as such");
+      ok(/log-moneyness/.test(ccc.note) && /bands 5\.0% wide/.test(ccc.note),
+         `the note states the axis and the band width it chose (${(ccc.note.match(/bands [\d.]+% wide/) || [])[0]})`);
+      ok(ccc.rowLabels.some((t) => t.indexOf("−") === 0),
+         "and a negative row label uses U+2212, not a hyphen");
+    }
+
+    /* ---- the surface is taken BEFORE the sale gates ---- */
+    {
+      ok(/before the liquidity gates/.test(ccc.note) && /regardless of the Sell toggle/.test(ccc.note),
+         "the page says the surface is not the table — the gates fall hardest on the wings, and a smile with its tails cut off is a different smile");
+    }
+
+    /* ---- the earnings column, which is what a term structure is read WITH ---- */
+    {
+      const crossing = ccc.columns.filter((c) => c.crosses);
+      eq(crossing.length, 1, "one expiry outlives the 11-05 report");
+      ok(/12-18/.test(crossing[0].text), "and it is the back one");
+      ok(crossing[0].text.includes("⚠"),
+         "marked with a glyph, so it survives a greyscale render");
+    }
+
+    /* ---- nothing is modelled, and the page says so ---- */
+    {
+      ok(/Nothing here is fitted, interpolated or repriced/.test(ccc.note),
+         "the surface states that it publishes quoted volatilities and differences of them, and nothing that needs a rate");
+      ok(/reads as a fraction/.test(ccc.note),
+         `and carries the evidence for the units it is in (${(ccc.note.match(/median [\d.]+ reads as [a-z ]+/) || [])[0]})`);
+      ok(ccc.aria && /At-the-money implied volatility by expiry/.test(ccc.aria),
+         "and the chart has a text alternative that carries the term structure");
+    }
+
+    /* ---- THE UNIT TRAP, END TO END -------------------------------
+       DDD is CCC with every implied volatility multiplied by a hundred, which
+       is the other convention this vendor uses and does not flag. ivConvention
+       decides the divisor once per chain from the median; priceSale applies
+       it; the surface reads the divided field and no raw one. If any link in
+       that chain broke, DDD would render a surface a hundred times CCC's — and
+       it would render perfectly, with nothing on the page to reveal which one
+       the reader was looking at. */
+    {
+      await page.selectOption("#deskSurfaceSymbol", "DDD");
+      await page.waitForFunction(
+        () => document.getElementById("deskSurfaceSymbol").value === "DDD" &&
+              document.querySelectorAll("#deskSurface .ivs-cell").length > 0,
+        null, { timeout: 5000 });
+      const ddd = await readSurface();
+
+      eq(ddd.cells.length, ccc.cells.length, "the percent-quoted chain places the same cells");
+      assert.deepEqual(ddd.levels, ccc.levels,
+        "and publishes the IDENTICAL at-the-money levels"); checks++;
+      assert.deepEqual(ddd.numbers, ccc.numbers,
+        "and the identical volatility in every cell — a chain quoted in percent and one quoted in fractions draw the same surface"); checks++;
+      assert.deepEqual(
+        ddd.cells.map((c) => `${c.expiry}|${c.strike}|${c.traded}`),
+        ccc.cells.map((c) => `${c.expiry}|${c.strike}|${c.traded}`),
+        "cell for cell, in the same places"); checks++;
+      eq(ddd.hatches, ccc.hatches, "with the same sign on the same cell");
+      ok(/reads as percent/.test(ddd.note),
+         `and the page names the convention it detected rather than assuming one (${(ddd.note.match(/median [\d.]+ reads as [a-z ]+/) || [])[0]})`);
+      ok(ddd.levels[0] === "30.5",
+         "30.5, not 3050 and not 0.305 — the level a desk would actually quote");
+
+      /* And the choice is in the URL, like every other piece of desk state. */
+      eq(new URL(page.url()).searchParams.get("surface"), "DDD",
+         "which surface is on screen travels in the link, like the watchlist and the ranking key");
+      await page.selectOption("#deskSurfaceSymbol", "CCC");
+    }
+
+    /* ---- it fits, at both widths ---- */
+    {
+      const wide = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 1);
+      eq(wide, false, "the surface overflows nothing at 1440px");
+
+      /* ONE VIEWBOX UNIT IS ONE CSS PIXEL, at both widths. This is the
+         assertion that distinguishes a REDRAWN chart from a scaled one, and
+         the obvious version — "the svg got narrower" — cannot: the element is
+         width:100%, so its rendered box shrinks with the column whether or not
+         a single label was recomputed, and every type size shrinks with it
+         until nothing is legible. The viewBox is what says the chart was
+         rebuilt against the new width. */
+      ok(Math.abs(ccc.viewW - ccc.svgW) <= 2,
+         `the desk-width chart is built at one viewBox unit per pixel (${ccc.viewW} in ${ccc.svgW})`);
+      await page.setViewportSize({ width: 390, height: 900 });
+      /* The wait is SWALLOWED so the assertion below is what reports: a chart
+         that never redrew should be diagnosed by name, not by a bare timeout. */
+      await page.waitForFunction(() => {
+        const svg = document.querySelector("#deskSurface .ivs");
+        const vb = svg && Number((svg.getAttribute("viewBox") || "").split(/\s+/)[2]);
+        return vb > 0 && vb < 500;
+      }, null, { timeout: 5000 }).catch(() => {});
+      const narrow = await readSurface();
+      ok(narrow.svgW < ccc.svgW, `the chart's box follows the column (${ccc.svgW} -> ${narrow.svgW})`);
+      ok(Math.abs(narrow.viewW - narrow.svgW) <= 2,
+         `and the chart is REDRAWN against the phone width rather than scaled down with it — one viewBox unit is still one pixel (${narrow.viewW} in ${narrow.svgW})`);
+      eq(narrow.cells.length, ccc.cells.length, "with every cell still on it");
+      const phoneOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 1);
+      eq(phoneOverflow, false, "and it overflows nothing at 390px either");
+    }
+
+    /* ---- and it goes away with the desk ---- */
+    {
+      await page.click("#deskClear");
+      await page.waitForFunction(
+        () => document.getElementById("deskSurface").hidden === true, null, { timeout: 5000 });
+      eq(await page.locator("#deskSurface").isHidden(), true,
+         "clearing the desk clears the surface, rather than leaving the last symbol's chart under an empty table");
+      eq(new URL(page.url()).searchParams.get("surface"), null,
+         "and drops it from the URL");
+    }
+  }
+
   /* ---------- nothing threw, at a phone width -------------------- */
   {
     eq(pageErrors.length, 0, `no uncaught page error across the whole session (${pageErrors[0] || ""})`);
@@ -776,7 +1151,8 @@ try {
   console.log(`✓ flows-desk: ${checks} assertions — cross-symbol re-ranking, URL-held state, ` +
     `select-all tri-state, a refresh floor that spends nothing, per-chip failure isolation, ` +
     `a desk sized to a real balance and checked against the module that defines the sizing, ` +
-    `and a pane three grips and a keyboard can resize`);
+    `a pane three grips and a keyboard can resize, and an implied volatility surface whose ` +
+    `smile, term structure, stale prints and unit convention are each read out of the DOM`);
 } finally {
   await browser.close();
   await server.stop();

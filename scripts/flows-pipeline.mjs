@@ -223,12 +223,15 @@ function screenerTilt(row) {
   const grossPremium = Math.abs(num(row.call_premium)) + Math.abs(num(row.put_premium));
   const netTilt = grossPremium > 0 ? (netCall - netPut) / grossPremium : null;
 
-  // Volume surprise relative to the name's own 30-day norm, so a
-  // mega-cap's ordinary Tuesday does not outrank a real event.
+  /* Volume surprise relative to the name's own 30-day norm, so a
+     mega-cap's ordinary Tuesday does not outrank a real event. A side with no
+     norm is UNMEASURED, not average: the old fallback of 1 published a
+     balanced surpriseTilt of exactly 0 for a name the vendor never averaged,
+     and 0 is a real reading of this field ("as much call as put surprise"). */
   const callSurprise = num(row.avg_30_day_call_volume) > 0
-    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : 1;
+    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : null;
   const putSurprise = num(row.avg_30_day_put_volume) > 0
-    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : 1;
+    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : null;
 
   // Open-interest change: what actually stuck from yesterday, as a share of
   // the standing book rather than in raw contracts.
@@ -254,7 +257,8 @@ function screenerTilt(row) {
     premiumTilt,
     netTilt,
     volTilt,
-    surpriseTilt: Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
+    surpriseTilt: (callSurprise === null || putSurprise === null)
+      ? null : Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
     oiTilt: oiBase > 0 ? (callOiChange - putOiChange) / oiBase : null,
 
     /* The volatility surface, all of it already paid for by the one screener
@@ -952,10 +956,28 @@ function partitionSides(scored, { deadBand = DEAD_BAND } = {}) {
      construction at any pool size (the old comment's requirement is met a
      fortiori), and a quiet session now yields a SHORT board rather than a
      full one made of noise. */
+  /* THE DEAD BAND WAS A COUNT AND NOTHING ELSE.
+
+     Roughly 48 of 60 fully scored names land inside +-20 on a normal session,
+     and every one of them was thrown away here — after five API calls, the
+     liquidity floor, the issuer collapse and a full pass through the scorer.
+     The payload said "48 neutral" and could not say WHICH 48, so a name sitting
+     at 19 the session before it breaks out was indistinguishable from one
+     sitting at 1, and the near-misses that are the most informative part of a
+     quiet session were the only part not published.
+
+     `neutral` STAYS AN INTEGER. It is a wire field the live board already
+     renders, and changing a published field's TYPE under a renderer that
+     reads it is the same class of break as renaming it: the deck would print a
+     count as an array. The list arrives beside it under a new name, and the
+     count is derived FROM the list so the two can never disagree — the failure
+     mode of publishing both is a payload that says 48 above a list of 40. */
+  const neutralRows = sorted.filter((r) => Math.abs(r.score) < deadBand);
   return {
     long: sorted.filter((r) => r.score >= deadBand),
     short: sorted.filter((r) => r.score <= -deadBand).reverse(),   // most negative first
-    neutral: sorted.filter((r) => Math.abs(r.score) < deadBand).length,
+    neutralRows,
+    neutral: neutralRows.length,
     deadBand,
   };
 }
@@ -1121,50 +1143,604 @@ function selectExtremes(ranked, n) {
 /** Round a horizon move for publication, or pass null straight through. */
 const hz = (v) => (v === null ? null : Number(v.toFixed(4)));
 
+/**
+ * ONE ROW VOCABULARY, built in exactly one place.
+ *
+ * The board rows and the watch rows describe the same quantities about the
+ * same names out of the same scored pool. Writing the object twice is how a
+ * second vocabulary gets invented for one quantity — a `px` here and a `close`
+ * there, a `s` here and a `score` there — and a downstream scorer that reads
+ * both surfaces then has to know which surface it is holding. It is also how
+ * the two drift: summarize() was written twice in this file and the copies
+ * diverged badly enough to take a whole run down after the boards had already
+ * committed. The row builder is shared for the same reason.
+ */
+function boardRow(r, s, rank) {
+  const close = num(s.close);
+  const prev = num(s.prev_close);
+  return {
+    t: r.ticker,
+    r: rank,
+    s: r.score,
+    cnv: r.conviction,
+    px: close || r.spot,
+    chg: prev > 0 ? (close - prev) / prev : null,
+    purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
+    gRegime: r.gRegime,
+    gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
+    /* NULL WHEN THE VENDOR QUOTED NEITHER LEG, not zero.
+
+       num() answers 0 for a column that was never sent, so this published a
+       flat $0 for a name with no premium on the wire — and the board renders
+       that column with fmtMoney and a tone class, so the reader saw an
+       explicit "$0" and a neutral tint where the truth was "not quoted". A
+       confident zero the reader cannot distinguish from a measurement is the
+       defect this codebase hunts hardest, and it was sitting on the board's
+       own table the whole time.
+
+       It survived because the argument for tolerating it was about RANKING:
+       zero never reaches either tail, so a ranking of extremes is unaffected.
+       That argument is sound and irrelevant — this is a displayed column, not
+       just a sort key, and moverRow already reached the opposite conclusion
+       on the same two fields. Two builders disagreeing about the degenerate
+       case of one quantity is how a renderer ends up needing to know which
+       surface produced its row. */
+    netPrem: onWire(s.net_call_premium) || onWire(s.net_put_premium)
+      ? num(s.net_call_premium) - num(s.net_put_premium)
+      : null,
+    fam: r.fam,
+    // 42 sessions of closes, base-64 packed: two characters a session, so
+    // the whole sparkline costs 84 bytes on a card that already measures in
+    // kilobytes, and it needs no API call the pipeline was not making.
+    spark: packSpark(r.closes),
+    // Period returns in basis points, so the deck can rank without decoding
+    // the sparkline.
+    pr: [r.r5, r.r21, r.r42].map((x) => (x === null ? null : Math.round(x * 10000))),
+    w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
+    vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
+    ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
+    /* im is the VENDOR'S quote, to this name's own next listed expiry — a
+       different horizon for every row, so it is carried for the card and
+       never set beside another name's. hm is the same volatility scaled to a
+       FIXED number of sessions, which is what makes a column of them a
+       cross-section rather than a list of unrelated numbers. */
+    im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
+    hm: hz(horizonMove(r.iv30)),
+    hr: hz(horizonMove(r.rv30)),
+  };
+}
+
 function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
     pool.map((r) => r.ticker), previousIds,
     { entryRank: UNIVERSE.boardSize, exitRank: Math.round(UNIVERSE.boardSize * 1.4) },
   );
   const byTicker = new Map(pool.map((r) => [r.ticker, r]));
+  return ids.map((ticker, i) => boardRow(byTicker.get(ticker), screenerByTicker.get(ticker) || {}, i + 1));
+}
 
-  return ids.map((ticker, i) => {
-    const r = byTicker.get(ticker);
-    const s = screenerByTicker.get(ticker) || {};
-    const close = num(s.close);
-    const prev = num(s.prev_close);
+/**
+ * How many names the watch list publishes.
+ *
+ * The dead band holds ~48 of 60 scored names on a normal session, so 40 shows
+ * essentially all of the interesting end of it and truncates from the QUIET
+ * end: the rows are ranked by distance from neutral, so the names that fall
+ * off the bottom are the ones furthest from ever leaving the band, which are
+ * the ones with the least to say. It is a cap and not a target — a session
+ * with twelve neutral names publishes twelve.
+ *
+ * The number is also a payload budget. The ingest route rejects anything over
+ * 128KB (FLOWS_MAX_PAYLOAD_BYTES); a watch row measures ~440 bytes, most of it
+ * the packed sparkline, so forty rows is ~18KB. That is seven times inside the
+ * cap, which is where a payload whose row width may still grow should sit — a
+ * surface that publishes right up to a hard limit fails on the day a column is
+ * added, and it fails as a 413 from the Worker rather than here.
+ */
+const WATCH_ROWS = 40;
+
+/** A finite number rounded for publication, or null. Never 0 for "missing". */
+const fixed = (v, digits) => (Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
+
+/**
+ * The names inside the dead band, ranked by how close they are to leaving it.
+ *
+ * WHAT THE THREE EXTRA COLUMNS ARE DOING HERE. surpriseTilt is the log ratio
+ * of call-side to put-side volume surprise, each side measured against the
+ * name's OWN 30-day norm — the most conventional "unusual activity" measure in
+ * this entire product, signed by which side is doing the surprising — and it
+ * has never been displayed anywhere. It was computed in screenerTilt, used once as a pre-enrichment sort
+ * key, and dropped. relative_volume and put_call_ratio were parsed out of the
+ * same screener row and dropped in the same place. They belong on this surface
+ * in particular: a name pinned near zero on a signed composite can still be
+ * three times its own volume norm, and that is exactly the "why is this on the
+ * watch list" a reader needs when the score itself says nothing.
+ *
+ * None of the three enters a score, and none of them is presented as one. They
+ * are vendor observables republished at the precision the vendor states them
+ * to, which is what keeps this list inside the identification bar: nothing
+ * here needs a risk-free rate, a dividend yield, or any other parameter this
+ * project has refused to invent.
+ *
+ * THE 52-WEEK POSITION IS ALREADY HERE, as `w52` on every board row, computed
+ * from the 252 candles the pipeline fetches anyway. The screener also carries
+ * week_52_high / week_52_low, and deriving a second 52-week position from them
+ * would publish two numbers that mean the same thing, disagree in the third
+ * decimal (a vendor window against our own), and carry different names. That
+ * is the bug this file's shared row builder exists to prevent, so the screener
+ * pair stays unread and w52 arrives with the rest of the board vocabulary.
+ */
+function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } = {}) {
+  /* Order on the FULL-PRECISION residual, exactly as partitionSides does, and
+     for the same reason: `score` is a rounded integer and inside a +-20 band
+     ties are routine, so sorting on it hands the ranking to Array.prototype
+     .sort's stability rather than to the data. boundedScore is odd and
+     monotone in the residual, so |residual| descending IS |score| descending,
+     with the ties broken by the number that actually has the precision. */
+  const ranked = (pool || []).slice().sort((a, b) => Math.abs(b.residual) - Math.abs(a.residual));
+  const tilts = tiltByTicker || new Map();
+  return ranked.slice(0, cap).map((r, i) => {
+    const t = tilts.get(r.ticker) || {};
     return {
-      t: ticker,
-      r: i + 1,
-      s: r.score,
-      cnv: r.conviction,
-      px: close || r.spot,
-      chg: prev > 0 ? (close - prev) / prev : null,
-      purity: r.purity === null ? null : Number(r.purity.toFixed(3)),
-      gRegime: r.gRegime,
-      gFlipDist: r.flipDist === null ? null : Number(r.flipDist.toFixed(4)),
-      netPrem: num(s.net_call_premium) - num(s.net_put_premium),
-      fam: r.fam,
-      // 42 sessions of closes, base-64 packed: two characters a session, so
-      // the whole sparkline costs 84 bytes on a card that already measures in
-      // kilobytes, and it needs no API call the pipeline was not making.
-      spark: packSpark(r.closes),
-      // Period returns in basis points, so the deck can rank without decoding
-      // the sparkline.
-      pr: [r.r5, r.r21, r.r42].map((x) => (x === null ? null : Math.round(x * 10000))),
-      w52: r.week52Pos === null ? null : Number(r.week52Pos.toFixed(3)),
-      vrp: r.vrp === null ? null : Number(r.vrp.toFixed(4)),
-      ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
-      /* im is the VENDOR'S quote, to this name's own next listed expiry — a
-         different horizon for every row, so it is carried for the card and
-         never set beside another name's. hm is the same volatility scaled to a
-         FIXED number of sessions, which is what makes a column of them a
-         cross-section rather than a list of unrelated numbers. */
-      im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
-      hm: hz(horizonMove(r.iv30)),
-      hr: hz(horizonMove(r.rv30)),
+      ...boardRow(r, screenerByTicker.get(r.ticker) || {}, i + 1),
+      /* PRECISION THE SOURCE ACTUALLY HAS. surpriseTilt is a log ratio of two
+         volume ratios and is meaningful to about a thousandth; the vendor
+         quotes relative_volume to two decimals and a put/call ratio past three
+         is noise dressed as measurement. A name whose 30-day norm is missing
+         gets null here, never 0 — zero is a real reading of this field and
+         means "as much call as put surprise", which is the opposite of
+         "unknown". */
+      surpriseTilt: fixed(t.surpriseTilt, 3),
+      relVolume: fixed(t.relVolume, 2),
+      putCallRatio: fixed(t.putCallRatio, 3),
     };
   });
+}
+
+/* ---------- GICS sector momentum --------------------------------
+
+   ELEVEN CALLS A RUN, AND THERE IS NO SECOND CALL ANYWHERE IN THIS SECTION.
+
+   The rate limiter is the binding constraint on this entire pipeline, not the
+   vendor's quota — there is no documented quota. The limiter starts at 120ms
+   between calls, DOUBLES on any 429, decays 10% on a clean response, and a
+   single 429 permanently raises the floor toward 5s. The last live run made
+   367 calls in 122s with 36 of them already rate limited, and at the 5s
+   ceiling the 30-minute card deadline allows only ~360 calls in total — fewer
+   than a healthy run already makes. So a new surface is priced in calls before
+   it is priced in anything else, and this one costs eleven: the eleven sector
+   ETFs at one candle request each, reusing an endpoint the pipeline already
+   calls for every enriched name.
+
+   They are spent AFTER both boards are committed and BEFORE the cards, which
+   is a deliberate trade and not an accident of ordering. On a degraded day
+   these eleven calls come out of the CARD budget, so the run loses about
+   eleven cards rather than losing the sector view — the same argument that
+   puts the boards ahead of the cards, applied one level down. Cards are the
+   decorative half; a cross-sectional read of the market is not. */
+
+/**
+ * THE VENDOR'S TICKERS FOR GICS SECTORS, WHICH IS NOT THE SAME THING AS GICS.
+ *
+ * These are the eleven SPDR Select Sector ETFs. They are what this vendor can
+ * actually be asked about: /api/stock/{TICKER}/ohlc/1d takes a listed symbol,
+ * and there is no endpoint on this key that returns a GICS index level. So
+ * every row below is a statement about a TRADEABLE BASKET and has to be read
+ * as one. XLK is roughly forty per cent two names; XLC carries two share
+ * classes of a single issuer; XLRE has only existed since 2015 and XLC since
+ * 2018. A basket's momentum is mostly its largest holdings' momentum, and a
+ * row labelled only "Information Technology" invites a reader to believe the
+ * number is something this product cannot compute.
+ *
+ * The GICS name is therefore carried BESIDE the ticker rather than instead of
+ * it, so the card can print both and the claim stays checkable. Publishing the
+ * sector name alone would assert an index reading nobody here measured;
+ * publishing the ticker alone would be eleven rows a reader has to already
+ * know by heart.
+ */
+const SECTOR_ETFS = [
+  { sector: "Materials", etf: "XLB" },
+  { sector: "Communication Services", etf: "XLC" },
+  { sector: "Energy", etf: "XLE" },
+  { sector: "Financials", etf: "XLF" },
+  { sector: "Industrials", etf: "XLI" },
+  { sector: "Information Technology", etf: "XLK" },
+  { sector: "Consumer Staples", etf: "XLP" },
+  { sector: "Real Estate", etf: "XLRE" },
+  { sector: "Utilities", etf: "XLU" },
+  { sector: "Health Care", etf: "XLV" },
+  { sector: "Consumer Discretionary", etf: "XLY" },
+];
+
+/* THE SPAN IS A CHOICE AND IT IS PUBLISHED AS ONE.
+
+   15 is the conventional TRIX length and nothing in the data picks it. A
+   shorter span makes the oscillator chattier and a longer one makes it later;
+   neither is more true. Under this project's identification bar a quantity is
+   either recoverable from observables with no free parameters or labelled a
+   choice, and this is the second kind — so `span` goes out in the payload
+   beside every reading, which is what makes a published number reproducible by
+   someone who does not have this file. */
+const TRIX_SPAN = 15;
+
+/* HOW MANY SESSIONS THE PUBLISHED LINE HOLDS. Thirty sessions is about six
+   weeks: long enough that a trend line has a shape rather than a slope, short
+   enough that the whole eleven-sector payload stays a couple of kilobytes
+   against the ingest route's 128KB cap. */
+const TRIX_SERIES = 30;
+
+/* THE WARM-UP, MEASURED RATHER THAN GUESSED.
+
+   Three cascaded EMAs seeded on the first observation take a long time to stop
+   remembering that seed, and the reading during that stretch is not a small
+   error — it is the wrong number. Against a constant 30 bp/session ramp, whose
+   settled TRIX is exactly 30 bp by construction:
+
+       46 candles -> 28.32 bp   (-5.6%)
+       61 candles -> 29.63 bp   (-1.2%)
+       76 candles -> 29.93 bp   (-0.25%)
+      106 candles -> 30.00 bp
+
+   Five spans is what puts the OLDEST point of the published line inside a
+   quarter of one per cent of settled, not just the newest. Three spans would
+   have left the old end of every trend line sagging toward the middle for no
+   reason but arithmetic — a chart artefact that reads as "the trend is
+   accelerating" on every sector simultaneously. */
+const TRIX_WARMUP = 5 * TRIX_SPAN;
+
+/** Candles needed before a sector can be measured at all: warm-up, plus the
+    published window, plus the one extra bar the first difference consumes. */
+const TRIX_MIN_CANDLES = TRIX_WARMUP + TRIX_SERIES + 1;
+
+/**
+ * The exponential moving average of a series, seeded on its first value.
+ *
+ * Seeded rather than started from a simple average of the first `span` bars,
+ * which is the other common convention. The two disagree over the first few
+ * multiples of the span and are indistinguishable after that, and the only
+ * caller discards TRIX_WARMUP sessions before publishing anything — so the
+ * region where the choice could matter is thrown away by construction. That is
+ * what keeps the seeding convention from being a free parameter rather than
+ * merely an undocumented one.
+ */
+function ema(values, span) {
+  const alpha = 2 / (span + 1);
+  const out = new Array(values.length);
+  let prev = values.length ? values[0] : NaN;
+  for (let i = 0; i < values.length; i++) {
+    prev = i === 0 ? values[0] : prev + alpha * (values[i] - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/**
+ * TRIX as a per-session LOG return in basis points, oldest first.
+ *
+ * ON THE LOG, AND WHY IT IS NOT THE TEXTBOOK FORM. TRIX is conventionally the
+ * one-period rate of change of a triple-smoothed EMA of the plain close:
+ * (e3[t] - e3[t-1]) / e3[t-1]. Smoothing the LOG close instead turns that
+ * final division into a plain difference, and a difference of logs IS the log
+ * return — so the published number is additive across sessions and exactly
+ * antisymmetric between a move and its reverse. The percentage form is
+ * neither: a sector that falls 9% and then rises 9.89% is back where it
+ * started, and the two readings do not cancel. At the size this oscillator
+ * actually takes — tens of basis points a session — the two forms agree to
+ * about a part in a thousand, so this is not a claim that the textbook reading
+ * is wrong. It is a claim that on the day the two disagree, the additive one
+ * is the one whose sign and magnitude can be set beside another sector's.
+ *
+ * A NON-POSITIVE CLOSE HAS NO LOG, AND THAT IS THE POINT. The vendor's candle
+ * for a halted session or a symbol's first day can come back with a zero
+ * close. The percentage form would quietly turn that into a several-thousand-
+ * per-cent rate of change and then smear it across the next seventy-five
+ * sessions of the smoother, producing a confident, enormous, entirely
+ * fictitious trend. Here it produces -Infinity, the caller's screen catches it
+ * before this function is ever reached, and the sector reports unmeasured.
+ */
+function trixSeriesBp(closes, { span = TRIX_SPAN } = {}) {
+  const e3 = ema(ema(ema(closes.map((c) => Math.log(c)), span), span), span);
+  const out = [];
+  for (let i = 1; i < e3.length; i++) out.push((e3[i] - e3[i - 1]) * 10000);
+  return out;
+}
+
+/**
+ * THE 0-100 SCALING IS A CHOICE, AND IT IS WHERE THIS SURFACE GOES WRONG.
+ *
+ * TRIX is an unbounded signed oscillator in basis points per session. Nothing
+ * in its definition produces a 0-100 reading, so any such reading is an
+ * editorial decision about what "100" is supposed to mean — and the three
+ * available decisions make three DIFFERENT CLAIMS about the same session.
+ *
+ * REJECTED: CROSS-SECTIONAL MIN-MAX over today's eleven sectors. This is the
+ * scaling everyone reaches for and it is unusable, because it is a RANK
+ * dressed up as a LEVEL. By construction it emits exactly one 0 and exactly
+ * one 100 every single day, whatever the market did. A session in which all
+ * eleven sectors sat within two basis points of each other renders pixel-for-
+ * pixel identically to one in which energy ripped and utilities collapsed. The
+ * single question this panel exists to answer — is the market rotating today,
+ * or is it flat — is the single thing that scaling destroys. It would also
+ * make the published trend line a lie in a second way: yesterday's 80 and
+ * today's 80 would be different basis points, so the line's slope would encode
+ * changes in the OTHER ten sectors.
+ *
+ * REJECTED: A PERCENTILE OF EACH SECTOR'S OWN TRAILING HISTORY. This one at
+ * least survives a flat day — every sector prints near its own median and the
+ * row reads mid-range. What it does instead is silently rescale each sector by
+ * its own volatility, so eleven numbers that share an axis on the page stop
+ * sharing one in fact. Utilities moving 4 bp against its own quiet history
+ * outranks energy moving 30 bp against its own violent one, and a reader
+ * looking at eleven bars side by side has no way to see it. It also needs a
+ * lookback window, which is a second free parameter bought with nothing.
+ *
+ * CHOSEN: A FIXED LINEAR CLAMP, 50 AT ZERO MOMENTUM. One axis for all eleven
+ * sectors, and the SAME axis every day — a 62 last month and a 62 today are
+ * the same basis points, which is the property that makes a small trend line
+ * worth drawing at all. A flat day prints eleven numbers near 50 and looks
+ * flat. A rotating day spreads across the range. That is the test, and this is
+ * the only one of the three that passes it.
+ *
+ * WHAT IT COSTS, STATED RATHER THAN HIDDEN. The rails are real: past
+ * +-TRIX_FULL_SCALE_BP the reading stops distinguishing, so a sector in a
+ * historic trend and a sector in an unprecedented one both print 100. That is
+ * why the raw basis points ride along on every row and why `clamped` is a
+ * published field — a saturated reading has to announce itself rather than
+ * pass for an ordinary extreme.
+ *
+ * WHERE 50 CAME FROM, confessed plainly, because it is the free parameter this
+ * whole comment exists to declare. A sustained 50 bp per session is about +12%
+ * a month compounded, held long enough for a triple EMA of span 15 to converge
+ * on it. That is the top of what a GICS sector does, not a level any sector
+ * holds. It is a judgement about the SCALE of the phenomenon, not a
+ * measurement of it.
+ *
+ * This product has refused to publish assignment probability, expected value
+ * and fair premium because each of them needs a risk-free rate and a dividend
+ * yield that nobody here can observe. The difference is not that this
+ * parameter is more defensible than those. It is that this one is DECLARED IN
+ * THE PAYLOAD, next to the raw basis points it was applied to, so a reader who
+ * thinks 50 is the wrong number can divide it back out and use their own. A
+ * hidden parameter and a published one are different objects even when they
+ * hold the same value.
+ */
+const TRIX_FULL_SCALE_BP = 50;
+
+/** The published relation, in one place: scaled = 50 + 50*clamp(bp/full, -1, 1). */
+function scaleTrix(bp) {
+  if (!Number.isFinite(bp)) return null;
+  return Number((50 + 50 * Math.max(-1, Math.min(1, bp / TRIX_FULL_SCALE_BP))).toFixed(1));
+}
+
+/**
+ * One row per sector: measured, or explicitly unmeasured with a reason.
+ *
+ * NEVER A ZERO, AND NEVER SILENTLY ABSENT. A sector whose candles did not
+ * arrive is not a sector with no momentum — on this scale "no momentum" is 50,
+ * and a raw reading of 0 bp is a real, common, meaningful answer. Emitting 0
+ * or dropping the row are the two ways this product has been burned before: a
+ * confident number where the truth was "not measured", and a panel that
+ * quietly shrank from eleven bars to nine so nobody noticed the vendor had
+ * stopped answering. Both are prevented by keeping all eleven rows present,
+ * every field explicitly null, and a `reason` string a renderer can print.
+ *
+ * THE CLEAN TAIL, NOT THE WHOLE SERIES. A single unusable candle from last
+ * spring must not take out today's reading, and a single unusable candle from
+ * last week must. So the longest contiguous run of positive closes ENDING AT
+ * THE MOST RECENT BAR is what gets measured, and its length is what the
+ * minimum is checked against. Dropping bad bars in place would have been the
+ * other option and it is worse: it silently shortens the time axis, so a
+ * sector that halted for three days would have its TRIX computed over a
+ * calendar this payload never states.
+ */
+function sectorTrix(candlesByEtf, { span = TRIX_SPAN, series = TRIX_SERIES, warmup = TRIX_WARMUP } = {}) {
+  const minCandles = warmup + series + 1;
+  const get = (etf) => (candlesByEtf instanceof Map
+    ? candlesByEtf.get(etf)
+    : (candlesByEtf || {})[etf]) || [];
+
+  return SECTOR_ETFS.map(({ sector, etf }) => {
+    const unmeasured = (reason) => ({
+      sector, etf,
+      trix: null, trixBp: null, clamped: null, series: null, clampedPoints: null,
+      reason,
+    });
+
+    const raw = get(etf);
+    if (!raw.length) return unmeasured(`no candles returned for ${etf}`);
+
+    const closes = candlesAscending(raw).map((c) => num(c.close, NaN));
+    let start = closes.length;
+    while (start > 0 && Number.isFinite(closes[start - 1]) && closes[start - 1] > 0) start--;
+    const clean = closes.slice(start);
+
+    if (clean.length < minCandles) {
+      return unmeasured(
+        `${clean.length} usable ${etf} closes of ${closes.length} returned; ` +
+        `${minCandles} are needed for a settled TRIX(${span}) plus ${series} sessions`);
+    }
+
+    const settled = trixSeriesBp(clean, { span }).slice(warmup);
+    const window = settled.slice(-series);
+    if (!window.every((v) => Number.isFinite(v))) {
+      return unmeasured(`${etf} produced a non-finite TRIX over the published window`);
+    }
+
+    /* SCALED FROM THE ROUNDED READING, NOT FROM THE FULL-PRECISION ONE.
+
+       The raw basis points ride along on every row precisely so that the
+       scaling stays reversible — a reader who disagrees with the full-scale
+       band can recompute the whole panel from `trixBp` and their own. That
+       promise is only kept if the two numbers on the row are exactly
+       consistent, and scaling the unrounded value quietly breaks it: XLF's
+       -23.6503 bp scales to 26.3 while the -23.65 that gets PUBLISHED scales
+       to 26.4, and a reader checking the arithmetic finds the payload
+       disagreeing with itself in the last decimal. Rounding first makes the
+       published raw reading the source of truth for the published scaled one,
+       so the relation in `scaling.relation` is exactly true of every row
+       rather than nearly true. */
+    const bp = window.map((v) => Number(v.toFixed(2)));
+    const last = bp[bp.length - 1];
+    return {
+      sector, etf,
+      trix: scaleTrix(last),
+      trixBp: last,
+      clamped: Math.abs(last) >= TRIX_FULL_SCALE_BP,
+      series: bp.map((v) => scaleTrix(v)),
+      /* How many points of the drawn line are sitting on a rail. A line that
+         is flat because the sector was quiet and a line that is flat because
+         it is pinned at 100 look the same; this is how a reader tells them
+         apart without being handed the raw series as well. */
+      clampedPoints: bp.filter((v) => Math.abs(v) >= TRIX_FULL_SCALE_BP).length,
+      reason: null,
+    };
+  });
+}
+
+/* ---------- the rolling band: movers, and premium by name --------
+
+   ZERO ADDITIONAL API CALLS, AND THAT IS THE WHOLE DESIGN.
+
+   The six market-cap-band screener calls at step 1 already return every column
+   these two surfaces need — close, prev_close, relative_volume, sector, and
+   the net call and put premium — for every name in the universe, and the
+   pipeline has been reading four of them for twenty-five board rows and
+   throwing away the other two hundred-odd names' worth. Nothing below issues a
+   request. buildMovers is synchronous for exactly that reason: a function that
+   cannot await cannot quietly grow a fetch later, which is the way a
+   zero-cost surface stops being one.
+
+   RANKED OVER THE ELIGIBLE UNIVERSE, NOT THE SCORED POOL. Only ~60 names are
+   ever enriched and scored; ranking movers over those would publish "the
+   biggest movers among the sixty names our composite already liked", which is
+   a different and much less interesting claim than the one the panel makes.
+   The eligible universe is the right population: it is every name that cleared
+   price, market cap, option volume and open interest, which is what keeps a
+   $3 stock's three-cent tick out of a list of the day's largest moves.
+
+   AND NOT EARNINGS-GATED. The gate at step 2 exists to keep event-driven noise
+   out of a PREDICTIVE composite. This list is descriptive — it reports what
+   the tape did — and a "biggest movers" list that silently omitted every name
+   that moved because it reports next Tuesday would be lying about the day. */
+
+/**
+ * How many names each of the four lists holds.
+ *
+ * Fifteen, against a universe of two to four hundred: at that size the
+ * fifteenth name is already inside the top five per cent of the cross-section,
+ * and past there "largest mover" stops meaning anything a reader would act on.
+ * It is also a payload budget — four lists of fifteen rows at ~110 bytes is
+ * ~7KB against the ingest route's 128KB cap, comfortably inside the margin a
+ * surface whose row width may still grow should keep.
+ *
+ * It is a CAP and not a target. A session on which only three names fell
+ * publishes three fallers, for the same reason a thin board side publishes
+ * thin rather than throwing the run away.
+ */
+const MOVER_ROWS = 15;
+
+/** Did the vendor quote this column at all, as opposed to quoting it as zero? */
+const onWire = (v) => v !== undefined && v !== null && v !== "";
+
+/**
+ * A mover row, in the SAME vocabulary the board rows use.
+ *
+ * `t`, `px`, `chg` and `netPrem` are boardRow's names for boardRow's
+ * quantities, computed by boardRow's relations; `relVolume` and `surpriseTilt`
+ * are toWatchRows' names for toWatchRows' quantities at toWatchRows'
+ * precision. This file already carries the scar from inventing a second
+ * vocabulary for one quantity — a `px` on one surface and a `close` on
+ * another — and a downstream renderer then has to know which surface it is
+ * holding. It is a separate builder only because it takes a screener row where
+ * boardRow takes a scored record; every field name and unit is the same.
+ *
+ * `netPrem` USED TO BE THE ONE PLACE THESE TWO DISAGREED. boardRow computed
+ * num(net_call) - num(net_put), and num() answers 0 for a column the vendor
+ * never sent, so a name with no quoted premium published a flat $0. The
+ * argument for tolerating it was that a ranking of extremes never sees a
+ * zero — sound, and beside the point, because the board DISPLAYS that column.
+ * boardRow now checks the same two fields for presence on the wire and
+ * reports null exactly as this does, so a renderer no longer has to know
+ * which surface produced the row it is holding. Reporting null is also what
+ * keeps an unquoted name out of both premium lists rather than parking it in
+ * the middle of them.
+ */
+function moverRow(row, tilt) {
+  const close = num(row.close);
+  const prev = num(row.prev_close);
+  const hasPremium = onWire(row.net_call_premium) || onWire(row.net_put_premium);
+  const t = tilt || {};
+  return {
+    t: row.ticker,
+    px: close > 0 ? close : null,
+    /* A FRACTION of the prior close, exactly as boardRow publishes it: 0.0412
+       is +4.12%. No prior close means the move is UNKNOWN, not zero, so the
+       row reports null and buildMovers keeps it out of the ranking entirely
+       rather than seating it in the middle of a list of movers. */
+    chg: prev > 0 && close > 0 ? Number(((close - prev) / prev).toFixed(5)) : null,
+    // Signed US dollars. Positive is call premium bought over put premium
+    // bought, which is a statement about the TAPE and not a forecast.
+    netPrem: hasPremium
+      ? Math.round(num(row.net_call_premium) - num(row.net_put_premium))
+      : null,
+    relVolume: fixed(t.relVolume, 2),
+    surpriseTilt: fixed(t.surpriseTilt, 3),
+    // The vendor's own sector string, passed through verbatim or null. It is
+    // not mapped onto the eleven GICS names above: this vendor's spellings are
+    // undocumented, and inventing a crosswalk would publish a sector
+    // attribution nobody verified.
+    sector: row.sector || null,
+  };
+}
+
+/**
+ * The day's largest risers, largest fallers, and largest net premium by name.
+ *
+ * STRICTLY SIGNED, WHICH IS WHAT MAKES THE FOUR LISTS DISJOINT AND HONEST. A
+ * riser must have chg > 0 and a faller chg < 0, so on a day the whole market
+ * rose the fallers list is short or empty rather than filled with names that
+ * rose least — which is what a plain "bottom fifteen by change" would have
+ * published, under a heading that says the opposite. It also removes by
+ * construction the overlap bug this file has already been bitten by once: the
+ * top-n / bottom-n slices of one sorted array collide whenever the array is
+ * shorter than 2n, and selectExtremes carries a comment about the five names
+ * that were enriched twice because of it. A name cannot be both above and
+ * below zero, so no length of input can make these lists intersect.
+ *
+ * An unchanged name is in neither list, which is correct: flat is not a move.
+ *
+ * BY NAME, NOT BY CONTRACT. The premium lists rank the net premium the
+ * screener reports for the whole SYMBOL. "The largest single trade of the day"
+ * is a different question that needs a flow-alerts endpoint this key does not
+ * reach, and the payload says `byName` so no renderer can quietly relabel it.
+ */
+function buildMovers(withTilt, { cap = MOVER_ROWS } = {}) {
+  const rows = (withTilt || []).map(({ row, tilt }) => moverRow(row, tilt));
+
+  const movable = rows.filter((r) => r.chg !== null);
+  const byChange = movable.slice().sort((a, b) => b.chg - a.chg);
+  const risers = byChange.filter((r) => r.chg > 0).slice(0, cap);
+  // Descending order, so the fallers are the tail; reversed so the list leads
+  // with the LARGEST decline rather than the smallest one.
+  const fallers = byChange.filter((r) => r.chg < 0).slice(-cap).reverse();
+
+  const priced = rows.filter((r) => r.netPrem !== null);
+  const byPremium = priced.slice().sort((a, b) => b.netPrem - a.netPrem);
+  const bullish = byPremium.filter((r) => r.netPrem > 0).slice(0, cap);
+  const bearish = byPremium.filter((r) => r.netPrem < 0).slice(-cap).reverse();
+
+  return {
+    risers,
+    fallers,
+    premium: { basis: "byName", bullish, bearish },
+    ranked: movable.length,
+    priced: priced.length,
+    /* HOW MANY NAMES COULD NOT BE RANKED, published rather than swallowed. If
+       the vendor ever stops sending prev_close, every chg goes null, both
+       lists go empty, and without these counters the panel would report a
+       market in which nothing moved. */
+    unrankedChange: rows.length - movable.length,
+    unrankedPremium: rows.length - priced.length,
+  };
 }
 
 /**
@@ -1183,6 +1759,192 @@ function toRows(pool, screenerByTicker, previousIds) {
  */
 function summarize(payload) {
   return Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
+}
+
+/* ---------- the dated archive -----------------------------------
+
+   THE STORE DESTROYED HISTORY. flows_payload is keyed `id TEXT PRIMARY KEY`
+   and the ingest route upserts, so every morning `board:long` overwrote
+   yesterday's `board:long`. Nothing in this product retained what a signal had
+   said. That is why nobody can answer "what did this say about NVDA last
+   week", and it is why the deck's footer can assert a 51-52% hit rate as PROSE
+   with no series anywhere behind it. A forecast that is never written down
+   cannot be shown to be wrong, which is the same statement as: it cannot be
+   shown to be right.
+
+   Each board is therefore ALSO written under an immutable dated key. The live
+   keys `board:long` and `board:short` are untouched and still published FIRST
+   — the board reads them, and breaking them takes the product down — and the
+   dated copy is the same payload object, so the archive cannot describe the
+   session differently from the board the reader actually saw.
+
+   TWO EXTRA ROW WRITES A RUN, and that number is the design constraint, not a
+   detail. D1's free tier allows 100,000 row writes a day and this database is
+   SHARED WITH THE LIVE LEARNING APP — the reason flows_login_failures writes
+   only on a failed login is the same budget. Two rows is nothing.
+
+   THE ~50 PER-TICKER CARDS ARE DELIBERATELY NOT ARCHIVED. Dating them would be
+   +50 rows a day, twenty-five times the cost, to retain the decorative half of
+   the product. Everything needed to score a published signal later — the
+   ticker, the side, the rank, the score, the conviction and the close it was
+   published at — is already on the board row. A card's gamma ladder and
+   congressional prints answer no question about whether the call was right,
+   and they can be re-derived from the vendor for any name that turns out to
+   matter. History is kept for the CLAIM, not for its illustrations. */
+
+/* How long a dated board is kept: 126 calendar days, i.e. 90 trading sessions
+   at five sessions a week.
+
+   The unit that matters is SESSIONS, because the forecast horizon is
+   HORIZON_SESSIONS = 10: a board published today cannot be scored until ten
+   sessions have elapsed. A window has to hold many multiples of that or the
+   archive is a buffer rather than a record; 90 sessions leaves ~80 cohorts
+   that are both stored and resolved.
+
+   Be honest about what 80 cohorts settle. At a hit rate near one half the
+   standard error on 80 draws is about 5.6 points, so 51-52% is not
+   distinguishable from a coin at this sample size — and the cohorts overlap on
+   a ten-session horizon, so they are not even 80 independent draws. Retaining
+   more would not fix that. The point of the window is to make the claim
+   MEASURABLE and its uncertainty STATEABLE, not to ratify the footer.
+
+   Steady-state cost: 90 x 2 = 180 rows, and two writes a day. The keys are
+   dated by CALENDAR date, so the retention window is expressed in calendar
+   days; this constant is the one place the two units meet. */
+const ARCHIVE_RETENTION_DAYS = 126;
+
+/* How far past the retention edge one run sweeps.
+
+   THE PRUNE MUST BE BOUNDED AND PREDICTABLE. There is no
+   `DELETE FROM flows_payload WHERE id LIKE 'board:%:%'` in this design and
+   there must not be: the pipeline holds a route-scoped bearer rather than a
+   Cloudflare API token — deliberately, because D1:Edit is ACCOUNT-scoped and
+   would reach the live learning database — and a pattern delete is exactly the
+   operation whose row count nobody can state before it runs. Instead this run
+   NAMES the keys it wants gone, computed from the session date.
+
+   A run sweeps the 30 calendar days that sit just past the retention edge, on
+   both sides: at most 60 named deletes, of which in steady state exactly two
+   match anything. A delete that matches no row writes no row and costs nothing
+   against the D1 budget. The 30-day skirt is what makes the sweep
+   self-healing: a pipeline that does not run for three weeks still collects
+   everything that expired while it was down. Past a month of silence, dated
+   keys leak — that is a chosen, stated bound, and the log line reports the
+   sweep every run so the leak would be visible rather than inferred. */
+const ARCHIVE_PRUNE_LOOKBACK_DAYS = 30;
+
+/** The one date shape a dated key may carry. Both sides of the archive use it. */
+const ARCHIVE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The immutable key one board is archived under, or null.
+ *
+ * sessionDate is genuinely allowed to be null in this pipeline —
+ * resolveSessionDate falls back to undated vendor calls and says so — so this
+ * cannot assume it has a date. Returning null and skipping the archive is the
+ * only safe answer: `board:long:null` would be a row that pruneKeys can never
+ * name, and the entire retention story here is that every dated key is
+ * recomputable from a date. One unprunable row a year is a slow leak; one a
+ * day is the unbounded table this exists to prevent.
+ */
+function datedKey(side, sessionDate) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
+  return `board:${side}:${sessionDate}`;
+}
+
+/**
+ * Exactly the keys this run should delete.
+ *
+ * Deterministic in the session date and bounded by construction at
+ * 2 * lookbackDays entries — the two properties that make this a prune rather
+ * than a liability. The oldest day RETAINED is exactly retentionDays behind
+ * the session; the newest day deleted is retentionDays + 1. Off by one in that
+ * boundary is the difference between a 90-session archive and an 89-session
+ * one that silently drops the cohort a scorer is about to read.
+ */
+function pruneKeys(sessionDate, {
+  retentionDays = ARCHIVE_RETENTION_DAYS,
+  lookbackDays = ARCHIVE_PRUNE_LOOKBACK_DAYS,
+} = {}) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return [];
+  const t0 = Date.parse(sessionDate + "T00:00:00Z");
+  if (!Number.isFinite(t0)) return [];
+  const keys = [];
+  for (let back = retentionDays + 1; back <= retentionDays + lookbackDays; back++) {
+    const day = new Date(t0 - back * 86400000).toISOString().slice(0, 10);
+    for (const side of ["long", "short"]) keys.push(`board:${side}:${day}`);
+  }
+  return keys;
+}
+
+/**
+ * Delete one stored key, reporting the outcome rather than throwing.
+ *
+ * A retention sweep must never be able to fail a run that has already
+ * published its boards — the same rule meta is under, and for a stronger
+ * reason: meta is a diagnostic, while this is housekeeping for data that is
+ * already safely written. The caller counts what came back and prints one
+ * line.
+ */
+async function retire(key) {
+  if (DRY_RUN) {
+    console.log(`  [dry-run] retire ${key}`);
+    return { ok: true, status: 0 };
+  }
+  try {
+    const response = await fetch(
+      ingestURL() + "?key=" + encodeURIComponent(key),
+      {
+        method: "DELETE",
+        redirect: "error",   // same reasoning as publish(): never redirect a bearer
+        headers: {
+          Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
+          "User-Agent": "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)",
+        },
+      },
+    );
+    await sleep(PUBLISH_SPACING_MS);
+    return { ok: response.ok, status: response.status };
+  } catch (error) {
+    return { ok: false, status: 0, message: error.message };
+  }
+}
+
+/**
+ * Sweep the dated keys that have aged out of the retention window.
+ *
+ * ABANDON ON A ROUTE THAT REFUSES. If the ingest endpoint does not accept
+ * DELETE at all, every one of the sixty attempts fails identically, and
+ * sixty pointless authenticated requests spaced 150ms apart is nine seconds of
+ * traffic a day plus sixty log lines that say the same thing. Three
+ * consecutive refusals that are not a plain 404 is enough evidence that the
+ * route, and not the key, is the problem; a 404 is the ordinary answer for a
+ * day this pipeline never published and must not stop the sweep.
+ */
+async function pruneArchive(sessionDate, options = {}) {
+  const stale = pruneKeys(sessionDate, options);
+  if (!stale.length) {
+    console.log("prune: no session date, so no dated key is computable — skipped");
+    return { removed: 0, refused: 0, abandoned: false };
+  }
+  let removed = 0, refused = 0, streak = 0, lastStatus = 0, abandoned = false;
+  for (const key of stale) {
+    const result = await retire(key);
+    if (result.ok) { removed++; streak = 0; continue; }
+    if (result.status === 404) { streak = 0; continue; }
+    refused++; streak++; lastStatus = result.status;
+    if (streak >= 3) { abandoned = true; break; }
+  }
+  console.log(
+    `prune: ${stale.length} dated keys past ${ARCHIVE_RETENTION_DAYS} days named` +
+    `, ${removed} removed` +
+    (refused ? `, ${refused} refused (last HTTP ${lastStatus})` : "") +
+    (abandoned
+      ? " — ABANDONED after three consecutive refusals. The ingest route is" +
+        " rejecting DELETE, so dated boards will accumulate until it accepts it."
+      : ""),
+  );
+  return { removed, refused, abandoned };
 }
 
 async function publish(key, payload) {
@@ -1268,10 +2030,24 @@ function fakeScreener(count) {
     const putVol = Math.round(1500 + rnd() * 700000);
     const bull = rnd() * 4e7;
     const bear = rnd() * 4e7;
+    /* A FEW NAMES ARRIVE WITH NO PRIOR CLOSE, ON PURPOSE.
+
+       The vendor does not promise prev_close on every screener row, and the
+       movers band's whole discipline is that a name it cannot rank is counted
+       rather than seated in the middle of the list at 0%. A fixture in which
+       every row carries a prior close never executes that branch, so the
+       payload's `ranked + unrankedChange == universe` invariant is satisfied
+       trivially by both the correct implementation and a broken one that
+       reports `universe` as whatever it managed to rank. Five rows in 420 make
+       the two disagree, which is what turns the invariant into a test.
+
+       Deterministic rather than random, so a failure is reproducible and the
+       affected tickers can be named in a log. */
+    const quoted = i % 97 !== 3;
     rows.push({
       ticker: "SYN" + String(i).padStart(3, "0"),
       close: price.toFixed(2),
-      prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2),
+      ...(quoted ? { prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2) } : {}),
       marketcap: String(Math.round(2e9 + rnd() * 9e11)),
       sector: SECTORS[Math.floor(rnd() * SECTORS.length)],
       issue_type: "Common Stock",
@@ -1315,6 +2091,65 @@ function fakeScreener(count) {
     });
   }
   return rows;
+}
+
+/**
+ * A YEAR OF SECTOR-ETF CANDLES, ONE FIXED DRIFT PER SECTOR, SO THE DRY RUN CAN
+ * TELL A FLAT SECTOR FROM A TRENDING ONE.
+ *
+ * Three fixtures in this file have previously passed while proving nothing,
+ * every time for the same reason: the fixture agreed with the code's guess
+ * instead of with the market. A sector fixture drawing all eleven series from
+ * one distribution would be that failure in a new place, and a particularly
+ * complete one — an undifferentiated cross-section renders IDENTICALLY under
+ * min-max, under an own-history percentile and under a fixed clamp, so such a
+ * fixture cannot distinguish the scaling rule that shipped from the two that
+ * were rejected. It would certify nothing at all.
+ *
+ * So the drift is fixed, different per sector, and deliberately spans the
+ * clamp in both directions: (i - 5) * 12 bp per session across the eleven, so
+ * XLK sits at exactly zero drift and must print ~50, both ends saturate and
+ * must print 0 and 100 with `clamped` true, and the seven in between must land
+ * where a reader can tell them apart.
+ *
+ * Every one of those readings is checkable by hand. Under a constant log drift
+ * d per session the triple EMA converges on the same ramp and its first
+ * difference IS d, so the settled TRIX of the k-th sector is (k - 5) * 12 bp
+ * plus whatever wobble the +-0.3% noise leaves behind, which measures under
+ * 5 bp on every one of the eleven. A
+ * fixture whose right answer can be derived without running the code is the
+ * only kind that is evidence.
+ *
+ * XLRE COMES BACK SHORT ON PURPOSE. The unmeasured path — null with a stated
+ * reason rather than a confident zero — is the one this project has been
+ * burned by most often, and a dry run in which all eleven sectors succeed
+ * never executes it once. One deliberately truncated series means every dry
+ * run prints a null and the sentence explaining it.
+ */
+function fakeSectorCandles(etf) {
+  const i = SECTOR_ETFS.findIndex((s) => s.etf === etf);
+  const driftBp = (i - 5) * 12;
+  const sessions = etf === "XLRE" ? 20 : 252;
+  /* TWO STREAMS, so the price path does not depend on how many other fields
+     this fixture happens to draw. Sharing one generator with the volume column
+     is how a fixture's answers move when someone adds a field years later, and
+     the whole value of this one is that its answers are derivable by hand. */
+  const rnd = mulberry(90000 + i * 17);
+  const vol = mulberry(31337 + i);
+  const day0 = Date.UTC(2025, 7, 25, 13, 30);
+  let logPx = Math.log(60 + i * 7);
+  return Array.from({ length: sessions }, (_, k) => {
+    logPx += driftBp / 10000 + (rnd() - 0.5) * 0.006;
+    const close = Math.exp(logPx);
+    return {
+      start_time: new Date(day0 + k * 86400000).toISOString(),
+      open: close.toFixed(2),
+      close: close.toFixed(2),
+      high: (close * 1.006).toFixed(2),
+      low: (close * 0.994).toFixed(2),
+      volume: Math.round(4e6 + vol() * 3e7),
+    };
+  });
 }
 
 /** Does this row carry none of the four gamma legs buildSurface reads? */
@@ -1599,11 +2434,19 @@ async function main() {
   // 2. Cheap tilt, and the earnings gate. Earnings inside the horizon is
   //    the single largest source of false options-flow signals, so those
   //    names are excluded rather than scored and hoped for.
-  const tilted = universe.map((row) => ({ row, tilt: screenerTilt(row) }))
-    .filter(({ row }) => {
-      const dte = daysToEarnings(row, today);
-      return dte === null || dte < 0 || dte > 12;
-    });
+  /* THE TILT FOR EVERY ELIGIBLE NAME, KEPT — not just for the ones that
+     survive the earnings gate. It was always computed for all of them: this
+     map ran over the whole universe and the filter then threw most of the
+     results away. The movers band at step 7c is ranked over the FULL eligible
+     universe rather than the gated subset, because the gate exists to keep
+     event-driven noise out of a PREDICTIVE composite and a list of the day's
+     largest moves is descriptive — one that silently dropped every name that
+     moved because it reports next Tuesday would be misdescribing the tape. */
+  const withTilt = universe.map((row) => ({ row, tilt: screenerTilt(row) }));
+  const tilted = withTilt.filter(({ row }) => {
+    const dte = daysToEarnings(row, today);
+    return dte === null || dte < 0 || dte > 12;
+  });
   console.log(`after earnings gate: ${tilted.length}`);
 
   const composite = tilted.map(({ row, tilt }) => ({
@@ -1614,7 +2457,7 @@ async function main() {
        identically zero, so the selection composite silently lost a third of
        itself the moment the column was made unit-free. */
     rough: (tilt.premiumTilt || 0) + (tilt.netTilt || 0) + (tilt.volTilt || 0) +
-           Math.tanh(tilt.surpriseTilt),
+           Math.tanh(tilt.surpriseTilt || 0),
   })).sort((a, b) => b.rough - a.rough);
 
   // 3. Enrich only the extremes. This two-stage split is the entire
@@ -1696,6 +2539,13 @@ async function main() {
       `(same sector and market cap, return correlation ${d.corr.toFixed(3)})`);
   }
 
+  /* The cheap screener tilt, kept addressable by ticker. It was computed for
+     every universe name at step 2, used once to rank the enrichment picks, and
+     then dropped — including surpriseTilt, the most conventional unusual-
+     activity measure in the product, which no surface has ever displayed. The
+     watch list is where it finally gets published. */
+  const tiltByTicker = new Map(unique.map((e) => [e.features.ticker, e.tilt]));
+
   // 6. Score.
   const scored = scoreBoard(
     unique.map((e) => e.features),
@@ -1737,11 +2587,12 @@ async function main() {
   }
 
   const published = {};
+  const payloads = {};
   const first = scored[0] || {};
   for (const side of ["long", "short"]) {
     const rows = toRows(sides[side], screenerByTicker, previous[side]);
     published[side] = rows;
-    await publish("board:" + side, {
+    payloads[side] = {
       v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
       universe: universe.length,
@@ -1760,7 +2611,197 @@ async function main() {
       weights: first.weights || null,
       shareClasses,
       status: rows.length ? "ok" : "thin",
+    };
+    await publish("board:" + side, payloads[side]);
+  }
+
+  /* 7b. THE ARCHIVE, THE WATCH LIST, AND THE PRUNE — every one of them AFTER
+     both live boards are committed, and every one of them best-effort.
+
+     The ordering is the same argument the cards are under, and it is stronger
+     here because two of these three keys are NEW. A key the ingest route has
+     never seen is rejected at the door with a 400, and a throw at this point
+     would exit the job non-zero after both boards had already landed — a run
+     that succeeded reported as a failure, which is the exact lie the meta
+     publish told on the first live run. Each surface therefore reports its own
+     failure and the run continues.
+
+     They are also ordered among themselves by what a reader loses. The dated
+     copies are the record and go first; the watch list is a new product
+     surface and goes second; the prune is housekeeping for data already safely
+     written and goes last. */
+  for (const side of ["long", "short"]) {
+    const key = datedKey(side, sessionDate);
+    if (!key) {
+      console.warn(`  archive: session date is ${sessionDate === null ? "unresolved" : `"${sessionDate}"`}` +
+                   " — refusing to write a dated key no prune could ever name");
+      break;
+    }
+    try {
+      /* The SAME payload object the live board was published from, not a
+         reconstruction of it. Two builders for one payload is how the archive
+         comes to describe a session the reader never saw. */
+      await publish(key, payloads[side]);
+    } catch (error) {
+      console.warn(`  archive ${key}: ${error.message}`);
+    }
+  }
+
+  try {
+    const watchRows = toWatchRows(sides.neutralRows, screenerByTicker, tiltByTicker);
+    await publish("board:watch", {
+      v: BOARD_SCHEMA_VERSION,
+      side: "watch", generatedAt, sessionDate,
+      rows: watchRows,
+      universe: universe.length,
+      enriched: enriched.length,
+      scored: scored.length,
+      dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
+      deadBand: sides.deadBand,
+      /* `neutral` is the FULL count inside the band and rows.length is what fit
+         under the cap. Publishing both is what lets a reader see that the list
+         was truncated; publishing only the list would quietly redefine the
+         board's own neutral count on this one surface. */
+      neutral: sides.neutral,
+      horizonSessions: HORIZON_SESSIONS,
+      weights: first.weights || null,
+      status: watchRows.length ? "ok" : "thin",
     });
+  } catch (error) {
+    console.warn(`  watch: ${error.message}`);
+  }
+
+  /* 7c. THE ROLLING BAND — the day's largest movers, and the largest net
+     option premium by name.
+
+     FREE. Every column it publishes was already on the screener rows fetched
+     at step 1 and was already being discarded for all but the twenty-five
+     names that reached a board. It issues no request, and buildMovers is
+     synchronous so it cannot grow one later without that being obvious in the
+     diff.
+
+     Best-effort and after the boards for the same reason as everything else in
+     this stretch: `movers` is a key the ingest route has never seen, and an
+     unrecognised key is refused at the door with a 400. A throw here would
+     exit the job non-zero after both boards had already landed — a successful
+     run reported as a failure, which is the exact lie the first live meta
+     publish told. */
+  try {
+    const movers = buildMovers(withTilt);
+    await publish("movers", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* THE POPULATION THE LISTS WERE RANKED OVER, published beside them. "The
+         fifteen largest risers" means nothing without it: fifteen of two
+         hundred is a tail, fifteen of twenty is most of the market. */
+      universe: universe.length,
+      cap: MOVER_ROWS,
+      ranked: movers.ranked,
+      priced: movers.priced,
+      unrankedChange: movers.unrankedChange,
+      unrankedPremium: movers.unrankedPremium,
+      risers: movers.risers,
+      fallers: movers.fallers,
+      premium: movers.premium,
+      status: (movers.risers.length || movers.fallers.length) ? "ok" : "thin",
+    });
+    console.log(
+      `  movers: ${movers.risers.length} up, ${movers.fallers.length} down of ` +
+      `${movers.ranked} ranked` +
+      (movers.unrankedChange ? `, ${movers.unrankedChange} with no prior close` : "") +
+      `; premium ${movers.premium.bullish.length}/${movers.premium.bearish.length} of ${movers.priced}` +
+      (movers.unrankedPremium ? `, ${movers.unrankedPremium} unquoted` : ""));
+  } catch (error) {
+    console.warn(`  movers: ${error.message}`);
+  }
+
+  try {
+    await pruneArchive(sessionDate);
+  } catch (error) {
+    console.warn(`  prune: ${error.message}`);
+  }
+
+  /* 7d. SECTOR MOMENTUM — eleven candle calls, the only new requests this
+     pipeline makes, spent here: after everything free has been committed and
+     before the cards, which are what they are traded against.
+
+     THE DEADLINE GUARD IS NOT DEFENSIVE CLUTTER. At the limiter's 5s ceiling
+     these eleven calls are 55 seconds, and if the run has already walked past
+     the card deadline then spending them buys a sector panel that lands in the
+     same minute GitHub kills the job. Worse, it would be eleven calls spent on
+     the way to publishing nothing. Skipping leaves the previously stored
+     payload in place with its own older `generatedAt`, which is a stale
+     reading a reader can see is stale — strictly better than overwriting a
+     good panel with eleven nulls. */
+  if (Date.now() > stats.startedAt + DEADLINE_MS) {
+    console.warn(
+      `  sector:trix: past the ${DEADLINE_MS / 60000}min deadline — not spending ` +
+      `${SECTOR_ETFS.length} calls on a surface that would land after the cards were abandoned`);
+  } else {
+    try {
+      /* SEQUENTIALLY, not Promise.all. The five per-name enrichment calls are
+         issued together because they are five; eleven fired at once is a burst
+         that the adaptive limiter cannot damp — every one of them sleeps the
+         SAME delayMs concurrently and then arrives together, which is exactly
+         the shape that earns a 429 and permanently raises the floor for the
+         rest of the run. Serialised, the whole sector fetch is eleven inter-
+         call delays: about 1.3 seconds at the 120ms start rate, against a job
+         budgeted in minutes. */
+      const candlesByEtf = new Map();
+      for (const { etf } of SECTOR_ETFS) {
+        const candles = DRY_RUN
+          ? fakeSectorCandles(etf)
+          : await uw(`/api/stock/${etf}/ohlc/1d`, {
+            // The same year of candles, and the same session pin, that every
+            // enriched name already asks this endpoint for.
+            timeframe: "1Y",
+            ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
+          }).catch(() => []);
+        candlesByEtf.set(etf, candles);
+      }
+
+      const sectors = sectorTrix(candlesByEtf);
+      const measured = sectors.filter((s) => s.trix !== null).length;
+      await publish("sector:trix", {
+        v: BOARD_SCHEMA_VERSION,
+        generatedAt, sessionDate,
+        /* THE WHOLE RELATION, IN THE PAYLOAD. A reader holding this blob and
+           nothing else can reproduce every `trix` from its own `trixBp`, and
+           can undo the scaling entirely if they disagree with it. `choice:
+           true` is not decoration — it is the label this project's
+           identification bar requires on any published quantity that is not
+           recoverable from observables alone, and the full-scale band is
+           exactly such a quantity. */
+        span: TRIX_SPAN,
+        price: "log",
+        seriesSessions: TRIX_SERIES,
+        warmupSessions: TRIX_WARMUP,
+        scaling: {
+          rule: "fixed-clamp",
+          choice: true,
+          neutral: 50,
+          fullScaleBp: TRIX_FULL_SCALE_BP,
+          relation: "trix = 50 + 50 * clamp(trixBp / fullScaleBp, -1, +1)",
+          rejected: "cross-sectional min-max (one 0 and one 100 every day, so a " +
+            "flat market renders as a violent rotation) and own-history percentile " +
+            "(rescales each sector by its own volatility, so the eleven bars stop " +
+            "sharing an axis)",
+        },
+        /* NOT GICS ITSELF. Eleven tradeable baskets standing in for eleven
+           sectors, and the reader is told so on the payload rather than left
+           to infer it from the tickers. */
+        basis: "SPDR Select Sector ETFs, not GICS index levels",
+        sectors,
+        measured,
+        status: measured ? "ok" : "unavailable",
+      });
+      console.log(`  sector:trix: ${measured}/${SECTOR_ETFS.length} sectors measured`);
+      for (const s of sectors) {
+        if (s.reason) console.warn(`    ${s.sector} (${s.etf}): not measured — ${s.reason}`);
+      }
+    } catch (error) {
+      console.warn(`  sector:trix: ${error.message}`);
+    }
   }
 
   /* 8. CARDS — after the boards are safely committed, and best-effort.
@@ -1932,6 +2973,11 @@ export {
   candlesAscending, selectExtremes, scoreBoard, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
   computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
+  boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
+  WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
+  SECTOR_ETFS, TRIX_SPAN, TRIX_SERIES, TRIX_WARMUP, TRIX_MIN_CANDLES,
+  TRIX_FULL_SCALE_BP, ema, trixSeriesBp, scaleTrix, sectorTrix,
+  MOVER_ROWS, moverRow, buildMovers,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

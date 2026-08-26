@@ -203,7 +203,17 @@
 
     const W = Math.max(300, Math.min(760, host.clientWidth || 560));
     const ROW = bars.length > 34 ? 9 : 12;
-    const padT = 16, padB = 30, labelW = 46, railW = 132;
+    /* THE RAIL IS AN ANNOTATION COLUMN, NOT A TOOLTIP.
+
+       The two level readouts were drawn as filled, outlined plates in a 132px
+       rail — 44% of the canvas at a 320px viewport, sitting flush against the
+       right end of the bars with a card background behind them. Nothing was
+       ever drawn under them, so the fill bought nothing and cost the panel
+       its whole right-hand third: what it looked like was a tooltip that had
+       got stuck over the chart. Without the plate the same text needs no
+       padding, no border and no background, and the twenty pixels it gives
+       back go to the bars. */
+    const padT = 16, padB = 30, labelW = 46, railW = 112;
     const plotL = labelW, plotR = W - railW;
     const plotW = Math.max(60, plotR - plotL);
     const H = padT + bars.length * ROW + padB;
@@ -270,35 +280,81 @@
     defs.append(pat);
     svg.append(defs);
 
-    /* DECADE TICKS. A symlog's log segment is exactly scale-invariant, so a
-       book with a 35:1 spread and one with a 4e17:1 spread draw identically:
-       bar LENGTH alone encodes rank, not magnitude. Printing a rule and a
-       label at each power of ten restores the magnitude to the ink, which is
-       what the panel's own note used to apologise for not having. */
-    const marks = [];
-    for (let e = Math.ceil(Math.log10(tau)); Math.pow(10, e) <= vmax; e++) marks.push(Math.pow(10, e));
-    /* A book whose whole range is under one decade would otherwise get NO
-       magnitude reference at all, which is the failure this rail exists to
-       fix. The knee — where the axis stops being linear — and the widest bar
-       are always marked, so the reader always has two labelled quantities to
-       read the rest against. */
-    marks.push(tau, vmax);
+    /* MAGNITUDE TICKS ON A ROUND LADDER, NOT ON THIS TICKER'S OWN NUMBERS.
 
-    /* THE GUARANTEED MARKS WERE ALWAYS REJECTED. `rate` is the largest
-       pixels-per-unit that fits both sides, so whenever the zero rule is not
-       clamped to its 18/82 bounds, negW/|fMin| and posW/fMax are EQUAL and
-       xOf(+-vmax) lands exactly on plotR or plotL — inside the two-unit edge
-       test. The widest bar, which this rail's own comment promises is always
-       marked, was drawn on none of the 109 emitted cards. Clamp the guaranteed
-       pair inward instead of discarding it; a decade that falls off the end is
-       still dropped, because unlike vmax it is not load-bearing. */
-    const guaranteed = new Set([tau, vmax]);
+       A symlog's log segment is exactly scale-invariant, so a book with a
+       35:1 spread and one with a 4e17:1 spread draw identically: bar LENGTH
+       alone encodes rank, not magnitude, and the rail is what puts the
+       magnitude back. But the rail was built from the decades PLUS tau and
+       vmax — a quantile of this book and its single widest bar — and those
+       two are not graduations, they are readings. The axis came out labelled
+
+           −505K  −100K  −4K   4K   100K  505K
+
+       on a live card: six numbers, three of them artefacts of the data, and
+       the reader is left to wonder what is special about four thousand. An
+       axis is a ruler and a ruler has round marks on it. The candidates are
+       now the standard log ladder — 1, 2 and 5 times a power of ten — over
+       the range the axis spans, and nothing else is ever printed.
+
+       The old `guaranteed` set existed to promise that the widest bar always
+       had a mark near it, and this ladder keeps that promise without a
+       special case. `lowest` is at most tau/5, tau is at most vmax, and the
+       largest ladder value at or below vmax is at least vmax/2 — so that
+       value always clears the floor and the loop below cannot fail to emit
+       it, on any book. An explicit re-add would be a line no input can reach.
+
+       niceStep() is deliberately NOT reused: its ladder carries 2.5 for the
+       price rail, and every graduation on this axis has to come off ONE
+       ladder or the reader cannot tell a graduation from a reading. */
+    const marks = new Set();
+    /* The ladder runs a good way BELOW the knee. tau is the book's 60th
+       percentile, so a floor at tau left half the bars on the panel with no
+       graduation anywhere near them — on a real card that meant three marks
+       for forty bars. Inside the knee the axis is linear, where a graduation
+       is not merely placeable but exactly proportional, which is the one
+       stretch of this axis where ticks cost nothing to interpret. */
+    const lowest = Math.max(tau / 5, vmax / 1e4);
+    for (let e = Math.floor(Math.log10(lowest)); Math.pow(10, e) <= vmax; e++) {
+      for (const m of [1, 2, 5]) {
+        const v = m * Math.pow(10, e);
+        if (v > 0 && v <= vmax && v >= lowest) marks.add(v);
+      }
+    }
+
+    /* A SIDE WITH NO BARS GETS NO GRADUATIONS. Position is magnitude on this
+       axis, so a "−20K" tick in a region where the book has nothing to draw
+       reads as a measurement of an empty half of the plot. */
+    const sides = [];
+    if (fMax > 0) sides.push(1);
+    if (fMin < 0) sides.push(-1);
+
+    /* ACCEPTED FROM THE LARGEST DOWN.
+
+       The old pass went up from the smallest, so a mark near the knee claimed
+       its space first and blocked the decade above it under the 40px rule —
+       which is exactly how 10K vanished from the rail quoted above while 4K
+       survived. Taking the biggest first means the graduation nearest the
+       widest bar is never the one that loses.
+
+       And a mark is clamped inward ONLY if it landed on the edge. `rate` is
+       the largest pixels-per-unit that fits both sides, so whenever the zero
+       rule is not clamped to its 18/82 bounds, xOf(+-vmax) lands exactly on
+       plotR or plotL — inside a two-unit edge test that then discarded it, on
+       all 109 emitted cards. That is a sub-pixel miss and clamping it back is
+       right. But on a book whose short side is a hundredth of its long side —
+       the case the zero rule's own 18/82 clamp exists for — xOf(−vmax) lands
+       well outside plotL, and the old unconditional clamp printed "−505K"
+       hard against the left edge: a magnitude named at a position where that
+       magnitude is not, on an axis whose entire premise is that position IS
+       magnitude. Three pixels of tolerance recovers the sub-pixel miss and
+       nothing else. */
     const decades = [];
-    for (const v of marks.sort((a, b) => a - b)) {
-      for (const sgn of [1, -1]) {
+    for (const v of Array.from(marks).sort((a, b) => b - a)) {
+      for (const sgn of sides) {
         let x = xOf(sgn * v);
-        if (guaranteed.has(v)) x = Math.min(plotR - 2, Math.max(plotL + 2, x));
-        else if (x < plotL + 2 || x > plotR - 2) continue;
+        if (x < plotL - 3 || x > plotR + 3) continue;
+        x = Math.min(plotR - 2, Math.max(plotL + 2, x));
         if (Math.abs(x - x0) < 18) continue;             // never crowd the zero rule
         if (decades.some((d) => Math.abs(d.x - x) < 40)) continue;
         decades.push({ x, v, sgn });
@@ -318,15 +374,34 @@
       const xg = xOf(b.g);
       const y = yOfIndex(i) - (ROW - 4) / 2;
       const neg = b.g < 0;
+      const bx = Math.min(x0, xg);
+      // A zero-width bar reads as NO DATA; tiny-but-nonzero is a different
+      // fact, so there is a minimum width.
+      const bw = Math.max(Math.abs(xg - x0), 1.5);
       svg.append(svgEl("rect", {
         class: "gp-bar " + (neg ? "is-neg" : "is-pos"),
-        x: Math.min(x0, xg), y,
-        // A zero-width bar reads as NO DATA; tiny-but-nonzero is a different
-        // fact, so there is a minimum width.
-        width: Math.max(Math.abs(xg - x0), 1.5),
-        height: ROW - 4,
-        fill: neg ? "url(#gpNeg)" : null,
+        x: bx, y, width: bw, height: ROW - 4,
       }));
+      /* THE HATCH IS AN OVERLAY NOW, NOT THE WHOLE BAR.
+
+         A short bar was drawn with `fill: url(#gpNeg)` and no fill under it,
+         so it was a set of 1.8-on-4 diagonal lines — about 45% coverage —
+         while a long bar of identical magnitude was 100% solid. Two bars
+         meaning the same number, one of them half the ink. The reader's first
+         impression of which side of the book is heavier was being set by the
+         texture that exists to carry the SIGN, which is the one thing texture
+         must not be allowed to do here. Fill underneath, texture cut into it
+         from above: both channels intact, comparable weight, and the sign
+         still survives a greyscale render because the texture is still there.
+
+         This is the same construction the gamma surface uses for its own
+         short cells, which is the other reason to prefer it: one panel should
+         not encode short gamma differently from the panel beside it. */
+      if (neg) {
+        svg.append(svgEl("rect", {
+          class: "gp-barhatch", x: bx, y, width: bw, height: ROW - 4, fill: "url(#gpNeg)",
+        }));
+      }
     });
 
     // The cumulative curve, split at the sign change so the short-gamma
@@ -384,10 +459,10 @@
       placedPlates.push({ y: py, h });
 
       const g = svgEl("g", { class: "gp-plate " + (cls || "") });
-      if (Math.abs(py - y) > 1) {
-        g.append(svgEl("line", { class: "gp-leader", x1: plotR, y1: y, x2: plotR + 6, y2: py }));
-      }
-      g.append(svgEl("rect", { x: plotR + 6, y: py - h / 2, width: railW - 10, height: h, rx: 2 }));
+      /* The leader is drawn to the label's y whether or not the plate moved:
+         it is what ties an annotation in the rail to the rule it names, and
+         with the plate's background gone there is nothing else doing that. */
+      g.append(svgEl("line", { class: "gp-leader", x1: plotR, y1: y, x2: plotR + 8, y2: py }));
       const t1 = svgEl("text", { x: plotR + 12, y: sub ? py - 3 : py + 4, class: "gp-plate-k" });
       t1.textContent = label + "  " + value;
       g.append(t1);
@@ -399,12 +474,30 @@
       return g;
     };
 
+    /* HOW SHORT, NOT MERELY SHORT. regime.spotGammaShare is the cumulative
+       dealer gamma interpolated AT SPOT as a share of the ladder's peak |cum|,
+       so it lives in [-1, 1], is unit-free, and is comparable across a $35
+       name and a $900 one — its own definition site says so. The card has
+       published it on every payload since the field existed and nothing drew
+       it: only its SIGN reached the reader, laundered through the "short Γ" /
+       "long Γ" badge in the header, so dealers at 0.9 of their peak short
+       position at spot and dealers at 0.05 of it rendered identically. Those
+       are not the same board. The magnitude belongs on the spot rule, which is
+       the one place a reader is already looking when they ask the question. */
+    const atSpot = isNum((card.regime || {}).spotGammaShare);
     // Spot claims its plate first: it is the reference every other level is
     // measured against, so it is the one that must sit exactly on its rule.
     if (spot !== null && spot >= lo && spot <= hi) {
       const y = yOfPrice(spot);
       svg.append(svgEl("line", { class: "gp-spot", x1: plotL, x2: plotR, y1: y, y2: y }));
-      svg.append(plate(y, "SPOT", px2(spot), null, "is-spot"));
+      /* The magnitude only. The SIGN is already carried three times over — the
+         header badge, the derived sentence below, and the side of the zero rule
+         the curve is on there — and the sub-line has room for about twenty
+         monospace characters before it runs off the canvas, where SVG clips it
+         silently. */
+      svg.append(plate(y, "SPOT", px2(spot),
+        atSpot === null ? null : "\u0393 " + Math.abs(atSpot).toFixed(2) + " of peak",
+        "is-spot"));
     }
 
     if (flip !== null && flip >= lo && flip <= hi) {
@@ -429,24 +522,43 @@
       }
     }
 
-    // Price labels are earned, not gridded: spot, flip, and the three biggest
-    // strikes by |gamma|, with a de-collision pass.
+    /* Price labels are earned, not gridded: the three biggest strikes by
+       |gamma| and the two ends, with a de-collision pass.
+
+       SPOT AND THE FLIP ARE NOT IN THIS LIST ANY MORE. Both already have a
+       rule across the plot and a labelled annotation in the rail carrying the
+       same px2() string, so putting them here printed each of those two
+       prices TWICE on one row — and the left copy was distinguished from its
+       neighbours by colour alone, which is the one channel this card does not
+       let anything depend on. Dropping them also hands their rows back to the
+       strikes that actually carry the gamma, which is what the rail is for. */
     const wanted = [];
-    if (spot !== null) wanted.push({ p: spot, cls: "is-spot" });
-    if (flip !== null) wanted.push({ p: flip, cls: "is-flip" });
     bars.slice().sort((a, b) => Math.abs(b.g) - Math.abs(a.g)).slice(0, 3)
       .forEach((b) => wanted.push({ p: b.k, cls: "" }));
     wanted.push({ p: lo, cls: "" }, { p: hi, cls: "" });
+    /* THEN THE RULER FILLS IN. Once spot and the flip stopped being labelled
+       here, an emitted card was down to four prices on a 490px column — the
+       three biggest strikes clustered together near the top, and the low end.
+       The unlabelled ticks below already mark a round step; labelling a
+       coarser multiple of the SAME step turns the rail back into a price axis
+       without inventing a second set of numbers for the reader to reconcile.
+       Earned labels are pushed first and win every collision, so the ruler
+       only ever fills gaps. */
+    const labelStep = niceStep((hi - lo) / 6);
+    if (labelStep > 0) {
+      for (let v = Math.ceil(lo / labelStep) * labelStep; v <= hi + 1e-9; v += labelStep) {
+        wanted.push({ p: Number(v.toFixed(4)), cls: "" });
+      }
+    }
     const placed = [];
     for (const c of wanted) {
       if (isNum(c.p) === null || c.p < lo || c.p > hi) continue;
       const y = yOfPrice(c.p);
-      if (placed.some((q) => Math.abs(q - y) < 12)) continue;
+      if (placed.some((q) => Math.abs(q - y) < 14)) continue;
       placed.push(y);
       const t = svgEl("text", { class: "gp-price " + c.cls, x: labelW - 8, y: y + 3, "text-anchor": "end" });
       t.textContent = px2(c.p);
       svg.append(t);
-      if (placed.length >= 8) break;
     }
 
     /* The caption sits AT the zero rule it labels rather than at the far left
@@ -455,12 +567,33 @@
        plot and a centred caption hung off the canvas when it sat near an edge.
        Measured on an emitted card at a 320px viewport: a 166px caption centred
        at x=85 overhung the left edge, and SVG clips silently so the leading
-       glyph simply vanished. The half-width is estimated from the string
-       rather than measured — SVG offers no pre-layout metric — at roughly
-       0.5em per character for this face and size, which errs wide. */
-    const axisText = "◀ short   net dealer Γ   long ▶";
-    const axisHalf = axisText.length * 0.5 * 9 * 0.5;
-    const axisX = Math.min(plotR - axisHalf, Math.max(plotL + axisHalf, x0));
+       glyph simply vanished.
+
+       AND THE CAPTION SAYS THE SCALE IS LOGARITHMIC, on the axis, where a
+       reader meets it. It was stated only in the note under the chart, four
+       sentences in — and a reader who assumes a linear axis misjudges every
+       bar on the panel, in a direction that always flatters the wings. The
+       ticks now being round makes the compression visible (100K and 500K are
+       not five times as far apart as 20K and 100K), but visible is not the
+       same as stated.
+
+       TWO THINGS THE OLD CLAMP GOT WRONG, both of which the longer caption
+       would have made worse. The per-character estimate was 4.5 units, and
+       .gp-axis measures 5.81 at 10px with its letter-spacing — so the comment
+       claiming the estimate "errs wide" had it backwards by 22%, and a
+       caption believed to fit could overhang by a fifth of its length. And
+       the clamp was to the PLOT, not the canvas: at a 320px viewport the plot
+       is 142 units and no caption of this kind fits inside it, so the clamp
+       was pushing a 250-unit string into a 142-unit box and the excess left
+       the canvas at whichever end lost. The caption is an axis label, not
+       plot furniture; it may use the whole canvas, and it drops to a short
+       form if even that will not hold it. */
+    const AXIS_CH = 6;           // 5.81 measured, rounded up so the estimate errs wide
+    const axisLong = "◀ short   net dealer Γ (log scale)   long ▶";
+    const axisShort = "◀ short   Γ, log scale   long ▶";
+    const axisText = axisLong.length * AXIS_CH <= W - 8 ? axisLong : axisShort;
+    const axisHalf = (axisText.length * AXIS_CH) / 2;
+    const axisX = Math.min(W - 4 - axisHalf, Math.max(4 + axisHalf, x0));
     const axis = svgEl("text", { class: "gp-axis", x: axisX, y: H - 3, "text-anchor": "middle" });
     axis.textContent = axisText;
     svg.append(axis);
@@ -516,8 +649,29 @@
             ? `The book crosses zero ${regime.crossings} times; this is the one separating the most exposure. `
             : "")
         : "Net gamma does not change sign materially inside the drawn band, so no flip level is published here. ") +
+      /* THE READING IN WORDS, because a share of a peak is not self-evidently
+         a position size. 0 is "spot sits where the running total is zero",
+         which is the flip itself; 1 is "spot sits at the most exposed rung the
+         ladder measured". Withheld rather than defaulted when spot lies
+         outside the measured band — the feature returns null there precisely
+         because clamping to the edge rung reported a confident +-1 for a stock
+         trading nowhere near the strikes on file. */
+      (atSpot !== null
+        ? `Dealer gamma AT SPOT is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
+          `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
+          `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"} ` +
+          `— a share, not a dollar figure, which is what makes it comparable across names. `
+        : `Where spot sits in the cumulative is not published on this card: spot lies outside ` +
+          `the measured strike band, and the edge rung would report a confident extreme for a ` +
+          `stock trading nowhere near the strikes on file. `) +
       band +
-      `The gamma axis is symlog with decade rules: read magnitude off the labelled powers of ten, not off bar length. ` +
+      /* THE READER WHO ASSUMES A LINEAR AXIS MISREADS EVERY BAR, so the axis
+         names itself twice: once on the caption and once here, in the terms
+         that say what to do about it. "Symlog" was a word; this is an
+         instruction. */
+      `The gamma axis is LOGARITHMIC outside a narrow band around zero, so a bar twice as long ` +
+      `is nowhere near twice the gamma: read magnitude off the labelled ticks, which are round ` +
+      `numbers on a 1-2-5 ladder, and treat bar length as rank. ` +
       `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
       /* THE CURVE AND THE BARS DO NOT SHARE A SCALE, and sharing the zero rule
          makes them look as though they do. A running total is the SUM of the
@@ -658,6 +812,78 @@
    * only channel is the single most common way this chart is drawn and the
    * single most common way it fails.
    */
+
+  /* THE SHADING RAMP: STEPPED, LOGARITHMIC, AND SCALED TO THE CELLS THAT ARE
+     ACTUALLY ON THE GRID.
+
+     What shipped was linear in |v| / scaleCap, and scaleCap is
+     max(q95, peak/100) — so on any book with one dominant ATM cell the
+     divisor is a hundredth of a peak that is itself two or three decades
+     above the median cell. Measured on the suite's own surface fixture, whose
+     grid holds one 9e9 outlier and 98 cells between 1e6 and 4e6: every
+     ordinary cell mapped to a fill-opacity between 0.130 and 0.159. Five
+     "distinct" values, none of them separable by eye, against a void drawn at
+     0.35 — which is how a panel whose whole job is "find the concentration"
+     came to read as an empty grid with a few marks in it. The panel's own
+     test asserted that magnitude was "encoded in opacity, not flattened" and
+     passed on that, because it counted distinct values instead of measuring
+     their spread.
+
+     Three decisions, and each of them is a decision about a failure mode:
+
+     LOGARITHMIC, because per-cell gamma is log-distributed across a strike
+     ladder — the wings are orders of magnitude under the ATM rung, not a
+     fraction of it — and a linear map spends the entire scale on the top
+     decade.
+
+     TOPPED AT min(cap, the 98th percentile of the drawn magnitudes), so one
+     outlier cannot push the ramp above every other cell on the grid. In the
+     ordinary case, where scaleCap is the q95 of a well-behaved grid, the two
+     are the same number and nothing changes. The outlier itself is still
+     marked with a slash, which is the channel that says "off scale" without
+     taking the ramp with it.
+
+     STEPPED rather than continuous, because steps can be DRAWN. A continuous
+     opacity ramp is undecodable: nothing anywhere on the panel tells a reader
+     what 0.4 is worth. Five steps, a factor the note can name, and a key with
+     both ends labelled turn the shading back into a quantity. */
+  const RAMP_STEPS = 5;
+  const RAMP_OPACITY = [0.24, 0.43, 0.62, 0.81, 1];
+  /* The step factor is snapped to one of these so the note can NAME it.
+     "each step is a factor of 2.46" is a number a reader has to take on
+     trust; "a factor of 2" is one they can multiply in their head. */
+  const RAMP_FACTORS = [1.5, 2, 3, 5, 10];
+
+  function surfaceRamp(mags, cap) {
+    if (!mags.length || !(cap > 0)) return null;
+    const at = (p) => mags[Math.min(mags.length - 1, Math.max(0, Math.round(p * (mags.length - 1))))];
+    const top = Math.min(cap, at(0.98));
+    if (!(top > 0)) return null;
+    /* Four decades is already more dynamic range than a strike ladder has;
+       below that the floor is the grid's own tenth percentile, so the palest
+       step is a step a real cell occupies rather than an empty one. */
+    const bottom = Math.max(at(0.1), top / 1e4);
+    let factor = RAMP_FACTORS[RAMP_FACTORS.length - 1];
+    if (top > bottom * 1.05) {
+      const want = Math.pow(top / bottom, 1 / RAMP_STEPS);
+      factor = RAMP_FACTORS.reduce((a, b) =>
+        (Math.abs(Math.log(b) - Math.log(want)) < Math.abs(Math.log(a) - Math.log(want)) ? b : a));
+    }
+    const lg = Math.log(factor);
+    return {
+      top, factor,
+      floor: top / Math.pow(factor, RAMP_STEPS - 1),
+      /* A measured zero never reaches this: it has no magnitude to encode and
+         the renderer draws it as its own mark before asking for a band. A
+         guard here would be a branch no input can take, and this file has
+         already shipped one of those. */
+      band: (v) => {
+        const k = RAMP_STEPS - 1 - Math.floor(Math.log(top / Math.abs(v)) / lg + 1e-9);
+        return Math.min(RAMP_STEPS - 1, Math.max(0, k));
+      },
+    };
+  }
+
   function renderSurface(host, panel, card) {
     const question =
       "Where is dealer gamma concentrated, and when does it expire?";
@@ -668,7 +894,11 @@
 
     const { grid, strikes, expiries, scaleCap, spot, atSpot, callWall, putWall } = panel;
     const W = panelWidth(host);
-    const labelW = 46, padT = 30, padB = 34, padR = 8;
+    /* labelW carries the price rail AND a gutter for the wall markers, which
+       used to be full-width rules across the grid. padB carries the shading
+       key, which sits in space the panel was already reserving and never
+       drawing into: the key costs the card no height at all. */
+    const labelW = 54, padT = 30, padB = 42, padR = 10;
     const plotL = labelW;
     const plotW = Math.max(60, W - labelW - padR);
     const colW = plotW / expiries.length;
@@ -698,6 +928,16 @@
     // Rows run high price at the top, the way a price ladder is read.
     const yOfRow = (i) => padT + (strikes.length - 1 - i) * rowH;
 
+    /* The ramp is measured off the grid rather than off the payload, because
+       the payload publishes a cap and a peak and no distribution. Zeros are
+       excluded for the same reason buildSurface excludes them from its own
+       quantile: a mostly-empty grid would otherwise put the floor at zero. */
+    const mags = [];
+    for (const row of grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
+    mags.sort((a, b) => a - b);
+    const ramp = surfaceRamp(mags, isNum(scaleCap) === null ? 0 : scaleCap);
+
+    const cellW = Math.max(1, colW - 1), cellH = Math.max(1, rowH - 1);
     strikes.forEach((k, i) => {
       const y = yOfRow(i);
       expiries.forEach((e, j) => {
@@ -708,41 +948,70 @@
              cell. A pair the vendor never returned and a pair carrying no
              gamma are different facts and only one of them is tradeable. */
           svg.append(svgEl("rect", {
-            class: "gs-void", x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
+            class: "gs-void", x, y, width: cellW, height: cellH,
           }));
           return;
         }
-        const mag = scaleCap > 0 ? Math.min(1, Math.abs(v) / scaleCap) : 0;
+        if (v === 0) {
+          /* AND A MEASURED ZERO IS NOT A SMALL LONG POSITION. The sign class
+             was chosen by `v < 0`, so a pair the vendor measured at exactly
+             zero was drawn as the palest LONG cell on the grid — a sign the
+             book does not have, asserted at the one magnitude where sign is
+             meaningless, and at an opacity that made it look like the
+             smallest real reading rather than none. It gets a mark of its
+             own: no fill, a centre tick. Three states, three appearances —
+             not measured, measured at nothing, measured at something. */
+          svg.append(svgEl("rect", { class: "gs-cell is-zero", x, y, width: cellW, height: cellH }));
+          const cx = x + cellW / 2, cy = y + cellH / 2;
+          svg.append(svgEl("line", {
+            class: "gs-zeromark", x1: cx - Math.min(4, cellW / 3), y1: cy,
+            x2: cx + Math.min(4, cellW / 3), y2: cy,
+          }));
+          return;
+        }
         const neg = v < 0;
+        const band = ramp ? ramp.band(v) : 0;
         const cell = svgEl("rect", {
           class: "gs-cell " + (neg ? "is-neg" : "is-pos"),
-          x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
-          /* A floor on opacity so a small-but-real cell is still visible as a
-             cell; zero opacity and "no data" must not look alike. */
-          "fill-opacity": (0.12 + 0.88 * mag).toFixed(3),
+          x, y, width: cellW, height: cellH,
+          /* The palest step is still clearly a cell: zero opacity and "no
+             data" must not look alike, and now neither may look like the
+             centre-ticked zero either. */
+          "fill-opacity": RAMP_OPACITY[band].toFixed(3),
         });
         svg.append(cell);
         if (neg && rowH >= 9 && colW >= 9) {
           svg.append(svgEl("rect", {
-            class: "gs-hatch", x, y, width: Math.max(1, colW - 1), height: Math.max(1, rowH - 1),
+            class: "gs-hatch", x, y, width: cellW, height: cellH,
             fill: "url(#gsNeg)",
           }));
         }
-        /* Cells beyond the cap are marked rather than silently flattened
-           against everything else at full saturation. */
+        /* Cells beyond the PUBLISHED cap are marked rather than silently
+           flattened against everything else at full saturation. The slash is
+           tied to scaleCap and not to the ramp's own top, because scaleCap is
+           what the payload counted in `clipped` and a picture that marks a
+           different set of cells than its own payload counted is worse than
+           one that marks none. */
         if (Math.abs(v) > scaleCap) {
+          /* A SLASH, NOT A DIAGONAL OF THE CELL. Corner to corner made the
+             mark's angle a function of the cell's aspect ratio, and a cell is
+             44 x 15 at a phone width and 240 x 15 on a desktop — so on a wide
+             card the mark flattened into a long shallow line running most of
+             the way across the grid, which reads as a stray rule rather than
+             as a mark on one cell. A fixed-length 45-degree slash at the
+             centre is the same glyph at every width, and 45 degrees is also
+             what keeps it distinct from the hatch's own direction. */
+          const len = Math.min(cellW, cellH) * 0.8;
+          const cx = x + cellW / 2, cy = y + cellH / 2;
           svg.append(svgEl("line", {
-            class: "gs-clip", x1: x + 1, y1: y + 1,
-            x2: x + Math.max(1, colW - 2), y2: y + Math.max(1, rowH - 2),
+            class: "gs-clip",
+            x1: (cx - len / 2).toFixed(2), y1: (cy + len / 2).toFixed(2),
+            x2: (cx + len / 2).toFixed(2), y2: (cy - len / 2).toFixed(2),
           }));
         }
       });
     });
 
-    /* PRICE LABELS ARE EARNED. Every strike labelled at 7px rows is a wall of
-       digits; spot, both walls and the two ends always get one, and the rest
-       are filled in at whatever stride leaves them legible. */
-    const mustLabel = new Set([0, strikes.length - 1]);
     const idxOf = (price) => {
       if (price === null || price === undefined) return -1;
       let best = -1, d = Infinity;
@@ -750,25 +1019,56 @@
       return best;
     };
     const spotRow = idxOf(atSpot);
-    if (spotRow >= 0) mustLabel.add(spotRow);
     const callRow = callWall ? idxOf(callWall.strike) : -1;
     const putRow = putWall ? idxOf(putWall.strike) : -1;
-    if (callRow >= 0) mustLabel.add(callRow);
-    if (putRow >= 0) mustLabel.add(putRow);
 
-    const stride = Math.max(1, Math.ceil(13 / rowH));
-    strikes.forEach((k, i) => {
-      if (!mustLabel.has(i) && i % stride !== 0) return;
-      const y = yOfRow(i) + rowH / 2 + 3;
-      // Never let an earned label collide with a guaranteed one.
-      if (!mustLabel.has(i) && [...mustLabel].some((m) => Math.abs(m - i) * rowH < 12)) return;
+    /* PRICE LABELS ARE EARNED, AND THERE ARE FEW OF THEM.
+
+       The stride was `ceil(13 / rowH)` — as many labels as would fit without
+       overlapping. But a 21-rung ladder at 15px a rung fits twenty-one of
+       them, so the stride evaluated to 1 and every single strike was
+       labelled: twenty near-identical numbers, 62.00 63.00 64.00 and on down
+       the side, all of them at the same weight, competing with the cells for
+       the reader's eye. Legibility was never the binding constraint here.
+       COMPETITION WITH THE DATA is, and the fix is a budget rather than a
+       fit: the levels that mean something are guaranteed, the rest are a
+       coarse ruler, and a minimum separation stops the two from crowding.
+
+       Priority order matters — the first entry to claim a y wins it — so
+       spot and the two walls are pushed before the ends and the ruler. */
+    /* TWO SEPARATIONS, and the difference between them is the difference
+       between a guarantee and a budget. A level that means something —
+       spot, either wall — needs only the separation that keeps 9px type
+       legible, because it is going to be drawn whatever else is on the rail.
+       A ruler label is discretionary and gets the wider one, so the ruler
+       thins itself around the levels rather than the other way round. Sharing
+       one threshold at the wide value silently dropped the put wall whenever
+       it sat within a row of spot, which is precisely when a reader most
+       wants to see both. */
+    const LEVEL_SEP = 12, RULER_SEP = 24;
+    const LABEL_BUDGET = 5;
+    const wantRows = [];
+    if (spotRow >= 0) wantRows.push({ i: spotRow, cls: " is-spot", must: true });
+    if (callRow >= 0) wantRows.push({ i: callRow, cls: " is-call", must: true });
+    if (putRow >= 0) wantRows.push({ i: putRow, cls: " is-put", must: true });
+    wantRows.push({ i: strikes.length - 1, cls: "" }, { i: 0, cls: "" });
+    const stride = Math.max(1, Math.round(strikes.length / LABEL_BUDGET));
+    for (let i = 0; i < strikes.length; i += stride) wantRows.push({ i, cls: "" });
+
+    const placedRows = [];
+    for (const c of wantRows) {
+      if (c.i < 0 || c.i >= strikes.length) continue;
+      const y = yOfRow(c.i) + rowH / 2 + 3;
+      const sep = c.must ? LEVEL_SEP : RULER_SEP;
+      if (placedRows.some((q) => Math.abs(q - y) < sep)) continue;
+      placedRows.push(y);
       const t = svgEl("text", {
-        class: "gs-price" + (i === spotRow ? " is-spot" : ""),
-        x: labelW - 6, y, "text-anchor": "end",
+        class: "gs-price" + c.cls,
+        x: labelW - 13, y, "text-anchor": "end",
       });
-      t.textContent = px2(k);
+      t.textContent = px2(strikes[c.i]);
       svg.append(t);
-    });
+    }
 
     /* EXPIRY LABELS. Month-day only; the year is the same across an eight-week
        horizon and repeating it four times costs the width the labels need. */
@@ -795,15 +1095,85 @@
       const y = padT + (1 - t) * (strikes.length - 1) * rowH + rowH / 2;
       svg.append(svgEl("line", { class: "gs-spot", x1: plotL, x2: plotL + plotW, y1: y, y2: y }));
     }
-    const markRow = (rowIndex, cls) => {
+    /* THE WALLS POINT AT THEIR ROW; THEY NO LONGER RULE ACROSS IT.
+
+       Each wall was a full-width outlined rect at stroke-width 1.4, so the
+       two of them drew more ink than the cells they were annotating and the
+       grid read as three horizontal rules with a heat map behind them. A
+       marker in the gutter and a tick at the far edge bracket the same row
+       for a fraction of the ink, and the row's price label is guaranteed
+       above, so the reader has three things on one line to follow.
+
+       Filled for the call wall, hollow for the put wall. That is the same
+       non-hue channel the session path uses for its two legs — filled disc,
+       hollow square — and it is why the marker is a shape at all rather than
+       two coloured rules: on a greyscale print or to a deuteranope reader,
+       the celadon rule and the red one were the same rule. */
+    const markWall = (rowIndex, cls) => {
       if (rowIndex < 0) return;
-      const y = yOfRow(rowIndex);
-      svg.append(svgEl("rect", {
-        class: cls, x: plotL, y, width: plotW, height: Math.max(1, rowH - 1),
+      const yc = yOfRow(rowIndex) + Math.max(1, rowH - 1) / 2;
+      const g = svgEl("g", { class: cls });
+      const t = Math.min(5.5, rowH / 2.2);
+      g.append(svgEl("polygon", {
+        class: "gs-wallmark",
+        points: `${plotL - 11},${yc - t} ${plotL - 11},${yc + t} ${plotL - 2},${yc}`,
       }));
+      g.append(svgEl("line", {
+        class: "gs-walltick", x1: plotL + plotW, y1: yc, x2: plotL + plotW + 6, y2: yc,
+      }));
+      svg.append(g);
     };
-    markRow(callRow, "gs-callwall");
-    markRow(putRow, "gs-putwall");
+    markWall(callRow, "gs-callwall");
+    markWall(putRow, "gs-putwall");
+
+    /* THE KEY, in the padding the panel was already reserving and never drew
+       into. Without it "magnitude by opacity" is an encoding with no decoder:
+       the note could say the scale was capped at 670K and a reader still had
+       no way to turn a shade into a number. Both ends of the ramp are
+       labelled and the note names the step, so any cell can be read to within
+       one step. The hatched swatch keys the SIGN channel in the same breath,
+       because that is the other thing the picture cannot say about itself. */
+    if (ramp) {
+      const keyY = padT + strikes.length * rowH + 12;
+      const sw = 15, swH = 9;
+      const rampX = plotL + 30;
+      for (let b = 0; b < RAMP_STEPS; b++) {
+        svg.append(svgEl("rect", {
+          class: "gs-key-sw is-pos", x: rampX + b * sw, y: keyY, width: sw - 1, height: swH,
+          "fill-opacity": RAMP_OPACITY[b].toFixed(3),
+        }));
+      }
+      const lowT = svgEl("text", { class: "gs-key", x: rampX - 4, y: keyY + swH, "text-anchor": "end" });
+      lowT.textContent = compact(ramp.floor);
+      svg.append(lowT);
+      const hiT = svgEl("text", { class: "gs-key", x: rampX + RAMP_STEPS * sw + 3, y: keyY + swH });
+      hiT.textContent = compact(ramp.top);
+      svg.append(hiT);
+
+      const hatchX = rampX + RAMP_STEPS * sw + 3 + compact(ramp.top).length * 6.2 + 10;
+      svg.append(svgEl("rect", {
+        class: "gs-key-sw is-neg", x: hatchX, y: keyY, width: sw - 1, height: swH, "fill-opacity": "0.81",
+      }));
+      svg.append(svgEl("rect", {
+        class: "gs-hatch", x: hatchX, y: keyY, width: sw - 1, height: swH, fill: "url(#gsNeg)",
+      }));
+      const negT = svgEl("text", { class: "gs-key", x: hatchX + sw + 2, y: keyY + swH });
+      negT.textContent = "short";
+      svg.append(negT);
+    }
+
+    /* THE PANEL HAD role="img" AND NO LABEL AT ALL, which is a picture a
+       screen reader announces as "image" and nothing else. The grid itself
+       cannot be read out cell by cell — 126 of them — so the label carries
+       what the legend carries: the band, the levels, and the window. */
+    svg.setAttribute("aria-label",
+      `Dealer gamma by strike and expiry` + (card && card.ticker ? ` for ${card.ticker}` : "") + `. ` +
+      `${strikes.length} strikes from ${px2(lo)} to ${px2(hi)} across ${expiries.length} expiries ` +
+      `from ${expiries[0]} to ${expiries[expiries.length - 1]}. ` +
+      (s !== null ? `Spot ${px2(s)}. ` : "") +
+      (callWall ? `Call wall ${px2(callWall.strike)}. ` : "") +
+      (putWall ? `Put wall ${px2(putWall.strike)}. ` : "") +
+      `Darker cells carry more gamma; hatched cells are short gamma.`);
 
     host.append(svg);
 
@@ -815,18 +1185,51 @@
     if (s !== null) pairs.push(["Spot", px2(s)]);
     if (callWall) pairs.push(["Call wall", px2(callWall.strike)]);
     if (putWall) pairs.push(["Put wall", px2(putWall.strike)]);
+    /* WHERE THE CONCENTRATION IS, IN WORDS. The picture can now be segmented
+       by eye, but the single densest cell is the one reading a trader wants
+       to carry away and it is the one a shade cannot state exactly. Both
+       coordinates, because a strike without its expiry is the profile panel
+       and an expiry without its strike is the roll-off panel — the joint is
+       the only thing this panel knows that neither of those does. */
+    let peakAt = null;
+    for (let i = 0; i < strikes.length; i++) {
+      for (let j = 0; j < expiries.length; j++) {
+        const v = grid[i][j];
+        if (v === null || v === 0) continue;
+        if (peakAt === null || Math.abs(v) > Math.abs(peakAt.v)) peakAt = { v, i, j };
+      }
+    }
+    if (peakAt) {
+      pairs.push(["Densest cell",
+        px2(strikes[peakAt.i]) + " · " + String(expiries[peakAt.j]).slice(5) +
+        (peakAt.v < 0 ? " short" : " long")]);
+    }
     const regime = card && card.regime && card.regime.label;
     if (regime) pairs.push(["Regime", String(regime).replace(/_/g, " ")]);
     host.append(statList(pairs));
 
     const notes = [];
-    notes.push("Colour is capped at " + compact(scaleCap) +
-      (panel.clipped > 0
-        ? "; " + (panel.clipped === 1
-          ? "one cell runs past it (peak " + compact(panel.peak) + ") and is marked"
-          : panel.clipped + " cells run past it (peak " + compact(panel.peak) + ") and are marked") +
-          " with a slash"
-        : ""));
+    /* THE KEY'S NUMBERS, IN PROSE, so the two cannot drift apart and so a
+       reader who is reading rather than looking still gets the decoder. */
+    if (ramp) {
+      notes.push("Shading steps by a factor of " + (ramp.factor % 1 === 0 ? ramp.factor : ramp.factor.toFixed(1)) +
+        " from " + compact(ramp.floor) + " up to " + compact(ramp.top) + ", darker for more gamma");
+    } else {
+      /* A CARD WHOSE SURFACE PUBLISHES NO SCALE still draws its cells, and
+         every one of them at the same weight — which is a picture that looks
+         like a measurement of uniformity. Say that shade carries nothing here
+         rather than let a reader decode a ramp that was never built. */
+      notes.push("No colour scale could be measured for this grid, so shade carries no magnitude on it");
+    }
+    if (isNum(scaleCap) !== null && scaleCap > 0) {
+      notes.push("Colour is capped at " + compact(scaleCap) +
+        (panel.clipped > 0
+          ? "; " + (panel.clipped === 1
+            ? "one cell runs past it (peak " + compact(panel.peak) + ") and is marked"
+            : panel.clipped + " cells run past it (peak " + compact(panel.peak) + ") and are marked") +
+            " with a slash"
+          : ""));
+    }
     /* Only the dimension that is actually windowed is mentioned. "Showing 6 of
        6 expiries" is noise that trains a reader to skip the sentence, and the
        sentence exists so that "8 of 40" is not skipped. */
@@ -838,8 +1241,11 @@
       windowed.push(panel.strikesShown + " of " + panel.strikesTotal + " strikes");
     }
     if (windowed.length) notes.push("Showing " + windowed.join(" and "));
-    notes.push("Short-gamma cells are hatched as well as coloured; blank cells are strikes " +
-      "the vendor returned no gamma for, which is not the same as none");
+    /* THREE STATES, NAMED, because two of them used to look alike and the
+       third was drawn with a sign it does not have. */
+    notes.push("Short-gamma cells are hatched as well as coloured; a cell the vendor measured " +
+      "at exactly zero carries a centre tick, and a blank cell is a strike and expiry it " +
+      "returned nothing for at all — not measured and measured at nothing are different facts");
     host.append(el("p", "fc-note", notes.join(". ") + "."));
   }
 
@@ -1160,6 +1566,44 @@
 
   /* ---------- session path ------------------------------------------ */
 
+  /**
+   * THE PANEL DRAWS BOTH SERIES, ON TWO SCALES THAT SHARE ONLY THEIR ZERO.
+   *
+   * buildPath has always emitted `series` as [cumulative net delta,
+   * cumulative net premium] PAIRS, and this renderer read `p[0]` and dropped
+   * the second half of every row: ~78 premium points shipped on every card,
+   * paid for in ingest bytes, and never once drawn. The same shape as the
+   * `vol` block that no renderer read, and as assignedReturn on the desk rows.
+   *
+   * The premium leg is worth its ink because DELTA AND PREMIUM DIVERGING
+   * INTRADAY IS THE SPREAD-VERSUS-DIRECTIONAL TELL: money that moves premium
+   * without moving net delta is being spent on structure — verticals, calendars,
+   * anything with two legs — rather than on a direction. A reader with only the
+   * delta curve cannot see that, and the two end-of-day totals below the chart
+   * cannot show WHEN it happened.
+   *
+   * TWO SCALES, STATED, BECAUSE THE UNITS ARE NOT COMMENSURABLE. One leg is
+   * contracts of delta, the other is dollars. Plotting them against one shared
+   * axis would let a reader compare their heights, which means nothing at all —
+   * the identical mistake the gamma panel's note apologises for between its
+   * bars and its cumulative curve. Each leg is normalised by its OWN largest
+   * absolute value, and the two share exactly one thing: the zero rule, which
+   * is the one place they must agree, because zero means "nothing net" in both
+   * units. Both normalisations are printed under the chart.
+   *
+   * IDENTITY WITHOUT HUE. Delta is a solid stroke ending in a filled disc;
+   * premium is dashed and ends in a hollow square; the legend swatches are
+   * drawn with the same strokes rather than described in words. The gamma
+   * surface hatches its short-gamma cells for this reason and says why —
+   * colour is the LAST channel here, not the first — and this panel had been
+   * relying on hue alone to distinguish a positive run from a negative one.
+   *
+   * The stroke styling is set as PRESENTATION ATTRIBUTES rather than left to
+   * the stylesheet. A path with no CSS defaults to fill:black, stroke:none —
+   * a solid blob, not a line — so a renderer that ships before its rules do
+   * would draw something actively wrong rather than something plain. Any CSS
+   * rule of the same name still wins over an attribute.
+   */
   function renderPath(host, panel) {
     const question = "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
@@ -1167,35 +1611,219 @@
     }
     panelHead(host, question);
 
-    const series = panel.series.map((p) => p[0]);
+    /* A row is a PAIR. A card old enough to carry bare numbers instead is read
+       as delta-only rather than crashing on `undefined[1]` — published cards
+       outlive the code that reads them. */
+    const rows = panel.series.map((r) => (Array.isArray(r) ? r : [r, null]));
+    const delta = rows.map((r) => isNum(r[0]));
+    const prem = rows.map((r) => isNum(r[1]));
+    if (delta.filter((v) => v !== null).length < 2) {
+      return deadPanel(host, question, "the tape carried no usable cumulative delta");
+    }
+
+    /* WHY A ZERO PREMIUM SERIES IS NOT DRAWN. A flat line along the axis is
+       indistinguishable from a measured series that happened to end where it
+       began, so it reads as a finding. Absence is stated in words instead —
+       the same rule that keeps a missing ATR from drawing a zero-width band. */
+    const premMeasured = prem.filter((v) => v !== null);
+    const premPublished = premMeasured.length >= 2;
+    const premMoved = premMeasured.some((v) => v !== 0);
+    const drawPrem = premPublished && premMoved;
+
     const W = Math.max(280, Math.min(760, host.clientWidth || 560));
-    const H = 120, pad = 10;
-    const lo = Math.min(...series, 0), hi = Math.max(...series, 0);
-    const span = hi - lo || 1;
-    const x = (i) => pad + (i / (series.length - 1)) * (W - 2 * pad);
-    const y = (v) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+    const H = 132, pad = 10;
+    const x = (i) => pad + (i / (rows.length - 1)) * (W - 2 * pad);
+
+    // Each leg normalised by its own largest |value|, so each lands in [-1, 1]
+    // with zero fixed at zero — which is what makes one shared zero rule
+    // honest while the magnitudes stay separately scaled.
+    const scaleOf = (vals) => Math.max(...vals.filter((v) => v !== null).map(Math.abs), 0);
+    const dScale = scaleOf(delta);
+    const pScale = drawPrem ? scaleOf(prem) : 0;
+    const unit = (v, s) => (v === null || !(s > 0) ? null : v / s);
+    const dU = delta.map((v) => unit(v, dScale));
+    const pU = drawPrem ? prem.map((v) => unit(v, pScale)) : [];
+    const all = dU.concat(pU).filter((v) => v !== null);
+    const uLo = Math.min(0, ...all), uHi = Math.max(0, ...all);
+    const uSpan = uHi - uLo || 1;
+    const y = (u) => pad + (1 - (u - uLo) / uSpan) * (H - 2 * pad);
 
     const svg = svgEl("svg", {
       class: "fp", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img",
     });
-    svg.append(svgEl("line", { class: "fp-zero", x1: pad, x2: W - pad, y1: y(0), y2: y(0) }));
-    const d = series.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+    svg.append(svgEl("line", { class: "fp-zero", x1: pad, x2: W - pad, y1: y(0), y2: y(0),
+      stroke: "currentColor", "stroke-opacity": 0.35, "stroke-dasharray": "3 3" }));
+
+    // A break in the series is a break in the line, not a segment drawn
+    // through a value nobody measured.
+    const dOf = (us) => {
+      let d = "", open = false;
+      us.forEach((u, i) => {
+        if (u === null) { open = false; return; }
+        d += (open ? "L" : "M") + x(i).toFixed(1) + " " + y(u).toFixed(1) + " ";
+        open = true;
+      });
+      return d.trim();
+    };
+    const lastOf = (us) => { for (let i = us.length - 1; i >= 0; i--) if (us[i] !== null) return i; return -1; };
+
+    if (drawPrem) {
+      // Drawn UNDER the delta line: delta is the panel's subject, premium its
+      // context, and the one that ends up on top is the one that reads as the
+      // measurement when they cross.
+      svg.append(svgEl("path", {
+        class: "fp-prem", d: dOf(pU), fill: "none", stroke: "currentColor",
+        "stroke-opacity": 0.75, "stroke-width": 1.4, "stroke-dasharray": "5 3",
+        "stroke-linejoin": "round",
+      }));
+      const li = lastOf(pU);
+      if (li >= 0) {
+        svg.append(svgEl("rect", {
+          class: "fp-prem-end", x: x(li) - 3, y: y(pU[li]) - 3, width: 6, height: 6,
+          fill: "none", stroke: "currentColor", "stroke-width": 1.4,
+        }));
+      }
+    }
+
+    const dLast = lastOf(dU);
     svg.append(svgEl("path", {
-      class: "fp-line " + (series[series.length - 1] >= 0 ? "is-pos" : "is-neg"), d,
+      class: "fp-line " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"), d: dOf(dU),
+      fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linejoin": "round",
     }));
+    if (dLast >= 0) {
+      svg.append(svgEl("circle", {
+        class: "fp-line-end " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"),
+        cx: x(dLast), cy: y(dU[dLast]), r: 2.6, fill: "currentColor",
+      }));
+    }
+
+    /* THE CENTROID IS A TIME, so it is drawn on the time axis rather than
+       printed only as a percentage. It is the movement-weighted mean minute of
+       the session: a rule near the left edge with a curve that ends high says
+       the work was done early and the tape merely held; a rule near the right
+       edge under the same curve is a late arrival. */
+    const centroid = isNum(panel.centroid);
+    if (centroid !== null) {
+      const cx = Number((pad + Math.min(1, Math.max(0, centroid)) * (W - 2 * pad)).toFixed(1));
+      svg.append(svgEl("line", {
+        class: "fp-centroid", x1: cx, x2: cx, y1: pad, y2: H - pad,
+        stroke: "currentColor", "stroke-opacity": 0.5, "stroke-width": 1,
+        "stroke-dasharray": "1 3",
+      }));
+    }
+
     svg.setAttribute("aria-label",
-      `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}.`);
+      `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}` +
+      (drawPrem ? `, and cumulative net premium ending at ${money(panel.netPremium)}, ` +
+        `drawn on its own scale and sharing only the zero rule` : "") +
+      (centroid !== null ? `. Movement-weighted mean minute at ${Math.round(centroid * 100)}% of the session` : "") +
+      ".");
     host.append(svg);
 
+    /* THE LEGEND CARRIES THE STROKES THEMSELVES, not a colour word. A reader
+       who cannot separate the two hues — or who printed the card — matches the
+       dash pattern instead, and the scale each leg was normalised by is stated
+       beside it rather than left as an axis nobody would read. */
+    /* A PARAGRAPH RATHER THAN A LIST, because nothing in this stylesheet
+       resets list markers: a <ul> with no rules of its own renders as bulleted,
+       indented text, and a legend that has to wait for a stylesheet to stop
+       looking broken is a legend that ships broken. A note-classed paragraph
+       is already styled and already wraps. */
+    const legend = el("p", "fc-note fp-legend");
+    const key = (draw, text) => {
+      const span = el("span", "fp-key");
+      const sw = svgEl("svg", { class: "fp-swatch", width: 26, height: 10,
+        viewBox: "0 0 26 10", "aria-hidden": "true" });
+      draw(sw);
+      span.append(sw);
+      span.append(el("span", "fp-key-t", text));
+      return span;
+    };
+    legend.append(key((sw) => {
+      sw.append(svgEl("line", { x1: 1, y1: 5, x2: 20, y2: 5, stroke: "currentColor",
+        "stroke-width": 1.8 }));
+      sw.append(svgEl("circle", { cx: 22, cy: 5, r: 2.6, fill: "currentColor" }));
+    }, `Net delta — solid; \u00b1${compact(dScale)} contracts at full deflection. `));
+    if (drawPrem) {
+      legend.append(key((sw) => {
+        sw.append(svgEl("line", { x1: 1, y1: 5, x2: 18, y2: 5, stroke: "currentColor",
+          "stroke-width": 1.4, "stroke-dasharray": "5 3", "stroke-opacity": 0.75 }));
+        sw.append(svgEl("rect", { x: 20, y: 2, width: 6, height: 6, fill: "none",
+          stroke: "currentColor", "stroke-width": 1.4 }));
+      }, `Net premium — dashed; \u00b1${money(pScale)} at full deflection. `));
+    }
+    if (centroid !== null) {
+      legend.append(key((sw) => {
+        sw.append(svgEl("line", { x1: 10, y1: 0, x2: 10, y2: 10, stroke: "currentColor",
+          "stroke-width": 1, "stroke-dasharray": "1 3", "stroke-opacity": 0.5 }));
+      }, "Movement-weighted mean minute."));
+    }
+    host.append(legend);
+
+    /* THE THREE PATH NUMBERS, which are the whole of family D and which this
+       panel could not state until they were published. A card built before
+       they were is shown an em dash and told so below; it is never shown a
+       zero, because 0 persistence and a 0.5 centroid are both real and
+       unusual readings. */
+    const hasSig = panel && "persistence" in panel;
+    const persistence = isNum(panel.persistence);
+    const concentration = isNum(panel.concentration);
+    const share = (v) => (v === null ? DASH : Math.round(v * 100) + "%");
     host.append(statList([
       ["Net delta", compact(panel.netDelta)],
       ["Net premium", money(panel.netPremium)],
       ["Minutes on tape", String(panel.minutes)],
+      ["Minutes with the direction", share(persistence)],
+      ["Busiest 5% of minutes", share(concentration)],
+      ["Weighted mean minute", share(centroid)],
     ]));
-    host.append(el("p", "fc-note",
+
+    /* THE READING, not the method: what the three numbers say about this
+       session, each against the baseline its own definition supplies. Nothing
+       here is thresholded into an adjective — the baselines are 50% for a
+       directionless tape and 5% for a uniform one, both of which come from the
+       estimators themselves and neither of which is a parameter anybody chose. */
+    if (persistence !== null || concentration !== null || centroid !== null) {
+      const reading = el("p", "fc-reading");
+      reading.textContent =
+        (persistence !== null
+          ? `${Math.round(persistence * 100)}% of minutes moved with the day's net direction, ` +
+            `against 50% for a tape with no direction at all. `
+          : "") +
+        (concentration !== null
+          ? `The busiest 5% of minutes carried ${Math.round(concentration * 100)}% of the movement — ` +
+            `${(concentration / 0.05).toFixed(1)}× what a uniform session would put there. `
+          : "") +
+        (centroid !== null
+          ? `The movement-weighted mean minute sits at ${Math.round(centroid * 100)}% of the session.`
+          : "");
+      host.append(reading);
+    }
+
+    const note = el("p", "fc-note");
+    note.textContent =
       "The curve is the running total, so its shape is the accumulation: a straight " +
       "climb is a worked order, a single step is one print. Net premium is call buying " +
-      "minus put buying — positive put premium is put BUYING, which is bearish."));
+      "minus put buying — positive put premium is put BUYING, which is bearish. " +
+      (drawPrem
+        ? "The two legs are in DIFFERENT UNITS — contracts of delta against dollars — so " +
+          "each is normalised by its own largest reading and they share only the zero rule. " +
+          "Compare their SHAPES, never their heights: premium moving while delta does not is " +
+          "money spent on structure rather than on a direction. "
+        : premPublished
+        ? "The premium leg is not drawn: the tape recorded no net premium in either direction " +
+          "this session, and a flat line along the axis would read as a measurement rather " +
+          "than as an absence. "
+        : "The premium leg is not drawn: this card was built before the premium series was " +
+          "published, and it returns on the next published session. ") +
+      (hasSig
+        ? "Persistence counts minutes, not size, so a steady worked order and one spike can " +
+          "share an end-of-day total and separate here."
+        : "This card was built before the path signature was published, so persistence, " +
+          "concentration and the weighted mean minute are shown as unmeasured rather than " +
+          "as zeros — a zero concentration is the flattest session possible and a 0.5 " +
+          "centroid is a real reading. They return on the next published session.");
+    host.append(note);
   }
 
   /* ---------- congress ---------------------------------------------- */
@@ -1340,6 +1968,63 @@
       ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
       ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
     ]));
+
+    /* THE TWO REASONS THE QUALITY GAUGE IS LOW, spelled out.
+    
+       O is a single digit and it is a PRODUCT of four oriented axes, so a 38
+       can mean "this name's flow is lottery tickets", "this participant is
+       trading vol, not direction", or neither of those and something else
+       entirely. Those readings call for opposite handling — one says the
+       direction is real but the sizing is a punt, the other says there is no
+       directional view to read at all — and until now the card folded both
+       into that digit and the reader could not recover either.
+    
+       Both are ratios of gross sums with no free parameter. otmShare is in
+       [0, 1] by construction (|otm directional delta| <= |directional delta|
+       row by row); vegaTilt is gross vega flow per unit of gross delta flow,
+       unbounded above, and its floor of zero is "every dollar of this flow was
+       spent on direction". Neither is thresholded into an adjective here: the
+       scorer ranks them cross-sectionally, so no absolute cut is identified,
+       and inventing one would be exactly the free parameter this project has
+       refused elsewhere. */
+    const quality = card.quality;
+    if (!quality) {
+      if (!legacy) host.append(el("p", "fc-note",
+        "The two quality readings behind the O gauge — the out-of-the-money share of " +
+        "directional flow and the vega tilt — are not published on this card. It was " +
+        "built before they were, so they are shown as unmeasured rather than as zeros: " +
+        "zero is the BEST possible reading of both once they are oriented, and imputing " +
+        "it would reward a name for having no data. They return on the next published " +
+        "session."));
+    } else {
+      const otm = isNum(quality.otmShare);
+      const tilt = isNum(quality.vegaTilt);
+      host.append(statList([
+        ["OTM share of directional flow", otm === null ? DASH : Math.round(otm * 100) + "%"],
+        ["Vega flow per unit delta", tilt === null ? DASH : neg(tilt.toFixed(2))],
+      ]));
+      host.append(el("p", "fc-note",
+        (otm === null && tilt === null
+          ? "Neither quality reading is measurable on this name: there was no directional " +
+            "delta flow to divide by, which is \"no directional view\", never infinite " +
+            "conviction — so both are withheld rather than floored at their best value. "
+          : "") +
+        (otm !== null
+          ? `${Math.round(otm * 100)}% of this name's directional delta flow traded ` +
+            `out-of-the-money. A high share is lottery tickets — cheap, convex, and ` +
+            `frequently written by someone with no view at all; a low one is near-money ` +
+            `conviction that has to be paid for. `
+          : "") +
+        (tilt !== null
+          ? `Each unit of gross delta flow came with ${neg(tilt.toFixed(2))} of gross vega ` +
+            `flow. A high tilt says this participant is trading VOLATILITY rather than ` +
+            `direction, which is the cleanest reason on the card to suppress a directional ` +
+            `read rather than to misinterpret it as a view. `
+          : "") +
+        "Both enter the score only through the O gauge, ranked against the rest of the " +
+        "board rather than against a fixed cut — there is no identified threshold at " +
+        "which a share becomes \"too high\"."));
+    }
 
     if (legacy) {
       host.append(el("p", "fc-note",

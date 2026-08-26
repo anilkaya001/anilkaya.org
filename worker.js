@@ -2166,6 +2166,8 @@ async function route(request, env, url, ctx) {
     "/flows/": (u) => FLOWS_PAGES.overviewPage({ username: u }),
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
     "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
+    "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
+    "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
     "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
@@ -2182,7 +2184,8 @@ async function route(request, env, url, ctx) {
 
   /* Canonical trailing slash for every gated page, so a link without one is a
      redirect rather than a 404 handed to the static bundle. */
-  if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk") {
+  if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
+      || path === "/flows/watch" || path === "/flows/history") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2193,7 +2196,7 @@ async function route(request, env, url, ctx) {
     // and D1:Edit permissions are ACCOUNT-scoped, so a CI credential could
     // reach the live learning database. A bearer token scoped to this one
     // route cannot.
-    requireMethod(request, ["GET", "POST"]);
+    requireMethod(request, ["GET", "POST", "DELETE"]);
     if (!env.FLOWS_INGEST_TOKEN) throw new HttpError(503, "unavailable", "Ingest is not configured");
 
     const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -2209,9 +2212,23 @@ async function route(request, env, url, ctx) {
     // primary key, and the read path builds the same key from a query
     // parameter, so anything the two sides could disagree about is a bug.
     const card = key.startsWith("card:") ? key.slice(5) : null;
+    /* EVERY KEY SHAPE THE STORE ACCEPTS, enumerated. This string becomes a
+       primary key and the read path rebuilds it from a query parameter, so
+       anything the two sides could disagree about is a bug that presents as
+       missing data rather than as an error.
+
+       `board:long:2026-08-26` is the dated, immutable copy of a session's
+       board. The live board keeps its undated key so the reader path is
+       unchanged; the dated copy exists because the undated one is overwritten
+       every morning, which meant the product could never answer "what did this
+       say last week" — or measure whether it had ever been right.
+
+       The date is matched by SHAPE, not parsed. A well-formed but impossible
+       date would only ever produce a row nothing reads; a loose pattern would
+       hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short)$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2227,6 +2244,38 @@ async function route(request, env, url, ctx) {
       const stored = await readFlowsPayload(env, key);
       if (!stored) return json({ key, status: "pending" });
       return passthrough(stored);
+    }
+
+    /* DELETE EXISTS FOR EXACTLY ONE CALLER AND ONE KEY SHAPE.
+
+       Retaining a dated copy of every board is what makes the track record
+       possible, and an archive with no prune is a table that grows forever
+       against a write budget shared with a live learning app. So the pipeline
+       sweeps its own old keys — and this is the route it sweeps through.
+
+       IT CAN ONLY EVER REMOVE A DATED BOARD. The bearer that reaches here can
+       already overwrite the live board, so this is not a privilege boundary;
+       it is a blast-radius one. A prune with an off-by-one in its date
+       arithmetic that could name `board:long` would take the product down
+       silently — the read path would answer `pending` and the section would
+       look like it had simply never run. Narrowing the pattern here means the
+       worst a broken sweep can do is delete history nobody is reading yet.
+
+       Nothing matched is 404 and NOT an error: the sweep names a fixed skirt
+       of days past the retention edge so a month of downtime self-heals, and
+       in steady state almost every name it tries is a day that was never
+       written. The caller treats 404 as an ordinary empty day. */
+    if (request.method === "DELETE") {
+      if (!/^board:(long|short):\d{4}-\d{2}-\d{2}$/.test(key)) {
+        throw new HttpError(400, "undeletable_key", "Only dated boards can be removed");
+      }
+      await ensureFlowsTables(env);
+      const result = await env.DB.prepare(
+        "DELETE FROM flows_payload WHERE id = ?"
+      ).bind(key).run();
+      const removed = result && result.meta ? Number(result.meta.changes) || 0 : 0;
+      if (!removed) return json({ key, removed: 0, status: "absent" }, 404);
+      return json({ ok: true, key, removed });
     }
 
     const payload = new TextDecoder().decode(
@@ -2253,10 +2302,56 @@ async function route(request, env, url, ctx) {
     if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
 
     if (path === "/api/flows/board") {
-      const side = url.searchParams.get("side") === "short" ? "short" : "long";
+      /* THREE BOARDS, ONE ROUTE. `watch` holds the names inside the dead band
+         — fully scored, published on neither side, and until now reported as
+         nothing but an integer. It is the same shape as the other two and
+         reaches the reader down the same path, so it is a third value of the
+         same parameter rather than a second route that would drift from this
+         one. Anything not recognised falls back to `long`, so a hand-edited
+         URL cannot mint a key. */
+      const raw = url.searchParams.get("side");
+      const side = raw === "short" || raw === "watch" ? raw : "long";
       const stored = await readFlowsPayload(env, "board:" + side);
       if (stored === null) {
         return json({ side, rows: [], generatedAt: null, status: "pending" });
+      }
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/movers" || path === "/api/flows/sectors") {
+      /* TWO MARKET-WIDE READINGS, both precomputed and both served as bytes.
+
+         Everything else in this section is bottom-up: a residual WITHIN the
+         day's cross-section, with sector and log-cap deliberately neutralised
+         out of it. So the board could say twelve names lean bullish and never
+         say whether that was breadth or one sector, and it could not say
+         whether the tape itself was risk-on. These two answer that.
+
+         `movers` costs the pipeline nothing — the screener already returns the
+         whole universe with price and change, and the pipeline discarded all
+         but the enriched sixty. `sector:trix` costs eleven candle calls of a
+         hundred-odd headroom, because a sector reading is one call per SECTOR
+         rather than one per name, which is what makes a top-down layer
+         affordable at all where a per-name one would not be. */
+      const key = path.endsWith("/movers") ? "movers" : "sector:trix";
+      const stored = await readFlowsPayload(env, key);
+      if (stored === null) return json({ status: "pending", rows: [] });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/record") {
+      /* THE SIGNAL'S OWN TRACK RECORD, scored in the pipeline and served here
+         as one blob like everything else. It is emphatically NOT computed on
+         this path: measuring it means reading every retained board and joining
+         it to later closes, which is exactly the parsing this architecture
+         exists to keep out of a 10ms CPU budget.
+
+         Absent is the ORDINARY state right after this ships, not a fault.
+         Retention begins with the first pipeline run after deploy, so there is
+         genuinely nothing to score yet, and the page says so. */
+      const stored = await readFlowsPayload(env, "record");
+      if (stored === null) {
+        return json({ status: "pending", horizons: [], sessions: 0 });
       }
       return passthrough(stored);
     }

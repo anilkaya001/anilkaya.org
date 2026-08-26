@@ -59,7 +59,7 @@ export const CARD_SCHEMA_VERSION = 2;
    belong to the scorer too, and the expiry-gamma leg names have already been
    wrong once in two places at once. Two copies of a convention are two chances
    to disagree about it. */
-import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg } from "./flows-features.js";
+import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature } from "./flows-features.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -511,12 +511,51 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
     return [Math.round(last.d), Math.round(last.p)];
   });
 
+  /* THE SHAPE OF THE ACCUMULATION, PUBLISHED AS NUMBERS AND NOT ONLY AS A CURVE.
+     
+     pathSignature's own docstring says why the panel exists: "two names with
+     the same end-of-day net delta and different paths mean opposite things",
+     steady accumulation against the tape versus one spike already in the
+     price. Those three numbers ARE that distinction, they drive the D axis of
+     the score and the persistence term of conviction — and the card published
+     none of them, so the panel could show the reader a curve and three
+     end-of-day totals and could not state the one thing it is for. This is the
+     same failure as the `vol` block that was built, serialised and shipped on
+     every card with no renderer: computed, paid for, unreadable.
+
+     RECOMPUTED FROM THE SAME ROWS rather than plumbed through from the
+     scorer's feature object, for the reason the import block already gives:
+     two copies of a convention are two chances to disagree about it. The
+     scorer reads pathSignature on these very ticks, so recomputing costs one
+     pass over an array already in memory and guarantees the number on the card
+     is the number in the score.
+
+     NULL WHEN THE TAPE DID NOT MOVE. pathSignature falls back to
+     persistence 0, concentration 0 and centroid 0.5 on a tape it cannot
+     measure, which is correct for a cross-sectional column and is exactly the
+     manufactured extreme this file's first rule forbids on a card: 0.5 is
+     "the day's weight sat precisely at midday", a real and unusual reading,
+     and 0 concentration is the flattest session possible. A tape whose every
+     minute is zero has no direction to persist in and no busiest minute, so
+     all three are withheld. */
+  const moved = rows.reduce((a, r) => a + Math.abs(r.d), 0);
+  const sig = moved > 0 ? pathSignature(tickRows) : null;
+
   return ok({
     series,
     netDelta: Math.round(cumD),
     netPremium: Math.round(cumP),
     minutes: rows.length,
     startedAt: new Date(first).toISOString(),
+    // Share of minutes moving WITH the day's net direction. 0.5 is a
+    // directionless tape; 1 is a buyer who never let up.
+    persistence: sig ? sig.persistence : null,
+    // Share of absolute movement contributed by the busiest 5% of minutes.
+    // 0.05 is a perfectly uniform session, so the reading is read against
+    // that baseline rather than against zero.
+    concentration: sig ? sig.concentration : null,
+    // Movement-weighted mean minute, 0 at the open and 1 at the close.
+    centroid: sig ? sig.centroid : null,
   }, sessionDate);
 }
 
@@ -625,6 +664,29 @@ export function buildCard({
       breadth: numOrNull(f.breadth),
       coverage: numOrNull(f.coverage),
       gate: numOrNull(f.gate),
+    },
+    /* THE TWO REASONS THE GATE SUPPRESSED THIS NAME, as numbers rather than
+       as one digit under the O gauge.
+       
+       positioningQuality computes both, the scorer gates on both, and POLARITY
+       has carried an entry for each since before this line existed — a
+       reserved entry for a field the card never published, which is the shape
+       this repository's unrendered quantities keep taking. Folded into O they
+       are unrecoverable: a name whose flow is 95% out-of-the-money lottery
+       tickets and a name whose participant is trading vol rather than
+       direction reach the reader as the same middling gauge, and the two call
+       for opposite handling.
+
+       Both are unit-free ratios of gross sums with no free parameter:
+       otmShare is |otm directional delta| over |directional delta|, in [0,1]
+       by construction, and vegaTilt is gross vega flow per unit of gross delta
+       flow. numOrNull, not zero — positioningQuality returns null when there
+       is no directional flow to measure, and zero is the TOP of the otmShare
+       column once it is oriented, so imputing it rewards a name for having no
+       data. That exact substitution has already shipped here twice. */
+    quality: {
+      otmShare: numOrNull(f.otmShare),
+      vegaTilt: numOrNull(f.vegaTilt),
     },
     regime: f.netGamma !== undefined
       ? {
