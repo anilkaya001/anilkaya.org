@@ -142,6 +142,73 @@ const idx = (cal) => new Map(cal.map((d, i) => [d, i]));
   close(rec.sessions[2].ls, 0.03, "and each row's spread is the arithmetic of its own closes", 1e-4);
 }
 
+/* ---------- the selection epoch: two experiments, never one mean --- */
+{
+  /* THE DEFECT THIS PINS IS A CONSEQUENCE OF WIDENING THE BOARD.
+
+     A session's long-minus-short return is the return of whatever names that
+     board published, and which names it published is decided by a selection
+     rule. On 2026-08-26 that rule changed — from the extremes of a rough tilt
+     composite to a stated market-cap cohort — so boards on either side of the
+     date score two different populations. Same headings, same units, and a
+     mean across them that is finite, plausible, and answers no question.
+
+     The scorer reports them separately. That is the entire mitigation, and it
+     is worth more than a schema bump would be: bumping the version would zero
+     126 days of retained archive to say a sentence that fits in a footnote. */
+  const cal = Array.from({ length: 8 }, (_, i) => `2026-08-0${i + 1}`);
+  const mk = (d, aPx) => ([
+    { d, side: "long", rows: [{ t: "A", px: aPx }] },
+    { d, side: "short", rows: [{ t: "C", px: 200 }] },
+  ]);
+  // Two sessions before the epoch, two on or after it.
+  const boards = [
+    ...mk("2026-08-01", 100), ...mk("2026-08-02", 100),
+    ...mk("2026-08-05", 100), ...mk("2026-08-06", 100),
+  ];
+  const closes = closesOf({
+    A: { "2026-08-02": 110, "2026-08-03": 110, "2026-08-05": 110,
+         "2026-08-06": 101, "2026-08-07": 101, "2026-08-08": 101 },
+    C: { "2026-08-02": 200, "2026-08-03": 200, "2026-08-05": 200,
+         "2026-08-06": 200, "2026-08-07": 200, "2026-08-08": 200 },
+  });
+  const epoch = "2026-08-05";
+  const rec = scoreSessions(boards, closes, cal, { horizons: [1], statedK: 1, epoch });
+
+  eq(rec.epoch, epoch, "the epoch rides along with the numbers it partitions");
+  eq(rec.retained, 4, "every retained session is still counted — nothing is discarded");
+  eq(rec.epochRetained, 2, "two sessions under the current rule");
+  eq(rec.priorRetained, 2, "and two before it");
+
+  const h = rec.horizons.find((x) => x.k === 1);
+  eq(h.n, 2, "the headline mean counts ONLY sessions under the current rule");
+  eq(h.priorN, 2, "the earlier sessions are reported beside it, under their own count");
+
+  /* The two halves were built to differ by an order of magnitude: +10% before
+     the epoch, +1% after. A pooled mean would land near +5.5% — a number
+     belonging to neither population and visibly wrong here by construction. */
+  close(h.ls, 0.01, "the current mean is the current population's, undiluted", 1e-9);
+  close(h.prior, 0.10, "and the prior mean is the prior population's", 1e-9);
+  ok(Math.abs(h.ls - 0.055) > 0.01,
+     "neither is the pooled average of the two — which is the number this partition exists to never publish");
+
+  /* NO EPOCH, NO SECOND SERIES. A `prior` key that is always present but
+     usually null invites a renderer to draw an empty second line forever. */
+  const flat = scoreSessions(boards, closes, cal, { horizons: [1], statedK: 1 });
+  ok(!("prior" in flat.horizons[0]) && !("priorN" in flat.horizons[0]),
+     "with no epoch the horizon row carries no prior keys at all");
+  eq(flat.epoch, null, "and reports no epoch");
+  eq(flat.horizons[0].n, 4, "pooling all four sessions, which is the pre-existing behaviour unchanged");
+
+  const allAfter = scoreSessions(boards, closes, cal, { horizons: [1], statedK: 1, epoch: "2020-01-01" });
+  ok(!("prior" in allAfter.horizons[0]),
+     "an epoch with nothing before it also draws no second series — the key appears only when it has something to say");
+  eq(allAfter.priorRetained, 0, "though the count is still published, so the page can say 'none'");
+
+  ok(RECORD_NOTES.epoch.includes("different population"),
+     "and the reason is published in words beside the numbers");
+}
+
 /* ---------- featureColumnsOf: schema-driven, with two exclusions -- */
 {
   const cols = featureColumnsOf({
@@ -259,4 +326,5 @@ const idx = (cal) => new Map(cal.map((d, i) => [d, i]));
 console.log(`✓ flows-record: ${checks} assertions — a calendar that skips what was never open, ` +
   `attrition excluded from every mean and counted beside it, a spread that refuses one leg, ` +
   `horizons that count sessions rather than rows, and an IC that is Spearman by construction ` +
-  `with null-and-reason where there is nothing to measure`);
+  `with null-and-reason where there is nothing to measure, and a selection epoch that 
+  reports two populations separately rather than averaging them into one hit rate`);

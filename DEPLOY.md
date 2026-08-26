@@ -537,6 +537,89 @@ allows 10 ms of CPU per invocation including cron, and the daily job makes
 hundreds of Unusual Whales calls. The Worker only verifies a cookie and hands
 back a stored string.
 
+#### 10.5a Which names the board sees, and why that is a correctness surface
+
+On 2026-08-26 the live board published **eleven names**. Every stage that
+produced that number was defensible on its own:
+
+```
+ 264 screened -> 205 eligible -> 190 past the earnings gate
+->  60 enriched ->  23 clear the liquidity floor ->  11 published
+```
+
+Two stages were the cause, and neither was the board size.
+
+**The screener cap.** `/api/screener/stocks` returns at most ~50 rows and
+accepts no `limit`, `page` or `offset`. The band ladder IS the pagination, so
+its length is the ceiling on how much of the market can be seen at all — six
+bands capped the entire investable universe at 300 names before one filter ran.
+Worse, the first band (`$1-3B`, a 3x span) was saturated at 50 on every run, so
+the small-cap end was truncated **silently**: the log prints what each band
+returned, and a truncated band returns exactly the same 50 as a complete one.
+It is now a generated geometric ladder of 32 bands at ratio 1.3, with equal
+ratio rather than equal width because listed companies are roughly log-uniform
+in market cap — equal ratio spreads the cap's pressure evenly instead of
+saturating the bottom and wasting the top. **Bands that return a full page are
+now counted and reported as `CAP`**; that line is the only evidence of
+truncation there has ever been.
+
+**The enrichment pool, which is the subtler one.** Enrichment costs five calls
+a name, so the pool was 60 — thirty per side of a rough composite of the very
+screener columns family F is built from. That is a selection on the
+measurement. The score is a residual against the cross-sectional spread of the
+pool it is computed over; when the pool IS the tails of that signal, the spread
+is the selection's rather than the market's, and every z-score on the board
+inherits it. A pool chosen for extreme tilt makes tilt look ordinary.
+
+The pool is now a **stated universe**: the largest `UNIVERSE.enrichCount` (100)
+names in the gated screen, plus any Nasdaq-100 member the screen returned.
+Market cap is the selection axis because it is on the screener row already, is
+stable session to session, and — the property that does the work — **is
+independent of the option flow being scored**, so selecting on it cannot bias
+the cross-section.
+
+Nasdaq-100 membership is a dated repository constant (`NDX_AS_OF`), not a
+measurement: no endpoint on this key returns index membership. It is used
+**additively** — it guarantees inclusion and never excludes — so the failure
+mode of letting the list rot is a slightly different hundred names at the cost
+of five calls, never a wrong reading. Guarantee-first with a cap would let a
+stale list push real large caps off the board, which is the one way a dated
+constant could produce a wrong number; `tests/flows-universe-contract.mjs`
+asserts the order.
+
+**The board widened for free; the expensive legs did not.** The board is built
+from data already fetched, so publishing 93 rows instead of 11 costs nothing. A
+chain is one call a name and a card is two, so those legs are capped at
+`DEEP_NAMES` (50) and ranked by |score| **across both sides** — neutrality has
+no side, and taking the head of each board would spend the same calls on a +4
+long while skipping a −40 short. Rows that got the deep treatment carry `dp`,
+and the renderer will not advertise a card for a row without it.
+
+Three consequences that are easy to get wrong and are each pinned by a test:
+
+- **Every row carries the four chain columns, declared `null`.** They used to
+  be appended by the re-publish, which skipped rows with no chain — harmless
+  while every board row was deep. At 93 rows, 43 would ship without their last
+  four keys, and **the board table binds columns positionally**.
+- **A board written before `deep` existed keeps every card clickable.** Assets
+  deploy when `main` moves; the pipeline runs the next morning. A renderer that
+  read "no `dp`" as "no card" would dark the entire card reader for a day. The
+  test is on the *payload* (`deep` is a published count), not on the row.
+- **The record partitions on `SELECTION_EPOCH`.** The pool changed, so the same
+  score integer means something different on either side of that date.
+  `scoreSessions` reports the two populations separately rather than averaging
+  them into one hit rate. It does **not** bump `BOARD_SCHEMA_VERSION` — that
+  would zero 126 days of retained archive to say a sentence that fits in a
+  footnote.
+
+**The dead band moved 20 -> 1.** Twenty was calibrated against a pool of sixty
+tilt-extremes, where a score of 20 was ordinary. Against a stated size cohort
+it swallows the middle of the market: on the first dry run of the expanded
+pool, **71 of 100 names fell inside it**. Widening the universe and keeping the
+band would have answered "show me more names" by measuring more names and
+showing the same few. One rather than zero, so a score of exactly 0 — a real
+outcome — has an unambiguous home on the watch board.
+
 The call count is derived, not estimated:
 
 ```

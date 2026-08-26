@@ -17,6 +17,7 @@ import {
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
+  DEEP_NAMES, deepNames,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -1432,6 +1433,45 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const board = read("board-long");
   const movers = read("movers");
   const trix = read("sector-trix");
+
+  /* THE EXPENSIVE LEGS SPEND ONLY ON THE NAMES THE BOARD SAYS THEY DID.
+
+     The board is free to widen — it is built from data already fetched — so it
+     is ~93 rows. A chain is one vendor call and a card is two, so those legs
+     are capped at DEEP_NAMES and the rows that got one are stamped `dp`.
+
+     Nothing about a card built for a 94th name looks wrong: it renders
+     perfectly, it is correct, and it costs three calls that the deadline
+     budget did not allocate. So the assertion is an EQUALITY between two
+     independently-derived sets — the cards actually emitted, and the rows that
+     claim to have one — rather than a bound on either alone. A cap enforced in
+     the chain leg but not the card leg would satisfy any looser check. */
+  {
+    const emitted = new Set(fs.readdirSync(path.dirname(prefix))
+      .map((f) => /-card-(.+)\.json$/.exec(f))
+      .filter(Boolean).map((m) => m[1]));
+    const claimed = new Set();
+    const long = read("board-long"), short = read("board-short");
+    for (const b of [long, short]) {
+      for (const r of b.rows) if (r.dp) claimed.add(r.t);
+    }
+    ok(emitted.size > 0, `the dry run emitted ${emitted.size} cards`);
+    ok(emitted.size <= DEEP_NAMES,
+       `and no more than the ${DEEP_NAMES}-name deep budget (${emitted.size}), however wide the board got`);
+    assert.deepEqual([...emitted].sort(), [...claimed].sort(),
+      "the cards that exist are EXACTLY the rows that advertise one — a row promising a card " +
+      "the pipeline never wrote opens a 404, and a card nobody links to is three calls burned"); checks++;
+
+    const total = long.rows.length + short.rows.length;
+    ok(total > emitted.size,
+       `the board (${total} rows) is genuinely wider than the deep set (${emitted.size}), so this ` +
+       "equality is a measurement rather than a tautology over a board where every row is deep");
+    eq(long.deep, long.rows.filter((r) => r.dp).length,
+       "the published `deep` count agrees with the rows it counts");
+    ok(typeof long.deepRule === "string" && long.deepRule.length > 40,
+       "and the rule that chose them is published in words, not left to be inferred from which rows are clickable");
+  }
+
 
   /* THE POPULATION INVARIANT. Every name the movers band was handed is either
      ranked or explicitly counted as unrankable, and the total is the same

@@ -2205,7 +2205,13 @@
   document.addEventListener("click", (event) => {
     // The deck card and the table's ticker button are both openers. Delegation
     // rather than per-node listeners, so a re-rendered board needs no rebind.
-    const button = event.target.closest && event.target.closest(".fb-open, .fd-card");
+    /* [data-t] IS PART OF THE SELECTOR, not an afterthought inside the
+       handler. Rows the pipeline built no card for render with the same
+       classes and no data-t, so requiring the attribute here is what makes
+       "has a card" a single fact expressed in one place rather than a class
+       name the board and this file both have to agree about. */
+    const button = event.target.closest &&
+      event.target.closest(".fb-open[data-t], .fd-card[data-t]");
     if (!button) return;
     event.preventDefault();
     const ticker = button.dataset.t;

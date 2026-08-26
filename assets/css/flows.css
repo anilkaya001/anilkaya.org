@@ -1065,6 +1065,36 @@ body.is-stale .flows-tablewrap {
 .fd-card:hover::after { opacity: 1; }
 .fd-card:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
 
+/* A ROW WITH NO DETAIL CARD.
+
+   The board is free to widen and the card is not, so roughly half the rows
+   carry no card and must not look like they do. The signal is DELIBERATELY
+   quiet: a dashed border and a slightly recessed ground, no dimmed text and no
+   reduced opacity. The row's data is not less certain or less complete — every
+   column on it was measured exactly the way the deep rows' were — so greying
+   the numbers would say something false about the numbers to say something
+   true about the link.
+
+   .fd-flat is a <div>, so :hover, the spotlight and the focus ring never apply
+   and none of them need unsetting. The cursor is the one property that has to
+   be said, because .fd-card sets `cursor: pointer` on the shared class. */
+.fd-card.fd-flat {
+  cursor: default;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--panel-bg) 82%, transparent);
+  box-shadow: none;
+}
+
+/* The ticker in the table, when there is nothing to open. A <span>, so the
+   pointer cursor and the hover underline of .fb-open never engage; the dotted
+   underline is the standard "there is an explanation here" affordance and the
+   title attribute carries it. */
+.fb-open.fb-flat {
+  cursor: help;
+  color: var(--ink-dim, var(--ink));
+  border-bottom: 1px dotted var(--panel-border);
+}
+
 /* THE DECK CARD WAS MISSING FROM THE REDUCED-MOTION BLOCK, and it is the one
    surface in this section that actually moves: it has carried a hover
    transform since it shipped and that rule never covered it.
