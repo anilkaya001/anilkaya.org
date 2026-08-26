@@ -2167,6 +2167,7 @@ async function route(request, env, url, ctx) {
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
     "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
     "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
+    "/flows/market/": (u) => FLOWS_PAGES.marketPage({ username: u }),
     "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
     "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
   };
@@ -2228,7 +2229,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2315,6 +2316,23 @@ async function route(request, env, url, ctx) {
       if (stored === null) {
         return json({ side, rows: [], generatedAt: null, status: "pending" });
       }
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/market") {
+      /* THE LEVEL, WHICH EVERY OTHER SURFACE HERE HAS NEUTRALISED AWAY.
+
+         The board score is a residual within the day's cross-section after
+         sector and log-capitalisation are divided out — by design, because that
+         is what makes it a comparison between names. The cost is that no
+         existing surface can say whether the tape as a whole was bought or
+         sold: the level was removed before the ranking was taken.
+
+         Computed in the pipeline from screener rows already in memory, so it
+         costs no vendor call at all. Served here like everything else: read a
+         stored blob, hand back the bytes. */
+      const stored = await readFlowsPayload(env, "market");
+      if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
