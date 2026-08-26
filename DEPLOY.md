@@ -528,14 +528,35 @@ The call count is derived, not estimated:
 ```
   1  screener call, x6 market-cap bands (the endpoint caps at ~50 rows
      and takes no page or offset, so the universe is walked by band) =  6
+     -- which puts the LIVE universe at <=300 names, not the 420 the
+     dry-run fixture carries. Anything sized against 420 is sized
+     against a fixture.
 + 3  dating probe (AAPL, dated and undated, plus candles)            =  3
 + 1  SPY candles, to resolve the session date                        =  1
 + 5  per enriched name x 2 sides x enrichPerSide (30)                = 300
 + 3  per board name (max-pain, congress, gamma surface)
         x boardSize (25) x 2                                         = 150
++ 11 sector ETF candles, one per SPDR sector (XLB XLC XLE XLF XLI XLK
+     XLP XLRE XLU XLV XLY), for the sector momentum panel          =  11
 + 2  reads of the live board, for hysteresis (Worker, not vendor)
-                                                                     = 460, plus retries
+                                                                     = 471, plus retries
 ```
+
+THE SECTOR LEG IS ELEVEN CALLS BECAUSE IT IS ONE PER SECTOR. That is the
+whole reason a top-down layer is affordable here: every other reading on this
+site costs one call per NAME, so a single extra leg on the board costs fifty.
+They are issued SEQUENTIALLY rather than as a Promise.all — eleven concurrent
+calls all sleep the same delay and then arrive together, which is precisely
+the burst shape that earns a 429 and permanently raises the floor for the rest
+of the run. They are spent after the boards and the watch list commit and
+before the cards, and skipped entirely past the 30-minute deadline: a stale
+sector panel with a visibly older timestamp beats overwriting a good one with
+eleven nulls.
+
+The day's movers cost NOTHING. The screener rows the pipeline already fetches
+carry close, prev_close, relative_volume and both premium legs for the whole
+eligible universe, and until now the pipeline read them for twenty-five board
+rows and discarded the rest.
 
 This figure was 403 until the gamma-surface leg landed, and this runbook still
 said "2 per board name" for weeks after it became 3 — an understatement of up

@@ -1541,19 +1541,32 @@ function sectorTrix(candlesByEtf, { span = TRIX_SPAN, series = TRIX_SERIES, warm
       return unmeasured(`${etf} produced a non-finite TRIX over the published window`);
     }
 
-    const last = window[window.length - 1];
+    /* SCALED FROM THE ROUNDED READING, NOT FROM THE FULL-PRECISION ONE.
+
+       The raw basis points ride along on every row precisely so that the
+       scaling stays reversible — a reader who disagrees with the full-scale
+       band can recompute the whole panel from `trixBp` and their own. That
+       promise is only kept if the two numbers on the row are exactly
+       consistent, and scaling the unrounded value quietly breaks it: XLF's
+       -23.6503 bp scales to 26.3 while the -23.65 that gets PUBLISHED scales
+       to 26.4, and a reader checking the arithmetic finds the payload
+       disagreeing with itself in the last decimal. Rounding first makes the
+       published raw reading the source of truth for the published scaled one,
+       so the relation in `scaling.relation` is exactly true of every row
+       rather than nearly true. */
+    const bp = window.map((v) => Number(v.toFixed(2)));
+    const last = bp[bp.length - 1];
     return {
       sector, etf,
       trix: scaleTrix(last),
-      // The raw reading rides along so the scaling above stays reversible.
-      trixBp: Number(last.toFixed(2)),
+      trixBp: last,
       clamped: Math.abs(last) >= TRIX_FULL_SCALE_BP,
-      series: window.map((v) => scaleTrix(v)),
+      series: bp.map((v) => scaleTrix(v)),
       /* How many points of the drawn line are sitting on a rail. A line that
          is flat because the sector was quiet and a line that is flat because
          it is pinned at 100 look the same; this is how a reader tells them
          apart without being handed the raw series as well. */
-      clampedPoints: window.filter((v) => Math.abs(v) >= TRIX_FULL_SCALE_BP).length,
+      clampedPoints: bp.filter((v) => Math.abs(v) >= TRIX_FULL_SCALE_BP).length,
       reason: null,
     };
   });
@@ -1991,10 +2004,24 @@ function fakeScreener(count) {
     const putVol = Math.round(1500 + rnd() * 700000);
     const bull = rnd() * 4e7;
     const bear = rnd() * 4e7;
+    /* A FEW NAMES ARRIVE WITH NO PRIOR CLOSE, ON PURPOSE.
+
+       The vendor does not promise prev_close on every screener row, and the
+       movers band's whole discipline is that a name it cannot rank is counted
+       rather than seated in the middle of the list at 0%. A fixture in which
+       every row carries a prior close never executes that branch, so the
+       payload's `ranked + unrankedChange == universe` invariant is satisfied
+       trivially by both the correct implementation and a broken one that
+       reports `universe` as whatever it managed to rank. Five rows in 420 make
+       the two disagree, which is what turns the invariant into a test.
+
+       Deterministic rather than random, so a failure is reproducible and the
+       affected tickers can be named in a log. */
+    const quoted = i % 97 !== 3;
     rows.push({
       ticker: "SYN" + String(i).padStart(3, "0"),
       close: price.toFixed(2),
-      prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2),
+      ...(quoted ? { prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2) } : {}),
       marketcap: String(Math.round(2e9 + rnd() * 9e11)),
       sector: SECTORS[Math.floor(rnd() * SECTORS.length)],
       issue_type: "Common Stock",

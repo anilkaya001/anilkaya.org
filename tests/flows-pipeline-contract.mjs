@@ -19,6 +19,10 @@ import {
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -940,6 +944,32 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(extreme[1].clamped, false, "a 10 bp sector is nowhere near a rail");
   eq(extreme[1].clampedPoints, 0, "and none of its line is pinned");
 
+  /* THE PUBLISHED LINE IS A TREND LINE AND IT IS THE RECENT ONE.
+
+     Every fixture above runs on a constant drift, and a constant drift makes a
+     constant TRIX — thirty identical numbers — which cannot detect either of
+     the two ways this series goes wrong: publishing the OLDEST window instead
+     of the newest, or publishing the scalar thirty times. So this sector is
+     genuinely flat for 195 sessions and then turns up at 40 bp, which puts the
+     turn inside the published window and nowhere else. An oldest-first slice
+     of the same data would be thirty readings of exactly 50. */
+  const bend = (n, driftAt, p0 = 100) => {
+    const out = [];
+    let logPx = Math.log(p0);
+    for (let i = 0; i < n; i++) { out.push(Math.exp(logPx)); logPx += driftAt(i) / 10000; }
+    return out;
+  };
+  const turning = sectorTrix(new Map([
+    ["XLB", candles(bend(220, (i) => (i < 195 ? 0 : 40)))]]))[0];
+  const line = turning.series;
+  eq(line[0], 50,
+     "the published line begins at the neutral midpoint, because the sector really was flat then");
+  ok(line[line.length - 1] - line[0] > 20,
+     `THE WINDOW IS THE RECENT ONE: the line rises ${(line[line.length - 1] - line[0]).toFixed(1)} points across it — an oldest-first slice would be thirty identical 50s`);
+  ok(line.every((v, i) => i === 0 || v >= line[i - 1]),
+     "and it rises monotonically, tracking the turn in the underlying rather than wobbling");
+  eq(line[line.length - 1], turning.trix, "ending on the scalar published beside it");
+
   /* THE SERIES IS DRAWABLE. Long enough for a shape, on the same 0-100 axis
      as the scalar, and ending on it. */
   for (const r of rotating) {
@@ -997,7 +1027,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(by.get("XLB").reason, null, "and a measured sector carries no reason");
 
   ok(/no candles/.test(by.get("XLC").reason), "an empty response says so");
-  ok(/106/.test(by.get("XLE").reason) && /46/.test(by.get("XLE").reason),
+  /* The reason text is tied to the EXPORTED constant rather than to a literal,
+     so a change to the warm-up cannot leave the published sentence claiming a
+     minimum the code no longer enforces. */
+  ok(new RegExp(`^46 usable XLE closes of 46 returned; ${TRIX_MIN_CANDLES} are needed`)
+       .test(by.get("XLE").reason),
      `a short series names both what it had and what it needed: "${by.get("XLE").reason}"`);
 
   /* THE WARM-UP GATE IS SUBSTANTIVE, not a formality. 46 candles is plenty to
@@ -1176,6 +1210,107 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(nothing.risers.length, 0, "an empty universe publishes empty lists rather than throwing");
   eq(nothing.ranked, 0, "with an honest count of zero");
   eq(nothing.unrankedChange, 0, "and no phantom unranked names");
+}
+
+/* ---------- the two new payloads, as the pipeline actually emits them ------
+
+   The blocks above test the builders. This one tests the WIRING, which is a
+   different thing and is where the interesting mistake lives: buildMovers is
+   correct for whatever population it is handed, so a unit test cannot tell
+   `withTilt` (the whole eligible universe) from `tilted` (the earnings-gated
+   subset the board is selected from). Handing it the wrong one would publish
+   "the day's biggest movers, among the names that do not report soon" under a
+   heading that claims otherwise, and every pure test would still pass.
+
+   The payload catches it because it publishes its own population: `universe`
+   is the board's count, and `ranked + unrankedChange` has to add up to it. */
+{
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-emit-")) + "/e";
+  execFileSync(process.execPath,
+               ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
+               { cwd: import.meta.dirname, stdio: "ignore" });
+  const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
+  const board = read("board-long");
+  const movers = read("movers");
+  const trix = read("sector-trix");
+
+  /* THE POPULATION INVARIANT. Every name the movers band was handed is either
+     ranked or explicitly counted as unrankable, and the total is the same
+     universe the board reports. */
+  eq(movers.universe, board.universe,
+     "THE MOVERS ARE RANKED OVER THE BOARD'S OWN UNIVERSE, not over the earnings-gated subset");
+  eq(movers.ranked + movers.unrankedChange, movers.universe,
+     "and every one of those names is either ranked or counted as unrankable — none quietly vanish");
+  /* THE INVARIANT ONLY BITES IF THE TWO NUMBERS CAN DIFFER. The synthetic
+     screener withholds prev_close on five rows in 420 precisely so that
+     `universe` and `ranked` are not the same integer here — otherwise an
+     implementation that published the ranked count as the universe would
+     satisfy the line above trivially, which is how a fixture passes while
+     proving nothing. */
+  ok(movers.unrankedChange > 0,
+     `the dry run really does contain names that cannot be ranked (${movers.unrankedChange} of ${movers.universe})`);
+  ok(movers.universe > movers.ranked,
+     "so `universe` and `ranked` are distinct numbers and the invariant above has something to say");
+  eq(movers.priced + movers.unrankedPremium, movers.universe,
+     "the same holds for the premium population, counted separately");
+  eq(movers.cap, MOVER_ROWS, "the cap is published so a reader knows the list was truncated");
+  ok(movers.risers.length <= MOVER_ROWS && movers.fallers.length <= MOVER_ROWS,
+     "and is honoured in both directions");
+  eq(movers.premium.basis, "byName", "the premium claim is scoped on the payload itself");
+  for (const key of ["v", "generatedAt", "sessionDate"]) {
+    ok(movers[key] !== undefined, `the movers payload carries \`${key}\` like every other surface`);
+    ok(trix[key] !== undefined, `and so does sector:trix`);
+  }
+
+  /* THE CHOICE IS DECLARED IN THE PAYLOAD, which is the whole of this
+     project's identification bar for a quantity that is not recoverable from
+     observables alone. A reader holding this blob and nothing else can
+     reproduce every scaled reading, and undo it if they disagree. */
+  eq(trix.scaling.choice, true, "the 0-100 scaling is LABELLED A CHOICE in the payload");
+  eq(trix.scaling.rule, "fixed-clamp", "and named, so a renderer cannot misdescribe it");
+  eq(trix.scaling.neutral, 50, "with the neutral point stated");
+  eq(trix.scaling.fullScaleBp, TRIX_FULL_SCALE_BP, "and the band the rails sit at");
+  ok(/clamp\(trixBp \/ fullScaleBp/.test(trix.scaling.relation),
+     "the relation itself is written out in the payload, not left in this repository");
+  ok(/min-max/.test(trix.scaling.rejected) && /percentile/.test(trix.scaling.rejected),
+     "and so is what was rejected, so the choice reads as a choice");
+  eq(trix.span, 15, "the EMA span is published, because it is the other free parameter");
+  eq(trix.price, "log", "and which price the smoother ran on");
+  ok(/not GICS/.test(trix.basis),
+     "the payload says out loud that these are ETFs standing in for GICS sectors");
+
+  eq(trix.sectors.length, 11, "eleven sectors on the wire");
+  eq(trix.sectors.filter((s) => s.trix !== null).length, trix.measured,
+     "`measured` counts what was actually measured rather than being asserted");
+  for (const s of trix.sectors) {
+    const want = s.trixBp === null ? null : Number(
+      (50 + 50 * Math.max(-1, Math.min(1, s.trixBp / TRIX_FULL_SCALE_BP))).toFixed(1));
+    eq(s.trix, want, `${s.etf}: the emitted reading is the emitted relation applied to the emitted raw bp`);
+  }
+
+  /* THE UNMEASURED PATH RUNS ON EVERY DRY RUN, on purpose. A fixture in which
+     all eleven sectors succeed never executes the branch this project has been
+     burned by most. */
+  const missing = trix.sectors.filter((s) => s.trix === null);
+  ok(missing.length >= 1, "the dry run exercises the unmeasured path rather than stepping around it");
+  for (const s of missing) {
+    ok(typeof s.reason === "string" && s.reason.length > 10,
+       `${s.etf} is published as null WITH a reason: "${s.reason}"`);
+  }
+  ok(trix.sectors.some((s) => s.trix !== null && Math.abs(s.trix - 50) < 5),
+     "and the dry run contains a genuinely flat sector, reading near the neutral midpoint");
+  ok(trix.sectors.some((s) => s.clamped === true),
+     "and a saturated one, so the rail is exercised too");
+
+  /* BOTH PAYLOADS FIT. The ingest route refuses anything over 128KB, and it
+     refuses it as a 413 from the Worker rather than here. */
+  for (const [key, payload] of [["movers", movers], ["sector:trix", trix]]) {
+    const bytes = JSON.stringify(payload).length;
+    ok(bytes < 32 * 1024,
+       `${key} is ${(bytes / 1024).toFixed(1)}KB, comfortably inside the 128KB ingest cap`);
+  }
+
+  fs.rmSync(path.dirname(prefix), { recursive: true, force: true });
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts`);
