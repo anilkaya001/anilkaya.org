@@ -573,6 +573,29 @@ a sale; this leg is measuring a surface, and the at-the-money contract — the
 single most load-bearing input in the grid, since every skew cell in a column
 is measured against it — is exactly what that filter removes.
 
+**THAT DECISION HAS A PRICE AND THE PRICE IS PAID EXPLICITLY.** Without the
+filter the vendor returns a put AND a call at every strike, which ties on every
+field the downstream tiebreaks compare — so the surface flipped on vendor row
+order and the skew published a confident zero. `preferOutOfTheMoney` in
+`shared/flows-chain.js` resolves each strike to one contract before anything
+measures: the put below spot, the call above, freshness at the money. What it
+resolved is published as `strikeCollisions` rather than applied silently.
+
+**A TRUNCATED CHAIN PUBLISHES NO SCALARS.** Every relation begins "on the
+nearest expiry" and "the nearest listed strike", and the endpoint documents no
+ordering parameter — so a chain that filled the 500-row page is an arbitrary
+subset in which "nearest" cannot be identified. The panels still publish, with
+their coverage stated; `skew`, `term` and `atmIv` are withheld with that reason,
+because they go onto a board row and into an archive where nothing carries the
+caveat.
+
+**THE SCALARS ARE ARCHIVED BUT NOT POOLED.** Each is read at that name's own
+nearest listed expiry past a floor — eight days out on SPY, ninety on a thin
+name — so they are excluded from the cross-sectional IC table for the reason
+`boardRow` already states about `im`. `skewDays` rides the row so the tenor is
+recoverable. A name against its own history is like-for-like, and that
+percentile is what they exist for.
+
 The boards are then RE-PUBLISHED with `skew`, `term` and `atmIv` merged onto
 their rows, dated key first and live second, per side. The second write exists
 because the fields cannot be there the first time: boards must publish before

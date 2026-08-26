@@ -1085,5 +1085,71 @@
   readSort();
   syncHeaders();
 
+  /* ---------- the cursor spotlight ----------------------------------
+
+     ONE DELEGATED LISTENER ON THE DECK, not one per card: fifty cards is
+     fifty listeners for an effect that only ever applies to whichever one the
+     pointer is inside, and the deck is re-rendered on every sort.
+
+     ATTACHED ONLY WHERE IT MEANS ANYTHING, and the two conditions are
+     different in kind. `pointer: fine` is about capability — a touch device
+     has no hover state to decorate, and firing pointermove there costs work
+     for a highlight nobody sees. `prefers-reduced-motion` is about consent,
+     and the answer is not to soften the effect but to not attach at all: the
+     CSS hides the layer too, so neither half can leak past the other.
+
+     BOTH ARE RE-CHECKED ON CHANGE. A reader who turns motion down while the
+     page is open, or plugs in a mouse, gets the setting they asked for
+     without reloading — a media query read once at boot is a preference
+     honoured once. */
+  const fine = window.matchMedia("(pointer: fine)");
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let spotlightOn = false;
+  let frame = 0;
+  let pending = null;
+
+  function onPointerMove(event) {
+    const card = event.target.closest && event.target.closest(".fd-card");
+    if (!card) return;
+    pending = { card, x: event.clientX, y: event.clientY };
+    /* rAF-THROTTLED. pointermove fires far faster than the screen refreshes,
+       and writing a custom property per event is a style recalculation per
+       event; one write per frame is the most a paint can use. */
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (!pending) return;
+      const { card: target, x, y } = pending;
+      const box = target.getBoundingClientRect();
+      if (!box.width || !box.height) return;
+      target.style.setProperty("--mx", (((x - box.left) / box.width) * 100).toFixed(1));
+      target.style.setProperty("--my", (((y - box.top) / box.height) * 100).toFixed(1));
+    });
+  }
+
+  function syncSpotlight() {
+    const want = fine.matches && !calm.matches;
+    if (want === spotlightOn || !deck) return;
+    spotlightOn = want;
+    if (want) {
+      deck.addEventListener("pointermove", onPointerMove, { passive: true });
+    } else {
+      deck.removeEventListener("pointermove", onPointerMove);
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      pending = null;
+      /* Leave nothing behind: a card that kept an --mx from before the
+         preference changed would hold a stale highlight position. */
+      for (const card of deck.querySelectorAll(".fd-card")) {
+        card.style.removeProperty("--mx");
+        card.style.removeProperty("--my");
+      }
+    }
+  }
+  for (const query of [fine, calm]) {
+    if (query.addEventListener) query.addEventListener("change", syncSpotlight);
+    else if (query.addListener) query.addListener(syncSpotlight);   // older Safari
+  }
+  syncSpotlight();
+
   render(side);
 })();

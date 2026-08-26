@@ -532,15 +532,16 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     side, sessionDate: "2026-08-24",
     rows: tickers.map((t, i) => ({ t, r: i + 1, s: 50, px: 100 })),
   });
-  const chain = (skew, term, atmIv) => ({ scalars: { skew, term, atmIv } });
+  const chain = (skew, term, atmIv, skewDays = null) =>
+    ({ scalars: { skew, term, atmIv, skewDays } });
 
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA", "BBB"]), short: board("short", ["CCC"]) };
     const chains = new Map([
-      ["AAA", chain(0.04, -0.02, 0.31)],
-      ["BBB", chain(null, null, null)],       // measured nothing: still merged, as nulls
-      ["CCC", chain(0.06, 0.01, 0.28)],
+      ["AAA", chain(0.04, -0.02, 0.31, 25)],
+      ["BBB", chain(null, null, null, null)],  // measured nothing: still merged, as nulls
+      ["CCC", chain(0.06, 0.01, 0.28, 32)],
     ]);
     await republishWithChain(payloads, chains, "2026-08-24", async (key) => { seen.push(key); });
 
@@ -550,8 +551,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       "archive copy will never have is the one state the archive exists to prevent"); checks++;
 
     const row = payloads.long.rows[0];
-    eq(Object.keys(row).slice(-3).join(","), "skew,term,atmIv",
-       "the three columns are APPENDED, in order — the board table binds positionally");
+    eq(Object.keys(row).slice(-4).join(","), "skew,term,atmIv,skewDays",
+       "the four columns are APPENDED, in order — the board table binds positionally");
     eq(payloads.long.rows[1].skew, null,
        "a name whose chain measured nothing carries null, not the previous row's reading");
   }
@@ -561,7 +562,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
-    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31)], ["CCC", chain(0.06, 0.01, 0.28)]]);
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
     const lines = await republishWithChain(payloads, chains, "2026-08-24", async (key) => {
       seen.push(key);
       if (key === "board:long:2026-08-24") throw new Error("archive write refused");
@@ -590,7 +591,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
-    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31)], ["CCC", chain(0.06, 0.01, 0.28)]]);
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
     await republishWithChain(payloads, chains, null, async (key) => { seen.push(key); });
     ok(!seen.some((k) => /board:(long|short):/.test(k)),
        `with no session date, no dated key is written at all (${seen.join(", ")})`);
@@ -1547,7 +1548,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      whole point — a skew percentile exists only from the first session that
      archived a skew), and that the four panels reached the card. */
   const boardShort = read("board-short");
-  const chainCols = ["skew", "term", "atmIv"];
+  const chainCols = ["skew", "term", "atmIv", "skewDays"];
   for (const [side, b] of [["long", board], ["short", boardShort]]) {
     ok(b.rows.length > 0, `the ${side} board has rows to carry the chain columns`);
     const keys = Object.keys(b.rows[0]);
@@ -1557,8 +1558,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     /* APPENDED, NEVER INSERTED. The board table binds columns positionally, so
        a field added anywhere but the end shifts every column after it under a
        heading that no longer describes it. */
-    eq(keys.slice(-3).join(","), chainCols.join(","),
-       `and they are the LAST three keys on a ${side} row, in order — the table binds positionally`);
+    eq(keys.slice(-4).join(","), chainCols.join(","),
+       `and they are the LAST four keys on a ${side} row, in order — the table binds positionally`);
     ok(b.rows.some((r) => r.skew !== null),
        `at least one ${side} row carries a measured skew`);
     for (const r of b.rows) {

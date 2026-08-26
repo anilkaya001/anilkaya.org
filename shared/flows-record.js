@@ -194,7 +194,24 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
  * non-numeric (ticker, sparkline, regime string) simply has no number to
  * contribute and drops out on its own.
  */
-const IC_EXCLUDE = new Set(["r", "px"]);
+/**
+ * Columns that must not become IC rows, each for a stated reason.
+ *
+ *   r  — the published rank is the score's own ordering restated positionally.
+ *   px — a price LEVEL; across names it ranks share prices, a units artifact.
+ *
+ * The chain scalars are excluded for a THIRD reason, and it is the one
+ * boardRow already states for `im`: they are measured at each name's own
+ * nearest listed expiry past a floor, which is eight days out on SPY and
+ * ninety on a thin name. Pooled across names they would be a correlation
+ * between tenors as much as between skews — "carried for the card and never
+ * set beside another name's", exactly as `im` is.
+ *
+ * They are still ARCHIVED on the board row, because a name against its own
+ * history is like-for-like and that percentile is what they exist for. It is
+ * only the cross-section that is refused.
+ */
+const IC_EXCLUDE = new Set(["r", "px", "skew", "term", "atmIv", "skewDays"]);
 
 export function featureColumnsOf(row) {
   const out = {};

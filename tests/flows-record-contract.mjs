@@ -150,6 +150,7 @@ const idx = (cal) => new Map(cal.map((d, i) => [d, i]));
     fam: { F: 10, P: -5, D: null, V: 0, O: 38 },
     pr: [120, null, -80],
     netPrem: 1e6,
+    skew: 0.04, term: -0.02, atmIv: 0.31, skewDays: 25,
   });
   eq(cols.r, undefined, "the published rank is excluded: it is the score's ordering restated");
   eq(cols.px, undefined, "the price level is excluded: across names it ranks share prices");
@@ -159,6 +160,19 @@ const idx = (cal) => new Map(cal.map((d, i) => [d, i]));
   eq(cols["pr.0"], 120, "pr explodes to pr.*");
   eq(cols["pr.1"], undefined, "with nulls dropped");
   eq(cols.gRegime, undefined, "strings have no number to contribute");
+
+  /* THE CHAIN SCALARS ARE ARCHIVED BUT NOT POOLED, and the reason is the one
+     boardRow already states for `im`: each is read at that name's own nearest
+     listed expiry past a floor, which is eight days out on SPY and ninety on a
+     thin name. Pooled across names the coefficient would be a correlation
+     between tenors as much as between skews.
+
+     A name against its OWN history is like-for-like, which is what they are on
+     the board row for. Only the cross-section is refused. */
+  for (const key of ["skew", "term", "atmIv", "skewDays"]) {
+    eq(cols[key], undefined,
+       `${key} is excluded from the cross-sectional table: it is a per-name-horizon quantity`);
+  }
 }
 
 /* ---------- icTable: Spearman by construction --------------------- */

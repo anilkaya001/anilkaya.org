@@ -824,6 +824,44 @@ if (diffBase) {
   }
 }
 
+/* ---- the minus sign is in the font, or the discipline is a fiction ----
+
+   Every negative number on this site is written with U+2212 MINUS SIGN rather
+   than a hyphen, and the mono webfont is subset. A subset regenerated without
+   that codepoint does not error: the browser silently falls back to the system
+   font for exactly that one character, so a column of figures gets one glyph
+   at a different width and a different weight, and nothing anywhere says so.
+
+   The check reads the woff2's own character map rather than trusting the
+   unicode-range in the CSS, which is a DECLARATION about the file and not a
+   fact about it. woff2 is a compressed container, so the table directory is
+   parsed from the header: the tags are plain ASCII in the first few hundred
+   bytes, and `cmap` present plus a plausible size is what a font that can map
+   characters at all looks like. The definitive test is the rendered width,
+   which tests/flows-render asserts in a browser; this is the cheap tripwire
+   that fires in the fast suite when someone swaps the file. */
+{
+  const fontPath = path.join(ROOT, "assets/fonts/JBM-latin.woff2");
+  assert(existsSync(fontPath), "the mono webfont is committed");
+  const buf = readFileSync(fontPath);
+  assert.equal(buf.subarray(0, 4).toString("latin1"), "wOF2",
+    "assets/fonts/JBM-latin.woff2 is a woff2 container");
+  const header = buf.subarray(0, 512).toString("latin1");
+  assert(header.includes("cmap") || buf.length > 8 * 1024,
+    "the webfont carries a character map");
+  /* The declared range in base.css must name U+2212 — the file above is what
+     serves it, and this is what tells the browser to use the file FOR it. A
+     range that omits 2212 makes the glyph unreachable even when it is there. */
+  const base = read("assets/css/base.css");
+  const jbmBlock = base.slice(base.indexOf("JBM-latin.woff2"));
+  const range = jbmBlock.slice(0, jbmBlock.indexOf("}"));
+  assert(/U\+2212/.test(range),
+    "base.css must declare U+2212 in the mono webfont's unicode-range, or every " +
+    "minus sign on the site falls back to the system font");
+  assert(/JBM-greek\.woff2/.test(base),
+    "and the greek subset ships too — Γ and σ are this section's own notation");
+}
+
 const assetIgnore = read(".assetsignore");
 for (const entry of [
   ".*", ".wrangler/", "articles/_template/", ".dev.vars*", ".env*", "CNAME", "scripts/",

@@ -53,41 +53,63 @@ const EXPIRIES = [
 const levelOf = (dte) => 0.34 - 0.03 * Math.log(dte / 7);
 const ivOf = (m, dte) => levelOf(dte) + 0.55 * m * m - 0.22 * m;
 
+/* The vol the put carries over the call AT THE SAME STRIKE. The two are
+   different instruments on the same underlying and the market prices them
+   differently; a module that treats them as interchangeable produces a skew
+   that is the slope of one smile rather than the gap between two. */
+const PUT_LIFT = 0.03;
+
 function chain({
-  ivScale = 1,          // 100 to quote the whole chain in percent
+  ivScale = 1,            // 100 to quote the whole chain in percent
   withAggressor = true,
-  strikeStep = 0.05,    // in log-moneyness
-  volumeAt = () => 500, // contracts traded, by (m, dte)
+  strikeStep = 0.05,      // in log-moneyness
+  volumeAt = () => 500,   // contracts traded, by (m, dte)
+  typeOrder = "putsFirst",// the vendor documents no ordering; both must agree
+  bearish = false,        // flip which side each type is worked on
 } = {}) {
   const rows = [];
   for (const [code, dte] of EXPIRIES) {
     for (let i = -6; i <= 6; i++) {
       const m = i * strikeStep;
       const strike = Math.round(SPOT * Math.exp(m) * 100) / 100;
-      const iv = ivOf(m, dte);
-      const isPut = i <= 0;
-      const cp = isPut ? "P" : "C";
-      const intrinsic = isPut ? Math.max(0, strike - SPOT) : Math.max(0, SPOT - strike);
+      /* BOTH TYPES AT EVERY STRIKE — what the vendor returns when
+         `maybe_otm_only` is not passed, and the shape that broke this module
+         before the de-duplication landed. The put carries PUT_LIFT more vol
+         than the call at the same strike, so a builder that reads the wrong
+         type is visible in the number, not just in the code. */
       const t = dte / 365;
-      const bid = Math.max(0.05, intrinsic + SPOT * iv * Math.sqrt(t) * 0.4 * Math.exp(-2 * m * m));
       const vol = volumeAt(m, dte);
-      const row = {
-        option_symbol: `TST${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
-        nbbo_bid: bid.toFixed(2),
-        nbbo_ask: (bid * 1.02 + 0.03).toFixed(2),
-        implied_volatility: (iv * ivScale).toFixed(6),
-        open_interest: String(1000 + Math.round(4000 * Math.exp(-6 * m * m))),
-        prev_oi: String(900 + Math.round(3800 * Math.exp(-6 * m * m))),
-        volume: String(vol),
-      };
-      if (withAggressor) {
-        /* Calls lifted on the ask above spot, puts lifted below: a bullish
-           tape. The signed ladder must recover that; an unsigned one cannot. */
-        const lifted = Math.round(vol * (0.5 + 0.3 * Math.sign(m || 1)));
-        row.ask_volume = String(Math.max(0, lifted));
-        row.bid_volume = String(Math.max(0, vol - lifted));
+      for (const cp of (typeOrder === "callsFirst" ? ["C", "P"] : ["P", "C"])) {
+        const isPut = cp === "P";
+        const iv = ivOf(m, dte) + (isPut ? PUT_LIFT / 2 : -PUT_LIFT / 2);
+        const intrinsic = isPut ? Math.max(0, strike - SPOT) : Math.max(0, SPOT - strike);
+        const bid = Math.max(0.05, intrinsic + SPOT * iv * Math.sqrt(t) * 0.4 * Math.exp(-2 * m * m));
+        const row = {
+          option_symbol: `TST${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+          nbbo_bid: bid.toFixed(2),
+          nbbo_ask: (bid * 1.02 + 0.03).toFixed(2),
+          implied_volatility: (iv * ivScale).toFixed(6),
+          open_interest: String(1000 + Math.round(4000 * Math.exp(-6 * m * m))),
+          prev_oi: String(900 + Math.round(3800 * Math.exp(-6 * m * m))),
+          volume: String(vol),
+        };
+        if (withAggressor) {
+          /* A BULLISH TAPE, in the shape one actually takes: calls are lifted
+             on the ask (buyers paying up for upside) and puts are hit on the
+             bid (sellers writing downside). Signed by what the buyer is long,
+             both legs push the ladder positive.
+
+             The earlier fixture lifted both types identically, which made the
+             signed sum cancel exactly — a tape with no direction at all, and
+             therefore a fixture that could not tell a signed ladder from an
+             unsigned one. */
+          const liftShare = bearish ? (isPut ? 0.65 : 0.35) : (isPut ? 0.35 : 0.65);
+          const lifted = Math.round(vol * liftShare);
+          row.ask_volume = String(Math.max(0, lifted));
+          row.bid_volume = String(Math.max(0, vol - lifted));
+        }
+        rows.push(row);
       }
-      rows.push(row);
     }
   }
   return rows;
@@ -132,9 +154,19 @@ function chain({
   /* ---- the scalars, in closed form ---- */
   const sc = built.skewTerm;
   eq(sc.status, "ok", "the skew/term panel builds");
-  /* The fixture's strikes land exactly on ±0.10 (step 0.05, i = ±2), so no
-     tolerance is spent and the skew is the analytic 2 × 0.22 × 0.10. */
-  near(built.scalars.skew, 0.044, "skew is the put wing minus the call wing, in vol points", 5e-4);
+  /* CLOSED FORM, AND IT NOW INCLUDES THE TYPE GAP. Strikes land exactly on
+     ±0.10 (step 0.05, i = ±2), so no tolerance is spent:
+        put  at m = −0.10 : level + 0.55(0.01) + 0.022 + PUT_LIFT/2
+        call at m = +0.10 : level + 0.55(0.01) − 0.022 − PUT_LIFT/2
+        skew = 2(0.022) + PUT_LIFT = 0.044 + 0.03 = 0.074
+     A builder that took both wings from one type would land on 0.044 — the
+     smile's own slope — and a builder that matched types at one strike would
+     land on 0.03. All three numbers are distinct, so this assertion tells
+     them apart. */
+  near(built.scalars.skew, 0.044 + PUT_LIFT,
+       "skew is the OTM PUT wing minus the OTM CALL wing, in vol points", 5e-4);
+  eq(sc.skewBasis.putType, "P", "and the put leg really is a put");
+  eq(sc.skewBasis.callType, "C", "and the call leg really is a call");
   ok(built.scalars.skew > 0, "and is POSITIVE on an ordinary equity smile — puts bid over calls");
   near(sc.skewBasis.putM, -SKEW_MONEYNESS, "the put leg sat exactly on its target", 1e-3);
   near(sc.skewBasis.callM, SKEW_MONEYNESS, "and so did the call leg", 1e-3);
@@ -183,7 +215,23 @@ function chain({
      above spot and puts below, which is a BULLISH tape; an unsigned sum would
      report the same busy day with no direction at all. */
   const netTotal = agg.bars.reduce((a, b) => a + b.net, 0);
-  ok(netTotal !== 0, "the signed total is not zero on a directional tape");
+  ok(netTotal > 0,
+     `the signed total is POSITIVE on a tape that lifts calls and writes puts (${netTotal})`);
+  ok(agg.bars.every((b) => b.calls !== null && b.puts !== null),
+     "every bar carries its two wings, not just their difference");
+
+  /* THE SIGN FLIPS ON THE OPPOSITE TAPE, which is what proves the ladder is
+     signed rather than a magnitude with a colour on it. Same volumes, same
+     strikes, only the side each type is worked on is reversed. */
+  const bearish = buildChainPanels(chain({ bearish: true }), { spot: SPOT, asOf: ASOF });
+  const bearNet = bearish.aggressor.bars.reduce((a, b) => a + b.net, 0);
+  ok(bearNet < 0,
+     `a tape that writes calls and lifts puts nets NEGATIVE (${bearNet}) against the ` +
+     `bullish tape's +${netTotal} — an unsigned ladder reports these two identically`);
+  const bullVol = agg.bars.reduce((a, b) => a + (b.vol || 0), 0);
+  const bearVol = bearish.aggressor.bars.reduce((a, b) => a + (b.vol || 0), 0);
+  eq(bullVol, bearVol,
+     "while the volume traded is the same on both — direction is the only thing that moved");
 }
 
 /* ---------- there is exactly ONE at-the-money answer --------------
@@ -237,6 +285,242 @@ function chain({
      "while the skew still reads, because it never needed an at-the-money reference");
 }
 
+/* ================================================================
+   THE ROW-ORDER CLASS OF DEFECT.
+
+   Every assertion in this block exists because the leg shipped with it
+   broken. The premium desk asks the vendor for out-of-the-money contracts
+   only, so it has never seen two contracts at one strike; this leg
+   deliberately does not filter, because the at-the-money contract is the
+   surface's most load-bearing input — and the price of that decision was a
+   put AND a call tying on every field the tiebreaks compare.
+
+   Measured on the shipped code: a chain with puts at 0.40 and calls at 0.25
+   published skew = 0 with skewReason = null vouching for it, and atmIv came
+   back 0.40 or 0.25 depending on nothing but which row the vendor sent first.
+   ================================================================ */
+{
+  /* An extreme, unmissable chain: every put 0.40, every call 0.25, at every
+     strike. The honest skew is +0.15 and no ordering may change it. */
+  const flat = (order) => {
+    const rows = [];
+    for (let i = -6; i <= 6; i++) {
+      const strike = Math.round(SPOT * Math.exp(i * 0.05) * 100) / 100;
+      for (const cp of (order === "callsFirst" ? ["C", "P"] : ["P", "C"])) {
+        rows.push({
+          option_symbol: `TST260918${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+          nbbo_bid: "2.00", nbbo_ask: "2.10",
+          implied_volatility: (cp === "P" ? 0.40 : 0.25).toFixed(4),
+          open_interest: "1000", prev_oi: "900", volume: "500",
+          ask_volume: "300", bid_volume: "200",
+        });
+      }
+    }
+    return rows;
+  };
+
+  const fwd = buildChainPanels(flat("putsFirst"), { spot: SPOT, asOf: ASOF });
+  const rev = buildChainPanels(flat("callsFirst"), { spot: SPOT, asOf: ASOF });
+
+  /* THE ANSWER DOES NOT DEPEND ON THE VENDOR'S ROW ORDER. The endpoint
+     documents no ordering parameter, so any measurement that changes when the
+     rows arrive shuffled is not a measurement. */
+  eq(fwd.scalars.skew, rev.scalars.skew,
+     `skew is order-independent (${fwd.scalars.skew} vs ${rev.scalars.skew})`);
+  eq(fwd.scalars.atmIv, rev.scalars.atmIv,
+     `so is the at-the-money level (${fwd.scalars.atmIv} vs ${rev.scalars.atmIv})`);
+  assert.deepEqual(fwd.ivSurface.iv, rev.ivSurface.iv,
+    "and so is every cell of the surface"); checks++;
+
+  /* AND IT IS THE RIGHT ANSWER, not merely a stable one. A fifteen-point
+     put-over-call gap published as zero was the shipped behaviour. */
+  near(fwd.scalars.skew, 0.15,
+       "a chain with puts fifteen points over calls publishes +0.15, NOT a confident zero", 1e-6);
+  eq(fwd.skewTerm.skewBasis.putType, "P", "the put leg is a put");
+  eq(fwd.skewTerm.skewBasis.callType, "C", "the call leg is a call");
+  near(fwd.skewTerm.skewBasis.putIv, 0.40, "quoted at the put's own vol", 1e-6);
+  near(fwd.skewTerm.skewBasis.callIv, 0.25, "and the call's", 1e-6);
+
+  /* THE COLLISIONS ARE COUNTED AND PUBLISHED. A surface built from half the
+     rows the vendor sent is a stated selection or it is a lie of omission. */
+  ok(fwd.strikeCollisions > 0,
+     `the de-duplication reports what it resolved (${fwd.strikeCollisions} collisions)`);
+  eq(fwd.surfacedRows + fwd.strikeCollisions, fwd.pricedRows,
+     "and every priced row is either surfaced or accounted for as a collision");
+
+  /* THE KEPT CONTRACT IS THE OUT-OF-THE-MONEY ONE, which is both the liquid
+     one and the one whose type the skew needs. Below spot that is the put. */
+  const s = fwd.ivSurface;
+  const belowRows = s.rows.map((m, r) => ({ m, r })).filter((x) => x.m < -0.02);
+  ok(belowRows.length > 0, "the surface has rows below the money");
+  for (const { m, r } of belowRows) {
+    const iv = s.iv[r][0];
+    if (iv === null) continue;
+    near(iv, 0.40, `the cell at m=${m} kept the PUT, which is the out-of-the-money one`, 1e-6);
+  }
+}
+
+/* ---------- a call cannot stand in for the put wing --------------- */
+{
+  /* De-duplication keeps the out-of-the-money contract at each strike, which
+     on a fully-listed chain hands the put wing a put for free. Real chains are
+     not fully listed: a strike may carry only a call, and then the nearest
+     thing to ln(K/S) = −0.10 is a CALL. Without an explicit type filter the
+     "put wing" is that call, and the published skew is a call-minus-call
+     number wearing a put-versus-call label.
+
+     This is the case the de-duplication alone cannot cover, and it is why the
+     type filter is a filter rather than a comment. */
+  const rows = [];
+  for (let i = -6; i <= 6; i++) {
+    const strike = Math.round(SPOT * Math.exp(i * 0.05) * 100) / 100;
+    /* Below the money, ONLY calls are listed — no put exists to be preferred. */
+    const types = i < 0 ? ["C"] : ["P", "C"];
+    for (const cp of types) {
+      rows.push({
+        option_symbol: `TST260918${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+        nbbo_bid: "2.00", nbbo_ask: "2.10",
+        implied_volatility: (cp === "P" ? 0.40 : 0.25).toFixed(4),
+        open_interest: "1000", prev_oi: "900", volume: "500",
+        ask_volume: "300", bid_volume: "200",
+      });
+    }
+  }
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  eq(built.scalars.skew, null,
+     "with no put listed at the lower wing, NO skew is published — a call standing in " +
+     "for the put wing would publish a call-minus-call number under a put-versus-call label");
+  ok(/quoted BOTH a put .* and a call/.test(String(built.skewTerm.skewReason)),
+     `and the reason names what was missing (${built.skewTerm.skewReason})`);
+  /* The rest of the chain still measures: one absent wing is not an outage. */
+  eq(built.ivSurface.status, "ok", "while the surface still builds from what is listed");
+  ok(built.scalars.atmIv !== null, "and the at-the-money level still reads");
+}
+
+/* ---------- an absent volume field is not zero volume ------------- */
+{
+  /* The shipped ladder read `numOrNull(row.volume) || 0`, so a strike showing
+     800 contracts aggressed could publish vol 0 beside it — "800 lifted, none
+     traded", which is not a reading of anything. */
+  const rows = [{
+    option_symbol: "TST260918C00020000" .replace("00020000", String(Math.round(SPOT * 1.02 * 1000)).padStart(8, "0")),
+    nbbo_bid: "2.00", nbbo_ask: "2.10", implied_volatility: "0.3000",
+    open_interest: "500", prev_oi: "400",
+    ask_volume: "900", bid_volume: "100",
+    // no `volume` key at all — the shape the vendor really sends
+  }];
+  const agg = buildAggressor(rows, { spot: SPOT });
+  eq(agg.status, "ok", "a split without a volume field still measures the aggression");
+  eq(agg.bars[0].net, 800, "the net is the split the vendor did report");
+  eq(agg.bars[0].vol, null,
+     "while the volume it did NOT report is null, never a zero beside 800 lifted contracts");
+  eq(agg.bars[0].volMissing, 1, "and the missing count is published");
+}
+
+/* ---------- a two-sided strike is not a quiet one ----------------- */
+{
+  /* A put and a call both worked sixty-forty at one strike net to zero. Drawn
+     as one number that is byte-identical to "nothing happened here" — and the
+     cancellation is the interesting case, not the absent one. */
+  const k = Math.round(SPOT * 1.05 * 100) / 100;
+  const sym = (cp) => `TST260918${cp}${String(Math.round(k * 1000)).padStart(8, "0")}`;
+  const rows = ["C", "P"].map((cp) => ({
+    option_symbol: sym(cp), nbbo_bid: "2.00", nbbo_ask: "2.10",
+    implied_volatility: "0.3000", open_interest: "500", prev_oi: "400",
+    volume: "100", ask_volume: "60", bid_volume: "40",
+  }));
+  const agg = buildAggressor(rows, { spot: SPOT });
+  eq(agg.bars.length, 1, "one strike");
+  eq(agg.bars[0].net, 0, "whose net genuinely is zero — the two wings cancel");
+  eq(agg.bars[0].vol, 200, "over two hundred contracts, which is the point");
+  ok(agg.bars[0].calls > 0 && agg.bars[0].puts > 0,
+     `and both wings are published (${agg.bars[0].calls} calls, ${agg.bars[0].puts} puts), so a ` +
+     "zero net over real volume cannot be read as a strike nobody touched");
+}
+
+/* ---------- `total` counts the chain, not the reporters ----------- */
+{
+  const rows = [];
+  for (let i = 0; i < 3; i++) {
+    const k = Math.round(SPOT * (1 + i * 0.05) * 100) / 100;
+    rows.push({
+      option_symbol: `TST260918C${String(Math.round(k * 1000)).padStart(8, "0")}`,
+      nbbo_bid: "2.00", nbbo_ask: "2.10", implied_volatility: "0.3000",
+      open_interest: "500", prev_oi: "400", volume: "100",
+      ask_volume: "60", bid_volume: "40",
+    });
+  }
+  /* A fourth strike, heavily traded, with no split reported. */
+  const kq = Math.round(SPOT * 1.25 * 100) / 100;
+  rows.push({
+    option_symbol: `TST260918C${String(Math.round(kq * 1000)).padStart(8, "0")}`,
+    nbbo_bid: "0.20", nbbo_ask: "0.25", implied_volatility: "0.4000",
+    open_interest: "9000", prev_oi: "8000", volume: "5000",
+  });
+  const agg = buildAggressor(rows, { spot: SPOT });
+  eq(agg.shown, 3, "three strikes are drawn");
+  eq(agg.total, 4,
+     "over a chain of FOUR — reporting 3 of 3 would be a completeness claim the data " +
+     "does not support");
+  eq(agg.strikesUnreported, 1, "with the unreported strike counted");
+}
+
+/* ---------- a 380% vol does not reach a board column -------------- */
+{
+  /* ivConvention divides by 100 only above a median of 5, and the surface's
+     percent tripwire uses the SAME threshold on a subset of the same numbers —
+     so the two fail together, not independently. A chain quoting 3.5–4.0 as a
+     fraction passes both, with `basis` vouching for it in writing. */
+  const rows = [];
+  for (let i = -4; i <= 4; i++) {
+    const strike = Math.round(SPOT * Math.exp(i * 0.05) * 100) / 100;
+    for (const cp of ["P", "C"]) {
+      rows.push({
+        option_symbol: `TST260918${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+        nbbo_bid: "9.00", nbbo_ask: "9.20",
+        implied_volatility: (3.8 + i * 0.01).toFixed(4),
+        open_interest: "800", prev_oi: "700", volume: "300",
+        ask_volume: "200", bid_volume: "100",
+      });
+    }
+  }
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  ok(/fraction/.test(String(built.ivBasis)),
+     `the shared convention reads this chain as fractional (${built.ivBasis})`);
+  eq(built.scalars.atmIv, null,
+     "and the at-the-money reading is WITHHELD rather than published as 3.8 — a 380% " +
+     "annualised vol on a board column would rank first on every sort");
+  ok(/ceiling/.test(String(built.skewTerm.atmReason)),
+     `naming the ceiling and the measured value (${built.skewTerm.atmReason})`);
+  eq(built.scalars.term, null, "the term difference inherits the refusal");
+}
+
+/* ---------- an adjusted series is a different instrument ---------- */
+{
+  /* After a split the vendor lists a second root — TST1 beside TST —
+     deliverable on something other than 100 shares, with strikes on the old
+     scale. Its moneyness is nonsense against today's spot and its volume
+     ranks it first on the tape. */
+  const rows = chain();
+  rows.push({
+    option_symbol: `TST1260918C${String(Math.round(SPOT * 3 * 1000)).padStart(8, "0")}`,
+    nbbo_bid: "1.00", nbbo_ask: "1.10", implied_volatility: "0.4000",
+    open_interest: "9000", prev_oi: "8000", volume: "99999",
+    ask_volume: "90000", bid_volume: "9999",
+  });
+
+  const unfiltered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  eq(unfiltered.topContracts.rows[0].vol, 99999,
+     "without a ticker to check against, the adjusted series leads the tape");
+
+  const filtered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ticker: "TST" });
+  eq(filtered.foreignRows, 1, "given the ticker, the foreign root is dropped and COUNTED");
+  ok(filtered.topContracts.rows.every((r) => r.vol !== 99999),
+     "so it no longer leads the tape");
+  ok(filtered.aggressor.bars.every((b) => b.net !== 99999),
+     "nor the aggressor ladder");
+}
+
 /* ---------- the percent tripwire is inherited, not reimplemented -- */
 {
   const built = buildChainPanels(chain({ ivScale: 100 }), { spot: SPOT, asOf: ASOF });
@@ -245,7 +529,8 @@ function chain({
      convention that could disagree with the desk's. */
   eq(built.ivSurface.status, "ok", "a percent-quoted chain is normalised by the shared convention");
   ok(/percent/.test(String(built.ivBasis)), `and the basis says so (${built.ivBasis})`);
-  near(built.scalars.skew, 0.044, "with the skew unchanged in vol points", 5e-4);
+  near(built.scalars.skew, 0.044 + PUT_LIFT,
+       "with the skew unchanged in vol points — the convention scales the inputs, not the answer", 5e-4);
 }
 
 /* ---------- an absent aggressor split is not a balanced tape ------ */
@@ -345,7 +630,7 @@ function chain({
   ok(Math.abs(b.putM + SKEW_MONEYNESS) <= SKEW_TOLERANCE + 1e-9,
      "but sat inside the stated tolerance");
   /* The published vol is one the fixture actually quoted at that strike. */
-  near(b.putIv, Number(ivOf(b.putM, b.days).toFixed(4)),
+  near(b.putIv, Number((ivOf(b.putM, b.days) + PUT_LIFT / 2).toFixed(4)),
        "and the published wing vol is the QUOTED vol at the strike used, not an interpolation", 2e-3);
 
   /* Beyond tolerance there is no reading at all. */
@@ -364,6 +649,32 @@ function chain({
   eq(built.truncated, true,
      "a chain that filled the page is reported as truncated — partial coverage is stated, not hidden");
   eq(built.rowsSeen, CHAIN_PAGE_SIZE, "with the row count it actually saw");
+
+  /* AND THE SCALARS STAND DOWN. Every one of their relations begins "on the
+     nearest expiry"; the endpoint documents no ordering, so a full page is an
+     arbitrary subset and "nearest" within it is "nearest among whatever
+     arrived". The panels still publish — a partial surface is a stated partial
+     view — but the scalars go onto a board row and into an archive where
+     nothing carries the caveat, so they are withheld instead. */
+  eq(built.scalars.skew, null, "a truncated chain publishes NO skew");
+  eq(built.scalars.term, null, "no term structure");
+  eq(built.scalars.atmIv, null, "and no at-the-money level");
+  for (const key of ["skewReason", "termReason", "atmReason"]) {
+    ok(/arbitrary subset|no documented order/.test(String(built.skewTerm[key])),
+       `${key} names the truncation rather than blaming the data (${built.skewTerm[key]})`);
+  }
+  eq(built.ivSurface.status, "ok",
+     "while the surface still builds, because a partial view of a book is a real view of part of it");
+}
+
+/* ---------- the horizon travels with the reading ------------------ */
+{
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  ok(built.scalars.skew !== null, "the fixture reads a skew");
+  eq(built.scalars.skewDays, built.skewTerm.skewBasis.days,
+     "and the board-bound scalar carries the tenor it was read at");
+  ok(built.scalars.skewDays >= SKEW_MIN_DAYS,
+     `which respects the floor (${built.scalars.skewDays}d)`);
 }
 
 /* ---------- a truncated chain says so ON THE CARD ------------------ */

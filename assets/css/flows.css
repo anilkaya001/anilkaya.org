@@ -7,12 +7,32 @@
    ============================================================= */
 
 :root {
-  /* Directional pair, checked against --bg-elev (#12110d):
-     jade  #6f9f78 -> 6.9:1, brick #d1685a -> 5.4:1. Both clear AA
-     for body text, and neither collides with the gold accent. */
-  --flow-up:   #6f9f78;
-  --flow-down: #d1685a;
+  /* THE SIGNED PAIR, brightened. The jade/brick pair was chosen to sit
+     quietly beside the gold accent — and it did, which turned out to be the
+     problem: on a dense board a reader scanning for direction was reading two
+     muted colours a shade apart from the chrome around them. Gold is now
+     chrome ONLY, so the signed pair no longer has to defer to it and can be
+     the loudest thing on the page, which is what a direction column is for.
+
+     Checked against --panel-bg (#100f0b), which is what they now sit on:
+     green #57a866 -> 6.2:1, red #e06a52 -> 5.0:1. Both clear AA for body
+     text. Neither is the saturated #3fb950/#f85149 of a pure terminal clone:
+     those wash out the warm blacks this site is built on.
+
+     HUE IS STILL THE LAST CHANNEL. Every chart that uses these also carries
+     the sign in position or hatch, because a reader who cannot separate them
+     must still be able to read the board. */
+  --flow-up:   #57a866;
+  --flow-down: #e06a52;
   --flow-flat: var(--ink-faint);
+  /* UNSIGNED MAGNITUDE IS NOT A DIRECTION, so it must not borrow the signed
+     pair — a green bar for "how much" beside a green bar for "up" teaches the
+     reader that more is bullish. It was gold, which is worse: gold is the
+     brand accent now, and data drawn in the accent colour reads as emphasis
+     rather than as measurement. A neutral ink ramp says magnitude and nothing
+     else. */
+  --flow-mag:     var(--ink-dim);
+  --flow-mag-dim: color-mix(in srgb, var(--ink-dim) 55%, transparent);
   --flow-surface: color-mix(in srgb, var(--bg-elev) 92%, transparent);
 }
 
@@ -250,7 +270,19 @@
 
 .flows-table th,
 .flows-table td {
-  padding: 0.6rem 0.85rem;
+  /* THE DENSITY PASS, and it is also what pays for the webfont.
+
+     JetBrains Mono advances 0.600 em per character against roughly 0.581 for
+     the system stack it replaced — three percent wider, which is nothing on a
+     label and five pixels on the desk's thirteen-column table, enough to push
+     it into a horizontal scroll it is explicitly built to avoid. The desk
+     contract caught it at exactly that width.
+
+     Tightening the horizontal padding by two hundredths of a rem per side buys
+     back more than the font costs and reads denser besides, which is what this
+     iteration wanted from the tables anyway. The vertical rhythm is untouched:
+     row height is what makes a long table scannable. */
+  padding: 0.6rem 0.72rem;
   text-align: left;
   border-bottom: 1px solid var(--hairline);
   white-space: nowrap;
@@ -366,7 +398,7 @@
   bottom: 50%;
   height: calc(var(--h, 0) * 0.5rem);
   border-radius: 1px;
-  background: var(--gold-mystic);
+  background: var(--flow-up);
 }
 
 .fb-fam i.is-neg::before {
@@ -516,13 +548,61 @@ p.fb-empty {
 .fc.is-stale .gp,
 .fc.is-stale .fp { opacity: 0.72; }
 
-.fc-panel { margin-top: 1.5rem; }
+/* A PANEL IS A BOX NOW, and the box is the point.
+
+   The card was ten sections separated by margin alone, so a reader scrolling
+   it had no edge to tell them where one measurement stopped and the next
+   began — every chart bled into the paragraph under the chart above it. A
+   boxed card with a header strip is the convention every trading surface uses
+   for exactly this reason, and it costs one border and one background.
+
+   NOTE FOR THE RENDERERS: the padding changes host.clientWidth, which is what
+   every panel sizes its viewBox from. They re-measure on paint, and the
+   1:1 viewBox invariant is asserted at 320 and 1280 in the render contract,
+   so a padding change that broke the sizing would fail there rather than ship
+   as a slightly-wrong chart. */
+.fc-panel {
+  /* THE SIDE PADDING IS A VARIABLE BECAUSE THE CHARTS MEASURE THE HOST.
+
+     Every panel sizes its viewBox from host.clientWidth and holds one viewBox
+     unit to one CSS pixel; below 300px it clamps up to 300 instead, and a
+     clamped chart in a narrower box is a letterboxed drawing with 9px axis
+     type rendered at 7. On a 320px phone the page's own padding already takes
+     most of the slack, so a further 1rem each side pushed the host to 254 and
+     broke the invariant — the render contract caught it at exactly that
+     viewport.
+
+     So the box keeps its border, its header strip and its vertical rhythm at
+     every width, and gives its side padding back to the chart on a phone. A
+     bordered panel whose content reaches the border is still obviously a
+     panel; a chart drawn at the wrong scale is not still a chart. */
+  --panel-pad-x: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--panel-pad-x) var(--space-3);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-card);
+}
+
+@media (max-width: 30rem) {
+  .fc-panel { --panel-pad-x: 0px; }
+  /* The header keeps its own inset so the label is not flush to the border. */
+  .fc-panel h3 { padding-inline: var(--space-2); }
+}
 
 .fc-panel h3 {
-  margin: 0 0 0.15rem;
-  font-size: 1rem;
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
 }
 
 /* The question the panel answers, stated before its chart. A panel that
@@ -585,23 +665,23 @@ p.fb-empty {
 .gp-negpat { color: var(--bg-deep); }
 
 .gp-zero { stroke: var(--hairline); stroke-width: 1; }
-.gp-bar.is-pos { fill: var(--gold-mystic); }
+.gp-bar.is-pos { fill: var(--flow-up); }
 .gp-bar.is-neg { fill: var(--flow-down); stroke: none; }
 .gp-barhatch { opacity: 0.55; }
 
 .gp-cum { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
-.gp-cum.is-pos { stroke: var(--gold-celadon); }
+.gp-cum.is-pos { stroke: var(--flow-up); }
 .gp-cum.is-neg { stroke: var(--flow-down); stroke-dasharray: 4 3; }
 
 .gp-spot { stroke: var(--ink); stroke-width: 1.5; }
-.gp-flip { stroke: var(--gold-harvest); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.gp-flip { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 6 4; }
 
 /* Drawn when a plate had to be nudged off its rule to avoid a collision, so
    the label is never silently detached from the level it names. */
 .gp-leader { stroke: var(--hairline); stroke-width: 1; }
 .gp-plate-k { fill: var(--ink); font-family: var(--font-mono); font-size: 10.5px; }
 .gp-plate-s { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 9.5px; }
-.gp-plate.is-flip .gp-plate-k { fill: var(--gold-harvest); }
+.gp-plate.is-flip .gp-plate-k { fill: var(--ink); }
 
 .gp-price { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
 .gp-axis {
@@ -624,8 +704,8 @@ p.fb-empty {
 /* ---------- gamma roll-off ---------------------------------------- */
 
 .gc { display: block; width: 100%; height: auto; }
-.gc-cum { fill: color-mix(in srgb, var(--gold-mystic) 22%, transparent); }
-.gc-step { fill: var(--gold-mystic); }
+.gc-cum { fill: var(--flow-mag-dim); }
+.gc-step { fill: var(--flow-mag); }
 .gc-half { stroke: var(--ink-dim); stroke-width: 1; stroke-dasharray: 4 3; }
 .gc-exp { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 10.5px; }
 .gc-share { fill: var(--ink); font-family: var(--font-mono); font-size: 10.5px; }
@@ -771,7 +851,7 @@ p.fb-empty {
   left: 50%;
   width: calc(var(--w, 0) * 50%);
   border-radius: 2px;
-  background: var(--gold-mystic);
+  background: var(--flow-mag);
 }
 
 .fc-fam li.is-neg .fc-fam-track i {
@@ -802,7 +882,7 @@ p.fb-empty {
   left: 0;
   right: auto;
   width: calc(var(--w, 0) * 100%);
-  background: var(--gold-celadon);
+  background: var(--flow-mag);
 }
 
 .fc-fam li.is-null .fc-fam-track i {
@@ -943,14 +1023,67 @@ body.is-stale .flows-tablewrap {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.85rem 0.9rem 0.75rem;
-  background: var(--bg-elev);
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-  transition: border-color 120ms ease, transform 120ms ease;
+  position: relative;                 /* the spotlight layer is absolute inside */
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-card);
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 160ms ease;
 }
 
-.fd-card:hover { border-color: var(--gold-mystic); transform: translateY(-1px); }
+/* THE CURSOR SPOTLIGHT.
+
+   A pointer-following highlight, positioned from --mx/--my which
+   assets/js/flows-board.js writes on a throttled pointermove. It is a
+   gradient layer rather than a filter or a shadow animation, so the whole
+   effect is one composited paint and never touches layout.
+
+   It is DECORATION AND KNOWS IT. Nothing on this card means anything
+   different when the pointer is over it, so the spotlight carries no
+   information and its absence costs a reader nothing — which is exactly why
+   it is safe to switch off entirely below. The lift and the border are the
+   affordance; the spotlight is the polish. */
+.fd-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+  background: radial-gradient(
+    16rem 12rem at calc(var(--mx, 50) * 1%) calc(var(--my, 50) * 1%),
+    color-mix(in srgb, var(--gold-mystic) 13%, transparent),
+    transparent 70%);
+}
+
+.fd-card:hover {
+  border-color: color-mix(in srgb, var(--gold-mystic) 55%, var(--panel-border));
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(6, 6, 4, 0.5);
+}
+.fd-card:hover::after { opacity: 1; }
 .fd-card:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
+
+/* THE DECK CARD WAS MISSING FROM THE REDUCED-MOTION BLOCK, and it is the one
+   surface in this section that actually moves: it has carried a hover
+   transform since it shipped and that rule never covered it.
+
+   THIS OVERRIDE LIVES HERE, NOT UP THERE. The early block sits six hundred
+   lines above `.fd-card`, so at equal specificity the card's own transition
+   won on source order and a reader who asked for no motion got the lift
+   anyway. An override that cannot reach what it overrides is worse than no
+   override: it reads as handled.
+
+   The JS honours the same preference independently — it does not attach the
+   pointermove listener at all — so the spotlight has nothing to position.
+   Hiding the layer is the belt to that braces: neither half can leak past
+   the other. */
+@media (prefers-reduced-motion: reduce) {
+  .fd-card { transition: none; }
+  .fd-card:hover { transform: none; box-shadow: var(--shadow-card); }
+  .fd-card::after { display: none; }
+}
 
 .fd-head { display: flex; align-items: baseline; gap: 0.5rem; }
 
@@ -1056,7 +1189,7 @@ body.is-stale .flows-tablewrap {
   border-radius: 2px;
 }
 
-.fd-track i.is-pos { left: 50%; width: calc(var(--w, 0) * 50%); background: var(--gold-mystic); }
+.fd-track i.is-pos { left: 50%; width: calc(var(--w, 0) * 50%); background: var(--flow-up); }
 .fd-track i.is-neg { right: 50%; width: calc(var(--w, 0) * 50%); background: var(--flow-down); }
 
 /* Three items in a 15rem card is tight, and space-between happily pushes the
@@ -1084,13 +1217,13 @@ body.is-stale .flows-tablewrap {
 /* Two bands, one scale. The realized band is drawn inside the implied one, so
    the visible gap between them IS the variance risk premium. */
 .pm-band.is-implied {
-  fill: color-mix(in srgb, var(--gold-mystic) 16%, transparent);
+  fill: color-mix(in srgb, var(--ink-dim) 16%, transparent);
   stroke: var(--hairline);
 }
 
 .pm-band.is-realized {
-  fill: color-mix(in srgb, var(--gold-celadon) 30%, transparent);
-  stroke: color-mix(in srgb, var(--gold-celadon) 55%, transparent);
+  fill: color-mix(in srgb, var(--ink) 22%, transparent);
+  stroke: color-mix(in srgb, var(--ink) 45%, transparent);
 }
 
 /* The vendor's own quote is a reference pair, not a band: its horizon is not
@@ -1109,10 +1242,10 @@ body.is-stale .flows-tablewrap {
 .bd-gap.is-up { stroke: color-mix(in srgb, var(--flow-up) 55%, transparent); }
 .bd-gap.is-down { stroke: color-mix(in srgb, var(--flow-down) 55%, transparent); }
 .bd-dot.is-oi { fill: var(--ink-dim); }
-.bd-dot.is-vol { fill: var(--gold-mystic); }
+.bd-dot.is-vol { fill: var(--flow-mag); }
 .bd-lab { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 9.5px; }
 .bd-lab.is-spot { fill: var(--ink); }
-.bd-lab.is-vol { fill: var(--gold-mystic); }
+.bd-lab.is-vol { fill: var(--flow-mag); }
 .bd-axis-lab { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 10px; }
 
 /* A GAUGE GROWS FROM THE BASELINE, not from the centre rule. V and O carry no
@@ -1122,7 +1255,7 @@ body.is-stale .flows-tablewrap {
   bottom: 0;
   top: auto;
   height: calc(var(--h, 0) * 1rem);
-  background: var(--gold-celadon);
+  background: var(--flow-mag);
 }
 
 /* ---------- premium desk ---------------------------------------
@@ -1961,7 +2094,12 @@ body.is-stale .flows-tablewrap {
 
 .rc { display: block; overflow: visible; }
 .rc-zero { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3; }
-.rc-line { fill: none; stroke: var(--gold-harvest); stroke-width: 1.8; }
+/* THE RECORD CURVE IS SIGNED DATA, so it cannot be drawn in the brand accent:
+   a gold line reads as "the site's headline number" rather than as a return
+   that may well be negative. The dots already carry the sign; the line that
+   joins them is neutral, so the colour on the page belongs to the readings
+   rather than to the shape. */
+.rc-line { fill: none; stroke: var(--flow-mag); stroke-width: 1.8; }
 .rc-dot.is-pos { fill: var(--flow-up); }
 .rc-dot.is-neg { fill: var(--flow-down); }
 
@@ -2248,7 +2386,14 @@ body.is-stale .flows-tablewrap {
     position: sticky;
     top: 0;
     align-self: start;
+    /* THE RAIL COULD NOT SCROLL, and the bug was latent rather than visible:
+       at six links it fit, and every group added past that would have been
+       clipped with no affordance saying so. A sticky element capped at the
+       viewport height needs an overflow rule or it simply hides its own
+       tail. */
     max-height: 100vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 5.5rem 0.9rem 2rem;
     border-bottom: 0;
     border-right: 1px solid var(--hairline);
@@ -2294,7 +2439,12 @@ body.is-stale .flows-tablewrap {
 .sp-bandpat { color: var(--ink-faint); }
 .sp-bandlabel { fill: var(--ink-dim); font-family: var(--font-mono); font-size: 9.5px; }
 
-.sp-dot.is-bull { fill: var(--gold-mystic); }
+/* THE SPINE'S TWO POLES WERE GOLD AND BRICK, which is not a pair: one is the
+   brand accent and the other is a signed colour, so a reader learned "bullish
+   = the site's colour" instead of "bullish = up". They are the signed pair
+   now, and the dead band between them is hatched rather than tinted, so the
+   sign survives without hue. */
+.sp-dot.is-bull { fill: var(--flow-up); }
 .sp-dot.is-bear { fill: var(--flow-down); }
 
 /* ---------- the two poles --------------------------------------- */
@@ -2354,6 +2504,9 @@ body.is-stale .flows-tablewrap {
 }
 
 .ptile {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
   display: block;
   padding: 0.7rem 0.8rem;
   background: var(--bg-elev);

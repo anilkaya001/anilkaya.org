@@ -1398,6 +1398,12 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
       row.skew = c.scalars.skew;
       row.term = c.scalars.term;
       row.atmIv = c.scalars.atmIv;
+      /* THE HORIZON THE SKEW WAS READ AT. "Nearest expiry past seven days" is
+         eight days out on SPY and ninety on a thin name, so a column of skews
+         is a column of different tenors unless the tenor rides along. This is
+         the same fact `im` is carried for the card over — see boardRow — and
+         the reason all four are excluded from the cross-sectional IC table. */
+      row.skewDays = c.scalars.skewDays;
       merged++;
     }
     if (!merged) continue;
@@ -2408,31 +2414,49 @@ function fakeChain(ticker, spot, seed) {
       const m = i * 0.035;
       const strike = Math.round(spot * Math.exp(m) * 100) / 100;
       const level = 0.34 - 0.03 * Math.log(dte / 7);
-      const iv = level + 0.55 * m * m - 0.22 * m;      // put wing bid over the call wing
-      const isPut = i <= 0;
-      const cp = isPut ? "P" : "C";
-      const intrinsic = isPut ? Math.max(0, strike - spot) : Math.max(0, spot - strike);
-      const bid = intrinsic + spot * iv * Math.sqrt(dte / 365) * 0.4 * Math.exp(-2 * m * m);
-      // One line in twelve never traded; one in nine has no aggressor split.
-      const traded = rnd() > 0.08;
-      const volume = traded ? Math.round(80 + 3000 * Math.exp(-7 * m * m) * rnd()) : 0;
-      const row = {
-        option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
-        nbbo_bid: (i === 8 ? 0 : Math.max(0.05, bid)).toFixed(2),   // the far call: nobody bidding
-        nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
-        implied_volatility: iv.toFixed(6),
-        open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
-        prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m))),
-        volume: String(volume),
-      };
-      if (rnd() > 0.11) {
-        const lifted = Math.round(volume * (0.5 + 0.3 * Math.sign(m || 1)));
-        row.ask_volume = String(Math.max(0, lifted));
-        row.bid_volume = String(Math.max(0, volume - lifted));
+      /* BOTH A PUT AND A CALL AT EVERY STRIKE, which is what the vendor
+         actually returns once `maybe_otm_only` is not passed — and the shape
+         that broke this leg before the de-duplication landed. A fixture with
+         one type per strike exercises none of it. The two types carry
+         DIFFERENT vols so a builder that picks the wrong one is visible in the
+         number rather than only in the code. */
+      for (const cp of ["P", "C"]) {
+        const isPut = cp === "P";
+        const iv = level + 0.55 * m * m - 0.22 * m + (isPut ? 0.012 : -0.012);
+        const intrinsic = isPut ? Math.max(0, strike - spot) : Math.max(0, spot - strike);
+        const bid = intrinsic + spot * iv * Math.sqrt(dte / 365) * 0.4 * Math.exp(-2 * m * m);
+        // One line in twelve never traded; one in nine has no aggressor split.
+        const traded = rnd() > 0.08;
+        const volume = traded ? Math.round(80 + 3000 * Math.exp(-7 * m * m) * rnd()) : 0;
+        const row = {
+          option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+          // The far call: quoted with nobody bidding, and it still trades.
+          nbbo_bid: (i === 8 && !isPut ? 0 : Math.max(0.05, bid)).toFixed(2),
+          nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
+          implied_volatility: iv.toFixed(6),
+          open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
+          prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m))),
+        };
+        /* One row in fourteen carries NO volume key at all — the shape that
+           made the aggressor ladder publish "800 lifted, 0 traded". */
+        if (rnd() > 0.07) row.volume = String(volume);
+        if (rnd() > 0.11) {
+          const lifted = Math.round(volume * (0.5 + 0.3 * Math.sign(m || 1)));
+          row.ask_volume = String(Math.max(0, lifted));
+          row.bid_volume = String(Math.max(0, volume - lifted));
+        }
+        rows.push(row);
       }
-      rows.push(row);
     }
   }
+  /* ONE ADJUSTED-SERIES ROW, on the old strike scale and heavily traded, so
+     the root filter has something to reject on every dry run. */
+  rows.push({
+    option_symbol: `${ticker}1260918C${String(Math.round(spot * 300)).padStart(8, "0")}`,
+    nbbo_bid: "1.00", nbbo_ask: "1.10", implied_volatility: "0.400000",
+    open_interest: "5000", prev_oi: "4800", volume: "99999",
+    ask_volume: "90000", bid_volume: "9999",
+  });
   return rows;
 }
 
@@ -3111,6 +3135,13 @@ async function main() {
      Both boards, deduplicated: a name can only be on one side, but building
      the list from the payloads rather than from a side keeps it in step with
      what was actually published. */
+  /* THE WHOLE LEG IS INSIDE ONE GUARD, including the bookkeeping around it.
+     The per-name try/catch covers a failing chain; it does not cover building
+     the ticker list, reducing the summary, or the re-publish call — and this
+     stretch runs AFTER both boards have landed, where this file's own rule is
+     that nothing may fail the run. */
+  const chainByTicker = new Map();
+  try {
   const boardTickers = [...new Set(
     ["long", "short"].flatMap((side) => payloads[side].rows.map((r) => r.t)))];
   const spotByTicker = new Map();
@@ -3141,7 +3172,6 @@ async function main() {
      deadline; the per-name check stops partway rather than eating the card
      window, because a run that spends its last four minutes on chains and then
      publishes no cards has traded a panel for a page. */
-  const chainByTicker = new Map();
   if (Date.now() > stats.startedAt + DEADLINE_MS) {
     console.warn(
       `  chains: past the ${DEADLINE_MS / 60000}min deadline — not spending ` +
@@ -3196,6 +3226,7 @@ async function main() {
         const panels = buildChainPanels(rows, {
           spot: spotByTicker.get(ticker) || null,
           asOf: sessionDate,
+          ticker,
         });
         chainByTicker.set(ticker, panels);
         if (panels.status === "ok") chainOk++; else chainFailed++;
@@ -3204,12 +3235,32 @@ async function main() {
         console.warn(`  chain ${ticker}: ${error.message}`);
       }
     }
-    const levelled = [...chainByTicker.values()].filter((c) => c.scalars.atmIv !== null).length;
-    const skewed = [...chainByTicker.values()].filter((c) => c.scalars.skew !== null).length;
+    const built = [...chainByTicker.entries()].filter(([, c]) => c.status === "ok");
+    const levelled = built.filter(([, c]) => c.scalars.atmIv !== null).length;
+    const skewed = built.filter(([, c]) => c.scalars.skew !== null).length;
     console.log(
       `  chains: ${chainOk} built, ${chainFailed} failed` +
       (chainSkipped ? `, ${chainSkipped} skipped for the deadline` : "") +
       `; ${levelled} levelled, ${skewed} with a skew reading`);
+    /* THE UNMEASURED NAMES BY NAME, the way the sector leg reports its own.
+       "15 built, 2 with a skew" is a number nobody can act on; which two, and
+       why, is the line that gets read on the morning something is wrong. */
+    for (const [t, c] of built) {
+      if (c.skewTerm.status !== "ok") continue;
+      if (c.scalars.skew === null) console.warn(`    ${t}: no skew — ${c.skewTerm.skewReason}`);
+      if (c.scalars.atmIv === null) console.warn(`    ${t}: no ATM level — ${c.skewTerm.atmReason}`);
+      if (c.foreignRows) console.warn(`    ${t}: dropped ${c.foreignRows} adjusted-series row(s)`);
+    }
+    /* ZERO LEVELLED ACROSS THE WHOLE BOARD is not a thin day, it is a broken
+       assumption — most plausibly that the vendor's `volume` is not today's
+       session volume at the hour this job runs, which would mean no expiry
+       anywhere can carry an at-the-money level. */
+    if (built.length && !levelled) {
+      console.warn(
+        "  chains: NOT ONE name carried an at-the-money level. Every level requires a " +
+        "contract that traded today, so this reads as `volume` being absent or zero " +
+        "chain-wide at this hour rather than as a quiet session.");
+    }
   }
 
   /* 7f. THE BOARDS, RE-PUBLISHED WITH WHAT THE CHAIN MEASURED.
@@ -3235,6 +3286,10 @@ async function main() {
     for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish)) {
       console.log(line);
     }
+  }
+  } catch (error) {
+    console.warn(`  chains: ${error.message} — the boards published before this leg ran ` +
+      "and are unaffected");
   }
 
   /* 8. CARDS — after the boards are safely committed, and best-effort.

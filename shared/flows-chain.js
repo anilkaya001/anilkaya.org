@@ -76,6 +76,22 @@ export const SKEW_MIN_DAYS = 7;
 export const TERM_MIN_DAYS = 7;
 export const TERM_FAR_DAYS = 45;
 
+/**
+ * The ceiling above which a published implied volatility is not a reading.
+ *
+ * ivConvention divides by 100 only when a chain's median implied vol is above
+ * 5, and the surface's own percent tripwire uses the SAME threshold on a
+ * subset of the same numbers — so the two do not fail independently, they fail
+ * together. A chain genuinely quoting 3.5 to 4.0 as a FRACTION (a 350–400%
+ * vol, which short-dated and distressed names really do print) passes both,
+ * and the basis string then vouches for it in writing.
+ *
+ * 3.0 is 300% annualised. Above that the number goes out as unavailable with
+ * its measured value named, rather than onto a board column where it would sit
+ * beside ordinary 0.3s and rank first on every sort.
+ */
+export const ATM_IV_CEILING = 3.0;
+
 export const TOP_CONTRACTS = 10;
 export const AGGRESSOR_STRIKES = 30;
 
@@ -133,18 +149,79 @@ export function serialiseSurface(surface) {
 /* ---------- the two scalars, and the term line ------------------- */
 
 /**
- * The wing reading at one target moneyness on one expiry's contracts.
+ * ONE CONTRACT PER STRIKE, AND IT IS THE OUT-OF-THE-MONEY ONE.
  *
- * Returns the nearest listed contract inside the tolerance band, or null.
+ * THIS IS THE MOST IMPORTANT FUNCTION IN THE FILE, and it exists because of a
+ * decision made one layer up. The premium desk asks the vendor for
+ * `maybe_otm_only`, so it has never seen more than one contract at a strike.
+ * This leg deliberately does NOT pass that filter — the at-the-money contract
+ * is the surface's most load-bearing input and that filter removes it — and
+ * the price of that decision is a put AND a call at every single strike.
+ *
+ * Handed both, everything downstream breaks in the same silent way. ivSurface's
+ * at-the-money tiebreak compares |moneyness| and then strike, and a put and a
+ * call at one strike tie on BOTH, so first-seen wins and the whole surface
+ * flips on the vendor's row order. Measured on a chain with puts at 0.40 and
+ * calls at 0.25: atmIv came back 0.40 or 0.25 depending on nothing but which
+ * row arrived first, and the skew — one wing minus the other — came back
+ * EXACTLY ZERO, because both wings resolved to the same type. A fifteen-point
+ * smile, published as "perfectly symmetric", with no reason field to say
+ * otherwise. That is the confident zero this whole codebase is built to refuse.
+ *
+ * The fix is to choose, once, before anything measures: below spot the
+ * out-of-the-money contract is the put, above spot it is the call, and those
+ * are also the liquid ones — the in-the-money twin carries the same
+ * information under put-call parity behind a wider spread. At the money both
+ * are out of the money by no distance at all, so freshness decides and the
+ * choice is stated.
+ */
+function preferOutOfTheMoney(priced) {
+  const byKey = new Map();
+  let collisions = 0;
+  for (const p of priced) {
+    const m = numOrNull(p.moneyness);
+    if (m === null || !p.expiry || !(p.strike > 0)) continue;
+    const key = p.expiry + "@" + p.strike;
+    const held = byKey.get(key);
+    if (!held) { byKey.set(key, p); continue; }
+    collisions++;
+    const lm = Math.log1p(m);
+    /* Below spot the put is out of the money; above spot the call is. AT the
+       money neither is, so the contract that actually traded today wins and
+       a call breaks a remaining tie — a stated rule rather than an ordering
+       accident. */
+    const wantType = lm < 0 ? "P" : lm > 0 ? "C" : null;
+    let better;
+    if (wantType) better = p.type === wantType && held.type !== wantType;
+    else {
+      const pf = p.ivTraded === true, hf = held.ivTraded === true;
+      better = pf !== hf ? pf : p.type === "C" && held.type !== "C";
+    }
+    if (better) byKey.set(key, p);
+  }
+  return { kept: [...byKey.values()], collisions };
+}
+
+/**
+ * The wing reading at one target moneyness, on contracts of ONE TYPE.
+ *
+ * `type` is required, not optional. The skew's whole claim is "the put wing
+ * against the call wing", and a function that could answer it with two puts is
+ * a function that will: see preferOutOfTheMoney above for what that cost.
+ * Filtering here as well as there is deliberate belt-and-braces — the
+ * de-duplication makes the right type available, this makes taking it
+ * structural rather than incidental.
+ *
  * FRESHNESS BREAKS TIES BEFORE DISTANCE DOES: `iv` on this vendor is the last
  * transaction's implied volatility, not a quote, so a print from today two
  * strikes off the target beats a print of unknown age sitting exactly on it.
- * The chosen contract's own age travels with the reading rather than being
- * averaged away.
+ * Distance then decides, and the lower strike settles what remains — so the
+ * answer never depends on the order the vendor happened to send.
  */
-function wingAt(priced, targetM, tol) {
+function wingAt(priced, targetM, tol, type) {
   let best = null;
   for (const p of priced) {
+    if (type && p.type !== type) continue;
     const m = numOrNull(p.moneyness);
     const iv = numOrNull(p.iv);
     if (m === null || iv === null || !(iv > 0)) continue;
@@ -152,8 +229,11 @@ function wingAt(priced, targetM, tol) {
     const d = Math.abs(lm - targetM);
     if (d > tol) continue;
     const fresh = p.ivTraded === true;
-    const better = best === null
-      || (fresh !== best.fresh ? fresh : d < best.d);
+    let better;
+    if (best === null) better = true;
+    else if (fresh !== best.fresh) better = fresh;
+    else if (d !== best.d) better = d < best.d;
+    else better = p.strike < best.strike;
     if (better) best = { d, fresh, iv, m: lm, strike: p.strike, type: p.type, traded: p.ivTraded };
   }
   return best;
@@ -213,16 +293,18 @@ export function chainScalars(pricedByExpiry, surface, {
     if (col.days < minDays) continue;
     const e = byExpiry.get(col.expiry);
     if (!e) continue;
-    const put = wingAt(e.priced, -targetM, tol);
-    const call = wingAt(e.priced, targetM, tol);
+    const put = wingAt(e.priced, -targetM, tol, "P");
+    const call = wingAt(e.priced, targetM, tol, "C");
     if (!put || !call) continue;
     skew = put.iv - call.iv;
     skewExpiry = col;
     skewBasis = {
       expiry: col.expiry, days: col.days,
       putM: round(put.m, 4), putStrike: round(put.strike, 2), putIv: round(put.iv, 4),
+      putType: put.type,
       putTraded: put.traded === true ? 1 : put.traded === false ? 0 : null,
       callM: round(call.m, 4), callStrike: round(call.strike, 2), callIv: round(call.iv, 4),
+      callType: call.type,
       callTraded: call.traded === true ? 1 : call.traded === false ? 0 : null,
     };
     break;
@@ -231,18 +313,31 @@ export function chainScalars(pricedByExpiry, surface, {
   const reachedFloor = anyColumn.some((e) => e.days >= minDays);
   const skewReason = skew !== null ? null
     : !reachedFloor ? `no listed expiry on this chain reached ${minDays} days`
-      : `no expiry past ${minDays} days had a quoted contract within ${tol} of BOTH ` +
-        `ln(K/S) = −${targetM} and +${targetM}`;
+      : `no expiry past ${minDays} days quoted BOTH a put within ${tol} of ` +
+        `ln(K/S) = −${targetM} and a call within ${tol} of +${targetM}`;
 
-  const atmIv = nearLevel ? nearLevel.atmIv : null;
+  const rawAtm = nearLevel ? nearLevel.atmIv : null;
+  const overCeiling = rawAtm !== null && rawAtm > ATM_IV_CEILING;
+  const atmIv = overCeiling ? null : rawAtm;
   const atmReason = atmIv !== null ? null
-    : !reachedFloor ? `no listed expiry on this chain reached ${minDays} days`
-      : "no expiry past the floor carried an at-the-money contract that traded today";
+    : overCeiling
+      ? `the at-the-money reading was ${rawAtm.toFixed(2)} (${(rawAtm * 100).toFixed(0)}% ` +
+        `annualised), past the ${ATM_IV_CEILING} ceiling this module will vouch for — the ` +
+        "per-chain percent convention and the surface's tripwire share one threshold and " +
+        "fail together, so a chain quoting in this band is not distinguishable from a " +
+        "mis-scaled one"
+      : !reachedFloor ? `no listed expiry on this chain reached ${minDays} days`
+        : "no expiry past the floor carried an at-the-money contract that traded today";
 
-  const term = nearLevel && farLevel ? farLevel.atmIv - nearLevel.atmIv : null;
+  /* The term difference inherits the ceiling: if either level is one this
+     module will not vouch for, their difference is not one either. */
+  const farOver = farLevel && farLevel.atmIv > ATM_IV_CEILING;
+  const term = nearLevel && farLevel && !overCeiling && !farOver
+    ? farLevel.atmIv - nearLevel.atmIv : null;
   const termReason = term !== null ? null
-    : !nearLevel ? atmReason
-      : `no levelled expiry reached ${termFarDays} days, so there is no far leg to difference`;
+    : overCeiling || farOver ? atmReason || "an at-the-money level was past the stated ceiling"
+      : !nearLevel ? atmReason
+        : `no levelled expiry reached ${termFarDays} days, so there is no far leg to difference`;
 
   return {
     skew: round(skew, 4),
@@ -257,7 +352,7 @@ export function chainScalars(pricedByExpiry, surface, {
     atmIv: round(atmIv, 4),
     atmExpiry: nearLevel ? nearLevel.expiry : null,
     atmReason,
-    relation: `skew = iv(ln K/S = −${targetM}) − iv(ln K/S = +${targetM}) on the nearest ` +
+    relation: `skew = put iv(ln K/S = −${targetM}) − call iv(ln K/S = +${targetM}) on the nearest ` +
       `expiry at or past ${minDays} days carrying both wings; nearest listed strike within ` +
       `${tol} of each target, freshness before distance, no interpolation. ` +
       `+ means the put wing is bid over the call wing. ` +
@@ -369,18 +464,26 @@ export function buildTopContracts(rows, { spot, ivDivisor = 1, limit = TOP_CONTR
  */
 export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = {}) {
   const byStrike = new Map();
+  const allStrikes = new Set();
   let reported = 0, unreported = 0;
   for (const row of rows || []) {
     const p = parseOptionSymbol(row && row.option_symbol);
     if (!p) continue;
+    allStrikes.add(p.strike);
     const ask = numOrNull(row.ask_volume);
     const bid = numOrNull(row.bid_volume);
-    const volume = numOrNull(row.volume) || 0;
-    if (ask === null || bid === null) { if (volume > 0) unreported++; continue; }
-    if (ask === 0 && bid === 0 && volume === 0) continue;   // never traded, not a data point
+    /* VOLUME IS null-OR-A-NUMBER, never `|| 0`. The coerced version summed an
+       absent volume field as zero, so a strike showing 800 contracts aggressed
+       could publish `vol: 0` beside it — "800 lifted, none traded", which is
+       not a reading of anything. */
+    const volume = numOrNull(row.volume);
+    if (ask === null || bid === null) { if (volume === null || volume > 0) unreported++; continue; }
+    if (ask === 0 && bid === 0 && !volume) continue;   // never traded, not a data point
     reported++;
     const k = p.strike;
-    if (!byStrike.has(k)) byStrike.set(k, { k, net: 0, vol: 0, calls: 0, puts: 0 });
+    if (!byStrike.has(k)) {
+      byStrike.set(k, { k, net: 0, vol: 0, volKnown: 0, volMissing: 0, calls: 0, puts: 0 });
+    }
     const cell = byStrike.get(k);
     /* A PUT LIFTED AT THE ASK IS BEARISH PRESSURE, a call lifted at the ask is
        bullish, and summing them unsigned would report a busy day as a directional
@@ -388,8 +491,11 @@ export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = 
        that contract is long: calls positive, puts negative. */
     const signed = (ask - bid) * (p.type === "P" ? -1 : 1);
     cell.net += signed;
-    cell.vol += volume;
-    if (p.type === "P") cell.puts += volume; else cell.calls += volume;
+    if (volume === null) cell.volMissing++;
+    else {
+      cell.vol += volume; cell.volKnown++;
+      if (p.type === "P") cell.puts += volume; else cell.calls += volume;
+    }
   }
   if (!byStrike.size) {
     return dead(unreported
@@ -398,7 +504,12 @@ export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = 
   }
 
   let ladder = [...byStrike.values()].sort((a, b) => a.k - b.k);
-  const total = ladder.length;
+  /* THE POPULATION IS THE CHAIN'S STRIKES, not the ones that happened to carry
+     a split. Reporting "3 of 3" on a chain where a fourth strike traded five
+     thousand contracts the vendor did not split is a completeness claim the
+     data does not support. */
+  const total = allStrikes.size;
+  const measuredStrikes = ladder.length;
   /* KEPT NEAREST THE MONEY, because that is where hedging happens and where
      the gamma ladder beside it is measured. The count says how much was cut. */
   if (spot > 0 && ladder.length > maxStrikes) {
@@ -414,15 +525,29 @@ export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = 
   return {
     status: "ok",
     bars: ladder.map((c) => ({
-      k: round(c.k, 2), net: Math.round(c.net), vol: Math.round(c.vol),
+      k: round(c.k, 2),
+      net: Math.round(c.net),
+      /* null, not 0, when nothing at this strike reported a volume. */
+      vol: c.volKnown ? Math.round(c.vol) : null,
+      /* THE TWO WINGS, KEPT. A strike where a put and a call were each lifted
+         sixty-forty nets to zero — and drawn as one number that is
+         indistinguishable from a strike where nothing happened at all. The
+         zero is the interesting case, and it needs its own evidence beside
+         it. */
+      calls: c.volKnown ? Math.round(c.calls) : null,
+      puts: c.volKnown ? Math.round(c.puts) : null,
+      volMissing: c.volMissing || 0,
     })),
     shown: ladder.length,
+    measuredStrikes,
     total,
+    strikesUnreported: Math.max(0, total - measuredStrikes),
     reported,
     unreported,
     relation: "net = Σ (ask_volume − bid_volume) per strike, in contracts, signed by " +
       "what the buyer is long: calls +, puts −. Contracts with no reported split are " +
-      "excluded and counted, never summed as zero",
+      "excluded and counted, never summed as zero; `total` counts strikes on the chain, " +
+      "not strikes that reported",
   };
 }
 
@@ -436,11 +561,28 @@ export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = 
  * aggressor split returns a live surface beside an unavailable ladder, and
  * nothing anywhere returns a zero it did not measure.
  */
-export function buildChainPanels(chainRows, { spot, asOf } = {}) {
-  const rows = Array.isArray(chainRows) ? chainRows : [];
-  const truncated = rows.length >= CHAIN_PAGE_SIZE;
+export function buildChainPanels(chainRows, { spot, asOf, ticker = null } = {}) {
+  const all = Array.isArray(chainRows) ? chainRows : [];
+  const truncated = all.length >= CHAIN_PAGE_SIZE;
+
+  /* ADJUSTED SERIES ARE A DIFFERENT INSTRUMENT AND THEY WIN EVERY RANKING.
+     After a split or a special dividend the vendor lists a second root — AAPL1
+     beside AAPL — deliverable on something other than 100 shares. Its strikes
+     are on the old scale, so its moneyness is nonsense against today's spot,
+     and its volume ranks it first on the tape. Dropped by root, counted, and
+     the count is published rather than being an invisible filter. */
+  const rows = ticker
+    ? all.filter((r) => {
+      const p = parseOptionSymbol(r && r.option_symbol);
+      return p && p.ticker === ticker;
+    })
+    : all;
+  const foreignRows = all.length - rows.length;
   if (!rows.length) {
-    const reason = "the vendor returned no contracts for this symbol";
+    const reason = foreignRows
+      ? `every one of the ${foreignRows} contracts the vendor returned belongs to an ` +
+        `adjusted series, not to ${ticker}`
+      : "the vendor returned no contracts for this symbol";
     return {
       status: "unavailable", reason, truncated: false, rowsSeen: 0,
       ivSurface: dead(reason), skewTerm: dead(reason),
@@ -469,16 +611,46 @@ export function buildChainPanels(chainRows, { spot, asOf } = {}) {
     if (p) priced.push(p);
   }
 
-  const surface = ivSurface(priced, { ivBasis: conv.basis });
+  /* ONE CONTRACT PER STRIKE BEFORE ANYTHING MEASURES. See
+     preferOutOfTheMoney: without this the surface flips on vendor row order
+     and the skew publishes a confident zero. */
+  const { kept, collisions } = preferOutOfTheMoney(priced);
+
+  const surface = ivSurface(kept, { ivBasis: conv.basis });
   const serial = serialiseSurface(surface);
 
   const byExpiry = new Map();
-  for (const p of priced) {
+  for (const p of kept) {
     if (!p.expiry) continue;
     if (!byExpiry.has(p.expiry)) byExpiry.set(p.expiry, { expiry: p.expiry, days: p.days, priced: [] });
     byExpiry.get(p.expiry).priced.push(p);
   }
-  const scalars = chainScalars(byExpiry, surface);
+  let scalars = chainScalars(byExpiry, surface);
+
+  /* A TRUNCATED CHAIN CANNOT VOUCH FOR THE WORD "NEAREST".
+     
+     Every scalar's stated relation begins "on the nearest expiry" and "the
+     nearest listed strike". The vendor's page ceiling is 500 contracts and the
+     ticker-scoped endpoint documents NO ordering parameter — a fact this
+     repository already learned once on the premium desk — so a chain that
+     filled the page is an arbitrary subset, and "nearest" over an arbitrary
+     subset is "nearest among whatever arrived", which is not what the relation
+     says.
+     
+     The panels still publish: a surface built from part of a book is a stated
+     partial view and the coverage says so. The SCALARS do not, because they go
+     onto a board row and into an archive where nothing carries their caveat. */
+  if (truncated) {
+    const why = `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no ` +
+      "documented order, so this is an arbitrary subset of the book and \"the nearest " +
+      "expiry\" cannot be identified within it";
+    scalars = {
+      ...scalars,
+      skew: null, skewReason: why, skewBasis: null,
+      term: null, termReason: why, termBasis: null,
+      atmIv: null, atmReason: why, atmExpiry: null,
+    };
+  }
 
   return {
     status: "ok",
@@ -490,12 +662,26 @@ export function buildChainPanels(chainRows, { spot, asOf } = {}) {
        the whole chain — a selection, stated here rather than left for a reader
        to infer from a thin column. The tape panels below do NOT inherit it. */
     pricedRows: priced.length,
+    /* What the de-duplication and the root filter actually removed, published
+       rather than silently applied: a surface built from half the rows the
+       vendor sent is a stated selection or it is a lie of omission. */
+    surfacedRows: kept.length,
+    strikeCollisions: collisions,
+    foreignRows,
     ivBasis: conv.basis,
     ivSurface: serial,
     skewTerm: buildSkewTerm(serial, scalars),
     topContracts: buildTopContracts(rows, { spot, ivDivisor: conv.divisor }),
     aggressor: buildAggressor(rows, { spot }),
-    scalars: { skew: scalars.skew, term: scalars.term, atmIv: scalars.atmIv },
+    /* THE HORIZON TRAVELS WITH THE READING. "Nearest expiry past seven days" is
+       eight days out on SPY and ninety on a thin name, so the number alone is
+       not comparable across names — carrying the days is what lets anyone
+       holding a board row see that, rather than having to know the rule. */
+    scalars: {
+      skew: scalars.skew, term: scalars.term, atmIv: scalars.atmIv,
+      skewDays: scalars.skewBasis ? scalars.skewBasis.days : null,
+      atmDays: scalars.termBasis ? scalars.termBasis.nearDays : null,
+    },
   };
 }
 
