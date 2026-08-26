@@ -275,6 +275,104 @@
     wrap.hidden = false;
   }
 
+
+  /* ---------- the per-feature evidence table ----------------------- */
+
+  /* THE ECONOMIC HYPOTHESIS RIDES EACH ROW. An IC without the claim it
+     tests is a number shopping for a story; the claim is stated here, in
+     the renderer, so a feature added to the payload before its prose lands
+     degrades to its bare key rather than to an invented sentence. */
+  const HYPOTHESES = {
+    "s": "the composite itself \u2014 the product's own claim, measured against what followed",
+    "cnv": "conviction: agreement across independent sources should mark flow that persists",
+    "chg": "the session's own return: does a move continue or hand it back",
+    "purity": "a one-sided tape should carry more information than the same volume churned",
+    "gFlipDist": "distance to the gamma flip: dealer hedging pressure is strongest near it",
+    "netPrem": "signed premium: money is a costlier vote than contract count",
+    "w52": "position in the 52-week range: breakout names and basing names behave differently",
+    "vrp": "variance risk premium: implied rich of delivered tends to revert",
+    "ivr": "IV rank: the extremes of a name's own volatility year",
+    "im": "the priced move: how much movement the vendor's quote already charges for",
+    "hm": "the priced move rescaled to the fixed horizon every row shares",
+    "hr": "delivered movement at that same fixed horizon",
+    "fam.F": "flow family: aggressor-side pressure on the day's tape",
+    "fam.P": "positioning family: what actually stuck in open interest",
+    "fam.D": "path family: a direction held all day is a different fact from one print",
+    "fam.V": "volatility gauge \u2014 unsigned, so any relation is about vol regime, not direction",
+    "fam.O": "quality gauge \u2014 unsigned; tests whether cleaner flow predicts better",
+    "pr.0": "trailing 5-session return: momentum at the fastest speed the board keeps",
+    "pr.1": "trailing 21-session return: one-month momentum",
+    "pr.2": "trailing 42-session return: two-month momentum",
+  };
+
+  function renderFeatures(features) {
+    const wrap = document.getElementById("recFeatWrap");
+    const body = document.getElementById("recFeatBody");
+    const notes = document.getElementById("recFeatNotes");
+    if (!wrap || !body || !notes) return;
+
+    /* TRANSITIONAL BY CONSTRUCTION: a record blob written before this table
+       existed simply lacks the key, and the honest rendering of that is
+       "not yet measured", never an empty frame or a table of zeros. */
+    if (!features || !Array.isArray(features.cols) || !features.cols.length) {
+      const p = document.createElement("p");
+      p.className = "rec-empty";
+      p.textContent = "The evidence table has not been measured yet. It is " +
+        "computed from the retained sessions on each pipeline run, so it " +
+        "appears with the first run after this page shipped.";
+      notes.replaceChildren(p);
+      wrap.hidden = true;
+      return;
+    }
+
+    body.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const col of features.cols) {
+      const tr = document.createElement("tr");
+      const th = document.createElement("th");
+      th.scope = "row";
+      th.className = "fb-tk rec-feat-key";
+      th.textContent = String(col.key);
+      const hyp = HYPOTHESES[col.key];
+      if (hyp) th.title = hyp;
+      tr.append(th);
+
+      const ic = isNum(col.ic);
+      const icCell = cell(
+        ic === null ? DASH : (ic < 0 ? MINUS : ic > 0 ? "+" : "") + Math.abs(ic).toFixed(3),
+        "c-num");
+      /* An unmeasured coefficient SAYS WHY, in place — "constant column" and
+         "too few pairs" are different facts and the payload distinguishes
+         them; collapsing both to a bare dash would throw that away. */
+      if (ic === null && col.reason) icCell.title = String(col.reason);
+      tr.append(icCell);
+
+      tr.append(cell(isNum(col.n) === null ? DASH : String(col.n), "c-num"));
+      frag.append(tr);
+    }
+    body.append(frag);
+    wrap.hidden = false;
+
+    /* The methodology, verbatim from the payload — the reader holds the
+       rules and the numbers together, and a change to the method must
+       change this text or lie in public. */
+    notes.textContent = "";
+    const meta = document.createElement("p");
+    meta.className = "rec-note";
+    const k = isNum(features.k);
+    const minN = isNum(features.minN);
+    meta.textContent = "Horizon: " + (k === null ? DASH : k + " sessions") +
+      " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") + ".";
+    notes.append(meta);
+    for (const key of ["method", "selection", "overlap", "calendar"]) {
+      if (typeof features[key] !== "string" || !features[key]) continue;
+      const p = document.createElement("p");
+      p.className = "rec-note";
+      p.textContent = features[key];
+      notes.append(p);
+    }
+  }
+
   /* ---------- load -------------------------------------------------- */
 
   /* Redraw at the new width rather than letting the browser scale the old
@@ -308,6 +406,7 @@
 
     renderCurve(horizons);
     renderSessions(sessions);
+    renderFeatures(payload.features);
 
     if (payload.status === "pending" || (!horizons.length && !sessions.length)) {
       /* THE ORDINARY STATE ON DAY ONE, and it is stated as a fact about the

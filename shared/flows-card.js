@@ -400,7 +400,7 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
  * the units a reader sizes in.
  */
 export function buildPricedMove({
-  spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, asOf,
+  spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
   sessions = HORIZON_SESSIONS,
 }) {
   const s = numOrNull(spot);
@@ -443,6 +443,21 @@ export function buildPricedMove({
        serialised and published on every card, and that no renderer drew. */
     ivRank: numOrNull(ivRank),
     ivMomentum: numOrNull(ivMomentum),
+    /* THE VENDOR'S OWN AT-THE-MONEY VOLATILITY, parsed since the first
+       screener call and dropped at this boundary every session since. It is a
+       different measurement from iv30 — the vendor's `volatility` field rather
+       than its 30-day interpolation — and publishing both lets a reader see
+       them disagree instead of trusting one silently. */
+    atmVol: numOrNull(atmVol),
+    /* THIS NAME'S OWN 30-DAY IMPLIED VOL, four points, zero extra calls: the
+       screener has carried iv30d_1d and iv30d_1m alongside iv30d and iv30d_1w
+       from the beginning and nothing has ever read the first two. Ordered
+       oldest to newest so a renderer draws it left to right without deciding
+       an order of its own. A point the vendor did not send is null, never
+       carried forward from its neighbour. */
+    ivStrip: Array.isArray(ivStrip)
+      ? ivStrip.map((p) => ({ h: p.h, v: numOrNull(p.v) }))
+      : null,
     // The one comparative statement the data supports, as a tag rather than
     // prose so the renderer cannot embellish it.
     richness: numOrNull(vrp) === null ? null : (vrp > 0 ? "rich" : "cheap"),
@@ -634,9 +649,46 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * One card. Every panel is independent: a dead congress feed still ships a
  * live gamma panel, and no panel failure can remove the name from the board.
  */
+/**
+ * One chain panel, or a stated absence.
+ *
+ * The chain leg is the last vendor spend of the run and the first thing a slow
+ * morning drops, so "this card has no chain" is an ORDINARY state rather than
+ * an error — and it has to arrive as a reason a reader can see, never as an
+ * empty panel or a zero.
+ */
+function chainPanel(chain, key) {
+  if (!chain) {
+    return {
+      status: "unavailable",
+      reason: "no option chain was fetched for this name this session — the chain leg " +
+        "is the last call the pipeline spends and the first it gives up on a slow morning",
+    };
+  }
+  const panel = chain[key] || { status: "unavailable", reason: "this panel was not built from the chain" };
+  /* HOW MUCH OF THE BOOK THIS WAS BUILT FROM, on every panel that was built.
+
+     The vendor's page ceiling is 500 contracts and a wide name has more than
+     that, so a surface can be complete-looking and drawn from a slice. A panel
+     that does not carry its own coverage lets a reader mistake "these are the
+     strikes that fit on one page" for "these are the strikes". The filter is
+     stated for the same reason: the leg excludes zero-open-interest chains,
+     which is a selection rather than a fact about the market. */
+  if (panel.status !== "ok") return panel;
+  return {
+    ...panel,
+    coverage: {
+      truncated: chain.truncated === true,
+      rowsSeen: numOrNull(chain.rowsSeen),
+      pricedRows: numOrNull(chain.pricedRows),
+      filter: "contracts with no open interest are excluded upstream by the vendor",
+    },
+  };
+}
+
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
-  generatedAt, sessionDate, weights,
+  chain, generatedAt, sessionDate, weights,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -737,6 +789,20 @@ export function buildCard({
         callWall: gamma.status === "ok" ? gamma.callWall : null,
         putWall: gamma.status === "ok" ? gamma.putWall : null,
       }),
+      /* THE OPTION CHAIN'S FOUR PANELS, built in shared/flows-chain.js from the
+         one /option-contracts call the chain leg spends per board name.
+
+         They are `unavailable` with a reason on any card the leg could not
+         reach — a name whose chain came back empty, a run that hit the
+         deadline before this name's turn, or any session before the leg
+         shipped. A renderer that has not been written yet simply has no host
+         for them, and a payload from before they existed carries the key not
+         at all, which is the same transitional story every other panel here
+         already tells. */
+      ivSurface: chainPanel(chain, "ivSurface"),
+      skewTerm: chainPanel(chain, "skewTerm"),
+      topContracts: chainPanel(chain, "topContracts"),
+      aggressor: chainPanel(chain, "aggressor"),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
       displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
@@ -745,6 +811,8 @@ export function buildCard({
         impliedMovePerc: f.impliedMovePerc,
         vrp: f.vrp, iv30: f.iv30, rv30: f.rv30,
         ivRank: f.ivRank, ivMomentum: f.ivMomentum,
+        atmVol: f.atmVol,
+        ivStrip: f.ivStrip,
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
       }),

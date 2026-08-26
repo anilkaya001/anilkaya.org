@@ -435,8 +435,8 @@ try {
     /* ---- empty, which is the state it ships in ---- */
     {
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector(".rec-empty", { timeout: 15000 });
-      const note = await page.locator(".rec-empty").textContent();
+      await page.waitForSelector("#recCurve .rec-empty", { timeout: 15000 });
+      const note = await page.locator("#recCurve .rec-empty").textContent();
       ok(/first pipeline run|No session has been scored/.test(note),
          `an empty record explains WHY it is empty (${note})`);
       const status = await page.locator("#recStatus").textContent();
@@ -444,6 +444,14 @@ try {
       /* THE THING THAT MUST NOT HAPPEN: a chart drawn from nothing. */
       eq(await page.locator("#recCurve svg").count(), 0,
          "nothing is plotted when nothing has been measured");
+      /* Same for the evidence table — and a record blob written before the
+         table existed lacks the key entirely, which is the transitional
+         state this branch also covers. */
+      eq(await page.locator("#recFeatWrap").isHidden(), true,
+         "and no evidence table is framed around zero rows");
+      const featEmpty = await page.locator("#recFeatNotes").textContent();
+      ok(/not been measured yet/.test(featEmpty),
+         `the evidence section says it has not been measured (${featEmpty})`);
     }
 
     /* ---- below the floor: measured, but not enough to plot ---- */
@@ -456,13 +464,13 @@ try {
         ],
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector(".rec-empty, #recCurve svg", { timeout: 15000 });
+      await page.waitForSelector("#recCurve .rec-empty, #recCurve svg", { timeout: 15000 });
       /* A THREE-SESSION MEAN IS MOSTLY ITS OWN SAMPLING ERROR. Plotting it
          invites a reading the number cannot support, so the floor holds and
          the page says what the longest horizon actually has. */
       eq(await page.locator("#recCurve svg").count(), 0,
          "a horizon below the stated session floor is not plotted");
-      const note = await page.locator(".rec-empty").textContent();
+      const note = await page.locator("#recCurve .rec-empty").textContent();
       ok(/3/.test(note), `and the note names how many sessions there actually are (${note})`);
       /* NOT "any row" — the empty state renders a full-width explanation row,
          so a tr-count floor is true in every reachable state. The session row
@@ -493,6 +501,24 @@ try {
           { d: "2026-08-24", long: 0.021, short: -0.010, ls: 0.031, hit: 0.61, lost: 1, names: 24 },
           { d: "2026-08-21", long: -0.008, short: 0.004, ls: -0.012, hit: null, lost: 9, names: 22 },
         ],
+        features: {
+          k: 10, minN: 20,
+          method: "spearman = pearson(percentileRank(feature), percentileRank(forward return)); " +
+            "returns are close-to-close price returns from each row's published px, raw, not side-signed",
+          selection: "archived rows are the published extremes only, so these are ICs conditional " +
+            "on selection, not universe ICs",
+          overlap: "consecutive sessions share most of a multi-session window, so n counts rows, " +
+            "not independent observations",
+          calendar: "the trading calendar is the union of observed close dates",
+          cols: [
+            { key: "s", ic: 0.042, n: 640 },
+            { key: "cnv", ic: -0.011, n: 640 },
+            /* The two shapes an unmeasured column comes in, and they are
+               DIFFERENT FACTS the payload distinguishes. */
+            { key: "purity", ic: null, n: 640, reason: "no variation to rank" },
+            { key: "vrp", ic: null, n: 3, reason: "fewer than 20 measured pairs" },
+          ],
+        },
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#recCurve svg", { timeout: 15000 });
@@ -576,6 +602,53 @@ try {
       ok(axis.includes("0"), "including zero");
       ok(axis.some((t) => /%/.test(t)),
          `and the extremes carry a magnitude (${axis.join(", ")})`);
+
+      /* ---- the per-feature evidence table ---- */
+      const feat = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll("#recFeatBody tr")).map((tr) => ({
+          key: tr.querySelector("th").textContent.trim(),
+          hyp: tr.querySelector("th").getAttribute("title"),
+          ic: tr.querySelectorAll("td")[0].textContent.trim(),
+          icTitle: tr.querySelectorAll("td")[0].getAttribute("title"),
+          n: tr.querySelectorAll("td")[1].textContent.trim(),
+        }));
+        return {
+          rows,
+          hidden: document.getElementById("recFeatWrap").hidden,
+          notes: Array.from(document.querySelectorAll("#recFeatNotes .rec-note")).map((p) => p.textContent),
+        };
+      });
+      eq(feat.hidden, false, "the evidence table is shown once the record carries one");
+      eq(feat.rows.length, 4, "every published column gets a row");
+
+      const byKey = Object.fromEntries(feat.rows.map((r) => [r.key, r]));
+      eq(byKey.s.ic, "+0.042", "a positive IC carries its sign explicitly");
+      eq(byKey.cnv.ic, "\u22120.011", "and a negative one carries a real minus, U+2212");
+      eq(byKey.s.n, "640", "with the sample it was measured on beside it");
+
+      /* AN UNMEASURED COEFFICIENT IS A DASH THAT SAYS WHY. Zero would be a
+         confident "no relation" where the truth is "nothing to measure",
+         and the two null reasons are different facts. */
+      eq(byKey.purity.ic, "\u2014", "a constant column shows the em dash, never 0.000");
+      ok(/no variation/.test(byKey.purity.icTitle || ""),
+         `and names its reason (${byKey.purity.icTitle})`);
+      eq(byKey.vrp.ic, "\u2014", "so does a column below the sample floor");
+      ok(/fewer than 20/.test(byKey.vrp.icTitle || ""),
+         `with the floor named rather than the variance (${byKey.vrp.icTitle})`);
+
+      /* THE ECONOMIC HYPOTHESIS RIDES THE ROW. An IC with no claim attached
+         is a number shopping for a story. */
+      ok(/composite|claim/.test(byKey.s.hyp || ""),
+         `the score's row states what it is testing (${byKey.s.hyp})`);
+      ok(/agreement|conviction/.test(byKey.cnv.hyp || ""),
+         `and so does conviction's (${byKey.cnv.hyp})`);
+
+      /* THE METHODOLOGY IS PRINTED FROM THE PAYLOAD, VERBATIM. */
+      const notes = feat.notes.join(" | ");
+      ok(/10 sessions/.test(notes), `the horizon is stated (${notes.slice(0, 80)})`);
+      ok(/percentileRank/.test(notes), "the method is printed as the payload states it");
+      ok(/conditional on selection/.test(notes), "including the selection caveat");
+      ok(/not independent observations|effective sample/.test(notes), "and the overlap deflation");
     }
 
     /* ---- a uniformly NEGATIVE record, which is the case the zero line is for ----
