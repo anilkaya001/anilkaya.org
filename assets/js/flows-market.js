@@ -228,11 +228,53 @@
     if (!host || !panel) return;
     host.textContent = "";
 
-    var rows = (sectors && Array.isArray(sectors.rows)) ? sectors.rows.slice() : [];
-    var measured = rows.filter(function (r) { return isNum(r && r.trix) !== null; });
-    if (!measured.length) {
+    /* THE FIELD THE PIPELINE ACTUALLY WRITES.
+
+       This read `sectors.rows` for as long as the panel has existed, and the
+       payload has never carried a `rows` key — the eleven readings go out
+       under `sectors`. The publisher's own log line said so on every run
+       ("published sector:trix: no rows, 3563 bytes") and nothing was looking.
+       The suite did not catch it because its fixture was written from the
+       same assumption as this function rather than from the pipeline, so the
+       two agreed with each other and neither agreed with the publisher.
+
+       There is deliberately NO `rows` fallback. A fallback would let the
+       payload and this renderer drift apart again silently, which is the only
+       reason the bug survived a live run that measured all eleven sectors. */
+    var entries = (sectors && Array.isArray(sectors.sectors)) ? sectors.sectors.slice() : [];
+
+    /* THREE DIFFERENT SILENCES, AND THEY MAY NOT SHARE A SENTENCE.
+
+       Before, every one of these printed "No sector carried enough history",
+       which is a claim ABOUT THE DATA — a measured emptiness. Two of the three
+       are nothing of the kind: one is an unpublished key and one is a payload
+       this page could not read. Saying the strongest of the three in all three
+       cases is exactly the confident zero this project refuses everywhere
+       else, and it is what made a working measurement look like a dead one. */
+    if (!sectors || sectors.status === "pending") {
       host.append(el("p", "flows-empty",
-        "No sector carried enough history to settle a TRIX reading this session."));
+        "The pipeline has not published this key yet. Sector momentum costs eleven " +
+        "candle calls a run, so it appears with the first pipeline run after it shipped."));
+      panel.hidden = false;
+      return;
+    }
+    if (!entries.length) {
+      host.append(el("p", "flows-empty",
+        "This payload carried no sector readings, so the page cannot say whether any " +
+        "sector settled. That is a gap in the payload rather than a fact about the market."));
+      panel.hidden = false;
+      return;
+    }
+
+    var measured = entries.filter(function (r) { return isNum(r && r.trix) !== null; });
+    if (!measured.length) {
+      /* NOW the sentence is earned: readings were published and none settled,
+         and the payload says per sector why. */
+      var why = entries.filter(function (r) { return r && r.reason; })
+        .map(function (r) { return r.reason; })[0];
+      host.append(el("p", "flows-empty",
+        "No sector carried enough history to settle a TRIX reading this session." +
+        (why ? " " + why : "")));
       panel.hidden = false;
       return;
     }
@@ -255,7 +297,7 @@
     });
     host.append(list);
 
-    var unmeasured = rows.length - measured.length;
+    var unmeasured = entries.length - measured.length;
     if (note) {
       note.textContent =
         "TRIX in basis points: a triple-smoothed momentum reading on each sector ETF's own " +
