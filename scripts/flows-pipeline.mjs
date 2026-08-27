@@ -1688,7 +1688,32 @@ async function fetchPublishedTickers(key) {
  * written" identically: as an absent session.
  */
 async function fetchStoredPayload(key) {
-  if (DRY_RUN) return null;
+  return (await readStored(key)).payload;
+}
+
+/**
+ * The same read, WITH ITS OUTCOME.
+ *
+ * THIS EXISTS BECAUSE THE COMMENT BELOW IT USED TO BE WRONG. collectDatedBoards
+ * said of this function: "returns null for an absent key and null for a failed
+ * read — the two are indistinguishable from here, and NO AMOUNT OF CARE AT THIS
+ * CALL SITE CHANGES THAT." The first half was true and the second was a
+ * surrender: the call site could not tell them apart only because this function
+ * threw the status away before returning.
+ *
+ * It cost a real bug. The track record reported "0 retained session(s) of 180
+ * dated key(s) probed" on a morning when board:long:2026-08-25 had demonstrably
+ * been written the day before, and there was no way to tell a cold archive from
+ * a store that refused every read — so the page said "nothing has been scored
+ * yet", which is a claim about the SIGNAL, on evidence that was really a claim
+ * about the STORE.
+ *
+ * The GET route answers an absent key with 200 and {status:"pending"}, so
+ * "absent" is a positive answer and is reported as one. Anything else is a
+ * failure and says so with its status.
+ */
+async function readStored(key) {
+  if (DRY_RUN) return { payload: null, absent: true, status: 0 };
   try {
     const response = await fetch(
       ingestURL() + "?key=" + encodeURIComponent(key),
@@ -1697,10 +1722,16 @@ async function fetchStoredPayload(key) {
         headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN },
       },
     );
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
+    if (!response.ok) return { payload: null, failed: true, status: response.status };
+    const body = await response.json();
+    /* The route's own word for "nothing stored under this key", which is a
+       different fact from a read that did not complete. */
+    if (body && body.status === "pending") {
+      return { payload: null, absent: true, status: response.status };
+    }
+    return { payload: body, status: response.status };
+  } catch (error) {
+    return { payload: null, failed: true, status: 0, detail: error.message };
   }
 }
 
@@ -1735,6 +1766,15 @@ const candleDate = (c) => {
  * closes, exercising every joint in the scorer with numbers a contract
  * test can recompute.
  */
+/* HOW THE ARCHIVE WALK PACES ITSELF. Not tuning for its own sake: the store
+   sits behind Cloudflare and this leg makes more requests to it than the whole
+   rest of the run combined. */
+const ARCHIVE_READ_PACE_MS = 40;
+const ARCHIVE_READ_RETRY_MS = 600;
+/* Enough refusals with nothing found to conclude the store is not answering,
+   rather than that the archive is empty. */
+const ARCHIVE_READ_GIVE_UP = 8;
+
 async function collectDatedBoards(sessionDate, payloads, enriched) {
   const boards = [];
   if (DRY_RUN) {
@@ -1748,8 +1788,12 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
     return { boards, probed: boards.length };
   }
   const base = Date.parse(sessionDate + "T00:00:00Z");
-  if (!Number.isFinite(base)) return { boards, probed: 0 };
-  let probed = 0;
+  if (!Number.isFinite(base)) return { boards, probed: 0, absent: 0, failed: 0, statuses: [] };
+  let probed = 0, absent = 0, failed = 0, recovered = 0;
+  const statuses = new Set();
+  let abandoned = false;
+
+  outer:
   for (let back = 1; back <= ARCHIVE_RETENTION_DAYS; back++) {
     const t = new Date(base - back * 86400000);
     const dow = t.getUTCDay();
@@ -1757,11 +1801,61 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
     const d = t.toISOString().slice(0, 10);
     for (const side of ["long", "short"]) {
       probed++;
-      const stored = await fetchStoredPayload(`board:${side}:${d}`);
+
+      /* PACED. This walk is up to 180 reads against a route that sits behind
+         Cloudflare, and the run has already seen it answer a WRITE with 403
+         under burst. Unpaced it finished 180 requests in thirteen seconds —
+         about fourteen a second, which is the shape a rate rule bites. The
+         delay costs seconds on a leg that spends no vendor call and sits
+         outside the deadline calculus, so it is the cheapest thing here. */
+      if (probed > 1) await sleep(ARCHIVE_READ_PACE_MS);
+
+      let read = await readStored(`board:${side}:${d}`);
+      /* ONE RETRY, AND IT IS COUNTED. A refusal that clears on a second
+         attempt is a rate limit; one that repeats is not, and the two want
+         different fixes. Publishing `recovered` is what tells them apart
+         next run instead of next month. */
+      if (read.failed) {
+        await sleep(ARCHIVE_READ_RETRY_MS);
+        const again = await readStored(`board:${side}:${d}`);
+        if (!again.failed) recovered++;
+        read = again;
+      }
+
+      if (read.failed) {
+        failed++;
+        statuses.add(read.status || (read.detail ? "network" : 0));
+        /* ABANDON RATHER THAN SPEND THREE MINUTES PROVING THE SAME REFUSAL,
+           and never report the result as an empty archive. The same shape
+           pruneArchive already uses for its DELETEs. */
+        if (failed >= ARCHIVE_READ_GIVE_UP && !boards.length) { abandoned = true; break outer; }
+        continue;
+      }
+
+      if (read.absent) { absent++; continue; }
+
+      const stored = read.payload;
       if (stored && Array.isArray(stored.rows) && stored.rows.length) {
         boards.push({ d, side, rows: stored.rows });
+      } else {
+        /* A 200 carrying no rows is a key that exists and holds nothing,
+           which is neither absent nor failed. Counted with absent because
+           it contributes no session either way, and it cannot be confused
+           with a refusal, which is the distinction that matters. */
+        absent++;
       }
     }
+  }
+
+  if (failed) {
+    console.warn(
+      `  record archive: ${failed} of ${probed} read(s) FAILED` +
+      (recovered ? `, ${recovered} more recovered on a retry` : "") +
+      ` (status ${[...statuses].join(", ")})` +
+      (abandoned
+        ? " — ABANDONED. Every read refused, so this run can say NOTHING about" +
+          " whether the archive holds sessions. It is not a cold archive."
+        : ""));
   }
   /* HOW HARD IT LOOKED, published alongside what it found.
 
@@ -1771,7 +1865,7 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
      `retained: 0` that probed 180 keys is a cold archive, and a `retained: 0`
      that probed 0 is a broken date. Without this the page can only say "zero",
      which is the one thing a reader already knows by looking at it. */
-  return { boards, probed };
+  return { boards, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
 }
 
 /**
@@ -3895,7 +3989,9 @@ async function main() {
      watch list are committed: a record that fails to score must never cost
      the reader today's session. */
   try {
-    const { boards: datedBoards, probed: archiveProbed } =
+    const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
+      absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
+      statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } =
       await collectDatedBoards(sessionDate, payloads, enriched);
     const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
     const recordCalendar = tradingCalendar([
@@ -3921,6 +4017,13 @@ async function main() {
       status: "ok",
       statedHorizon: HORIZON_SESSIONS,
       archiveProbed,
+      /* WHAT THE PROBE ACTUALLY MET. `archiveProbed` alone could not tell a
+         cold archive from a store that refused every read, and the page said
+         "nothing has been scored yet" — a claim about the SIGNAL — on evidence
+         that was really a claim about the STORE. These four make the two
+         distinguishable to anyone holding the payload. */
+      archiveFailed, archiveAbsent, archiveRecovered,
+      archiveStatuses, archiveAbandoned,
       attrition: RECORD_NOTES.attrition,
       epochNote: RECORD_NOTES.epoch,
       ...rec,
@@ -3936,7 +4039,9 @@ async function main() {
     });
     const measuredCols = features.cols.filter((c) => c.ic !== null).length;
     console.log(
-      `  record: ${rec.retained} retained session(s) of ${archiveProbed} dated key(s) probed, ` +
+      `  record: ${rec.retained} retained session(s) of ${archiveProbed} dated key(s) probed` +
+      (archiveFailed ? ` (${archiveFailed} READ FAILED, so "retained" is a floor` +
+        `${archiveAbandoned ? " and the walk was abandoned" : ""})` : "") + ", " +
       `${rec.sessions.length} scored at k=${HORIZON_SESSIONS}; ` +
       `features ${measuredCols}/${features.cols.length} measured`);
   } catch (error) {
