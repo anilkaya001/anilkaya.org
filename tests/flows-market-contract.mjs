@@ -199,11 +199,26 @@ try {
   };
   eq((await put("market", payload)).status, 200, "the ingest route accepts the market key");
 
+  /* THE PUBLISHER'S SHAPE, NOT THE RENDERER'S.
+
+     This fixture used to write `rows:`, which is the key the RENDERER read and
+     a key scripts/flows-pipeline.mjs has never written — it publishes the
+     eleven readings under `sectors`. Fixture and renderer agreed with each
+     other, 58 assertions passed, and the live page said "No sector carried
+     enough history" through a run that measured all eleven. That is this
+     repo's oldest trap: a fixture written from the same assumption as the code
+     proves only that the assumption is self-consistent.
+
+     The field names below are copied from the publish("sector:trix", ...) call
+     and are pinned against the pipeline's REAL emitted payload by
+     tests/flows-payload-shape.mjs, which is what makes this fixture honest
+     rather than merely corrected. */
   await put("sector:trix", {
-    v: 2, status: "ok", rows: [
-      { sector: "Technology", etf: "XLK", trix: 12.5 },
-      { sector: "Energy", etf: "XLE", trix: -8.25 },
-      { sector: "Real Estate", etf: "XLRE", trix: null, reason: "not enough history" },
+    v: 2, status: "ok", measured: 2, sectors: [
+      { sector: "Technology", etf: "XLK", trix: 12.5, trixBp: 6.25 },
+      { sector: "Energy", etf: "XLE", trix: -8.25, trixBp: -4.13 },
+      { sector: "Real Estate", etf: "XLRE", trix: null, trixBp: null,
+        reason: "31 usable XLRE closes of 31 returned; 106 are needed" },
     ],
   });
   await put("movers", {

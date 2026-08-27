@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "npm run test:contracts && npm run test:flows && npm run test:pipeline && npm run test:flows-universe && npm run test:flows-record && npm run test:flows-chain-panels && npm run test:mastery && npm run test:academy && npm run test:placement && npm run test:worker && npm run test:flows-worker && npm run test:flows-chain && npm run test:flows-desk && npm run test:flows-overview && npm run test:flows-sections && npm run test:flows-market && npm run test:flows-ticker && npm run test:flows-legacy && npm run test:flows-motion && npm run test:flows-render && npm run test:browser && npm run test:flows-unusual && npm run test:flows-events",
+    "test": "npm run test:contracts && npm run test:flows && npm run test:pipeline && npm run test:flows-universe && npm run test:flows-record && npm run test:flows-chain-panels && npm run test:mastery && npm run test:academy && npm run test:placement && npm run test:worker && npm run test:flows-worker && npm run test:flows-chain && npm run test:flows-desk && npm run test:flows-overview && npm run test:flows-sections && npm run test:flows-market && npm run test:flows-ticker && npm run test:flows-legacy && npm run test:flows-motion && npm run test:flows-render && npm run test:browser && npm run test:flows-unusual && npm run test:flows-events && npm run test:flows-payload-shape",
     "test:contracts": "node contracts.mjs",
     "test:mastery": "node mastery-contract.mjs",
     "test:academy": "node academy-contract.mjs",
@@ -29,7 +29,8 @@
     "test:flows-market": "node flows-market-contract.mjs",
     "test:flows-ticker": "node flows-ticker-contract.mjs",
     "test:flows-unusual": "node flows-unusual-contract.mjs",
-    "test:flows-events": "node flows-events-contract.mjs"
+    "test:flows-events": "node flows-events-contract.mjs",
+    "test:flows-payload-shape": "node flows-payload-shape.mjs"
   },
   "devDependencies": {
     "playwright": "1.61.1",
