@@ -431,11 +431,36 @@
        and eighty probed is a cold archive; zero out of zero would be a broken
        session date, and reads the same on the page unless the denominator is
        said out loud. The word is "readable", not "exists", on purpose — a
-       missing key and a failed read are indistinguishable from the pipeline,
-       so the page claims only what the pipeline actually observed. */
+       missing key and a failed read were indistinguishable from the pipeline
+       when this was written, and are not any more — see the branch below,
+       which is what the archive counters were added to make possible. */
     if (retained === 0) {
       const probed = isNum(payload.archiveProbed);
       const k = isNum(payload.statedHorizon);
+      const failed = isNum(payload.archiveFailed);
+
+      /* A REFUSED STORE IS NOT A COLD ARCHIVE, AND MUST NOT READ AS ONE.
+
+         This branch used to say "the ordinary first state of the record
+         rather than a failure" whatever had happened, because the pipeline
+         could not tell an absent key from a read that never completed. It can
+         now — the ingest route answers an absent key with 200 and
+         {status:"pending"}, so "absent" is a positive answer and anything else
+         is a failure carrying its status. When reads failed, "nothing has been
+         scored" is a claim about the SIGNAL resting on evidence that is really
+         about the STORE, and this page has no business making it. */
+      if (failed !== null && failed > 0) {
+        statusEl.textContent =
+          "The record could not be measured this session, and that is a fault " +
+          "in the archive rather than a verdict on the signal. " + failed +
+          " of " + (probed === null ? "the" : probed) + " archive read" +
+          (failed === 1 ? "" : "s") + " failed, so this run could not tell " +
+          "whether earlier sessions exist. Nothing below is evidence that the " +
+          "board has never been right — it is evidence that the store did not " +
+          "answer.";
+        return;
+      }
+
       statusEl.textContent =
         "Nothing has been scored yet, and this is the ordinary first state of " +
         "the record rather than a failure. A board is scored only against " +
@@ -444,7 +469,8 @@
         " cannot score itself" +
         (probed !== null
           ? ", and no earlier dated board was readable — " + probed +
-            " dated key" + (probed === 1 ? " was" : "s were") + " probed."
+            " dated key" + (probed === 1 ? " was" : "s were") +
+            " probed and every one answered that it holds nothing."
           : ".") +
         " The first measured session appears on the next pipeline run" +
         (k !== null
