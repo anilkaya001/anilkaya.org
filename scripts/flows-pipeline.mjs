@@ -69,6 +69,38 @@ function ingestURL() {
   return process.env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest";
 }
 
+/* THE INGEST ROUTE IS BEHIND CLOUDFLARE AND JUDGES THE CALLER, NOT ONLY THE
+   BEARER — so every request to it must look like the same client.
+
+   ONE BUILDER BECAUSE THE COPIES DIVERGED AND IT COST THE TRACK RECORD.
+   publish() and retire() each carried their own copy of this User-Agent, with
+   publish()'s comment explaining exactly why it is needed: "Node's fetch sends
+   no User-Agent, and an anonymous POST from a datacenter address is exactly
+   the shape edge bot heuristics drop." The READ path never got a copy. So
+   writes and deletes reached the Worker and every read was refused by the edge
+   with 403 — measured, 8 of 8, on 2026-08-27, with a retry recovering none of
+   them because a bot heuristic is deterministic and not a rate limit.
+
+   The visible cost was the track record: collectDatedBoards read "0 retained
+   session(s) of 180 dated key(s) probed" and the page called it "the ordinary
+   first state of the record rather than a failure", when in fact no read had
+   ever succeeded and the archive's contents were simply unknown. The silent
+   cost was hysteresis, which uses the same read and had been quietly building
+   every board with no incumbents since the day it was wired up.
+
+   A third copy of a string three call sites must agree on is worse than the
+   two that already disagreed, so there is now one. */
+const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)";
+
+function ingestHeaders({ json = false } = {}) {
+  const headers = {
+    Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
+    "User-Agent": INGEST_UA,
+  };
+  if (json) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
 /* ---------- universe gate --------------------------------------
    These thresholds are the difference between a live edge and a
    rounding error, not housekeeping. A genuine flow composite makes
@@ -1719,7 +1751,7 @@ async function readStored(key) {
       ingestURL() + "?key=" + encodeURIComponent(key),
       {
         redirect: "error",   // same reasoning as publish(): never redirect a bearer
-        headers: { Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN },
+        headers: ingestHeaders(),
       },
     );
     if (!response.ok) return { payload: null, failed: true, status: response.status };
@@ -2714,10 +2746,7 @@ async function retire(key) {
       {
         method: "DELETE",
         redirect: "error",   // same reasoning as publish(): never redirect a bearer
-        headers: {
-          Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
-          "User-Agent": "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)",
-        },
+        headers: ingestHeaders(),
       },
     );
     await sleep(PUBLISH_SPACING_MS);
@@ -2855,15 +2884,10 @@ async function publish(key, payload) {
       // redirect named. Failing loudly on a misconfigured URL is the correct
       // outcome; silently handing the ingest token to another host is not.
       redirect: "error",
-      headers: {
-        Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
-        "Content-Type": "application/json",
-        // Identify the client honestly. Node's fetch sends no User-Agent, and
-        // an anonymous POST from a datacenter address is exactly the shape
-        // edge bot heuristics drop. Naming the caller is also what lets the
-        // operator write a precise WAF skip rule instead of a broad one.
-        "User-Agent": "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)",
-      },
+      // Identify the client honestly, through the one builder every call site
+      // shares — see ingestHeaders(). Naming the caller is also what lets the
+      // operator write a precise WAF skip rule instead of a broad one.
+      headers: ingestHeaders({ json: true }),
       body,
     },
   );

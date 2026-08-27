@@ -9,6 +9,7 @@
    "this flow is high quality" read as "this name is bullish". */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
@@ -1945,6 +1946,55 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 
   fs.rmSync(path.dirname(prefix), { recursive: true, force: true });
+}
+
+/* ---------- every ingest request looks like the same client ----------
+
+   THE READ PATH WAS ANONYMOUS AND THE EDGE DROPPED IT.
+
+   publish() and retire() each carried their own copy of a User-Agent header,
+   and publish()'s comment said exactly why it was needed: Node's fetch sends
+   none, and an anonymous request from a datacenter address is the shape edge
+   bot heuristics drop. fetchStoredPayload() never got a copy — so writes and
+   deletes reached the Worker and every READ was refused by Cloudflare with
+   403. Measured on 2026-08-27: 8 of 8, with a retry recovering none, because a
+   bot heuristic is deterministic rather than a rate limit.
+
+   It surfaced as the track record reporting "0 retained session(s) of 180
+   dated key(s) probed" while the page called that the ordinary first state of
+   a cold archive. It had also been silently disabling board hysteresis, which
+   reads through the same function, since the day hysteresis was wired up.
+
+   Two copies of a string that three call sites must agree on is what allowed
+   one to be missing. This asserts there is one builder and that every request
+   to the ingest route goes through it. */
+{
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+
+  const uaLiterals = src.match(/anilkaya-flows-pipeline\/1/g) || [];
+  eq(uaLiterals.length, 1,
+     `the ingest User-Agent is written down ONCE (found ${uaLiterals.length}). Two copies is ` +
+     "how the read path came to have none");
+
+  ok(/function ingestHeaders\(/.test(src),
+     "and it is reached through a single builder every call site shares");
+
+  /* Every fetch to the ingest route must take its headers from that builder.
+     Checked by locating each call and reading forward to its options — a
+     bare `Authorization:` literal at one of these sites is the defect. */
+  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?key="/g)];
+  eq(sites.length, 3,
+     `three call sites reach the ingest route — read, write and delete (found ${sites.length}). ` +
+     "A fourth must join the builder rather than hand-rolling headers");
+  for (const site of sites) {
+    const window = src.slice(site.index, site.index + 900);
+    ok(/headers: ingestHeaders\(/.test(window),
+       "each ingest fetch takes its headers from ingestHeaders() rather than assembling its " +
+       "own — the read path assembling its own is precisely the bug this pins");
+    ok(!/Authorization: "Bearer " \+ process\.env\.FLOWS_INGEST_TOKEN/.test(window),
+       "and none of them still builds an Authorization header inline, which is what a copied " +
+       "call site looks like on the way back in");
+  }
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, and the truncated-chain probe's three distinct verdicts`);
