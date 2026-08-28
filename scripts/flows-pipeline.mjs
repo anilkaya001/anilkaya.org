@@ -4068,6 +4068,30 @@ async function main() {
         `${archiveAbandoned ? " and the walk was abandoned" : ""})` : "") + ", " +
       `${rec.sessions.length} scored at k=${HORIZON_SESSIONS}; ` +
       `features ${measuredCols}/${features.cols.length} measured`);
+    /* EVERY HORIZON, IN THE LOG. The line above reports only the stated
+       horizon's count, so on the morning the archive first held two sessions
+       — the morning k=1 produced the first scored number this product has
+       ever had — the log could not say whether it did. The payload carried
+       the answer, and this sandbox's proxy blocks the site, so the one place
+       the number existed was the one place nothing could read. The check-in
+       that was written to report that first number could not. A diagnostic
+       that exists is a diagnostic in the log. */
+    /* BOTH POPULATIONS, because printing only the current rule's mean lied
+       on its first output: "22 scored at k=10" beside "k=10 unmeasured
+       (n=0)". Both were true — every session predated the selection epoch,
+       so all 22 scored under the PRIOR rule — but a line that shows one
+       population under a heading that sounds like the whole is the exact
+       misreading the epoch split exists to prevent. */
+    if (rec.horizons && rec.horizons.length) {
+      const leg = (ls, n) => ls === null || !n
+        ? null : `${(ls * 10000).toFixed(1)}bp over ${n}`;
+      console.log("  record horizons: " + rec.horizons.map((h) => {
+        const cur = leg(h.ls, h.n), prior = leg(h.prior, h.priorN);
+        if (!cur && !prior) return `k=${h.k} unmeasured`;
+        return `k=${h.k} ` + [cur && `current ${cur}`, prior && `prior-rule ${prior}`]
+          .filter(Boolean).join(", ");
+      }).join("; "));
+    }
   } catch (error) {
     console.warn(`  record: ${error.message}`);
   }
