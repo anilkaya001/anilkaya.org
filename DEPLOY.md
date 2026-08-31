@@ -337,33 +337,38 @@ the Worker needs it as a secret and GitHub Actions needs it as a repository
 secret. If the two differ, every publish returns 401, the job exits non-zero,
 and the board silently keeps yesterday's data.
 
+The normal flow is **mint mode**: one command mints a distinct crypto-random
+password per roster account plus a fresh pepper, derives the hash map, and
+prints everything ONCE — nothing touches disk, argv, or shell history.
+
 ```bash
-# 1. Generate the three values. All three are printed ONCE; keep the terminal
-#    open until they are pasted, because none can be recovered afterwards.
-PEPPER=$(openssl rand -base64 48)
-INGEST_TOKEN=$(openssl rand -hex 32)
+# 1. Mint the whole set: per-user passwords, a fresh pepper, and the
+#    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
+#    secrets are pasted below, because none of it can be recovered afterwards.
+node scripts/generate-flows-credentials.mjs --mint
 
-# 2. Choose the shared password. `read -s` keeps it off the screen and, because
-#    it is not a command argument, out of shell history and out of `ps`.
-read -rsp 'Flows password for all 11 accounts: ' SHARED_PASSWORD; echo
-
-# 3. Derive the per-user hash map. The generator reads BOTH values from stdin,
-#    never from argv, for the same reason.
-printf '%s\n%s\n' "$SHARED_PASSWORD" "$PEPPER" \
-  | node scripts/generate-flows-credentials.mjs
-
-# 4. Print the pepper and the ingest token so they can be pasted below.
-printf 'FLOWS_PEPPER:       %s\nFLOWS_INGEST_TOKEN: %s\n' "$PEPPER" "$INGEST_TOKEN"
+# 2. The ingest token is separate (it authenticates the pipeline, not people).
+INGEST_TOKEN=$(openssl rand -hex 32); printf 'FLOWS_INGEST_TOKEN: %s\n' "$INGEST_TOKEN"
 ```
 
-Now set them. Each command prompts for the value; paste the matching line from
-above, and paste the JSON the generator printed for `FLOWS_CREDENTIALS`.
+Now set them. Each command prompts for the value; paste the matching block the
+mint printed (pepper and JSON are each on their own labeled line).
 
 ```bash
 ./tests/node_modules/.bin/wrangler secret put FLOWS_PEPPER
 ./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS
 ./tests/node_modules/.bin/wrangler secret put FLOWS_INGEST_TOKEN
 ```
+
+Hand each person their password **out-of-band** — never through a chat, a
+ticket, or an email thread. **A credential that has touched any of those is
+burned**, whether or not it still works: re-mint the entire set, and bump
+`FLOWS_SESSION_EPOCH` (below) so cookies minted under the burned set die too.
+
+Legacy shared-password mode still exists (`printf '%s\n%s\n' "$PASSWORD"
+"$PEPPER" | node scripts/generate-flows-credentials.mjs`), but per-user
+passwords are the default for a reason: with a shared password, one person's
+leak rotates everybody.
 
 **Adding a secret does not deploy it.** The dashboard stores it as a new Worker
 version and leaves that version undeployed, so the running Worker keeps serving
@@ -384,11 +389,11 @@ curl -s https://anilkaya.org/api/flows/ingest
 # FLOWS_PEPPER or FLOWS_CREDENTIALS is stored but not deployed.
 ```
 
-Then clear the variables from the live shell, since three of them are still in
-memory:
+Then clear the one shell variable still in memory, and close the terminal that
+showed the mint output:
 
 ```bash
-unset PEPPER INGEST_TOKEN SHARED_PASSWORD
+unset INGEST_TOKEN
 ```
 
 **The repository is public.** None of these values may ever be committed,
@@ -417,7 +422,7 @@ These are two different operations and only one of them signs anyone out.
 
 | Goal | Action | Effect on live sessions |
 |---|---|---|
-| Change the password | Regenerate `FLOWS_CREDENTIALS` with the same pepper | **None** — everyone stays signed in |
+| Change passwords | Re-mint (`--mint`) and set `FLOWS_PEPPER` + `FLOWS_CREDENTIALS` | **None** — everyone stays signed in |
 | Revoke every session | Increment `FLOWS_SESSION_EPOCH` in `[vars]` and redeploy | All sessions invalid immediately |
 
 Rotating `FLOWS_PEPPER` does **not** sign anyone out. The pepper is used for

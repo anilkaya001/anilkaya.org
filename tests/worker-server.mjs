@@ -109,6 +109,11 @@ export async function startWorker({ extraVars = [] } = {}) {
     "--var", `SESSION_SECRET:${SESSION_SECRET}`,
     "--var", `FLOWS_PEPPER:${FLOWS_PEPPER}`,
     "--var", `FLOWS_CREDENTIALS:${await flowsCredentialsJSON()}`,
+    /* The production epoch in wrangler.toml is a revocation lever that gets
+       bumped on rotation; the harness pins its own so the fixtures'
+       self-signed sessions stay valid across bumps. Epoch mismatch behavior
+       has its own contracts in flows-auth and flows-worker. */
+    "--var", "FLOWS_SESSION_EPOCH:1",
     ...extraVars.flatMap((v) => ["--var", v]),
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {
