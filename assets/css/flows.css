@@ -3892,3 +3892,108 @@ body.is-stale .flows-tablewrap {
 }
 .mk-sea-v { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; }
 .mk-sea-p { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-dim); }
+
+/* ==============================================================
+   Wave 2 — the three per-name stock panels on /flows/ticker/
+   (darkpool, oiDeltas, volContext), plus the landscape tier.
+
+   COLOURS ARE CLASS-BASED AND DRAWN FROM THE EXISTING PROPERTIES
+   ONLY (--flow-up / --flow-down / --ink-dim / --panel-border): the
+   SVG marks here carry no inline fills, so this file owns the
+   mapping of series to hue in one place, the same rule the tide
+   chart states above. Sign, where these panels have one at all,
+   is in the glyph (an explicit + / U+2212) before it is in a hue.
+   ============================================================== */
+
+/* --- the landscape pass ---------------------------------------------- */
+/* The 76rem block above already gives .ft-grid its two columns and sends
+   .is-wide across them with `grid-column: 1 / -1`, which is span-agnostic —
+   so the only new ink a third column needs is the track list. The three
+   wave-2 panels are span 1 in the registry and slot as single cells; the
+   min-width:0 discipline on .ft-panel and its host (stated at the top of
+   the ticker section) is what keeps a 60-session strip or a five-column
+   table from pushing a track into horizontal overflow at any tier. */
+@media (min-width: 110rem) {
+  .ft-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* --- the quiet arm ---------------------------------------------------- */
+/* NOT .fc-dead. "The feed answered with nothing" is an ordinary reading
+   and must not wear the Unavailable banner — it reads at full note size in
+   the dim ink, and the data-empty attribute (set by the drawers) is the
+   machine-readable half of the distinction. */
+.ft-quiet {
+  margin: 0.55rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+/* --- darkpool: the off-exchange prints table -------------------------- */
+/* Scrolling and the 22rem table floor come from .fc-tablewrap above —
+   restating either here would be a second answer to the same question. */
+.fdp-table td { white-space: nowrap; }
+.fdp-time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* The cancel tag: a bordered label, not a hue — a cancelled print is a
+   stated fact about the tape, not a direction. */
+.fdp-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.fdp-count { font-variant-numeric: tabular-nums; }
+
+/* --- oiDeltas: the open-interest change table ------------------------- */
+.foi-table td { white-space: nowrap; }
+.foi-oc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* Hue is DECORATION on the change column: the sign is already in the glyph
+   (tcSignedInt's + / U+2212), so a greyscale print loses nothing. */
+.foi-chg.is-up { color: var(--flow-up); }
+.foi-chg.is-down { color: var(--flow-down); }
+.foi-chg.is-flat,
+.foi-chg.is-unknown { color: var(--ink-dim); }
+.foi-streaks { font-family: var(--font-mono); font-size: 0.78rem; }
+.foi-streak.is-unknown { color: var(--ink-dim); }
+
+/* --- volContext: term curve + IV rank --------------------------------- */
+.fvc-half { margin-top: 0.7rem; }
+.fvc-h {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+/* The curve svg is width:100% because it was drawn at the host's own width
+   (one viewBox unit is one CSS pixel); the rank strip was drawn at a fixed
+   width and is display:block WITHOUT width:100% for the same invariant —
+   stretching either would scale its type and marks. */
+.fvc-svg { display: block; width: 100%; height: auto; }
+.fvc-spark { display: block; }
+.fvc-line { stroke: var(--ink-dim); stroke-width: 1.5; fill: none; }
+.fvc-dot { fill: var(--ink-dim); }
+.fvc-frame { stroke: var(--panel-border); stroke-width: 1; }
+.fvc-axis { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-dim); }
+.fvc-spark-l { stroke: var(--ink-dim); stroke-width: 1.5; fill: none; }
+.fvc-spark-d { fill: var(--ink-dim); }
+.fvc-spark-d.is-now { fill: var(--ink); }
+.fvc-mini { margin-top: 0.4rem; }
+.fvc-exp { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.fvc-rank {
+  margin: 0.2rem 0 0.4rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.fvc-rank-n { font-size: 1.3rem; font-weight: 600; }
+.fvc-rank-n.is-missing { font-weight: 400; color: var(--ink-dim); }
+.fvc-rank-u { font-size: 0.82rem; color: var(--ink-dim); }
+.fvc-rank-d { font-size: 0.76rem; color: var(--ink-faint); }
+.fvc-count { font-variant-numeric: tabular-nums; }

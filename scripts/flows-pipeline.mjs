@@ -185,15 +185,19 @@ export const RATE = {
    + 50 option chains    (top 50 board names by |score|)
    + 29 chain recoveries (the second single-expiry call, on names the first
         call truncated — spent on roughly 3 names in 5)
-   + 100 cards           (2 per name x 50: max-pain and the gamma surface;
-        congress went market-wide and is the one call below)
+   + 300 cards           (6 per name x 50: max-pain, the gamma surface, and
+        the wave-2 four — dark pool prints, contract OI deltas, the vol term
+        structure and the IV-rank series; congress went market-wide and is
+        the one call below)
    + 1  congress, market-wide
    + 1  flow alerts, market-wide
    + 7  market pulse     (tide, totals, oi-change, net impact, insiders,
         dark pool, seasonality — one market-wide call each)
-   + 6  wave-B probes    (per-stock endpoints on one liquid name, first-row
-        key dumps only; retired once the sections they scout are built)
-   = 881 modelled.
+   + 1  shorts probe     (the one wave-B scout still open: volume-and-ratio
+        answered ok with ZERO rows on 2026-08-31, so it re-probes with a
+        dated param until it shows a row shape or proves empty by design;
+        the five confirmed probes retired into the sections they scouted)
+   = 1076 modelled.
 
    MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
    170 were 429s that were then retried — so ~852 attempts carried a distinct
@@ -201,7 +205,7 @@ export const RATE = {
    terms were added. The model was within 2% of the meter that day, which is
    the only reason to keep writing it down; re-read the meter on the first
    run that carries the new terms. */
-export const CALL_BUDGET = 950;
+export const CALL_BUDGET = 1250;
 
 /**
  * How near an earnings date has to be for a name to leave the board.
@@ -3257,6 +3261,82 @@ function fakeMaxPain(ticker, spot) {
   }));
 }
 
+/* Wave-2 per-name fixtures, in the wire spellings the 2026-08-31 live
+   probes observed. Sometimes-absent fields absent on purpose; one name in
+   a few gets an EMPTY feed so the quiet branch is exercised on dry runs. */
+function fakeStockDarkpool(ticker, spot) {
+  const rnd = mulberry(ticker.length * 1289 + Math.round(spot));
+  if (ticker.length % 7 === 3) return [];               // a quiet name
+  return Array.from({ length: 20 }, (_, i) => {
+    const px = spot * (0.985 + rnd() * 0.03);
+    const size = Math.round(5e3 + rnd() * 4e5);
+    const row = {
+      ticker,
+      executed_at: `2026-08-28T${String(13 + (i % 7))}:${String(10 + (i % 49))}:00Z`,
+      price: px.toFixed(2), size,
+      volume: Math.round(rnd() * 6e7),
+      market_center: "L",
+    };
+    if (i % 5 !== 4) row.premium = String(Math.round(px * size));  // an unpriced print
+    if (i % 3 !== 2) { row.nbbo_bid = (px - 0.03).toFixed(2); row.nbbo_ask = (px + 0.03).toFixed(2); }
+    if (i % 9 === 8) row.canceled = false;
+    return row;
+  });
+}
+
+function fakeStockOiChange(ticker, spot) {
+  const rnd = mulberry(ticker.length * 2039 + Math.round(spot));
+  return Array.from({ length: 14 }, (_, i) => {
+    const k = Math.max(1, Math.round(spot * (0.8 + rnd() * 0.4)));
+    const row = {
+      option_symbol: `${ticker}260918${rnd() > 0.5 ? "C" : "P"}${String(k * 1000).padStart(8, "0")}`,
+      underlying_symbol: ticker,
+      oi_change: String(Math.round((rnd() - 0.35) * 30000)),
+      curr_oi: Math.round(rnd() * 80000),
+      last_oi: Math.round(rnd() * 70000),
+      volume: Math.round(rnd() * 40000),
+      curr_date: "2026-08-28",
+      last_date: "2026-08-27",
+    };
+    if (i % 4 !== 3) row.trades = Math.round(rnd() * 700);
+    if (i % 5 !== 4) row.avg_price = (rnd() * 30).toFixed(2);
+    if (i % 3 !== 2) row.percentage_of_total = (rnd() * 0.3).toFixed(4);
+    if (i % 6 !== 5) row.days_of_oi_increases = Math.floor(rnd() * 9);
+    if (i % 7 !== 6) row.days_of_vol_greater_than_oi = Math.floor(rnd() * 5);
+    return row;
+  });
+}
+
+function fakeTermStructure(ticker, spot) {
+  const rnd = mulberry(ticker.length * 3167);
+  return Array.from({ length: 12 }, (_, i) => {
+    const dte = 3 + i * 12;
+    const vol = 0.2 + rnd() * 0.3 + (i < 2 ? rnd() * 0.15 : 0);
+    return {
+      ticker, date: "2026-08-28",
+      expiry: new Date(Date.UTC(2026, 7, 28) + dte * 86400000).toISOString().slice(0, 10),
+      dte, volatility: vol.toFixed(4),
+      implied_move: (spot * vol * Math.sqrt(dte / 365)).toFixed(2),
+      implied_move_perc: (vol * Math.sqrt(dte / 365)).toFixed(4),
+    };
+  });
+}
+
+function fakeIvRank(ticker, spot) {
+  const rnd = mulberry(ticker.length * 4271);
+  return Array.from({ length: 70 }, (_, i) => {
+    const row = {
+      date: new Date(Date.UTC(2026, 7, 28) - i * 86400000).toISOString().slice(0, 10),
+      updated_at: "2026-08-28T20:00:00Z",
+      volatility: (0.18 + rnd() * 0.4).toFixed(4),
+      close: (spot * (0.9 + rnd() * 0.2)).toFixed(2),
+    };
+    /* Observed 0..100; absent some days on purpose. */
+    if (i % 8 !== 7) row.iv_rank_1y = (rnd() * 100).toFixed(2);
+    return row;
+  });
+}
+
 /** Disclosed congressional filings, including a deliberately late one. */
 function fakeCongress(ticker) {
   const rnd = mulberry(ticker.length * 613);
@@ -4919,13 +4999,15 @@ async function main() {
      the fixture. */
   const probeResults = [];
   if (!DRY_RUN) {
+    /* Five of the six original scouts answered with rows on 2026-08-31 and
+       retired into the wave-2 card panels. The shorts scout answered ok with
+       ZERO rows undated, so it stays — now dated, since several vendor feeds
+       fill per-session — until it shows a shape or proves empty by design.
+       The per-ticker flow-alerts scout confirmed its shape (a superset of
+       the market-wide feed, plus type/created_at/price/strike) and waits on
+       a section, not on more scouting. */
     const PROBE_PATHS = [
-      ["/api/darkpool/AAPL", { limit: 5 }],
-      ["/api/stock/AAPL/oi-change", { limit: 5 }],
-      ["/api/shorts/AAPL/volume-and-ratio", {}],
-      ["/api/stock/AAPL/iv-rank", { limit: 5 }],
-      ["/api/stock/AAPL/volatility/term-structure", {}],
-      ["/api/stock/AAPL/flow-alerts", { limit: 5 }],
+      ["/api/shorts/AAPL/volume-and-ratio", sessionDate ? { date: sessionDate } : {}],
     ];
     for (const [path, params] of PROBE_PATHS) {
       try {
@@ -5067,8 +5149,10 @@ async function main() {
 
       const spotPx = num(e.row.close);
       const congress = congressByTicker.get(ticker) || [];
-      const [maxPain, surface] = DRY_RUN
-        ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries)]
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
+        ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
+           fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
+           fakeTermStructure(ticker, spotPx), fakeIvRank(ticker, spotPx)]
         : await Promise.all([
           // The one per-name source the dating commit left undated. The
           // endpoint takes a `date`, and its window spans 120 days of expiries.
@@ -5093,6 +5177,16 @@ async function main() {
               limit: 500,
             }).catch(() => [])
             : Promise.resolve([]),
+          /* THE WAVE-2 PER-NAME FEEDS, four calls a card. Shapes were read
+             off the 2026-08-31 live probes, not the spec. `null` on failure
+             (an unavailable panel with a reason), `[]` only when the vendor
+             actually answered nothing (a quiet one) — the same three-silences
+             boundary buildCard states. The shared limiter serializes these
+             like every other call, so the width here costs order, not rate. */
+          uw(`/api/darkpool/${ticker}`, { limit: 60 }).catch(() => null),
+          uw(`/api/stock/${ticker}/oi-change`, { limit: 30 }).catch(() => null),
+          uw(`/api/stock/${ticker}/volatility/term-structure`, {}).catch(() => null),
+          uw(`/api/stock/${ticker}/iv-rank`, { limit: 70 }).catch(() => null),
         ]);
 
       /* SAY WHAT CAME BACK WHEN NOTHING USABLE DID.
@@ -5139,6 +5233,7 @@ async function main() {
         chain: chainByTicker.get(ticker) || null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
+        darkpool: dpRaw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankRaw,
       });
 
       /* A CARD THAT WILL NOT FIT SHEDS ITS CHEAPEST PANELS IN A STATED
@@ -5161,6 +5256,12 @@ async function main() {
         ["aggressor", "dropped to fit the payload cap"],
         ["ivSurface", "dropped to fit the payload cap"],
         ["skewTerm", "dropped to fit the payload cap"],
+        /* The wave-2 panels shed after the chain four: they are auxiliary
+           context, but unlike the tape they are reconstructible nowhere
+           else on the site, so they go later rather than first. */
+        ["darkpool", "dropped to fit the payload cap"],
+        ["oiDeltas", "dropped to fit the payload cap"],
+        ["volContext", "dropped to fit the payload cap"],
       ];
       let body = JSON.stringify(card);
       const dropped = [];

@@ -3281,6 +3281,625 @@
     ]));
   }
 
+  /* ===== the three wave-2 stock panels ===== */
+  /* =============================================================
+     drawDarkpool, drawOiDeltas, drawVolContext — the per-name deep
+     feeds: panels.darkpool, panels.oiDeltas, panels.volContext,
+     shaped in shared/flows-stock.js and published on every card
+     since the deep-feed leg shipped.
+
+     THESE ARE THE FIRST PANELS ON THIS PAGE WITH A PUBLISHED
+     "quiet" STATE. The chain four know only "ok" and "unavailable",
+     because an empty chain is a failure of that leg; here a vendor
+     that was read and answered with nothing is an ORDINARY state and
+     must not wear the Unavailable banner. So the tagged union has
+     three live arms plus the transitional one:
+
+       missing key   — a card from before the deep feeds shipped.
+                       The walk says so with PREDATES_STOCK, the
+                       same story the chain panels tell about their
+                       own wave.
+       "unavailable" — this run could not read the feed; deadPanel,
+                       with the builder's own reason verbatim.
+       "quiet"       — the feed answered and held nothing; heading
+                       plus one sentence, marked data-empty="quiet"
+                       so a test can tell the silences apart without
+                       parsing prose (flows-market.js's pulse idiom).
+
+     PROSE IS THE PAYLOAD'S. Each panel ships its own `note`
+     (shared/flows-stock.js STOCK_NOTES, written against the
+     vendor's refusals) and these drawers render it through
+     appendNotes rather than paraphrasing it. The words "print" and
+     "trade" are allowed inside the darkpool panel ONLY, where the
+     rows are reported equity executions; the other two panels never
+     use them, and nothing anywhere claims a side, an identity or an
+     intent.
+     ============================================================= */
+
+  /* THE TRANSITIONAL SENTENCE IS PER-WAVE, NOT PER-PAGE. A card from before
+     the chain leg lacks the four chain keys; a card from before the deep
+     feeds lacks the three stock keys. Each absence is dated by its own
+     shipping, and telling a reader the wrong wave is a confident wrong fact
+     about which card they are looking at. */
+  const PREDATES_CHAIN =
+    "this card was built before the option chain leg shipped, so this " +
+    "panel was never in it.";
+  const PREDATES_STOCK =
+    "this card was built before the per-name deep feeds shipped, so this " +
+    "panel was never in it.";
+  const STOCK_KEYS = new Set(["darkpool", "oiDeltas", "volContext"]);
+  const predatesSentence = (key) => (STOCK_KEYS.has(key) ? PREDATES_STOCK : PREDATES_CHAIN);
+
+  /**
+   * The quiet arm: heading, ONE sentence, and the machine-readable kind.
+   * Not deadPanel — "the feed answered with nothing" and "the feed could
+   * not be read" are different facts, and only the second is a failure.
+   */
+  function ftQuiet(host, question, sentence) {
+    const { el, panelHead } = window.FlowsPanels;
+    panelHead(host, question);
+    const p = el("p", "ft-quiet", sentence);
+    p.setAttribute("data-empty", "quiet");
+    host.append(p);
+  }
+
+  /** HH:MM read off the ISO timestamp's own digits — never through Date,
+   *  which would shift the tape's stated minute into the reader's zone. */
+  function fdpTime(at) {
+    const m = /T(\d{2}):(\d{2})/.exec(String(at == null ? "" : at));
+    return m ? m[1] + ":" + m[2] : window.FlowsPanels.DASH;
+  }
+
+  function drawDarkpool(host, panel, card, question, mount) {
+    const { el, isNum, deadPanel, panelHead, px2, money, DASH } = window.FlowsPanels;
+
+    const q = question || "Which off-exchange prints carried the size in this name?";
+
+    if (panel === undefined || panel === null) return deadPanel(host, q, PREDATES_STOCK);
+    if (panel.status === "quiet") {
+      return ftQuiet(host, q,
+        "The feed answered with nothing: no off-exchange print in this name " +
+        "reached it with a dollar size to rank.");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    /* SECOND-STAGE GUARD. "ok" with zero rows cannot come out of the shaper
+       today — it answers quiet — but a hand-mutated payload can present it,
+       and an empty table under this heading reads as a broken renderer. */
+    const rows = Array.isArray(panel.rows) ? panel.rows : [];
+    if (!rows.length) {
+      return ftQuiet(host, q,
+        "The feed answered with nothing: no off-exchange print in this name " +
+        "reached it with a dollar size to rank.");
+    }
+
+    panelHead(host, q);
+
+    const table = el("table", "fc-levels fdp-table");
+    const thead = el("thead");
+    const hr = el("tr");
+    const HEADS = [
+      ["Time", "fdp-h-time", "The tape's own execution timestamp, UTC, to the minute."],
+      ["Price", "c-num", "The reported execution price."],
+      ["Size", "c-num", "Shares in the print, the tape's own count."],
+      ["Dollars", "c-num",
+        "The print's dollar size, the vendor's own premium field — the column these rows are ranked by."],
+      ["Bid / Ask", "c-num",
+        "The national best bid and offer beside the print, when the tape carried both."],
+    ];
+    for (const [label, cls, title] of HEADS) {
+      const th = el("th", cls, label);
+      th.scope = "col";
+      th.title = title;
+      hr.append(th);
+    }
+    thead.append(hr);
+    table.append(thead);
+
+    const tbody = el("tbody");
+    for (const r of rows) {
+      const tr = el("tr", "fdp-row" + (r.canceled === true ? " is-canceled" : ""));
+
+      /* The cancel flag is a stated fact with exactly one honest rendering: a
+         tag when the tape says true, NOTHING when it says false or says
+         nothing at all. A "live" tag on the false rows would turn the null
+         rows' absence of a tag into a claim. */
+      const timeTd = tcCell(fdpTime(r.at), "fdp-time",
+        "The tape's own execution timestamp, UTC. The tape reports these prints with delay.");
+      if (r.canceled === true) {
+        const tag = el("span", "fdp-tag", "cancelled");
+        tag.title = "The tape carries a cancel flag on this print.";
+        timeTd.append(tag);
+      }
+      tr.append(timeTd);
+
+      tr.append(tcCell(px2(r.px), "c-num fdp-px",
+        isNum(r.px) === null ? "The tape carried no price on this row." : "The reported execution price."));
+      tr.append(tcCell(tcInt(r.size), "c-num fdp-size",
+        isNum(r.size) === null ? "The tape carried no share count on this row." : "Shares in the print."));
+      tr.append(tcCell(money(r.prem), "c-num fdp-prem",
+        "The print's dollar size, the vendor's own premium field. Size moved here; " +
+        "which way anyone was positioned is not on the tape."));
+
+      const bid = isNum(r.bid), ask = isNum(r.ask);
+      tr.append(tcCell(
+        bid !== null && ask !== null ? px2(bid) + " / " + px2(ask) : DASH,
+        "c-num fdp-quote",
+        bid !== null && ask !== null
+          ? "The national best bid and offer around the print, as the tape reported them. " +
+            "Context only: the tape attributes no side, so where the print sat in this " +
+            "quote is not a reading of who initiated."
+          : "The tape carried no usable bid and ask beside this print — not a quote of zero."));
+      tbody.append(tr);
+    }
+    table.append(tbody);
+
+    const wrap = el("div", "fc-tablewrap fdp-wrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Off-exchange prints");
+    wrap.append(table);
+    host.append(wrap);
+
+    /* THE CAPPED-LIST RULE, in the shaper's own numbers: what was kept, and
+       what was counted out because it could not be ranked. Then the payload's
+       note, verbatim — the refusals are the builder's to state. */
+    const seen = isNum(panel.seen);
+    const shed = isNum(panel.shed);
+    const unpriced = isNum(panel.unpriced);
+    const bits = [];
+    if (shed !== null && shed > 0 && seen !== null) bits.push(rows.length + " kept of " + seen);
+    if (unpriced !== null && unpriced > 0) {
+      bits.push("+" + unpriced + " unpriced print" + (unpriced === 1 ? "" : "s") + " counted out");
+    }
+    if (bits.length) host.append(el("p", "fc-note fdp-count", bits.join(" · ") + "."));
+    appendNotes(host, [panel.note], "About these prints");
+  }
+
+  /* ===== oiDeltas ===== */
+
+  /** "C 150 · 09-18" — the contract in the payload's own three parts. The
+   *  full expiry and the raw option symbol ride in the cell's title, because
+   *  slice(5) drops the year and two Januaries are not the same contract. */
+  function foiContract(r) {
+    const { isNum, DASH } = window.FlowsPanels;
+    const cp = r.cp === "C" || r.cp === "P" ? r.cp : null;
+    const k = isNum(r.k);
+    const exp = typeof r.exp === "string" && r.exp ? r.exp : null;
+    if (cp === null && k === null && exp === null) return DASH;
+    return (cp || DASH) + " " + (k === null ? DASH : String(k)) + " · " +
+      (exp ? exp.slice(5) : DASH);
+  }
+
+  /** One streak counter as a span, or the em dash. The counter is the
+   *  VENDOR'S — its rule is not published and is not restated here. */
+  function foiStreakSpan(v, label, title) {
+    const { el, isNum, DASH } = window.FlowsPanels;
+    const n = isNum(v);
+    const span = el("span", "foi-streak" + (n === null ? " is-unknown" : ""),
+      n === null ? DASH : n + "d " + label);
+    span.title = n === null
+      ? "The vendor published no counter for this line — not a streak of zero."
+      : title;
+    return span;
+  }
+
+  function drawOiDeltas(host, panel, card, question, mount) {
+    const { el, isNum, deadPanel, panelHead, DASH } = window.FlowsPanels;
+
+    const q = question || "Where did open interest move between clearing snapshots?";
+
+    if (panel === undefined || panel === null) return deadPanel(host, q, PREDATES_STOCK);
+    if (panel.status === "quiet") {
+      return ftQuiet(host, q,
+        "The feed answered with nothing: the vendor surfaced no contract-level " +
+        "open-interest change in this name.");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    const rows = Array.isArray(panel.rows) ? panel.rows : [];
+    if (!rows.length) {
+      return ftQuiet(host, q,
+        "The feed answered with nothing: the vendor surfaced no contract-level " +
+        "open-interest change in this name.");
+    }
+
+    panelHead(host, q);
+
+    const table = el("table", "fc-levels foi-table");
+    const thead = el("thead");
+    const hr = el("tr");
+    /* The delta is a Greek capital and the head is not set in the mono face —
+       the same one-glyph-fallback trap TC_COLS documents, and the same fix. */
+    const thChg = el("th", "c-num");
+    thChg.scope = "col";
+    thChg.title = "curr_oi minus the previous clearing snapshot's, the vendor's own difference. " +
+      "A settled fact a day late by construction — never today's tape.";
+    thChg.append(el("span", "ftt-greek", "Δ"));
+    thChg.append(document.createTextNode("OI"));
+    const heads = [
+      [el("th", "foi-h-oc", "Contract"),
+        "Call or put, strike and expiry, from the vendor's option symbol."],
+      [thChg, null],
+      [el("th", "c-num", "Curr OI"), "Open interest at the newer of the two clearing snapshots."],
+      [el("th", "c-num", "Vol"), "The vendor's contract volume beside the change."],
+      [el("th", "foi-h-streaks", "Streaks"),
+        "The vendor's own consecutive-session counters. Their rules are the vendor's and are not published."],
+    ];
+    for (const [th, title] of heads) {
+      th.scope = "col";
+      if (title) th.title = title;
+      hr.append(th);
+    }
+    thead.append(hr);
+    table.append(thead);
+
+    const tbody = el("tbody");
+    for (const r of rows) {
+      const tr = el("tr", "foi-row");
+
+      const exp = typeof r.exp === "string" && r.exp ? r.exp : null;
+      tr.append(tcCell(foiContract(r), "foi-oc",
+        (exp ? "Expiry " + exp + ". " : "") +
+        (typeof r.oc === "string" && r.oc ? "Vendor symbol " + r.oc + "." : "")));
+
+      /* SIGN IS IN THE GLYPH, and the tone class is decoration on top of it.
+         tcSignedInt already refuses a sign at zero — a change of exactly zero
+         is a measurement without a direction. */
+      const chg = isNum(r.change);
+      const prevOi = isNum(r.prevOi);
+      const currOi = isNum(r.currOi);
+      tr.append(tcCell(tcSignedInt(chg),
+        "c-num foi-chg " + (chg === null ? "is-unknown" : chg > 0 ? "is-up" : chg < 0 ? "is-down" : "is-flat"),
+        chg === null
+          ? "The vendor published no usable change for this line."
+          : "Between the vendor's two clearing snapshots" +
+            (prevOi !== null && currOi !== null
+              ? ": " + tcInt(prevOi) + " to " + tcInt(currOi) : "") +
+            ". A day late by construction, so it says what stuck — never today's tape."));
+
+      tr.append(tcCell(tcInt(r.currOi), "c-num foi-oi",
+        currOi === null
+          ? "The vendor published no current open interest for this line."
+          : "Contracts outstanding at the newer clearing snapshot."));
+
+      const vol = isNum(r.vol);
+      const avgPx = isNum(r.avgPx);
+      tr.append(tcCell(tcInt(r.vol), "c-num foi-vol",
+        vol === null
+          ? "The vendor published no volume for this line."
+          : "The vendor's contract volume on this line" +
+            (avgPx === null ? "" : ", at an average price of " + avgPx.toFixed(2)) + "."));
+
+      const streaks = tcCell("", "foi-streaks", null);
+      const up = isNum(r.oiUpDays);
+      const vg = isNum(r.volGtOiDays);
+      if (up === null && vg === null) {
+        streaks.textContent = DASH;
+        streaks.title = "The vendor published neither counter for this line — not streaks of zero.";
+      } else {
+        streaks.append(foiStreakSpan(r.oiUpDays, "↑OI",
+          "The vendor's own counter: consecutive sessions of open-interest increases on this line."));
+        streaks.append(document.createTextNode(" · "));
+        streaks.append(foiStreakSpan(r.volGtOiDays, "V>OI",
+          "The vendor's own counter: consecutive sessions with volume above open interest on this line."));
+      }
+      tr.append(streaks);
+      tbody.append(tr);
+    }
+    table.append(tbody);
+
+    const wrap = el("div", "fc-tablewrap foi-wrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Contract-level open-interest changes");
+    wrap.append(table);
+    host.append(wrap);
+
+    /* The capped-list rule, then the payload's note verbatim — the note is
+       where the vendor-selection caveat lives, and it is the builder's prose,
+       not this file's. VENDOR ORDER PRESERVED upstream, so no sort here. */
+    const seen = isNum(panel.seen);
+    const shed = isNum(panel.shed);
+    if (shed !== null && shed > 0 && seen !== null) {
+      host.append(el("p", "fc-note foi-count", rows.length + " kept of " + seen + "."));
+    }
+    appendNotes(host, [panel.note], "About this feed");
+  }
+
+  /* ===== volContext ===== */
+
+  /** A LEVEL as a whole percent for the axis rail: 0.31 → "31%". Unsigned —
+   *  an implied volatility has no sign to carry. */
+  function fvcPct(v) {
+    const { isNum, DASH } = window.FlowsPanels;
+    const n = isNum(v);
+    return n === null ? DASH : (n * 100).toFixed(0) + "%";
+  }
+
+  /** One half's silence, under its own heading. Each half carries its own
+   *  status and survives the other's absence — a curve with no rank history
+   *  is half a panel, not an unavailable one. */
+  function fvcHalfSilence(halfHost, half, quietSentence) {
+    const { el } = window.FlowsPanels;
+    const quiet = half && half.status === "quiet";
+    const p = el("p", "ft-quiet", quiet
+      ? quietSentence
+      : "This half's feed could not be read this run" +
+        (half && half.reason ? ": " + String(half.reason).replace(/\.+$/, "") : "") + ".");
+    p.setAttribute("data-empty", quiet ? "quiet" : "unavailable");
+    halfHost.append(p);
+  }
+
+  function drawVolContext(host, panel, card, question, mount) {
+    const { el, svgEl, isNum, deadPanel, panelHead, vol1, neg, DASH } = window.FlowsPanels;
+
+    const q = question ||
+      "What does the chain charge across tenors, and where does implied volatility sit in its own year?";
+
+    if (panel === undefined || panel === null) return deadPanel(host, q, PREDATES_STOCK);
+    if (panel.status === "quiet") {
+      return ftQuiet(host, q,
+        "Both volatility feeds answered with nothing for this name — no listed " +
+        "term structure and no rank history.");
+    }
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    panelHead(host, q);
+
+    const term = panel.term || null;
+    const ivRank = panel.ivRank || null;
+    const W = ftWidth(host);
+
+    /* ---- the term half ---------------------------------------------- */
+    const termHost = el("div", "fvc-half fvc-termhalf");
+    termHost.append(el("h4", "fvc-h", "Term structure"));
+
+    const termRows = term && term.status === "ok" && Array.isArray(term.rows) ? term.rows : [];
+    /* x IS THE STATED TENOR, dte, falling back to the ROW INDEX only where
+       dte is null (measured: no emitted row lacks it, but a point must not
+       vanish for missing an axis). y is the expiry's own implied volatility.
+       Nothing is fitted or interpolated — the polyline connects quotes, and
+       its kinks are the reading. Built BEFORE the branch because the guard
+       below is on what is drawable, not on what was published: the shaper
+       drops rows without a volatility, so "ok" implies points today, but a
+       hand-mutated payload can present rows with none and Infinity must not
+       reach the scale. */
+    const pts = [];
+    termRows.forEach((r, i) => {
+      const y = isNum(r && r.vol);
+      if (y === null) return;
+      const dte = isNum(r && r.dte);
+      pts.push({ x: dte === null ? i : dte, y, dte, r });
+    });
+    pts.sort((a, b) => a.x - b.x);
+
+    if (!termRows.length) {
+      fvcHalfSilence(termHost, term,
+        "The vendor answered the term-structure read with nothing for this name.");
+    } else if (!pts.length) {
+      fvcHalfSilence(termHost, { status: "quiet" },
+        "The vendor answered the term-structure read with nothing this curve can place.");
+    } else {
+      let rawLo = Infinity, rawHi = -Infinity, xLo = Infinity, xHi = -Infinity;
+      for (const p of pts) {
+        if (p.y < rawLo) rawLo = p.y;
+        if (p.y > rawHi) rawHi = p.y;
+        if (p.x < xLo) xLo = p.x;
+        if (p.x > xHi) xHi = p.x;
+      }
+      /* A flat curve and a single expiry still need a finite span to divide
+         by; the pad is drawing headroom, not data. */
+      const lo = rawHi - rawLo < 1e-9 ? rawLo - 0.01 : rawLo;
+      const hi = rawHi - rawLo < 1e-9 ? rawHi + 0.01 : rawHi;
+      if (xHi - xLo < 1e-9) xHi = xLo + 1;
+
+      const H = 120, padL = 34, padR = 10, padT = 10, padB = 12;
+      const xOf = (x) => padL + ((x - xLo) / (xHi - xLo)) * (W - padL - padR);
+      const yOf = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+
+      const front = pts[0], back = pts[pts.length - 1];
+      const svg = svgEl("svg", {
+        class: "fvc-svg", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+        role: "img", preserveAspectRatio: "xMidYMid meet",
+        "aria-label": "Implied-volatility term structure" +
+          (card && card.ticker ? " for " + card.ticker : "") + ": " +
+          pts.length + " listed expiries, from " + vol1(front.y) +
+          (front.dte === null ? "" : " at " + front.dte + " days") + " out to " + vol1(back.y) +
+          (back.dte === null ? "" : " at " + back.dte + " days") +
+          ". Lowest " + vol1(rawLo) + ", highest " + vol1(rawHi) +
+          ". Derived from quotes; none of it is a forecast.",
+      });
+
+      svg.append(svgEl("line", {
+        class: "fvc-frame", x1: padL, x2: padL, y1: padT, y2: H - padB,
+      }));
+      svg.append(svgEl("polyline", {
+        class: "fvc-line",
+        points: pts.map((p) => xOf(p.x).toFixed(1) + "," + yOf(p.y).toFixed(1)).join(" "),
+      }));
+      for (const p of pts) {
+        const g = svgEl("g", { class: "fvc-dotg" });
+        const t = svgEl("title");
+        const imp = isNum(p.r.impliedMovePerc);
+        t.textContent = String(p.r.expiry) +
+          (p.dte === null ? "" : ", " + p.dte + " days") +
+          " · " + vol1(p.y) + " implied" +
+          (imp === null ? "" : " · implied move " + vol1(imp) + " of spot") + ".";
+        g.append(t);
+        g.append(svgEl("circle", {
+          class: "fvc-dot", cx: xOf(p.x).toFixed(1), cy: yOf(p.y).toFixed(1), r: 2,
+        }));
+        svg.append(g);
+      }
+      /* The rail: min and max as percentages, at their own heights. On a flat
+         curve they are one number and one label. */
+      const rail = [[rawHi, yOf(rawHi)]];
+      if (rawHi - rawLo >= 1e-9) rail.push([rawLo, yOf(rawLo)]);
+      for (const [v, y] of rail) {
+        const t = svgEl("text", {
+          class: "fvc-axis", x: padL - 5, y: (y + 3.5).toFixed(1), "text-anchor": "end",
+        });
+        t.textContent = fvcPct(v);
+        svg.append(t);
+      }
+      termHost.append(svg);
+
+      /* The mini-table: the FIRST rows in calendar order, stated as a slice
+         so it can never be read as the population. Null is the em dash, and
+         never a zero. */
+      const mt = el("table", "fc-levels fvc-mini");
+      const mh = el("thead");
+      const mhr = el("tr");
+      for (const [label, cls, title] of [
+        ["Expiry", "fvc-mh-exp", "The listed expiry, as published."],
+        ["IV", "c-num", "That expiry's own implied volatility."],
+        ["Implied move", "c-num",
+          "The vendor's implied move as a share of spot — what the chain charges, not what will happen."],
+      ]) {
+        const th = el("th", cls, label);
+        th.scope = "col";
+        th.title = title;
+        mhr.append(th);
+      }
+      mh.append(mhr);
+      mt.append(mh);
+      const mb = el("tbody");
+      for (const r of termRows.slice(0, 4)) {
+        const tr = el("tr");
+        tr.append(tcCell(typeof r.expiry === "string" && r.expiry ? r.expiry : DASH, "fvc-exp", null));
+        tr.append(tcCell(vol1(r.vol), "c-num", null));
+        tr.append(tcCell(isNum(r.impliedMovePerc) === null ? DASH : vol1(r.impliedMovePerc),
+          "c-num",
+          isNum(r.impliedMovePerc) === null
+            ? "The vendor published no implied move for this expiry — not a move of zero."
+            : null));
+        mb.append(tr);
+      }
+      mt.append(mb);
+      const mwrap = el("div", "fc-tablewrap fvc-miniwrap");
+      mwrap.append(mt);
+      termHost.append(mwrap);
+
+      const termBits = [];
+      if (termRows.length > 4) {
+        termBits.push("first 4 of " + termRows.length + " listed expiries — the curve draws all " +
+          termRows.length);
+      }
+      const tSeen = isNum(term.seen), tShed = isNum(term.shed);
+      if (tShed !== null && tShed > 0 && tSeen !== null) {
+        termBits.push(termRows.length + " kept of " + tSeen);
+      }
+      if (termBits.length) {
+        const cap = termBits.join(" · ");
+        termHost.append(el("p", "fc-note fvc-count",
+          cap.charAt(0).toUpperCase() + cap.slice(1) + "."));
+      }
+    }
+    host.append(termHost);
+
+    /* ---- the rank half ---------------------------------------------- */
+    const rankHost = el("div", "fvc-half fvc-rankhalf");
+    rankHost.append(el("h4", "fvc-h", "IV rank"));
+
+    const rankRows = ivRank && ivRank.status === "ok" && Array.isArray(ivRank.rows) ? ivRank.rows : [];
+    if (!rankRows.length) {
+      fvcHalfSilence(rankHost, ivRank,
+        "The vendor answered the rank-history read with nothing for this name.");
+    } else {
+      /* THE HEADLINE IS THE PAYLOAD'S NUMBER IN THE PAYLOAD'S UNIT. rankUnit
+         says percent 0-100 as published, and it is NEVER rescaled here — this
+         vendor's rank fields have printed "1352% of its year" once already,
+         which is why the unit travels with the number. rows arrive newest
+         first, so rows[0] is the latest session. */
+      const latest = rankRows[0];
+      const rank = isNum(latest && latest.rank1y);
+      const headline = el("p", "fvc-rank");
+      if (rank === null) {
+        const n = el("span", "fvc-rank-n is-missing", DASH);
+        n.title = "No rank published for the latest session — not a rank of zero.";
+        headline.append(n);
+        headline.append(el("span", "fvc-rank-u", " no rank published"));
+      } else {
+        const n = el("span", "fvc-rank-n", neg(rank.toFixed(1)));
+        n.title = "Where the latest session's implied volatility ranks against this name's own " +
+          "past year, in the payload's unit: " + (ivRank.rankUnit || "as published") + ".";
+        headline.append(n);
+        headline.append(el("span", "fvc-rank-u", " / 100"));
+      }
+      if (latest && typeof latest.date === "string" && latest.date) {
+        headline.append(el("span", "fvc-rank-d", " · " + latest.date));
+      }
+      rankHost.append(headline);
+
+      /* The strip: oldest LEFT, newest RIGHT — the orientation every strip on
+         this site uses (flows-board's spark, the events IV path, the score
+         strips all say "oldest first"). The wire is newest-first, so it is
+         reversed here. A NULL POINT IS A GAP, never a zero and never a bridge:
+         a segment is drawn only between ADJACENT measured sessions. */
+      const series = rankRows.slice().reverse().map((r) => isNum(r && r.rank1y));
+      const n = series.length;
+      const gaps = series.filter((v) => v === null).length;
+      if (n >= 2 && gaps < n) {
+        const SW = Math.max(120, Math.min(220, W - 120)), SH = 40, sPadX = 3, sPadY = 4;
+        const xO = (i) => sPadX + (i / (n - 1)) * (SW - sPadX * 2);
+        /* THE DOMAIN IS THE RANK'S OWN 0 TO 100, fixed — a strip rescaled to
+           its own extremes would draw a quiet year and a violent one alike. */
+        const yO = (v) => sPadY + (1 - v / 100) * (SH - sPadY * 2);
+        const svg = svgEl("svg", {
+          class: "fvc-spark", viewBox: `0 0 ${SW} ${SH}`, width: SW, height: SH,
+          role: "img", preserveAspectRatio: "xMidYMid meet",
+          "aria-label": "One-year implied-volatility rank by session, oldest on the left, on the " +
+            "rank's own 0 to 100 scale: " + n + " sessions" +
+            (gaps > 0 ? ", " + gaps + " of them with no published rank, drawn as gaps in the line" : "") +
+            (rank === null
+              ? ". The latest session publishes no rank."
+              : ". Latest " + neg(rank.toFixed(1)) + "."),
+        });
+        svg.append(svgEl("line", { class: "fvc-frame", x1: sPadX, x2: SW - sPadX, y1: yO(0), y2: yO(0) }));
+        for (let i = 0; i + 1 < n; i++) {
+          if (series[i] === null || series[i + 1] === null) continue;
+          svg.append(svgEl("line", {
+            class: "fvc-spark-l",
+            x1: xO(i).toFixed(1), y1: yO(series[i]).toFixed(1),
+            x2: xO(i + 1).toFixed(1), y2: yO(series[i + 1]).toFixed(1),
+          }));
+        }
+        series.forEach((v, i) => {
+          if (v === null) return;
+          /* A measured session BETWEEN two gaps has no segment on either side
+             and would otherwise be invisible — it gets a dot. So does the
+             newest session, which is the one the headline states. */
+          const lone = (i === 0 || series[i - 1] === null) && (i === n - 1 || series[i + 1] === null);
+          if (!lone && i !== n - 1) return;
+          svg.append(svgEl("circle", {
+            class: "fvc-spark-d" + (i === n - 1 ? " is-now" : ""),
+            cx: xO(i).toFixed(1), cy: yO(v).toFixed(1), r: i === n - 1 ? 2 : 1.5,
+          }));
+        });
+        rankHost.append(svg);
+      }
+
+      const rBits = [];
+      const rSeen = isNum(ivRank.seen), rShed = isNum(ivRank.shed);
+      if (rShed !== null && rShed > 0 && rSeen !== null) {
+        rBits.push(rankRows.length + " kept of " + rSeen);
+      }
+      if (gaps > 0) {
+        rBits.push(gaps + " session" + (gaps === 1 ? "" : "s") + " with no published rank — gaps " +
+          "in the strip, never zeros");
+      }
+      if (rBits.length) {
+        const cap = rBits.join(" · ");
+        rankHost.append(el("p", "fc-note fvc-count",
+          cap.charAt(0).toUpperCase() + cap.slice(1) + "."));
+      }
+    }
+    host.append(rankHost);
+
+    appendNotes(host, [panel.note], "About this panel");
+  }
+
   /* ---------- the drawer table ------------------------------------- */
 
   /* Keyed by the SAME strings shared/flows-panels.js publishes. The test
@@ -3301,6 +3920,9 @@
     path: P.path,
     context: P.context,
     congress: P.congress,
+    darkpool: drawDarkpool,
+    oiDeltas: drawOiDeltas,
+    volContext: drawVolContext,
     __score: null,          // drawn from the card's TOP LEVEL, not its panels
   };
 
@@ -3345,11 +3967,11 @@
          payload, not a failure. `{status:"unavailable"}` is this run
          declining to publish, and it carries its own reason. Anything else
          goes to the drawer, which switches on status before touching a
-         number. */
+         number. The transitional sentence is per-wave (predatesSentence):
+         the chain four and the deep-feed three shipped at different times,
+         and each absence is dated by its own wave. */
       if (panel === undefined) {
-        deadPanel(host, question,
-          "this card was built before the option chain leg shipped, so this " +
-          "panel was never in it.");
+        deadPanel(host, question, predatesSentence(key));
         continue;
       }
 
@@ -3419,9 +4041,7 @@
       return;
     }
     if (panel === undefined) {
-      deadPanel(zoomHost, question,
-        "this card was built before the option chain leg shipped, so this " +
-        "panel was never in it.");
+      deadPanel(zoomHost, question, predatesSentence(zoomKey));
       return;
     }
     try { drawer(zoomHost, panel, painted, question, "zoom"); }
