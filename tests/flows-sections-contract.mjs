@@ -216,7 +216,16 @@ try {
 
     /* WHAT IT MUST NEVER REMOVE. Each of these is either the live product or
        a payload no sweep has any business naming. */
-    for (const key of ["board:long", "board:short", "board:watch", "record", "meta", "card:AAPL"]) {
+    /* The dated scores pool is swept by the same prune under the same
+       narrowing: the dated key goes; the live trace, which readers are on,
+       cannot be named by a sweep at all. */
+    await put("scores:2026-01-02", { rows: [{ t: "TEST", s: 0 }] });
+    const sHit = await del("scores:2026-01-02");
+    eq(sHit.status, 200, "a dated scores pool can be swept");
+    eq((await sHit.json()).removed, 1, "and reports what it removed");
+
+    for (const key of ["board:long", "board:short", "board:watch", "record", "meta", "card:AAPL",
+                       "scoretrack"]) {
       const res = await del(key);
       eq(res.status, 400, `the sweep cannot delete ${key}`);
     }

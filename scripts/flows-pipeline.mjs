@@ -39,6 +39,7 @@ import {
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
+import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -1817,10 +1818,17 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
         boards.push({ d, side, rows: payloads[side].rows });
       }
     }
-    return { boards, probed: boards.length };
+    /* No dated scores fixtures exist, so the dry-run track exercises the
+       BACKFILL path over these synthetic boards plus the "scores" path via
+       the current session's own pool — both branches, no fixture that could
+       agree with the code by construction. */
+    return { boards, scoreDays: [], probed: boards.length };
   }
   const base = Date.parse(sessionDate + "T00:00:00Z");
-  if (!Number.isFinite(base)) return { boards, probed: 0, absent: 0, failed: 0, statuses: [] };
+  if (!Number.isFinite(base)) {
+    return { boards, scoreDays: [], probed: 0, absent: 0, failed: 0, statuses: [] };
+  }
+  const scoreDays = [];
   let probed = 0, absent = 0, failed = 0, recovered = 0;
   const statuses = new Set();
   let abandoned = false;
@@ -1831,7 +1839,7 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
     const dow = t.getUTCDay();
     if (dow === 0 || dow === 6) continue;      // a dated key is only ever written on a weekday
     const d = t.toISOString().slice(0, 10);
-    for (const side of ["long", "short"]) {
+    for (const what of ["scores", "long", "short"]) {
       probed++;
 
       /* PACED. This walk is up to 180 reads against a route that sits behind
@@ -1842,14 +1850,15 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
          outside the deadline calculus, so it is the cheapest thing here. */
       if (probed > 1) await sleep(ARCHIVE_READ_PACE_MS);
 
-      let read = await readStored(`board:${side}:${d}`);
+      const key = what === "scores" ? `scores:${d}` : `board:${what}:${d}`;
+      let read = await readStored(key);
       /* ONE RETRY, AND IT IS COUNTED. A refusal that clears on a second
          attempt is a rate limit; one that repeats is not, and the two want
          different fixes. Publishing `recovered` is what tells them apart
          next run instead of next month. */
       if (read.failed) {
         await sleep(ARCHIVE_READ_RETRY_MS);
-        const again = await readStored(`board:${side}:${d}`);
+        const again = await readStored(key);
         if (!again.failed) recovered++;
         read = again;
       }
@@ -1868,7 +1877,8 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
 
       const stored = read.payload;
       if (stored && Array.isArray(stored.rows) && stored.rows.length) {
-        boards.push({ d, side, rows: stored.rows });
+        if (what === "scores") scoreDays.push({ d, rows: stored.rows, source: "scores" });
+        else boards.push({ d, side: what, rows: stored.rows });
       } else {
         /* A 200 carrying no rows is a key that exists and holds nothing,
            which is neither absent nor failed. Counted with absent because
@@ -1897,7 +1907,7 @@ async function collectDatedBoards(sessionDate, payloads, enriched) {
      `retained: 0` that probed 180 keys is a cold archive, and a `retained: 0`
      that probed 0 is a broken date. Without this the page can only say "zero",
      which is the one thing a reader already knows by looking at it. */
-  return { boards, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
+  return { boards, scoreDays, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
 }
 
 /**
@@ -2673,7 +2683,7 @@ const ARCHIVE_RETENTION_DAYS = 126;
    NAMES the keys it wants gone, computed from the session date.
 
    A run sweeps the 30 calendar days that sit just past the retention edge, on
-   both sides: at most 60 named deletes, of which in steady state exactly two
+   both sides plus the dated scores pool: at most 90 named deletes, of which in steady state exactly two
    match anything. A delete that matches no row writes no row and costs nothing
    against the D1 budget. The 30-day skirt is what makes the sweep
    self-healing: a pipeline that does not run for three weeks still collects
@@ -2722,6 +2732,7 @@ function pruneKeys(sessionDate, {
   for (let back = retentionDays + 1; back <= retentionDays + lookbackDays; back++) {
     const day = new Date(t0 - back * 86400000).toISOString().slice(0, 10);
     for (const side of ["long", "short"]) keys.push(`board:${side}:${day}`);
+    keys.push(`scores:${day}`);
   }
   return keys;
 }
@@ -3835,6 +3846,39 @@ async function main() {
     console.warn(`  watch: ${error.message}`);
   }
 
+  /* 7b-ter. THE SESSION'S WHOLE SCORED POOL, archived under a dated key.
+
+     The boards archive fifty names a side; the DISTRIBUTION dies with the
+     run. So "what did we say about this name yesterday" had an answer only
+     for names that made a board, and the near-misses — the most informative
+     part of a quiet session — were the one part with no history. This key is
+     the whole pool, {t, s} and nothing else: the score is the subject, and
+     every other column already lives on the boards beside it in the archive.
+
+     Same immutability contract as the dated boards: written once per session
+     (a re-run writes identical bytes — scoresRows sorts by ticker for exactly
+     that), swept by the same prune, and read back by the scoretrack leg the
+     way the record reads the boards. Best-effort AFTER the boards: history
+     must never cost the reader today's ranking. */
+  if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    try {
+      const scoreRows = scoresRows(sides);
+      await publish(`scores:${sessionDate}`, {
+        v: BOARD_SCHEMA_VERSION, generatedAt, sessionDate,
+        deadBand: sides.deadBand,
+        selectionEpoch: SELECTION_EPOCH,
+        rows: scoreRows,
+        status: scoreRows.length ? "ok" : "empty",
+      });
+      console.log(`  scores: ${scoreRows.length} name(s) archived for ${sessionDate}`);
+    } catch (error) {
+      console.warn(`  scores: ${error.message}`);
+    }
+  } else {
+    console.warn(
+      "  scores: no session date, so the pool cannot be archived under a dated key this run");
+  }
+
   /* 7c. THE ROLLING BAND — the day's largest movers, and the largest net
      option premium by name.
 
@@ -4012,11 +4056,12 @@ async function main() {
      everything in this stretch, and placed AFTER today's boards, archive and
      watch list are committed: a record that fails to score must never cost
      the reader today's session. */
+  let archiveWalk = null;
   try {
+    archiveWalk = await collectDatedBoards(sessionDate, payloads, enriched);
     const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
       absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
-      statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } =
-      await collectDatedBoards(sessionDate, payloads, enriched);
+      statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } = archiveWalk;
     const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
     const recordCalendar = tradingCalendar([
       ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
@@ -4094,6 +4139,64 @@ async function main() {
     }
   } catch (error) {
     console.warn(`  record: ${error.message}`);
+  }
+
+  /* 7c-ter. THE SCORE TRACK — each name's daily score, traced.
+
+     ZERO VENDOR CALLS, and a VIEW rather than a store: rebuilt from the
+     dated archive every run, so it can never drift from the keys it is a
+     reading of. Three sources compose one timeline, strongest first:
+
+       - a dated scores key (the whole pool for that session),
+       - failing that, the two archived boards (only the names that made a
+         board — the payload marks these sessions board-only, because their
+         sparseness is a fact about the ARCHIVE and must not read as a fact
+         about the market),
+       - plus the current session's own pool, which was published minutes
+         ago in this same run and would otherwise wait a day to appear.
+
+     After the record for the same reason the record is after the boards: a
+     failure here may cost only itself. */
+  try {
+    const walked = archiveWalk || { boards: [], scoreDays: [] };
+    const dayMap = new Map();
+    for (const sd of walked.scoreDays || []) {
+      dayMap.set(sd.d, { d: sd.d, rows: sd.rows, source: "scores" });
+    }
+    const boardsByDate = new Map();
+    for (const b of walked.boards || []) {
+      if (!boardsByDate.has(b.d)) boardsByDate.set(b.d, []);
+      boardsByDate.get(b.d).push(b.rows);
+    }
+    for (const [d, lists] of boardsByDate) {
+      if (!dayMap.has(d)) dayMap.set(d, { d, rows: boardsToScoreRows(lists), source: "boards" });
+    }
+    if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+      dayMap.set(sessionDate, { d: sessionDate, rows: scoresRows(sides), source: "scores" });
+    }
+
+    const track = buildScoreTrack([...dayMap.values()], {
+      deadBand: sides.deadBand,
+      epoch: SELECTION_EPOCH,
+    });
+    await publish("scoretrack", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* The same honesty the record carries: a reader must be able to tell a
+         thin trace from a store that refused the walk. */
+      archive: {
+        probed: walked.probed || 0,
+        failed: walked.failed || 0,
+        abandoned: !!walked.abandoned,
+      },
+      ...track,
+    });
+    console.log(
+      `  scoretrack: ${track.names.length} name(s) over ${track.sessions.length} session(s) ` +
+      `(${track.sources.full} full, ${track.sources.boardsOnly} board-only)` +
+      (track.namesShed ? `; ${track.namesShed} name(s) shed for the size cap` : ""));
+  } catch (error) {
+    console.warn(`  scoretrack: ${error.message}`);
   }
 
   /* 7d. SECTOR MOMENTUM — eleven candle calls, the only new requests this

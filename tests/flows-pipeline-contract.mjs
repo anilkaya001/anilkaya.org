@@ -801,16 +801,24 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "the sweep stops at the far edge too, rather than walking back to the epoch");
 
   for (const k of keys) {
-    const m = /^board:(long|short):(\d{4}-\d{2}-\d{2})$/.exec(k);
-    ok(m, `every swept key is a dated board key and nothing else (${k})`);
-    ok(Date.parse(m[2] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
+    /* The sweep names exactly the dated archive: the two board sides and the
+       scores pool. Anything else in this list is the off-by-one that could
+       name a live key, which is the blast radius the worker's DELETE gate
+       and this pin both exist to contain. */
+    const m = /^(?:board:(?:long|short)|scores):(\d{4}-\d{2}-\d{2})$/.exec(k);
+    ok(m, `every swept key is a dated archive key and nothing else (${k})`);
+    ok(Date.parse(m[1] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
        `${k} is strictly older than the retention window`);
   }
+  ok(keys.some((k) => k.startsWith("scores:")),
+     "and the dated scores pool IS in the sweep — an archive key the prune " +
+     "does not name grows forever");
 
   /* THE BOUND, asserted after the shape checks so that a sweep which walks the
      wrong WAY is reported as a wrong boundary rather than as a wrong count. */
-  eq(keys.length, 2 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
-     "THE BOUND: one run deletes at most two sides x the lookback, and that number is knowable before it runs");
+  eq(keys.length, 3 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
+     "THE BOUND: one run deletes at most three archive keys x the lookback " +
+     "(two board sides and the scores pool), and that number is knowable before it runs");
   eq(new Set(keys).size, keys.length, "and never names the same row twice");
 
   // A key this pipeline never wrote must never be nameable by the sweep.
@@ -874,13 +882,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(refused.seen[0].method, "DELETE", "the sweep deletes rather than overwriting with a tombstone");
 
     const missing = await run(404);
-    eq(missing.seen.length, 2 * LOOKBACK,
+    eq(missing.seen.length, 3 * LOOKBACK,
        "a 404 is an ordinary empty day, so the sweep runs the whole skirt rather than stopping at the first gap");
     ok(!missing.result.abandoned, "and reports no abandonment");
     eq(missing.result.removed, 0, "with nothing removed, honestly");
 
     const done = await run(200);
-    eq(done.result.removed, 2 * LOOKBACK,
+    eq(done.result.removed, 3 * LOOKBACK,
        "and every key that really was there is counted as removed");
   } finally {
     process.env.FLOWS_INGEST_URL = prevUrl;
