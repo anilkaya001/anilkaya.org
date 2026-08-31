@@ -771,4 +771,46 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   }
 }
 
-console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, and a full source-ablation sweep`);
+/* ---------- the wave-2 panels at the card boundary -----------------
+   Their internals live in flows-stock-contract.mjs; what the CARD owes
+   is the three-silences boundary: a null raw (the fetch failed) is
+   unavailable-with-reason, an empty raw (the vendor answered nothing)
+   is quiet, and a card from before these panels existed simply lacks
+   the keys — which older payloads already prove. */
+{
+  const base = {
+    ticker: "TEST", row: { close: "100" }, features: null,
+    strikes: [], ticks: [], expiries: [], maxPain: [], congress: [],
+    surface: [], chain: null, generatedAt: null, sessionDate: "2026-08-28",
+    weights: null,
+  };
+  const dead = buildCard(base).panels;
+  for (const key of ["darkpool", "oiDeltas", "volContext"]) {
+    eq(dead[key].status, "unavailable",
+       `an omitted ${key} raw defaults to a FAILED read — unavailable`);
+    ok(dead[key].reason, "with a reason");
+    ok(dead[key].note && dead[key].note.length > 60,
+       "and the panel's own prose rides even when it is empty");
+  }
+
+  const quiet = buildCard({ ...base, darkpool: [], oiDeltas: [], termStructure: [], ivRank: [] }).panels;
+  eq(quiet.darkpool.status, "quiet",
+     "while a vendor that ANSWERED with nothing is quiet — a different fact, " +
+     "worth a different sentence on the page");
+  eq(quiet.volContext.status, "quiet", "for the vol context too");
+
+  const live = buildCard({
+    ...base,
+    darkpool: [{ executed_at: "2026-08-28T14:00:00Z", price: "100", size: 1000, premium: "100000" }],
+    oiDeltas: [{ option_symbol: "TEST260918C00100000", oi_change: "500", curr_oi: 900 }],
+    termStructure: [{ expiry: "2026-09-18", dte: 21, volatility: "0.3", implied_move_perc: "0.041" }],
+    ivRank: [{ date: "2026-08-28", volatility: "0.3", iv_rank_1y: "44.0" }],
+  }).panels;
+  eq(live.darkpool.status, "ok", "a fed dark-pool panel is ok");
+  eq(live.darkpool.rows[0].prem, 100000, "with the print's own dollars");
+  eq(live.oiDeltas.rows[0].k, 100, "the OI delta's contract comes off the shared parser");
+  eq(live.volContext.term.rows[0].impliedMovePerc, 0.041, "and the implied move survives as a number");
+  eq(live.volContext.ivRank.rows[0].rank1y, 44, "beside a rank whose unit the payload states");
+}
+
+console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, and wave-2 panels holding the three-silences boundary`);

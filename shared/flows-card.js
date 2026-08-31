@@ -60,6 +60,9 @@ export const CARD_SCHEMA_VERSION = 2;
    wrong once in two places at once. Two copies of a convention are two chances
    to disagree about it. */
 import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature } from "./flows-features.js";
+import {
+  shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
+} from "./flows-stock.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -714,6 +717,12 @@ function chainPanel(chain, key) {
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   chain, generatedAt, sessionDate, weights,
+  /* The wave-2 per-name raws. `null` means the fetch itself failed and the
+     panel says unavailable-with-reason; `[]` means the vendor answered with
+     nothing and the panel says quiet — the three-silences rule at the card
+     boundary. Cards from before these existed simply lack the keys, which
+     is the same transitional story the chain panels told. */
+  darkpool = null, oiDeltas = null, termStructure = null, ivRank = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -848,8 +857,26 @@ export function buildCard({
         changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
       }, { asOf: sessionDate }),
       congress: buildCongress(congress, { asOf: sessionDate }),
+      darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool),
+      oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas),
+      volContext: darkNull(termStructure) && darkNull(ivRank)
+        ? { status: "unavailable", reason: "neither volatility feed could be read this run",
+            note: STOCK_NOTES.volContext }
+        : { ...buildVolContext(termStructure || [], ivRank || []), note: STOCK_NOTES.volContext },
     },
   };
+}
+
+/* A raw of null is a failed READ; a raw of [] is a vendor answering nothing.
+   The panels keep those apart because the pages must say different
+   sentences for them. */
+const darkNull = (raw) => raw === null || raw === undefined;
+
+function stockPanel(raw, shaper, note) {
+  if (darkNull(raw)) {
+    return { status: "unavailable", reason: "the feed could not be read this run", note };
+  }
+  return { ...shaper(raw), note };
 }
 
 /**
