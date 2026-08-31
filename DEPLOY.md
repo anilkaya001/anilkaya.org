@@ -1059,3 +1059,40 @@ scoretrack: 214 name(s) over 42 session(s) (39 full, 3 board-only)
 with a large `board-only` count long after this shipped means the dated
 scores keys are not being found — check the archive read counters on the
 record line first, since both legs share the same walk.
+
+### 10.5g The market pulse, the intraday cron, and the wave-B probes
+
+Seven market-wide vendor feeds pooled under one `pulse` key — tide, total
+options volume, OI change, top net impact, insider filing aggregates, recent
+dark pool prints, and market seasonality — at a cost of seven calls a run.
+Shapes follow `docs/uw-openapi.yaml` (the vendor's own spec, checked in
+2026-08-31) but are read defensively, because the spec marks half the
+OI-change fields "ToBeDone" and documentation has been wrong five times in
+this repository. Each feed fails alone: a vendor error becomes
+`{status:"unavailable", reason}` on that feed only.
+
+**The freshness architecture lives on the Worker, not on GitHub.** GitHub's
+crons have fired hours late all season, so intraday cadence cannot come from
+a workflow. The Worker's existing `*/15 * * * *` cron (the market snapshot's)
+also runs `refreshFlowsIntraday()`: inside the Eastern session (weekdays
+09:15–16:15, DST-safe via the IANA zone — `shared/flows-freshness.js`) it
+re-reads the market tide and the vendor's flow alerts, two vendor calls a
+tick, ~52 a day. It REFRESHES, never seeds: a cold store stays cold until the
+nightly pipeline publishes the envelope, because a cron that seeded keys
+would be a second publisher with a second idea of the schema. `refreshed:
+"nightly" | "intraday"` plus `readAt` on both payloads is how a page states
+which read it is showing.
+
+The log lines to read on a pipeline run:
+
+```
+pulse: 7 of 7 feeds ok — tide:ok:78 totals:ok:20 ...
+probe /api/darkpool/AAPL: ok — 5 row(s), first-row keys: ...
+```
+
+A `pulse <feed>: NOTE returned rows but none shaped` line is the spec being
+wrong the sixth time — the dumped first-row keys are the fix. The six `probe`
+lines scout wave B (per-stock dark pool, OI change, short volume, IV rank,
+vol term structure, per-ticker flow alerts): their observed shapes land in
+`meta.probes`, and the sections they scout must be built from THOSE dumps,
+not from the spec. The probes retire when wave B lands.

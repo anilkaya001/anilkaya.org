@@ -18,6 +18,9 @@ import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 import { rankChain, RANK_KEYS, crossesEarnings } from "./shared/flows-premium.js";
+import { buildFlowAlerts } from "./shared/flows-alerts.js";
+import { shapeTide } from "./shared/flows-pulse.js";
+import { isRefreshWindow } from "./shared/flows-freshness.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 // Edge-memoization window for rendered course pages. Kept short so a deploy
@@ -971,6 +974,85 @@ function timingSafeEqualStr(a, b) {
 const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 /** Fetch a stored blob by key. Returns {payload, updatedAt}, or null if absent. */
+/* =============================================================
+   INTRADAY FRESHNESS — the cron re-reads the two feeds that fill
+   DURING the session, so their pages stop being last night's copy.
+
+   Everything else the pipeline publishes is once-a-day by nature
+   (boards, cards, the archive); these two are not: the market tide
+   is a running intraday series and the vendor's flow alerts fire
+   all session. The Worker already wakes every 15 minutes for the
+   market snapshot; inside the Eastern session (the gate lives in
+   shared/flows-freshness.js) that wake now also spends TWO vendor
+   calls — a cost of ~52 calls a day against a plan measured in
+   hundreds of millions.
+
+   REFRESH, NEVER SEED. Both refreshes require the nightly key to
+   exist and keep its envelope (v, generatedAt, sessionDate, the
+   neighbouring pulse feeds): the pipeline owns the shape, the cron
+   only re-reads what fills intraday and stamps readAt. A cold
+   store stays cold until the pipeline runs — a cron that seeded
+   keys would be a second publisher with a second idea of the
+   schema, which is the class of drift the shape suite exists to
+   kill. On any failure the stored copy stands untouched, and its
+   readAt says honestly how old the read is.
+   ============================================================= */
+async function refreshFlowsIntraday(env) {
+  if (!env.DB || !env.UW_API_KEY) return;
+  if (!isRefreshWindow(new Date())) return;
+  await ensureFlowsTables(env);
+
+  const upsert = (key, obj) => env.DB.prepare(
+    "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
+    "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+  ).bind(key, JSON.stringify(obj), Date.now()).run();
+
+  /* Each refresh fails alone, and a failure is logged rather than thrown:
+     the scheduled handler's other duties never pay for a vendor outage. */
+  try {
+    const stored = await readFlowsPayload(env, "flowalerts");
+    if (stored) {
+      const prev = JSON.parse(stored.payload);
+      const raw = await uwFetch(env, "/api/option-trades/flow-alerts", { limit: 60 });
+      /* The nightly run knew every name's place in the board funnel; this
+         handler does not re-derive that, it carries each name's last known
+         stage forward. A name the nightly run never saw is foreign — which
+         is what it would have been called last night too. */
+      const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
+      const alerts = buildFlowAlerts(raw, { stageOf: (t) => lastStage.get(t) || null });
+      await upsert("flowalerts", {
+        ...prev, ...alerts,
+        readAt: new Date().toISOString(),
+        refreshed: "intraday",
+      });
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ message: "flowalerts intraday refresh failed",
+      error: error instanceof Error ? error.message : String(error) }));
+  }
+
+  try {
+    const stored = await readFlowsPayload(env, "pulse");
+    if (stored) {
+      const prev = JSON.parse(stored.payload);
+      const raw = await uwFetch(env, "/api/market/market-tide", { interval_5m: "true" });
+      const tide = shapeTide(raw);
+      /* A quiet or failed read never overwrites a series that has data:
+         better a stale tide with an honest readAt than an empty fresh one. */
+      if (tide.status === "ok") {
+        await upsert("pulse", {
+          ...prev, tide,
+          readAt: new Date().toISOString(),
+          refreshed: "intraday",
+        });
+      }
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ message: "pulse tide intraday refresh failed",
+      error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
 async function readFlowsPayload(env, key) {
   if (!env.DB) return null;
   await ensureFlowsTables(env);
@@ -2247,7 +2329,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2377,6 +2459,16 @@ async function route(request, env, url, ctx) {
          its own key so a failed feed can never cost the counter beside it.
          Served like everything here: one stored blob, handed back as bytes. */
       const stored = await readFlowsPayload(env, "flowalerts");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/pulse") {
+      /* THE MARKET PULSE — seven market-wide vendor feeds pooled under one
+         key by the nightly pipeline, with the tide re-read intraday by the
+         cron so the series does not stop at yesterday's close. Served like
+         everything here: one stored blob, handed back as bytes. */
+      const stored = await readFlowsPayload(env, "pulse");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -2607,6 +2699,15 @@ export default {
     ctx.waitUntil(refreshMarketSnapshot(env).catch((error) => {
       console.error(JSON.stringify({
         message: "market refresh failed",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }));
+    /* Session-hours refresh of the two Flows feeds that fill intraday.
+       Self-gating (weekday, 09:15..16:15 Eastern) and self-isolating: its
+       failure never reaches the market snapshot above, and vice versa. */
+    ctx.waitUntil(refreshFlowsIntraday(env).catch((error) => {
+      console.error(JSON.stringify({
+        message: "flows intraday refresh failed",
         error: error instanceof Error ? error.message : String(error),
       }));
     }));

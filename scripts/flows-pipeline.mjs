@@ -40,7 +40,8 @@ import {
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
-import { buildFlowAlerts, ALERT_ROWS } from "../shared/flows-alerts.js";
+import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
+import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -187,12 +188,19 @@ export const RATE = {
    + 100 cards           (2 per name x 50: max-pain and the gamma surface;
         congress went market-wide and is the one call below)
    + 1  congress, market-wide
-   = 867 modelled.
+   + 1  flow alerts, market-wide
+   + 7  market pulse     (tide, totals, oi-change, net impact, insiders,
+        dark pool, seasonality — one market-wide call each)
+   + 6  wave-B probes    (per-stock endpoints on one liquid name, first-row
+        key dumps only; retired once the sections they scout are built)
+   = 881 modelled.
 
    MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
    170 were 429s that were then retried — so ~852 attempts carried a distinct
-   request, against 867 modelled. The model is now within 2% of the meter,
-   which is the only reason to keep writing it down. */
+   request, against the 867 the model totalled BEFORE the pulse and probe
+   terms were added. The model was within 2% of the meter that day, which is
+   the only reason to keep writing it down; re-read the meter on the first
+   run that carries the new terms. */
 export const CALL_BUDGET = 950;
 
 /**
@@ -3321,6 +3329,74 @@ function fakeFlowAlerts(tickers) {
   return rows;
 }
 
+/* Dry-run raws for the pulse leg, one entry per feed, in the wire spelling
+   the spec documents (docs/uw-openapi.yaml) — snake_case, numbers sometimes
+   strings, envelopes sometimes {data:[...]}. Sometimes-absent fields are
+   absent on purpose, and one feed arrives failed so the composite's
+   isolation is exercised on every dry run, not just on a bad vendor day. */
+function fakePulseRaws(tickers) {
+  const rnd = mulberry(6229);
+  const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 20);
+  const pick = () => names[Math.floor(rnd() * names.length)];
+  const tide = Array.from({ length: 78 }, (_, i) => ({
+    timestamp: `2026-08-24T${String(9 + Math.floor((30 + i * 5) / 60)).padStart(2, "0")}:${String((30 + i * 5) % 60).padStart(2, "0")}:00-04:00`,
+    net_call_premium: String(Math.round((rnd() - 0.4) * 4e8)),
+    net_put_premium: String(Math.round((rnd() - 0.5) * 3e8)),
+    net_volume: Math.round((rnd() - 0.5) * 2e6),
+  }));
+  const totals = { data: Array.from({ length: 24 }, (_, i) => ({
+    date: `2026-07-${String(1 + i).padStart(2, "0")}`,
+    call_premium: String(Math.round(rnd() * 3e10)),
+    call_volume: Math.round(rnd() * 3e7),
+    put_premium: String(Math.round(rnd() * 2.5e10)),
+    put_volume: Math.round(rnd() * 2.5e7),
+  })) };
+  const oiChange = { data: Array.from({ length: 40 }, (_, i) => {
+    const t = pick();
+    const row = {
+      option_symbol: `${t}260918${rnd() > 0.5 ? "C" : "P"}${String(Math.round(40 + rnd() * 300) * 1000).padStart(8, "0")}`,
+      underlying_symbol: t,
+      oi_change: String(Math.round((rnd() - 0.3) * 40000)),
+      curr_oi: Math.round(rnd() * 90000),
+      last_oi: Math.round(rnd() * 80000),
+      volume: Math.round(rnd() * 50000),
+      rnk: i,
+    };
+    if (i % 4 !== 3) row.trades = Math.round(rnd() * 900);
+    if (i % 5 !== 4) row.avg_price = (rnd() * 40).toFixed(2);
+    if (i % 6 !== 5) row.percentage_of_total = (rnd() * 0.2).toFixed(4);
+    return row;
+  }) };
+  const netImpact = Array.from({ length: 30 }, () => ({
+    ticker: pick(), net_premium: Math.round((rnd() - 0.45) * 2e8),
+  }));
+  const insiders = { data: Array.from({ length: 15 }, (_, i) => ({
+    filing_date: `2026-08-${String(1 + i).padStart(2, "0")}`,
+    purchases: Math.round(rnd() * 300), sells: Math.round(rnd() * 500),
+    purchases_notional: String(Math.round(rnd() * 4e8)),
+    sells_notional: String(Math.round(rnd() * 9e8)),
+  })) };
+  const darkpool = { data: Array.from({ length: 45 }, (_, i) => {
+    const px = 20 + rnd() * 400;
+    const size = Math.round(1e4 + rnd() * 2e6);
+    const row = {
+      ticker: pick(),
+      executed_at: `2026-08-24T${String(10 + (i % 6))}:0${i % 10}:00Z`,
+      price: px.toFixed(2), size,
+      premium: String(Math.round(px * size)),
+      volume: Math.round(rnd() * 8e7),
+    };
+    if (i % 3 !== 2) { row.nbbo_bid = (px - 0.05).toFixed(2); row.nbbo_ask = (px + 0.05).toFixed(2); }
+    if (i % 7 === 6) row.canceled = rnd() > 0.5;
+    return row;
+  }) };
+  return {
+    tide, totals, oiChange, netImpact, insiders, darkpool,
+    /* One feed fails on every dry run so the isolation is always exercised. */
+    seasonality: { __failed: "synthetic outage (dry-run fixture)" },
+  };
+}
+
 function fakeEnrichment(ticker, spot, seed) {
   const rnd = mulberry(seed);
   const bias = rnd() - 0.5;
@@ -3937,9 +4013,13 @@ async function main() {
     console.warn(`  market: ${error.message}`);
   }
 
+  /* Held past this try so the flow-alerts leg can re-publish the movers with
+     a per-contract band cut from the alerts. Null when movers never published,
+     in which case the band is silently not owed. */
+  let moversPayload = null;
   try {
     const movers = buildMovers(withTilt);
-    await publish("movers", {
+    moversPayload = {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
       /* THE POPULATION THE LISTS WERE RANKED OVER, published beside them. "The
@@ -3955,7 +4035,8 @@ async function main() {
       fallers: movers.fallers,
       premium: movers.premium,
       status: (movers.risers.length || movers.fallers.length) ? "ok" : "thin",
-    });
+    };
+    await publish("movers", moversPayload);
     console.log(
       `  movers: ${movers.risers.length} up, ${movers.fallers.length} down of ` +
       `${movers.ranked} ranked` +
@@ -4715,8 +4796,12 @@ async function main() {
         generatedAt, sessionDate,
         /* The alerts carry their own vendor timestamps per row, but the READ
            is this run's: a reader must be able to see that a quiet feed may
-           simply be a pre-open read of a feed that fills intraday. */
+           simply be a pre-open read of a feed that fills intraday. The worker
+           cron re-reads this key during the session and flips `refreshed` to
+           "intraday"; publishing the field here keeps one schema with two
+           writers instead of a field that exists only sometimes. */
         readAt: new Date().toISOString(),
+        refreshed: "nightly",
         ...alerts,
       });
       console.log(
@@ -4725,6 +4810,25 @@ async function main() {
         (alerts.unusable ? `, ${alerts.unusable} unusable` : "") +
         `; ${alerts.coverage.sweeps} sweep-flagged, ${alerts.coverage.opening} all-opening, ` +
         `${alerts.coverage.calls}C/${alerts.coverage.puts}P of ${alerts.coverage.withContract} with a parsed contract`);
+
+      /* THE MOVERS' PER-CONTRACT BAND, finally. The movers premium lists are
+         byName because the screener reports whole-symbol premium, and the old
+         comment said contract-level needed "a flow-alerts endpoint this key
+         does not reach" — a sentence six live runs have since retired. The
+         band is cut from the SHAPED alerts already in hand (zero calls) and
+         the movers are re-published whole (one extra row write). Isolated on
+         purpose: a failure here leaves the band-less movers already
+         published, and the flowalerts key above is committed either way. */
+      if (moversPayload) {
+        try {
+          moversPayload.premium = { ...moversPayload.premium, byContract: alertBand(alerts.rows) };
+          await publish("movers", moversPayload);
+          console.log(`  movers band: ${moversPayload.premium.byContract.rows.length} contract window(s) ` +
+            `of ${moversPayload.premium.byContract.seen} priced alerts`);
+        } catch (error) {
+          console.warn(`  movers band: ${error.message} — movers stand as first published, without the band`);
+        }
+      }
     } catch (error) {
       console.warn(`  flow-alerts: ${error.message} — the counter feed above published before this leg ran`);
     }
@@ -4735,6 +4839,109 @@ async function main() {
   } catch (error) {
     console.warn(`  chains: ${error.message} — the boards published before this leg ran ` +
       "and are unaffected");
+  }
+
+  /* 7g. THE MARKET PULSE — seven market-wide feeds, one call each, pooled
+     under one key.
+
+     WHY SEVEN SEQUENTIAL FETCHES AND NOT A Promise.all: the rate limiter is
+     a shared instance whose whole design is one call in flight at a time —
+     parallelizing here would race its delay accounting for a saving of
+     seconds against a leg that costs seven calls.
+
+     EVERY FEED FAILS ALONE. A fetch failure becomes {__failed: reason} and
+     buildPulse publishes that feed as unavailable-with-reason while its six
+     neighbours carry data. The leg as a whole failing (the publish itself)
+     costs only this key — everything above committed first.
+
+     FIELD SHAPES are the spec's (docs/uw-openapi.yaml) read defensively; the
+     quiet-but-rows diagnostic below is the tripwire for the spec being wrong
+     the sixth time: a feed that RETURNED rows but shaped to nothing dumps
+     its first row's keys to this log, which is the output that has solved
+     every prior shape mystery in one run. */
+  try {
+    const PULSE_FETCHES = {
+      tide: ["/api/market/market-tide", { interval_5m: "true" }],
+      totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
+      oiChange: ["/api/market/oi-change", { limit: 100 }],
+      netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
+      insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
+      darkpool: ["/api/darkpool/recent", { limit: 100 }],
+      seasonality: ["/api/seasonality/market", {}],
+    };
+    const raws = {};
+    if (DRY_RUN) {
+      Object.assign(raws, fakePulseRaws((payloads.long.rows || []).map((r) => r.t)));
+    } else {
+      for (const [feed, [path, params]] of Object.entries(PULSE_FETCHES)) {
+        try {
+          raws[feed] = await uw(path, params);
+        } catch (error) {
+          raws[feed] = { __failed: error && error.message ? error.message : String(error) };
+        }
+      }
+    }
+    const pulse = buildPulse(raws);
+    for (const feed of PULSE_FEEDS) {
+      const f = pulse[feed];
+      if (f.status === "quiet") {
+        const first = (Array.isArray(raws[feed]) ? raws[feed] : (raws[feed] && raws[feed].data) || [])[0];
+        if (first && typeof first === "object") {
+          console.log(`  pulse ${feed}: NOTE returned rows but none shaped — first-row keys: ` +
+            Object.keys(first).slice(0, 24).join(", "));
+        }
+      }
+    }
+    await publish("pulse", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* The READ time, distinct from the vendor's own per-point stamps: the
+         worker cron re-publishes this key intraday and a reader must be able
+         to see which read they are looking at. */
+      readAt: new Date().toISOString(),
+      refreshed: "nightly",
+      ...pulse,
+    });
+    const okCount = PULSE_FEEDS.filter((f) => pulse[f].status === "ok").length;
+    console.log(`  pulse: ${okCount} of ${PULSE_FEEDS.length} feeds ok — ` +
+      PULSE_FEEDS.map((f) => `${f}:${pulse[f].status}${pulse[f].rows ? ":" + pulse[f].rows.length : pulse[f].points ? ":" + pulse[f].points.length : ""}`).join(" "));
+  } catch (error) {
+    console.warn(`  pulse: ${error.message} — every key above published before this leg ran`);
+  }
+
+  /* 7h. WAVE-B PROBES — six per-stock endpoints scouted on one liquid name.
+
+     PROBES, NOT SECTIONS: the next wave builds per-name panels on these
+     paths, and this repository does not build renderers on documented
+     shapes — it builds them on observed ones. One call each, first-row keys
+     to this log, results into meta for the record. Retired when the
+     sections land. Skipped on dry runs: a probe of a fixture would measure
+     the fixture. */
+  const probeResults = [];
+  if (!DRY_RUN) {
+    const PROBE_PATHS = [
+      ["/api/darkpool/AAPL", { limit: 5 }],
+      ["/api/stock/AAPL/oi-change", { limit: 5 }],
+      ["/api/shorts/AAPL/volume-and-ratio", {}],
+      ["/api/stock/AAPL/iv-rank", { limit: 5 }],
+      ["/api/stock/AAPL/volatility/term-structure", {}],
+      ["/api/stock/AAPL/flow-alerts", { limit: 5 }],
+    ];
+    for (const [path, params] of PROBE_PATHS) {
+      try {
+        const raw = await uw(path, params);
+        const rows = Array.isArray(raw) ? raw : (raw && raw.data) || [];
+        const first = rows[0];
+        const keys = first && typeof first === "object" ? Object.keys(first).slice(0, 24) : [];
+        probeResults.push({ path, status: "ok", rows: rows.length, keys });
+        console.log(`  probe ${path}: ok — ${rows.length} row(s)` +
+          (keys.length ? `, first-row keys: ${keys.join(", ")}` : ", no readable rows"));
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        probeResults.push({ path, status: "failed", error: message });
+        console.log(`  probe ${path}: ${message}`);
+      }
+    }
   }
 
   /* 8. CARDS — after the boards are safely committed, and best-effort.
@@ -5016,6 +5223,9 @@ async function main() {
       liquid: liquid.length,
       cardsBuilt, cardsFailed, cardsSkipped,
       apiCalls: stats.calls,
+      /* Wave-B scouting results ride the diagnostic key so a later session
+         can read the observed shapes without re-fetching the job log. */
+      probes: probeResults,
     });
   } catch (error) {
     console.warn(`  meta: ${error.message}`);

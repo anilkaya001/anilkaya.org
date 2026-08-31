@@ -333,9 +333,11 @@
 
   function paintMovers(movers) {
     var host = document.getElementById("mktMovers");
+    var band = document.getElementById("mktMoversBand");
     var panel = document.getElementById("mktMoversPanel");
     if (!host || !panel) return;
     host.textContent = "";
+    if (band) band.textContent = "";
     if (!movers || movers.status === "pending") { panel.hidden = true; return; }
 
     var grid = el("div", "mk-movers-grid");
@@ -345,8 +347,527 @@
     grid.append(moverList("Most net call premium", prem.bullish, "netPrem"));
     grid.append(moverList("Most net put premium", prem.bearish, "netPrem"));
     host.append(grid);
+
+    /* THE PER-CONTRACT BAND, cut by the pipeline from the vendor's own flow
+       alerts. ABSENT WHOLE when the alerts leg failed on a run — a plain
+       truthiness check, and absence renders as nothing rather than as an
+       error, because the movers above published first and stand alone. */
+    if (band && movers.premium && movers.premium.byContract) {
+      moverBand(band, movers.premium.byContract);
+    }
     panel.hidden = false;
   }
+
+  /* The band's FEED object arrives under its own name so the payload-shape
+     scan sees only real `movers.` reads inside paintMovers above. */
+  function moverBand(host, feed) {
+    var rows = Array.isArray(feed.rows) ? feed.rows : [];
+    if (!rows.length) return;
+    host.append(el("h3", "mk-movers-h", "Largest flagged contract windows"));
+    var ul = el("ul", "mk-movers mk-band");
+    rows.forEach(function (r) {
+      var li = el("li");
+      li.append(el("span", "mk-mv-t", contractLabel(r)));
+      var v = usd(r.prem) + (r.sweep === true ? " · sweep" : "");
+      li.append(el("span", "mk-mv-v " + toneClass(r.prem), v));
+      ul.append(li);
+    });
+    host.append(ul);
+    var seen = isNum(feed.seen);
+    var shed = isNum(feed.shed);
+    host.append(el("p", "fc-note",
+      (feed.basis ? "Basis: " + feed.basis + ". " : "") +
+      (shed !== null && shed > 0 && seen !== null
+        ? rows.length + " kept of " + seen + " — a capped list, never the population. "
+        : "") +
+      "Windows the vendor's own alert rules flagged, ranked by their stated " +
+      "premium within that selection — not the whole tape."));
+  }
+
+  /* One spelling of a contract for the band and the pulse's OI-change table:
+     "TICKER C150 09-18". When the parsed legs are absent the vendor's own
+     option symbol is shown as sent, or the ticker with an em dash. */
+  function contractLabel(r) {
+    if (r.cp && isNum(r.k) !== null && r.exp) {
+      return (r.t || DASH) + " " + r.cp + String(r.k) + " " + String(r.exp).slice(5);
+    }
+    return r.oc || ((r.t || DASH) + " " + DASH);
+  }
+
+  /* ---------- the market pulse ------------------------------------
+     Seven market-wide vendor feeds pooled under one payload key. Each
+     feed carries its own status and fails alone, so each card below
+     answers its own three silences: an UNPUBLISHED key hides the whole
+     section (the file's convention for pending), an UNAVAILABLE feed
+     names its reason, and a QUIET feed says the vendor answered with
+     nothing — which for a pre-open read is ordinary, not an outage. */
+
+  function paintPulse(pulse) {
+    var panel = document.getElementById("mkPulsePanel");
+    var grid = document.getElementById("mkPulseGrid");
+    var stampEl = document.getElementById("mkPulseStamp");
+    var foot = document.getElementById("mkPulseFoot");
+    if (!panel || !grid) return;
+    if (!pulse || pulse.status === "pending") { panel.hidden = true; return; }
+
+    var notes = pulse.notes || {};
+    grid.textContent = "";
+    if (stampEl) stampEl.textContent = pulseStamp(pulse.readAt, pulse.refreshed);
+
+    grid.append(tideCard(pulse.tide, notes.tide));
+    grid.append(totalsCard(pulse.totals, notes.totals));
+    grid.append(oiChangeCard(pulse.oiChange, notes.oiChange));
+    grid.append(netImpactCard(pulse.netImpact, notes.netImpact));
+    grid.append(insidersCard(pulse.insiders, notes.insiders));
+    grid.append(darkpoolCard(pulse.darkpool, notes.darkpool));
+    grid.append(seasonalityCard(pulse.seasonality, notes.seasonality));
+
+    if (foot) foot.textContent = notes.refusals || "";
+
+    /* REVEALED BEFORE THE TIDE IS MEASURED. A hidden element reports
+       clientWidth 0 and the chart would silently draw at a fallback
+       width — the flows-track precedent, unhide first, then measure. */
+    panel.hidden = false;
+    drawTide();
+  }
+
+  /* Sub-panel helpers take the FEED objects under their own names, so the
+     payload-shape scan sees only real payload reads inside paintPulse. */
+
+  var PULSE_QUIET = "The feed answered this read with nothing — ordinary " +
+    "for a pre-open read of a series that fills during market hours.";
+  var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function pulseStamp(readAt, refreshed) {
+    if (typeof readAt !== "string") return "";
+    var t = new Date(readAt);
+    if (isNaN(t.getTime())) return "";
+    var hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    if (refreshed === "intraday") {
+      return "Read " + hm + " (refreshes about every 15 minutes during market hours).";
+    }
+    if (refreshed === "nightly") {
+      return "Read " + hm + " with the nightly build (refreshes intraday during market hours).";
+    }
+    return "Read " + hm + ".";
+  }
+
+  function pulseCard(title, wide) {
+    var card = el("div", "mk-pulse-card" + (wide ? " is-wide" : ""));
+    card.append(el("h3", "mk-pulse-h", title));
+    return card;
+  }
+
+  /* TWO OF THE THREE SILENCES, told apart in words and in the DOM. */
+  function feedSilence(feed, quietText) {
+    if (!feed || feed.status === "unavailable") {
+      var p = el("p", "flows-empty",
+        "This feed could not be read on this run" +
+        (feed && feed.reason ? ": " + feed.reason : "") +
+        ". Its six neighbours are unaffected.");
+      p.setAttribute("data-empty", "unavailable");
+      return p;
+    }
+    var q = el("p", "flows-empty", quietText || PULSE_QUIET);
+    q.setAttribute("data-empty", "quiet");
+    return q;
+  }
+
+  /* THE CAPPED-LIST RULE: a shortened list must say what it is short of,
+     so it can never be read as the population. */
+  function capLine(feed, shown, noun) {
+    var seen = isNum(feed.seen);
+    var shed = isNum(feed.shed);
+    var capped = (shed !== null && shed > 0) || (seen !== null && shown < seen);
+    if (!capped || seen === null) return null;
+    return el("p", "fc-note mk-pulse-kept",
+      shown + " " + noun + " kept of " + seen +
+      " the feed returned — a capped list, never the population.");
+  }
+
+  function pulseTable(headers, aria) {
+    var wrap = el("div", "flows-tablewrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", aria);
+    var table = el("table", "flows-table mk-pulse-table");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    headers.forEach(function (h) {
+      var th = el("th", h.num ? "c-num" : null, h.label);
+      th.scope = "col";
+      hr.append(th);
+    });
+    thead.append(hr);
+    table.append(thead);
+    var tbody = document.createElement("tbody");
+    table.append(tbody);
+    wrap.append(table);
+    return { wrap: wrap, body: tbody };
+  }
+
+  function grouped(v) {
+    var n = isNum(v);
+    return n === null ? DASH : Math.round(n).toLocaleString("en-US");
+  }
+  function signedGrouped(v) {
+    var n = isNum(v);
+    if (n === null) return DASH;
+    return (n >= 0 ? "+" : MINUS) + Math.abs(Math.round(n)).toLocaleString("en-US");
+  }
+  function priceUsd(v) {
+    var n = isNum(v);
+    return n === null ? DASH : "$" + n.toFixed(2);
+  }
+  /* The vendor's percent-ish columns, rendered in the vendor's own units —
+     the seasonality caption says so beside them. */
+  function vendorPct(v) {
+    var n = isNum(v);
+    return n === null ? DASH : n.toFixed(2) + "%";
+  }
+  function signedVendorPct(v) {
+    var n = isNum(v);
+    if (n === null) return DASH;
+    return (n >= 0 ? "+" : MINUS) + Math.abs(n).toFixed(2) + "%";
+  }
+  function hhmm(iso) {
+    return (typeof iso === "string" && iso.length >= 16) ? iso.slice(11, 16) : DASH;
+  }
+
+  /* ---------- 1. the tide, as an SVG dual line --------------------- */
+
+  var tideChart = null;   // {points, host} once the card is built
+
+  function tideCard(feed, note) {
+    var card = pulseCard("Market tide", true);
+    var points = feed && Array.isArray(feed.points) ? feed.points : [];
+    if (feed && feed.status === "ok" && points.length) {
+      var chart = el("div", "mk-tide");
+      card.append(chart);
+      tideChart = { points: points, host: chart };
+      var kept = capLine(feed, points.length, "buckets");
+      if (kept) card.append(kept);
+    } else {
+      tideChart = null;
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  function svgNode(tag, attrs) {
+    var n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]);
+      }
+    }
+    return n;
+  }
+
+  /** Full repaint at the host's CURRENT width — called at build and again on
+      resize, never scaled: one viewBox unit is one CSS pixel. */
+  function drawTide() {
+    if (!tideChart || !tideChart.host) return;
+    var host = tideChart.host;
+    var points = tideChart.points;
+    host.textContent = "";
+
+    var W = Math.max(240, Math.min(1600, Math.round(host.clientWidth) || 320));
+    var H = 180;
+    var padL = 54, padR = 42, padT = 10, padB = 20;
+    var n = points.length;
+
+    var lo = 0, hi = 0;
+    points.forEach(function (p) {
+      var c = isNum(p.callPrem), q = isNum(p.putPrem);
+      if (c !== null) { if (c < lo) lo = c; if (c > hi) hi = c; }
+      if (q !== null) { if (q < lo) lo = q; if (q > hi) hi = q; }
+    });
+    if (lo === hi) hi = 1;   // a flat all-zero read still gets an axis
+
+    var x = function (i) {
+      return padL + (n < 2 ? 0 : (i / (n - 1)) * (W - padL - padR));
+    };
+    var y = function (v) {
+      return padT + ((hi - v) / (hi - lo)) * (H - padT - padB);
+    };
+
+    var svg = svgNode("svg", {
+      class: "mk-tide-svg", viewBox: "0 0 " + W + " " + H,
+      width: W, height: H, role: "img",
+      "aria-label": "Net call premium and net put premium per bucket across " +
+        "the session, two lines either side of a zero rule.",
+    });
+
+    // The zero rule, before the lines so they draw over it.
+    svg.append(svgNode("line", {
+      class: "mk-tide-zero", x1: padL, x2: W - padR,
+      y1: y(0).toFixed(1), y2: y(0).toFixed(1),
+    }));
+
+    /* One path per series, pen up over null buckets: an absent reading is a
+       GAP in the line, never a point at zero. */
+    var seriesD = function (key) {
+      var d = "", pen = false;
+      points.forEach(function (p, i) {
+        var v = isNum(p[key]);
+        if (v === null) { pen = false; return; }
+        d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1);
+        pen = true;
+      });
+      return d;
+    };
+    var lastIdx = function (key) {
+      for (var i = points.length - 1; i >= 0; i--) {
+        if (isNum(points[i][key]) !== null) return i;
+      }
+      return -1;
+    };
+
+    var callD = seriesD("callPrem");
+    var putD = seriesD("putPrem");
+    if (callD) svg.append(svgNode("path", { class: "mk-tide-call", d: callD }));
+    if (putD) svg.append(svgNode("path", { class: "mk-tide-put", d: putD }));
+
+    /* End-of-line words, so hue is never the only channel. */
+    var endLabel = function (key, word) {
+      var i = lastIdx(key);
+      if (i < 0) return;
+      var t = svgNode("text", {
+        class: "mk-tide-lab", x: (x(i) + 4).toFixed(1),
+        y: (y(isNum(points[i][key])) + 3).toFixed(1),
+      });
+      t.textContent = word;
+      svg.append(t);
+    };
+    endLabel("callPrem", "calls");
+    endLabel("putPrem", "puts");
+
+    // The y-axis in the units the sums are read in: usd() at min, 0, max.
+    [hi, 0, lo].filter(function (v, i, arr) { return arr.indexOf(v) === i; })
+      .forEach(function (v) {
+        var t = svgNode("text", {
+          class: "mk-tide-lab", x: padL - 6, y: (y(v) + 3).toFixed(1),
+          "text-anchor": "end",
+        });
+        t.textContent = usd(v);
+        svg.append(t);
+      });
+
+    // Three or four time ticks, HH:MM from the vendor's own bucket stamps.
+    var step = Math.max(1, Math.round((n - 1) / 3) || 1);
+    var ticks = [];
+    for (var i = 0; i < n; i += step) ticks.push(i);
+    if (ticks[ticks.length - 1] !== n - 1) ticks.push(n - 1);
+    ticks.forEach(function (idx, j) {
+      var t = svgNode("text", {
+        class: "mk-tide-lab", x: x(idx).toFixed(1), y: H - 6,
+        "text-anchor": j === 0 ? "start" : (j === ticks.length - 1 ? "end" : "middle"),
+      });
+      t.textContent = hhmm(points[idx].t);
+      svg.append(t);
+    });
+
+    host.append(svg);
+  }
+
+  /* ---------- 2..7, the tabular cards ------------------------------ */
+
+  function totalsCard(feed, note) {
+    var card = pulseCard("Volume and premium per session");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      var shown = rows.slice(0, 10);
+      var t = pulseTable([
+        { label: "Session" },
+        { label: "Call vol", num: true }, { label: "Put vol", num: true },
+        { label: "Call prem", num: true }, { label: "Put prem", num: true },
+      ], "Total options volume and premium per session, split call and put");
+      shown.forEach(function (r) {
+        var tr = document.createElement("tr");
+        var th = el("th", null, r.date || DASH);
+        th.scope = "row";
+        tr.append(th);
+        tr.append(el("td", "c-num", grouped(r.callVol)));
+        tr.append(el("td", "c-num", grouped(r.putVol)));
+        tr.append(el("td", "c-num", usd(r.callPrem)));
+        tr.append(el("td", "c-num", usd(r.putPrem)));
+        t.body.append(tr);
+      });
+      card.append(t.wrap);
+      var kept = capLine(feed, shown.length, "sessions");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  function oiChangeCard(feed, note) {
+    var card = pulseCard("Open-interest change");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      var t = pulseTable([
+        { label: "Contract" },
+        { label: "Change", num: true }, { label: "Curr OI", num: true },
+        { label: "Volume", num: true },
+      ], "Contracts the vendor ranked by open-interest change");
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        var th = el("th", null, contractLabel(r));
+        th.scope = "row";
+        tr.append(th);
+        tr.append(el("td", "c-num " + toneClass(r.change), signedGrouped(r.change)));
+        tr.append(el("td", "c-num", grouped(r.currOi)));
+        tr.append(el("td", "c-num", grouped(r.vol)));
+        t.body.append(tr);
+      });
+      card.append(t.wrap);
+      var kept = capLine(feed, rows.length, "contracts");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  function netImpactCard(feed, note) {
+    var card = pulseCard("Net premium impact");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      /* VENDOR ORDER PRESERVED: the rows arrive under the vendor's own
+         unpublished ranking, so the split slices positives and negatives in
+         the order given rather than re-sorting inside a rule this payload
+         cannot state. */
+      var pos = [], neg = [];
+      rows.forEach(function (r) {
+        var v = isNum(r.netPrem);
+        if (v === null) return;
+        if (v > 0) pos.push(r);
+        else if (v < 0) neg.push(r);
+      });
+      var cols = el("div", "mk-movers-grid mk-pulse-cols");
+      cols.append(moverList("Positive net premium", pos, "netPrem"));
+      cols.append(moverList("Negative net premium", neg, "netPrem"));
+      card.append(cols);
+      var shown = Math.min(pos.length, 8) + Math.min(neg.length, 8);
+      var kept = capLine(feed, shown, "names");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  function insidersCard(feed, note) {
+    var card = pulseCard("Insider filings");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      var t = pulseTable([
+        { label: "Filing day" },
+        { label: "Buys", num: true }, { label: "Sells", num: true },
+        { label: "Buy notional", num: true }, { label: "Sell notional", num: true },
+      ], "Aggregate insider filings per filing day");
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        var th = el("th", null, r.date || DASH);
+        th.scope = "row";
+        tr.append(th);
+        tr.append(el("td", "c-num", grouped(r.buys)));
+        tr.append(el("td", "c-num", grouped(r.sells)));
+        tr.append(el("td", "c-num", usd(r.buysNotional)));
+        tr.append(el("td", "c-num", usd(r.sellsNotional)));
+        t.body.append(tr);
+      });
+      card.append(t.wrap);
+      var kept = capLine(feed, rows.length, "filing days");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  /* The ONE panel whose rows are reported equity executions, so "prints"
+     is accurate here — and only here. */
+  function darkpoolCard(feed, note) {
+    var card = pulseCard("Dark pool prints");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      var t = pulseTable([
+        { label: "Name" }, { label: "Time", num: true },
+        { label: "Price", num: true }, { label: "Size", num: true },
+        { label: "Premium", num: true },
+      ], "Off-exchange equity trades reported to the tape, as the vendor surfaces them");
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        var th = el("th", "fb-tk", r.t || DASH);
+        th.scope = "row";
+        tr.append(th);
+        tr.append(el("td", "c-num", hhmm(r.at)));
+        tr.append(el("td", "c-num", priceUsd(r.px)));
+        tr.append(el("td", "c-num", grouped(r.size)));
+        tr.append(el("td", "c-num", usd(r.prem)));
+        t.body.append(tr);
+      });
+      card.append(t.wrap);
+      var kept = capLine(feed, rows.length, "prints");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  function seasonalityCard(feed, note) {
+    var card = pulseCard("Seasonality by month");
+    var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    if (feed && feed.status === "ok" && rows.length) {
+      var strip = el("div", "mk-sea");
+      var nowMonth = new Date().getMonth() + 1;
+      rows.forEach(function (r) {
+        var m = isNum(r.month);
+        var cell = el("div", "mk-sea-cell" + (m === nowMonth ? " is-now" : ""));
+        cell.append(el("span", "mk-sea-m",
+          m !== null && m >= 1 && m <= 12 ? MONTH_ABBR[m - 1] : DASH));
+        cell.append(el("span", "mk-sea-v " + toneClass(r.avg), signedVendorPct(r.avg)));
+        cell.append(el("span", "mk-sea-p", vendorPct(r.positivePct)));
+        var tip = [];
+        if (isNum(r.median) !== null) tip.push("median " + signedVendorPct(r.median));
+        if (isNum(r.min) !== null && isNum(r.max) !== null) {
+          tip.push("range " + signedVendorPct(r.min) + " to " + signedVendorPct(r.max));
+        }
+        if (isNum(r.years) !== null) tip.push("over " + r.years + " years");
+        if (tip.length) cell.title = tip.join(" · ");
+        strip.append(cell);
+      });
+      card.append(strip);
+      card.append(el("p", "fc-note mk-pulse-kept",
+        "Average monthly change, with the share of positive closes beneath it; " +
+        "units are as published by the vendor."));
+      var kept = capLine(feed, rows.length, "months");
+      if (kept) card.append(kept);
+    } else {
+      card.append(feedSilence(feed));
+    }
+    if (note) card.append(el("p", "fc-note", note));
+    return card;
+  }
+
+  /* Repainted whole at the new width, never scaled — the flows-track rule. */
+  var tideResizeTimer = 0;
+  window.addEventListener("resize", function () {
+    if (!tideChart) return;
+    clearTimeout(tideResizeTimer);
+    tideResizeTimer = setTimeout(drawTide, 150);
+  });
 
   function get(path) {
     return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
@@ -363,6 +884,7 @@
     get("/api/flows/market"),
     get("/api/flows/sectors").catch(function () { return null; }),
     get("/api/flows/movers").catch(function () { return null; }),
+    get("/api/flows/pulse").catch(function () { return null; }),
   ]).then(function (all) {
     var m = all[0], sectors = all[1], movers = all[2];
     if (!m) return;
@@ -383,6 +905,7 @@
     paintTape(m);
     paintSectors(sectors);
     paintMovers(movers);
+    paintPulse(all[3]);
 
     if (status) {
       status.textContent = m.n + " screened names" +

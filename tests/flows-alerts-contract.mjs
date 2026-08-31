@@ -22,6 +22,7 @@
 import assert from "node:assert/strict";
 import {
   alertRow, buildFlowAlerts, ALERT_ROWS, ALERTS_NOTES,
+  alertBand, ALERT_BAND_ROWS,
 } from "../shared/flows-alerts.js";
 
 let checks = 0;
@@ -144,6 +145,36 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   deep(built.rows, [], "with no rows");
   eq(built.notes, ALERTS_NOTES, "and the notes still ride, because the page's " +
     "basis panel must explain the surface even when it is empty");
+}
+
+/* ---------- §6b the movers band cut from the same rows ------------
+   The band exists because the movers' premium lists are byName and a
+   stale comment said contract-level needed an endpoint "this key does
+   not reach". It is cut from ALREADY-RANKED rows, so its one honest
+   job is subsetting without re-ordering and without inventing rank
+   for rows the ranking could not place. */
+{
+  const built = buildFlowAlerts([
+    { ticker: "AAA", option_chain: "AAA260918C00150000", total_premium: 900, has_sweep: true },
+    { ticker: "BBB", total_premium: 500 },
+    { ticker: "CCC", trade_count: 3, total_size: 10 },        // no premium
+  ]);
+  const band = alertBand(built.rows, { cap: 2 });
+  deep(band.rows.map((r) => r.t), ["AAA", "BBB"],
+    "the band keeps the ranking's own order and only rows the ranking could place " +
+    "— a row without a premium cannot appear in a premium band");
+  eq(band.seen, 2, "seen counts the priced rows, not the whole feed");
+  eq(band.shed, 0, "nothing shed at this cap");
+  eq(band.basis, "vendor-flagged windows",
+    "and the basis names the vendor's selection so no renderer can relabel it " +
+    "as the market's largest");
+  eq(band.rows[0].sweep, true, "the sweep flag rides");
+  eq(band.rows[0].k, 150, "with the parsed contract");
+  ok(!("askPrem" in band.rows[0]),
+    "the band is a subset of fields on purpose — it is a caption panel, not a " +
+    "second copy of the feed");
+  eq(alertBand(built.rows).cap, ALERT_BAND_ROWS, "the default cap is the published constant");
+  deep(alertBand(null).rows, [], "and junk input is an empty band, not a throw");
 }
 
 /* ---------- §7 the vocabulary holds in the payload's own prose ----

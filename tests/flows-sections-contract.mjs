@@ -225,7 +225,7 @@ try {
     eq((await sHit.json()).removed, 1, "and reports what it removed");
 
     for (const key of ["board:long", "board:short", "board:watch", "record", "meta", "card:AAPL",
-                       "scoretrack"]) {
+                       "scoretrack", "flowalerts", "pulse"]) {
       const res = await del(key);
       eq(res.status, 400, `the sweep cannot delete ${key}`);
     }
