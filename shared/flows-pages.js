@@ -104,6 +104,7 @@ const rail = (active) => {
   <p class="rail-group" id="railEvidence">Evidence</p>
   <div class="rail-items" role="group" aria-labelledby="railEvidence">
     ${item("/flows/history/", "Track record", "history")}
+    ${item("/flows/track/", "Score track", "track")}
   </div>
 </nav>`;
 };
@@ -812,6 +813,59 @@ ${shell("Events", "Options-flow intelligence", "events", username, `
 }
 
 
+/* ---------- score track ----------------------------------------- */
+
+/**
+ * EACH NAME'S DAILY SCORE, TRACED.
+ *
+ * The boards are a ranking's two tails; this page is the whole distribution
+ * over time. One row per name, one cell per session, the cell being the same
+ * composite the board printed that morning — no new arithmetic, no new call.
+ *
+ * The honesty this page must carry above every other: A GAP IS NOT A ZERO.
+ * A name absent from a session was not scored that day (out of the screener,
+ * under the liquidity floor, inside the earnings gate, or simply not
+ * enriched); zero is a score the pipeline assigns. The renderer keeps the two
+ * on different channels entirely, and sessions reconstructed from the boards
+ * alone are marked board-only so their sparseness reads as a fact about the
+ * archive rather than about the market.
+ */
+export function trackPage({ username = "" } = {}) {
+  const lede = "The same score the board prints each morning, traced name by " +
+    "name across sessions. The boards show a ranking's two tails; this page " +
+    "keeps the whole distribution, so a name drifting toward a board is " +
+    "visible before the morning it arrives. A gap means the name was not " +
+    "scored that session — never zero.";
+  return `${head("Flows — Score track", "Each name's daily score, traced across sessions.")}
+${shell("Score track", "Options-flow intelligence", "track", username, `
+  <div class="flows-status" id="stStatus" role="status">Loading the track…</div>
+  <p class="flows-stale" id="stStale" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <section class="fc-panel" id="stTrackPanel" hidden aria-labelledby="stTrackH">
+    <h2 class="fc-panel-h" id="stTrackH">The score, session by session</h2>
+    <div id="stTrack"></div>
+    <p class="fc-note" id="stTrackNote"></p>
+  </section>
+
+  <section class="fc-panel" id="stBasisPanel" hidden aria-labelledby="stBasisH">
+    <h2 class="fc-panel-h" id="stBasisH">What this number is, and what a gap is not</h2>
+    <div id="stBasis"></div>
+  </section>
+
+  <p class="flows-foot" id="stFoot"></p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-ui.js")}" defer></script>
+<script src="${v("/assets/js/flows-track.js")}" defer></script>
+</body>
+</html>`;
+}
+
+
 /* ---------- unusual activity ----------------------------------- */
 
 /**
@@ -1136,5 +1190,5 @@ function escapeHTML(value) {
 
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
-  tickerPage, unusualPage, eventsPage, ASSET_VERSION,
+  tickerPage, unusualPage, eventsPage, trackPage, ASSET_VERSION,
 };

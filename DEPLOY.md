@@ -1012,3 +1012,45 @@ events: 60 of 62 names reporting within 21 days, of 420 screened
 `universe` is not** — it would mean `next_earnings_date` stopped arriving on
 the screener, and the page would render an empty calendar rather than an
 error.
+
+### 10.5f The score track, and what a gap must never mean
+
+Two keys, both zero vendor calls.
+
+**`scores:YYYY-MM-DD`** — one session's whole scored pool, written once
+beside the dated boards. The boards archive a ranking's two tails; this key
+keeps the distribution, `{t, s}` per name and nothing else. Written under the
+same immutability contract as the dated boards (a re-run writes identical
+bytes — the rows are sorted by ticker for exactly that), swept by the same
+prune (which now names three keys a day, so the bound is 90 named deletes a
+run), and deletable through the same narrowed DELETE gate.
+
+**`scoretrack`** — the pooled trace, REBUILT from the archive every run
+rather than incrementally updated, so it can never drift from the keys it is
+a view of. The archive walk that already feeds the track record reads the
+scores key alongside the two board sides (three paced reads per weekday, same
+User-Agent, same retry accounting). Sessions older than the dated scores key
+are reconstructed from the archived boards and published as `source:
+"boards"` — genuinely sparser, and the payload says so rather than letting a
+thin column read as a quiet market.
+
+The honesty this surface carries above every other: **a gap is not a zero.**
+A null in a series means the name was not scored that session — out of the
+screener, under the liquidity floor, inside the earnings gate, or not
+enriched. Zero is a score the pipeline assigns. The first version of the
+shared module turned `score: null` into `0` via `Number(null) === 0`, and the
+suite's first run caught it because its fixture places a real zero adjacent
+to a gap on purpose. Keep it that way: any fixture for this surface must
+contain a zero, or the collapse becomes unobservable again.
+
+The log lines to read:
+
+```
+scores: 131 name(s) archived for 2026-08-28
+scoretrack: 214 name(s) over 42 session(s) (39 full, 3 board-only)
+```
+
+`scores:` missing with a dated session is the writer failing; `scoretrack`
+with a large `board-only` count long after this shipped means the dated
+scores keys are not being found — check the archive read counters on the
+record line first, since both legs share the same walk.

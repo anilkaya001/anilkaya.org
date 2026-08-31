@@ -391,11 +391,49 @@ try {
       eq(anonEvApi.status, 401, "and refuses an anonymous reader");
     }
 
+    /* THE SCORE TRACK. What can go wrong here is a page that treats a gap as
+       a zero — but the markup cannot assert that; the module and render
+       suites do. What the markup CAN assert is that the page ships its own
+       honesty scaffolding: the basis host for the pipeline's notes, and the
+       UI module loaded BEFORE the controller that destructures from it. */
+    {
+      const st = await get("/flows/track/", { headers: { Cookie: "flows_session=" + token } });
+      eq(st.status, 200, "/flows/track/ renders for an authenticated session");
+      const stHtml = await st.text();
+      ok(stHtml.includes("/assets/js/flows-track.js"), "the track page loads its own controller");
+      ok(stHtml.includes("/assets/js/flows-ui.js"), "and the shared UI module");
+      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-track.js"),
+         "with the module BEFORE the controller — the load order is the dependency order");
+      ok(stHtml.includes('id="stTrack"'), "and carries the trace host");
+      ok(stHtml.includes('id="stBasis"'), "and the basis panel, which is the page's honesty");
+      ok(/never zero/i.test(stHtml),
+         "the page's own lede states that a gap is not a zero — the one sentence a " +
+         "reader must not have to infer");
+
+      const anonSt = await get("/flows/track/");
+      eq(anonSt.status, 200, "/flows/track/ serves a page to an anonymous visitor");
+      ok(!(await anonSt.text()).includes('id="stTrack"'),
+         "/flows/track/ leaks nothing to an anonymous visitor");
+
+      const bareSt = await get("/flows/track");
+      eq(bareSt.status, 308, "/flows/track without its trailing slash redirects");
+
+      const stApi = await get("/api/flows/scoretrack", { headers: { Cookie: "flows_session=" + token } });
+      eq(stApi.status, 200, "an authenticated scoretrack request succeeds");
+      const stPayload = await stApi.json();
+      ok(stPayload.status === "pending" || Array.isArray(stPayload.names),
+         "and answers pending or a real trace, never a half-shaped object");
+
+      const anonStApi = await get("/api/flows/scoretrack");
+      eq(anonStApi.status, 401, "and refuses an anonymous reader");
+    }
+
     /* Every gated page carries the rail, and the rail carries every
        destination — a nav that omits a route is a route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
                         "/flows/market/", "/flows/unusual/", "/flows/events/",
-                        "/flows/ticker/", "/flows/desk/", "/flows/history/"]) {
+                        "/flows/ticker/", "/flows/desk/", "/flows/history/",
+                        "/flows/track/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
 
@@ -447,6 +485,17 @@ try {
        "ingest rejects an unknown board side");
     eq((await post("board:long", "not json at all", INGEST_TOKEN)).status, 400,
        "ingest rejects malformed JSON at the door, so the read path never serves it");
+
+    /* The score archive's two keys pass the same door. The dated pool is the
+       immutable per-session distribution; scoretrack is the live trace the
+       pipeline rebuilds from it. */
+    eq((await post("scores:2026-01-02", JSON.stringify({ rows: [{ t: "TEST", s: 0 }] }),
+        INGEST_TOKEN)).status, 200, "a dated scores pool is an accepted key");
+    eq((await post("scoretrack", JSON.stringify({ names: [], sessions: [] }),
+        INGEST_TOKEN)).status, 200, "and so is the live trace");
+    eq((await post("scores:02-01-2026", "{}", INGEST_TOKEN)).status, 400,
+       "but a scores key with a malformed date is refused at the door — the read " +
+       "path rebuilds this key from a date, so any other shape is unreachable forever");
 
     const good = await post("board:long", payload, INGEST_TOKEN);
     eq(good.status, 200, "a correctly authenticated ingest succeeds");

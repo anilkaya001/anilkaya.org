@@ -2178,6 +2178,7 @@ async function route(request, env, url, ctx) {
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
     "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
+    "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2202,7 +2203,8 @@ async function route(request, env, url, ctx) {
   if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
       || path === "/flows/watch" || path === "/flows/history"
       || path === "/flows/market" || path === "/flows/ticker"
-      || path === "/flows/unusual" || path === "/flows/events") {
+      || path === "/flows/unusual" || path === "/flows/events"
+      || path === "/flows/track") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2245,7 +2247,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2283,8 +2285,8 @@ async function route(request, env, url, ctx) {
        in steady state almost every name it tries is a day that was never
        written. The caller treats 404 as an ordinary empty day. */
     if (request.method === "DELETE") {
-      if (!/^board:(long|short):\d{4}-\d{2}-\d{2}$/.test(key)) {
-        throw new HttpError(400, "undeletable_key", "Only dated boards can be removed");
+      if (!/^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/.test(key)) {
+        throw new HttpError(400, "undeletable_key", "Only dated archive keys can be removed");
       }
       await ensureFlowsTables(env);
       const result = await env.DB.prepare(
@@ -2357,6 +2359,15 @@ async function route(request, env, url, ctx) {
          from screener rows already in memory — no vendor call — and served
          like everything here: one stored blob, handed back as bytes. */
       const stored = await readFlowsPayload(env, "events");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/scoretrack") {
+      /* EACH NAME'S DAILY SCORE, TRACED. Rebuilt by the pipeline from its own
+         dated archive every run — a view, not a second store — and served
+         like everything here: one stored blob, handed back as bytes. */
+      const stored = await readFlowsPayload(env, "scoretrack");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
