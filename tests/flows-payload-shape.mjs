@@ -95,6 +95,11 @@ const SURFACES = [
   { key: "events", file: "assets/js/flows-events.js", fn: null, vars: ["payload"] },
   { key: "record", file: "assets/js/flows-history.js", fn: null, vars: ["payload"] },
   { key: "scoretrack", file: "assets/js/flows-track.js", fn: null, vars: ["payload"] },
+  /* flows-unusual.js draws TWO payloads and keeps them under two names —
+     `payload` for the counter feed, `alerts` for the vendor's flow alerts —
+     precisely so these two scans cannot blur. One name reaching into the
+     other's blob is the drift this suite exists to catch. */
+  { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------

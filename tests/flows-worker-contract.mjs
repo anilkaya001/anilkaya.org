@@ -341,6 +341,25 @@ try {
       eq(bareUa.status, 308, "/flows/unusual without its trailing slash redirects");
 
       /* The API answers honestly before the pipeline has ever written the key. */
+      /* THE ALERTS PANEL rides on the same page under its own payload. The
+         markup half asserted here: the panel exists, its flags column warns
+         that an em dash is not "off", and the lede's new sentence carries
+         the vendor-flag vocabulary INSIDE the refusal prose — the two-sided
+         ban above already proved no banned word escaped it. */
+      ok(uaHtml.includes('id="uaAlertsBody"'), "the vendor-alerts panel's table body ships");
+      ok(uaHtml.includes('id="uaAlertsNote"'), "with its own note host");
+      ok(/not the same fact as the flag being off/i.test(uaHtml),
+         "and the flags column's own header states that an absent flag is not an " +
+         "off one — the three-state distinction the module enforces");
+
+      const alertsApi = await get("/api/flows/flowalerts", { headers: { Cookie: "flows_session=" + token } });
+      eq(alertsApi.status, 200, "an authenticated flow-alerts request succeeds");
+      const alertsPayload = await alertsApi.json();
+      ok(alertsPayload.status === "pending" || Array.isArray(alertsPayload.rows),
+         "and answers pending or a real feed, never a half-shaped object");
+      eq((await get("/api/flows/flowalerts")).status, 401,
+         "and refuses an anonymous reader");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();
@@ -493,6 +512,8 @@ try {
         INGEST_TOKEN)).status, 200, "a dated scores pool is an accepted key");
     eq((await post("scoretrack", JSON.stringify({ names: [], sessions: [] }),
         INGEST_TOKEN)).status, 200, "and so is the live trace");
+    eq((await post("flowalerts", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
+       "the vendor-alerts feed is an accepted key");
     eq((await post("scores:02-01-2026", "{}", INGEST_TOKEN)).status, 400,
        "but a scores key with a malformed date is refused at the door — the read " +
        "path rebuilds this key from a date, so any other shape is unreachable forever");

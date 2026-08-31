@@ -1036,6 +1036,162 @@
     }
   }
 
+  /* ---------- the vendor's flow alerts -------------------------------
+
+     A SEPARATE PAYLOAD, A SEPARATE FETCH, AND DELIBERATELY NO SHARED FATE:
+     the counter feed above is built from chains the pipeline always reads,
+     while this one rests on a single market-wide call that has failed for
+     months and only recently answered — so either can arrive without the
+     other, and a failure here says so in this panel and nowhere else.
+
+     THE VARIABLE IS `alerts`, NEVER `payload`: the payload-shape suite
+     scans this file's `payload.` reads against the unusual payload and its
+     `alerts.` reads against the flowalerts payload, and one name reaching
+     into the other's blob is exactly the drift it exists to catch. */
+
+  const alertsPanel = document.getElementById("uaAlertsPanel");
+  const alertsBody = document.getElementById("uaAlertsBody");
+  const alertsCap = document.getElementById("uaAlertsCap");
+  const alertsNote = document.getElementById("uaAlertsNote");
+  const ALERT_COLUMNS = 10;
+
+  /* A vendor flag has three states and the cell keeps all three: yes, no,
+     and "the vendor did not carry the flag on this row" — which is not no. */
+  function flagWord(v, name) {
+    return name + " " + (v === true ? "yes" : v === false ? "no" : DASH);
+  }
+
+  function alertFlagsCell(r) {
+    const names = [["sweep", r.sweep], ["floor", r.floor],
+                   ["single-leg", r.single], ["all-opening", r.opening]];
+    const yes = names.filter(([, v]) => v === true).map(([n]) => n);
+    const known = names.some(([, v]) => v === true || v === false);
+    const text = yes.length ? yes.join(", ") : known ? "none" : DASH;
+    return cell(text, null,
+      names.map(([n, v]) => flagWord(v, n)).join(" · ") +
+      " — the vendor's flags, as sent; " + DASH + " means the flag was not carried.");
+  }
+
+  function alertWindowCell(r) {
+    if (!r.spanStart || !r.spanEnd) return cell(DASH, null,
+      "The vendor stated no span for this window.");
+    const hm = (iso) => String(iso).slice(11, 16);
+    return cell(hm(r.spanStart) + "\u2013" + hm(r.spanEnd), null,
+      "The vendor's stated span: " + r.spanStart + " to " + r.spanEnd + ".");
+  }
+
+  function alertRowEl(r) {
+    const tr = document.createElement("tr");
+    const name = el("th", "fb-tk");
+    name.scope = "row";
+    name.textContent = r.t || DASH;
+    if (r.rule) name.title = "Flagged by the vendor's rule \u201c" + r.rule + "\u201d.";
+    tr.append(name);
+    tr.append(cell(
+      r.cp ? (r.cp === "C" ? "C " : "P ") + (isNum(r.k) === null ? "" : count(r.k)) +
+        (r.exp ? " \u00b7 " + r.exp : "")
+        : (r.oc || DASH),
+      null,
+      r.cp === null && r.oc
+        ? "The vendor's option symbol could not be parsed; shown as sent."
+        : null));
+    tr.append(cell(money(r.prem), "c-num"));
+    tr.append(cell(money(r.askPrem), "c-num"));
+    tr.append(cell(money(r.bidPrem), "c-num"));
+    tr.append(cell(count(r.size), "c-num"));
+    tr.append(cell(count(r.trades), "c-num"));
+    tr.append(alertFlagsCell(r));
+    tr.append(alertWindowCell(r));
+    tr.append(cell(r.st || DASH, r.st === "foreign" ? "ua-dim" : null,
+      r.st === "foreign"
+        ? "The screener never returned this name, so the board holds no view of it."
+        : null));
+    return tr;
+  }
+
+  function paintAlerts(alerts) {
+    if (!alertsPanel || !alertsBody) return;
+
+    if (alerts.status === "pending") {
+      /* The ordinary state before the first run under this key: a fact
+         about the store, and the panel opens to say it rather than
+         letting the section render as if the vendor were silent. */
+      emptyRow(alertsBody, ALERT_COLUMNS,
+        "The pipeline has not published this key yet. The alerts feed costs one " +
+        "market-wide call a run and appears with the first pipeline run after it " +
+        "shipped.");
+      if (alertsCap) alertsCap.textContent = "Nothing has been published under this key.";
+      alertsPanel.hidden = false;
+      return;
+    }
+
+    const rows = Array.isArray(alerts.rows) ? alerts.rows : null;
+    if (!rows) {
+      emptyRow(alertsBody, ALERT_COLUMNS,
+        "This payload could not be read as an alerts feed: it carries no rows " +
+        "array. That is a gap in the payload, not a quiet market.");
+      alertsPanel.hidden = false;
+      return;
+    }
+
+    alertsBody.textContent = "";
+    if (!rows.length) {
+      emptyRow(alertsBody, ALERT_COLUMNS,
+        "The vendor's rules flagged nothing in this read. The read is stamped " +
+        "below — a pre-open read of a feed that fills intraday is expected to " +
+        "be thin — and absence from the vendor's selection is not evidence of " +
+        "a quiet market.");
+    } else {
+      for (const r of rows) alertsBody.append(alertRowEl(r));
+    }
+
+    const seen = isNum(alerts.seen);
+    const shed = isNum(alerts.shed) ?? 0;
+    const cov = alerts.coverage && typeof alerts.coverage === "object" ? alerts.coverage : {};
+    if (alertsCap) {
+      alertsCap.textContent = count(rows.length) +
+        (seen === null ? " windows" : " of " + count(seen) + " flagged windows") +
+        (shed ? ", the largest premiums kept and " + count(shed) + " shed by the row cap" : "") +
+        " \u00b7 ranked by the vendor's own premium, inside the vendor's own selection.";
+    }
+    if (alertsNote) {
+      const bits = [];
+      const readAt = instant(alerts.readAt);
+      bits.push("The population is what the vendor's rules chose to flag — the rules " +
+        "are named per row, their definitions are the vendor's own, and absence from " +
+        "this list is not evidence of quiet.");
+      if (isNum(cov.withContract) !== null && rows.length) {
+        bits.push(count(cov.withContract) + " of " + count(rows.length) +
+          " carried a parseable contract symbol" +
+          (isNum(cov.calls) !== null && isNum(cov.puts) !== null
+            ? " (" + count(cov.calls) + " calls, " + count(cov.puts) + " puts)" : "") + ".");
+      }
+      if (readAt) bits.push("Read " + readAt + "; each row also carries the vendor's own span.");
+      alertsNote.textContent = bits.join(" ");
+    }
+    alertsPanel.hidden = false;
+  }
+
+  fetch("/api/flows/flowalerts", {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  }).then((response) => {
+    if (response.status === 401) { location.replace("/flows/"); return null; }
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    return response.json();
+  }).then((alerts) => {
+    if (!alerts || typeof alerts !== "object") return;
+    paintAlerts(alerts);
+  }).catch((error) => {
+    if (!alertsPanel || !alertsBody) return;
+    emptyRow(alertsBody, ALERT_COLUMNS,
+      "The alerts feed could not be loaded (" + (error && error.message
+        ? error.message : "no message") + "). The counter feed below is a separate " +
+      "payload and stands on its own.");
+    if (alertsCap) alertsCap.textContent = "No window could be listed.";
+    alertsPanel.hidden = false;
+  });
+
   /* ---------- fetch --------------------------------------------------- */
 
   fetch(PAYLOAD_URL, {

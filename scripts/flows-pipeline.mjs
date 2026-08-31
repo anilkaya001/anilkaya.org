@@ -35,11 +35,12 @@ import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS }
   from "../shared/flows-chain.js";
 import {
-  rankUnusual, rankUnusualNames, describeFlowAlerts, describeOiBasis,
+  rankUnusual, rankUnusualNames, describeOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
+import { buildFlowAlerts, ALERT_ROWS } from "../shared/flows-alerts.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -569,48 +570,6 @@ let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * One bounded request, whose only product is a sentence in the log.
- *
- * WHY NOT uw(). uw() ends with `return Array.isArray(body) ? body : (body &&
- * body.data) || [];` — it coerces any body it does not recognise to an empty
- * array. That is right for a data call and catastrophic here: a vendor
- * envelope this repo has never seen would be reported as "returned nothing",
- * which is indistinguishable from a refusal, and this probe would then write
- * the WRONG permanent answer into a comment that has asserted the same thing
- * for months with no evidence behind it. An answer with false provenance is
- * worse than no answer.
- *
- * NO RETRY, ON PURPOSE, WHICH MAKES 429 AN OUTCOME. The live run of
- * 2026-08-26 was rate-limited on 170 of 1022 calls, so throttling is the
- * single most likely thing this probe meets. describeFlowAlerts() reports it
- * as THROTTLED and explicitly not as a refusal.
- *
- * DRY-RUN GUARDED, because the test suite runs this pipeline: an unguarded
- * fetch would fire a live request with `Bearer undefined` out of `npm test`.
- */
-async function uwProbe(path, params = {}) {
-  if (DRY_RUN) return { status: 0, body: null, raw: "", dryRun: true };
-  const url = new URL(BASE + path);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  await sleep(delayMs);
-  stats.calls++;
-  let response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        Authorization: "Bearer " + process.env.UW_API_KEY,
-        Accept: "application/json",
-      },
-    });
-  } catch (error) {
-    return { status: -1, body: null, raw: String(error && error.message), network: true };
-  }
-  const text = await response.text();
-  let body = null, parsed = true;
-  try { body = JSON.parse(text); } catch { parsed = false; }
-  return { status: response.status, body, parsed, raw: text.slice(0, 400) };
-}
 
 async function uw(path, params = {}) {
   const url = new URL(BASE + path);
@@ -3311,6 +3270,57 @@ function fakeCongress(ticker) {
   });
 }
 
+/* THE OBSERVED KEY SET, NOT THE DOCUMENTED ONE. These are the fields the
+   probe's first-row dumps carried on three live runs (2026-08-27 twice,
+   2026-08-28); sometimes-absent fields are absent from SOME fixture rows on
+   purpose, because the module's whole contract is that an absent flag is not
+   a false one and an absent premium is not a zero. */
+function fakeFlowAlerts(tickers) {
+  const rnd = mulberry(4177);
+  const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
+  const rows = [];
+  for (let i = 0; i < 80; i++) {
+    const t = names[Math.floor(rnd() * names.length)];
+    const call = rnd() > 0.45;
+    const strike = Math.round(40 + rnd() * 200);
+    const row = {
+      ticker: t,
+      alert_rule: ["RepeatedHits", "SteadyAccumulation", "LowHistoricVolume"][i % 3],
+      rule_id: "r" + (i % 3),
+      total_premium: Math.round(20000 + rnd() * 3000000),
+      trade_count: 1 + Math.floor(rnd() * 40),
+      total_ask_side_prem: Math.round(rnd() * 2000000),
+      total_bid_side_prem: Math.round(rnd() * 900000),
+      has_sweep: rnd() > 0.6,
+      all_opening_trades: rnd() > 0.8,
+      open_interest: Math.floor(rnd() * 20000),
+      volume_oi_ratio: Number((rnd() * 8).toFixed(3)),
+      underlying_price: Number((30 + rnd() * 400).toFixed(2)),
+      start_time: "2026-08-24T14:" + String(10 + (i % 45)).padStart(2, "0") + ":00Z",
+      end_time: "2026-08-24T14:" + String(12 + (i % 45)).padStart(2, "0") + ":30Z",
+      expiry: "2026-09-18",
+      sector: "Technology",
+      marketcap: 1e10,
+      er_time: "unknown",
+      next_earnings_date: "2026-10-20",
+      expiry_count: 1,
+      has_singleleg: true,
+    };
+    /* The sometimes-absent fields, absent sometimes. */
+    if (i % 4 !== 3) {
+      row.option_chain = t + "260918" + (call ? "C" : "P") +
+        String(strike * 1000).padStart(8, "0");
+    }
+    if (i % 5 !== 4) row.total_size = 10 + Math.floor(rnd() * 900);
+    if (i % 6 !== 5) row.has_floor = rnd() > 0.85;
+    if (i % 7 === 6) { row.iv_start = 0.3 + rnd() * 0.4; row.iv_end = 0.3 + rnd() * 0.4; }
+    if (i % 11 === 10) delete row.total_premium;   // rankable only by size
+    rows.push(row);
+  }
+  rows.push({ ticker: "", total_premium: 5 });     // unusable, counted
+  return rows;
+}
+
 function fakeEnrichment(ticker, spot, seed) {
   const rnd = mulberry(seed);
   const bias = rnd() - 0.5;
@@ -4668,16 +4678,55 @@ async function main() {
             " and is not evidence about the vendor."
           : ""));
     }
-    /* THE PROBE THAT SETTLES THE ASSERTION. One call, once per run, whose
-       entire output is a line in the log — no payload, no page, no reader.
-       It exists because this file states in two places that the per-trade
-       flow-alerts endpoint is unreachable on this key, and has never once
-       recorded a status code to back it. Roughly 0.1% of the run's calls. */
+    /* 7f''. THE VENDOR'S FLOW ALERTS — the probe, grown into a feed.
+
+       The probe this block replaces existed to settle an assertion: this
+       file claimed in two places that the per-trade endpoint was
+       unreachable on this key, with no status code ever recorded to back
+       it. Five live runs answered REACHABLE (200, {data:[...]}), so the
+       assertion is dead and the one call the probe spent now buys the
+       feed itself. ONE call — the endpoint is market-wide, not per-name.
+
+       The stage map is rebuilt here rather than shared with the events
+       leg's: that one lives inside another try whose failure must not
+       cost this feed, and gated is derived the cheap way (screened minus
+       gate survivors) because for THIS surface the one load-bearing
+       distinction is board / scored / gated / foreign. */
     try {
-      const probe = await uwProbe("/api/option-trades/flow-alerts", { limit: 5 });
-      console.log("  " + describeFlowAlerts(probe).line);
+      const raw = DRY_RUN
+        ? fakeFlowAlerts((payloads.long.rows || []).map((r) => r.t))
+        : await uw("/api/option-trades/flow-alerts", { limit: 200 });
+
+      const survivors = new Set((tilted || []).map((x) => x.row && x.row.ticker));
+      const stage = new Map();
+      for (const { row } of withTilt || []) {
+        if (row && row.ticker) stage.set(row.ticker, survivors.has(row.ticker) ? "eligible" : "gated");
+      }
+      for (const e of liquid || []) if (e && e.row && e.row.ticker) stage.set(e.row.ticker, "scored");
+      for (const side of ["long", "short"]) {
+        for (const r of (payloads[side] && payloads[side].rows) || []) {
+          if (r && r.t) stage.set(r.t, "board:" + side);
+        }
+      }
+
+      const alerts = buildFlowAlerts(raw, { stageOf: (t) => stage.get(t) || null });
+      await publish("flowalerts", {
+        v: BOARD_SCHEMA_VERSION,
+        generatedAt, sessionDate,
+        /* The alerts carry their own vendor timestamps per row, but the READ
+           is this run's: a reader must be able to see that a quiet feed may
+           simply be a pre-open read of a feed that fills intraday. */
+        readAt: new Date().toISOString(),
+        ...alerts,
+      });
+      console.log(
+        `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
+        (alerts.shed ? ` (${alerts.shed} shed by the ${ALERT_ROWS}-row cap)` : "") +
+        (alerts.unusable ? `, ${alerts.unusable} unusable` : "") +
+        `; ${alerts.coverage.sweeps} sweep-flagged, ${alerts.coverage.opening} all-opening, ` +
+        `${alerts.coverage.calls}C/${alerts.coverage.puts}P of ${alerts.coverage.withContract} with a parsed contract`);
     } catch (error) {
-      console.warn(`  flow-alerts: the probe itself threw — ${error.message}`);
+      console.warn(`  flow-alerts: ${error.message} — the counter feed above published before this leg ran`);
     }
   } catch (error) {
     console.warn(`  unusual: ${error.message}`);
