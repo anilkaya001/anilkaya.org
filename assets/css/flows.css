@@ -3495,3 +3495,308 @@ body.is-stale .flows-tablewrap {
 .ev-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 .ev-how[open] { padding-bottom: var(--space-2); }
 .ev-how .ev-b-item { margin-top: var(--space-2); }
+
+/* =====================================================================
+   /flows/track/ — the score, session by session.
+   (assets/js/flows-track.js, drawing with the FlowsUI primitives from
+   assets/js/flows-ui.js; the strip's inner classes are generated with
+   the page's own "st" prefix, which is why they are styled here.)
+
+   TWO KINDS OF LENGTH, ONE RULE EACH. Inside the axis and the strips
+   every length is a viewBox unit and ONE VIEWBOX UNIT IS ONE CSS PIXEL:
+   the JS measures the strip column while the panel is visible and emits
+   each svg at that exact width, so nothing in this section may size,
+   stretch or scale an svg. Everything outside them is rems.
+
+   A GAP IS NOT A ZERO, in the stylesheet's half of the bargain: there is
+   deliberately NO rule here that paints anything where a value is
+   missing — absence is the absence of marks — and the measured zero
+   keeps full-contrast ink, because dimming it would file a measurement
+   beside the em dash it must never resemble.
+
+   HUE IS THE LAST CHANNEL. Sign is carried by which side of the
+   always-drawn zero rule the trace sits on; the only tints are the
+   confirmation on the final dot and on the Last column, both repeating
+   a sign the geometry and the U+2212 glyph already state. Board-only
+   columns are carried by hatch and wash, the epoch by a dashed rule —
+   all of it legible in greyscale.
+   ===================================================================== */
+
+/* --- the controls ---------------------------------------------------- */
+
+.st-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.2rem;
+  align-items: flex-end;
+  margin: 0 0 var(--space-3);
+}
+
+/* min-width: 0 on the field AND the select: a flex item's min-width is
+   auto, which is min-content, and the select's min-content is its widest
+   OPTION at 16px mono — wider than a 320px phone's whole content column.
+   Without both zeros the control refuses to shrink and hands the page a
+   horizontal scrollbar; the probe caught it at exactly 333px. */
+.st-field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+
+.st-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.st-input,
+.st-select {
+  /* 16px floor prevents iOS zooming the viewport on focus; 44px is the
+     tap-target floor every primary Flows control keeps. Same numbers,
+     same reasons, as .flows-form. */
+  font-family: var(--font-mono);
+  font-size: 16px;
+  min-height: 44px;
+  padding: 0.45rem 0.7rem;
+  color: var(--ink);
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-1);
+}
+
+.st-input { width: 12rem; max-width: 100%; }
+.st-select { min-width: 0; max-width: 100%; }
+
+.st-input:focus-visible,
+.st-select:focus-visible,
+.st-more:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+
+@media (max-width: 40rem) {
+  .st-field { flex: 1 1 100%; }
+  .st-input { width: 100%; }
+}
+
+/* --- the table ------------------------------------------------------- */
+
+/* The WRAPPER scrolls, never the page — the same tested invariant as
+   every other Flows table. Focusable in the markup so a keyboard user
+   can scroll it. */
+.st-scroll {
+  overflow-x: auto;
+  outline-offset: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--bg-elev);
+}
+
+/* NOT .flows-table: that class carries min-width 46rem, and this table
+   is built to fit a 320px phone without an inner scroll. The layout is
+   FIXED as a drawing decision: with table-layout:fixed the strip
+   column's width is settled by the header row alone, so the JS can
+   measure it BEFORE any row exists and content can never re-negotiate
+   the column under svgs already emitted at that exact width. */
+.st-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.st-table th,
+.st-table td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-table thead th {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--bg-deep);
+  vertical-align: bottom;
+}
+
+.st-table thead abbr { text-decoration: none; border-bottom: 0; cursor: help; }
+
+.st-table tbody tr:last-child th,
+.st-table tbody tr:last-child td { border-bottom: 0; }
+.st-table tbody tr:hover { background: var(--bg-deep); }
+
+/* The specificity defect flows.css:308 documents, settled the same way:
+   `.st-table th` is (0,1,1) and beats bare `.c-num`, so the numeric
+   columns need their own (0,2,1) rule to stay right-aligned. */
+.st-table th.c-num,
+.st-table td.c-num { text-align: right; }
+
+.st-c-name { width: 5rem; }
+.st-c-last { width: 3.9rem; }
+.st-c-n { width: 2.8rem; }
+
+@media (max-width: 40rem) {
+  .st-c-name { width: 4.2rem; }
+  .st-c-last { width: 3.3rem; }
+  .st-c-n { width: 2.3rem; }
+}
+
+/* The strip cell: the svg is display:block and NEVER width:100% — its
+   width attribute IS the measured column width, one unit per pixel. */
+.st-c-strip { cursor: help; }
+.st-c-strip svg,
+.st-axis svg { display: block; }
+.st-axis { display: block; }
+
+/* An absent Last is dimmed and explained; a measured zero is NOT in this
+   rule and keeps full ink — see the section header. */
+.st-c-last.is-none { color: var(--ink-faint); cursor: help; }
+
+/* --- the strip's own marks (classes generated by FlowsUI, prefix "st") - */
+
+/* Board-only columns: a wash, quiet on purpose — it says "reconstructed
+   from the boards alone", not "look here". The axis carries the hatch
+   twin of the same fact. */
+.st-wash { fill: color-mix(in srgb, var(--ink-faint) 9%, transparent); }
+
+/* The dead band, to scale around zero. */
+.st-band { fill: color-mix(in srgb, var(--ink-faint) 20%, transparent); }
+
+/* The zero rule: always drawn, always at zero. Position against it is
+   the sign channel, so it must survive every wash drawn under it. */
+.st-zero { stroke: var(--panel-border); stroke-width: 1; }
+
+.st-line {
+  stroke: var(--ink-dim);
+  stroke-width: 1.2;
+  fill: none;
+}
+
+.st-dot { fill: var(--ink-dim); }
+/* The final measured dot: full ink first, and only then the directional
+   tint — confirmation of a sign the position already carries. A measured
+   zero keeps the undirectional ink, because zero has no side. */
+.st-dot.is-last { fill: var(--ink); }
+.st-dot.is-last.is-pos { fill: var(--flow-up); }
+.st-dot.is-last.is-neg { fill: var(--flow-down); }
+
+/* The selection epoch, in row strips and axis alike: a dashed rule in
+   the chrome accent — an annotation about the experiment, never data. */
+.st-erule {
+  stroke: var(--gold-harvest);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.85;
+}
+
+/* --- the session axis header ----------------------------------------- */
+
+/* Every <text> in the axis carries an explicit px font-size on the
+   element — an unsized SVG <text> inherits the document's 16px and
+   outgrows the 34px header it was measured for. These rules set family
+   and colour only. */
+.st-ax-lab,
+.st-ax-prelab {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.st-ax-lab { fill: var(--ink-faint); }
+.st-ax-tick { stroke: var(--hairline); stroke-width: 1; }
+
+/* Board-only columns in the axis: wash AND hatch, so the marking
+   survives greyscale. NO `fill` RULE ON .st-ax-srchatch — its fill is
+   the pattern, set as a presentation attribute, and a CSS fill would win
+   the cascade and erase it. The pattern's stroke rides currentColor. */
+.st-ax-src { fill: color-mix(in srgb, var(--ink-faint) 10%, transparent); }
+.st-ax-hatch { color: color-mix(in srgb, var(--ink-faint) 50%, transparent); }
+
+/* The pre-epoch lane: dotted, in the chrome accent, labelled when there
+   is room and said in words in the note either way. */
+.st-ax-pre {
+  stroke: var(--gold-mystic);
+  stroke-width: 2;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+}
+.st-ax-prelab {
+  fill: var(--gold-harvest);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+
+/* --- show more, empty states, the basis ------------------------------ */
+
+.st-more {
+  display: block;
+  margin: 0.9rem auto 0;
+  min-height: 44px;
+  padding: 0 1.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.st-more:hover { color: var(--ink); border-color: var(--gold-mystic); }
+
+.st-empty {
+  margin: 0;
+  padding: 1rem 0.2rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  white-space: normal;
+}
+
+/* The payload's own sentences, verbatim — the same prose idiom as the
+   events and unusual pages, written here rather than borrowed so a later
+   edit to one page's basis cannot silently restyle another's. */
+.st-b-item { margin: 0 0 var(--space-3); }
+.st-b-item:last-child { margin-bottom: 0; }
+
+.st-b-k {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+
+.st-b-p {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+/* Screen-reader text for the strip column's header, whose visible
+   content is a decorative svg. */
+.st-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-more { transition: none; }
+}

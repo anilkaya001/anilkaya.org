@@ -357,9 +357,15 @@ HTML rewriting and is therefore not a complete test environment.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `flowsCardPrefetch`, and `FlowsPanels`.
+  `LEARNING_PATHS`, `toast`, `flowsCardPrefetch`, `FlowsPanels`, and
+  `FlowsUI`.
   This list is an ALLOWLIST: a global that is not on it is an undocumented
-  one. `FlowsPanels` is the ten card-panel renderers plus their scaffolding,
+  one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
+  minus U+2212 and the absent-value em dash, the labeled controls, and the
+  score-strip chart whose gap-is-not-zero contract is enforced in the
+  primitive rather than re-derived per page) — the seed of the component
+  layer, introduced with `/flows/track/`.
+  `FlowsPanels` is the ten card-panel renderers plus their scaffolding,
   extracted from `flows-card.js` so the card dialog and `/flows/ticker/` draw
   the SAME code — the alternative was duplicating 2,003 of that file's 2,325
   lines and fixing every future chart bug twice.
