@@ -125,6 +125,16 @@ export async function startWorker({ extraVars = [] } = {}) {
 
   try {
     await waitForPort(port, child, output);
+    /* The port accepting connections is not the worker being ready: wrangler
+       compiles the bundle on the FIRST request, and on this hardware that
+       first response has been measured at 32 seconds — past the 30-second
+       navigation timeout the browser suites give their first page.goto, which
+       made both fail on exactly the cold run and pass on every retry. Paying
+       the compile here, once, keeps "the worker is up" true in the sense
+       every caller actually means. A warm-up failure is not fatal: the
+       suites' own requests will then report the real error. */
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(120000) })
+      .catch(() => {});
   } catch (error) {
     await stopProcess(child);
     await rm(persist, { recursive: true, force: true });
