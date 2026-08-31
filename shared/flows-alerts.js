@@ -130,6 +130,38 @@ export function alertRow(raw, { stageOf } = {}) {
   };
 }
 
+/** Rows the movers band carries. A choice, published as `cap` beside it. */
+export const ALERT_BAND_ROWS = 8;
+
+/**
+ * The per-contract band for the movers panel, cut from ALREADY-SHAPED alert
+ * rows (buildFlowAlerts().rows — premium-ranked with a total tie-break, so
+ * this function adds no ordering of its own and stays deterministic for free).
+ *
+ * WHY THIS EXISTS: the movers premium lists are `byName` because the screener
+ * reports whole-symbol net premium, and for months a comment said contract-
+ * level ranking "needs a flow-alerts endpoint this key does not reach". The
+ * feed has since been proven reachable and is fetched every run — this band
+ * is that stale sentence retired. It stays the VENDOR'S selection: the band
+ * ranks inside what the alert rules flagged, never the whole tape, and the
+ * basis string on the payload says so.
+ */
+export function alertBand(shapedRows, { cap = ALERT_BAND_ROWS } = {}) {
+  const usable = (Array.isArray(shapedRows) ? shapedRows : [])
+    .filter((r) => r && r.prem !== null && typeof r.t === "string");
+  const rows = usable.slice(0, cap).map((r) => ({
+    t: r.t, oc: r.oc, cp: r.cp, k: r.k, exp: r.exp,
+    prem: r.prem, sweep: r.sweep, rule: r.rule,
+  }));
+  return {
+    basis: "vendor-flagged windows",
+    rows,
+    seen: usable.length,
+    cap,
+    shed: Math.max(0, usable.length - rows.length),
+  };
+}
+
 /**
  * The published feed: shaped, ranked by the vendor's own premium inside the
  * vendor's own selection, capped with the shed counted.

@@ -360,6 +360,15 @@ try {
       eq((await get("/api/flows/flowalerts")).status, 401,
          "and refuses an anonymous reader");
 
+      const pulseApi = await get("/api/flows/pulse", { headers: { Cookie: "flows_session=" + token } });
+      eq(pulseApi.status, 200, "an authenticated pulse request succeeds");
+      const pulsePayload = await pulseApi.json();
+      ok(pulsePayload.status === "pending" || typeof pulsePayload.tide === "object",
+         "and answers pending or a real pulse, never a half-shaped object");
+      eq((await get("/api/flows/pulse")).status, 401,
+         "the pulse refuses an anonymous reader — behind it is a metered vendor " +
+         "relationship, exactly like every other flows key");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();
@@ -514,6 +523,8 @@ try {
         INGEST_TOKEN)).status, 200, "and so is the live trace");
     eq((await post("flowalerts", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
        "the vendor-alerts feed is an accepted key");
+    eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,
+       "and so is the market pulse");
     eq((await post("scores:02-01-2026", "{}", INGEST_TOKEN)).status, 400,
        "but a scores key with a malformed date is refused at the door — the read " +
        "path rebuilds this key from a date, so any other shape is unreachable forever");

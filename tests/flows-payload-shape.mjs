@@ -100,6 +100,7 @@ const SURFACES = [
      precisely so these two scans cannot blur. One name reaching into the
      other's blob is the drift this suite exists to catch. */
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
+  { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------
@@ -114,6 +115,10 @@ const OPTIONAL = {
      rather than 404, so `status` is read off a shape the pipeline never
      emits. That read is correct and must stay. */
   "sector:trix": { status: "the worker's pending envelope carries it; the payload also does" },
+  /* Same pending-envelope allowance: the pulse renderer must recognise
+     {status:"pending"} from the worker even though the pipeline's own
+     payload never carries a top-level status. */
+  pulse: { status: "the worker's pending envelope carries it" },
 };
 
 const missingReport = [];
