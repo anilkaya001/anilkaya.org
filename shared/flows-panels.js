@@ -91,6 +91,21 @@ export const TICKER_PANELS = Object.freeze([
   { key: "congress", id: "ftCongress", span: 1,
     title: "Disclosed congressional transactions",
     question: "Has anyone in Congress disclosed a trade in this name?" },
+  /* THE THREE WAVE-2 STOCK PANELS, published by shared/flows-stock.js since
+     the per-name deep feeds shipped. They close the page's argument rather
+     than open it — each is context for the option book above it, not a
+     signal of its own — so they sit after the book and before the score.
+     All three are span 1: none carries a table or a grid wide enough to
+     earn both columns, and the landscape pass slots them as single cells. */
+  { key: "darkpool", id: "ftDark", span: 1,
+    title: "Off-exchange prints",
+    question: "Which off-exchange prints carried the size in this name?" },
+  { key: "oiDeltas", id: "ftOi", span: 1,
+    title: "Open-interest changes",
+    question: "Where did open interest move between clearing snapshots?" },
+  { key: "volContext", id: "ftVol", span: 1,
+    title: "Volatility context",
+    question: "What does the chain charge across tenors, and where does implied volatility sit in its own year?" },
   /* NOT A PANEL KEY. The score derivation is drawn from the card's TOP-LEVEL
      fields (score, fam, weights, conv, quality), not from card.panels — so it
      is deliberately spelled with a sentinel that can never collide with a

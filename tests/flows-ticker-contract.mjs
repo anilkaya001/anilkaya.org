@@ -119,6 +119,16 @@ const truncated = cards.filter((c) =>
   eq(TICKER_PANELS[iTerm].span, 2, "and so does the term line, or they can never align");
   eq(iTerm, iIvs + 1, "and they are adjacent, so they mount at the same width");
 
+  /* THE THREE WAVE-2 STOCK PANELS ARE SINGLE-COLUMN BY CONTRACT: the
+     landscape tiers (two columns at 76rem, three at 110rem) slot them as
+     single cells, and a span-2 entry here would silently re-argue that
+     layout from the registry. */
+  for (const key of ["darkpool", "oiDeltas", "volContext"]) {
+    const p = TICKER_PANELS.find((x) => x.key === key);
+    ok(p, `the registry mounts the ${key} panel`);
+    eq(p.span, 1, `${key} is a single-column panel at every landscape tier`);
+  }
+
   /* The pipeline's shed ladder drops panels by key when a card is over the
      100KB self-check. A key it can shed that the registry does not mount
      would be shed into a panel nobody draws. */
@@ -235,8 +245,11 @@ function sweepPanels() {
 
 const browser = await chromium.launch();
 try {
-  /* ---------- 2. every panel renders, at both widths -------------- */
-  for (const width of [320, 1280]) {
+  /* ---------- 2. every panel renders, at all three widths ---------- */
+  /* 1840px is past the 110rem tier, where the grid opens its third column;
+     every assertion in this loop — no clipped type, no sideways scroll, one
+     viewBox unit one CSS pixel — must hold there too. */
+  for (const width of [320, 1280, 1840]) {
     const page = await browser.newPage({ viewport: { width, height: 1400 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -340,6 +353,17 @@ try {
              `(nearest ${nearest.toFixed(2)}px)`);
         }
       }
+    }
+
+    /* THE 110rem TIER. The shell caps content at 78rem, so the third column
+       buys DENSITY rather than width: three tracks inside the same content
+       box, every span-1 host still above the 300 chart floor, and .is-wide
+       still `1 / -1` across all three — the same span rule, not a new one. */
+    if (width >= 1840) {
+      const tracks = await page.evaluate(() =>
+        getComputedStyle(document.getElementById("ftGrid")).gridTemplateColumns
+          .split(" ").filter((t) => parseFloat(t) > 0).length);
+      eq(tracks, 3, `${width}px: the grid opens its third column at the 110rem tier`);
     }
     await page.close();
   }
@@ -532,6 +556,269 @@ try {
     await page.close();
   }
 
+  /* ---------- 6b. the three stock panels: readings ----------------- */
+  {
+    /* THE FIXTURE IS AN EMITTED CARD WITH NAMED FIELDS MUTATED, and each
+       mutation is the point of its own test. The emitted corpus carries no
+       cancelled print, no null oiUpDays beside real counters on row 0, and
+       no pinned rank value — those states are staged by name. */
+    const base = withChain.find((c) =>
+      c.panels.darkpool.status === "ok" &&
+      c.panels.oiDeltas.status === "ok" &&
+      c.panels.volContext.status === "ok" &&
+      c.panels.volContext.term.status === "ok" &&
+      c.panels.volContext.ivRank.status === "ok");
+    ok(base, "an emitted card carries all three stock panels with data");
+    const card = JSON.parse(JSON.stringify(base));
+    card.panels.darkpool.rows[0].canceled = true;          // the tape's cancel flag, staged
+    card.panels.oiDeltas.rows[0].oiUpDays = null;          // an unpublished counter, staged
+    card.panels.volContext.ivRank.rows[0].rank1y = 57.5;   // a pinned headline the drawer must not rescale
+    card.panels.volContext.ivRank.rows[5].rank1y = null;   // a guaranteed gap for the strip
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker });
+
+    const dp = card.panels.darkpool;
+    const oi = card.panels.oiDeltas;
+    const vc = card.panels.volContext;
+    /* The strip's segment count, computed from the payload the way the
+       drawer must draw it: oldest first, a segment only between ADJACENT
+       measured sessions. The staged null guarantees the count is strictly
+       below n − 1, so a drawer that bridges gaps (or zeroes them) fails. */
+    const series = vc.ivRank.rows.slice().reverse()
+      .map((r) => (typeof r.rank1y === "number" && Number.isFinite(r.rank1y) ? r.rank1y : null));
+    let wantSegments = 0;
+    for (let i = 0; i + 1 < series.length; i++) {
+      if (series[i] !== null && series[i + 1] !== null) wantSegments++;
+    }
+    ok(wantSegments < series.length - 1,
+       "the fixture really carries a gap for the strip to refuse to bridge");
+
+    const got = await page.evaluate(() => {
+      const panelOf = (key) =>
+        document.querySelector('.ft-panel[data-panel="' + key + '"] > div');
+      const text = (root, sel) => {
+        const n = root.querySelector(sel);
+        return n ? n.textContent : null;
+      };
+      const dpHost = panelOf("darkpool");
+      const oiHost = panelOf("oiDeltas");
+      const vcHost = panelOf("volContext");
+      /* Everything a panel SAYS, tooltips included, for the vocabulary sweep. */
+      const saidBy = (root) => root.textContent + " " +
+        [...root.querySelectorAll("[title]")].map((n) => n.getAttribute("title")).join(" ");
+      return {
+        dpRows: dpHost.querySelectorAll(".fdp-table tbody tr").length,
+        dpTags: [...dpHost.querySelectorAll(".fdp-tag")].map((n) => n.textContent),
+        /* The first TEXT node only: a cancelled row's cell is "HH:MM" plus its
+           tag element, and the clock claim is about the clock. */
+        dpTimes: [...dpHost.querySelectorAll(".fdp-time")]
+          .map((n) => (n.firstChild ? n.firstChild.textContent : "")),
+        dpQuotes: [...dpHost.querySelectorAll(".fdp-quote")].map((n) => n.textContent),
+        dpCount: text(dpHost, ".fdp-count"),
+        dpNotes: [...dpHost.querySelectorAll(".fc-note")].map((n) => n.textContent).join(" "),
+        oiContracts: [...oiHost.querySelectorAll(".foi-oc")].map((n) => n.textContent),
+        oiChanges: [...oiHost.querySelectorAll(".foi-chg")].map((n) => n.textContent),
+        oiStreaks: [...oiHost.querySelectorAll(".foi-streaks")]
+          .map((n) => [...n.querySelectorAll(".foi-streak")].map((s) => s.textContent)),
+        oiCount: text(oiHost, ".foi-count"),
+        oiNotes: [...oiHost.querySelectorAll(".fc-note")].map((n) => n.textContent).join(" "),
+        oiSaid: saidBy(oiHost),
+        rankHead: text(vcHost, ".fvc-rank"),
+        rankN: text(vcHost, ".fvc-rank-n"),
+        axisLabels: [...vcHost.querySelectorAll(".fvc-axis")].map((n) => n.textContent),
+        dots: vcHost.querySelectorAll(".fvc-dot").length,
+        curvePoints: (vcHost.querySelector(".fvc-line") || { getAttribute: () => "" })
+          .getAttribute("points"),
+        miniRows: vcHost.querySelectorAll(".fvc-mini tbody tr").length,
+        miniIvs: [...vcHost.querySelectorAll(".fvc-mini tbody tr td:nth-child(2)")]
+          .map((n) => n.textContent),
+        segments: vcHost.querySelectorAll(".fvc-spark-l").length,
+        sparkDots: vcHost.querySelectorAll(".fvc-spark-d").length,
+        vcNotes: [...vcHost.querySelectorAll(".fc-note")].map((n) => n.textContent).join(" "),
+        vcSaid: saidBy(vcHost),
+      };
+    });
+
+    /* --- darkpool: the table is the payload, row for row -------------- */
+    eq(got.dpRows, dp.rows.length, "darkpool draws one row per published print");
+    ok(got.dpTimes.every((t) => /^\d{2}:\d{2}$/.test(t) || t === "—"),
+       `every time cell is HH:MM off the tape's own timestamp (${got.dpTimes[0]})`);
+    /* THE CANCEL FLAG HAS ONE HONEST RENDERING: a tag on true, NOTHING on
+       false and on null — a "live" badge on the false rows would turn the
+       null rows' bare absence into a claim. */
+    const wantTags = dp.rows.filter((r) => r.canceled === true).length;
+    eq(got.dpTags.length, wantTags, "exactly the cancelled prints carry the tag");
+    ok(got.dpTags.every((t) => t === "cancelled"), "and the tag says what the flag says");
+    const iBoth = dp.rows.findIndex((r) => r.bid !== null && r.ask !== null);
+    const iNone = dp.rows.findIndex((r) => r.bid === null || r.ask === null);
+    if (iBoth !== -1) {
+      ok(/^\d+\.\d{2} \/ \d+\.\d{2}$/.test(got.dpQuotes[iBoth]),
+         `a quoted print shows bid and ask side by side ("${got.dpQuotes[iBoth]}")`);
+    }
+    if (iNone !== -1) {
+      eq(got.dpQuotes[iNone], "—",
+         "a print missing either side of the quote shows the dash, never half a spread");
+    }
+    /* The capped-list line, in the shaper's own numbers. Every emitted card
+       sheds and counts out today, so both clauses are exercised. */
+    if (dp.shed > 0) {
+      ok(got.dpCount && got.dpCount.includes(dp.rows.length + " kept of " + dp.seen),
+         `the caption states ${dp.rows.length} kept of ${dp.seen}`);
+    }
+    if (dp.unpriced > 0) {
+      ok(got.dpCount && got.dpCount.includes("+" + dp.unpriced + " unpriced print"),
+         "and counts the unpriced prints out rather than seating them");
+    }
+    ok(got.dpNotes.includes(dp.note.slice(0, 60)),
+       "the payload's own darkpool note is rendered, not paraphrased");
+
+    /* --- oiDeltas: signed changes, vendor counters, vendor prose ------- */
+    eq(got.oiContracts.length, oi.rows.length, "oiDeltas draws one row per published change");
+    ok(/^[CP] [\d.]+ · \d{2}-\d{2}$/.test(got.oiContracts[0]),
+       `the contract cell is built from cp, strike and expiry ("${got.oiContracts[0]}")`);
+    const iNeg = oi.rows.findIndex((r) => typeof r.change === "number" && r.change < 0);
+    if (iNeg !== -1) {
+      ok(got.oiChanges[iNeg].startsWith("−"),
+         `a negative change leads with U+2212 ("${got.oiChanges[iNeg]}")`);
+    }
+    const iPos = oi.rows.findIndex((r) => typeof r.change === "number" && r.change > 0);
+    if (iPos !== -1) {
+      ok(got.oiChanges[iPos].startsWith("+"),
+         `a positive change leads with its sign ("${got.oiChanges[iPos]}")`);
+    }
+    /* Row 0's oiUpDays was staged to null: its ↑OI half is the dash, and its
+       V>OI half still renders — a missing counter is not a streak of zero
+       and must not take its neighbour down with it. */
+    eq(got.oiStreaks[0][0], "—", "a null counter is the dash, never a zero");
+    ok(/^\d+d V>OI$/.test(got.oiStreaks[0][1]),
+       `while the sibling counter still renders ("${got.oiStreaks[0][1]}")`);
+    const iBothStreaks = oi.rows.findIndex((r, i) => i > 0 &&
+      typeof r.oiUpDays === "number" && typeof r.volGtOiDays === "number");
+    if (iBothStreaks !== -1) {
+      ok(/^\d+d ↑OI$/.test(got.oiStreaks[iBothStreaks][0]),
+         `a published counter renders as the vendor's own streak ("${got.oiStreaks[iBothStreaks][0]}")`);
+    }
+    if (oi.shed > 0) {
+      ok(got.oiCount && got.oiCount.includes(oi.rows.length + " kept of " + oi.seen),
+         "the oiDeltas caption states the capped list");
+    }
+    ok(got.oiNotes.includes("selection rule"),
+       "the vendor-selection caveat reaches the reader from the payload's note");
+    ok(got.oiNotes.includes(oi.note.slice(0, 60)),
+       "and it is the note verbatim, not a paraphrase");
+
+    /* --- volContext: the rank is NEVER rescaled ------------------------ */
+    eq(got.rankN, "57.5",
+       "the pinned rank renders as its own number — 0.6 or 5750 here is the rescale " +
+       "this vendor's rank fields have already burned once");
+    ok(got.rankHead.includes("57.5 / 100"), "and the headline states the unit's ceiling");
+    eq(got.dots, vc.term.rows.length, "the term curve dots every listed expiry");
+    eq((got.curvePoints || "").split(" ").length, vc.term.rows.length,
+       "and the polyline runs through all of them");
+    eq(got.axisLabels.length, 2, "the y rail is labelled at min and max");
+    ok(got.axisLabels.every((t) => /^\d+%$/.test(t)),
+       `both labels are whole percents (${got.axisLabels.join(", ")})`);
+    eq(got.miniRows, Math.min(4, vc.term.rows.length),
+       "the mini-table holds the first four expiries");
+    ok(got.miniIvs.every((t) => /^\d+\.\d%$/.test(t) || t === "—"),
+       `mini-table volatilities are percents to one decimal (${got.miniIvs[0]})`);
+    /* THE STRIP'S GAPS ARE GAPS. Segment count is computed from the payload
+       the way the drawer must draw it; a drawer that bridges a null (or
+       draws it at zero) lands on n − 1 and fails by count. */
+    eq(got.segments, wantSegments,
+       `the rank strip draws a segment only between adjacent measured sessions ` +
+       `(${got.segments} of a bridged ${series.length - 1})`);
+    ok(got.sparkDots >= 1, "and the newest measured session carries its dot");
+    ok(got.vcNotes.includes(vc.note.slice(0, 60)),
+       "the volContext note is rendered from the payload");
+
+    /* --- vocabulary: the darkpool words stay in the darkpool panel ----- */
+    /* "print"/"trade" are accurate for reported equity executions and are
+       allowed THERE; the other two panels describe clearing snapshots and
+       quotes, and may not borrow them. The side-attribution words are banned
+       in all three by the same refusals the payload's notes state. */
+    for (const [key, said] of [["oiDeltas", got.oiSaid], ["volContext", got.vcSaid]]) {
+      ok(!/print|trade|bought|sold|buyer|seller|whale|institutional|smart money/i.test(said),
+         `${key} never borrows the tape's vocabulary or attributes a side`);
+    }
+    eq(errors.length, 0, `the stock panels render without throwing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 6c. the three stock panels: silences ----------------- */
+  {
+    /* THE THREE SILENCES, one per panel, same construction as section 6:
+       an emitted card with one named mutation each. `undefined` predates
+       the deep feeds — a DIFFERENT wave from the chain four, and the
+       sentence must date the absence by its own wave. "unavailable"
+       carries the builder's reason verbatim. "quiet" is an ordinary
+       reading and must not wear the Unavailable banner. */
+    const legacy = JSON.parse(JSON.stringify(withChain[0]));
+    delete legacy.panels.darkpool;
+    legacy.panels.oiDeltas = {
+      status: "unavailable", reason: "the feed could not be read this run",
+      note: legacy.panels.oiDeltas.note,
+    };
+    legacy.panels.volContext = {
+      status: "quiet",
+      term: { status: "quiet", rows: [], seen: 0, cap: 16, shed: 0 },
+      ivRank: { status: "quiet", rows: [], seen: 0, cap: 60, shed: 0,
+        rankUnit: "percent 0-100, as published" },
+      note: legacy.panels.volContext.note,
+    };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, legacy, { ticker: legacy.ticker });
+    const said = await page.evaluate(() => {
+      const host = (key) => document.querySelector('.ft-panel[data-panel="' + key + '"] > div');
+      const vc = host("volContext");
+      return {
+        dark: host("darkpool").querySelector(".fc-dead").textContent,
+        oi: host("oiDeltas").querySelector(".fc-dead").textContent,
+        vcQuiet: vc.querySelector('[data-empty="quiet"]') !== null,
+        vcDead: vc.querySelector(".fc-dead") !== null,
+        vcText: vc.textContent,
+      };
+    });
+    ok(said.dark.includes("before the per-name deep feeds"),
+       "an absent stock key dates the card by ITS wave, not the chain leg's");
+    ok(said.oi.includes("the feed could not be read this run"),
+       "an unavailable stock panel prints the builder's reason verbatim");
+    ok(said.vcQuiet, "a quiet panel is marked data-empty=quiet");
+    ok(!said.vcDead, "and never wears the Unavailable banner");
+    eq(errors.length, 0, "none of the three silences throws");
+    await page.close();
+  }
+  {
+    /* EACH HALF OF volContext SURVIVES THE OTHER'S ABSENCE — the payload's
+       own design ("a name with a curve but no rank history is half a panel,
+       not an unavailable one"), asserted from the reader's side. */
+    const half = JSON.parse(JSON.stringify(withChain.find((c) =>
+      c.panels.volContext.status === "ok" && c.panels.volContext.ivRank.status === "ok")));
+    half.panels.volContext.term = { status: "quiet", rows: [], seen: 0, cap: 16, shed: 0 };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, half, { ticker: half.ticker });
+    const got = await page.evaluate(() => {
+      const vc = document.querySelector('.ft-panel[data-panel="volContext"] > div');
+      return {
+        termQuiet: vc.querySelector('.fvc-termhalf [data-empty="quiet"]') !== null,
+        curve: vc.querySelector(".fvc-line") !== null,
+        rank: (vc.querySelector(".fvc-rank") || { textContent: "" }).textContent,
+      };
+    });
+    ok(got.termQuiet, "a quiet term half says so under its own heading");
+    ok(!got.curve, "and draws no curve");
+    ok(/\/ 100/.test(got.rank), "while the rank half still states its reading");
+    eq(errors.length, 0, "the half-silence throws nothing");
+    await page.close();
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({
@@ -610,5 +897,8 @@ try {
 console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup, the ` +
   `drawers and the shed ladder all read, four payloads that shipped for weeks with ` +
   `no renderer finally drawn, an enlarge that redraws rather than scales and cannot ` +
-  `shrink the panels it exists for, absent and unavailable told apart, and a page ` +
-  `that answers "no name" with an index instead of an error`);
+  `shrink the panels it exists for, absent and unavailable told apart, the three ` +
+  `stock panels rendering the payload's own numbers and notes with quiet, ` +
+  `unavailable and pre-wave absence held apart, a rank that is never rescaled and ` +
+  `a strip that never bridges a gap, and a page that answers "no name" with an ` +
+  `index instead of an error`);
