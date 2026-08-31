@@ -27,12 +27,13 @@ const PASSWORD = "Ankara06**--";
 
 /* ---------- roster --------------------------------------------- */
 {
-  ok(FLOWS_USERNAMES.length === 11, "eleven accounts are provisioned");
-  ok(new Set(FLOWS_USERNAMES).size === 11, "usernames are unique");
+  ok(FLOWS_USERNAMES.length === 12, "twelve accounts are provisioned");
+  ok(new Set(FLOWS_USERNAMES).size === 12, "usernames are unique");
   ok(FLOWS_USERNAMES.every((u) => /^[a-z]+$/.test(u)), "usernames are lowercase and simple");
   ok(Object.isFrozen(FLOWS_USERNAMES), "the roster cannot be mutated at runtime");
   for (const expected of ["firatgok", "dincersen", "mehmetsen", "ferhatyukselturk", "berkkocak",
-                          "anilkaya", "isaatceken", "bektastorun", "yigiteyi", "ahmetcan", "canaci"]) {
+                          "anilkaya", "isaatceken", "bektastorun", "yigiteyi", "ahmetcan", "canaci",
+                          "ozgurhatipoglu"]) {
     ok(FLOWS_USERNAMES.includes(expected), `roster contains ${expected}`);
   }
 }

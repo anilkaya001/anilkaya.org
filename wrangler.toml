@@ -40,7 +40,9 @@ crons = ["*/15 * * * *"]
 # Leaving it unset is safe: sessionEpoch() defaults to "1", which is a stable
 # epoch rather than an undefined-versus-undefined comparison.
 [vars]
-FLOWS_SESSION_EPOCH = "1"
+# "2": the 2026-08-31 credential rotation — every cookie minted under the
+# previous credential set dies on deploy.
+FLOWS_SESSION_EPOCH = "2"
 
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:
