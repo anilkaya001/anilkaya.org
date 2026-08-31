@@ -1109,6 +1109,25 @@
     return tr;
   }
 
+  /* THE FRESHNESS STAMP, worded by who wrote the read: the nightly pipeline
+     publishes this key and the worker cron re-reads it during the session,
+     flipping `refreshed` to "intraday" — so the stamp says which read the
+     table below is, and how it moves. Takes the two fields, never the
+     payload, so the shape scan sees the real `alerts.` reads at the call. */
+  function alertsStamp(readAt, refreshed) {
+    if (typeof readAt !== "string") return "";
+    const t = new Date(readAt);
+    if (Number.isNaN(t.getTime())) return "";
+    const hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    if (refreshed === "intraday") {
+      return "Read " + hm + " (refreshes about every 15 minutes during market hours).";
+    }
+    if (refreshed === "nightly") {
+      return "Read " + hm + " with the nightly build (refreshes intraday during market hours).";
+    }
+    return "Read " + hm + ".";
+  }
+
   function paintAlerts(alerts) {
     if (!alertsPanel || !alertsBody) return;
 
@@ -1169,6 +1188,23 @@
       if (readAt) bits.push("Read " + readAt + "; each row also carries the vendor's own span.");
       alertsNote.textContent = bits.join(" ");
     }
+
+    /* The stamp line sits at the top of the section, under the heading,
+       created here because the markup half predates it. One element,
+       repainted in place on any later paint. */
+    let stampEl = document.getElementById("uaAlertsStamp");
+    if (!stampEl) {
+      stampEl = el("p", "fc-note");
+      stampEl.id = "uaAlertsStamp";
+      const heading = document.getElementById("uaAlertsH");
+      if (heading && heading.parentNode === alertsPanel) {
+        alertsPanel.insertBefore(stampEl, heading.nextSibling);
+      } else {
+        alertsPanel.insertBefore(stampEl, alertsPanel.firstChild);
+      }
+    }
+    stampEl.textContent = alertsStamp(alerts.readAt, alerts.refreshed);
+
     alertsPanel.hidden = false;
   }
 

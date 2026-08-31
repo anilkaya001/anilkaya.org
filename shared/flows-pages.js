@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "78";
+export const ASSET_VERSION = "79";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -713,11 +713,19 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
   <section class="fc-panel" id="mktMoversPanel" hidden>
     <h2 class="fc-panel-h">The session&#39;s extremes</h2>
     <div id="mktMovers"></div>
+    <div id="mktMoversBand"></div>
     <p class="fc-note">
       Ranked over the whole screened universe, not over the board. Tickers here
       are plain text: a detail card exists only for the names the board went
       deep on, and a link that usually leads nowhere is worse than no link.
     </p>
+  </section>
+
+  <section class="fc-panel" id="mkPulsePanel" hidden>
+    <h2 class="fc-panel-h">Market pulse</h2>
+    <p class="fc-note" id="mkPulseStamp"></p>
+    <div class="mk-pulse-grid" id="mkPulseGrid"></div>
+    <p class="fc-note" id="mkPulseFoot"></p>
   </section>
 
   <p class="flows-foot" id="mktFoot"></p>
