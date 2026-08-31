@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "77";
+export const ASSET_VERSION = "78";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -903,7 +903,11 @@ export function unusualPage({ username = "" } = {}) {
     "beside it. A counter, not a trade: the vendor reports a total for each strike " +
     "with no size, no time and no execution price — and this endpoint carries no " +
     "as-of date, so the counter is stamped with when it was read and nothing more. " +
-    "Nothing here says who traded, or why.";
+    "Nothing here says who traded, or why. Above that counter now sit the vendor's " +
+    "own flow alerts: windows of activity the vendor's rules flagged, each carrying " +
+    "a stated span, a size, a premium and the vendor's sweep flag — richer than the " +
+    "counter, and still not a trade, because a window aggregates its executions and " +
+    "the selection is the vendor's, not the market's.";
   return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
 ${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
   <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
@@ -912,6 +916,30 @@ ${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
   <div class="flows-controls">
     <p class="flows-lede">${lede}</p>
   </div>
+
+  <section class="fc-panel" id="uaAlertsPanel" hidden aria-labelledby="uaAlertsH">
+    <h2 class="fc-panel-h" id="uaAlertsH">What the vendor's rules flagged</h2>
+    <div class="flows-tablewrap" tabindex="0" role="region"
+         aria-label="Vendor-flagged windows of option activity">
+      <table class="flows-table" id="uaAlerts">
+        <caption class="flows-caption" id="uaAlertsCap"></caption>
+        <thead><tr>
+          <th scope="col">Name</th>
+          <th scope="col"><abbr title="The flagged contract: side, strike and expiry, parsed from the vendor&#39;s option symbol.">Contract</abbr></th>
+          <th scope="col" class="c-num"><abbr title="The vendor&#39;s total premium across the window, in dollars.">Premium</abbr></th>
+          <th scope="col" class="c-num"><abbr title="The vendor&#39;s attribution of the window&#39;s dollars to the ask side of the quote. The split is carried as published and adds no inference about who initiated.">Ask-side</abbr></th>
+          <th scope="col" class="c-num"><abbr title="The vendor&#39;s attribution to the bid side. The two sides need not sum to the total.">Bid-side</abbr></th>
+          <th scope="col" class="c-num"><abbr title="Contracts across the window, as the vendor totals them.">Size</abbr></th>
+          <th scope="col" class="c-num"><abbr title="The vendor&#39;s count of executions inside the window.">Count</abbr></th>
+          <th scope="col"><abbr title="The vendor&#39;s own activity flags, reported as sent. An em dash means the vendor did not carry that flag on this row — which is not the same fact as the flag being off.">Flags</abbr></th>
+          <th scope="col"><abbr title="The vendor&#39;s stated span of the window, in UTC.">Window</abbr></th>
+          <th scope="col"><abbr title="How far the name got in the board&#39;s own funnel this run. &quot;foreign&quot; means the screener never returned it.">Stage</abbr></th>
+        </tr></thead>
+        <tbody id="uaAlertsBody"></tbody>
+      </table>
+    </div>
+    <p class="fc-note" id="uaAlertsNote"></p>
+  </section>
 
   <section class="fc-panel" id="uaFeedPanel" hidden aria-labelledby="uaFeedH">
     <h2 class="fc-panel-h" id="uaFeedH">Contracts by volume over open interest</h2>

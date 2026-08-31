@@ -2247,7 +2247,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2368,6 +2368,15 @@ async function route(request, env, url, ctx) {
          dated archive every run — a view, not a second store — and served
          like everything here: one stored blob, handed back as bytes. */
       const stored = await readFlowsPayload(env, "scoretrack");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/flowalerts") {
+      /* THE VENDOR'S FLOW ALERTS — one market-wide call a run, published as
+         its own key so a failed feed can never cost the counter beside it.
+         Served like everything here: one stored blob, handed back as bytes. */
+      const stored = await readFlowsPayload(env, "flowalerts");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
