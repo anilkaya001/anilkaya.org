@@ -460,14 +460,35 @@
     if (silent(into, payload, "watch board")) return;
     const rows = ranked(payload.rows);
     if (!rows.length) {
-      quiet(into, "empty", "No name sits inside the dead band this session.");
+      /* WHICH SILENCE THIS IS, AND THE TWO ROUTES USED TO DISAGREE. This
+         region asserted a reading about the market ("no name sits inside the
+         band") while /flows/watch/ asserted a fault in the publish, over the
+         same payload — so on an empty session a reader got both sentences on
+         two routes of one product. The Watch route's reading is the correct
+         one: with a ±1 band, a session where NO name lands inside it is
+         near-impossible, so an empty watch list is far more likely to be a
+         key that did not publish than a market that had no middle. */
+      quiet(into, "unavailable",
+        "The watch board published no rows. With a dead band this narrow a " +
+        "session where no name sits inside it would be extraordinary, so this " +
+        "is more likely a key that did not publish than a market with no middle.");
       return;
     }
     const list = el("ul", "cc-moves");
     for (const row of rows.slice(0, LIST_MAX)) {
       const li = el("li");
       li.append(el("span", "cc-t", row.t || DASH));
-      li.append(el("span", "c-num" + tone(row.s), fmtSigned(row.s)));
+      /* THE RESIDUAL, NOT THE SCORE, BECAUSE THE SCORE HAS NO BITS HERE.
+         `s` is a rounded integer on a ±100 scale and the dead band is ±1, so
+         every row in this region prints 0 — seven identical zeros under a
+         heading that promises "how close they are to leaving the band". The
+         rows really ARE ordered, on |residual|, and that is the number the
+         ordering is made of. Falls back to the score for a payload published
+         before this field existed, which is the only reading available there. */
+      const resid = isNum(row.resid);
+      li.append(resid !== null
+        ? el("span", "c-num" + tone(resid), resid.toFixed(4))
+        : el("span", "c-num" + tone(row.s), fmtSigned(row.s)));
       li.append(el("span", "cc-dim",
         "conv " + (isNum(row.cnv) === null ? DASH : Math.round(row.cnv))));
       list.append(li);
@@ -486,7 +507,15 @@
 
   function renderSpine(payload) {
     spineHost.replaceChildren();
-    const band = isNum(payload.deadBand) ?? 20;
+    /* NO BAND PUBLISHED MEANS NO HATCH, NOT A ±20 ONE.
+       The `?? 20` here painted 174px of hatch on an 872px axis whenever the
+       board was unreadable or predated the field — a confident visual claim
+       that a ±20 bar had been applied when none was published at all, in the
+       one channel this chart exists to communicate. The real band is 1, whose
+       hatch is ~9px, so the fabricated state was not even comparable to the
+       true one: it was the most emphatic mark on the chart standing in for a
+       missing number. */
+    const band = isNum(payload.deadBand);
     const scored = isNum(payload.scored);
     const neutral = isNum(payload.neutral);
 
@@ -514,10 +543,15 @@
     svg.append(defs);
 
     svg.append(svgEl("line", { class: "sp-axis", x1: padX, x2: W - padX, y1: axisY, y2: axisY }));
-    svg.append(svgEl("rect", {
-      class: "sp-band", x: xOf(-band), y: axisY - 13, width: xOf(band) - xOf(-band), height: 26,
-      fill: "url(#spBand)",
-    }));
+    /* Drawn only when a band was actually published. An axis with no hatch is
+       an axis that says nothing about exclusion, which is the truth when the
+       field is missing; a hatch drawn from a default says something false. */
+    if (band !== null) {
+      svg.append(svgEl("rect", {
+        class: "sp-band", x: xOf(-band), y: axisY - 13, width: xOf(band) - xOf(-band), height: 26,
+        fill: "url(#spBand)",
+      }));
+    }
 
     for (const s of [-100, -50, 0, 50, 100]) {
       svg.append(svgEl("line", { class: "sp-tick", x1: xOf(s), x2: xOf(s), y1: axisY + 10, y2: axisY + 15 }));
@@ -529,9 +563,12 @@
     const bandLabel = svgEl("text", {
       class: "sp-bandlabel", x: xOf(0), y: axisY - 19, "text-anchor": "middle",
     });
-    bandLabel.textContent = scored !== null && neutral !== null
-      ? neutral + " of " + scored + " inside ±" + band + " · not named"
-      : "±" + band + " dead band · not named";
+    bandLabel.textContent = band === null
+      /* Says what is missing rather than naming a width nobody published. */
+      ? "no dead band published for this session · the axis is drawn without one"
+      : scored !== null && neutral !== null
+        ? neutral + " of " + scored + " inside ±" + band + " · not named"
+        : "±" + band + " dead band · not named";
     svg.append(bandLabel);
 
     /* One mark per PUBLISHED name, at its true score. The regions above show

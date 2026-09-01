@@ -334,8 +334,23 @@ try {
        worse, a confident 0.00. So the rows here are built by the pipeline's
        OWN exported toWatchRows: the renderer is driven by the real payload
        shape, and the two ends cannot diverge silently again. */
+    /* THE RESIDUAL IS THE SCORE'S OWN INVERSE, NOT score/100.
+
+       This fixture carried `residual: score / 100` — a convenient stand-in
+       that CONTRADICTED its own score field, since boundedScore is
+       100*tanh(residual / SCORE_SCALE) and not 100*residual. It went
+       unnoticed for as long as nothing read both fields: the pool's residual
+       drove the ordering, the score drove the rendering, and no assertion
+       ever compared them. Publishing `resid` on the watch row put them side
+       by side and the contradiction surfaced immediately — a row scored 9
+       reconstructing to 16.24.
+
+       A fixture whose fields disagree cannot test a renderer that reads both.
+       This one now obeys the same relation the scorer does, so a score of 9
+       really is what a residual of atanh(0.09)*SCORE_SCALE produces. */
+    const SCORE_SCALE = Math.atanh(0.80) / 2.0;
     const mkPool = (ticker, score, extra = {}) => ({
-      ticker, score, residual: score / 100,
+      ticker, score, residual: SCORE_SCALE * Math.atanh(score / 100),
       conviction: 50, spot: 100, purity: 0.5, gRegime: "long", flipDist: 0.1,
       fam: { F: score, P: 0, D: 0, O: 50, V: 40 },
       closes: Array.from({ length: 60 }, (_, i) => 100 + i),
@@ -384,11 +399,17 @@ try {
     /* Distance is DERIVED here, not trusted from the payload — a third
        serialised field that must agree with two others eventually disagrees. */
     const dist = (await page.locator("#watchBody td.c-toband").allTextContents()).map((t) => t.trim());
-    assert.deepEqual(dist, ["1", "2", "11", "16"],
-      "and the distance shown is the band minus the absolute score"); checks++;
+    assert.deepEqual(dist, ["0.99", "1.99", "10.99", "16.00"],
+      "and the distance is the band minus the UNROUNDED score. The hundredth " +
+      "below each integer is the tanh/atanh round-trip through the fixture's " +
+      "residual, not a modelling choice — the fixture picks integer scores, " +
+      "inverts them to residuals, and the renderer inverts them back. Pinned " +
+      "at the precision actually printed rather than at the ideal, because a " +
+      "tolerance here would hide the day the two inverses stop agreeing"); checks++;
 
     const near = await page.locator("#watchBody td.c-toband.is-near").count();
-    eq(near, 2, "rows within three of the edge are marked");
+    eq(near, 2, "rows within a fifth of the band's half-width of the edge are marked");
+
 
     const surprised = await page.locator("#watchBody td.is-surprise").count();
     eq(surprised, 1, "and only a tilt past log 3 — one side surprising 3× the other — is marked");
@@ -412,6 +433,59 @@ try {
 
     eq(await page.locator('[data-rail-count="watch"]').textContent(), "4",
        "the rail badges the watch count");
+
+    /* ---------- THE LIVE SHAPE, WHICH THIS SUITE NEVER COVERED ----------
+
+       Every case above uses deadBand 20 and rows carrying no `resid` — the
+       shape this page was designed against, and now the backward-compatible
+       fallback. Production narrowed the band to 1, and at that width the
+       whole page degenerated: the score is a rounded integer on a ±100 scale,
+       so every row inside the band prints 0, "distance = band − |score|"
+       became identically 1 on every row, the "within three" highlight fired
+       on all of them, the sort had nothing to sort by and fell through to
+       input order wearing the authority of a ranking, and the status line
+       reported a tautology as a finding. All of it rendered perfectly.
+
+       The residual is the quantity the rows are genuinely ordered by and it
+       is published now. These assertions pin the reading at the live band. */
+    await put("board:watch", {
+      side: "watch", sessionDate: "2026-08-24", deadBand: 1, scored: 130, status: "ok",
+      rows: [
+        { t: "FAR", r: 1, s: 0, cnv: 70, px: 10, resid: 0.0002 },
+        { t: "MID", r: 2, s: 0, cnv: 71, px: 11, resid: -0.0030 },
+        { t: "EDGE", r: 3, s: 0, cnv: 72, px: 12, resid: 0.0052 },
+      ],
+    });
+    await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#watchBody tr", { timeout: 15000 });
+
+    const bandOrder = (await page.locator("#watchBody th").allTextContents()).map((t) => t.trim());
+    assert.deepEqual(bandOrder, ["EDGE", "MID", "FAR"],
+      "AT THE LIVE BAND THE ORDERING IS RECOVERED. All three rows score 0, so " +
+      "on the score this sort had nothing to work with and returned input " +
+      "order — which was alphabetical here and would have read as a ranking"); checks++;
+
+    const bandDist = (await page.locator("#watchBody td.c-toband").allTextContents()).map((t) => t.trim());
+    ok(new Set(bandDist).size === 3,
+      `and the distance column carries three distinct values rather than one ` +
+      `constant (${bandDist.join(", ")}) — at this band the old column was ` +
+      `identically "1" on every row`);
+    ok(/^\d+\.\d{2}$/.test(bandDist[0]),
+      `still in SCORE POINTS (${bandDist[0]}), comparable to the score column ` +
+      "beside it — an earlier attempt reported residual units here and, at the " +
+      "±20 band above, collapsed its two closest rows onto one printed value");
+
+    const bandNear = await page.locator("#watchBody td.c-toband.is-near").count();
+    ok(bandNear >= 1 && bandNear < 3,
+      `the near mark selects some rows but not all (${bandNear} of 3) — ` +
+      "hard-coded at three score units it selected every row at this band, " +
+      "and a mark on everything marks nothing");
+
+    const unitTitle = await page.locator("#watchBody td.c-toband").first().getAttribute("title");
+    ok(/unrounded score/.test(unitTitle || ""),
+      "AND THE ROW SAYS WHERE ITS PRECISION CAME FROM: the score printed beside " +
+      "this column is an integer that would place the name at the edge exactly, " +
+      `so the difference has to be attributable (${unitTitle})`);
 
     /* THE TWO EMPTY STATES ARE DIFFERENT FACTS. "The pipeline has not run
        since this shipped" and "the pipeline ran and put nobody in the band"

@@ -2159,6 +2159,26 @@ function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } 
          gets null here, never 0 — zero is a real reading of this field and
          means "as much call as put surprise", which is the opposite of
          "unknown". */
+      /* THE KEY THIS TABLE IS ORDERED BY, PUBLISHED.
+
+         The sort above is on |residual| and says so; the rows then shipped
+         carrying only `s`, a rounded integer on a +-100 scale. With DEAD_BAND
+         narrowed to 1, every name inside the band prints 0, 1 or -1 — in
+         practice a column of zeros — so the reader saw seven rows in a
+         deliberate order under a heading promising "how close they are to
+         leaving the band", ranked by a quantity the payload never carried.
+         The column had no bits and the ordering had no visible cause.
+
+         This is not a coerced zero: those zeros are real, and the refuted
+         half of this finding claimed otherwise. It is a ROUNDING that
+         destroys the ordering key at the last step, which is why publishing
+         `resid` fixes it and re-checking for nulls would not.
+
+         Four decimals because that is where this quantity stops being
+         meaningful: the band edge sits at |residual| ~= 0.0055, so a
+         thousandth would quantise the whole table onto six values. Costs no
+         vendor call and no recomputation — the number is already on `r`. */
+      resid: fixed(r.residual, 4),
       surpriseTilt: fixed(t.surpriseTilt, 3),
       relVolume: fixed(t.relVolume, 2),
       putCallRatio: fixed(t.putCallRatio, 3),
