@@ -16,6 +16,8 @@ import {
   num, median, quantile, mad, winsorize, robustZ, invNorm, vanDerWaerden,
   neutralize, flowPurity, aggressorGamma, gammaFlip, bookDisplacement,
   pathSignature, gammaDecayCalendar, positioningQuality,
+  greekTermStructure, legPresent, GREEK_UNITS,
+  callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg, callDeltaLeg, putDeltaLeg,
   effectiveBreadth, pearson, calibrateScoreScale, boundedScore,
   conviction, applyHysteresis, gammaCrossings, isLiveColumn,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
@@ -957,4 +959,121 @@ const near = (a, b, tol, msg) => {
      "a bad print in the middle does not destroy the series");
 }
 
-console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction`);
+/* ---------- the six legs one vendor call already pays for ----------
+
+   /greek-exposure/expiry returns call/put legs for gex, delta, charm AND
+   vanna. This product read the gamma pair and dropped the other six, once per
+   name, every run. The directive names Vanna and Charm explicitly.
+
+   THE FIXTURE IS THE VENDOR'S OWN EXAMPLE, copied from the "Greek Exposure By
+   Expiry" schema block in docs/uw-openapi.yaml — the same block that says
+   `call_gex`, the wire name a different part of that document got wrong and
+   which cost this product every gamma roll-off panel for weeks. Using their
+   numbers rather than invented ones is what makes the sign assertion below a
+   statement about the vendor rather than about this fixture. */
+{
+  const VENDOR = [
+    { expiry: "2022-05-25", dte: 5,
+      call_gex: "9356683.4241",   put_gex: "-12337386.0524",
+      call_delta: "227549667.4651", put_delta: "-191893077.7193",
+      call_charm: "102382359.5786", put_charm: "-943028472.4815",
+      call_vanna: "152099632406.9564", put_vanna: "488921784213.1121" },
+    { expiry: "2022-06-17", dte: 28,
+      call_gex: "8456599.8505",   put_gex: "-12703877.0243",
+      call_charm: "81465130.0002", put_charm: "-1054548432.6111",
+      call_vanna: "161231587973.6811", put_vanna: "488921784213.1121" },
+  ];
+
+  ok(legPresent(VENDOR, callVannaLeg) && legPresent(VENDOR, putVannaLeg),
+    "both vanna legs are found under their wire names");
+  ok(legPresent(VENDOR, callCharmLeg) && legPresent(VENDOR, putCharmLeg),
+    "and both charm legs");
+  ok(legPresent(VENDOR, callDeltaLeg), "and the call delta leg");
+  ok(!legPresent(VENDOR, (r) => r.call_theta),
+    "while a leg the endpoint does not carry is absent — the presence test is " +
+    "not vacuously true");
+  ok(!legPresent([{ call_vanna: null }, { call_vanna: "" }], callVannaLeg),
+    "AND NULL IS NOT PRESENCE. A vendor that stopped publishing a leg sends " +
+    "nulls, and a leg read as present-but-zero would draw a flat line that a " +
+    "reader takes for a measured empty book");
+
+  const vanna = greekTermStructure(VENDOR,
+    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg, asOf: "2022-05-20" });
+  const charm = greekTermStructure(VENDOR,
+    { name: "charm", callLeg: callCharmLeg, putLeg: putCharmLeg, asOf: "2022-05-20" });
+
+  eq(vanna.status, "ok", "the vanna term structure builds");
+  eq(vanna.rows.length, 2, "one row per expiry");
+  eq(vanna.rows[0].expiry, "2022-05-25", "sorted onto the calendar");
+  eq(vanna.rows[0].dte, 5, "carrying the vendor's own dte where it sent one");
+
+  /* THE SIGN TRAP, ASSERTED AS A FACT ABOUT THE WIRE. */
+  ok(charm.rows[0].call > 0 && charm.rows[0].put < 0,
+    "charm arrives DEALER-SIGNED: the put leg is negative against a positive call leg");
+  ok(vanna.rows[0].call > 0 && vanna.rows[0].put > 0,
+    "VANNA DOES NOT. Both vanna legs are positive in the vendor's own example, " +
+    "so the convention that holds for gamma and charm is false for vanna — a " +
+    "reader that netted call+put under one rule would report the wrong " +
+    "magnitude, and on a put-heavy name the wrong DIRECTION");
+  ok(/never netted/.test(vanna.signConvention) && /differs BY GREEK/.test(vanna.signConvention),
+    "so the convention rides on the payload as a field rather than living in a " +
+    "comment the renderer never reads");
+  eq(vanna.rows[0].call + vanna.rows[0].put > 0, true,
+    "and the legs stay separate: nothing here produced a net");
+
+  /* Units travel, because three of these are dollar quantities differing only
+     by what they are PER. */
+  ok(/VOL POINT/.test(vanna.unit), "the vanna unit names what it is per");
+  ok(/per DAY/.test(charm.unit), "and the charm unit names a different one");
+  ok(vanna.unit !== charm.unit && vanna.unit === GREEK_UNITS.vanna,
+    "read without their units these are interchangeable large numbers, which " +
+    "is exactly how '1352% of its year' happened");
+
+  /* The three silences, at the one point they are still distinguishable. */
+  const absent = greekTermStructure(VENDOR,
+    { name: "vanna", callLeg: () => undefined, putLeg: () => undefined });
+  eq(absent.status, "absent",
+    "A LEG THE VENDOR NEVER SENT IS ABSENT, not an empty book. Drawing zero " +
+    "here would tell a reader this name carries no vanna, which is a claim " +
+    "about the market made out of a claim about the response");
+  ok(/published no vanna leg/.test(absent.reason), "with the reason in words");
+  eq(greekTermStructure([{ expiry: "2026-01-16", call_vanna: "5" }],
+    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg }).status, "ok",
+    "while ONE readable leg is half a reading and still a reading");
+  eq(greekTermStructure([{ expiry: "2026-01-16", call_vanna: "5" }],
+    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg }).rows[0].put, null,
+    "with the missing half NULL rather than zero — zeroing it would invent a " +
+    "put book that is not there");
+
+  /* THE CONFIDENT ZERO THIS FUNCTION SHIPPED WITH, AND THE FIXTURE THAT
+     CAUGHT IT. The first draft read each leg through num(), whose contract is
+     a number — so an expiry the vendor sent no vanna for came back as
+     `call: 0, put: 0, dte: 0`, telling a reader the book measured empty at
+     that expiry when the vendor had simply said nothing. In the one function
+     written to abolish exactly that. These four assertions are why the
+     dry-run fixture now carries a deliberately half-present expiry. */
+  const halfPresent = greekTermStructure([
+    { expiry: "2026-01-16", call_vanna: "5", put_vanna: "7", dte: 3 },
+    { expiry: "2026-02-20" },
+    { expiry: "2026-03-20", call_vanna: "9" },
+  ], { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg });
+  eq(halfPresent.rows.length, 2,
+    "AN EXPIRY CARRYING NEITHER LEG IS DROPPED, not published at zero — the " +
+    "vendor said nothing about it and a zero row is a claim that it measured empty");
+  eq(halfPresent.rows[1].expiry, "2026-03-20", "and the drop is of the right row");
+  eq(halfPresent.rows[1].put, null,
+    "the surviving half-present row keeps its real leg and nulls the other");
+  eq(halfPresent.rows[1].dte, null,
+    "AND AN UNSENT dte IS NULL, not 0. Coerced, it read 'expires today' — the " +
+    "most consequential possible wrong answer on a term structure, since the " +
+    "front expiry is the one a reader acts on");
+  eq(halfPresent.rows[0].dte, 3, "while a dte the vendor did send is carried");
+  eq(greekTermStructure([], { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg }).status,
+    "absent", "an empty response has no legs at all");
+
+  eq(JSON.stringify(greekTermStructure(VENDOR, { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg })),
+     JSON.stringify(greekTermStructure(VENDOR, { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg })),
+    "two builds over one response are byte-identical");
+}
+
+console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg sign convention that differs by Greek asserted from the vendor's own example`);

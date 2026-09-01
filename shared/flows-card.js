@@ -59,7 +59,11 @@ export const CARD_SCHEMA_VERSION = 2;
    belong to the scorer too, and the expiry-gamma leg names have already been
    wrong once in two places at once. Two copies of a convention are two chances
    to disagree about it. */
-import { horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature } from "./flows-features.js";
+import {
+  horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
+  greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
+  callDeltaLeg, putDeltaLeg,
+} from "./flows-features.js";
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
@@ -723,6 +727,42 @@ function chainPanel(chain, key) {
   };
 }
 
+/**
+ * One second-order Greek term structure, in the card's own status vocabulary.
+ *
+ * THE CARD BOUNDARY HAS EXACTLY TWO STATES, and this maps onto them rather
+ * than widening them. Every panel here is `ok` or `unavailable` — an
+ * invariant the source-ablation sweep asserts over every panel on every
+ * ablation, because the renderer switches on status before it touches a
+ * number. greekTermStructure distinguishes three silences internally (the
+ * vendor sent no such leg / the leg was there but nothing was readable /
+ * rows survived), which is the right resolution AT THE SHAPER. Emitting that
+ * third state here would have failed a test that exists for a good reason,
+ * and the correct response to that is to map, not to widen the test so the
+ * new code passes.
+ *
+ * NO INFORMATION IS LOST IN THE MAPPING: the two dead states carry different
+ * REASON strings, which is how every other dead panel on this card already
+ * tells its story. What is missing is a machine-readable tag distinguishing
+ * them, and that is a real gap — the card's shared renderer hardcodes
+ * "Unavailable." for every non-ok status and sets no data-empty attribute, so
+ * no suite can tell these two apart without matching on prose. That is one
+ * defect, in one place, and it belongs to the renderer rather than here;
+ * fixing it widens this union deliberately and for every panel at once.
+ */
+function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
+  const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate });
+  if (built.status === "ok") return built;
+  return {
+    status: "unavailable",
+    reason: built.reason || `no ${name} exposure was readable on this response`,
+    /* The unit rides even on a dead panel: a reader who sees the heading
+       still learns what the number would have been measured in. */
+    unit: built.unit,
+    rows: [], legs: built.legs,
+  };
+}
+
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   chain, generatedAt, sessionDate, weights,
@@ -848,6 +888,28 @@ export function buildCard({
       aggressor: chainPanel(chain, "aggressor"),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
+      /* THE FIVE LEGS THE GAMMA CALL ALREADY PAID FOR.
+
+         `expiries` is one /greek-exposure/expiry response carrying call/put
+         pairs for gex, delta, charm AND vanna. buildCalendar above reads the
+         gamma pair; until now the other six were parsed by JSON.parse and
+         dropped on the floor, once per name, every run.
+
+         Charm is why pinning accelerates into a Friday close — dollar-delta
+         bleeding out with time alone, spot unchanged. Vanna is why a vol
+         crush forces mechanical delta buying at unchanged spot. Neither is
+         visible in a gamma ladder, and both are named in this product's own
+         brief. They cost nothing here: no vendor call, no deadline, no
+         rate-limit budget, just a second read of a response already in hand.
+
+         Each is ABSENT rather than empty when the vendor sends no such leg,
+         so a response without vanna says so instead of drawing a flat line a
+         reader takes for a book with no vanna in it. And the two legs are
+         never netted: the put leg's sign convention differs BY GREEK on this
+         endpoint, so a single netting rule would invert one of them. */
+      vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate),
+      charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate),
+      deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate),
       displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
       pricedMove: buildPricedMove({
         spot,

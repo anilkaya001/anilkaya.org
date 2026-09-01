@@ -692,6 +692,164 @@ export function putGammaLeg(row) {
   return row ? (row.put_gex ?? row.put_gamma) : undefined;
 }
 
+/* ---------- the second-order legs on the same response ----------
+ *
+ * ONE VENDOR CALL ALREADY BUYS SIX MORE LEGS THAN THIS PRODUCT READ.
+ * /greek-exposure/expiry returns call/put legs for gex, delta, charm AND
+ * vanna per expiry. Until now only the gamma pair was read; delta, charm and
+ * vanna were parsed by JSON and dropped on the floor, once per name, every
+ * run. The directive names Vanna and Charm explicitly, and they are the two
+ * that explain what a gamma ladder cannot: charm is why pinning accelerates
+ * into a Friday close, vanna is why a vol crush forces mechanical delta
+ * buying at unchanged spot.
+ *
+ * WIRE NAME FIRST, same discipline the gamma pair earned the hard way, and
+ * for the same reason: the schema block that documents these four is the one
+ * that also says `call_gex` — the name a different part of the same document
+ * got wrong and which cost this product every gamma roll-off panel for weeks.
+ * That block is therefore evidence rather than a claim, but a `??` fallback
+ * costs nothing and a rename costs a panel.
+ *
+ * THE SIGN CONVENTION IS NOT SHARED ACROSS LEGS, AND THAT IS THE TRAP.
+ * In the vendor's own example rows: put_gex is NEGATIVE against a positive
+ * call_gex, put_charm is NEGATIVE against a positive call_charm — both
+ * dealer-signed — but put_vanna is POSITIVE against a positive call_vanna.
+ * A reader that assumed one convention and netted call+put would report a
+ * vanna book of the wrong magnitude and, on a put-heavy name, the wrong
+ * direction entirely. So nothing here nets the two legs. Each is published
+ * beside the other with the vendor's sign untouched, and the convention is
+ * published as a field rather than assumed in a comment nobody reads. */
+
+export function callVannaLeg(row) { return row ? (row.call_vanna ?? row.call_vex) : undefined; }
+export function putVannaLeg(row)  { return row ? (row.put_vanna  ?? row.put_vex)  : undefined; }
+export function callCharmLeg(row) { return row ? (row.call_charm ?? row.call_cex) : undefined; }
+export function putCharmLeg(row)  { return row ? (row.put_charm  ?? row.put_cex)  : undefined; }
+export function callDeltaLeg(row) { return row ? (row.call_delta ?? row.call_dex) : undefined; }
+export function putDeltaLeg(row)  { return row ? (row.put_delta  ?? row.put_dex)  : undefined; }
+
+/**
+ * The units, published beside every number that carries them.
+ *
+ * This repository has one scar named after a missing unit ("1352% of its
+ * year"), and exposure Greeks are the easiest place in the product to repeat
+ * it: three of these are dollar quantities differing only by what they are
+ * per, and read without their unit they are interchangeable large numbers.
+ */
+export const GREEK_UNITS = Object.freeze({
+  gamma: "dollar-gamma: the change in dealer dollar-delta per 1% move in spot",
+  delta: "dollar-delta: the signed directional exposure dealers are carrying",
+  charm: "dollar-delta per DAY: how fast that exposure decays with time alone, spot unchanged",
+  vanna: "dollar-delta per VOL POINT: how much that exposure moves on a 1-point change in implied volatility, spot unchanged",
+});
+
+/**
+ * Is a leg actually on the wire, or merely absent?
+ *
+ * ABSENT IS NOT ZERO. A vendor that stopped publishing a leg, and a book that
+ * genuinely measures zero at every expiry, produce the same sum. This tests
+ * PRESENCE across the rows before any arithmetic runs, so a panel can say
+ * "the vendor published no vanna leg on this response" rather than drawing a
+ * flat line at zero and letting a reader conclude the name has no vanna.
+ */
+export function legPresent(rows, reader) {
+  for (const r of (rows || [])) {
+    const v = reader(r);
+    if (v !== null && v !== undefined && v !== "") return true;
+  }
+  return false;
+}
+
+/**
+ * A dated term structure for ONE Greek, both legs, unnetted.
+ *
+ * Shares gammaDecayCalendar's grammar — sorted onto the calendar, dated, with
+ * a share of the book at each expiry — so a reader who has learned to read the
+ * gamma roll-off can read these without learning a second vocabulary. What it
+ * does NOT share is the netting: gammaDecayCalendar sums magnitudes because
+ * the gamma legs arrive dealer-signed, and that assumption is false for vanna.
+ *
+ * Returns status "absent" when the vendor sent no such leg, "quiet" when the
+ * leg was present but nothing survived shaping, and "ok" otherwise — the three
+ * silences, kept apart at the point where they are still distinguishable.
+ */
+export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = null, cap = 12 } = {}) {
+  const src = Array.isArray(expiryRows) ? expiryRows : [];
+  const hasCall = legPresent(src, callLeg);
+  const hasPut = legPresent(src, putLeg);
+  if (!hasCall && !hasPut) {
+    return {
+      status: "absent",
+      reason: `the vendor published no ${name} leg on this response`,
+      unit: GREEK_UNITS[name] || null,
+      rows: [], legs: { call: false, put: false },
+    };
+  }
+
+  const base = asOf ? Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z") : NaN;
+  /* ABSENT-TESTED BEFORE COERCION, and the first draft of this function was
+     not. It read each leg through num(), whose contract is a NUMBER — so an
+     expiry the vendor sent no vanna for came back 0 and published `call: 0,
+     put: 0, dte: 0`: a confident zero, in the function written to abolish
+     them, telling a reader the book measured empty at that expiry when the
+     vendor had simply said nothing. The dry-run fixture's one deliberately
+     half-present expiry is what surfaced it. */
+  const numOrNull = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const rows = [];
+  for (const r of src) {
+    if (!r || !r.expiry) continue;
+    const c = hasCall ? numOrNull(callLeg(r)) : null;
+    const p = hasPut ? numOrNull(putLeg(r)) : null;
+    /* A row where BOTH legs are unreadable measured nothing and is dropped.
+       A row where one leg is readable keeps it and nulls the other — half a
+       reading is still a reading, and zeroing the missing half would invent
+       a book that is not there. */
+    if (c === null && p === null) continue;
+    const ms = Date.parse(String(r.expiry).slice(0, 10) + "T00:00:00Z");
+    const sentDte = numOrNull(r.dte);
+    rows.push({
+      expiry: String(r.expiry).slice(0, 10),
+      call: c,
+      put: p,
+      /* The vendor's own dte where it sent one, ours where it did not, and
+         null rather than a guess when we have no asOf to measure from. Read
+         through numOrNull for the same reason as the legs: num() turned an
+         unsent dte into "expires today". */
+      dte: sentDte !== null ? sentDte
+        : (Number.isFinite(base) && Number.isFinite(ms) ? Math.round((ms - base) / 86400000) : null),
+    });
+  }
+  rows.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
+  const kept = rows.slice(0, cap);
+
+  /* GROSS, NOT NET, and the field name says so. Summing |call| + |put| is a
+     size, never a direction: it answers "how much of this Greek is on the
+     book" without asserting which way it points, which is the only question
+     the sign conventions above let this function answer for every leg. */
+  const gross = kept.reduce((a, r) => a + Math.abs(r.call ?? 0) + Math.abs(r.put ?? 0), 0);
+
+  return {
+    status: kept.length ? "ok" : "quiet",
+    reason: kept.length ? null : `the ${name} leg was present but no expiry carried a readable value`,
+    unit: GREEK_UNITS[name] || null,
+    /* Published rather than assumed: a reader (or a later renderer) must be
+       able to see that the two legs were NOT combined and why. */
+    signConvention:
+      "the vendor's own sign on each leg, untouched. The put leg's convention " +
+      "differs BY GREEK on this endpoint — put gamma and put charm arrive " +
+      "dealer-signed against their call legs while put vanna does not — so the " +
+      "two legs are never netted here and the total below is a gross size, not " +
+      "a direction.",
+    rows: kept,
+    grossAbs: gross,
+    legs: { call: hasCall, put: hasPut },
+    seen: rows.length, cap, shed: Math.max(0, rows.length - kept.length),
+  };
+}
+
 /**
  * TGamma — Gamma Expiry Decay Calendar, from greek-exposure/expiry.
  *

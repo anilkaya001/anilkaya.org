@@ -365,6 +365,7 @@ export const DEADLINE_MS = 36 * 60 * 1000;
 
 /* The tick row's field list is reported once per run, not once per name. */
 let tickFieldsReported = false;
+let greekFieldsReported = false;
 
 /** The four fields this pipeline reads off a /net-prem-ticks row. */
 const TICK_FIELDS_READ = Object.freeze([
@@ -994,6 +995,41 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
     for (const line of describeTickFields(ticker, ticks[0])) console.log(line);
   }
 
+  /* THE SAME PROBE, ON THE ENDPOINT THAT HAS ALREADY LIED ONCE.
+
+     /greek-exposure/expiry is where `call_gamma` turned out to be `call_gex`
+     on the wire, and every gamma roll-off panel shipped "unavailable" for
+     weeks as a result. The vanna, charm and delta readers added beside it are
+     written from the SAME schema block that got gex right — which makes that
+     block evidence rather than a claim, but not a measurement.
+
+     So the first live run says which of the eight legs actually arrived,
+     printed once, from the row this run already holds. If a leg is missing
+     the term structures publish `absent` with a reason and nothing is drawn;
+     this line is how that turns into a two-minute fix rather than a mystery. */
+  if (!greekFieldsReported && expiries.length) {
+    greekFieldsReported = true;
+    const first = expiries[0] || {};
+    const keys = Object.keys(first);
+    const legs = ["call_gex", "put_gex", "call_delta", "put_delta",
+      "call_charm", "put_charm", "call_vanna", "put_vanna"];
+    const present = legs.filter((k) => first[k] !== null && first[k] !== undefined && first[k] !== "");
+    const absent = legs.filter((k) => !present.includes(k));
+    console.log(`  greek-exposure/expiry fields (${ticker}): ${keys.length} keys, ` +
+      `${present.length} of ${legs.length} expected legs present`);
+    if (absent.length) console.log(`    ABSENT legs: ${absent.join(", ")}`);
+    const unread = keys.filter((k) => !legs.includes(k) && k !== "expiry" && k !== "date" && k !== "dte");
+    if (unread.length) console.log(`    unread keys: ${unread.slice(0, 12).join(", ")}`);
+    /* Signs, because the put leg's convention differs BY GREEK on this
+       endpoint and that is the one thing a schema block cannot be trusted
+       for — netting under the wrong convention inverts a whole Greek. */
+    const sign = (v) => (v === null || v === undefined || v === "" ? "-" : (Number(v) < 0 ? "neg" : "pos"));
+    console.log(`    signs: gex ${sign(first.call_gex)}/${sign(first.put_gex)} ` +
+      `charm ${sign(first.call_charm)}/${sign(first.put_charm)} ` +
+      `vanna ${sign(first.call_vanna)}/${sign(first.put_vanna)} ` +
+      `delta ${sign(first.call_delta)}/${sign(first.put_delta)} (call/put)`);
+  }
+
   const missing = [];
   if (!greekFlow.length) missing.push("greek-flow");
   if (!strikes.length) missing.push("spot-exposures/strike");
@@ -1142,6 +1178,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
+
   const dollarVolume = medianDollarVolume(ohlc);   // last 60 sessions, not the year
 
   const closes = candlesAscending(ohlc).map((c) => num(c.close));
@@ -3622,11 +3659,37 @@ function fakeEnrichment(ticker, spot, seed) {
      "unavailable: no expiry gamma". Third time a fixture has agreed with the
      code's guess instead of with the vendor; a fixture that does that tests
      nothing. */
-  const expiries = Array.from({ length: 6 }, (_, i) => ({
-    expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-    call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
-    put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
-  }));
+  /* THE OTHER SIX LEGS, IN THE VENDOR'S OWN SIGN CONVENTION.
+
+     The same lesson as the gex fixture above, one level deeper: a fixture
+     that carries only the legs the code reads cannot catch the code failing
+     to read a leg. It also cannot catch the trap that makes these three
+     dangerous, so the signs here are copied from the vendor's own example
+     rows rather than invented — put_charm NEGATIVE against a positive
+     call_charm (dealer-signed, like gex), and put_vanna POSITIVE against a
+     positive call_vanna (NOT dealer-signed). A fixture that signed all three
+     alike would agree with any netting rule and prove nothing.
+
+     One expiry deliberately omits the vanna pair so every dry run exercises
+     a half-present leg, which is where a confident zero would otherwise be
+     invented for the missing half. */
+  const expiries = Array.from({ length: 6 }, (_, i) => {
+    const row = {
+      expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
+      dte: i * 7 + 4,
+      call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
+      put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
+      call_delta: String(2.2e8 / (i + 1) * (0.6 + rnd())),
+      put_delta: String(-1.9e8 / (i + 1) * (0.6 + rnd())),
+      call_charm: String(1.0e8 / (i + 1) * (0.6 + rnd())),
+      put_charm: String(-9.4e8 / (i + 1) * (0.6 + rnd())),
+    };
+    if (i !== 4) {
+      row.call_vanna = String(1.5e11 / (i + 1) * (0.6 + rnd()));
+      row.put_vanna = String(4.8e11 / (i + 1) * (0.6 + rnd()));
+    }
+    return row;
+  });
 
   let px = spot;
   const day0 = Date.UTC(2026, 5, 24, 13, 30);

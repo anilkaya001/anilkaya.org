@@ -1020,11 +1020,35 @@ async function refreshFlowsIntraday(env) {
          is what it would have been called last night too. */
       const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
       const alerts = buildFlowAlerts(raw, { stageOf: (t) => lastStage.get(t) || null });
-      await upsert("flowalerts", {
-        ...prev, ...alerts,
-        readAt: new Date().toISOString(),
-        refreshed: "intraday",
-      });
+      /* A QUIET READ NEVER OVERWRITES A FEED THAT HAS DATA — the same guard
+         the tide refresh below has always carried, and whose absence here
+         cost the product its entire alerts feed every session.
+
+         The spread `{...prev, ...alerts}` overwrites prev.rows, prev.seen and
+         prev.status wholesale. With the envelope defect above, `alerts` was a
+         well-formed empty feed, so sixty real rows were replaced by zero on
+         the first cron firing after 09:15 ET and again every fifteen minutes.
+         Better a stale feed with an honest readAt than an empty fresh one, so
+         the write happens only when the read actually produced rows.
+
+         The two conditions are separate on purpose: a shape bug is now
+         impossible (the shaper unwraps), and a genuinely empty vendor read is
+         still refused here. Fixing only one of them would leave the other
+         able to blank the key on its own. */
+      if (alerts.status === "ok" && alerts.rows.length) {
+        await upsert("flowalerts", {
+          ...prev, ...alerts,
+          readAt: new Date().toISOString(),
+          refreshed: "intraday",
+        });
+      } else {
+        /* Not silent: a refresh that declines to write is a fact about this
+           read, and the stored copy's own readAt still says how old it is. */
+        console.log(JSON.stringify({
+          message: "flowalerts intraday refresh declined to write",
+          status: alerts.status, shaped: alerts.rows.length, unusable: alerts.unusable,
+        }));
+      }
     }
   } catch (error) {
     console.error(JSON.stringify({ message: "flowalerts intraday refresh failed",
