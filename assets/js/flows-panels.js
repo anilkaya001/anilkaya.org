@@ -1701,7 +1701,23 @@
       const yOf = (v) => pad + (1 - (v - lo) / span) * (H - pad * 2);
       const svg = svgEl("svg", {
         class: "px", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
-        role: "img", preserveAspectRatio: "none",
+        /* THE ONLY CHART IN THIS FILE THAT STRETCHED, and the one about to
+           carry a second series on a shared axis.
+
+           `none` scales x and y independently. With width:100% over a fixed
+           height, any divergence between the host's real width and
+           panelWidth()'s clamped answer scaled x while leaving y alone: the
+           2.5px marker became an ellipse and the line's SLOPE — the only
+           thing a price sparkline communicates — was distorted by whatever
+           the ratio happened to be. The five other SVGs here have always used
+           `meet`; this one was the outlier.
+
+           No test caught it because the repository's ratio assertion measures
+           WIDTH, and width is exactly what this defect gets right. `meet`
+           takes the smaller of the two scales, which with a matching height
+           is 1 — so one viewBox unit is one CSS pixel, the invariant this
+           codebase already holds everywhere else. */
+        role: "img", preserveAspectRatio: "xMidYMid meet",
       });
       // A baseline at the window's first close, so the line's position against
       // it IS the window return — no axis labels needed.
