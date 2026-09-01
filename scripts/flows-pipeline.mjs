@@ -3535,7 +3535,11 @@ function fakePoliticalRaws(tickers) {
   filings.push({ notes: "no filer and no ticker" });      // unusable, counted
   return {
     filings,
-    holders: { __failed: "HTTP 403 — enterprise-only endpoint" },
+    /* The status the LIVE vendor returned on 2026-09-01, not the one the
+       spec's "enterprise-only" note led this fixture to guess. 422 is
+       Unprocessable Entity; an entitlement refusal would be 403. The fixture
+       carries what was observed. */
+    holders: { __failed: "HTTP 422 — the status the live vendor returned" },
   };
 }
 
@@ -5186,40 +5190,88 @@ async function main() {
       pagesRead = null;
     } else {
       const filings = [];
-      const seenPages = new Set();
+      const seenRows = new Set();
+      const identity = (r) => `${r && r.politician_id || r && r.name || ""}|` +
+        `${r && r.ticker || ""}|${r && r.transaction_date || ""}|` +
+        `${r && r.filed_at_date || ""}|${r && r.amounts || r && r.mid_value || ""}`;
       try {
-        for (let page = 1; page <= POLITICAL_MAX_PAGES; page++) {
-          const rows = unwrapPolitical(await uw("/api/congress/congress-trader", {
-            limit: POLITICAL_PAGE_LIMIT, page, date_from: from, date: sessionDate || undefined,
+        /* THE DATE LADDER, AND WHY IT REPLACED A PAGE WALK.
+
+           The first live run measured this leg and the measurement said the
+           design was wrong. congress-trader documents `page`, `date_from` and
+           `date`, so it looked like the wider population — but its own
+           description begins "Returns the recent reports by THE GIVEN
+           CONGRESS MEMBER". `name` is optional in the parameter list and the
+           route is per-member in fact: called without one over a 90-day
+           window it returned SEVEN filings, and the buyers ranking published
+           exactly one name. In the same run, the card leg's
+           /congress/recent-trades returned 100.
+
+           One route returned 100 and the other 7, same vendor, same session.
+           Pagination bought a NARROWER population, not a wider one.
+
+           recent-trades has no page parameter, but its `date` is documented
+           as an upper bound on transaction date — which is a ladder. Walk it
+           backwards: take a page, find the oldest transaction date in it, ask
+           again with `date` set there. That is the same shape the universe
+           walker uses against a route that also refuses to paginate, and for
+           the same reason.
+
+           TWO GUARDS, BOTH LOAD-BEARING. A ladder whose cursor does not
+           advance repeats forever, so a rung that fails to move the date ends
+           the walk. And because `date` is inclusive, consecutive rungs
+           overlap on the boundary day by construction — so rows are deduped
+           on identity, and a rung contributing nothing NEW ends the walk too.
+           Without the dedupe every boundary day would be counted twice and
+           the ranked totals would be quietly inflated. */
+        let cursor = sessionDate || null;
+        for (let rung = 1; rung <= POLITICAL_MAX_PAGES; rung++) {
+          const rows = unwrapPolitical(await uw("/api/congress/recent-trades", {
+            limit: POLITICAL_PAGE_LIMIT, date: cursor || undefined,
           }));
           if (!rows.length) break;
-          /* The fingerprint is the whole page's identity keys, not its first
-             row: a feed re-sorted between calls would fool a first-row check
-             while still being the same 200 filings. */
-          const print = rows.map((r) => `${r && r.politician_id || ""}|${r && r.ticker || ""}` +
-            `|${r && r.transaction_date || ""}|${r && r.amounts || r && r.mid_value || ""}`).join(";");
-          if (seenPages.has(print)) {
-            paginated = false;
-            console.warn(`  political: page ${page} repeated page ${pagesRead} byte for byte — ` +
-              "the vendor is ignoring `page`. Keeping one page; a ranking summed over " +
-              "repeats would overstate every total by the number of pages read");
-            break;
+
+          let added = 0;
+          let oldest = null;
+          for (const r of rows) {
+            const d = r && typeof r.transaction_date === "string"
+              ? r.transaction_date.slice(0, 10) : null;
+            if (d && (oldest === null || d < oldest)) oldest = d;
+            /* The window is applied HERE rather than by the vendor, because
+               recent-trades takes only an upper bound. A row older than the
+               floor is outside the stated window and is not counted. */
+            if (d && d < from) continue;
+            const key = identity(r);
+            if (seenRows.has(key)) continue;
+            seenRows.add(key);
+            filings.push(r);
+            added++;
           }
-          seenPages.add(print);
-          filings.push(...rows);
           pagesRead++;
-          if (rows.length < POLITICAL_PAGE_LIMIT) {
-            /* NULL, NOT FALSE, WHEN ONE PAGE WAS ENOUGH. `false` is reserved
-               for the vendor IGNORING `page`, and the renderer turns it into
-               a banner reading "the vendor returned the same page twice".
-               Publishing false for a short first page — an ordinary thin
-               week — would print that about a vendor that did nothing wrong,
-               which is the opposite of the honesty the flag exists for. The
-               comment above the leg already said this; the code did not. */
-            paginated = pagesRead > 1 ? true : null;
+
+          if (!added) {
+            /* Every row on this rung was already held. Either the vendor
+               ignored the cursor or the ladder has walked past the window;
+               both mean the next rung would cost a call and add nothing. */
+            paginated = pagesRead > 1;
             break;
           }
-          if (page === POLITICAL_MAX_PAGES) paginated = true;
+          if (rows.length < POLITICAL_PAGE_LIMIT) { paginated = pagesRead > 1 ? true : null; break; }
+          if (!oldest || oldest < from) { paginated = pagesRead > 1; break; }
+          if (oldest === cursor) {
+            /* THE CURSOR DID NOT MOVE. A full page whose oldest transaction
+               is the day we asked for means one date holds more filings than
+               a page can carry, and the ladder cannot step past it without
+               losing the remainder. Stopping is the honest end: the payload
+               reports how far it actually reached. */
+            console.warn(`  political: the ladder stalled at ${cursor} — a single ` +
+              "date carries more filings than one page holds, so the window is " +
+              "read only back to there");
+            paginated = pagesRead > 1;
+            break;
+          }
+          cursor = oldest;
+          if (rung === POLITICAL_MAX_PAGES) paginated = true;
         }
       } catch (error) {
         /* A 422 on page 1 means the route refused the shape, not that there
@@ -5227,8 +5279,8 @@ async function main() {
            smaller population, and the payload says which one it read. */
         if (!filings.length) {
           fellBack = true;
-          console.warn(`  political: congress-trader refused (${error.message}) — ` +
-            "falling back to recent-trades, one page, no window");
+          console.warn(`  political: the recent-trades ladder refused on its first ` +
+            `rung (${error.message}) — falling back to one unwindowed page`);
           try {
             filings.push(...unwrapPolitical(await uw("/api/congress/recent-trades",
               { limit: POLITICAL_PAGE_LIMIT })));
@@ -5253,8 +5305,17 @@ async function main() {
           const message = error && error.message ? error.message : String(error);
           if (!holders.length) {
             raws.holders = { __failed: message };
-            console.log(`  political holders: ${message} — enterprise-only by the spec's own ` +
-              "note, so one refusal ends the walk rather than buying five more");
+            /* WHAT THE VENDOR ACTUALLY SAID, not what the spec led us to
+               expect. The first live run returned HTTP 422 on this route, not
+               the 403 an entitlement refusal would give — and the note here
+               asserted "enterprise-only" as though the status had confirmed
+               it. The spec does say enterprise-only; 422 is Unprocessable
+               Entity, which is what this vendor also returns for a parameter
+               it dislikes. Those are different diagnoses with different fixes,
+               and the log should carry the status rather than the inference. */
+            console.log(`  political holders: ${message} — the spec marks this route ` +
+              "enterprise-only, but the status above is what the vendor actually " +
+              "returned; one refusal ends the walk rather than buying five more");
             break;
           }
           console.warn(`  political holders ${ticker}: ${message} — the names already read stand`);
@@ -5286,7 +5347,9 @@ async function main() {
          a broken pagination. `paginated: false` is the vendor ignoring the
          parameter; null is one page having been enough to answer. */
       source: {
-        route: DRY_RUN ? "dry-run fixture" : fellBack ? "recent-trades" : "congress-trader",
+        route: DRY_RUN ? "dry-run fixture"
+          : fellBack ? "recent-trades (single page, unwindowed)"
+          : "recent-trades (date ladder)",
         pages: pagesRead, pageLimit: POLITICAL_PAGE_LIMIT, paginated,
         windowed: !fellBack,
       },
