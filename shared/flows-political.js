@@ -168,14 +168,58 @@ export function sideOf(txnType) {
   return null;
 }
 
-/** One disclosure, shaped. Null when it carries no usable identity. */
+/**
+ * The numeric-triple spelling of the same fact, folded onto the band shape so
+ * that everything downstream — the sums, the carried bounds, the open-ended
+ * flag — works on one structure regardless of which endpoint fed it.
+ */
+export function valueBand(raw) {
+  const lo = num(raw.low_value);
+  const hi = num(raw.high_value);
+  if (lo !== null && hi !== null) {
+    return { lo, hi, mid: (lo + hi) / 2, open: false };
+  }
+  const stated = num(raw.mid_value);
+  if (lo !== null || hi !== null) {
+    /* One bound and no other: a floor with no ceiling is open-ended, and a
+       stated midpoint alongside a missing bound is not evidence of the bound.
+       No midpoint is invented here for the same reason parseBand invents
+       none for "Over $50,000,000" — these are the largest rows, where a
+       guess would move the ranking most. */
+    return { lo, hi, mid: null, open: true };
+  }
+  return { lo: null, hi: null, mid: stated, open: false };
+}
+
+/**
+ * One disclosure, shaped. Null when it carries no usable identity.
+ *
+ * TWO WIRE SPELLINGS, ONE ROW. The congress endpoints return `txn_type` with
+ * an `amounts` RANGE STRING ("$15,001 - $50,000"); the unusual-trades family
+ * returns `transaction_type` with a numeric `low_value`/`mid_value`/
+ * `high_value` triple and calls the issuer `asset` (docs/uw-openapi.yaml,
+ * "Senate Stock" and "Politician Trades"). Reading only the first spelling
+ * would not throw on the second — it would classify every side as null and
+ * every band as unparseable, and the ranking would come back CONFIDENTLY
+ * EMPTY, which is the failure this repository refuses to ship. Both are read.
+ *
+ * Where the numeric triple states both bounds, the midpoint is computed from
+ * them rather than taken from the vendor's `mid_value`, so that ONE basis —
+ * the one SIZE_BASIS publishes — produces every summed number on the page.
+ * The vendor's stated midpoint is used only where the bounds are absent, and
+ * a lone bound stays open-ended with no midpoint, exactly as a band string
+ * reading "Over $50,000,000" does.
+ */
 export function filingRow(raw) {
   if (!raw || typeof raw !== "object") return null;
   const who = str(raw.name) || str(raw.reporter);
   const t = str(raw.ticker);
   if (!who && !t) return null;
 
-  const band = parseBand(raw.amounts);
+  const band = raw.low_value !== undefined || raw.high_value !== undefined
+    || raw.mid_value !== undefined
+    ? valueBand(raw)
+    : parseBand(raw.amounts);
   const txn = str(raw.transaction_date);
   const filed = str(raw.filed_at_date);
   const txnMs = txn ? Date.parse(txn + "T00:00:00Z") : NaN;
@@ -191,9 +235,9 @@ export function filingRow(raw) {
     memberType: raw.member_type === null || raw.member_type === undefined
       ? null : raw.member_type,
     t,
-    issuer: str(raw.issuer),
-    side: sideOf(raw.txn_type),
-    txnType: str(raw.txn_type),
+    issuer: str(raw.issuer) || str(raw.asset),
+    side: sideOf(raw.txn_type || raw.transaction_type),
+    txnType: str(raw.txn_type) || str(raw.transaction_type),
     lo: band.lo, hi: band.hi, mid: band.mid, openBand: band.open,
     txnDate: txn,
     filedDate: filed,
@@ -230,7 +274,7 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
     if (!a) {
       a = {
         who: r.who, id: r.id, memberType: r.memberType,
-        boughtMid: 0, boughtLo: 0, boughtHi: 0, buys: 0,
+        boughtMid: 0, boughtLo: 0, boughtHi: 0, openFloor: 0, buys: 0,
         soldMid: 0, sells: 0, openBands: 0, unclassified: 0,
         tickers: new Set(), lags: [],
       };
@@ -241,9 +285,24 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
     if (r.openBand) a.openBands++;
     if (r.side === "buy") {
       a.buys++;
-      if (r.mid !== null) a.boughtMid += r.mid;
-      if (r.lo !== null) a.boughtLo += r.lo;
-      if (r.hi !== null) a.boughtHi += r.hi;
+      /* ALL THREE OR NONE, over one population.
+
+         The low, the midpoint and the high are a triple describing the SAME
+         set of filings, and lo <= mid <= hi only holds while that is true.
+         An open-ended band ("Over $50,000,000") states a floor and no
+         ceiling, so it has no midpoint by design — adding its floor to the
+         low total while it contributes nothing to the other two produced a
+         low that EXCEEDED its own high, which a synthetic run caught before
+         any reader could. Such a row is counted in openBands and its floor
+         totalled separately in openFloor, so the size held back is published
+         rather than dropped. */
+      if (r.mid !== null) {
+        a.boughtMid += r.mid;
+        if (r.lo !== null) a.boughtLo += r.lo;
+        if (r.hi !== null) a.boughtHi += r.hi;
+      } else if (r.lo !== null) {
+        a.openFloor += r.lo;
+      }
     } else if (r.side === "sell") {
       a.sells++;
       if (r.mid !== null) a.soldMid += r.mid;
@@ -262,6 +321,9 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
       names: a.tickers.size,
       medianLagDays: median(a.lags),
       openBands: a.openBands,
+      /* The disclosed floor of the purchases the totals above could not
+         include. Zero when there were none. */
+      openFloor: a.openFloor,
       unclassified: a.unclassified,
     });
   }
@@ -284,14 +346,22 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
     if (!r || !r.t) continue;
     let a = by.get(r.t);
     if (!a) a = { t: r.t, issuer: r.issuer, boughtMid: 0, boughtLo: 0, boughtHi: 0,
+                  openFloor: 0, openBands: 0,
                   soldMid: 0, buys: 0, sells: 0, who: new Set(), lags: [] }, by.set(r.t, a);
     if (r.who) a.who.add(r.id || r.who);
     if (r.lagDays !== null) a.lags.push(r.lagDays);
+    if (r.openBand) a.openBands++;
     if (r.side === "buy") {
       a.buys++;
-      if (r.mid !== null) a.boughtMid += r.mid;
-      if (r.lo !== null) a.boughtLo += r.lo;
-      if (r.hi !== null) a.boughtHi += r.hi;
+      /* The same all-three-or-none rule the buyer ranking keeps — see there
+         for why a floor without a ceiling stays out of the summed triple. */
+      if (r.mid !== null) {
+        a.boughtMid += r.mid;
+        if (r.lo !== null) a.boughtLo += r.lo;
+        if (r.hi !== null) a.boughtHi += r.hi;
+      } else if (r.lo !== null) {
+        a.openFloor += r.lo;
+      }
     } else if (r.side === "sell") {
       a.sells++;
       if (r.mid !== null) a.soldMid += r.mid;
@@ -305,6 +375,7 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
       bought: a.boughtMid, boughtLo: a.boughtLo, boughtHi: a.boughtHi,
       sold: a.soldMid, buys: a.buys, sells: a.sells,
       filers: a.who.size, medianLagDays: median(a.lags),
+      openBands: a.openBands, openFloor: a.openFloor,
     });
   }
   out.sort((x, y) => (y.bought - x.bought) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
@@ -334,25 +405,45 @@ export function shapeRecent(rows, { cap = POLITICAL_CAPS.recent } = {}) {
 /* ---------- holders of one name ---------------------------------- */
 
 /**
- * The holders feed is the strongest data on this page: the vendor states
- * min/mid/max as NUMBERS rather than a range string, and names the account
- * owner. Ranked by the vendor's own midpoint.
+ * The holders feed states min/mid/max as NUMBERS rather than a range string,
+ * and names the account owner. Ranked by the vendor's own midpoint.
+ *
+ * THE NUMBERS ARE NOT DOLLARS. The spec describes all three as "the
+ * portfolio's ... share quantity" (docs/uw-openapi.yaml, Portfolio Holder),
+ * and its own example — 9 / 76 / 143 — is not a STOCK Act dollar band. Every
+ * other number in this module is dollars, so a field called `mid` here would
+ * be read as dollars by the first renderer that touched it and printed with a
+ * currency mark: the same defect class as the "1352% of its year" scar, where
+ * a number outlived the unit it was measured in. The fields are therefore
+ * named `minQty/midQty/maxQty`, the unit rides on the block as `qtyUnit`, and
+ * that unit says the reading is the VENDOR'S CLAIM rather than a measured
+ * fact — this repository has been wrong about this spec five times, so the
+ * renderer is told what the documentation says, not what is true.
+ *
+ * The practical consequence is a refusal: a share count cannot be added to,
+ * ranked against, or divided by the dollar bands on the rest of this page.
  */
+export const HOLDER_QTY_UNIT =
+  "share quantity as the vendor's specification describes it, not dollars — " +
+  "so these numbers carry no currency mark and are never summed with, or " +
+  "ranked against, the disclosed dollar bands elsewhere on this page";
+
 export function shapeHolders(raw, ticker, { cap = POLITICAL_CAPS.holders } = {}) {
   const rows = [];
   for (const r of unwrapRows(raw)) {
     if (!r || typeof r !== "object") continue;
     const who = str(r.full_name);
-    const mid = num(r.mid_amount);
     if (!who) continue;
     rows.push({
       t: ticker || null,
       who, id: str(r.id),
       owner: str(r.owner),
-      min: num(r.min_amount), mid, max: num(r.max_amount),
+      minQty: num(r.min_amount),
+      midQty: num(r.mid_amount),
+      maxQty: num(r.max_amount),
     });
   }
-  rows.sort((a, b) => ((b.mid ?? -1) - (a.mid ?? -1))
+  rows.sort((a, b) => ((b.midQty ?? -1) - (a.midQty ?? -1))
     || (a.who < b.who ? -1 : a.who > b.who ? 1 : 0));
   const seen = rows.length;
   const kept = rows.slice(0, cap);
@@ -360,6 +451,7 @@ export function shapeHolders(raw, ticker, { cap = POLITICAL_CAPS.holders } = {})
   return {
     status: kept.length ? "ok" : "quiet",
     rows: kept, seen, cap, shed: seen - kept.length,
+    qtyUnit: HOLDER_QTY_UNIT,
     /* Stated rather than assumed: if the vendor sent no owner on these rows,
        the self-filed share is UNKNOWN, not 100%. */
     selfFiled: withOwner ? kept.filter((r) => /self/i.test(r.owner || "")).length : null,
@@ -409,7 +501,7 @@ export function buildPolitical(raws = {}) {
       if (!entry || !entry.raw) continue;
       for (const r of shapeHolders(entry.raw, entry.ticker).rows) rows.push(r);
     }
-    rows.sort((a, b) => ((b.mid ?? -1) - (a.mid ?? -1))
+    rows.sort((a, b) => ((b.midQty ?? -1) - (a.midQty ?? -1))
       || (a.who < b.who ? -1 : a.who > b.who ? 1 : 0));
     const seen = rows.length;
     const kept = rows.slice(0, POLITICAL_CAPS.holders);
@@ -417,6 +509,7 @@ export function buildPolitical(raws = {}) {
     out.holders = {
       status: kept.length ? "ok" : "quiet",
       rows: kept, seen, cap: POLITICAL_CAPS.holders, shed: seen - kept.length,
+      qtyUnit: HOLDER_QTY_UNIT,
       names: new Set(kept.map((r) => r.t)).size,
       selfFiled: ownerKnown ? kept.filter((r) => /self/i.test(r.owner || "")).length : null,
       ownerKnown,

@@ -20,9 +20,9 @@
 
 import assert from "node:assert/strict";
 import {
-  parseBand, sideOf, filingRow, rankBuyers, rankAssets, shapeRecent,
+  parseBand, valueBand, sideOf, filingRow, rankBuyers, rankAssets, shapeRecent,
   shapeHolders, buildPolitical, unwrapRows,
-  POLITICAL_CAPS, POLITICAL_NOTES, POLITICAL_FEEDS, SIZE_BASIS,
+  POLITICAL_CAPS, POLITICAL_NOTES, POLITICAL_FEEDS, SIZE_BASIS, HOLDER_QTY_UNIT,
 } from "../shared/flows-political.js";
 
 let checks = 0;
@@ -79,6 +79,32 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "and being history");
   eq(filingRow({}), null, "a filing with neither a filer nor a ticker is dropped");
   eq(filingRow({ ticker: "BBB" }).who, null, "a ticker-only row survives with no filer");
+
+  /* THE SECOND WIRE SPELLING. The unusual-trades family sends the same fact
+     as `transaction_type` plus a numeric triple, with the issuer under
+     `asset`. Reading only the congress spelling would not throw on this row
+     — it would classify the side as null and the band as unparseable, and
+     the ranking would come back confidently empty. */
+  const alt = filingRow({
+    name: "B Member", ticker: "BBB", asset: "Bbb Corporation - Common Stock",
+    transaction_type: "Buy", low_value: "1000001", high_value: "5000000",
+    mid_value: "3000000", transaction_date: "2026-06-20", filed_at_date: "2026-07-15",
+  });
+  eq(alt.side, "buy", "the alternate spelling of the side is classified, not dropped");
+  eq(alt.mid, 3000000.5,
+    "AND THE MIDPOINT IS COMPUTED FROM THE BOUNDS, not lifted from the vendor's " +
+    "own mid_value (3,000,000) — one basis produces every summed number on the " +
+    "page, and SIZE_BASIS states that basis");
+  eq(alt.issuer, "Bbb Corporation - Common Stock", "the issuer is read from `asset` too");
+  eq(alt.lagDays, 25, "and the lag still computes across the spellings");
+
+  const oneBound = valueBand({ low_value: "1000001", mid_value: "9999999" });
+  eq(oneBound.mid, null,
+    "a floor with no ceiling stays open-ended even when the vendor volunteers a " +
+    "midpoint — a stated mid is not evidence of the missing bound");
+  eq(oneBound.open, true, "and it is flagged as such");
+  eq(valueBand({ mid_value: "42" }).mid, 42,
+    "while a stated midpoint with no bounds at all is the only number there is");
 }
 
 /* ---------- §4 the ranking is of PURCHASES ----------------------- */
@@ -106,6 +132,43 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(built.rows[1].unclassified, 0, "classified rows are not counted as unclassified");
   ok(built.basis === SIZE_BASIS && /midpoint/.test(built.basis),
     "and the ranking convention rides on the payload rather than living in a caption");
+
+  /* THE TRIPLE DESCRIBES ONE POPULATION. A synthetic run produced a filer
+     whose summed LOW ($55,067,012) exceeded both their midpoint total
+     ($13,623,506) and their summed HIGH ($22,180,000) — an impossible row
+     that every other check passed. The cause: an open-ended band contributes
+     a floor and no ceiling, so summing its floor into the low while it
+     supplies neither of the other two breaks lo <= mid <= hi. Such a
+     purchase now sits out the triple entirely and reports its floor
+     separately, and the invariant is asserted rather than assumed. */
+  const withOpen = rankBuyers([
+    { who: "Open", id: "o1", t: "AAA", side: "buy", mid: 8000, lo: 1000, hi: 15000, lagDays: 3 },
+    { who: "Open", id: "o1", t: "BBB", side: "buy", mid: null, lo: 50000000, hi: null,
+      openBand: true, lagDays: 3 },
+  ]);
+  const o = withOpen.rows[0];
+  eq(o.bought, 8000, "the open band contributes no midpoint, because it states none");
+  eq(o.boughtLo, 1000,
+    "AND NO LOW EITHER — its $50,000,000 floor stays out of a total the same row " +
+    "cannot supply a ceiling for");
+  eq(o.boughtHi, 15000, "the high total covers exactly the filings the other two do");
+  eq(o.openFloor, 50000000,
+    "and the floor held back is PUBLISHED rather than dropped, so the largest " +
+    "disclosure on the row is visible beside the total that excludes it");
+  eq(o.openBands, 1, "with the count of such filings beside it");
+  ok(o.boughtLo <= o.bought && o.bought <= o.boughtHi,
+    "lo <= mid <= hi, the invariant the triple exists to carry");
+  for (const r of built.rows) {
+    ok(r.boughtLo <= r.bought && r.bought <= r.boughtHi,
+      `${r.who}: lo <= mid <= hi holds across the ranking, not just on the crafted row`);
+  }
+
+  const openAsset = rankAssets([
+    { who: "X", id: "x", t: "AAA", side: "buy", mid: null, lo: 9e6, hi: null, openBand: true },
+    { who: "Y", id: "y", t: "AAA", side: "buy", mid: 100, lo: 50, hi: 150 },
+  ]).rows[0];
+  eq(openAsset.boughtLo, 50, "the by-asset ranking keeps the same rule");
+  eq(openAsset.openFloor, 9e6, "and publishes the same held-back floor");
 }
 
 /* ---------- §5 the same discipline by asset ---------------------- */
@@ -130,6 +193,19 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { full_name: "Beta", id: "b", owner: "spouse", min_amount: 5, mid_amount: 500, max_amount: 900 },
   ] }, "AAA");
   deep(h.rows.map((r) => r.who), ["Beta", "Alpha"], "ranked by the vendor's own midpoint");
+  eq(h.rows[0].midQty, 500,
+    "AND THE NUMBER IS NAMED FOR ITS UNIT. The spec calls all three fields a " +
+    "\"share quantity\"; every other number in this module is dollars, so a " +
+    "field called `mid` here would be printed with a currency mark by the first " +
+    "renderer that touched it");
+  eq(h.rows[0].mid, undefined,
+    "the dollar-shaped name is not also published — one name, so the two units " +
+    "cannot be confused by autocomplete");
+  ok(/share quantity/.test(h.qtyUnit) && /not dollars/.test(h.qtyUnit),
+    "and the unit rides on the block rather than living in a caption");
+  ok(/never summed with/.test(HOLDER_QTY_UNIT),
+    "stating the refusal the unit implies: a share count cannot be added to a " +
+    "dollar band");
   eq(h.rows[0].owner, "spouse",
     "AND THE OWNER IS CARRIED. A spouse's account attributed to a member's " +
     "judgement is the classic error this repository already names");
@@ -197,4 +273,6 @@ console.log(`✓ flows-political: ${checks} assertions — an open-ended band wi
   `midpoint, a gift that is not a purchase, a seller kept off a buying ranking, band bounds ` +
   `carried beside every midpoint total, disclosure lag on the row and the median under the ` +
   `total, an owner that stays unknown rather than becoming "self", recency by filing date, ` +
-  `caps with counted shed, byte-identical rebuilds, and prose that needs no allow-list`);
+  `caps with counted shed, byte-identical rebuilds, both wire spellings of a filing read ` +
+  `onto one row, a holder count named for the unit the vendor gives it, and prose that ` +
+  `needs no allow-list`);
