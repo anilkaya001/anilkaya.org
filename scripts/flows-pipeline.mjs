@@ -5117,7 +5117,17 @@ async function main() {
           seenPages.add(print);
           filings.push(...rows);
           pagesRead++;
-          if (rows.length < POLITICAL_PAGE_LIMIT) { paginated = pagesRead > 1; break; }
+          if (rows.length < POLITICAL_PAGE_LIMIT) {
+            /* NULL, NOT FALSE, WHEN ONE PAGE WAS ENOUGH. `false` is reserved
+               for the vendor IGNORING `page`, and the renderer turns it into
+               a banner reading "the vendor returned the same page twice".
+               Publishing false for a short first page — an ordinary thin
+               week — would print that about a vendor that did nothing wrong,
+               which is the opposite of the honesty the flag exists for. The
+               comment above the leg already said this; the code did not. */
+            paginated = pagesRead > 1 ? true : null;
+            break;
+          }
           if (page === POLITICAL_MAX_PAGES) paginated = true;
         }
       } catch (error) {

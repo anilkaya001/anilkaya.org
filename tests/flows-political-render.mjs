@@ -210,14 +210,41 @@ try {
     ok(geo[1].bandEnd > geo[0].bandStart,
       "the top two whiskers overlap on screen, as the fixture intends");
     const note = await page.textContent("#plBuyersNote");
-    ok(/1 of the 2 neighbouring pairs have overlapping bands/.test(note || ""),
+    ok(/1 of the 2 comparable neighbouring pairs have overlapping bands/.test(note || ""),
       "and the note COUNTS the neighbours the ranking cannot separate, rather " +
       `than warning in general terms — got: ${JSON.stringify(note)}`);
+    ok(/comparable/.test(note || ""),
+      "over a denominator of COMPARABLE pairs — a proportion whose denominator " +
+      "counts pairs it could not measure is not a proportion of anything");
     ok(/Top 3 of 9 filers in the window/.test(note || "")
       && /6 ranked below the cut/.test(note || ""),
       "with what the cap kept and what it dropped — and the count is of the rows " +
       "ACTUALLY DRAWN rather than of the cap, since a note reading 'top 25' above " +
       `three rows describes a page nobody is looking at — got: ${JSON.stringify(note)}`);
+  }
+
+  /* ---------- §2b a pair that cannot be compared is not counted --- */
+  {
+    /* Cara's high is absent, so neither the Ben/Cara pair nor any pair using
+       her bounds can be tested for overlap. Such a pair must fall out of BOTH
+       the numerator and the denominator: counting it as "not overlapping"
+       would report the ranking as better separated than it was measured to
+       be, which is the flattering direction and therefore the dangerous one. */
+    await put("political", { ...payload, buyers: { ...payload.buyers,
+      rows: payload.buyers.rows.map((r, i) =>
+        (i === 2 ? { ...r, boughtHi: null } : r)) } });
+    const p = await browser.newPage();
+    await p.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p.waitForSelector("#plBuyers tbody tr");
+    const note = await p.textContent("#plBuyersNote");
+    ok(/1 of the 1 comparable neighbouring pairs/.test(note || ""),
+      "THE DENOMINATOR DROPS TO ONE. Three rows make two neighbouring pairs, " +
+      "but the row with no stated high cannot be compared to its neighbour, so " +
+      "only one pair was measured and the note says one — not '1 of 2', which " +
+      `would credit the ranking with a separation nobody checked — got: ${JSON.stringify(note)}`);
+    await p.close();
+    await put("political", payload);
   }
 
   /* ---------- §3 the open band's floor reaches the page ----------- */
@@ -378,6 +405,25 @@ try {
     const text = await p2.textContent("#plSource");
     ok(/one page deep/.test(text || ""), "in words, not as a status code");
     await p2.close();
+
+    /* AND A THIN WEEK IS NOT AN ACCUSATION. `paginated: null` means one page
+       answered the whole window, which is the ordinary case and says nothing
+       about the vendor. This shipped as `false` — the pipeline set it from
+       `pagesRead > 1` on a short first page — so an ordinary window under 200
+       filings would have printed "the vendor returned the same page twice"
+       about a vendor that did exactly what it was asked. */
+    await put("political", { ...payload,
+      source: { ...payload.source, pages: 1, paginated: null } });
+    const p2b = await browser.newPage();
+    await p2b.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p2b.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p2b.waitForSelector("#plBuyers tbody tr");
+    eq(await p2b.evaluate(() => document.getElementById("plSource").hidden), true,
+      "one page that answered the whole window raises NO banner — null and false " +
+      "are different facts about the vendor, and only one of them is a complaint");
+    ok(/1 page/.test(await p2b.textContent("#plStatus")),
+      "while the status line still reports how wide the read was");
+    await p2b.close();
   }
 
   /* ---------- §10 the three silences, three sentences ------------- */

@@ -133,25 +133,50 @@
   /* How many ADJACENT pairs in the ranking have overlapping bands. Adjacent
      rather than all pairs: the claim the ranking makes is about neighbours,
      so the count that qualifies it is the count of neighbours it cannot
-     actually separate. */
+     actually separate.
+
+     THE FULL INTERSECTION TEST, AND NOT BECAUSE THE HALF ONE WAS WRONG. The
+     first draft tested only `b.hi >= a.lo`, and that really is sufficient
+     here: rows arrive sorted by midpoint descending, and lo <= mid <= hi
+     holds on every row, so b.lo <= b.mid <= a.mid <= a.hi is guaranteed and
+     the second half can never fail. A review bot read it as a defect, which
+     is the point — the shorter test is correct only by way of two invariants
+     established in two other files, and a reader who does not hold both in
+     mind sees a bug. The complete test costs nothing, returns the same
+     answer, and needs no argument.
+
+     ALL FOUR BOUNDS OR NEITHER. The old skip checked two of them, so a pair
+     missing the other two was silently counted as separated. A pair that
+     cannot be compared is now not counted in EITHER total, and the note's
+     denominator is the comparable pairs rather than every pair — a
+     proportion whose denominator includes what it could not measure is not
+     a proportion of anything. */
   function overlaps(rows) {
-    var n = 0;
+    var n = 0, comparable = 0;
     for (var i = 1; i < rows.length; i++) {
       var a = rows[i - 1], b = rows[i];
-      if (isNum(a.boughtLo) === null || isNum(b.boughtHi) === null) continue;
-      if (b.boughtHi >= a.boughtLo) n++;
+      var aLo = isNum(a.boughtLo), aHi = isNum(a.boughtHi);
+      var bLo = isNum(b.boughtLo), bHi = isNum(b.boughtHi);
+      if (aLo === null || aHi === null || bLo === null || bHi === null) continue;
+      comparable++;
+      if (aLo <= bHi && bLo <= aHi) n++;
     }
-    return n;
+    return { n: n, comparable: comparable };
   }
   function overlapNote(rows) {
     if (rows.length < 2) return "";
-    var n = overlaps(rows);
-    if (!n) {
-      return "No two neighbours here have overlapping bands, so the order of " +
-        "this column is one the disclosed ranges can carry.";
+    var o = overlaps(rows);
+    if (!o.comparable) {
+      return "No two neighbours here state both a low and a high, so whether " +
+        "this ordering is one the disclosed ranges can carry was not measured.";
     }
-    return n + " of the " + (rows.length - 1) + " neighbouring pairs have " +
-      "overlapping bands — their whiskers cross, and those pairs are not " +
+    if (!o.n) {
+      return "No two of the " + o.comparable + " comparable neighbouring pairs " +
+        "have overlapping bands, so the order of this column is one the " +
+        "disclosed ranges can carry.";
+    }
+    return o.n + " of the " + o.comparable + " comparable neighbouring pairs " +
+      "have overlapping bands — their whiskers cross, and those pairs are not " +
       "separated by anything the filings state. The bar is a midpoint; the " +
       "whisker is what was actually disclosed.";
   }
