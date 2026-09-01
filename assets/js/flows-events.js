@@ -324,7 +324,7 @@
    * A fixed viewBox emitted at width:100% is scaled by the browser, and
    * everything scales with it — a 9px axis label becomes 5px on a phone and
    * oversized on a wide desk. So the width is measured from the host at
-   * paint time, clamped to [300, 1200], and used as the viewBox width. No
+   * paint time, clamped to [300, 1900], and used as the viewBox width. No
    * transform: scale() anywhere.
    *
    * AND EVERY <text> CARRIES AN EXPLICIT px font-size. An unsized SVG
@@ -350,7 +350,7 @@
   function chartWidth() {
     revealPanel();
     const w = windowHost && windowHost.clientWidth;
-    return Math.max(300, Math.min(1200, Math.round(w) || 560));
+    return Math.max(300, Math.min(1900, Math.round(w) || 560));
   }
 
   function windowMessage(text) {

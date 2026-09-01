@@ -58,7 +58,7 @@
      module rather than restated here. Two width functions is two answers to
      "how wide is this chart" on a page that draws panels from both — and the
      four drawers below sit in the same grid as ten renderers that would then
-     be sizing themselves by a different rule. [300, 1200]: the floor is the
+     be sizing themselves by a different rule. [300, 1900]: the floor is the
      chart floor the 30rem panel rule protects (a 320px viewport gives a
      284.8px host, and 300/284.8 = 1.053, inside the render contract's 15%
      tolerance); the ceiling binds in the enlarge dialog, whose host reaches
@@ -1061,12 +1061,14 @@
 
     panelHead(host, q);
 
-    /* [300, 1200]. The floor is the chart floor the 30rem panel rule protects
+    /* [300, 1900]. The floor is the chart floor the 30rem panel rule protects
        (measured: a 320px viewport gives a 284.8px host). The ceiling binds only
        in the enlarge dialog on a very wide screen: at min(96rem, 96vw) less
-       2×1.7rem the host reaches 1481px, so 1200 is a real clamp there and is
+       2×1.7rem the host reaches 1481px; the binding case is now a full-row
+       .is-wide at the three-column tier (1823px), and 1900 clears it — see
+       the policy note on panelWidth in flows-panels.js. The old 1200 is
        stated as a choice rather than described as inert. */
-    const W = Math.max(300, Math.min(1200, Math.round(host && host.clientWidth) || 560));
+    const W = Math.max(300, Math.min(1900, Math.round(host && host.clientWidth) || 560));
 
     /* ---------- geometry, shared verbatim with the surface above ------ */
 
