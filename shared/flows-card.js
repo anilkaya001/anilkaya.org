@@ -602,13 +602,22 @@ const AMOUNT_RANGE = /\$?([\d,]+)\s*[-–]\s*\$?([\d,]+)/;
  * Disclosed congressional transactions in this name.
  *
  * Deliberately NOT "congressional buyers", and deliberately without a member
- * track record or an average return. Two reasons, both hard:
+ * track record or an average return.
  *
- *  - Not computable. /api/congress/congress-trader accepts only limit, date,
- *    ticker and name — no page and no offset — so a member's disclosure
- *    history cannot be walked past the first page at any budget.
- *  - Not a return even if it were. A disclosure reports an OPENING with no
- *    paired closing print, so any "return" attributed to it is invented.
+ * ONE OF THE TWO ORIGINAL REASONS HAS EXPIRED, AND SAYING SO IS THE POINT.
+ * This comment used to argue that /api/congress/congress-trader "accepts only
+ * limit, date, ticker and name — no page and no offset", so a member's
+ * history could not be walked. The specification now documents `page`
+ * (1-indexed), `date_from` and `date` on that route, and the political
+ * section walks exactly that ladder. A refusal resting on a vendor
+ * limitation has to be re-read when the vendor changes, or it becomes
+ * folklore that outlives its own reason.
+ *
+ * The reason that has not expired is the one that never could:
+ *
+ *  - A disclosure reports an OPENING with no paired closing print, so any
+ *    "return" attributed to it is invented. No amount of pagination supplies
+ *    the closing print, so no budget makes a track record computable here.
  *
  * What IS informative, and free: the disclosure lag. The STOCK Act allows 45
  * days and late filers routinely exceed 100, so a trade surfacing today may

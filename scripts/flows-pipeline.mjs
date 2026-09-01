@@ -42,6 +42,9 @@ import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
 import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
+import {
+  buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapPolitical,
+} from "../shared/flows-political.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -3409,6 +3412,68 @@ function fakeFlowAlerts(tickers) {
   return rows;
 }
 
+/* Dry-run raws for the political leg. Built to exercise the traps rather
+   than to look plausible: one open-ended band whose midpoint must stay
+   absent, one "Receive" that is a gift and not a purchase, one large SELLER
+   who must not top a list captioned about buying, one row in the SECOND wire
+   spelling (transaction_type + the numeric triple), one row with no owner so
+   the self-filed share has to come back unknown, and lag spread across the
+   statutory 45 days and well past it. The holders feed arrives failed on
+   every dry run, because enterprise-only is what it does on this key and the
+   isolation is worth exercising on every run rather than on a bad day. */
+function fakePoliticalRaws(tickers) {
+  const rnd = mulberry(4471);
+  const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 12);
+  const BANDS = ["$1,001 - $15,000", "$15,001 - $50,000", "$50,001 - $100,000",
+    "$100,001 - $250,000", "$250,001 - $500,000", "$1,000,001 - $5,000,000"];
+  const MEMBERS = ["Ada Reyes", "Ben Osei", "Cara Lindqvist", "Dev Patel",
+    "Elena Moreau", "Frank Okafor", "Grace Tan", "Hugo Silva"];
+  const filings = [];
+  for (let i = 0; i < 140; i++) {
+    const txnMs = Date.parse("2026-08-20T00:00:00Z") - Math.floor(rnd() * 75) * 86400000;
+    const lag = 18 + Math.floor(rnd() * 95);
+    const row = {
+      name: MEMBERS[i % MEMBERS.length],
+      politician_id: `pid-${i % MEMBERS.length}`,
+      reporter: MEMBERS[i % MEMBERS.length].split(" ")[0] + " " + MEMBERS[i % MEMBERS.length][0] + ".",
+      ticker: names[Math.floor(rnd() * names.length)],
+      issuer: "Synthetic Holdings Inc",
+      member_type: i % 3 === 0 ? "senate" : "house",
+      txn_type: i % 7 === 6 ? "Sale (Partial)" : i % 11 === 10 ? "Receive" : "Purchase",
+      amounts: i % 23 === 22 ? "Over $50,000,000" : BANDS[Math.floor(rnd() * BANDS.length)],
+      transaction_date: new Date(txnMs).toISOString().slice(0, 10),
+      filed_at_date: new Date(txnMs + lag * 86400000).toISOString().slice(0, 10),
+    };
+    if (i % 9 === 8) row.notes = "Subholding Of: Synthetic Brokerage Account stock";
+    filings.push(row);
+  }
+  /* The seller who must stay off the buying ranking: more disclosed dollars
+     than anyone, none of them a purchase. */
+  for (let i = 0; i < 6; i++) {
+    filings.push({
+      name: "Ivor Blackwood", politician_id: "pid-sell", ticker: names[i % names.length],
+      issuer: "Synthetic Holdings Inc", member_type: "house",
+      txn_type: "Sale (Full)", amounts: "$1,000,001 - $5,000,000",
+      transaction_date: "2026-07-02", filed_at_date: "2026-08-01",
+    });
+  }
+  /* The second wire spelling, on rows that are otherwise ordinary. */
+  for (let i = 0; i < 8; i++) {
+    filings.push({
+      name: "Jae Moon", politician_id: "pid-alt", ticker: names[i % names.length],
+      asset: "Synthetic Corporation - Common Stock", asset_type: "stock",
+      transaction_type: "Buy",
+      low_value: "1000001", high_value: "5000000", mid_value: "3000000",
+      transaction_date: "2026-06-20", filed_at_date: "2026-07-15",
+    });
+  }
+  filings.push({ notes: "no filer and no ticker" });      // unusable, counted
+  return {
+    filings,
+    holders: { __failed: "HTTP 403 — enterprise-only endpoint" },
+  };
+}
+
 /* Dry-run raws for the pulse leg, one entry per feed, in the wire spelling
    the spec documents (docs/uw-openapi.yaml) — snake_case, numbers sometimes
    strings, envelopes sometimes {data:[...]}. Sometimes-absent fields are
@@ -4987,6 +5052,153 @@ async function main() {
       PULSE_FEEDS.map((f) => `${f}:${pulse[f].status}${pulse[f].rows ? ":" + pulse[f].rows.length : pulse[f].points ? ":" + pulse[f].points.length : ""}`).join(" "));
   } catch (error) {
     console.warn(`  pulse: ${error.message} — every key above published before this leg ran`);
+  }
+
+  /* 7i. THE POLITICAL SECTION — who disclosed the largest purchases.
+
+     WHY congress-trader AND NOT recent-trades. A ranking needs a POPULATION,
+     and recent-trades caps at 200 rows with no page parameter: the top of a
+     ranking built on it would be "whoever filed most recently", dressed as
+     "whoever bought most". congress-trader documents `page` (1-indexed),
+     `date_from` and `date`, and its `name` filter is optional — so the same
+     route paginates the whole chamber across a stated window. That makes the
+     window, not the vendor's row budget, the thing the caption has to name.
+
+     THE PAGE PARAMETER IS VERIFIED, NOT ASSUMED. If the vendor ignores
+     `page` — this specification has been wrong five times — every page
+     returns the same rows, and summing eight identical pages inflates every
+     ranked total EIGHTFOLD while every internal check still passes: the sums
+     are consistent, the ordering is stable, the page simply lies by a factor.
+     So each page is fingerprinted and a repeat stops the walk, keeps the
+     first page only, and says in the payload that pagination did not answer.
+     A short page also stops it, which is the ordinary end.
+
+     THE HOLDERS FEED IS ENTERPRISE-ONLY by the spec's own note, so it is
+     expected to 403 on this key. It fails alone — the section publishes
+     without it — and the first refusal ends the walk rather than spending one
+     call per name to be told the same thing six times. */
+  try {
+    const POLITICAL_WINDOW_DAYS = 90;
+    const POLITICAL_PAGE_LIMIT = 200;
+    const POLITICAL_MAX_PAGES = 8;
+    const POLITICAL_HOLDER_NAMES = 6;
+    const from = new Date(Date.parse((sessionDate || new Date().toISOString().slice(0, 10)) +
+      "T00:00:00Z") - POLITICAL_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
+
+    const raws = {};
+    let pagesRead = 0, paginated = null, fellBack = false;
+    if (DRY_RUN) {
+      Object.assign(raws, fakePoliticalRaws((payloads.long.rows || []).map((r) => r.t)));
+      /* NULL, NOT ZERO. A fixture read no pages, and "0 pages, 154 filings"
+         is a self-contradicting pair that a reader would have to guess at.
+         The same distinction the payloads keep everywhere else. */
+      pagesRead = null;
+    } else {
+      const filings = [];
+      const seenPages = new Set();
+      try {
+        for (let page = 1; page <= POLITICAL_MAX_PAGES; page++) {
+          const rows = unwrapPolitical(await uw("/api/congress/congress-trader", {
+            limit: POLITICAL_PAGE_LIMIT, page, date_from: from, date: sessionDate || undefined,
+          }));
+          if (!rows.length) break;
+          /* The fingerprint is the whole page's identity keys, not its first
+             row: a feed re-sorted between calls would fool a first-row check
+             while still being the same 200 filings. */
+          const print = rows.map((r) => `${r && r.politician_id || ""}|${r && r.ticker || ""}` +
+            `|${r && r.transaction_date || ""}|${r && r.amounts || r && r.mid_value || ""}`).join(";");
+          if (seenPages.has(print)) {
+            paginated = false;
+            console.warn(`  political: page ${page} repeated page ${pagesRead} byte for byte — ` +
+              "the vendor is ignoring `page`. Keeping one page; a ranking summed over " +
+              "repeats would overstate every total by the number of pages read");
+            break;
+          }
+          seenPages.add(print);
+          filings.push(...rows);
+          pagesRead++;
+          if (rows.length < POLITICAL_PAGE_LIMIT) { paginated = pagesRead > 1; break; }
+          if (page === POLITICAL_MAX_PAGES) paginated = true;
+        }
+      } catch (error) {
+        /* A 422 on page 1 means the route refused the shape, not that there
+           are no filings. recent-trades answers the same question over a
+           smaller population, and the payload says which one it read. */
+        if (!filings.length) {
+          fellBack = true;
+          console.warn(`  political: congress-trader refused (${error.message}) — ` +
+            "falling back to recent-trades, one page, no window");
+          try {
+            filings.push(...unwrapPolitical(await uw("/api/congress/recent-trades",
+              { limit: POLITICAL_PAGE_LIMIT })));
+            pagesRead = 1;
+          } catch (inner) {
+            raws.filings = { __failed: inner && inner.message ? inner.message : String(inner) };
+          }
+        } else {
+          console.warn(`  political: page ${pagesRead + 1} failed (${error.message}) — ` +
+            `ranking on the ${filings.length} filing(s) already read`);
+        }
+      }
+      if (!raws.filings) raws.filings = filings;
+
+      /* Holders, for the names the boards already care about. */
+      const holderNames = deepNames(published, POLITICAL_HOLDER_NAMES).map((d) => d.t);
+      const holders = [];
+      for (const ticker of holderNames) {
+        try {
+          holders.push({ ticker, raw: await uw(`/api/politician-portfolios/holders/${ticker}`, {}) });
+        } catch (error) {
+          const message = error && error.message ? error.message : String(error);
+          if (!holders.length) {
+            raws.holders = { __failed: message };
+            console.log(`  political holders: ${message} — enterprise-only by the spec's own ` +
+              "note, so one refusal ends the walk rather than buying five more");
+            break;
+          }
+          console.warn(`  political holders ${ticker}: ${message} — the names already read stand`);
+        }
+      }
+      if (!raws.holders) raws.holders = holders;
+    }
+
+    const political = buildPolitical(raws);
+    /* The quiet-but-rows tripwire, the same one the pulse leg carries: a feed
+       that RETURNED rows and shaped to nothing dumps its first row's keys,
+       which is the output that has solved every prior shape mystery in one
+       run. */
+    if (political.buyers.status === "quiet") {
+      const first = unwrapPolitical(raws.filings)[0];
+      if (first && typeof first === "object") {
+        console.log("  political: NOTE filings returned rows but none ranked — first-row keys: " +
+          Object.keys(first).slice(0, 24).join(", "));
+      }
+    }
+    await publish("political", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      readAt: new Date().toISOString(),
+      window: { from, to: sessionDate || null, days: POLITICAL_WINDOW_DAYS },
+      /* HOW THE POPULATION WAS OBTAINED, published rather than logged. A
+         ranking is only as wide as what was read, and a reader who cannot see
+         that one page was read instead of eight cannot tell a thin week from
+         a broken pagination. `paginated: false` is the vendor ignoring the
+         parameter; null is one page having been enough to answer. */
+      source: {
+        route: DRY_RUN ? "dry-run fixture" : fellBack ? "recent-trades" : "congress-trader",
+        pages: pagesRead, pageLimit: POLITICAL_PAGE_LIMIT, paginated,
+        windowed: !fellBack,
+      },
+      ...political,
+    });
+    const okCount = POLITICAL_FEEDS.filter((f) => political[f].status === "ok").length;
+    console.log(`  political: ${okCount} of ${POLITICAL_FEEDS.length} feeds ok — ` +
+      `${political.filings ?? 0} filing(s) over ${pagesRead === null ? "no" : pagesRead} ` +
+      `page(s) from ${from}, ` +
+      POLITICAL_FEEDS.map((f) => `${f}:${political[f].status}` +
+        `${political[f].rows ? ":" + political[f].rows.length : ""}`).join(" "));
+  } catch (error) {
+    console.warn(`  political: ${error.message} — every key above published before this leg ran`);
   }
 
   /* 7h. WAVE-B PROBES — six per-stock endpoints scouted on one liquid name.

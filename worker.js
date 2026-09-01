@@ -2261,6 +2261,10 @@ async function route(request, env, url, ctx) {
     "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
     "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
+    /* Under its own rail group rather than beside the session pages — see
+       politicalPage() for why a 45-day-old fact does not belong next to
+       today's tape. */
+    "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2286,7 +2290,7 @@ async function route(request, env, url, ctx) {
       || path === "/flows/watch" || path === "/flows/history"
       || path === "/flows/market" || path === "/flows/ticker"
       || path === "/flows/unusual" || path === "/flows/events"
-      || path === "/flows/track") {
+      || path === "/flows/track" || path === "/flows/political") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2329,7 +2333,7 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2469,6 +2473,21 @@ async function route(request, env, url, ctx) {
          cron so the series does not stop at yesterday's close. Served like
          everything here: one stored blob, handed back as bytes. */
       const stored = await readFlowsPayload(env, "pulse");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/political") {
+      /* DISCLOSED POLITICAL FILINGS, ranked by size. Built nightly by the
+         pipeline from a paginated congress-trader window and — where the key
+         is entitled to it — the politician-portfolio holders feed. Served the
+         way everything here is: one stored blob, handed back as bytes.
+
+         The payload carries how it was obtained (route, pages read, whether
+         pagination answered) because a ranking is only as wide as the
+         population behind it, and a reader cannot tell a thin week from a
+         broken walk without that. */
+      const stored = await readFlowsPayload(env, "political");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }

@@ -101,6 +101,19 @@ const SURFACES = [
      other's blob is the drift this suite exists to catch. */
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
   { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },
+  /* The political renderer hands the WHOLE payload to each of its four
+     painters under one name, so a whole-file scan is the right scope: every
+     `p.` read in the file is a root-field claim about this key. */
+  { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },
+  /* THE COMMAND CENTER, which draws five payloads into one page and is the
+     largest renderer on the site. Each region is scoped to its own painter,
+     because a whole-file scan would check every payload's fields against all
+     five keys and pass on the union — the exact vacuous-pass shape this suite
+     exists to prevent. */
+  { key: "scoretrack", file: "assets/js/flows-overview.js", fn: "paintChanged", vars: ["payload"] },
+  { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintAlerts", vars: ["payload"] },
+  { key: "events", file: "assets/js/flows-overview.js", fn: "paintEvents", vars: ["payload"] },
+  { key: "board:watch", file: "assets/js/flows-overview.js", fn: "paintWatch", vars: ["payload"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------
@@ -119,6 +132,10 @@ const OPTIONAL = {
      {status:"pending"} from the worker even though the pipeline's own
      payload never carries a top-level status. */
   pulse: { status: "the worker's pending envelope carries it" },
+  /* Same allowance, same reason: the renderer must recognise the worker's
+     {status:"pending"} for a key the pipeline has not written yet, and the
+     political payload carries no top-level status of its own. */
+  political: { status: "the worker's pending envelope carries it" },
 };
 
 const missingReport = [];
@@ -144,7 +161,19 @@ for (const surf of SURFACES) {
      assertion pass vacuously — the exact failure mode that let the
      sector bug live, reproduced inside its own detector. */
   for (const v of surf.vars) {
-    ok(new RegExp("function\\s+\\w+\\s*\\(\\s*" + v + "\\b").test(scope) || !surf.fn,
+    /* THE PAYLOAD NEED NOT BE THE FIRST PARAMETER, and insisting it was kept
+       the site's largest renderer out of this scan entirely. flows-overview.js
+       paints into a host it is handed first — paintChanged(into, payload) —
+       so the old anchored pattern matched nothing there, and the only way to
+       cover the file would have been to reorder five signatures to satisfy a
+       test. A test that dictates parameter order is a test that will be
+       worked around.
+
+       The anti-vacuity guarantee is unchanged and is the whole point of this
+       check: the name must appear in the parameter list of a function inside
+       the scanned scope, so renaming it still fails here loudly instead of
+       silently disabling every assertion below. */
+    ok(new RegExp("function\\s+\\w+\\s*\\([^)]*\\b" + v + "\\b[^)]*\\)").test(scope) || !surf.fn,
        `${surf.file}:${surf.fn || "(module)"} still receives its payload as \`${v}\` — ` +
        "a renamed parameter makes this whole scan vacuous");
   }

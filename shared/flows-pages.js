@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "81";
+export const ASSET_VERSION = "82";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -76,7 +76,12 @@ const rail = (active) => {
      honest; a badge that says 0 while the fetch is in flight is not. */
   const item = (href, label, key) => {
     const on = active === key;
-    const badge = key === "long" || key === "short" || key === "watch"
+    /* EVENTS WAS QUERYING A SLOT THAT WAS NEVER RENDERED. flows-events.js has
+       filled [data-rail-count="events"] since the calendar shipped; this set
+       emitted a slot for three keys and not that one, so the query matched
+       nothing and the badge could never appear — a silent no-op rather than an
+       error, which is why it survived. The set and the fillers agree now. */
+    const badge = key === "long" || key === "short" || key === "watch" || key === "events"
       ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
     return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
       `<span class="rail-label">${label}</span>${badge}</a>`;
@@ -100,6 +105,10 @@ const rail = (active) => {
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
+  </div>
+  <p class="rail-group" id="railDisclosures">Disclosures</p>
+  <div class="rail-items" role="group" aria-labelledby="railDisclosures">
+    ${item("/flows/political/", "Political", "political")}
   </div>
   <p class="rail-group" id="railEvidence">Evidence</p>
   <div class="rail-items" role="group" aria-labelledby="railEvidence">
@@ -244,54 +253,132 @@ const cardDialog = () => `
   </article>
 </dialog>`;
 
-/* ---------- overview: both tails at once ------------------------ */
+/* ---------- overview: the command center ------------------------ */
 
 /**
- * The landing page.
+ * The landing page, and the one screen that answers "what should I look at
+ * today" without leaving it.
  *
- * It used to be the board with a LONG/SHORT toggle, which is two problems in
- * one control: it hides half the session behind a click, and a toggle has no
- * URL, so a reader cannot link to, bookmark or send the bearish side.
+ * IT USED TO THROW AWAY WHAT IT HAD ALREADY FETCHED. The page pulled both
+ * full board payloads — every ranked name on each side — and drew SIX TILES
+ * from them, three a side. Everything else the session knows sat on four
+ * other routes, so the first question anyone asks cost five page loads.
  *
- * The main section now shows BOTH POLES AT ONCE over a fixed score axis, and
- * the dead band is drawn rather than described. That band is the reason the
- * page is usually short — 17 of 24 names landed inside it on the session now
- * live — and a reader who cannot see it reads a three-name page as a broken
- * one. Drawing it turns "why is this empty" into "most of the market is not
- * leaning, and here is how much of it".
+ * SEVEN REGIONS NOW, FROM SEVEN ENDPOINTS THAT ALREADY EXISTED. A verdict
+ * bar, both ranked sides ten deep with a score strip per row, what moved
+ * since the prior session, the freshest flagged windows, what reports next,
+ * what is a hair outside the band, and the spine. No new vendor call, no
+ * pipeline change: the difference is that the page stopped discarding what
+ * was already in its hands.
  *
- * The full ranked lists move to their own routes, where they are pages rather
- * than a state of this one.
+ * THE REGION SHELLS ARE EMITTED HERE, THE CONTENTS IN THE BROWSER — the same
+ * split marketPage() uses for its .fc-panel skeletons. A heading is prose and
+ * belongs in the document; a subtitle that reads "top 10 of 43" is a
+ * measurement and cannot be written before the payload lands.
+ *
+ * THE SPINE KEEPS ITS PLACE at the foot, inside a region of its own. It is
+ * the only view of the WHOLE distribution — one mark per published name on a
+ * fixed −100..+100 axis with the dead band hatched onto it — and the regions
+ * above it are an index of that distribution, not a replacement for it. That
+ * band is why this page is usually short, and a reader who cannot see it
+ * reads a ten-name page as a broken one.
  */
 export function overviewPage({ username = "" } = {}) {
-  return `${head("Flows — Overview", "Where the session leans, both tails at once.")}
+  return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
 ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
-  <!-- THE SPINE. A fixed -100..+100 axis with the dead band hatched, so the
-       band that excluded most of the market is visible rather than inferred. -->
-  <section class="spine" aria-labelledby="spineH">
-    <h2 id="spineH" class="spine-h">Where the session leans</h2>
-    <div id="spinePlot"></div>
-  </section>
+  <!-- THE COMMAND CENTER. Twelve columns at desk widths, stacking to one on a
+       phone. Every region below is a HOST: the shell, its heading and its
+       accessible name are emitted here; the rows, the tiles and the strips are
+       filled by flows-overview.js from payloads this page cannot see. A region
+       that stays empty says which of the three silences it is in — the key was
+       never published, the request never came back, or the pipeline measured
+       and found nothing — because only the last of those is about the market. -->
+  <div class="cc">
 
-  <div class="poles">
-    <section class="pole is-bull" aria-labelledby="bullH">
-      <header class="pole-head">
-        <h2 id="bullH">Most bullish-leaning</h2>
-        <a href="/flows/long/" class="pole-all" id="bullAll">All bullish</a>
-      </header>
-      <div class="pole-deck" id="bullDeck" role="list" aria-labelledby="bullH"></div>
+    <!-- Six readings the rest of the page then explains. Any of them may be an
+         em dash: a tile whose endpoint did not answer says so by not saying a
+         number. -->
+    <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
+
+    <section class="cc-region cc-bull" aria-labelledby="ccBullH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccBullH">Bullish</h2>
+        <!-- The subtitle IS the way to the rest of them: it says how many this
+             region is NOT showing, and goes there. -->
+        <a class="cc-h-s" href="/flows/long/" id="ccBullSub" hidden></a>
+      </div>
+      <div class="cc-body" id="ccBull"></div>
     </section>
 
-    <section class="pole is-bear" aria-labelledby="bearH">
-      <header class="pole-head">
-        <h2 id="bearH">Most bearish-leaning</h2>
-        <a href="/flows/short/" class="pole-all" id="bearAll">All bearish</a>
-      </header>
-      <div class="pole-deck" id="bearDeck" role="list" aria-labelledby="bearH"></div>
+    <section class="cc-region cc-bear" aria-labelledby="ccBearH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccBearH">Bearish</h2>
+        <a class="cc-h-s" href="/flows/short/" id="ccBearSub" hidden></a>
+      </div>
+      <div class="cc-body" id="ccBear"></div>
     </section>
+
+    <!-- THE QUESTION NO OTHER ROUTE ANSWERS. Every surface in this section
+         reports a level; none of them reports a CHANGE, so a name that moved
+         forty points overnight looks exactly like one that has sat still for a
+         month. "Prior session" means the previous session the name was SCORED:
+         a gap in the trace means it was not scored that day, never that it
+         scored zero. -->
+    <section class="cc-region cc-chg" aria-labelledby="ccChgH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccChgH">What changed</h2>
+        <span class="cc-h-s">since each name&#39;s prior scored session</span>
+      </div>
+      <div class="cc-body" id="ccChg"></div>
+    </section>
+
+    <!-- The vendor's own rules, not this pipeline's. Tickers here are plain
+         text: a detail card exists only for the names the board went deep on,
+         and an opener that usually opens nothing is worse than no opener. -->
+    <section class="cc-region cc-alerts" aria-labelledby="ccAlertsH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccAlertsH">Freshest flagged windows</h2>
+        <span class="cc-h-s" id="ccAlertsSub"></span>
+      </div>
+      <div class="cc-body" id="ccAlerts"></div>
+    </section>
+
+    <section class="cc-region cc-ev" aria-labelledby="ccEventsH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccEventsH">Reporting soon</h2>
+        <span class="cc-h-s" id="ccEventsSub"></span>
+      </div>
+      <div class="cc-body" id="ccEvents"></div>
+    </section>
+
+    <!-- Fully scored, published on neither side. Until the watch board existed
+         these names reached the reader as a single integer in the band label. -->
+    <section class="cc-region cc-watch" aria-labelledby="ccWatchH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccWatchH">Nearly in</h2>
+        <a class="cc-h-s" href="/flows/watch/" id="ccWatchSub">inside the dead band</a>
+      </div>
+      <div class="cc-body" id="ccWatch"></div>
+    </section>
+
+    <!-- THE SPINE, re-seated rather than replaced. A fixed -100..+100 axis with
+         the dead band hatched, so the band that excluded most of the market is
+         visible rather than inferred. It is the only view of the whole
+         distribution on the page, which is why it survived the redesign intact. -->
+    <section class="cc-region cc-spine" aria-labelledby="ccSpineH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccSpineH">The whole distribution</h2>
+        <span class="cc-h-s">every published name on a fixed axis</span>
+      </div>
+      <section class="spine" aria-labelledby="spineH">
+        <h2 id="spineH" class="spine-h">Where the session leans</h2>
+        <div id="spinePlot"></div>
+      </section>
+    </section>
+
   </div>
 
   <p class="flows-foot">
@@ -302,6 +389,11 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
 `)}
 ${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
+<!-- flows-ui.js BEFORE flows-overview.js: the overview reads window.FlowsUI at
+     module scope, and two deferred scripts execute in document order, so the
+     library has to be the earlier tag. It is a hard dependency and the page
+     says so on the status line rather than throwing when it is missing. -->
+<script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 <script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
@@ -1224,7 +1316,93 @@ function escapeHTML(value) {
   })[c]);
 }
 
+/* ---------- the political disclosures --------------------------- */
+
+/**
+ * WHO DISCLOSED THE LARGEST PURCHASES.
+ *
+ * A SEPARATE RAIL GROUP, AND THAT IS THE ARGUMENT. Every other gated page
+ * answers a question about a session: what was bought today, what is unusual
+ * today, what reports this week. This one cannot. The STOCK Act allows 45
+ * days between a transaction and its disclosure and late filers routinely
+ * exceed 100, so the newest row here describes something that happened
+ * closer to two months ago than to this morning. Filing it under "Session"
+ * would put a two-month-old fact beside today's tape under one heading and
+ * invite the reading the whole page is built to refuse. It sits under
+ * "Disclosures" instead, next to nothing that claims to be current.
+ *
+ * FOUR PANELS, ONE SHELL EACH. Every heading and every accessible name is
+ * emitted here; every row, bar and band is filled by flows-political.js from
+ * a payload this document cannot see. A panel that stays empty says WHICH of
+ * the three silences it is in — the key was never published, the request did
+ * not come back, or the window was read and held nothing — because only the
+ * last of those is a fact about politicians.
+ *
+ * THE HOLDER PANEL IS EXPECTED TO BE UNAVAILABLE. The vendor marks
+ * /politician-portfolios/holders as enterprise-only, so on this key it
+ * answers 403. The panel ships anyway: an empty shell that names the refusal
+ * is honest, and it costs one line the day the entitlement changes.
+ */
+export function politicalPage({ username = "" } = {}) {
+  const lede = "Who disclosed the largest purchases, and in what — ranked by " +
+    "size, with the range each filing actually stated drawn across it.";
+  return `${head("Flows — Political", lede)}
+${shell("Political Disclosures", "Options-flow intelligence", "political", username, `
+  <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
+  <p class="flows-stale" id="plSource" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <!-- THE LAG, ABOVE THE FOLD AND NOT IN THE FOOTER. Everything below is
+       weeks old by construction. A reader who scrolls to a ranking without
+       having read that will read it as news, so it is said before the first
+       number rather than after the last. -->
+  <p class="pl-lede-warn">
+    Every row on this page is a statutory disclosure, not a trade seen on a
+    tape. Filing is late by law and later in practice: the STOCK Act allows
+    45 days and late filers routinely exceed 100. Each row carries the days
+    between its transaction and its filing, and each ranked total carries the
+    median lag of the filings behind it. This page ranks what has been
+    <em>disclosed</em>, which is never the same question as what is being
+    done now.
+  </p>
+
+  <section class="fc-panel is-wide" id="plBuyersPanel" hidden>
+    <h2 class="fc-panel-h">Who disclosed the largest purchases</h2>
+    <div id="plBuyers"></div>
+    <p class="fc-note" id="plBuyersNote"></p>
+  </section>
+
+  <section class="fc-panel is-wide" id="plAssetsPanel" hidden>
+    <h2 class="fc-panel-h">What was bought the most</h2>
+    <div id="plAssets"></div>
+    <p class="fc-note" id="plAssetsNote"></p>
+  </section>
+
+  <section class="fc-panel is-wide" id="plRecentPanel" hidden>
+    <h2 class="fc-panel-h">Newest disclosures</h2>
+    <div id="plRecent"></div>
+    <p class="fc-note" id="plRecentNote"></p>
+  </section>
+
+  <section class="fc-panel" id="plHoldersPanel" hidden>
+    <h2 class="fc-panel-h">Holdings in the board&#39;s names</h2>
+    <div id="plHolders"></div>
+    <p class="fc-note" id="plHoldersNote"></p>
+  </section>
+
+  <div class="flows-foot" id="plFoot"></div>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-political.js")}" defer></script>
+</body>
+</html>`;
+}
+
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
+  politicalPage,
   tickerPage, unusualPage, eventsPage, trackPage, ASSET_VERSION,
 };
