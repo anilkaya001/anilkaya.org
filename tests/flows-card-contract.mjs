@@ -492,6 +492,73 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "unavailable rather than claiming a measurement it never made");
 }
 
+/* ---------- price context: the join key that did not exist --------
+
+   The directive this product is built to has one explicit deliverable that
+   was nowhere in it: historical daily-close scores overlaid on price. Both
+   halves ship and both are drawn — on separate pages, in incompatible
+   shapes. The score series is keyed by session date; `closes` was a
+   POSITIONAL array with no dates, so nothing could align close[i] to
+   session[j].
+
+   The trap is not that dates were missing. It is that buildContext FILTERS —
+   dropping any close that is null or non-positive — so index stops being
+   time exactly when a session goes missing, and a dates array added
+   afterwards and filtered separately (or not filtered at all) is misaligned
+   by precisely the number of dropped sessions. Two independent designs for
+   this feature proposed exactly that. These assertions are what makes the
+   lockstep unreachable to get wrong. */
+{
+  const ctx = buildContext({
+    closes: [10, 11, 12, 13],
+    closeDates: ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"],
+  }, { asOf: "2026-08-27" });
+  eq(ctx.closes.length, ctx.closeDates.length,
+     "closes and closeDates are the same length");
+  assert.deepEqual(ctx.closeDates, ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"],
+     "and pair up in order when nothing is dropped"); checks++;
+  eq(ctx.dropped, 0, "with nothing dropped");
+
+  /* THE ASSERTION THE WHOLE SECTION EXISTS FOR. */
+  const gappy = buildContext({
+    closes: [10, null, 12, 0, 14],
+    closeDates: ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"],
+  }, { asOf: "2026-08-28" });
+  assert.deepEqual(gappy.closes, [10, 12, 14],
+     "the null and the non-positive close are dropped, as they always were"); checks++;
+  assert.deepEqual(gappy.closeDates, ["2026-08-24", "2026-08-26", "2026-08-28"],
+     "AND THEIR DATES GO WITH THEM. The surviving closes are 10, 12, 14 and " +
+     "they happened on the 24th, 26th and 28th — not the 24th, 25th and 26th. " +
+     "A dates array filtered separately from the closes, or not filtered at " +
+     "all, would have said the second and third here, putting every point on " +
+     "the wrong day and the score overlay out of step with the price it is " +
+     "drawn against"); checks++;
+  eq(gappy.dropped, 2,
+     "and the count of removed sessions is published, because a non-zero " +
+     "value is exactly when index stops being time in these arrays");
+  eq(gappy.closes.length, gappy.closeDates.length,
+     "the two arrays stay the same length across the filter");
+
+  /* A publisher that sends no dates must not manufacture a row of nulls that
+     a renderer could read as a measurement. */
+  const undated = buildContext({ closes: [10, 11, 12] }, { asOf: "2026-08-27" });
+  ok(!("closeDates" in undated),
+     "a card published before this field existed OMITS it rather than carrying " +
+     "nulls — an absent key is a different fact from a date that could not be read");
+  eq(undated.datedSessions, 0,
+     "with the dated count at zero, so a time-axis chart knows it cannot draw");
+  eq(undated.sessions, 3, "while the positional series is unaffected");
+
+  const halfDated = buildContext({
+    closes: [10, 11, 12], closeDates: ["2026-08-24", null, "2026-08-26"],
+  }, { asOf: "2026-08-26" });
+  eq(halfDated.closeDates[1], null, "a candle with no readable date keeps its slot as null");
+  eq(halfDated.datedSessions, 2,
+     "and datedSessions counts what can be placed on a time axis, which is not " +
+     "the same as sessions — a chart that joined on date and trusted `sessions` " +
+     "would silently plot two points and label them three");
+}
+
 /* ---------- the panels added after the live board was read -------- */
 {
   /* GAMMA ROLL-OFF. put_gamma arrives ALREADY dealer-signed, so gross roll-off
