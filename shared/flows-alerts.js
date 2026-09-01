@@ -165,11 +165,32 @@ export function alertBand(shapedRows, { cap = ALERT_BAND_ROWS } = {}) {
 /**
  * The published feed: shaped, ranked by the vendor's own premium inside the
  * vendor's own selection, capped with the shed counted.
+ *
+ * THE SHAPER OWNS THE ENVELOPE, AND IT LEARNED THAT THE EXPENSIVE WAY.
+ * This function accepted only a bare array, so the two writers of the
+ * `flowalerts` key had to agree, out of band, on who unwrapped. They did not.
+ * The nightly pipeline's uw() returns `body.data` already unwrapped; the
+ * worker's uwFetch() returns the parsed body verbatim. Handed
+ * `{data:[...60 rows...]}`, the `Array.isArray` guard below iterated NOTHING
+ * and returned a well-formed, entirely empty feed — and the cron's unguarded
+ * spread wrote that over sixty real rows, every fifteen minutes, all session.
+ * The Overview then reported "FLAGGED WINDOWS 0" over 569 screened names: a
+ * confident claim about the market manufactured by a type check.
+ *
+ * The guard is now an UNWRAP rather than a filter, so a caller cannot get the
+ * envelope wrong. Putting it here rather than at the two call sites is the
+ * point: the shaper is the only place that knows what a row is, and one
+ * spelling in one function removes the class of bug instead of this instance.
  */
 export function buildFlowAlerts(rawRows, { stageOf, cap = ALERT_ROWS } = {}) {
   const shaped = [];
   let unusable = 0;
-  for (const raw of (Array.isArray(rawRows) ? rawRows : [])) {
+  const incoming = Array.isArray(rawRows)
+    ? rawRows
+    : (rawRows && typeof rawRows === "object" && Array.isArray(rawRows.data))
+      ? rawRows.data
+      : [];
+  for (const raw of incoming) {
     const row = alertRow(raw, { stageOf });
     if (row) shaped.push(row);
     else unusable++;

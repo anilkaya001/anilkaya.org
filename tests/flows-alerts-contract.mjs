@@ -204,8 +204,57 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "fact about this feed");
 }
 
+/* ---------- the envelope both writers must survive -----------------
+   THE DEFECT THIS SECTION EXISTS FOR. Two writers publish the `flowalerts`
+   key: the nightly pipeline, whose uw() unwraps `body.data` before calling;
+   and the worker's fifteen-minute cron, whose uwFetch() returns the parsed
+   body verbatim. This suite only ever fed the shaper a bare array — the one
+   shape the CRON NEVER SENDS — so the shaper's `Array.isArray` guard silently
+   iterated nothing on every intraday refresh, and the unguarded write put a
+   well-formed empty feed over sixty real rows. The Overview then reported
+   "FLAGGED WINDOWS 0" across 569 screened names: a confident claim about the
+   market, manufactured by a type check, wearing the provenance "refreshed
+   intraday". Both envelopes are now fed to the one shaper here. */
+{
+  const rows = [
+    { ticker: "AAA", option_chain: "AAA260918C00100000", total_premium: "900000",
+      rule_name: "RepeatedHits", strike: "100", expiry: "2026-09-18", type: "call" },
+    { ticker: "BBB", option_chain: "BBB260918P00050000", total_premium: "400000",
+      rule_name: "SteadyAccumulation", strike: "50", expiry: "2026-09-18", type: "put" },
+  ];
+
+  const bare = buildFlowAlerts(rows, { stageOf: () => "board:long" });
+  const wrapped = buildFlowAlerts({ data: rows }, { stageOf: () => "board:long" });
+
+  eq(wrapped.rows.length, bare.rows.length,
+    "THE VENDOR ENVELOPE SHAPES IDENTICALLY TO A BARE ARRAY. The cron hands this " +
+    "shaper {data:[...]} and the pipeline hands it the unwrapped array; a shaper " +
+    "that reads only one of them turns the other writer into a zeroing machine");
+  eq(JSON.stringify(wrapped), JSON.stringify(bare),
+    "byte-identical, so which writer ran cannot be inferred from the payload — " +
+    "and cannot change it either");
+  eq(wrapped.status, "ok", "and the wrapped read is ok rather than quiet");
+  eq(wrapped.seen, 2, "with every row counted");
+
+  eq(buildFlowAlerts({ data: [] }, { stageOf: () => null }).status, "quiet",
+    "a genuinely empty envelope is still QUIET — the unwrap must not manufacture " +
+    "rows, only stop discarding them");
+  eq(buildFlowAlerts(null, { stageOf: () => null }).status, "quiet",
+    "and junk is quiet rather than a throw");
+  eq(buildFlowAlerts({ data: "nope" }, { stageOf: () => null }).status, "quiet",
+    "as is an envelope whose data is not a list");
+
+  /* The write guard's own condition, asserted where the shaper can see it:
+     the cron writes only on `status === "ok" && rows.length`, so these two
+     readings are exactly what must keep a stale-but-real feed in place. */
+  ok(buildFlowAlerts({ data: [] }, { stageOf: () => null }).rows.length === 0,
+    "an empty read publishes no rows, which is the condition the cron's write " +
+    "guard tests — better a stale feed with an honest readAt than an empty fresh one");
+}
+
 console.log(`✓ flows-alerts: ${checks} assertions — a vendor flag that is absent staying ` +
   `null rather than becoming a confident no, a row measuring nothing dropped and counted, ` +
   `premium ranking inside the vendor's own selection with a total tie-break the first ` +
   `draft's precedence bug would fail, a published cap with its shed, affirmative-only ` +
-  `flag counts, a quiet empty, and notes that need no allow-list`);
+  `flag counts, a quiet empty, both wire envelopes shaping byte-identically so the ` +
+  `second writer cannot zero the key, and notes that need no allow-list`);

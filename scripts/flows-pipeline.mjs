@@ -365,6 +365,7 @@ export const DEADLINE_MS = 36 * 60 * 1000;
 
 /* The tick row's field list is reported once per run, not once per name. */
 let tickFieldsReported = false;
+let greekFieldsReported = false;
 
 /** The four fields this pipeline reads off a /net-prem-ticks row. */
 const TICK_FIELDS_READ = Object.freeze([
@@ -994,6 +995,41 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
     for (const line of describeTickFields(ticker, ticks[0])) console.log(line);
   }
 
+  /* THE SAME PROBE, ON THE ENDPOINT THAT HAS ALREADY LIED ONCE.
+
+     /greek-exposure/expiry is where `call_gamma` turned out to be `call_gex`
+     on the wire, and every gamma roll-off panel shipped "unavailable" for
+     weeks as a result. The vanna, charm and delta readers added beside it are
+     written from the SAME schema block that got gex right — which makes that
+     block evidence rather than a claim, but not a measurement.
+
+     So the first live run says which of the eight legs actually arrived,
+     printed once, from the row this run already holds. If a leg is missing
+     the term structures publish `absent` with a reason and nothing is drawn;
+     this line is how that turns into a two-minute fix rather than a mystery. */
+  if (!greekFieldsReported && expiries.length) {
+    greekFieldsReported = true;
+    const first = expiries[0] || {};
+    const keys = Object.keys(first);
+    const legs = ["call_gex", "put_gex", "call_delta", "put_delta",
+      "call_charm", "put_charm", "call_vanna", "put_vanna"];
+    const present = legs.filter((k) => first[k] !== null && first[k] !== undefined && first[k] !== "");
+    const absent = legs.filter((k) => !present.includes(k));
+    console.log(`  greek-exposure/expiry fields (${ticker}): ${keys.length} keys, ` +
+      `${present.length} of ${legs.length} expected legs present`);
+    if (absent.length) console.log(`    ABSENT legs: ${absent.join(", ")}`);
+    const unread = keys.filter((k) => !legs.includes(k) && k !== "expiry" && k !== "date" && k !== "dte");
+    if (unread.length) console.log(`    unread keys: ${unread.slice(0, 12).join(", ")}`);
+    /* Signs, because the put leg's convention differs BY GREEK on this
+       endpoint and that is the one thing a schema block cannot be trusted
+       for — netting under the wrong convention inverts a whole Greek. */
+    const sign = (v) => (v === null || v === undefined || v === "" ? "-" : (Number(v) < 0 ? "neg" : "pos"));
+    console.log(`    signs: gex ${sign(first.call_gex)}/${sign(first.put_gex)} ` +
+      `charm ${sign(first.call_charm)}/${sign(first.put_charm)} ` +
+      `vanna ${sign(first.call_vanna)}/${sign(first.put_vanna)} ` +
+      `delta ${sign(first.call_delta)}/${sign(first.put_delta)} (call/put)`);
+  }
+
   const missing = [];
   if (!greekFlow.length) missing.push("greek-flow");
   if (!strikes.length) missing.push("spot-exposures/strike");
@@ -1142,6 +1178,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
+
   const dollarVolume = medianDollarVolume(ohlc);   // last 60 sessions, not the year
 
   const closes = candlesAscending(ohlc).map((c) => num(c.close));
@@ -2122,6 +2159,26 @@ function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } 
          gets null here, never 0 — zero is a real reading of this field and
          means "as much call as put surprise", which is the opposite of
          "unknown". */
+      /* THE KEY THIS TABLE IS ORDERED BY, PUBLISHED.
+
+         The sort above is on |residual| and says so; the rows then shipped
+         carrying only `s`, a rounded integer on a +-100 scale. With DEAD_BAND
+         narrowed to 1, every name inside the band prints 0, 1 or -1 — in
+         practice a column of zeros — so the reader saw seven rows in a
+         deliberate order under a heading promising "how close they are to
+         leaving the band", ranked by a quantity the payload never carried.
+         The column had no bits and the ordering had no visible cause.
+
+         This is not a coerced zero: those zeros are real, and the refuted
+         half of this finding claimed otherwise. It is a ROUNDING that
+         destroys the ordering key at the last step, which is why publishing
+         `resid` fixes it and re-checking for nulls would not.
+
+         Four decimals because that is where this quantity stops being
+         meaningful: the band edge sits at |residual| ~= 0.0055, so a
+         thousandth would quantise the whole table onto six values. Costs no
+         vendor call and no recomputation — the number is already on `r`. */
+      resid: fixed(r.residual, 4),
       surpriseTilt: fixed(t.surpriseTilt, 3),
       relVolume: fixed(t.relVolume, 2),
       putCallRatio: fixed(t.putCallRatio, 3),
@@ -3622,11 +3679,37 @@ function fakeEnrichment(ticker, spot, seed) {
      "unavailable: no expiry gamma". Third time a fixture has agreed with the
      code's guess instead of with the vendor; a fixture that does that tests
      nothing. */
-  const expiries = Array.from({ length: 6 }, (_, i) => ({
-    expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-    call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
-    put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
-  }));
+  /* THE OTHER SIX LEGS, IN THE VENDOR'S OWN SIGN CONVENTION.
+
+     The same lesson as the gex fixture above, one level deeper: a fixture
+     that carries only the legs the code reads cannot catch the code failing
+     to read a leg. It also cannot catch the trap that makes these three
+     dangerous, so the signs here are copied from the vendor's own example
+     rows rather than invented — put_charm NEGATIVE against a positive
+     call_charm (dealer-signed, like gex), and put_vanna POSITIVE against a
+     positive call_vanna (NOT dealer-signed). A fixture that signed all three
+     alike would agree with any netting rule and prove nothing.
+
+     One expiry deliberately omits the vanna pair so every dry run exercises
+     a half-present leg, which is where a confident zero would otherwise be
+     invented for the missing half. */
+  const expiries = Array.from({ length: 6 }, (_, i) => {
+    const row = {
+      expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
+      dte: i * 7 + 4,
+      call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
+      put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
+      call_delta: String(2.2e8 / (i + 1) * (0.6 + rnd())),
+      put_delta: String(-1.9e8 / (i + 1) * (0.6 + rnd())),
+      call_charm: String(1.0e8 / (i + 1) * (0.6 + rnd())),
+      put_charm: String(-9.4e8 / (i + 1) * (0.6 + rnd())),
+    };
+    if (i !== 4) {
+      row.call_vanna = String(1.5e11 / (i + 1) * (0.6 + rnd()));
+      row.put_vanna = String(4.8e11 / (i + 1) * (0.6 + rnd()));
+    }
+    return row;
+  });
 
   let px = spot;
   const day0 = Date.UTC(2026, 5, 24, 13, 30);
@@ -5284,6 +5367,16 @@ async function main() {
      targeted one. Bucketed by ticker here; a name with no disclosures gets an
      empty array and the panel says so, which is what it did before. */
   const congressByTicker = new Map();
+  /* WHETHER THE READ HAPPENED AT ALL, which the run knows and used to keep to
+     itself. The market-wide fetch can throw, and the per-name fallback is
+     gated on a deadline that can cut it short — either way `congressByTicker`
+     simply has no entry, exactly as it has none for a name that appeared in
+     no filing. The comment thirty lines below already names the consequence:
+     "fifty cards each publishing a panel that says, in effect, 'no member of
+     Congress has traded this name', which is a confident claim about the
+     filings rather than a report of a failed read". This flag is what lets
+     the card tell the two apart. */
+  let congressRead = "not attempted";
   if (onBoard.size) {
     let marketWide = 0;
     try {
@@ -5305,6 +5398,9 @@ async function main() {
         ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
         : await uw("/api/congress/recent-trades", { limit: 100 });
       marketWide = recent.length;
+      /* The read happened. Every board name is now either in the map or
+         genuinely absent from the filings, and both are knowable facts. */
+      congressRead = "ok";
       for (const row of recent) {
         const t = row && (row.ticker || row.symbol);
         if (!t || !onBoard.has(t)) continue;
@@ -5315,6 +5411,7 @@ async function main() {
         `  congress: ${recent.length} disclosure(s) market-wide, ` +
         `${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
     } catch (error) {
+      congressRead = "failed";
       console.warn(`  congress: market-wide read failed — ${error.message}`);
     }
 
@@ -5370,7 +5467,13 @@ async function main() {
         .slice(0, SURFACE_EXPIRIES);
 
       const spotPx = num(e.row.close);
-      const congress = congressByTicker.get(ticker) || [];
+      /* NULL FOR A READ THAT DID NOT HAPPEN, [] FOR ONE THAT FOUND NOTHING.
+         `|| []` collapsed both into the same empty array, and buildCongress
+         then published "Unavailable. no disclosed transactions" for each —
+         an unavailability status carrying a measured-emptiness reason, on
+         every card, whichever had actually occurred. */
+      const congress = congressByTicker.get(ticker)
+        || (congressRead === "ok" ? [] : null);
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),

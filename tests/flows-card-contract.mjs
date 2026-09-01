@@ -232,10 +232,24 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   // No field may claim a return or a member track record.
   const asText = JSON.stringify(c);
   ok(!/"return"|"avgReturn"|"trackRecord"|"winRate"/.test(asText),
-     "the panel claims no return: congress-trader has no pagination, so a member's " +
-     "history cannot be walked, and a disclosure has no paired closing print");
+     "the panel claims no return, and for the ONE reason that cannot expire: a " +
+     "disclosure reports an opening with no paired closing print. This message " +
+     "also used to argue that congress-trader has no pagination — which was " +
+     "true, then stopped being true when the vendor documented `page` and " +
+     "`date_from`, and the political section now walks exactly that ladder. A " +
+     "refusal resting on a vendor limitation has to be re-read when the vendor " +
+     "changes, or it becomes folklore that outlives its own reason");
 
-  eq(buildCongress([]).status, "unavailable", "no filings is unavailable, not zero buyers");
+  /* The unit-level split, matching the card-level one below. */
+  eq(buildCongress([]).status, "quiet",
+     "A TAPE THAT WAS READ AND NAMED NOBODY IS QUIET, not unavailable — still " +
+     "never '0 congressional buyers', but a fact about the filings rather than " +
+     "about the request");
+  eq(buildCongress(null).status, "unavailable",
+     "while a tape that was never read for this name is unavailable");
+  ok(buildCongress([]).reason !== buildCongress(null).reason,
+     "and the two carry different sentences, so the distinction survives into " +
+     "prose as well as into the status");
   eq(buildCongress(null).status, "unavailable", "a failed fetch is unavailable");
   ok(!("trades" in buildCongress([])), "and it carries no numbers");
 }
@@ -382,8 +396,19 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
       //    a 0 on a dead panel is the manufactured extreme this guards.
       const panel = PANEL_OF[source];
       if (panel) {
-        eq(card.panels[panel].status, "unavailable",
-           `panel ${panel} reports unavailable when ${source} is missing`);
+        /* AN EMPTY ARRAY IS NOT A MISSING SOURCE FOR EVERY PANEL.
+           This sweep ablates each source three ways — [], null, undefined —
+           and asserted all three produce "unavailable". For congress that
+           collapsed the very distinction the panel needs: [] is a tape that
+           WAS read and named nobody, which is a fact about the filings, while
+           null and undefined are reads that did not happen. The invariant
+           this sweep exists to protect is that a dead panel carries no
+           numbers, and that holds for both dead states; the status is
+           asserted precisely per source instead of uniformly. */
+        const expected = (panel === "congress" && Array.isArray(empty))
+          ? "quiet" : "unavailable";
+        eq(card.panels[panel].status, expected,
+           `panel ${panel} reports ${expected} when ${source} is ${JSON.stringify(empty) || "undefined"}`);
         ok(card.panels[panel].reason, `and gives a reason`);
         const stray = walk(card.panels[panel], `panels.${panel}`, []);
         ok(stray.length === 0,
@@ -403,8 +428,24 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
       // 4. Every panel is always a tagged union — the renderer switches on
       //    status before touching a number, so there is always a status.
       for (const p of Object.values(card.panels)) {
-        ok(p.status === "ok" || p.status === "unavailable",
+        /* THREE STATES NOW, AND THE WIDENING IS THE POINT OF A WHOLE CHANGE
+           RATHER THAN A SIDE EFFECT OF ONE. This union was two states for as
+           long as the card had no way to say "the source answered and
+           measured nothing", which is why a measured emptiness had to borrow
+           `unavailable` and the live product printed both silences in one
+           sentence. An earlier wave added three panels that wanted the third
+           state and mapped onto the two instead, deliberately, rather than
+           widening this assertion to let new code pass — because widening it
+           without teaching the renderer the third arm would have produced
+           panels the reader sees as "Unavailable." regardless. The renderer
+           has that arm now, so this widens once, for every panel. */
+        ok(p.status === "ok" || p.status === "unavailable" || p.status === "quiet",
            `every panel is a tagged union with ${source} missing`);
+        if (p.status !== "ok") {
+          ok(typeof p.reason === "string" && p.reason.length > 0,
+             `and every non-ok panel says WHICH silence it is, in words, with ` +
+             `${source} missing — a bare status is a blank the reader cannot read`);
+        }
       }
 
       // 5. A dead panel never removes the card, and never touches the others.
@@ -417,9 +458,38 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(noLevels.panels.levels.status === "unavailable"
      || noLevels.panels.levels.levels.every((l) => l.kind !== "gamma_flip"),
      "with no features there is no gamma flip level — never 'spot is exactly at the flip'");
-  const noCongress = buildCard({ ...full, congress: [] });
-  ok(!("buys" in noCongress.panels.congress),
-     "a failed congress fetch reports unavailable, never '0 congressional buyers'");
+  /* THE THREE SILENCES AT THE CONGRESS PANEL, AND THIS SUITE USED TO ENCODE
+     THE CONFLATION AS CORRECT. The one case it constructed was `congress: []`
+     — a read that HAPPENED and matched nothing — and it asserted that this
+     reports "unavailable". So the live product printed "Unavailable. no
+     disclosed transactions" on every card: an unavailability status carrying
+     a measured-emptiness reason, and no reader could tell a failed request
+     from a genuine absence of filings. The case that should legitimately
+     produce "unavailable" — `congress: null`, a read that did not happen —
+     was never constructed at all. */
+  const emptyCongress = buildCard({ ...full, congress: [] });
+  eq(emptyCongress.panels.congress.status, "quiet",
+     "A READ THAT FOUND NOTHING IS QUIET. The tape was fetched and this ticker " +
+     "appeared in no filing — a fact about the filings, and the only one of " +
+     "the three silences that is about the world rather than about the request");
+  ok(/read and named no member/.test(emptyCongress.panels.congress.reason),
+     "with the sentence saying which of the three it is, not just that it is empty");
+  ok(!("buys" in emptyCongress.panels.congress),
+     "and still no '0 congressional buyers' — a quiet panel carries no numbers either");
+
+  const unreadCongress = buildCard({ ...full, congress: null });
+  eq(unreadCongress.panels.congress.status, "unavailable",
+     "A READ THAT DID NOT HAPPEN IS UNAVAILABLE. The pipeline's market-wide " +
+     "fetch can throw and its per-name fallback is deadline-gated, and either " +
+     "way the run knows — it just used to drop the knowledge on the floor with " +
+     "`congressByTicker.get(t) || []`");
+  ok(/not read for this name/.test(unreadCongress.panels.congress.reason),
+     "saying so in words, so the two dead states are distinguishable in prose too");
+
+  const preFieldCongress = buildCard({ ...full, congress: undefined });
+  eq(preFieldCongress.panels.congress.status, "unavailable",
+     "and a card from before the pipeline learned the distinction reads as " +
+     "unavailable rather than claiming a measurement it never made");
 }
 
 /* ---------- the panels added after the live board was read -------- */

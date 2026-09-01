@@ -1,14 +1,15 @@
 /* =============================================================
    flows-watch.js — the dead band, which used to be an integer.
 
-   Roughly forty-eight of every sixty scored names land inside the ±20
-   band each session. The pipeline scores them completely — every
+   Most scored names land inside the dead band each session — the band's
+   width is published per session and has been as wide as ±20 and as narrow
+   as ±1, so no number is quoted here that the payload can contradict. The pipeline scores them completely — every
    family, every gate, every quality multiplier — and then reports them
    to the reader as a single count in a status line.
 
-   That count is the least useful form of the information. A name at
-   +19 is one session from publishing and nothing on the site let you
-   see it coming. A name at +2 carrying the largest options-volume
+   That count is the least useful form of the information. A name a hair
+   inside the edge is one session from publishing and nothing on the site let you
+   see it coming. A name barely off zero carrying the largest options-volume
    surprise in the universe is the most interesting row of the day and
    had nowhere to appear.
 
@@ -76,18 +77,61 @@
     return td;
   }
 
+  /* Distance is computed HERE rather than trusted from the payload, because
+     it is a function of quantities already on the wire — a third serialised
+     field that must agree with two others is a field that will eventually
+     disagree with them.
+
+     SCORE_SCALE, the one constant that converts a residual into a score.
+     boundedScore is 100*tanh(residual / SCORE_SCALE), so the inverse maps the
+     band's edge — quoted in score units — back into residual units, which is
+     where this page's proximity question can actually be answered. Kept as
+     the same closed form the scorer uses rather than a fitted number, so the
+     two cannot drift apart silently. */
+  var SCORE_SCALE = Math.atanh(0.80) / 2.0;
+
   /**
-   * How far this score sits from the nearest edge of the band.
+   * How far this name is from leaving the dead band.
    *
-   * Computed HERE rather than trusted from the payload, because it is a
-   * function of the score and the band and both are already on the wire — a
-   * third serialised field that must agree with two others is a field that
-   * will eventually disagree with them.
+   * MEASURED ON THE RESIDUAL, because the score cannot answer it any more.
+   * The page was calibrated against a ±20 band, where `band − |score|` ranged
+   * over 0..20 and the "within three" highlight picked out a real minority.
+   * The band is 1 now, so every row inside it scores 0 — and this column
+   * became identically 1, the highlight fired on every row, the sort had
+   * nothing to sort by, and the status line reported a tautology as a finding.
+   *
+   * The residual is the quantity the rows are actually ordered by, and it is
+   * published. Distance is computed in residual units and returned with the
+   * unit named, so the number cannot be read as score points.
    */
-  function distanceToBand(score, band) {
-    const s = isNum(score), b = isNum(band);
-    if (s === null || b === null) return null;
-    return Math.max(0, b - Math.abs(s));
+  function distanceToBand(row, band) {
+    const b = isNum(band);
+    if (b === null) return null;
+    const resid = isNum(row && row.resid);
+    if (resid !== null) {
+      /* THE UNROUNDED SCORE, NOT A SECOND UNIT.
+
+         The first attempt at this reported the distance in RESIDUAL units,
+         which fixed the ±1 band and broke the ±20 one: at that width the two
+         closest rows both printed 0.0000 and the column lost the very
+         distinction it exists for. It also put a second unit next to the
+         score column, inviting a reader to compare two numbers that are not
+         in the same measure.
+
+         boundedScore is 100*tanh(residual / SCORE_SCALE) — the score, before
+         it was rounded to an integer for display. Recovering it here keeps
+         the column in SCORE POINTS, comparable to the column beside it, and
+         restores the precision that rounding destroyed. It behaves at every
+         band width, which the previous two versions each failed to do at one
+         end. */
+      const exact = 100 * Math.tanh(resid / SCORE_SCALE);
+      return { value: Math.max(0, b - Math.abs(exact)), exact, unit: "score", edge: b };
+    }
+    /* A payload published before `resid` existed carries only the rounded
+       integer, so this reads what it has. */
+    const s = isNum(row && row.s);
+    if (s === null) return null;
+    return { value: Math.max(0, b - Math.abs(s)), exact: null, unit: "score", edge: b };
   }
 
   function rowFor(row, band) {
@@ -112,11 +156,29 @@
     /* THE COLUMN THIS PAGE EXISTS FOR. Zero means the next tick of the score
        publishes this name; a large number means the cross-section could not
        separate it from noise and is not close to doing so. */
-    const d = distanceToBand(row.s, band);
-    const dCell = cell(d === null ? DASH : d.toFixed(0), "c-num c-toband");
-    if (d !== null && d <= 3) {
+    const d = distanceToBand(row, band);
+    /* Two decimals where the exact score is available, none where only the
+       rounded integer is: printing "16.00" from an integer would claim a
+       precision the payload does not carry. */
+    const dCell = cell(
+      d === null ? DASH
+        : d.exact !== null ? d.value.toFixed(2) : d.value.toFixed(0),
+      "c-num c-toband");
+    /* THE THRESHOLD IS DERIVED FROM THE EDGE, NOT A CONSTANT. "Within three"
+       was three SCORE units against a ±20 band — a seventh of the way in.
+       Hard-coded against a band of 1 it selected every row. A fifth of the
+       distance from the centre to the edge keeps the same meaning at any
+       band width, and keeps the mark rare enough to mean something. */
+    if (d !== null && d.edge > 0 && d.value <= d.edge * 0.2) {
       dCell.className = "c-num c-toband is-near";
-      dCell.title = "Within three score units of the band edge.";
+      dCell.title = "Within a fifth of the band's half-width of the edge.";
+    }
+    if (d !== null && d.exact !== null) {
+      /* Where the column's precision comes from, on the row itself: the score
+         beside it is rounded and would place this name at the edge exactly. */
+      dCell.title = (dCell.title ? dCell.title + " " : "") +
+        "Score points, computed from the unrounded score (" + d.exact.toFixed(2) +
+        ") rather than the integer shown beside it.";
     }
     tr.append(dCell);
 
@@ -200,15 +262,19 @@
     }
 
     /* Sorted by proximity to the edge. NOT by score: the two sides of the band
-       are equidistant at ±19 and a score sort would put every mildly bullish
+       are equidistant just inside either edge and a score sort would put every mildly bullish
        name above every strongly bearish one, which is an ordering about sign
        rather than about how close anything came. */
     rows.sort((a, b) => {
-      const x = distanceToBand(a.s, band), y = distanceToBand(b.s, band);
+      const x = distanceToBand(a, band), y = distanceToBand(b, band);
       if (x === null && y === null) return 0;
       if (x === null) return 1;                 // unmeasured never wins a ranking
       if (y === null) return -1;
-      return x - y;
+      /* Measured on the residual now, so this sort has something to sort by:
+         on the score every row in the band is 0 and the ordering fell through
+         to Array.prototype.sort's stability — the input order, wearing the
+         authority of a ranking. */
+      return x.value - y.value;
     });
 
     const frag = document.createDocumentFragment();
@@ -217,8 +283,12 @@
     wrap.hidden = false;
 
     const near = rows.filter((r) => {
-      const d = distanceToBand(r.s, band);
-      return d !== null && d <= 3;
+      const d = distanceToBand(r, band);
+      /* The same edge-relative threshold the row highlight uses, from one
+         place, so the sentence and the marks cannot disagree. Against a band
+         of 1 the old absolute "<= 3" was true of every row, and the status
+         line reported that tautology as a finding. */
+      return d !== null && d.edge > 0 && d.value <= d.edge * 0.2;
     }).length;
 
     /* THE COUNT AND ITS DENOMINATOR STAY TOGETHER. Split across a separator
