@@ -73,7 +73,14 @@ export const unwrapRows = (raw) => {
 export const POLITICAL_CAPS = Object.freeze({
   buyers: 25,
   assets: 25,
-  recent: 60,
+  /* 24, DOWN FROM 60, AND THE REASON IS THE RENDERED PAGE. At 60 the
+     newest-disclosures table stood three times taller than both ranked
+     panels combined, so the surface answering "who bought the most" was
+     buried under the tape that merely lists what came in. The ranking is
+     what this page is for; the raw filings are context beneath it. What the
+     cap removes is counted and published as `shed`, so the reader is told
+     the window held more rather than being shown a shorter list silently. */
+  recent: 24,
   holders: 40,
 });
 

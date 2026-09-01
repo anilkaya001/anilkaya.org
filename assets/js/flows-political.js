@@ -251,13 +251,20 @@
     }
   }
 
-  /* What the cap kept and what it dropped, in one sentence. */
-  function countedNote(feed, unit) {
+  /* What the cap kept and what it dropped, in one sentence.
+
+     `cut` NAMES THE ORDERING THE CAP APPLIED. The ranked panels drop the
+     smallest; the recent panel is ordered by date and drops the OLDEST, and
+     saying those rows "ranked below the cut" would describe a ranking that
+     panel never took. The count is of rows actually drawn rather than of the
+     cap, because a note reading "top 25" above three rows describes a page
+     nobody is looking at. */
+  function countedNote(feed, unit, cut) {
     var seen = isNum(feed.seen), shed = isNum(feed.shed);
     if (seen === null) return "";
     if (!shed) return seen + " " + unit + (seen === 1 ? "" : "s") + " in the window.";
     return "Top " + feed.rows.length + " of " + seen + " " + unit + "s in the window; " +
-      shed + " ranked below the cut and are not drawn.";
+      shed + " " + (cut || "ranked below the cut") + " and are not drawn.";
   }
 
   /* ---------- panel 2: the assets ---------------------------------- */
@@ -410,7 +417,7 @@
         dated++;
         if (feed.rows[k].lagDays > 45) late++;
       }
-      note.textContent = countedNote(feed, "disclosure") +
+      note.textContent = countedNote(feed, "disclosure", "were filed earlier") +
         (dated
           ? " " + late + " of the " + dated + " shown were filed past the 45 days " +
             "the STOCK Act allows, which is the ordinary case rather than the " +
@@ -488,7 +495,7 @@
     var note = document.getElementById("plHoldersNote");
     if (note) {
       var known = isNum(feed.ownerKnown), self = isNum(feed.selfFiled);
-      note.textContent = countedNote(feed, "holding") + " " +
+      note.textContent = countedNote(feed, "holding", "hold less by the vendor's own midpoint") + " " +
         (known
           ? self + " of the " + known + " holdings with a stated account are the " +
             "filer’s own; the rest are a spouse’s, a dependant’s or joint."

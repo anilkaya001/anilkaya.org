@@ -4350,6 +4350,19 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .pl-owner.is-unknown { color: var(--ink-faint); font-style: italic; }
 
 /* One paragraph per published note, so the five refusals read as five
-   statements rather than as one wall. */
+   statements rather than as one wall.
+
+   THE FOOT IS RELEASED FROM --measure HERE, and only here. That cap keeps a
+   single running paragraph readable, but this foot is five separate notes
+   and on a wide canvas it left them stacked in a narrow strip down the left
+   with two thirds of the page blank beside them. Columns hold each line near
+   the same measure while using the width — the same answer the canvas tier
+   already reached for the section's other prose. */
 .flows-foot .flows-foot-p { margin: 0 0 var(--space-2); }
 .flows-foot .flows-foot-p:last-child { margin-bottom: 0; }
+#plFoot {
+  max-width: none;
+  columns: 30rem;
+  column-gap: 2.5rem;
+}
+#plFoot .flows-foot-p { break-inside: avoid; }
