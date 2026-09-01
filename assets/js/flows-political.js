@@ -399,7 +399,24 @@
     host.append(wrap);
 
     var note = document.getElementById("plRecentNote");
-    if (note) note.textContent = countedNote(feed, "disclosure");
+    if (note) {
+      /* HOW MANY, NOT JUST WHICH. When most rows carry the late mark the mark
+         stops distinguishing anything, and the useful fact becomes the
+         proportion. Counted over the rows actually shown, because that is the
+         population the reader can see. */
+      var late = 0, dated = 0;
+      for (var k = 0; k < feed.rows.length; k++) {
+        if (isNum(feed.rows[k].lagDays) === null) continue;
+        dated++;
+        if (feed.rows[k].lagDays > 45) late++;
+      }
+      note.textContent = countedNote(feed, "disclosure") +
+        (dated
+          ? " " + late + " of the " + dated + " shown were filed past the 45 days " +
+            "the STOCK Act allows, which is the ordinary case rather than the " +
+            "exception."
+          : "");
+    }
   }
 
   /* The range as disclosed, never collapsed to its midpoint here: this panel
@@ -516,13 +533,21 @@
          as the population behind it, and a reader who cannot tell one page
          from eight cannot tell a thin window from a broken one. */
       var pages = isNum(src.pages);
-      status.textContent = (isNum(p.filings) || 0) + " disclosure" +
-        (p.filings === 1 ? "" : "s") +
-        (w.from ? " filed between " + w.from + " and " + (w.to || "today") : "") +
-        (pages !== null ? ", read over " + pages + " page" + (pages === 1 ? "" : "s") : "") +
-        (src.route ? " of " + src.route : "") +
-        (isNum(p.unusable) ? " · " + p.unusable + " carried no filer or name and were dropped" : "") +
-        (p.readAt ? " · read " + new Date(p.readAt).toLocaleString() : "");
+      /* THE ROUTE IS ITS OWN CLAUSE. Appended to the window with "of", it read
+         as though the dates belonged to the route — "filed between May and
+         August of congress-trader". Each fact gets its own segment. */
+      var how = src.route
+        ? "via " + src.route + (pages !== null
+            ? ", " + pages + " page" + (pages === 1 ? "" : "s") + " deep" : "")
+        : "";
+      status.textContent = [
+        (isNum(p.filings) || 0) + " disclosure" + (p.filings === 1 ? "" : "s") +
+          (w.from ? " filed between " + w.from + " and " + (w.to || "today") : ""),
+        how,
+        isNum(p.unusable) && p.unusable
+          ? p.unusable + " carried no filer or name and were dropped" : "",
+        p.readAt ? "read " + new Date(p.readAt).toLocaleString() : "",
+      ].filter(Boolean).join(" · ");
     }
 
     /* THE PAGINATION VERDICT, SURFACED. `paginated: false` is the vendor
