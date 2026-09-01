@@ -217,9 +217,19 @@
    *     17.6px — a 1.023 stretch that has always been live and sat just
    *     inside the suite's 15% tolerance, which is why nothing caught it.
    *
-   * 1200 is the ticker page's enlarge dialog: at min(96rem, 96vw) less
-   * 2x1.7rem the host reaches 1481px, so the clamp is REAL there and is a
-   * stated choice rather than an inert guard. Below it every host draws at
+   * 1900 is set by the WIDEST HOST THE GRID CAN PRODUCE, and the number
+   * moved when the canvas did. Under the tiered .flows-main the largest a
+   * panel gets is a full-row .is-wide at the three-column tier, just below
+   * the four-column breakpoint: viewport 2111 - 13rem rail - 2x2.5rem pad
+   * = 1823px. The enlarge dialog is smaller than that (min(96rem, 96vw)
+   * less 2x1.7rem tops out at 1482), so it is no longer the binding case.
+   *
+   * THE CAP IS NOT COSMETIC. Above it the SVG keeps its viewBox and gets
+   * stretched by width:100%, so one viewBox unit stops being one CSS pixel
+   * and the axis type shrinks with the drawing — silently, because nothing
+   * overflows when everything scales together. The ticker suite asserts the
+   * ratio at 320, 1280 and 1840px and caught exactly that when the canvas
+   * widened and this number did not. Below the cap every host draws at
    * exactly its own width, which is the whole invariant.
    *
    * ONE FUNCTION, NOT TWO. flows-ticker.js reads this rather than defining its
@@ -227,7 +237,7 @@
    * the panels are now drawn by two different controllers.
    */
   function panelWidth(host) {
-    return Math.max(300, Math.min(1200, Math.round((host && host.clientWidth) || 560)));
+    return Math.max(300, Math.min(1900, Math.round((host && host.clientWidth) || 560)));
   }
 
   /** A round tick interval at or just below `raw`: 1, 2, 2.5 or 5 times a power of ten. */

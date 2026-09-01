@@ -144,6 +144,38 @@
   padding: 6rem var(--pad) 4rem;
 }
 
+/* THE CANVAS TIER, AND WHY THE CLAMP MOVED.
+
+   78rem is 1248px. With the 13rem rail this product painted ~1456px of ink
+   and left 43% of a 2560px monitor as gutter — while the ticker page's own
+   three-column tier fired at 110rem of VIEWPORT but lived inside the clamp,
+   so the widest breakpoint handed each of seventeen panels a ~380px track,
+   below the 424px floor stated in the ticker section. A wider monitor made
+   the densest page worse.
+
+   The tier starts at 92rem because below ~1456px the rail already limits
+   main to about 78rem, so nothing changes for a laptop; above it main grows
+   with the viewport to a 132rem (2112px) ceiling, which is where a
+   four-column ticker grid still clears that 424px floor.
+
+   Measured on the real pages: ticker −32%, board −23%, eight routes −12% of
+   full-page height, with every word of prose still on the page. */
+@media (min-width: 92rem) {
+  .flows-main { max-width: 132rem; }
+}
+
+/* MEASURE IS DEFENDED WITHOUT SPENDING HEIGHT. A wider page would otherwise
+   set 140-character lines. Capping at 68ch fixes that but costs height —
+   measured at +5..9% on the prose-heavy routes, because the same words wrap
+   into more lines over a narrower column. `columns: 32rem` instead lets the
+   browser choose how many columns keep every line near 70ch while using the
+   width, so the full caveats this product refuses to hide cost LESS vertical
+   space than they do today, not more. */
+@media (min-width: 92rem) {
+  .fc-note, .fc-q, .flows-foot, .flows-lede { columns: 32rem; column-gap: 2.5rem; }
+  .fc-reading { max-width: 68ch; }
+}
+
 .flows-head {
   display: flex;
   flex-wrap: wrap;
@@ -2825,23 +2857,32 @@ body.is-stale .flows-tablewrap {
    >=1328px viewport is already 1136px — so "enlarge" would SHRINK the two
    widest panels on the page, which are the two the button matters most for. */
 .ft-zoom {
-  margin: auto; width: min(96rem, 96vw); max-width: none; max-height: 92dvh;
+  margin: auto; width: min(120rem, 96vw); max-width: none; max-height: 92dvh;
   padding: 0; border: 1px solid var(--hairline); border-radius: var(--radius-3);
   background: var(--bg-elev); color: var(--ink); overflow: auto;
   overscroll-behavior: contain;
 }
 .ft-zoom::backdrop { background: rgba(0, 0, 0, 0.62); }
-/* THE CONTENT BOX IS CAPPED AT EXACTLY THE 1200 THE DRAWERS CLAMP TO, and
+/* THE CONTENT BOX IS CAPPED AT EXACTLY THE 1900 THE DRAWERS CLAMP TO, and
    the two numbers have to agree or the invariant breaks in the one place a
-   reader is looking hardest. panelWidth() stops at 1200; at a 1600px viewport
-   this dialog's host would otherwise be 1481.6px, so `width: 100%` would
-   stretch a 1200-unit drawing by 1.235 and every 9px label would render at
-   11.1. Border-box means this max-width INCLUDES the padding, so the content
-   box lands on 1200 exactly and the clamp never has to fight the layout.
-   Raising one without the other reintroduces the stretch. */
+   reader is looking hardest: above the clamp `width: 100%` stretches the
+   drawing and every 9px label renders larger than it was drawn. Border-box
+   means this max-width INCLUDES the padding, so the content box lands on
+   1900 exactly and the clamp never has to fight the layout.
+
+   BOTH NUMBERS MOVED TOGETHER, which is what the previous note demanded and
+   is why this one exists: 1200 was set against a 78rem canvas, and when the
+   canvas went tiered the grid began handing panels up to 1823px while this
+   dialog stayed at 1200. Enlarging a panel then made it SMALLER than the
+   grid on a wide monitor — the ticker suite's "a span-1 panel at least
+   doubles when enlarged" assertion is what caught it.
+
+   The dialog's own width rose to min(120rem, 96vw) for the same reason.
+   Its widest realisable host is 1920 - 2x1.7rem = 1865.6px, which stays
+   under the 1900 clamp, so the drawing is still 1:1 at every viewport. */
 .ft-zoom-inner {
   padding: clamp(1rem, 3vw, 1.7rem);
-  max-width: calc(1200px + 2 * clamp(1rem, 3vw, 1.7rem));
+  max-width: calc(1900px + 2 * clamp(1rem, 3vw, 1.7rem));
   margin: 0 auto;
 }
 .ft-zoom-close {
@@ -3856,7 +3897,11 @@ body.is-stale .flows-tablewrap {
 .mk-tide { position: relative; }
 .mk-tide-svg { display: block; width: 100%; height: auto; }
 .mk-tide-call { stroke: var(--flow-up); fill: none; stroke-width: 1.5; }
-.mk-tide-put { stroke: var(--flow-down); fill: none; stroke-width: 1.5; }
+/* DASHED BECAUSE HUE IS THE LAST CHANNEL. These two series are overlaid on
+   one axis, so unlike every other signed mark in this file neither position
+   nor a glyph separates them — colour was doing the whole job, and a
+   deuteranope reader could not tell the call line from the put line. */
+.mk-tide-put { stroke: var(--flow-down); fill: none; stroke-width: 1.5; stroke-dasharray: 3 2.5; }
 .mk-tide-zero { stroke: var(--panel-border); stroke-dasharray: 2 3; }
 .mk-tide-lab { font-size: 10px; fill: var(--ink-dim); font-family: var(--font-mono); }
 
@@ -3913,8 +3958,49 @@ body.is-stale .flows-tablewrap {
    min-width:0 discipline on .ft-panel and its host (stated at the top of
    the ticker section) is what keeps a 60-session strip or a five-column
    table from pushing a track into horizontal overflow at any tier. */
-@media (min-width: 110rem) {
+/* THE TRACK COUNT IS SET BY THE 424px FLOOR, NOT BY THE VIEWPORT.
+   With the canvas tier above, main is (viewport − 13rem rail − 2×2.5rem pad):
+     108rem viewport → 1440 content → 3 tracks of 469
+     132rem viewport → 1824 content → 4 tracks of 444
+   Both clear the ladder's floor. The old 110rem rule measured the viewport
+   while the content was still clamped at 1248, which is how it came to hand
+   out 380px tracks — narrower than the two-column tier it replaced. */
+@media (min-width: 108rem) {
   .ft-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* AT FOUR TRACKS .is-wide STOPS TAKING THE ROW. A full-row panel here is
+   2032px of mostly empty chart, and it does not merely look thin: measured,
+   it made the page 11% TALLER than the two-column tier, because every wide
+   panel's prose then sets one short block under an acre of white. Two tracks
+   is ~1000px, which is what the surface and the contract table were drawn
+   for. Below this tier `1 / -1` still applies and is gapless by
+   construction, so nothing changes for three columns or two.
+
+   THE PAIR IS PINNED TO THE SAME TWO TRACKS. The term line's j-th bar has to
+   centre on the surface's j-th column (shared/flows-panels.js:33-42), which
+   needs them STACKED and EQUAL width — span-2 alone would seat them side by
+   side and destroy the correspondence a reader is meant to trace downward.
+
+   THREE VARIANTS WERE MEASURED ON THE REAL PAGE, not reasoned about:
+     pinned to tracks 1-2            5729px   −27%   ← this
+     pinned to tracks 3-4            5889px   −25%
+     three gapless columns, no tier  7185px    −8%
+   The last is the one that looks safest on paper — no pinning, no holes —
+   and it is by far the worst, because a lower canvas cap costs more than the
+   holes ever did. Pinning leaves two half-rows unfilled near the top; that is
+   the price of the alignment invariant and it is worth 27%.
+
+   NO `grid-auto-flow: dense` ANYWHERE. Dense fills those holes and measures
+   5282px (−32%) by letting a later panel backfill an earlier one, which puts
+   visual order out of step with DOM order and therefore with tab order. A
+   grid of independently labelled regions is not worth a focus-order defect,
+   so the 8% stays on the table deliberately. */
+@media (min-width: 132rem) {
+  .ft-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ft-panel.is-wide { grid-column: span 2; }
+  .ft-panel[data-panel="ivSurface"],
+  .ft-panel[data-panel="skewTerm"] { grid-column: 1 / span 2; }
 }
 
 /* --- the quiet arm ---------------------------------------------------- */
