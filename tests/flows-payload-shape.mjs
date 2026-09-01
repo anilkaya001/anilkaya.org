@@ -101,6 +101,10 @@ const SURFACES = [
      other's blob is the drift this suite exists to catch. */
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
   { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },
+  /* The political renderer hands the WHOLE payload to each of its four
+     painters under one name, so a whole-file scan is the right scope: every
+     `p.` read in the file is a root-field claim about this key. */
+  { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------
@@ -119,6 +123,10 @@ const OPTIONAL = {
      {status:"pending"} from the worker even though the pipeline's own
      payload never carries a top-level status. */
   pulse: { status: "the worker's pending envelope carries it" },
+  /* Same allowance, same reason: the renderer must recognise the worker's
+     {status:"pending"} for a key the pipeline has not written yet, and the
+     political payload carries no top-level status of its own. */
+  political: { status: "the worker's pending envelope carries it" },
 };
 
 const missingReport = [];
