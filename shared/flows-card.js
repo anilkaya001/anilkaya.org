@@ -87,6 +87,33 @@ export function unavailable(reason) {
 }
 
 /**
+ * A panel whose source ARRIVED AND MEASURED NOTHING. Never carries numbers.
+ *
+ * THE THIRD SILENCE, AND THE CARD IS THE LAST SURFACE TO GET IT. Every other
+ * section in this product tells three empties apart — the key was never
+ * published, the request did not come back, the pipeline read and found
+ * nothing — because only the last of those is a fact about the market. The
+ * card boundary had exactly two states, so a measured emptiness had to
+ * borrow `unavailable`, and the live product printed
+ *
+ *     "Unavailable. no disclosed transactions"
+ *
+ * which is both silences in one sentence: an unavailability status carrying a
+ * measured-emptiness reason. A reader cannot tell whether nobody in Congress
+ * traded this name or whether the request failed, and those are opposite
+ * facts about the same blank space.
+ *
+ * Widening the union is deliberate and is done for EVERY panel at once. The
+ * source-ablation sweep asserts the union over every panel on every ablation
+ * precisely so that this cannot be widened by accident for one new panel;
+ * doing it here, with the renderer taught the third arm in the same change,
+ * is what that assertion was protecting.
+ */
+export function quiet(reason) {
+  return { status: "quiet", reason: reason || "measured nothing", asOf: null };
+}
+
+/**
  * Directional polarity per card field.
  *   +1  a larger number is more bullish
  *   -1  a larger number is more bearish
@@ -660,7 +687,23 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
     };
   }).filter((r) => r.member);
 
-  if (!rows.length) return unavailable("no disclosed transactions");
+  if (!rows.length) {
+    /* WHICH EMPTY THIS IS, decided by what the caller handed over.
+
+       `null` means the congress read did not happen for this name — the
+       market-wide fetch threw, or the deadline cut the per-name fallback
+       short. `[]` means it DID happen and this ticker appeared in none of
+       the filings. Those are opposite facts, and until now both produced
+       "Unavailable. no disclosed transactions": an unavailability status
+       carrying a measured-emptiness reason, printed on every card.
+
+       Cards published before the pipeline learned this distinction hand over
+       `undefined`, which is honestly unknown and reads as unavailable. */
+    if (tradeRows === null || tradeRows === undefined) {
+      return unavailable("the disclosure tape was not read for this name in this run");
+    }
+    return quiet("the disclosure tape was read and named no member trading this ticker");
+  }
   rows.sort((a, b) => b._sort - a._sort);
   const kept = rows.slice(0, limit).map(({ _sort, ...r }) => r);
 

@@ -5367,6 +5367,16 @@ async function main() {
      targeted one. Bucketed by ticker here; a name with no disclosures gets an
      empty array and the panel says so, which is what it did before. */
   const congressByTicker = new Map();
+  /* WHETHER THE READ HAPPENED AT ALL, which the run knows and used to keep to
+     itself. The market-wide fetch can throw, and the per-name fallback is
+     gated on a deadline that can cut it short — either way `congressByTicker`
+     simply has no entry, exactly as it has none for a name that appeared in
+     no filing. The comment thirty lines below already names the consequence:
+     "fifty cards each publishing a panel that says, in effect, 'no member of
+     Congress has traded this name', which is a confident claim about the
+     filings rather than a report of a failed read". This flag is what lets
+     the card tell the two apart. */
+  let congressRead = "not attempted";
   if (onBoard.size) {
     let marketWide = 0;
     try {
@@ -5388,6 +5398,9 @@ async function main() {
         ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
         : await uw("/api/congress/recent-trades", { limit: 100 });
       marketWide = recent.length;
+      /* The read happened. Every board name is now either in the map or
+         genuinely absent from the filings, and both are knowable facts. */
+      congressRead = "ok";
       for (const row of recent) {
         const t = row && (row.ticker || row.symbol);
         if (!t || !onBoard.has(t)) continue;
@@ -5398,6 +5411,7 @@ async function main() {
         `  congress: ${recent.length} disclosure(s) market-wide, ` +
         `${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
     } catch (error) {
+      congressRead = "failed";
       console.warn(`  congress: market-wide read failed — ${error.message}`);
     }
 
@@ -5453,7 +5467,13 @@ async function main() {
         .slice(0, SURFACE_EXPIRIES);
 
       const spotPx = num(e.row.close);
-      const congress = congressByTicker.get(ticker) || [];
+      /* NULL FOR A READ THAT DID NOT HAPPEN, [] FOR ONE THAT FOUND NOTHING.
+         `|| []` collapsed both into the same empty array, and buildCongress
+         then published "Unavailable. no disclosed transactions" for each —
+         an unavailability status carrying a measured-emptiness reason, on
+         every card, whichever had actually occurred. */
+      const congress = congressByTicker.get(ticker)
+        || (congressRead === "ok" ? [] : null);
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),

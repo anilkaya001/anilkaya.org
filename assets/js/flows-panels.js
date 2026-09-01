@@ -127,15 +127,64 @@
   /* ---------- panel scaffolding ----------------------------------- */
 
   /** A panel that could not be built says so, and shows no numbers. */
+  /**
+   * A panel whose SOURCE DID NOT ARRIVE.
+   *
+   * data-empty carries the kind, because a test that has to match on prose to
+   * tell two silences apart is a test that breaks on a reworded sentence and
+   * passes on a swapped meaning. Every other section in this product tags its
+   * empties this way; the card dialog — the most-opened view, and the one a
+   * reader consults on a name they are about to trade — was the last surface
+   * with no machine-readable tag at all.
+   */
   function deadPanel(host, question, reason) {
     host.replaceChildren();
     host.append(el("p", "fc-q", question));
     const note = el("p", "fc-dead");
+    note.setAttribute("data-empty", "unavailable");
     note.append(el("strong", null, "Unavailable. "));
     note.append(document.createTextNode(
       reason || "This panel's data source did not return.",
     ));
     host.append(note);
+  }
+
+  /**
+   * A panel whose source ARRIVED AND MEASURED NOTHING.
+   *
+   * The distinction deadPanel could not draw. "Unavailable. no disclosed
+   * transactions" shipped on every card: an unavailability heading over a
+   * measured-emptiness reason, so a reader could not tell a failed request
+   * from a real absence of filings. The word changes, the tag changes, and
+   * the sentence is the payload's own — a measured empty is a finding about
+   * the market and deserves to be phrased as one.
+   */
+  function quietPanel(host, question, reason) {
+    host.replaceChildren();
+    host.append(el("p", "fc-q", question));
+    const note = el("p", "fc-quiet");
+    note.setAttribute("data-empty", "quiet");
+    note.append(el("strong", null, "Nothing to report. "));
+    note.append(document.createTextNode(
+      reason || "This panel's source answered and measured nothing.",
+    ));
+    host.append(note);
+  }
+
+  /**
+   * Route a non-ok panel to the right silence.
+   *
+   * ONE PLACE THAT KNOWS THE TAXONOMY. Fourteen call sites shared the guard
+   * `if (!panel || panel.status !== "ok") return deadPanel(...)`, which is
+   * how every measured emptiness on this card came to be announced as an
+   * unavailability. A dispatcher means the next panel added cannot get it
+   * wrong by copying its neighbour, which is exactly how the last one did.
+   */
+  function emptyPanel(host, question, panel, fallback) {
+    if (panel && panel.status === "quiet") {
+      return quietPanel(host, question, panel.reason || fallback);
+    }
+    return deadPanel(host, question, (panel && panel.reason) || fallback);
   }
 
   /**
@@ -283,12 +332,12 @@
       "Where does dealer hedging flip from damping moves to amplifying them, " +
       "and how far is that from spot?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.bars) || !panel.bars.length) {
-      return deadPanel(host, question, panel && panel.reason);
+      return emptyPanel(host, question, panel);
     }
     panelHead(host, question);
 
     const bars = panel.bars.filter((b) => isNum(b.k) !== null && isNum(b.g) !== null);
-    if (!bars.length) return deadPanel(host, question, "no usable strikes");
+    if (!bars.length) return quietPanel(host, question, "no usable strikes");
     bars.sort((a, b) => a.k - b.k);
 
     const spot = isNum(panel.spot);
@@ -848,11 +897,11 @@
        parameter because the string below is the documentation of what this
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "Is today's flow building dealer gamma where the book already is, or somewhere else?";
-    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
 
     const oi = isNum(panel.oiCentroid), vol = isNum(panel.volCentroid), spot = isNum(panel.spot);
-    if (oi === null || vol === null) return deadPanel(host, question, "no centroid could be measured");
+    if (oi === null || vol === null) return quietPanel(host, question, "no centroid could be measured");
 
     const points = [oi, vol, spot].filter((v) => v !== null);
     let lo = Math.min(...points), hi = Math.max(...points);
@@ -1037,7 +1086,7 @@
     const question = questionIn ||
       "Where is dealer gamma concentrated, and when does it expire?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.grid) || !panel.grid.length) {
-      return deadPanel(host, question, panel && panel.reason);
+      return emptyPanel(host, question, panel);
     }
     panelHead(host, question);
 
@@ -1408,7 +1457,7 @@
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "When does this dealer positioning expire, and what is left after it does?";
     if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
-      return deadPanel(host, question, panel && panel.reason);
+      return emptyPanel(host, question, panel);
     }
     panelHead(host, question);
 
@@ -1508,7 +1557,7 @@
     const question = questionIn ||
       "What move is priced over a fixed horizon, and is that band rich against " +
       "what this stock has actually been delivering?";
-    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
 
     const spot = isNum(panel.spot);
@@ -1521,7 +1570,7 @@
     // the implied and realized bands are directly comparable by ink.
     const widest = Math.max(imp ?? 0, real ?? 0, quoted ?? 0);
     if (!(widest > 0) || spot === null) {
-      return deadPanel(host, question, "no band could be measured");
+      return quietPanel(host, question, "no band could be measured");
     }
 
     const W = panelWidth(host), H = 118, padX = 16;
@@ -1639,7 +1688,7 @@
        parameter because the string below is the documentation of what this
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "Where has this name been, before any of today's flow?";
-    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
 
     const closes = Array.isArray(panel.closes) ? panel.closes : [];
@@ -1695,7 +1744,7 @@
        parameter because the string below is the documentation of what this
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "Where are the levels that matter, and how far is each in units I can size against?";
-    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
 
     const table = el("table", "fc-levels");
@@ -1787,7 +1836,7 @@
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
-      return deadPanel(host, question, panel && panel.reason);
+      return emptyPanel(host, question, panel);
     }
     panelHead(host, question);
 
@@ -1798,7 +1847,7 @@
     const delta = rows.map((r) => isNum(r[0]));
     const prem = rows.map((r) => isNum(r[1]));
     if (delta.filter((v) => v !== null).length < 2) {
-      return deadPanel(host, question, "the tape carried no usable cumulative delta");
+      return quietPanel(host, question, "the tape carried no usable cumulative delta");
     }
 
     /* WHY A ZERO PREMIUM SERIES IS NOT DRAWN. A flat line along the axis is
@@ -2016,7 +2065,7 @@
        parameter because the string below is the documentation of what this
        chart is FOR, and moving it out of the function would separate the two. */
     const question = questionIn || "Who in Congress disclosed a trade in this name, and how old is that information?";
-    if (!panel || panel.status !== "ok") return deadPanel(host, question, panel && panel.reason);
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
 
     const table = el("table", "fc-congress");
@@ -2260,7 +2309,7 @@
     score: renderScore,
 
     /* scaffolding */
-    el, svgEl, isNum, deadPanel, statList, panelHead, panelWidth,
+    el, svgEl, isNum, deadPanel, quietPanel, emptyPanel, statList, panelHead, panelWidth,
     niceStep, quantileAbs, symlog, surfaceRamp,
     DASH, MINUS, neg, signed, pct, pct1, sigma, px2, vol1, money, compact,
     AXIS_CH,
