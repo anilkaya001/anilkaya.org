@@ -35,3 +35,10 @@ tests/cardshot-*.mjs
 # the underscore rule above makes.
 tests/.*-emit/
 tests/.*-probe/
+
+# Screenshot output directories. The design shots are megabytes of PNG that
+# regenerate from `_shots-ab.mjs` in two minutes, and every one of them is a
+# picture of a state the payloads already describe — so committing them stores
+# a stale copy of something reproducible. The precedent is the Phase-0
+# candidate sets: shot into a throwaway dir, shared out-of-band, never tracked.
+tests/.shots-*/
