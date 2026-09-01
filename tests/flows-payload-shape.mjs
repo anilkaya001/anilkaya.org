@@ -105,6 +105,15 @@ const SURFACES = [
      painters under one name, so a whole-file scan is the right scope: every
      `p.` read in the file is a root-field claim about this key. */
   { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },
+  /* THE COMMAND CENTER, which draws five payloads into one page and is the
+     largest renderer on the site. Each region is scoped to its own painter,
+     because a whole-file scan would check every payload's fields against all
+     five keys and pass on the union — the exact vacuous-pass shape this suite
+     exists to prevent. */
+  { key: "scoretrack", file: "assets/js/flows-overview.js", fn: "paintChanged", vars: ["payload"] },
+  { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintAlerts", vars: ["payload"] },
+  { key: "events", file: "assets/js/flows-overview.js", fn: "paintEvents", vars: ["payload"] },
+  { key: "board:watch", file: "assets/js/flows-overview.js", fn: "paintWatch", vars: ["payload"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------
@@ -152,7 +161,19 @@ for (const surf of SURFACES) {
      assertion pass vacuously — the exact failure mode that let the
      sector bug live, reproduced inside its own detector. */
   for (const v of surf.vars) {
-    ok(new RegExp("function\\s+\\w+\\s*\\(\\s*" + v + "\\b").test(scope) || !surf.fn,
+    /* THE PAYLOAD NEED NOT BE THE FIRST PARAMETER, and insisting it was kept
+       the site's largest renderer out of this scan entirely. flows-overview.js
+       paints into a host it is handed first — paintChanged(into, payload) —
+       so the old anchored pattern matched nothing there, and the only way to
+       cover the file would have been to reorder five signatures to satisfy a
+       test. A test that dictates parameter order is a test that will be
+       worked around.
+
+       The anti-vacuity guarantee is unchanged and is the whole point of this
+       check: the name must appear in the parameter list of a function inside
+       the scanned scope, so renaming it still fails here loudly instead of
+       silently disabling every assertion below. */
+    ok(new RegExp("function\\s+\\w+\\s*\\([^)]*\\b" + v + "\\b[^)]*\\)").test(scope) || !surf.fn,
        `${surf.file}:${surf.fn || "(module)"} still receives its payload as \`${v}\` — ` +
        "a renamed parameter makes this whole scan vacuous");
   }
