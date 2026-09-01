@@ -43,7 +43,12 @@ import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-
 import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
 import {
-  buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapPolitical,
+  /* Aliased for what it DOES, not for where it happens to live. It shipped
+     as `unwrapPolitical` and was then called from the flow-alerts leg to
+     count wire rows — a generic {data:[...]} unwrapper wearing a domain name
+     it had already outgrown. A reader meeting `unwrapVendorRows(raw)` beside
+     an options feed has to go and check whether that is a mistake. */
+  buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapVendorRows,
 } from "../shared/flows-political.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
@@ -5041,7 +5046,7 @@ async function main() {
         : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
       /* Measured on the WIRE rows, before any shaping drops anything: the
          question is what the vendor sent, not what survived our parser. */
-      const alertRowCount = unwrapPolitical(raw).length;
+      const alertRowCount = unwrapVendorRows(raw).length;
 
       const survivors = new Set((tilted || []).map((x) => x.row && x.row.ticker));
       const stage = new Map();
@@ -5264,7 +5269,7 @@ async function main() {
            the ranked totals would be quietly inflated. */
         let cursor = sessionDate || null;
         for (let rung = 1; rung <= POLITICAL_MAX_PAGES; rung++) {
-          const rows = unwrapPolitical(await uw("/api/congress/recent-trades", {
+          const rows = unwrapVendorRows(await uw("/api/congress/recent-trades", {
             limit: POLITICAL_PAGE_LIMIT, date: cursor || undefined,
           }));
           if (!rows.length) break;
@@ -5320,7 +5325,7 @@ async function main() {
           console.warn(`  political: the recent-trades ladder refused on its first ` +
             `rung (${error.message}) — falling back to one unwindowed page`);
           try {
-            filings.push(...unwrapPolitical(await uw("/api/congress/recent-trades",
+            filings.push(...unwrapVendorRows(await uw("/api/congress/recent-trades",
               { limit: POLITICAL_PAGE_LIMIT })));
             pagesRead = 1;
           } catch (inner) {
@@ -5368,7 +5373,7 @@ async function main() {
        which is the output that has solved every prior shape mystery in one
        run. */
     if (political.buyers.status === "quiet") {
-      const first = unwrapPolitical(raws.filings)[0];
+      const first = unwrapVendorRows(raws.filings)[0];
       if (first && typeof first === "object") {
         console.log("  political: NOTE filings returned rows but none ranked — first-row keys: " +
           Object.keys(first).slice(0, 24).join(", "));
