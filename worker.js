@@ -2261,6 +2261,10 @@ async function route(request, env, url, ctx) {
     "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
     "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
+    /* Under its own rail group rather than beside the session pages — see
+       politicalPage() for why a 45-day-old fact does not belong next to
+       today's tape. */
+    "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
   };
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
@@ -2286,7 +2290,7 @@ async function route(request, env, url, ctx) {
       || path === "/flows/watch" || path === "/flows/history"
       || path === "/flows/market" || path === "/flows/ticker"
       || path === "/flows/unusual" || path === "/flows/events"
-      || path === "/flows/track") {
+      || path === "/flows/track" || path === "/flows/political") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }

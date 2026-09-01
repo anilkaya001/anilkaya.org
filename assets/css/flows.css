@@ -4258,3 +4258,98 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-dot.is-pos { fill: var(--flow-up); }
 .cc-dot.is-neg { fill: var(--flow-down); }
 .cc-wash { fill: color-mix(in srgb, var(--ink-faint) 7%, transparent); }
+
+/* ---------- political disclosures -------------------------------- */
+
+/* THE LAG WARNING, above the first number rather than under the last.
+   Everything on that page is weeks old by construction, and a reader who
+   reaches a ranking without having read that reads it as news. */
+.pl-lede-warn {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-3) calc(var(--space-3) + 3px);
+  border-left: 3px solid var(--gold-mystic);
+  background: var(--panel-head);
+  border-radius: 0 var(--radius-2) var(--radius-2) 0;
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  max-width: var(--measure);
+}
+.pl-lede-warn em { color: var(--ink); font-style: italic; }
+
+/* The ranked row. The bar is the midpoint; the band across it is the summed
+   low to the summed high of the SAME filings, on the SAME axis. Two rows
+   whose bands overlap are not separated by anything the filings state, and
+   the overlap is meant to be visible before the note is read. */
+.pl-c-bar { width: 22%; min-width: 7rem; }
+.pl-bar {
+  position: relative;
+  height: 1.1rem;
+  background: rgba(201, 198, 172, 0.06);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+}
+.pl-bar-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--gold-mystic);
+  opacity: 0.55;
+  border-radius: var(--radius-1);
+}
+/* THE BAND IS A RULE WITH TWO STOPS, not a second fill: it has to read as an
+   interval laid over the bar rather than as more quantity. Position and the
+   end caps carry it, so it survives greyscale and a reader who cannot
+   separate the two hues. */
+.pl-bar-band {
+  position: absolute;
+  inset-block: 0;
+  border-left: 2px solid var(--ink);
+  border-right: 2px solid var(--ink);
+  background: linear-gradient(to bottom,
+    transparent calc(50% - 1px), var(--ink) calc(50% - 1px),
+    var(--ink) calc(50% + 1px), transparent calc(50% + 1px));
+  opacity: 0.75;
+}
+
+.pl-rank { color: var(--ink-faint); width: 2.5rem; }
+.pl-who { line-height: 1.3; }
+.pl-name, .pl-tick { display: block; color: var(--ink); }
+.pl-tick { font-family: var(--font-mono); }
+.pl-chamber, .pl-issuer {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.pl-issuer { text-transform: none; }
+.pl-mid { color: var(--ink); font-variant-numeric: tabular-nums; }
+/* The bounds are quieter than the midpoint they qualify, but not dim enough
+   to read as decoration — they are the honest half of the pair. */
+.pl-bound, .pl-sold, .pl-band {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Past the 45 days the STOCK Act allows. Marked with a rule as well as a
+   hue, so the mark is not carried by colour alone. */
+.pl-late {
+  color: var(--gold-harvest);
+  text-decoration: underline dotted currentColor 1px;
+  text-underline-offset: 3px;
+}
+
+/* The vendor's own word for the side. "Receive" is a gift or a transfer and
+   is neither, so it gets neither treatment. */
+.pl-side { font-size: 0.82rem; }
+.pl-side.is-buy { color: var(--flow-up); }
+.pl-side.is-sell { color: var(--flow-down); }
+.pl-side.is-neither { color: var(--ink-faint); font-style: italic; }
+
+.pl-owner.is-unknown { color: var(--ink-faint); font-style: italic; }
+
+/* One paragraph per published note, so the five refusals read as five
+   statements rather than as one wall. */
+.flows-foot .flows-foot-p { margin: 0 0 var(--space-2); }
+.flows-foot .flows-foot-p:last-child { margin-bottom: 0; }

@@ -68,7 +68,7 @@ const payload = {
   filings: 431,
   unusable: 3,
   buyers: {
-    status: "ok", seen: 31, cap: 25, shed: 6, basis: "band midpoint: stated convention",
+    status: "ok", seen: 9, cap: 25, shed: 6, basis: "band midpoint: stated convention",
     rows: [
       { who: "Ada Reyes", id: "p1", memberType: "senate", bought: 10_000_000,
         boughtLo: 9_000_000, boughtHi: 12_000_000, sold: 250_000, buys: 14, sells: 2,
@@ -213,8 +213,11 @@ try {
     ok(/1 of the 2 neighbouring pairs have overlapping bands/.test(note || ""),
       "and the note COUNTS the neighbours the ranking cannot separate, rather " +
       `than warning in general terms — got: ${JSON.stringify(note)}`);
-    ok(/Top 25 of 31/.test(note || "") && /6 ranked below the cut/.test(note || ""),
-      "with what the cap kept and what it dropped");
+    ok(/Top 3 of 9 filers in the window/.test(note || "")
+      && /6 ranked below the cut/.test(note || ""),
+      "with what the cap kept and what it dropped — and the count is of the rows " +
+      "ACTUALLY DRAWN rather than of the cap, since a note reading 'top 25' above " +
+      `three rows describes a page nobody is looking at — got: ${JSON.stringify(note)}`);
   }
 
   /* ---------- §3 the open band's floor reaches the page ----------- */
@@ -333,10 +336,24 @@ try {
     ok(foot.some((t) => /spouse/.test(t)),
       "including the attribution note, which names the account it will not assume");
 
-    /* The vocabulary ban, over everything the page actually renders rather
-       than over the payload alone — a heading or a caption written in this
-       file is prose the shaper's suite never sees. */
-    const body = await page.textContent("body");
+    /* The vocabulary ban, over everything THIS PAGE renders rather than over
+       the payload alone — a heading or a caption written in the renderer is
+       prose the shaper's suite never sees.
+
+       SCOPED PAST THE RAIL, and the first run is why. The rail links to
+       /flows/history/ under the label "Track record", which tripped this ban
+       on every page it appears on. That page measures whether the board's own
+       published rankings went on to be right, which is a record it HAS the
+       sessions to compute — the phrase is banned here because a disclosure
+       has no closing print, not because the words are unsayable on the site.
+       A ban that reached into shared chrome would be pressure to rename
+       another page's honest heading. */
+    const body = await page.evaluate(() => {
+      const main = document.querySelector(".flows-main") || document.body;
+      return [...main.children]
+        .filter((n) => !n.classList.contains("flows-rail") && !n.querySelector(".flows-rail"))
+        .map((n) => n.textContent).join(" ");
+    });
     const BAN = /\b(returns?|outperform|track record|profits?|gains|alpha|insider|tipped|front-?run)\b/i;
     const hit = BAN.exec(body || "");
     ok(!hit, `the rendered page says "${hit && hit[0]}" — a claim a disclosure ` +

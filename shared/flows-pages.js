@@ -106,6 +106,10 @@ const rail = (active) => {
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
   </div>
+  <p class="rail-group" id="railDisclosures">Disclosures</p>
+  <div class="rail-items" role="group" aria-labelledby="railDisclosures">
+    ${item("/flows/political/", "Political", "political")}
+  </div>
   <p class="rail-group" id="railEvidence">Evidence</p>
   <div class="rail-items" role="group" aria-labelledby="railEvidence">
     ${item("/flows/history/", "Track record", "history")}
@@ -1312,7 +1316,93 @@ function escapeHTML(value) {
   })[c]);
 }
 
+/* ---------- the political disclosures --------------------------- */
+
+/**
+ * WHO DISCLOSED THE LARGEST PURCHASES.
+ *
+ * A SEPARATE RAIL GROUP, AND THAT IS THE ARGUMENT. Every other gated page
+ * answers a question about a session: what was bought today, what is unusual
+ * today, what reports this week. This one cannot. The STOCK Act allows 45
+ * days between a transaction and its disclosure and late filers routinely
+ * exceed 100, so the newest row here describes something that happened
+ * closer to two months ago than to this morning. Filing it under "Session"
+ * would put a two-month-old fact beside today's tape under one heading and
+ * invite the reading the whole page is built to refuse. It sits under
+ * "Disclosures" instead, next to nothing that claims to be current.
+ *
+ * FOUR PANELS, ONE SHELL EACH. Every heading and every accessible name is
+ * emitted here; every row, bar and band is filled by flows-political.js from
+ * a payload this document cannot see. A panel that stays empty says WHICH of
+ * the three silences it is in — the key was never published, the request did
+ * not come back, or the window was read and held nothing — because only the
+ * last of those is a fact about politicians.
+ *
+ * THE HOLDER PANEL IS EXPECTED TO BE UNAVAILABLE. The vendor marks
+ * /politician-portfolios/holders as enterprise-only, so on this key it
+ * answers 403. The panel ships anyway: an empty shell that names the refusal
+ * is honest, and it costs one line the day the entitlement changes.
+ */
+export function politicalPage({ username = "" } = {}) {
+  const lede = "Who disclosed the largest purchases, and in what — ranked by " +
+    "size, with the range each filing actually stated drawn across it.";
+  return `${head("Flows — Political", lede)}
+${shell("Political Disclosures", "Options-flow intelligence", "political", username, `
+  <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
+  <p class="flows-stale" id="plSource" role="status" hidden></p>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <!-- THE LAG, ABOVE THE FOLD AND NOT IN THE FOOTER. Everything below is
+       weeks old by construction. A reader who scrolls to a ranking without
+       having read that will read it as news, so it is said before the first
+       number rather than after the last. -->
+  <p class="pl-lede-warn">
+    Every row on this page is a statutory disclosure, not a trade seen on a
+    tape. Filing is late by law and later in practice: the STOCK Act allows
+    45 days and late filers routinely exceed 100. Each row carries the days
+    between its transaction and its filing, and each ranked total carries the
+    median lag of the filings behind it. This page ranks what has been
+    <em>disclosed</em>, which is never the same question as what is being
+    done now.
+  </p>
+
+  <section class="fc-panel is-wide" id="plBuyersPanel" hidden>
+    <h2 class="fc-panel-h">Who disclosed the largest purchases</h2>
+    <div id="plBuyers"></div>
+    <p class="fc-note" id="plBuyersNote"></p>
+  </section>
+
+  <section class="fc-panel is-wide" id="plAssetsPanel" hidden>
+    <h2 class="fc-panel-h">What was bought the most</h2>
+    <div id="plAssets"></div>
+    <p class="fc-note" id="plAssetsNote"></p>
+  </section>
+
+  <section class="fc-panel is-wide" id="plRecentPanel" hidden>
+    <h2 class="fc-panel-h">Newest disclosures</h2>
+    <div id="plRecent"></div>
+    <p class="fc-note" id="plRecentNote"></p>
+  </section>
+
+  <section class="fc-panel" id="plHoldersPanel" hidden>
+    <h2 class="fc-panel-h">Holdings in the board&#39;s names</h2>
+    <div id="plHolders"></div>
+    <p class="fc-note" id="plHoldersNote"></p>
+  </section>
+
+  <div class="flows-foot" id="plFoot"></div>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-political.js")}" defer></script>
+</body>
+</html>`;
+}
+
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
+  politicalPage,
   tickerPage, unusualPage, eventsPage, trackPage, ASSET_VERSION,
 };
