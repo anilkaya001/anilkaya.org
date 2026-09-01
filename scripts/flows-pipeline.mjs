@@ -43,7 +43,12 @@ import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-
 import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
 import {
-  buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapPolitical,
+  /* Aliased for what it DOES, not for where it happens to live. It shipped
+     as `unwrapPolitical` and was then called from the flow-alerts leg to
+     count wire rows — a generic {data:[...]} unwrapper wearing a domain name
+     it had already outgrown. A reader meeting `unwrapVendorRows(raw)` beside
+     an options feed has to go and check whether that is a mistake. */
+  buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapVendorRows,
 } from "../shared/flows-political.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
@@ -3435,7 +3440,13 @@ function fakeFlowAlerts(tickers) {
   const rnd = mulberry(4177);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
   const rows = [];
-  for (let i = 0; i < 80; i++) {
+  /* EXACTLY THE VENDOR'S CEILING, because that is what the live route
+     returns. Four consecutive production reads came back with precisely 200
+     rows — the documented maximum — which means the population above it is
+     unknown on every real run. A fixture of 80 never exercised the
+     saturation branch, so the one state this feed is ALWAYS in was the one
+     state no dry run ever produced. */
+  for (let i = 0; i < ALERT_VENDOR_LIMIT; i++) {
     const t = names[Math.floor(rnd() * names.length)];
     const call = rnd() > 0.45;
     const strike = Math.round(40 + rnd() * 200);
@@ -3476,6 +3487,22 @@ function fakeFlowAlerts(tickers) {
   rows.push({ ticker: "", total_premium: 5 });     // unusable, counted
   return rows;
 }
+
+/* THE VENDOR'S OWN CEILING ON THIS ROUTE, named rather than inlined.
+
+   docs/uw-openapi.yaml types flow-alerts' `limit` as "Default 100 Max 200
+   Min 1". 200 is not a number this pipeline chose; it is the most the route
+   will give, and asking for more is the mistake that already cost this
+   product a morning of empty congress panels when a limit of 500 met a route
+   capped lower and answered 422.
+
+   It matters because four consecutive live reads have come back with exactly
+   200 rows. A response whose length equals the requested limit is a
+   TRUNCATION, not a count: the true population is unknown and at least this
+   large. Publishing `seen: 200` without saying so reads as "the vendor
+   flagged 200 windows today", which is a claim about the market made out of
+   a claim about the request. */
+const ALERT_VENDOR_LIMIT = 200;
 
 /* Dry-run raws for the political leg. Built to exercise the traps rather
    than to look plausible: one open-ended band whose midpoint must stay
@@ -5016,7 +5043,10 @@ async function main() {
     try {
       const raw = DRY_RUN
         ? fakeFlowAlerts((payloads.long.rows || []).map((r) => r.t))
-        : await uw("/api/option-trades/flow-alerts", { limit: 200 });
+        : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
+      /* Measured on the WIRE rows, before any shaping drops anything: the
+         question is what the vendor sent, not what survived our parser. */
+      const alertRowCount = unwrapVendorRows(raw).length;
 
       const survivors = new Set((tilted || []).map((x) => x.row && x.row.ticker));
       const stage = new Map();
@@ -5043,9 +5073,22 @@ async function main() {
         readAt: new Date().toISOString(),
         refreshed: "nightly",
         ...alerts,
+        /* WHOSE CEILING THE READ HIT. `shed` counts what OUR published cap
+           removed from what we received; it says nothing about what the
+           vendor withheld before we saw it. When the response length equals
+           the requested limit the population above it is unknown, and a
+           reader comparing today's count to yesterday's is comparing two
+           ceilings rather than two markets. */
+        vendorLimit: ALERT_VENDOR_LIMIT,
+        vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
       });
       console.log(
         `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
+        (alertRowCount >= ALERT_VENDOR_LIMIT
+          ? ` — WHICH IS THE VENDOR'S MAXIMUM (${ALERT_VENDOR_LIMIT}), so the true ` +
+            "population is unknown and at least that large; this route's limit " +
+            "cannot be raised, and today's count is a ceiling rather than a measurement"
+          : "") +
         (alerts.shed ? ` (${alerts.shed} shed by the ${ALERT_ROWS}-row cap)` : "") +
         (alerts.unusable ? `, ${alerts.unusable} unusable` : "") +
         `; ${alerts.coverage.sweeps} sweep-flagged, ${alerts.coverage.opening} all-opening, ` +
@@ -5226,7 +5269,7 @@ async function main() {
            the ranked totals would be quietly inflated. */
         let cursor = sessionDate || null;
         for (let rung = 1; rung <= POLITICAL_MAX_PAGES; rung++) {
-          const rows = unwrapPolitical(await uw("/api/congress/recent-trades", {
+          const rows = unwrapVendorRows(await uw("/api/congress/recent-trades", {
             limit: POLITICAL_PAGE_LIMIT, date: cursor || undefined,
           }));
           if (!rows.length) break;
@@ -5282,7 +5325,7 @@ async function main() {
           console.warn(`  political: the recent-trades ladder refused on its first ` +
             `rung (${error.message}) — falling back to one unwindowed page`);
           try {
-            filings.push(...unwrapPolitical(await uw("/api/congress/recent-trades",
+            filings.push(...unwrapVendorRows(await uw("/api/congress/recent-trades",
               { limit: POLITICAL_PAGE_LIMIT })));
             pagesRead = 1;
           } catch (inner) {
@@ -5330,7 +5373,7 @@ async function main() {
        which is the output that has solved every prior shape mystery in one
        run. */
     if (political.buyers.status === "quiet") {
-      const first = unwrapPolitical(raws.filings)[0];
+      const first = unwrapVendorRows(raws.filings)[0];
       if (first && typeof first === "object") {
         console.log("  political: NOTE filings returned rows but none ranked — first-row keys: " +
           Object.keys(first).slice(0, 24).join(", "));

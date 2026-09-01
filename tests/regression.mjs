@@ -216,7 +216,16 @@ try {
         const session = await page.locator(".session-control").boundingBox();
         const resumeCard = await page.locator(".dashboard-resume").boundingBox();
         const resumeAction = await page.locator(".dashboard-resume .btn").boundingBox();
-        const firstCourse = await page.locator("#labGrid .model-card").first().boundingBox();
+        /* WAIT FOR IT, THEN MEASURE. #labGrid is filled asynchronously, and
+           boundingBox() returns NULL for an element that is not laid out yet
+           — so under a loaded machine this raced, and the assertion below
+           then printed `Math.round(undefined || 0)` as "begins too late at
+           0px": a position it never measured, reported as though it had.
+           A missing element and an element in the wrong place are different
+           failures with different fixes, and this told you the wrong one. */
+        const firstCourseEl = page.locator("#labGrid .model-card").first();
+        await firstCourseEl.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+        const firstCourse = await firstCourseEl.boundingBox();
         assert(today && today.y + today.height <= height, `[${width}px] Today surface falls below the initial viewport`);
         assert(heroAction && heroAction.height >= 44, `[${width}px] hero action is not a 44px touch target`);
         assert(session && session.height >= 44, `[${width}px] session planner is not a 44px touch target`);
@@ -225,8 +234,15 @@ try {
           assert(resumeCard && resumeCard.y + resumeCard.height <= height,
             `[${width}px] personalized next-action card falls below the fold at ${Math.round((resumeCard?.y || 0) + (resumeCard?.height || 0))}px`);
         }
-        if ([390, 1024, 1280, 1440, 2048].includes(width)) assert(firstCourse && firstCourse.y <= height - 100,
-          `[${width}px] first course preview begins too late at ${Math.round(firstCourse?.y || 0)}px`);
+        if ([390, 1024, 1280, 1440, 2048].includes(width)) {
+          /* The two failures said apart, so the message names the one that
+             happened rather than inventing a coordinate for the other. */
+          assert(firstCourse,
+            `[${width}px] no course card was laid out in #labGrid within 10s — the grid ` +
+            "is filled asynchronously, so this is an absent element, not a misplaced one");
+          assert(firstCourse.y <= height - 100,
+            `[${width}px] first course preview begins too late at ${Math.round(firstCourse.y)}px`);
+        }
       }
       if (route === courseRoute("foundations") && width === 1280) {
         const stage = await page.locator(".stage").boundingBox();
