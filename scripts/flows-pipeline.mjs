@@ -1288,6 +1288,14 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     // its 5/21/42-session returns cost nothing: these candles were already
     // fetched for ATR, the liquidity floor and the realized-vol baseline.
     closes: closes.slice(-42),
+    /* THE DATES THOSE CLOSES BELONG TO, from the same slice of the same
+       candles. Without them `closes` is a positional array and every reader
+       is forced to treat INDEX as time — which is true only while no session
+       is missing, and the card's own filter drops any that are. Nothing could
+       put the daily-close score on the same axis as price because there was
+       no key to join on. candleDate is already used three times in this file;
+       this costs one more map over candles held in memory. */
+    closeDates: candlesAscending(ohlc).slice(-42).map(candleDate),
     /* Computed from the FULL year, not from the 42 retained for the
        sparkline: a 42-session return needs 43 closes, so reading it back out
        of the 42-element slice resolved to null on every name. */

@@ -461,6 +461,16 @@ try {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
             return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
           }),
+          /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
+             carrying preserveAspectRatio="none" over width:100% and a fixed
+             height scales x and y INDEPENDENTLY — so it gets its width
+             exactly right, which is all `scales` above measures, while the
+             drawing inside it is stretched. A round marker becomes an
+             ellipse and a price line's slope, the only thing it
+             communicates, is distorted by whatever the ratio happens to be.
+             renderContext carried `none` while the five other SVGs in that
+             file carried `meet`. */
+          par: svgs.map((s) => s.getAttribute("preserveAspectRatio") || "(default)"),
         });
       }
       return { panels: out, errors, overflow: document.documentElement.scrollWidth > 320 };
@@ -472,6 +482,18 @@ try {
        `${who}: every panel the renderer targets exists in the board markup (${(swept.errors || []).join("; ")})`);
 
     for (const p of swept.panels) {
+      /* NO CHART SCALES ITS AXES INDEPENDENTLY. `none` is the one value that
+         breaks the one-viewBox-unit-per-CSS-pixel invariant while leaving
+         every width assertion in this file passing, which is exactly why it
+         survived: the defect is invisible to the measurement that was
+         watching for it. */
+      for (const par of p.par || []) {
+        ok(par !== "none",
+           `${who}/${p.id}: no chart stretches — preserveAspectRatio="none" scales ` +
+           "x and y apart, so the width stays right while the drawing inside is " +
+           "distorted, and every width-based assertion here would still pass");
+      }
+
       /* NO PANEL IS SILENTLY BLANK. A host with no children is neither a chart
          nor an explanation — it is the state a reader cannot distinguish from
          a broken page, and it is what an unhandled tagged-union branch
@@ -558,6 +580,16 @@ try {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
             return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
           }),
+          /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
+             carrying preserveAspectRatio="none" over width:100% and a fixed
+             height scales x and y INDEPENDENTLY — so it gets its width
+             exactly right, which is all `scales` above measures, while the
+             drawing inside it is stretched. A round marker becomes an
+             ellipse and a price line's slope, the only thing it
+             communicates, is distorted by whatever the ratio happens to be.
+             renderContext carried `none` while the five other SVGs in that
+             file carried `meet`. */
+          par: svgs.map((s) => s.getAttribute("preserveAspectRatio") || "(default)"),
         });
       }
       return { panels: out, overflow: document.documentElement.scrollWidth > 1280 };

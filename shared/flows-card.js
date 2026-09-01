@@ -518,8 +518,41 @@ export function buildPricedMove({
 /* ---------- price context ------------------------------------------ */
 
 /** Where the name has been: period returns and its position in a year's range. */
-export function buildContext({ closes, r5, r21, r42, week52Pos, changePct }, { asOf = null } = {}) {
-  const series = (closes || []).map(numOrNull).filter((c) => c !== null && c > 0);
+export function buildContext(
+  { closes, closeDates, r5, r21, r42, week52Pos, changePct }, { asOf = null } = {},
+) {
+  /* FILTERED IN LOCKSTEP, WHICH IS THE WHOLE POINT.
+
+     This function drops any close that is null or non-positive, which is
+     correct — an unreadable candle is not a price. What it could not do was
+     say WHEN the survivors happened, so `closes` was a positional array and
+     every reader had to treat index as time. That holds only while nothing
+     is missing, and this filter is what makes things missing: drop one
+     session out of the middle and two non-adjacent days become neighbours,
+     silently, with the sparkline drawing a smooth step across a gap.
+
+     It is also why nothing in this product could put the daily-close score on
+     the same axis as price — the payload carried no key to join on. Both
+     halves have been published and rendered for weeks, on separate pages, in
+     incompatible shapes.
+
+     Zipping the two arrays BEFORE the filter is what keeps them parallel. A
+     dates array bolted on afterwards and filtered separately — or not
+     filtered at all — is misaligned by exactly the number of dropped
+     sessions, which is the defect this comment exists to prevent someone
+     reintroducing while "adding dates". */
+  const rawCloses = Array.isArray(closes) ? closes : [];
+  const rawDates = Array.isArray(closeDates) ? closeDates : [];
+  const kept = [];
+  for (let i = 0; i < rawCloses.length; i++) {
+    const c = numOrNull(rawCloses[i]);
+    if (c === null || !(c > 0)) continue;
+    const d = rawDates[i];
+    kept.push({ c, d: typeof d === "string" && d ? d.slice(0, 10) : null });
+  }
+  const series = kept.map((k) => k.c);
+  const dates = kept.map((k) => k.d);
+
   const fields = {
     r5: numOrNull(r5), r21: numOrNull(r21), r42: numOrNull(r42),
     week52Pos: numOrNull(week52Pos), changePct: numOrNull(changePct),
@@ -527,7 +560,24 @@ export function buildContext({ closes, r5, r21, r42, week52Pos, changePct }, { a
   if (series.length < 2 && Object.values(fields).every((x) => x === null)) {
     return unavailable("no price history");
   }
-  return ok({ ...fields, closes: series.map((c) => Number(c.toFixed(4))), sessions: series.length }, asOf);
+  const dated = dates.filter(Boolean).length;
+  return ok({
+    ...fields,
+    closes: series.map((c) => Number(c.toFixed(4))),
+    /* Same length as `closes` by construction, with null where the candle
+       carried no readable date. Absent entirely when the publisher sent no
+       dates at all — a card from before this field existed says so by not
+       having it, rather than by carrying a row of nulls that looks like a
+       measurement of nothing. */
+    ...(dated ? { closeDates: dates } : {}),
+    sessions: series.length,
+    /* How many of the retained closes can actually be placed on a time axis.
+       A chart that joins on date must know this is not always `sessions`. */
+    datedSessions: dated,
+    /* Sessions the filter removed. Non-zero means index is NOT time in the
+       arrays above, which is precisely when a reader needs the dates. */
+    dropped: rawCloses.length - series.length,
+  }, asOf);
 }
 
 /* ---------- intraday path ---------------------------------------- */
@@ -966,6 +1016,7 @@ export function buildCard({
       }),
       context: buildContext({
         closes: f.closes,
+        closeDates: f.closeDates,
         r5: f.r5, r21: f.r21, r42: f.r42,
         week52Pos: f.week52Pos,
         changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
