@@ -2538,105 +2538,14 @@ body.is-stale .flows-tablewrap {
 .sp-dot.is-bull { fill: var(--flow-up); }
 .sp-dot.is-bear { fill: var(--flow-down); }
 
-/* ---------- the two poles --------------------------------------- */
-
-.poles {
-  display: grid;
-  gap: 1rem;
-  margin: 1rem 0 0;
-}
-
-@media (min-width: 52rem) {
-  .poles { grid-template-columns: 1fr 1fr; gap: 1.4rem; }
-}
-
-.pole-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.pole-head h2 {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-weight: 700;
-}
-
-.pole.is-bull .pole-head h2 { color: var(--gold-celadon); }
-.pole.is-bear .pole-head h2 { color: var(--flow-down); }
-
-.pole-all {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--ink-faint);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.pole-all:hover { color: var(--ink); text-decoration: underline; }
-.pole-all:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-
-.pole-deck { display: grid; gap: 0.5rem; margin-top: 0.6rem; }
-
-/* An empty pole is the ORDINARY case — the dead band can legitimately leave a
-   side with nothing — so it reads as a reading, not as a breakage. */
-.pole-empty {
-  margin: 0.6rem 0 0;
-  padding: 0.9rem;
-  border: 1px dashed var(--hairline);
-  border-radius: 3px;
-  font-size: 0.85rem;
-  color: var(--ink-dim);
-}
-
-.ptile {
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-2);
-  display: block;
-  padding: 0.7rem 0.8rem;
-  background: var(--bg-elev);
-  border: 1px solid var(--hairline);
-  border-radius: 4px;
-  text-decoration: none;
-  color: inherit;
-}
-
-.ptile:hover { border-color: color-mix(in srgb, var(--gold-harvest) 45%, var(--hairline)); }
-.ptile:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-
-.ptile-head { display: flex; align-items: baseline; gap: 0.5rem; }
-.ptile-rank { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-faint); }
-.ptile-sym { font-family: var(--font-mono); font-size: 0.95rem; letter-spacing: 0.06em; color: var(--ink); }
-.ptile-score { margin-left: auto; font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; }
-.ptile-score.is-pos { color: var(--gold-celadon); }
-.ptile-score.is-neg { color: var(--flow-down); }
-
-.ptile-px { display: flex; gap: 0.45rem; align-items: baseline; margin-top: 0.25rem;
-            font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-dim); }
-.ptile-chg.is-pos { color: var(--flow-up); }
-.ptile-chg.is-neg { color: var(--flow-down); }
-
-/* Why this name is at the pole rather than merely near it. Without it a score
-   is a number with no account of itself. */
-.ptile-lean {
-  margin: 0.35rem 0 0;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--ink-faint);
-}
-
-.ptile-foot {
-  margin: 0.15rem 0 0;
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  color: var(--ink-faint);
-}
+/* ---------- the two poles: REMOVED -------------------------------
+   The six pole tiles (.poles / .pole-* / .ptile-*) were the whole of the
+   overview's main section, and nothing in the tree emits them any more —
+   the command center below replaced them with seven regions drawn from the
+   payloads that page was already fetching. The rules are deleted rather
+   than left in place: a selector for an element no document produces is a
+   claim that the element still exists, and this file is read by people
+   deciding what the page is made of. Its ancestor .spine survives, above. */
 
 .flows-lede { margin: 0; font-size: 0.9rem; color: var(--ink-dim); }
 
@@ -4083,3 +3992,269 @@ body.is-stale .flows-tablewrap {
 .fvc-rank-u { font-size: 0.82rem; color: var(--ink-dim); }
 .fvc-rank-d { font-size: 0.76rem; color: var(--ink-faint); }
 .fvc-count { font-variant-numeric: tabular-nums; }
+
+/* ==============================================================
+   THE COMMAND CENTER — /flows/
+   ==============================================================
+
+   The overview used to be six tiles over a spine. It fetched both full
+   board payloads to draw them and discarded everything past rank three,
+   while the level, the flagged windows, the calendar, the watch board and
+   the score moves each lived on their own route — so "what should I look
+   at today" cost five page loads to answer.
+
+   Seven regions on one screen answer it instead, from the endpoints that
+   were already there. TWELVE COLUMNS, because the canvas tier above lets
+   .flows-main reach 132rem on a wide monitor and a two-column grid would
+   leave a third of that as gutter; the spans collapse to six, then to one,
+   so a phone gets the same regions stacked rather than a scaled-down desk.
+
+   NO COLOUR IS DECLARED HERE. Every value is one of the tokens base.css
+   and the top of this file already define, so the section inherits the
+   palette instead of forking it.
+   ============================================================== */
+
+.cc {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  margin-top: var(--space-3);
+}
+/* MIN-WIDTH:0 IS LOAD-BEARING. A grid item's default min-width is auto, so
+   a region holding a wide table would refuse to shrink below that table and
+   push the whole page sideways — the overflow would land on the document
+   instead of inside .cc-wrap, where it belongs. */
+.cc > * { min-width: 0; }
+
+/* ---------- the verdict bar ----------
+   One hairline grid: the 1px gap over a border-coloured background draws
+   every divider, so the tiles need no borders of their own and cannot
+   double up at the seams. */
+.cc-verdict {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  background: var(--panel-border);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+.cc-tile {
+  background: var(--panel-bg);
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.cc-tile-k {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+.cc-tile-v {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.cc-tile-v.is-pos { color: var(--flow-up); }
+.cc-tile-v.is-neg { color: var(--flow-down); }
+.cc-tile-s { font-size: 0.68rem; color: var(--ink-faint); }
+
+/* ---------- a region ---------- */
+
+.cc-region {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-card);
+  padding: 0 0 0.7rem;
+  display: flex;
+  flex-direction: column;
+}
+.cc-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  /* WRAPS RATHER THAN OVERFLOWS. A subtitle is a whole clause on three of
+     these regions, and at 320px a header held to one line pushes past the
+     viewport — the one kind of overflow no scroll container can catch,
+     because it is the page itself that widens. */
+  flex-wrap: wrap;
+  padding: 0.45rem 0.85rem;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+}
+.cc-h-t {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+.cc-h-s {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  min-width: 0;
+  text-align: right;
+}
+/* Where the subtitle is the way to the rest of the rows, it is a real
+   anchor — linkable, middle-clickable, sendable — and it says how many the
+   region is NOT showing rather than "more". */
+a.cc-h-s { text-decoration: none; }
+a.cc-h-s:hover { color: var(--ink); text-decoration: underline; }
+a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+.cc-body { min-width: 0; }
+
+/* THE SPANS. Bull and bear are the page, so they take five columns each and
+   the score moves ride in the two beside them; the three index regions share
+   the row below. Every span is a whole number of twelfths, so no region can
+   end up a pixel wider than its neighbour by rounding. */
+.cc-bull   { grid-column: span 5; }
+.cc-bear   { grid-column: span 5; }
+.cc-chg    { grid-column: span 2; }
+.cc-alerts { grid-column: span 5; }
+.cc-ev     { grid-column: span 4; }
+.cc-watch  { grid-column: span 3; }
+.cc-spine  { grid-column: 1 / -1; }
+.cc-spine > .spine { padding: 0.6rem 0.85rem; margin: 0.4rem 0 0; }
+
+@media (max-width: 100rem) {
+  .cc-bull, .cc-bear { grid-column: span 6; }
+  .cc-chg { grid-column: span 12; }
+  .cc-alerts { grid-column: span 7; }
+  .cc-ev { grid-column: span 5; }
+  .cc-watch { grid-column: span 12; }
+}
+/* One column. A phone gets the same seven regions in the same order, not a
+   shrunken twelve-column desk. */
+@media (max-width: 60rem) {
+  .cc > * { grid-column: 1 / -1 !important; }
+}
+
+/* ---------- tables ----------
+   A TABLE SCROLLS INSIDE ITS OWN BOX, never by widening the page. The score
+   strip is drawn at a fixed 150px (one viewBox unit is one CSS pixel — see
+   flows-ui.js), so a seven-column row has a hard minimum width that no
+   amount of reflow can get under. The wrapper is focusable so a keyboard
+   user can reach that scroll, which is the same contract .flows-tablewrap
+   carries on the board. */
+.cc-wrap {
+  overflow-x: auto;
+  min-width: 0;
+  outline-offset: -2px;
+}
+
+.cc-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+.cc-tbl th {
+  text-align: left;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 500;
+  padding: 0.4rem 0.5rem 0.3rem;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+}
+.cc-tbl td {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+}
+.cc-tbl tr:last-child td { border-bottom: 0; }
+.cc-tbl .c-num { text-align: right; font-variant-numeric: tabular-nums; }
+.cc-rank { color: var(--ink-faint); width: 1.6rem; }
+.cc-t { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.cc-dim { color: var(--ink-faint); font-size: 0.74rem; }
+
+/* SCOPED TO .cc RATHER THAN DECLARED BARE. `is-pos` is a class fifteen other
+   rules in this file already qualify; a global colour on it would reach
+   every one of their elements and change things nobody edited. */
+.cc .is-pos { color: var(--flow-up); }
+.cc .is-neg { color: var(--flow-down); }
+
+/* The score column is the ranked signal and gets an anchor the other numeric
+   columns do not — position first, weight second, tint last. */
+.cc-score { font-weight: 700; background: color-mix(in srgb, var(--bg-elev) 60%, transparent); }
+
+/* THE CELL AND THE DRAWING NEED DIFFERENT NAMES. scoreStrip puts
+   `${prefix}-strip` on the svg it builds, so a cell also called .cc-strip
+   would hand this width rule to the drawing — and flows-ui.js's whole
+   geometry contract is that one viewBox unit is one CSS pixel, which a
+   stylesheet width silently rescales. The cell is .cc-trk; .cc-strip below
+   belongs to the library. */
+.cc-trk { width: 156px; padding-right: 0.6rem; }
+
+/* ---------- the ticker, as an opener ----------
+   A BUTTON, NOT A LINK. The tiles this replaced were <a href="?t=SYM">, so
+   opening a card was a full navigation that re-fetched both boards to
+   redraw the page already on screen. flows-card.js delegates on
+   .cc-open[data-t] and pushes the same ?t= state, so the address, the Back
+   button and the deep link all behave exactly as before — without the
+   reload. A button inherits none of its container's type, hence the reset. */
+.cc-open {
+  font: inherit;
+  color: inherit;
+  letter-spacing: 0.04em;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.cc-open:hover { color: var(--gold-celadon); text-decoration: underline; }
+.cc-open:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* A name the run built no detail card for. Not a disabled button — that
+   reads as "temporarily broken" — but plain text carrying the reason, which
+   is a permanent and stated property of the row. */
+.cc-flat { color: var(--ink-dim); cursor: help; }
+
+/* ---------- lists ---------- */
+
+.cc-moves { list-style: none; margin: 0; padding: 0.2rem 0.85rem 0; }
+.cc-moves li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.26rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+}
+.cc-moves li:last-child { border-bottom: 0; }
+.cc-moves li > :nth-child(2) { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* One of the three silences, in the region that owns it. Which silence is on
+   data-empty; the sentence is the renderer's, and it owes the distinction in
+   words as well as in the attribute. */
+.cc-quiet { margin: 0; padding: 0.7rem 0.85rem; font-size: 0.78rem; color: var(--ink-dim); }
+
+/* ---------- the score strips ----------
+   FlowsUI.scoreStrip builds its classes from the caller's prefix; the
+   overview passes "cc", so these are the structural suffixes that module
+   documents, under this page's namespace. */
+.cc-strip { display: block; }
+.cc-line { fill: none; stroke: var(--flow-mag); stroke-width: 1.25; }
+.cc-zero { stroke: var(--panel-border); stroke-width: 1; }
+.cc-band { fill: color-mix(in srgb, var(--ink-faint) 12%, transparent); }
+.cc-dot { fill: var(--flow-mag); }
+.cc-dot.is-pos { fill: var(--flow-up); }
+.cc-dot.is-neg { fill: var(--flow-down); }
+.cc-wash { fill: color-mix(in srgb, var(--ink-faint) 7%, transparent); }

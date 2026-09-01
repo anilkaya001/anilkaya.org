@@ -245,8 +245,13 @@
        classes and no data-t, so requiring the attribute here is what makes
        "has a card" a single fact expressed in one place rather than a class
        name the board and this file both have to agree about. */
+    /* .cc-open is the overview's ticker. Before it, the command center's
+       predecessor made each name an <a href="?t=SYM">, so opening a card was
+       a full navigation that re-fetched both board payloads to rebuild the
+       page the reader was already looking at. As a button it lands here
+       instead: same address pushed, same Back button, no reload. */
     const button = event.target.closest &&
-      event.target.closest(".fb-open[data-t], .fd-card[data-t]");
+      event.target.closest(".fb-open[data-t], .fd-card[data-t], .cc-open[data-t]");
     if (!button) return;
     event.preventDefault();
     const ticker = button.dataset.t;
