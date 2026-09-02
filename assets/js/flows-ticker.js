@@ -4028,6 +4028,9 @@
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
     scoreOverlay: P.overlay,
+    deltaExposure: P.deltaExposure,
+    charm: P.charm,
+    vanna: P.vanna,
     __score: null,          // drawn from the card's TOP LEVEL, not its panels
   };
 

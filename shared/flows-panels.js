@@ -111,6 +111,27 @@ export const TICKER_PANELS = Object.freeze([
      is deliberately spelled with a sentinel that can never collide with a
      payload key, and the test that asserts "every registry key is a key of
      buildCard().panels" excludes exactly this one. */
+  /* THE SECOND-ORDER GREEKS, PAID FOR AND THEN INVISIBLE.
+
+     These three came off a vendor call the pipeline was already making for
+     the gamma profile — no extra spend — and were published on every card
+     while no renderer touched them. That is the same defect the four chain
+     panels had, and the reason the registry test now asserts BOTH directions:
+     every registry key names a published panel AND every published panel is
+     either drawn or named in an explicit exemption. One direction only is how
+     a payload comes to carry a field nobody has looked at in weeks.
+
+     Three entries and one drawer: they differ in what the number means, and
+     the payload carries that as `unit`. */
+  { key: "deltaExposure", id: "ftDelta", span: 1,
+    title: "Dealer delta by expiry",
+    question: "How much directional exposure are dealers carrying, and where along the term?" },
+  { key: "charm", id: "ftCharm", span: 1,
+    title: "Charm by expiry",
+    question: "How fast is that exposure decaying with time alone, spot unchanged?" },
+  { key: "vanna", id: "ftVanna", span: 1,
+    title: "Vanna by expiry",
+    question: "How much would that exposure move on a one-point change in implied volatility?" },
   /* THE ONE PANEL BUILT FROM TWO PAYLOADS, and the reason the join happens in
      the pipeline rather than the browser. The card carries a dated price
      window; `scoretrack` carries the dated score history for every name on

@@ -2365,6 +2365,136 @@
     }
   }
 
+  /**
+   * One second-order Greek term structure: two legs, never netted.
+   *
+   * THE SIGN CONVENTION IS THE WHOLE DESIGN. The payload says it outright:
+   * the vendor's put leg is dealer-signed against its call leg for gamma and
+   * charm, and is NOT for vanna — on the same endpoint, in the same response.
+   * So a renderer that draws one bar per expiry has to decide what that bar
+   * means, and there is no answer that is right for all three panels. This
+   * draws the two legs as two bars and lets them stay two numbers.
+   *
+   * The consequence is deliberate: nothing on this panel is a direction. The
+   * total underneath is `grossAbs`, a SIZE, and it is labelled as one.
+   *
+   * SIGN LIVES IN POSITION, not in hue. A leg below the zero line is negative,
+   * which survives greyscale, a colour-blind reader and a printout — the
+   * repository's rule, and the reason the two legs are also told apart by
+   * their fill pattern rather than by colour alone.
+   */
+  function greekTermPanel(host, panel, questionIn, fallbackQuestion) {
+    const question = questionIn || fallbackQuestion;
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
+    panelHead(host, question);
+
+    const rows = (Array.isArray(panel.rows) ? panel.rows : [])
+      .filter((r) => r && (isNum(r.call) !== null || isNum(r.put) !== null));
+    if (!rows.length) {
+      return quietPanel(host, question,
+        "the expiry ladder came back with no leg on any expiry, so there is nothing " +
+        "to lay out along the term.");
+    }
+
+    /* ONE SCALE FOR BOTH LEGS AND BOTH SIGNS, taken from the largest
+       magnitude present. Scaling each leg to its own maximum would make a
+       put leg a thousandth the size of its call leg look identical to one
+       matching it, which is the comparison this panel exists for. */
+    let peak = 0;
+    for (const r of rows) {
+      for (const v of [isNum(r.call), isNum(r.put)]) {
+        if (v !== null && Math.abs(v) > peak) peak = Math.abs(v);
+      }
+    }
+    if (!(peak > 0)) {
+      return quietPanel(host, question,
+        "every leg on every expiry measured exactly zero. That is a reading, not an " +
+        "absence: the vendor reported the exposure and it was flat.");
+    }
+
+    const W = panelWidth(host), H = 150, padT = 8, padB = 26, padX = 4;
+    const plotH = H - padT - padB;
+    const mid = padT + plotH / 2;
+    const slot = (W - padX * 2) / rows.length;
+    const barW = Math.max(3, Math.min(18, slot / 3));
+    const yOf = (v) => mid - (v / peak) * (plotH / 2);
+
+    const svg = svgEl("svg", {
+      class: "gts", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+    svg.append(svgEl("line", {
+      class: "gts-zero", x1: padX, x2: W - padX, y1: mid, y2: mid,
+    }));
+
+    rows.forEach((r, i) => {
+      const cx = padX + slot * (i + 0.5);
+      for (const [leg, v] of [["call", isNum(r.call)], ["put", isNum(r.put)]]) {
+        if (v === null) continue;               // absent, and absent draws nothing
+        const x = leg === "call" ? cx - barW - 1 : cx + 1;
+        const y = v >= 0 ? yOf(v) : mid;
+        /* A MEASURED ZERO IS A HAIRLINE, NOT NOTHING. Zero height would be
+           indistinguishable from the leg the vendor never sent, and those are
+           different facts — the one this file exists to keep apart. */
+        const h = Math.max(1, Math.abs(yOf(v) - mid));
+        const rect = svgEl("rect", {
+          class: "gts-bar is-" + leg + " " + (v > 0 ? "is-pos" : v < 0 ? "is-neg" : "is-flat"),
+          x, y, width: barW, height: h,
+        });
+        rect.append(svgEl("title", {}, [
+          leg === "call" ? "Call leg" : "Put leg",
+          " on ", r.expiry || "an unnamed expiry",
+          isNum(r.dte) === null ? "" : " (" + r.dte + " days out)",
+          ": ", compact(v), ". ",
+          "This is one leg as the vendor signed it, and it is not added to the other.",
+        ].join("")));
+        svg.append(rect);
+      }
+      /* THE EXPIRY LABEL, thinned rather than crowded: a label per bar at
+         twelve expiries overlaps into an unreadable smear, and an unreadable
+         axis is worse than a sparse one. */
+      const every = Math.max(1, Math.ceil(rows.length / 6));
+      if (i % every === 0) {
+        const lab = svgEl("text", {
+          class: "gts-x", x: cx, y: H - padB + 14, "text-anchor": "middle",
+        });
+        lab.textContent = isNum(r.dte) === null
+          ? String(r.expiry || "").slice(5)
+          : r.dte + "d";
+        svg.append(lab);
+      }
+    });
+
+    svg.setAttribute("aria-label",
+      rows.length + " expiries, call and put legs drawn separately and never added. " +
+      "Largest single leg " + compact(peak) + ". " +
+      (isNum(panel.grossAbs) === null ? ""
+        : "Gross size across the ladder " + compact(panel.grossAbs) + "."));
+    host.append(svg);
+
+    /* THE UNIT TRAVELS WITH THE NUMBERS. It is published on the panel — this
+       renderer does not restate it, because a second copy of a unit is how a
+       page comes to label a per-day figure as a per-vol-point one. */
+    host.append(statList([
+      ["Expiries", String(rows.length) +
+        (isNum(panel.seen) !== null && panel.seen !== rows.length
+          ? " of " + panel.seen + " read" : "")],
+      ["Largest leg", compact(peak)],
+      ["Gross size", isNum(panel.grossAbs) === null ? DASH : compact(panel.grossAbs)],
+    ]));
+
+    if (panel.unit) host.append(el("p", "fc-note gts-unit", String(panel.unit)));
+    if (panel.signConvention) {
+      host.append(el("p", "fc-note gts-sign", String(panel.signConvention)));
+    }
+    if (isNum(panel.shed) !== null && panel.shed > 0) {
+      host.append(el("p", "fc-note gts-shed",
+        panel.shed + " further " + (panel.shed === 1 ? "expiry was" : "expiries were") +
+        " read and not drawn: the ladder is capped at " + panel.cap + " so the far " +
+        "months cannot squeeze the front weeks into a single pixel."));
+    }
+  }
+
   function renderScore(host, card, questionIn) {
     /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
        The dialog passes nothing and gets exactly the string it always did;
@@ -2540,6 +2670,15 @@
     congress: renderCongress,
     score: renderScore,
     overlay: renderOverlay,
+    /* THREE PANELS, ONE DRAWER. They differ only in what the number means,
+       and the payload carries that as `unit` — so three copies of this
+       function would be three places for the same chart to drift. */
+    vanna: (host, panel, card, q) => greekTermPanel(host, panel, q,
+      "How much dealer delta moves on a one-point change in implied volatility, by expiry?"),
+    charm: (host, panel, card, q) => greekTermPanel(host, panel, q,
+      "How fast is dealer delta decaying with time alone, by expiry?"),
+    deltaExposure: (host, panel, card, q) => greekTermPanel(host, panel, q,
+      "How much directional exposure are dealers carrying, by expiry?"),
 
     /* scaffolding */
     el, svgEl, isNum, deadPanel, quietPanel, emptyPanel, statList, panelHead, panelWidth,
