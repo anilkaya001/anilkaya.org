@@ -567,6 +567,89 @@ try {
     eq((await fetch(url("/api/flows/ingest?key=board:long:2026-01-02"), { method: "DELETE" })).status, 401,
        "DELETE without the bearer is refused like every other verb");
 
+    /* ---------- the dated archive is immutable, and was not ----------
+
+       IT SAID SO IN THREE COMMENTS AND NOTHING ENFORCED IT. Every key was
+       written with ON CONFLICT DO UPDATE, dated ones included, so a second
+       run on the same day silently replaced an archived board with a
+       different one. Measured before it was fixed: two POSTs to
+       board:long:2026-08-24 with contradictory rows both returned 200 and the
+       archive then reported the second.
+
+       That is not cosmetic. shared/flows-record.js reads exactly these keys
+       to compute the accuracy the deck publishes, and the crons fire twice
+       for the two US timezones and have been observed running hours late — so
+       a same-day second run is ordinary, not rare. A record that can be
+       quietly rewritten is not a record.
+
+       All five behaviours are pinned, because four of them are ways to get
+       this wrong: refusing the first write, refusing an identical retry
+       (which would turn the pipeline's own retry into an outage), freezing
+       the LIVE board, and leaving no way to correct a genuinely bad day. */
+    const ARCH = "board:long:2026-08-24";
+    const boardA = JSON.stringify({ v: 2, rows: [{ t: "AAA", s: 90 }] });
+    const boardZ = JSON.stringify({ v: 2, rows: [{ t: "ZZZ", s: -90 }] });
+    const archGet = () => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(ARCH)),
+      { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+
+    eq((await post(ARCH, boardA, INGEST_TOKEN)).status, 200,
+       "the first write of a dated key succeeds — immutability is not read-only");
+
+    const clash = await post(ARCH, boardZ, INGEST_TOKEN);
+    eq(clash.status, 409,
+       "a second write carrying a DIFFERENT payload is refused: it would revise what a " +
+       "past session said, which is the one thing this archive exists to prevent");
+    eq((await clash.json()).error.code, "archive_immutable",
+       "with a code a caller can switch on rather than prose it has to match");
+    assert.deepEqual(JSON.parse(await (await archGet()).text()).rows, [{ t: "AAA", s: 90 }],
+      "and the archive still holds what the FIRST run published"); checks++;
+
+    const retry = await post(ARCH, boardA, INGEST_TOKEN);
+    eq(retry.status, 200,
+       "a byte-identical rewrite still succeeds — the pipeline retries its own writes on a " +
+       "5xx, and refusing a retry that changes nothing would turn this guard into an outage");
+    eq((await retry.json()).stored, "unchanged",
+       "and says it stored nothing, so a run reporting `unchanged` on a key it thought it " +
+       "was publishing is visible in the log as the retry it is");
+
+    /* THE UNDATED KEYS ARE VIEWS AND MUST STAY WRITABLE. Freezing board:long
+       would take the product down every morning after the first.
+
+       CHECKED ON KEYS NOTHING ELSE IN THIS FILE READS. The first draft of
+       this block proved the point on `board:long` and left BoardZ sitting
+       there, so an assertion two hundred lines further down — that the
+       ingested board round-trips as TEST — failed on a payload this block had
+       written. A test that mutates shared state its neighbours depend on is a
+       worse defect than the one it is testing, because it fails somewhere
+       else. */
+    for (const view of ["pulse", "market", "flowalerts", "scoretrack"]) {
+      eq((await post(view, boardA, INGEST_TOKEN)).status, 200,
+         `${view} is a view of today and stays writable`);
+      eq((await post(view, boardZ, INGEST_TOKEN)).status, 200,
+         `${view} takes a second, different write without complaint — a view describes ` +
+         `today and rewriting it every morning is the product working`);
+    }
+
+    /* THE ESCAPE HATCH, and it is deliberately two steps. Immutability with
+       no way out is permanence by accident; a silent overwrite is a draft
+       pretending to be a record. Delete-then-write is neither. */
+    eq((await fetch(url("/api/flows/ingest?key=" + encodeURIComponent(ARCH)), {
+      method: "DELETE", headers: { Authorization: "Bearer " + INGEST_TOKEN },
+    })).status, 200, "a dated key can still be deleted");
+    eq((await post(ARCH, boardZ, INGEST_TOKEN)).status, 200,
+       "and rewritten afterwards — correcting a genuinely bad archive day is possible, " +
+       "visible, and impossible to do by accident");
+    assert.deepEqual(JSON.parse(await (await archGet()).text()).rows, [{ t: "ZZZ", s: -90 }],
+      "the correction landed"); checks++;
+
+    /* A DATED SCORES POOL IS THE SAME KIND OF RECORD and the same rule
+       applies — the DELETE branch and the write guard read one pattern, so
+       they cannot disagree about which keys are history. */
+    const POOL = "scores:2026-08-24";
+    eq((await post(POOL, boardA, INGEST_TOKEN)).status, 200, "a dated scores pool writes once");
+    eq((await post(POOL, boardZ, INGEST_TOKEN)).status, 409,
+       "and is immutable too: the write guard and the delete branch share one pattern");
+
     /* THE VERBS THAT ARE STILL NOT VERBS HERE. A route that quietly grew a
        third method could grow a fourth, so the closed set is asserted rather
        than assumed. */
