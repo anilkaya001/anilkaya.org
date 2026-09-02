@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   buildChainPanels, chainScalars, buildTopContracts, buildAggressor,
   serialiseSurface, CHAIN_PAGE_SIZE, SKEW_MONEYNESS, SKEW_TOLERANCE, SKEW_MIN_DAYS,
+  summariseSkewMisses,
 } from "../shared/flows-chain.js";
 import { ivConvention, priceSale, ivSurface } from "../shared/flows-premium.js";
 import { buildCard } from "../shared/flows-card.js";
@@ -884,6 +885,84 @@ function chain({
   ok(fine.scalars.skew !== null, "the default fixture does carry a skew");
   eq(fine.skewTerm.skewMiss, null, "so it publishes no miss diagnostic");
   eq(fine.skewTerm.skewReason, null, "and no reason");
+}
+
+/* ---------- what a run's misses add up to ---------------------------
+
+   THIS IS THE ARITHMETIC THAT DECIDES A PUBLISHED CONSTANT, and it was the
+   one part of the skew diagnostic nothing checked. It lived inline in the
+   pipeline as a log line; the corpus cannot reach it either, because all
+   fifty synthetic names carry a skew, so the branch never runs in a dry run.
+   A wrong count here produces a confident, wrong decision about
+   SKEW_TOLERANCE — which is worse than no diagnostic. */
+{
+  const wing = (o) => ({ listed: 4, unpriced: 0, nearest: null, nearestM: null,
+    nearestStrike: null, ...o });
+  const misses = [
+    /* a name whose call wing missed by 0.005 and whose put wing was fine */
+    { expiry: "2026-09-18", days: 21,
+      put: wing({ nearest: 0.01 }), call: wing({ nearest: 0.045 }) },
+    /* a name where both wings are just outside */
+    { expiry: "2026-09-18", days: 21,
+      put: wing({ nearest: 0.055 }), call: wing({ nearest: 0.07 }) },
+    /* a name with an unpriced call wing — no window reaches it */
+    { expiry: "2026-09-18", days: 21,
+      put: wing({ nearest: 0.02 }), call: wing({ nearest: null, unpriced: 2 }) },
+    /* a name with no calls listed at all */
+    { expiry: "2026-09-18", days: 21,
+      put: wing({ nearest: 0.03 }), call: wing({ listed: 0 }) },
+  ];
+  const sum = summariseSkewMisses(misses, { tolerance: 0.04 });
+
+  eq(sum.names, 4, "four names contributed misses");
+  eq(sum.wings, 8, "and eight wings between them");
+
+  /* THE PARTITION IS THE PROPERTY WORTH ASSERTING. Every wing lands in
+     exactly one group; counting a wing twice would inflate what a wider
+     window appears to buy, which is the specific way this could mislead. */
+  eq(sum.unlisted + sum.unpriced + sum.inside + sum.outside, sum.wings,
+     `the four groups partition the wings exactly ` +
+     `(${sum.unlisted} unlisted + ${sum.unpriced} unpriced + ${sum.inside} inside + ` +
+     `${sum.outside} outside = ${sum.wings})`);
+  eq(sum.unlisted, 1, "one wing was not listed at all");
+  eq(sum.unpriced, 1, "one was listed and carried no implied volatility");
+  eq(sum.inside, 3, "three were already inside the window — the OTHER wing failed on those");
+  eq(sum.outside, 3, "and three were priced but outside it");
+
+  /* A WING INSIDE THE WINDOW ON A NAME WITH NO READING IS NOT A NEAR-MISS.
+     Counting it as one would suggest a widening that changes nothing for
+     that name, because its failure was the other wing. */
+  ok(!sum.gaps.includes(0.01) && !sum.gaps.includes(0.02) && !sum.gaps.includes(0.03),
+     "wings already inside the window are kept out of the near-miss distances");
+
+  assert.deepEqual(sum.gaps, [0.045, 0.055, 0.07],
+    "the distances are the outside ones, sorted nearest first"); checks++;
+
+  /* WHAT A WIDENING BUYS, counted in WINGS. */
+  eq(sum.wouldCatch(0.05), 1, "a 0.05 window reaches one of the three outside wings");
+  eq(sum.wouldCatch(0.06), 2, "0.06 reaches two");
+  eq(sum.wouldCatch(0.08), 3, "0.08 reaches all three");
+  eq(sum.wouldCatch(0.04), 0, "and the current window reaches none of them, by construction");
+
+  /* AND WINGS ARE NOT NAMES. A name needs BOTH wings inside the window, so
+     wings caught is an upper bound on readings recovered. The fixture is
+     built so the two numbers actually differ: 0.08 catches three wings but
+     recovers only the ONE name whose other wing was already inside. */
+  const recovered = misses.filter((m) =>
+    [m.put, m.call].every((w) => w.listed && w.nearest !== null && w.nearest <= 0.08)).length;
+  eq(recovered, 2,
+     "at 0.08 only two of the four names get BOTH wings — the other two are held back by " +
+     "an unpriced and an unlisted wing that no window can reach");
+  ok(sum.wouldCatch(0.08) !== recovered,
+     `so wings caught (${sum.wouldCatch(0.08)}) and names recovered (${recovered}) are ` +
+     `genuinely different numbers, which is why the log says WINGS`);
+
+  /* THE EMPTY RUN IS NOT A CRASH. Most sessions will have no misses at all. */
+  const none = summariseSkewMisses([], { tolerance: 0.04 });
+  eq(none.names, 0, "a run with no misses summarises to zero");
+  eq(none.outside, 0, "with no distances");
+  eq(none.wouldCatch(0.9), 0, "and nothing for any window to catch");
+  eq(summariseSkewMisses(null).names, 0, "and a null list is not a crash");
 }
 
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +

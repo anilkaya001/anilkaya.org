@@ -32,7 +32,7 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, SKEW_TOLERANCE }
+import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
   rankUnusual, rankUnusualNames, describeOiBasis,
@@ -5048,30 +5048,28 @@ async function main() {
       if (c.skewTerm.skewMiss) misses.push(c.skewTerm.skewMiss);
     }
     if (misses.length) {
-      let unlisted = 0, unpricedWing = 0;
-      const gaps = [];
-      for (const m of misses) {
-        for (const w of [m.put, m.call]) {
-          if (!w || !w.listed) { unlisted++; continue; }
-          if (w.nearest === null) { unpricedWing++; continue; }
-          if (w.nearest > SKEW_TOLERANCE) gaps.push(w.nearest);
-        }
-      }
-      gaps.sort((a, b) => a - b);
-      /* WHAT A GIVEN WIDENING WOULD ACTUALLY BUY, per wing, from the measured
-         distances rather than from a rule of thumb. */
-      const wouldCatch = (t) => gaps.filter((g) => g <= t).length;
+      /* THE ARITHMETIC LIVES IN shared/flows-chain.js so it can be tested.
+         It decides whether SKEW_TOLERANCE moves, and it was the one part of
+         this diagnostic nothing checked — a wrong count here produces a
+         confident, wrong decision about a published constant. */
+      const sum = summariseSkewMisses(misses);
       console.log(
-        `  skew misses: ${misses.length} name(s) with no reading — ` +
-        `${gaps.length} wing(s) listed and priced but outside the ${SKEW_TOLERANCE} window, ` +
-        `${unpricedWing} listed with no implied volatility, ${unlisted} not listed at all` +
-        (gaps.length
-          ? `. Nearest misses ${gaps.slice(0, 5).map((g) => g.toFixed(4)).join(", ")}` +
-            `; a window of 0.05 would reach ${wouldCatch(0.05)} of them, 0.06 ${wouldCatch(0.06)}, ` +
-            `0.08 ${wouldCatch(0.08)}`
+        `  skew misses: ${sum.names} name(s) with no reading, ${sum.wings} wing(s) between ` +
+        `them — ${sum.outside} listed and priced but outside the ${sum.tolerance} window, ` +
+        `${sum.unpriced} listed with no implied volatility, ${sum.unlisted} not listed at all` +
+        (sum.inside
+          ? `, ${sum.inside} already inside the window (the OTHER wing is what failed on ` +
+            `those names, so no widening helps them)`
           : "") +
-        ". A wider window reaches only the first group; the other two are coverage facts " +
-        "no constant can fix.");
+        (sum.outside
+          ? `. Nearest misses ${sum.gaps.slice(0, 5).map((g) => g.toFixed(4)).join(", ")}` +
+            `; a window of 0.05 would reach ${sum.wouldCatch(0.05)} of those WINGS, ` +
+            `0.06 ${sum.wouldCatch(0.06)}, 0.08 ${sum.wouldCatch(0.08)} — and a name needs ` +
+            `BOTH wings, so wings caught is an upper bound on readings recovered, not a count ` +
+            `of them`
+          : "") +
+        ". A wider window reaches only the outside group; the rest are coverage facts no " +
+        "constant can fix.");
     }
 
     /* ZERO LEVELLED ACROSS THE WHOLE BOARD is not a thin day, it is a broken
