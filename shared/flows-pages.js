@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "90";
+export const ASSET_VERSION = "91";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1160,6 +1160,11 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <span class="fc-meta" id="ftConv"></span>
     <span class="fc-meta" id="ftRegime"></span>
     <span class="fc-meta" id="ftDates"></span>
+    <!-- ONCE YOU WERE ON A NAME THERE WAS NO WAY OFF IT. The index below
+         renders only when ?t= is absent, so comparing two names meant editing
+         the URL by hand. This is the way back to it, and it is in the header
+         because that is where the name it would replace is. -->
+    <button type="button" class="ft-switch" id="ftSwitch" hidden>Switch name</button>
   </header>
 
   <!-- THE INDEX, not an error state. With no ?t= this page is the list of
@@ -1167,6 +1172,10 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        that offers one. -->
   <section class="ft-picker" id="ftPicker" hidden aria-labelledby="ftPickerH">
     <h2 id="ftPickerH">Every name on today’s board</h2>
+    <!-- Only rendered when the picker was opened FROM a name: with no ?t= at
+         all there is nothing to go back to, and a dead "back" control is
+         worse than none. -->
+    <button type="button" class="ft-backto" id="ftBackTo" hidden></button>
     <p class="fc-note" id="ftPickerNote"></p>
     <div class="flows-tablewrap" tabindex="0" role="region"
          aria-label="Board names">

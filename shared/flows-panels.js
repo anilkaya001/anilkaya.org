@@ -40,12 +40,31 @@
  * impossible, and the assertion that checks it would be unsatisfiable rather
  * than merely failing.
  *
- * ORDER IS THE ARGUMENT THE PAGE MAKES. The four chain panels come first
- * because they are what this page exists to show — they are the half of the
- * card payload that has never been drawn. Gamma leads because it is the one
- * panel a reader opens the page for on a name they already know.
+ * ORDER IS THE ARGUMENT THE PAGE MAKES, and the argument has changed once.
+ * It used to be "the four chain panels come first because they are the half
+ * of the card payload that has never been drawn" — correct while that was
+ * true, and stale once they were drawn. The score derivation now leads,
+ * because a reader arrives from a board row carrying a score and the first
+ * thing the page owes them is what that number is made of. Gamma follows: it
+ * is the one panel a reader opens on a name they already know.
  */
 export const TICKER_PANELS = Object.freeze([
+  /* THE SCORE'S OWN DERIVATION, FIRST, and the ordering argument above has
+     been rewritten because it expired.
+
+     It used to sit LAST. That was defensible when it was written: the four
+     chain panels were the half of the payload nothing drew, and putting them
+     first was the argument the page made. They have been drawn for a while
+     now, and four more panels have since been added above this one — so the
+     explanation of the single number this page is about had drifted to entry
+     21 of 21, below a twenty-panel scroll.
+
+     A reader arrives here from a board row carrying a score. The first thing
+     the page owes them is what that score is made of. Everything below is
+     evidence for it. */
+  { key: "__score", id: "ftWhy", span: 2,
+    title: "Score derivation",
+    question: "Which components produced this score, and how heavily?" },
   { key: "gamma", id: "ftGamma", span: 1,
     title: "Gamma convexity",
     question: "Where is the dealer book long and short gamma?" },
@@ -150,9 +169,6 @@ export const TICKER_PANELS = Object.freeze([
        markup", which is not what went wrong. U+2019 passes through untouched
        and is what this site sets prose in anyway. */
     question: "How has this name\u2019s daily score moved against its own price?" },
-  { key: "__score", id: "ftWhy", span: 2,
-    title: "Score derivation",
-    question: "Which components produced this score, and how heavily?" },
 ]);
 
 /** The sentinel key that is drawn from the card's top level, not its panels. */
