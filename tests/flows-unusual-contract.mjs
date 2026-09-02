@@ -603,8 +603,19 @@ const rebuild = (em) => {
   ok(falsified.line.includes("Open interest cannot move further across one settlement than " +
      "the volume traded between them"),
      "stating the physical fact the falsification rests on, so the claim can be checked");
-  ok(/Both cannot be right/.test(falsified.line),
-     "and naming the reading elsewhere in the product that it contradicts");
+  /* THIS ASSERTION USED TO PIN "Both cannot be right", because the ticker
+     page's top-contracts caption asserted the alignment this line refutes and
+     the two shipped side by side. The caption has since been rewritten and
+     the counts now travel on the card itself, so the contradiction it named is
+     gone — and a line still claiming it would be describing a product that no
+     longer exists. What replaces it is the stronger invariant: the verdict a
+     maintainer reads in the job log must also be reaching the reader holding
+     the table, which tests/flows-ticker-contract.mjs §6d proves it does. */
+  ok(/publishes these counts/.test(falsified.line),
+     "and saying the card publishes these counts rather than leaving the falsification " +
+     "in a log only a maintainer reads");
+  ok(!/Both cannot be right/.test(falsified.line),
+     "the old line named a contradiction with the ticker caption that no longer exists");
 
   /* MUTATION IS THE POINT: no emitted chain has zero exceedances, so the
      inconclusive branch cannot be reached from the corpus as it stands. Setting

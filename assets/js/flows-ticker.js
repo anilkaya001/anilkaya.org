@@ -1869,10 +1869,17 @@
    *
    * THE SUBTLE ONE. `doi` is open_interest - prev_oi and the builder
    * emits null when EITHER side is missing. A renderer that coerces sees
-   * 0 and prints "no change overnight", which is a specific, confident,
-   * completely unfounded claim about what stuck. The dash carries a
-   * title saying which of the two it is, because the difference between
-   * "unchanged" and "not computable" is invisible in a glyph.
+   * 0 and prints "no change", which is a specific, confident, completely
+   * unfounded claim about what stuck. The dash carries a title saying
+   * which of the two it is, because the difference between "unchanged"
+   * and "not computable" is invisible in a glyph.
+   *
+   * THE TITLES NAME NO SPAN. They used to say "overnight", which is a
+   * claim about WHEN the two open-interest counts were taken, and the
+   * basis check below this table has falsified it on live rows: a
+   * contract cannot move its open interest further than its own volume
+   * across one settlement, and some did. The vendor stamps neither count,
+   * so these say what changed between them and stop there.
    */
   function tcDoiCell(v) {
     const { isNum } = window.FlowsPanels;
@@ -1882,8 +1889,8 @@
         text: tcSignedInt(null),
         cls: "c-num ftt-doi is-unknown",
         title: "The vendor published no previous open interest for this contract, so the " +
-          "overnight change is not computable. This is NOT a change of zero: an open " +
-          "interest that did not move prints 0.",
+          "change is not computable. This is NOT a change of zero: an open interest that " +
+          "did not move prints 0.",
       };
     }
     const r = Math.round(n);
@@ -1891,10 +1898,12 @@
       text: tcSignedInt(n),
       cls: "c-num ftt-doi " + (r > 0 ? "is-built" : r < 0 ? "is-closed" : "is-flat"),
       title: r === 0
-        ? "Open interest closed exactly where it opened: measured, and unchanged."
+        ? "Open interest was identical in both counts the vendor published: measured, and unchanged."
         : r > 0
-          ? Math.abs(r).toLocaleString("en-US") + " contracts of open interest were added overnight."
-          : Math.abs(r).toLocaleString("en-US") + " contracts of open interest came off overnight.",
+          ? Math.abs(r).toLocaleString("en-US") +
+            " more contracts were open at this strike in the later of the two counts."
+          : Math.abs(r).toLocaleString("en-US") +
+            " fewer contracts were open at this strike in the later of the two counts.",
     };
   }
 
@@ -2044,7 +2053,8 @@
     },
     {
       key: "doi", label: "OI", name: "Change in open interest", cls: "c-num", kind: "num", first: "desc",
-      relation: "open_interest − prev_oi: what stuck overnight, as opposed to what churned.",
+      relation: "open_interest − prev_oi: the move between two vendor open-interest counts, " +
+        "whose spacing the vendor does not state.",
       /* The delta is a Greek capital and the table head is not set in the
          mono face, so it is wrapped on its own. assets/css/base.css ships
          a Greek subset of JetBrains Mono for exactly this reason and says
@@ -2432,15 +2442,107 @@
     const basis = el("p", "fc-note ftt-basis");
     basis.append(document.createTextNode(
       (panel.relation ? String(panel.relation) + ". " : "") +
-      "ΔOI is open_interest − prev_oi: what stuck overnight, as against what churned. " +
-      "A " + DASH + " there means the vendor published no previous open interest, so the change " +
-      "is not computable — it does not mean the open interest held still, which prints 0. " +
+      "ΔOI is open_interest − prev_oi: the move between the two open-interest counts the " +
+      "vendor published, whatever span separates them. A " + DASH + " there means the vendor " +
+      "published no previous open interest, so the change is not computable — it does not mean " +
+      "the open interest held still, which prints 0. " +
       "Bid and Ask are the quoted NBBO in two columns and there is no Mid: (bid + ask) ÷ 2 " +
       "is a basis choice, and on the far out-of-the-money lines that make this table interesting " +
       "it is routinely nowhere near where anything traded. Each strike carries its log-moneyness " +
       "ln(K/S) and the vendor's implied volatility in its title, and each expiry its distance in " +
       "calendar days from this session."));
     host.append(basis);
+
+    /* ---------- what the basis check actually found, for this name ----
+
+       THE ONE THING ON THIS PANEL THAT IS A MEASUREMENT ABOUT THE DATA
+       RATHER THAN A READING OF IT, and it earns its place because the
+       caption above used to make the claim this check can refute.
+
+       Open interest cannot move further across one settlement than the
+       volume traded between those settlements. So a contract whose ΔOI
+       exceeds its own volume proves the two numbers do not describe the
+       same span — and the pipeline found exactly that on live rows. The
+       asymmetry is the whole point and the wording has to carry it: a
+       positive count FALSIFIES the pairing, while a zero count proves
+       nothing at all. It is equally consistent with an intraday-updated
+       open interest, with an aligned pair, and with a quiet session.
+       Writing the zero branch as reassurance would be the confident
+       inference this panel exists to avoid. */
+    if (panel.oiBasis) tcOiBasisNote(host, panel.oiBasis);
+  }
+
+  /**
+   * The basis-check note. Three verdicts, three different sentences.
+   */
+  function tcOiBasisNote(host, basis) {
+    const seen = isNum(basis.seen);
+    const exceeded = isNum(basis.exceeded);
+    const floor = isNum(basis.minVolume);
+    const pop = floor === null
+      ? "the contracts that carried all three numbers"
+      : "the " + tcInt(seen === null ? 0 : seen) + " contract" + (seen === 1 ? "" : "s") +
+        " here that traded at least " + tcInt(floor) + " lots and carried an open interest, " +
+        "a previous open interest and a volume together";
+
+    if (basis.verdict === "no-data" || seen === null || seen === 0) {
+      const note = el("p", "fc-note ftt-oibasis is-untested",
+        "No contract on this chain carried a volume, an open interest and a previous open " +
+        "interest together, so whether those two counts describe the same span could not be " +
+        "checked here. Read ΔOI as a move between two vendor snapshots of unstated spacing.");
+      note.setAttribute("data-empty", "quiet");
+      host.append(note);
+      return;
+    }
+
+    /* THE COUNT AND THE VERDICT MUST BOTH BE READABLE before either branch
+       below speaks. Neither sentence is survivable without the other number:
+       "4 of 105 exceeded" needs the 4, and "none of 105 exceeded" is a
+       confident claim about every contract on the chain built from a count
+       nobody read. A publisher that sends a verdict without its count is
+       broken, and this says so instead of picking the friendlier sentence. */
+    if (exceeded === null) {
+      const note = el("p", "fc-note ftt-oibasis is-untested",
+        "The basis check ran on this chain but published no count of contracts that " +
+        "exceeded their own volume, so its verdict cannot be shown with the number it " +
+        "rests on. Read ΔOI as a move between two vendor snapshots of unstated spacing.");
+      note.setAttribute("data-empty", "unavailable");
+      host.append(note);
+      return;
+    }
+
+    if (basis.verdict === "falsified" && exceeded > 0) {
+      host.append(el("p", "fc-note ftt-oibasis is-falsified",
+        "Measured on this chain: " + tcInt(exceeded) + " of " + pop + " moved their open " +
+        "interest further than their own volume. That cannot happen across a single " +
+        "settlement — no more contracts can be opened than were traded — so on this name the " +
+        "two counts are NOT describing the same span. Do not read ΔOI against the volume " +
+        "beside it as “what stuck of what churned”; they are two snapshots whose spacing the " +
+        "vendor does not state."));
+      return;
+    }
+
+    /* AND THE ZERO BRANCH REQUIRES BOTH HALVES TO AGREE — the verdict
+       "inconclusive" AND a count of exactly zero. Checking only the count
+       let "falsified" with exceeded 0 through, which is the publisher
+       contradicting itself being reported as the reassuring half of its own
+       contradiction. An unrecognised verdict lands here too: a sentence this
+       load-bearing is not composed from a string nothing in this file knows. */
+    if (basis.verdict !== "inconclusive" || exceeded !== 0) {
+      const note = el("p", "fc-note ftt-oibasis is-untested",
+        "The basis check published a verdict its own count does not support, so no reading " +
+        "of it is shown. Read ΔOI as a move between two vendor snapshots of unstated spacing.");
+      note.setAttribute("data-empty", "unavailable");
+      host.append(note);
+      return;
+    }
+
+    host.append(el("p", "fc-note ftt-oibasis is-inconclusive",
+      "Measured on this chain: none of " + pop + " moved their open interest further than " +
+      "their own volume. This is the weaker of the two outcomes and is INCONCLUSIVE — it is " +
+      "what an aligned pair looks like, and equally what an intraday-updated open interest or " +
+      "a quiet session looks like. It is not evidence that ΔOI and the volume beside it " +
+      "describe the same span."));
   }
 
   /* ===== aggressor ===== */

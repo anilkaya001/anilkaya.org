@@ -67,6 +67,10 @@ import {
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
+/* The volume floor the basis check applies, imported rather than repeated:
+   a copy here would silently stop matching the check the moment that number
+   moves, and the card publishes it as the population the counts describe. */
+import { UA_MIN_VOLUME } from "./flows-unusual.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -776,6 +780,38 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * live gamma panel, and no panel failure can remove the name from the board.
  */
 /**
+ * The open-interest basis check, in the shape a card publishes.
+ *
+ * THE LOG LINE DOES NOT SHIP. describeOiBasis returns a `line` written for a
+ * pipeline job log — it carries a "[dry-run]" tag, it addresses a maintainer,
+ * and it names other pages of this product. A card is read by someone holding
+ * a table, so the payload carries the three counts and the verdict and the
+ * renderer composes the sentence beside the column. That also keeps this
+ * prose inside the files the vocabulary suites scan.
+ *
+ * `minVolume` TRAVELS WITH THE COUNTS because the check is not run over every
+ * row in the table. shared/flows-unusual.js applies it only to contracts
+ * trading at least UA_MIN_VOLUME lots, so `seen` is a subset of the rows on
+ * screen and a reader told "3 of 8" without the threshold would look for
+ * eight rows and count something else.
+ */
+function oiBasisReading(basis) {
+  if (!basis || typeof basis !== "object") return null;
+  const seen = numOrNull(basis.seen);
+  if (seen === null) return null;
+  return {
+    seen,
+    exceeded: numOrNull(basis.exceeded),
+    exceedShare: numOrNull(basis.exceedShare),
+    /* "no-data" | "falsified" | "inconclusive" — and the renderer switches on
+       it rather than re-deriving the verdict from the counts, so the two can
+       never drift into disagreeing about the same rows. */
+    verdict: typeof basis.verdict === "string" ? basis.verdict : null,
+    minVolume: UA_MIN_VOLUME,
+  };
+}
+
+/**
  * One chain panel, or a stated absence.
  *
  * The chain leg is the last vendor spend of the run and the first thing a slow
@@ -803,6 +839,25 @@ function chainPanel(chain, key) {
   if (panel.status !== "ok") return panel;
   return {
     ...panel,
+    /* THE OPEN-INTEREST BASIS CHECK TRAVELS WITH THE TABLE THAT PRINTS THE
+       COLUMN IT JUDGES, and only with that table.
+
+       shared/flows-chain.js runs this on every chain because it is arithmetic
+       over rows already in memory, and until now the pipeline logged one of
+       them and published none. That left the reader holding a caption which
+       claimed the open-interest change and the volume span the same interval,
+       on a page that had already measured names where they cannot — an
+       open-interest change larger than the contract's own volume is not
+       possible across one settlement, so any such row falsifies the pairing.
+       Publishing the measurement is what lets the caption say what was found
+       for THIS name instead of asserting a general alignment nothing checked.
+
+       Three panels do not carry it: only `topContracts` prints the column.
+       Publishing a field the other three never read would be shape noise the
+       payload/renderer contract would have to carry forever. */
+    ...(key === "topContracts" && chain.oiBasis
+      ? { oiBasis: oiBasisReading(chain.oiBasis) }
+      : {}),
     coverage: {
       truncated: chain.truncated === true,
       /* THREE COUNTS, NOT ONE, because they are three different populations
