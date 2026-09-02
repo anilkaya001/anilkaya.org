@@ -111,6 +111,24 @@ export const TICKER_PANELS = Object.freeze([
      is deliberately spelled with a sentinel that can never collide with a
      payload key, and the test that asserts "every registry key is a key of
      buildCard().panels" excludes exactly this one. */
+  /* THE ONE PANEL BUILT FROM TWO PAYLOADS, and the reason the join happens in
+     the pipeline rather than the browser. The card carries a dated price
+     window; `scoretrack` carries the dated score history for every name on
+     the board. The pipeline holds both when it builds a card — the track is
+     assembled before the card loop — so the join is done once, at build time,
+     by a shaper that a contract test can run without a browser. Fetching the
+     track in the page instead would put an untested date join inside a
+     drawing function, which is exactly what shared/flows-overlay.js exists to
+     prevent. */
+  { key: "scoreOverlay", id: "ftOverlay", span: 2,
+    title: "Score over price",
+    /* THE TYPOGRAPHIC APOSTROPHE, as every other question on this page uses.
+       escapeHTML turns an ASCII ' into &#39;, and the worker suite compares
+       the registry's string against the served markup — so a straight quote
+       here fails a test whose message is about the question "reaching the
+       markup", which is not what went wrong. U+2019 passes through untouched
+       and is what this site sets prose in anyway. */
+    question: "How has this name\u2019s daily score moved against its own price?" },
   { key: "__score", id: "ftWhy", span: 2,
     title: "Score derivation",
     question: "Which components produced this score, and how heavily?" },

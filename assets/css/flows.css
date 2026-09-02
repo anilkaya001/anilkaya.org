@@ -780,6 +780,49 @@ p.fb-empty {
 .px-dot.is-pos { fill: var(--flow-up); }
 .px-dot.is-neg { fill: var(--flow-down); }
 
+/* ---------- score over price --------------------------------------
+
+   TWO SERIES, TWO UNITS, ONE DATE AXIS. The price line is the context and
+   the score line is the reading, so the score carries the weight and the
+   price is drawn as the fainter of the two. They share no y-scale — price
+   is fitted to its own window, the score is fixed at plus or minus one
+   hundred — so a crossing means nothing, which the panel's note says in
+   words. The distinction has to survive greyscale, which is why the two
+   differ in WIDTH and DASH and not in hue alone. */
+
+.ovl { display: block; width: 100%; }
+
+/* The dead band, in score units. A score line inside it is a name the
+   board's own membership rule would not have ranked, so it is drawn as
+   ground the line sits on rather than as a mark competing with it. */
+.ovl-band { fill: var(--ink); opacity: 0.06; }
+.ovl-zero { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 3 3; }
+
+/* Price: thinner, dashed, receding. */
+.ovl-px {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Score: solid and full weight — this is the series the panel is about. */
+.ovl-score {
+  fill: none;
+  stroke: var(--gold-harvest);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* A scored session with an unscored one on either side. A one-point subpath
+   has no length and renders as nothing, so a real measurement would vanish
+   between two gaps; the dot is that session, drawn. */
+.ovl-dot { fill: var(--gold-harvest); }
+
 /* ---------- session path ------------------------------------------ */
 
 .fp { display: block; width: 100%; height: auto; }

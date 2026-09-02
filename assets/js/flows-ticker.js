@@ -4027,6 +4027,7 @@
     darkpool: drawDarkpool,
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
+    scoreOverlay: P.overlay,
     __score: null,          // drawn from the card's TOP LEVEL, not its panels
   };
 

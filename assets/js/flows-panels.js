@@ -2209,6 +2209,162 @@
     host.append(note);
   }
 
+  /**
+   * The daily-close score laid over the price it was scored against.
+   *
+   * TWO PAYLOADS, ONE CHART, AND THE JOIN IS THE HARD PART. The card carries
+   * a dated price window; `scoretrack` carries a dated score history. Both are
+   * about forty points and both run oldest first, so zipping them by position
+   * produces a chart that looks right and is fiction. shared/flows-overlay.js
+   * does the join by date and this function only draws what it returns.
+   *
+   * THE SCORE AXIS IS FIXED AT PLUS OR MINUS ONE HUNDRED, not scaled to the
+   * name. The score's unit is fixed by construction — that is the whole point
+   * of the bounded tanh — so a scaled axis would make a name that never left
+   * plus-or-minus fifteen look exactly like one that swung to the rail, and
+   * two names on two screens would stop being comparable. A flat line near the
+   * middle is the honest picture of a name that did not move.
+   *
+   * THE PRICE AXIS IS SCALED TO THE WINDOW, because price has no fixed range
+   * and no meaningful zero. The two lines crossing therefore means nothing,
+   * which the note says out loud: they share only the date axis.
+   */
+  function renderOverlay(host, join, questionIn) {
+    const question = questionIn ||
+      "How has this name\u2019s daily score moved against its own price?";
+    if (!join || join.status !== "ok") return emptyPanel(host, question, join);
+    panelHead(host, question);
+
+    const rows = Array.isArray(join.rows) ? join.rows : [];
+    if (rows.length < 2) {
+      return quietPanel(host, question,
+        "one session is a dot, not a history — this name and its scores share " +
+        (rows.length === 1 ? "exactly one session" : "no session") + " so far.");
+    }
+
+    const W = panelWidth(host), H = 190, padL = 4, padR = 4, padT = 10, padB = 18;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+
+    let lo = Infinity, hi = -Infinity;
+    for (const r of rows) { if (r.close < lo) lo = r.close; if (r.close > hi) hi = r.close; }
+    const span = hi - lo || 1;
+    const xOf = (i) => padL + (i / (rows.length - 1)) * plotW;
+    const yPrice = (v) => padT + (1 - (v - lo) / span) * plotH;
+    /* SYMMETRIC ABOUT ZERO by construction, so the zero line is at the exact
+       middle on every name and the eye can compare two panels without
+       re-reading an axis. */
+    const yScore = (v) => padT + (1 - (Math.max(-100, Math.min(100, v)) + 100) / 200) * plotH;
+
+    const svg = svgEl("svg", {
+      class: "ovl", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      /* One viewBox unit is one CSS pixel — `meet` with a matching height
+         takes the smaller of the two scales, which is 1. `none` would scale
+         the axes independently and distort every slope on the panel. */
+      role: "img", preserveAspectRatio: "xMidYMid meet",
+    });
+
+    /* THE DEAD BAND, drawn first so both lines sit over it. It is a band in
+       SCORE units and it is what the board's membership rule is stated in, so
+       a score line inside it is a name the board would not have ranked. */
+    const band = isNum(join.deadBand);
+    if (band !== null && band > 0) {
+      svg.append(svgEl("rect", {
+        class: "ovl-band", x: padL, width: plotW,
+        y: yScore(band), height: Math.max(1, yScore(-band) - yScore(band)),
+      }));
+    }
+    svg.append(svgEl("line", {
+      class: "ovl-zero", x1: padL, x2: W - padR, y1: yScore(0), y2: yScore(0),
+    }));
+
+    /* Price first, score over it: the score is the reading this page is about
+       and the price is the context it is read against. */
+    svg.append(svgEl("path", {
+      class: "ovl-px",
+      d: rows.map((r, i) => (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yPrice(r.close).toFixed(1)).join(" "),
+    }));
+
+    /* THE SCORE LINE BREAKS AT EVERY GAP. A run of consecutive scored
+       sessions is one subpath; a null ends it. Bridging a hole would draw a
+       score on a day nobody scored, and filling it with zero would be worse —
+       zero is NEUTRAL, a reading this system publishes and defends. */
+    let d = "", open = false, segments = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const v = isNum(rows[i].score);
+      if (v === null) { open = false; continue; }
+      d += (open ? "L" : "M") + xOf(i).toFixed(1) + " " + yScore(v).toFixed(1) + " ";
+      if (!open) segments++;
+      open = true;
+    }
+    if (d) svg.append(svgEl("path", { class: "ovl-score", d: d.trim() }));
+
+    /* A LONE SCORED SESSION BETWEEN TWO GAPS DRAWS NO LINE — a one-point
+       subpath has no length and renders as nothing at all, which is a
+       measured score disappearing. It gets a dot. */
+    for (let i = 0; i < rows.length; i++) {
+      const v = isNum(rows[i].score);
+      if (v === null) continue;
+      const prev = i > 0 ? isNum(rows[i - 1].score) : null;
+      const next = i < rows.length - 1 ? isNum(rows[i + 1].score) : null;
+      if (prev === null && next === null) {
+        svg.append(svgEl("circle", {
+          class: "ovl-dot", cx: xOf(i), cy: yScore(v), r: 2,
+        }));
+      }
+    }
+
+    const first = rows[0], last = rows[rows.length - 1];
+    svg.setAttribute("aria-label",
+      join.overlap + " sessions from " + first.d + " to " + last.d + ", " +
+      "price from " + px2(first.close) + " to " + px2(last.close) + ", " +
+      "score from " + (isNum(first.score) === null ? "unscored" : first.score) +
+      " to " + (isNum(last.score) === null ? "unscored" : last.score) + "." +
+      (join.gaps ? " " + join.gaps + " session" + (join.gaps === 1 ? "" : "s") +
+        " in that window carry no score and the line breaks at each." : ""));
+    host.append(svg);
+
+    host.append(statList([
+      ["Shared sessions", String(join.overlap)],
+      ["From", first.d],
+      ["To", last.d],
+      ["Scored", join.scored + " of " + join.overlap],
+      ["Dead band", band === null ? DASH : "±" + band],
+    ]));
+
+    /* WHAT THE OVERLAP LEFT OUT, in both directions and as counts. "23
+       sessions" under a card that says "42 daily closes" reads as lost data
+       until the reason is beside it. */
+    const outside = [];
+    if (isNum(join.priceOnly) && join.priceOnly > 0) {
+      outside.push(join.priceOnly + " session" + (join.priceOnly === 1 ? "" : "s") +
+        " of price with no score for this name");
+    }
+    if (isNum(join.scoreOnly) && join.scoreOnly > 0) {
+      outside.push(join.scoreOnly + " scored session" + (join.scoreOnly === 1 ? "" : "s") +
+        " with no close on this card");
+    }
+    const notes = (join.notes || {});
+    host.append(el("p", "fc-note ovl-note",
+      (outside.length
+        ? "Drawn over the " + join.overlap + " sessions the two windows share. Outside it: " +
+          outside.join(", ") + ". "
+        : "The two windows cover the same " + join.overlap + " sessions exactly. ") +
+      (notes.join || "") + " " + (notes.axes || "")));
+
+    if (join.gaps > 0) {
+      host.append(el("p", "fc-note ovl-gaps",
+        join.gaps + " of these " + join.overlap + " sessions carry no score for this name. " +
+        (notes.gap || "")));
+    }
+    if (segments === 0) {
+      const dead = el("p", "fc-note ovl-none",
+        "No session in the shared window carries a score for this name, so only the " +
+        "price is drawn.");
+      dead.setAttribute("data-empty", "quiet");
+      host.append(dead);
+    }
+  }
+
   function renderScore(host, card, questionIn) {
     /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
        The dialog passes nothing and gets exactly the string it always did;
@@ -2383,6 +2539,7 @@
     path: renderPath,
     congress: renderCongress,
     score: renderScore,
+    overlay: renderOverlay,
 
     /* scaffolding */
     el, svgEl, isNum, deadPanel, quietPanel, emptyPanel, statList, panelHead, panelWidth,
