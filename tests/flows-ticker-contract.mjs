@@ -1252,6 +1252,104 @@ try {
     await page.close();
   }
 
+  /* ---------- 6h. the page was a dead end -------------------------
+
+     The index renders only when `?t=` is absent, so a reader who had arrived
+     on a name could not reach another one without editing the URL — on a
+     section whose whole purpose is comparing names against each other.
+
+     THE BOARDS MUST NOT BE FETCHED UNLESS THE CONTROL IS USED. Two requests
+     on every ticker page view would be paid by every reader to serve the few
+     who switch, and the card is what this page is. That is asserted first,
+     because it is the property a later "simplification" would quietly lose. */
+  {
+    const card = withChain[0];
+    const boards = { rows: [{ t: "AAA", r: 1, s: 40, dp: 1 }, { t: "BBB", r: 2, s: 30, dp: 1 }] };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker, boards });
+
+    const before = await page.evaluate(() =>
+      window.__requested.filter((u) => u.includes("/api/flows/board")).length);
+    eq(before, 0,
+       "loading a named ticker page fetches NO board — the switcher's cost is paid only " +
+       "by the readers who use it");
+
+    const btn = await page.evaluate(() => {
+      const b = document.getElementById("ftSwitch");
+      return b ? { hidden: b.hidden, text: b.textContent } : null;
+    });
+    ok(btn && !btn.hidden, "but the control is there, in the header, beside the name");
+
+    await page.click("#ftSwitch");
+    await page.waitForSelector("#ftPickerBody tr");
+    const after = await page.evaluate(() => ({
+      fetched: window.__requested.filter((u) => u.includes("/api/flows/board")).length,
+      rows: [...document.querySelectorAll("#ftPickerBody .ft-link")].map((a) => a.textContent),
+      gridHidden: document.getElementById("ftGrid")
+        ? document.getElementById("ftGrid").hidden
+        : document.querySelector(".ft-grid").hidden,
+      backShown: !document.getElementById("ftBackTo").hidden,
+      backText: document.getElementById("ftBackTo").textContent,
+      note: document.getElementById("ftPickerNote").textContent,
+    }));
+    ok(after.fetched > 0, "clicking it fetches the boards, then");
+    ok(after.rows.includes("AAA"), "and the index lists the names to switch to");
+    ok(after.backShown,
+       "opened FROM a name, the picker offers a way back — hiding twenty panels with no " +
+       "return is a worse dead end than the one this fixes");
+    ok(after.backText.includes(card.ticker),
+       `and names it (${after.backText.trim()}), so the reader knows what they are returning to`);
+    ok(after.note.includes(card.ticker), "the note says which name they are on");
+
+    /* CLICKING AGAIN MUST NOT RE-FETCH. Opening the switcher twice is not two
+       different questions. */
+    await page.click("#ftBackTo");
+    await page.click("#ftSwitch");
+    await page.waitForSelector("#ftPickerBody tr");
+    const twice = await page.evaluate(() =>
+      window.__requested.filter((u) => u.includes("/api/flows/board")).length);
+    eq(twice, after.fetched, "re-opening the switcher re-uses what it already fetched");
+
+    /* AND THE WAY BACK ACTUALLY RESTORES THE PAGE. */
+    await page.click("#ftBackTo");
+    const restored = await page.evaluate(() => ({
+      pickerHidden: document.getElementById("ftPicker").hidden,
+      panels: document.querySelectorAll(".ft-panel[data-panel]").length,
+      headShown: !document.getElementById("ftHead").hidden,
+    }));
+    ok(restored.pickerHidden, "going back hides the index");
+    ok(restored.headShown, "restores the header");
+    ok(restored.panels > 15, `and the panels are still there (${restored.panels})`);
+
+    eq(errors.length, 0, `the switcher throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 6i. the score derivation leads --------------------------
+
+     IT USED TO BE ENTRY 21 OF 21. The explanation of the single number this
+     page is about sat below a twenty-panel scroll — defensible when the
+     chain panels above it were the undrawn half of the payload, and stale
+     once they were drawn and four more panels were added on top.
+
+     Asserted on the REGISTRY and on the rendered DOM, because the page is
+     generated from the registry and a test that only read the registry would
+     pass on a page that never mounted it. */
+  {
+    eq(TICKER_PANELS[0].key, SCORE_KEY,
+       "the score derivation is the first panel the registry mounts");
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+    const order = await page.evaluate(() =>
+      [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => s.dataset.panel));
+    eq(order[0], "__score",
+       "and it is first in the document too — a reader arrives from a board row carrying " +
+       "a score, and the first thing the page owes them is what it is made of");
+    await page.close();
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({

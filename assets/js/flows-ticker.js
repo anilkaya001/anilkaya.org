@@ -4366,11 +4366,80 @@
 
   /* ---------- the picker, which is the index and not an error -------- */
 
-  function showPicker(rows, note) {
+  /* ---------- switching names without leaving the section ----------
+
+     THE PAGE WAS A DEAD END. The index below renders only when `?t=` is
+     absent, so a reader who had arrived on a name could not reach another one
+     without editing the URL — on a section whose whole purpose is comparing
+     names against each other.
+
+     THE BOARDS ARE FETCHED ONLY IF THE CONTROL IS USED. Two requests on every
+     ticker page view would be paid by every reader to serve the few who
+     switch, and the card is what this page is. Fetched once and kept, because
+     opening the switcher twice is not two different questions. */
+  let switchRows = null;
+
+  function wireSwitch(card) {
+    const btn = document.getElementById("ftSwitch");
+    if (!btn) return;
+    btn.hidden = false;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = "Loading names…";
+      try {
+        if (!switchRows) {
+          const [long, short] = await Promise.all([
+            getJSON("/api/flows/board?side=long").catch(() => null),
+            getJSON("/api/flows/board?side=short").catch(() => null),
+          ]);
+          switchRows = boardRows(long, short);
+        }
+        if (!switchRows.length) {
+          /* NOT AN ERROR AND NOT A BLANK LIST. The boards failed or are not
+             published yet, and the button says which rather than opening an
+             empty table the reader has to interpret. */
+          btn.textContent = "No board to switch to";
+          return;
+        }
+        showPicker(switchRows,
+          "Every name today's board built a card for. You are on " +
+          ((card && card.ticker) || "a name") + ".",
+          (card && card.ticker) || null);
+      } finally {
+        btn.disabled = false;
+        if (btn.textContent === "Loading names…") btn.textContent = prev;
+      }
+    };
+  }
+
+  function showPicker(rows, note, backTo) {
     if (!picker) return;
     grid.hidden = true;
     if (headEl) headEl.hidden = true;
     picker.hidden = false;
+
+    /* THE WAY BACK, and only when there is one. Opened from a name, the
+       picker has somewhere to return to and hiding the grid is reversible;
+       reached with no `?t=` at all it is the page itself and a "back" control
+       would lead nowhere. */
+    const back = document.getElementById("ftBackTo");
+    if (back) {
+      if (backTo) {
+        back.hidden = false;
+        back.textContent = "\u2190 Back to " + backTo;
+        back.onclick = () => {
+          picker.hidden = true;
+          grid.hidden = false;
+          if (headEl) headEl.hidden = false;
+          const h = document.getElementById("ftTicker");
+          if (h) h.focus();
+        };
+      } else {
+        back.hidden = true;
+        back.onclick = null;
+      }
+    }
     const body = $("ftPickerBody");
     body.replaceChildren();
     for (const row of rows) {
@@ -4462,6 +4531,7 @@
         });
       }
       paint(card);
+      wireSwitch(card);
       return null;
     }).catch(() => {
       statusEl.textContent = "This page could not be loaded. Reload to try again.";

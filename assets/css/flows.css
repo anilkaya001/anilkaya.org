@@ -780,6 +780,26 @@ p.fb-empty {
 .px-dot.is-pos { fill: var(--flow-up); }
 .px-dot.is-neg { fill: var(--flow-down); }
 
+/* ---------- the name switcher --------------------------------------
+
+   In the header, beside the name it replaces. Reset to a text control
+   rather than a button-looking button: the header is a row of readings and
+   a filled button in it would out-shout the score. */
+
+.ft-switch, .ft-backto {
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.15em 0.6em;
+  cursor: pointer;
+}
+.ft-switch:hover, .ft-backto:hover { color: var(--ink); border-color: var(--ink-faint); }
+.ft-switch:disabled { cursor: progress; opacity: 0.7; }
+.ft-backto { margin-bottom: 0.6rem; }
+
 /* ---------- second-order Greek term structures ---------------------
 
    TWO LEGS THAT ARE NEVER ADDED, so they are never drawn as one bar. The
