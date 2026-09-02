@@ -2115,13 +2115,37 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
   return lines;
 }
 
+/**
+ * One side's board rows, and the count of names it could not fit.
+ *
+ * THE NAMES THAT CLEARED THE BAND AND APPEAR NOWHERE. This product's stated
+ * rule is that the dead band decides publication: a name outside it is a
+ * signal, a name inside it goes on the watch list. Then `boardSize` truncates
+ * each side and the overflow lands on NEITHER — not this board, and not the
+ * watch list, which by construction holds only the names inside the band.
+ *
+ * Measured on the emitted corpus: 100 scored, 3 inside the band, 97 therefore
+ * cleared it, 93 published across both sides. Four names were fully scored,
+ * cleared the threshold the product says is the threshold, and reached no
+ * surface at all — and no published number said so, so the arithmetic could
+ * not be done by a reader either.
+ *
+ * The cap itself is defensible: a board is a ranked list and a ranked list
+ * has a length. What was not defensible was the silence — so the payload now
+ * publishes `cleared` and `shed`, derived where both lists are in scope
+ * rather than counted here and carried, because a count that travels
+ * separately from the rows it describes is a count that can disagree with
+ * them. That is the failure the neutral-list comment above already names: a
+ * payload saying 48 above a list of 40.
+ */
 function toRows(pool, screenerByTicker, previousIds) {
   const ids = applyHysteresis(
     pool.map((r) => r.ticker), previousIds,
     { entryRank: UNIVERSE.boardSize, exitRank: Math.round(UNIVERSE.boardSize * 1.4) },
   );
   const byTicker = new Map(pool.map((r) => [r.ticker, r]));
-  return ids.map((ticker, i) => boardRow(byTicker.get(ticker), screenerByTicker.get(ticker) || {}, i + 1));
+  return ids.map((ticker, i) =>
+    boardRow(byTicker.get(ticker), screenerByTicker.get(ticker) || {}, i + 1));
 }
 
 /**
@@ -4195,6 +4219,24 @@ async function main() {
       dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
       deadBand: sides.deadBand,
       neutral: sides.neutral,
+      /* HOW MANY NAMES CLEARED THE BAND ON THIS SIDE, and how many of them
+         this board could not hold.
+
+         THE PRODUCT'S STATED RULE IS THAT THE DEAD BAND DECIDES, and until
+         these two fields existed the rule was not quite true: `boardSize`
+         truncates each side and the overflow reaches NEITHER surface — not
+         this board, and not the watch list, which by construction holds only
+         the names INSIDE the band. Measured on the emitted corpus: 100
+         scored, 3 inside the band, so 97 cleared it and 93 published. Four
+         names were fully scored, cleared the threshold this product says is
+         the threshold, and appeared nowhere — with no published number from
+         which a reader could even work out that they existed.
+
+         Both derived here, from the two lists, in one place. `cleared` is the
+         side's whole pool and `shed` is what did not fit, so they cannot
+         drift from the rows beside them. */
+      cleared: sides[side].length,
+      shed: sides[side].length - rows.length,
       // The horizon every `hm` and `hr` on this board is stated in.
       horizonSessions: HORIZON_SESSIONS,
       weights: first.weights || null,
