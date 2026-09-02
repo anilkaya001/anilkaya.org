@@ -2157,6 +2157,58 @@
    * the composite in the first place. A gauge at zero is a real reading; a
    * signed axis at null is an absent one, and those must not look alike.
    */
+  /**
+   * How the three terms become the one number, checked before it is claimed.
+   *
+   * THE PANEL SHOWED THE PARTS AND NEVER THE ARITHMETIC. A reader could see
+   * agreement 67%, sources 5 of 5 and persistence 56% beside a conviction of
+   * 76 and had no way to combine them — the weights lived only in
+   * shared/flows-features.js. So the composite was, in practice, an opaque
+   * number with three suggestive numbers under it.
+   *
+   * THE WEIGHTS COME FROM THE PAYLOAD, NEVER FROM A COPY HERE. Restating
+   * 0.45/0.35/0.20 in this file would be a second copy of a constant that has
+   * already moved once, and on the day it moves again this page would describe
+   * arithmetic the pipeline did not do — the sector-momentum defect exactly,
+   * in prose instead of in a field name.
+   *
+   * AND IT IS VERIFIED BEFORE IT IS SHOWN. If the terms do not reconstruct the
+   * published conviction, the line is not drawn: an identity that does not hold
+   * is worse than no identity, because it invites a reader to trust a
+   * derivation the numbers do not support. A card from before these fields
+   * were published simply has no persistence and lands here too.
+   */
+  function convictionArithmetic(host, card, conv) {
+    const w = conv.weights;
+    if (!w || typeof w !== "object") return;
+    const a = isNum(conv.agreement), c = isNum(conv.coverage), pn = isNum(conv.persistence);
+    const wa = isNum(w.agreement), wc = isNum(w.coverage), wp = isNum(w.persistence);
+    const published = isNum(card.conviction);
+    if (a === null || c === null || pn === null ||
+        wa === null || wc === null || wp === null || published === null) return;
+
+    const recon = Math.round(100 * (wa * a + wc * c + wp * pn));
+    if (recon !== published) return;
+
+    const pct = (x) => Math.round(x * 100) + "%";
+    const term = (weight, value) => pct(weight) + " of " + pct(value);
+    const note = el("p", "fc-note fc-conv-math");
+    note.append(document.createTextNode(
+      "Conviction " + published + " is " + term(wa, a) + " agreement, plus " +
+      term(wc, c) + " source coverage, plus " + term(wp, pn) + " persistence. " +
+      /* THE SHAPE OF THE DOMINANT TERM, because it is what makes two nearby
+         convictions mean different things. Agreement is agree-over-present
+         across at most three signed axes, so it can only be 33%, 67% or 100%
+         — a category, carrying the heaviest weight. Two names ten points
+         apart may sit in the same category and differ only in coverage, or
+         sit in different ones; the composite alone does not say which. */
+      "Agreement is a COUNT — how many of the signed axes point the same way, out of the " +
+      "ones that were measured at all — so it moves in steps and never smoothly, and it " +
+      "carries the heaviest of the three weights. Two names a few points apart on this " +
+      "number may differ by a whole axis, or by nothing but coverage."));
+    host.append(note);
+  }
+
   function renderScore(host, card, questionIn) {
     /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
        The dialog passes nothing and gets exactly the string it always did;
@@ -2223,8 +2275,16 @@
       ["Agreement", isNum(conv.agreement) === null ? DASH : Math.round(conv.agreement * 100) + "%"],
       ["Axes present", isNum(conv.breadth) === null ? DASH : conv.breadth + " of 3"],
       ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
+      /* THE THIRD TERM OF THE COMPOSITE, which this list showed two of.
+         A reader could see agreement and coverage, could not see persistence,
+         and so watched a published conviction move by eleven points with
+         nothing on the card accounting for it. */
+      ["Persistence", isNum(conv.persistence) === null ? DASH
+        : Math.round(conv.persistence * 100) + "%"],
       ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
     ]));
+
+    convictionArithmetic(host, card, conv);
 
     /* THE TWO REASONS THE QUALITY GAUGE IS LOW, spelled out.
     

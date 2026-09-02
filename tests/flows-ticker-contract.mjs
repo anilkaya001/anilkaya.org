@@ -933,6 +933,72 @@ try {
     await page.close();
   }
 
+  /* ---------- 6e. the conviction arithmetic ------------------------
+
+     THE PANEL SHOWED THE PARTS AND NEVER THE SUM. Conviction is a weighted
+     blend of agreement, source coverage and persistence; this list published
+     two of those three terms and the weights lived only in
+     shared/flows-features.js, so a reader could see 67%, 5-of-5 and a
+     conviction of 76 with no way to connect them — and the missing third
+     term could move the composite eleven points with nothing on the card
+     accounting for it.
+
+     The line is drawn ONLY when the terms reconstruct the published number.
+     An identity that does not close is worse than no identity, because it
+     invites trust in a derivation the numbers do not support — so the
+     broken cases below must render nothing rather than something wrong. */
+  {
+    const base = withChain.find((c) => c.conv && c.conv.weights &&
+      isFinite(c.conviction) && c.conv.persistence !== null);
+    ok(base, "an emitted card carries the full conviction decomposition");
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    const readMath = async (card) => {
+      await mount(page, card, { ticker: card.ticker });
+      return page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="__score"] > div');
+        const math = host.querySelector(".fc-conv-math");
+        return { math: math ? math.textContent : null, said: host.textContent };
+      });
+    };
+
+    const good = await readMath(base);
+    ok(good.math, "the arithmetic is stated beside the terms it uses");
+    ok(good.math.includes("Conviction " + base.conviction),
+       "naming the published composite, so the reader knows which number is being explained");
+    /* THE WEIGHTS COME FROM THE PAYLOAD. A renderer restating 0.45/0.35/0.20
+       in its own prose is a second copy of a constant that has already moved
+       once, and on the day it moves again the page describes arithmetic the
+       pipeline did not do — the sector-momentum defect, in prose. */
+    for (const [k, w] of Object.entries(base.conv.weights)) {
+      ok(good.math.includes(Math.round(w * 100) + "%"),
+         `the ${k} weight is the payload's own (${Math.round(w * 100)}%), not a copy in the renderer`);
+    }
+    ok(/persistence/i.test(good.said),
+       "and persistence, the term this panel never showed, is in the stat list");
+    ok(/COUNT/.test(good.math) && /steps/.test(good.math),
+       "the note says agreement is a count that steps, which is why two nearby " +
+       "convictions can differ by a whole axis");
+
+    /* THREE WAYS FOR IT NOT TO CLOSE, and none may draw a line. */
+    const mutate = (fn) => { const c = JSON.parse(JSON.stringify(base)); fn(c); return c; };
+    const broken = await readMath(mutate((c) => { c.conviction = c.conviction + 7; }));
+    ok(!broken.math,
+       "a composite the terms do not reconstruct draws no arithmetic at all");
+    const noPer = await readMath(mutate((c) => { c.conv.persistence = null; }));
+    ok(!noPer.math, "nor does a card missing the third term");
+    const noWeights = await readMath(mutate((c) => { delete c.conv.weights; }));
+    ok(!noWeights.math, "nor a card published before the weights shipped");
+    ok(/Conviction/.test(noWeights.said),
+       "though the composite itself still prints — losing the derivation is not losing the number");
+
+    eq(errors.length, 0, "and none of the four states throws");
+    await page.close();
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({

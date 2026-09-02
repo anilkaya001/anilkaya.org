@@ -1715,6 +1715,69 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
+  /* ---------- the board says what its own sort key is made of --------
+
+     THE BOARD RANKS ON A COMPOSITE AND PUBLISHED ONLY THE COMPOSITE.
+     Conviction is 0.45·agreement + 0.35·coverage + 0.20·persistence, and the
+     heaviest term is a COUNT of how many signed axes point the same way — so
+     the largest single input to the sort key stepped, invisibly, and two
+     names ten points apart might differ by a whole axis or by nothing at all.
+     On this corpus the values cluster at 60-66, 75-82 and 90-96, one cluster
+     per agreement level.
+
+     Counts, not the ratio: agree/present is a fraction of two small integers
+     that no decimal holds, so a board rounding it to three places publishes
+     0.667 for two-of-three and any consumer multiplying back is doing
+     arithmetic on a rounding error. */
+  for (const side of ["long", "short"]) {
+    const file = `-board-${side}.json`;
+    const full = path.join(path.dirname(prefix), file);
+    if (!fs.existsSync(full)) continue;
+    const board = JSON.parse(fs.readFileSync(full, "utf8"));
+    const rows = board.rows || [];
+    ok(rows.length > 0, `board:${side} has rows to check`);
+    let withCounts = 0;
+    for (const r of rows) {
+      if (r.agr === null || r.bth === null) continue;
+      withCounts++;
+      ok(Number.isInteger(r.agr) && Number.isInteger(r.bth),
+         `board:${side} ${r.t}: the agreement counts are integers, not a rounded ratio`);
+      ok(r.agr >= 0 && r.agr <= r.bth,
+         `board:${side} ${r.t}: 0 <= agree (${r.agr}) <= present (${r.bth})`);
+      ok(r.bth <= 3, `board:${side} ${r.t}: at most three signed axes exist to agree`);
+    }
+    ok(withCounts === rows.length,
+       `every board:${side} row carries the count behind its own conviction (${withCounts}/${rows.length})`);
+  }
+
+  /* ---------- the composite can be re-done from the card -------------
+
+     A PUBLISHED BLEND WHOSE TERMS DO NOT RECONSTRUCT IT IS A LIE, and until
+     this assertion existed nothing checked. The card published two of the
+     three terms and none of the weights, so the number could be described
+     and not verified. */
+  {
+    const conv = card.conv || {};
+    const w = conv.weights;
+    ok(w && typeof w === "object", "the card publishes the weights the blend used");
+    for (const k of ["agreement", "coverage", "persistence"]) {
+      ok(Number.isFinite(w[k]), `including the ${k} weight`);
+      ok(Number.isFinite(conv[k]), `and the ${k} term itself`);
+    }
+    eq(Number((w.agreement + w.coverage + w.persistence).toFixed(10)), 1,
+       "the weights sum to one, so the whole [0,100] range is reachable");
+    const recon = Math.round(100 *
+      (w.agreement * conv.agreement + w.coverage * conv.coverage + w.persistence * conv.persistence));
+    eq(recon, card.conviction,
+       "and the three terms with those weights reconstruct the published conviction exactly");
+    /* THE CLAMPED COVERAGE, not the raw measurement: a name whose coverage
+       came in above 1 would close the identity in the pipeline and fail it
+       here if the wrong one of the two shipped. */
+    ok(conv.coverage >= 0 && conv.coverage <= 1,
+       "the published coverage is the clamped value the arithmetic used");
+    ok(conv.persistence >= 0 && conv.persistence <= 1, "and likewise persistence");
+  }
+
   /* ---------- the basis check reaches the reader ---------------------
 
      THE MEASUREMENT EXISTED AND WAS THROWN AWAY. describeOiBasis has run on
