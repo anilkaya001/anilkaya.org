@@ -19,7 +19,7 @@ import {
   greekTermStructure, legPresent, GREEK_UNITS,
   callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg, callDeltaLeg, putDeltaLeg,
   effectiveBreadth, pearson, calibrateScoreScale, boundedScore,
-  conviction, applyHysteresis, gammaCrossings, isLiveColumn,
+  conviction, CONVICTION_WEIGHTS, applyHysteresis, gammaCrossings, isLiveColumn,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   SCORE_SCALE,
 } from "../shared/flows-features.js";
@@ -523,6 +523,83 @@ const near = (a, b, tol, msg) => {
   // Out-of-range inputs are clamped rather than trusted.
   const wild = conviction({ familyScores: [1, 1], coverage: 99, persistence: -99 });
   ok(wild.conviction <= 100, "out-of-range coverage is clamped");
+
+  /* ---------- the composite can be reconstructed from what it returns ----
+
+     A COMPOSITE THAT CANNOT BE CHECKED IS AN OPAQUE NUMBER. This function
+     returned two of the three terms it weights, so a consumer could describe
+     conviction but not verify it, and the third term could move a published
+     76 to a published 87 with nothing accounting for the difference. The card
+     now publishes all three plus the weights, and that promise is only worth
+     anything if the identity actually closes. */
+  for (const cov of [0, 0.37, 1]) for (const per of [0, 0.55, 1]) {
+    for (const fs of [[1, 1, 1], [1, 1, -1], [1, -1, -1], [40, 30, null]]) {
+      const c = conviction({ familyScores: fs, coverage: cov, persistence: per });
+      const recon = Math.round(100 * (
+        CONVICTION_WEIGHTS.agreement * c.agreement +
+        CONVICTION_WEIGHTS.coverage * c.coverage +
+        CONVICTION_WEIGHTS.persistence * c.persistence));
+      eq(recon, c.conviction,
+         `the three returned terms and the published weights reconstruct the composite ` +
+         `(cov ${cov}, per ${per}, families ${JSON.stringify(fs)})`);
+    }
+  }
+  /* THE CLAMPED VALUES COME BACK, NOT THE ONES HANDED IN, or the identity
+     closes for well-behaved inputs and silently fails for exactly the rows
+     that needed checking. */
+  eq(wild.coverage, 1, "coverage comes back as the arithmetic used it, clamped to 1");
+  eq(wild.persistence, 0, "and persistence likewise, clamped up to 0");
+
+  /* THE COUNT IS EXACT WHERE THE RATIO IS NOT. agree/present is a fraction of
+     two small integers; 2/3 has no finite decimal, so a board rounding the
+     ratio to three places publishes 0.667 and any consumer multiplying back
+     to recover the count is doing arithmetic on a rounding error. */
+  const twoOfThree = conviction({ familyScores: [1, 1, -1], coverage: 1, persistence: 0 });
+  eq(twoOfThree.agree, 2, "the agreeing count is published as an integer");
+  eq(twoOfThree.breadth, 3, "beside the present count");
+  ok(Number(twoOfThree.agreement.toFixed(3)) * 3 !== 2,
+     "and the rounded ratio really does not recover it, which is why the count ships");
+  for (const fs of [[1, 1, 1], [1, 1, -1], [1, -1, -1], [0, 0], [40, 30, null], []]) {
+    const c = conviction({ familyScores: fs, coverage: 1, persistence: 0 });
+    ok(Number.isInteger(c.agree) && Number.isInteger(c.breadth) &&
+       c.agree >= 0 && c.agree <= c.breadth,
+       `0 <= agree <= breadth, both integers (${JSON.stringify(fs)})`);
+  }
+
+  /* THE SHAPE THAT MAKES THE DECOMPOSITION WORTH PUBLISHING. Agreement is
+     agree-over-present across at most three signed axes, so it takes three
+     values and carries the heaviest weight — which is why two convictions a
+     few points apart can differ by a whole axis. Pinned because it is the
+     argument for every field added above: if agreement ever became continuous
+     the case for the board carrying its count would need re-making. */
+  /* THE FIRST DRAFT OF THIS ASSERTION WAS WRONG AND THE ERROR IS WORTH
+     KEEPING. It offered [1,1,1], [1,1,-1] and [1,-1,-1] as three agreement
+     levels and got two: `sign` is the sign of the SUM, so with three measured
+     non-zero axes the majority always shares it and one-of-three cannot
+     happen that way. It arrives only when an axis is measured NEUTRAL, or the
+     signed sum is exactly zero — which is why the emitted corpus reaches it
+     at all (13 rows of 96). The prose on the board and the card was rewritten
+     from this: the count steps, and it runs 0..breadth, which is breadth+1
+     values and not breadth. */
+  const byMajority = new Set([[1, 1, 1], [1, 1, -1], [1, -1, -1]].map(
+    (fs) => conviction({ familyScores: fs, coverage: 1, persistence: 1 }).agree));
+  assert.deepEqual([...byMajority].sort(), [2, 3],
+    "three measured non-zero axes reach only two-of-three and three-of-three: the " +
+    "majority always shares the sign of the sum"); checks++;
+  eq(conviction({ familyScores: [1, -1, 0], coverage: 1, persistence: 1 }).agree, 1,
+     "one-of-three needs a measured-neutral axis, which is how the corpus reaches it");
+  const levels = new Set();
+  for (const fs of [[1, 1, 1], [1, 1, -1], [1, -1, 0], [0, 0, 0]]) {
+    levels.add(conviction({ familyScores: fs, coverage: 1, persistence: 1 }).agree);
+  }
+  assert.deepEqual([...levels].sort(), [0, 1, 2, 3],
+    "and the count runs 0..breadth — four values at breadth 3, not three"); checks++;
+  ok(CONVICTION_WEIGHTS.agreement > CONVICTION_WEIGHTS.coverage &&
+     CONVICTION_WEIGHTS.agreement > CONVICTION_WEIGHTS.persistence,
+     "and it is the heaviest of the three terms, so the coarsest input dominates");
+  eq(Number((CONVICTION_WEIGHTS.agreement + CONVICTION_WEIGHTS.coverage +
+     CONVICTION_WEIGHTS.persistence).toFixed(10)), 1,
+     "the weights sum to one, so the whole [0,100] range is reachable");
 }
 
 /* ---------- the scale estimator does not collapse on a signed column --- */

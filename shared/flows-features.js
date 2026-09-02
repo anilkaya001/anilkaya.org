@@ -1256,6 +1256,21 @@ export function boundedScore(z, scale) {
  * a ratio in [0,1], so the whole range is reachable by construction —
  * no absolute threshold can strand it at zero.
  */
+/**
+ * What the composite is made of, as data rather than as three literals.
+ *
+ * PUBLISHED WITH THE NUMBER SO THE READER CAN CHECK IT. The alternative is a
+ * renderer that restates 0.45/0.35/0.20 in its own prose, which is a second
+ * copy of a constant that has already moved once — and when the two disagree
+ * the page says the arithmetic is something it is not. The card ships these,
+ * so a published conviction can be reconstructed from its own payload.
+ */
+export const CONVICTION_WEIGHTS = Object.freeze({
+  agreement: 0.45,
+  coverage: 0.35,
+  persistence: 0.20,
+});
+
 export function conviction({ familyScores = [], coverage = 1, persistence = 0 }) {
   /* `s !== 0` used to do double duty: it dropped a genuinely ABSENT family
      from the agreement denominator, which is right, and it also dropped a
@@ -1265,7 +1280,9 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
      presence is a null test and a measured 0 counts as a family that agrees
      with nothing. */
   const present = familyScores.filter((s) => Number.isFinite(s));
-  if (!present.length) return { conviction: 0, agreement: 0, breadth: 0 };
+  if (!present.length) {
+    return { conviction: 0, agreement: 0, agree: 0, breadth: 0, coverage: 0, persistence: 0 };
+  }
 
   const sign = Math.sign(present.reduce((a, b) => a + b, 0)) || 1;
   const agree = present.filter((s) => Math.sign(s) === sign).length;
@@ -1273,12 +1290,46 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
 
   const cov = Math.min(Math.max(coverage, 0), 1);
   const per = Math.min(Math.max(persistence, 0), 1);
-  const value = 0.45 * agreement + 0.35 * cov + 0.20 * per;
+  const value = CONVICTION_WEIGHTS.agreement * agreement +
+    CONVICTION_WEIGHTS.coverage * cov +
+    CONVICTION_WEIGHTS.persistence * per;
 
+  /* ALL THREE TERMS COME BACK, not just the one that was already here.
+
+     A composite whose inputs are not published cannot be checked, and this
+     one has a shape that makes checking matter: `agreement` is agree/present
+     over at most three signed families — a COUNT over a count, stepping
+     rather than varying smoothly — and it carries the largest weight, while
+     the other two terms are continuous. A published 76 is therefore mostly a
+     step and partly a measurement, and a reader given only the 76 cannot tell
+     which of the two moved when it changes. On the emitted corpus this shows
+     up as a trimodal spread: 22 distinct values across 96 rows, clustered at
+     60-66, 75-82 and 90-96, one cluster per agreement level (13 rows at one
+     of three axes agreeing, 64 at two, 19 at all three).
+
+     Note what the count can and cannot be. With three families all measured
+     and non-zero, the majority always shares the sign of their sum, so
+     one-of-three is unreachable that way — it arrives only when a family is
+     measured NEUTRAL or the signed sum is exactly zero. The reachable set is
+     0..breadth, which is breadth+1 values and not breadth; a first draft of
+     the test here asserted three and failed, correctly.
+
+     `coverage` and `persistence` are returned AS CLAMPED, not as passed, so
+     a consumer reconstructing the identity gets the numbers the arithmetic
+     actually used rather than the ones handed in. */
   return {
     conviction: Math.round(100 * Math.min(Math.max(value, 0), 1)),
     agreement,
+    /* THE COUNT AS WELL AS THE RATIO. `agreement` is agree/present, a
+       fraction of two small integers that no decimal holds exactly — a board
+       rounding it to three places publishes 0.667 for two-of-three, and any
+       consumer multiplying back to recover the count is doing arithmetic on
+       a rounding error. The two integers are exact, smaller on the wire, and
+       are what a reader actually wants to be told. */
+    agree,
     breadth: present.length,
+    coverage: cov,
+    persistence: per,
   };
 }
 

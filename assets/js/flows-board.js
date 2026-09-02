@@ -158,11 +158,39 @@
 
   /* ---------- DOM helpers ---------------------------------------- */
 
-  function cell(text, className) {
+  function cell(text, className, title) {
     const td = document.createElement("td");
     if (className) td.className = className;
     td.textContent = text;          // textContent everywhere: no escaping to forget
+    if (title) td.title = title;
     return td;
+  }
+
+  /**
+   * What a published conviction is mostly made of.
+   *
+   * THE BOARD SORTS ON A COMPOSITE AND SHOWED ONLY THE COMPOSITE. Conviction
+   * is a weighted sum of three terms, and the heaviest of them — agreement,
+   * how many of the signed axes point the same way — can take only three
+   * values because there are only three axes. So the number's largest single
+   * input is a CATEGORY, and a column of them orders names partly by category
+   * and partly by degree with no way to tell the two apart: on the emitted
+   * corpus the values cluster at 60-66, 75-82 and 90-96, one cluster per
+   * agreement level, and a reader comparing 66 against 75 is comparing across
+   * a category boundary while one comparing 75 against 82 is not.
+   *
+   * NO WEIGHTS ARE NAMED HERE. The full arithmetic, with the weights the
+   * pipeline actually used, is on the card — restating them in a second file
+   * is how a page ends up describing a blend that has since moved.
+   */
+  function convictionTitle(row) {
+    const agree = isNum(row && row.agr);
+    const breadth = isNum(row && row.bth);
+    if (agree === null || breadth === null || breadth <= 0) return "";
+    return agree + " of " + breadth + " signed axes agree, which is the heaviest of the " +
+      "three terms behind this number. It is a COUNT out of " + breadth + ", so it moves in " +
+      "steps and never smoothly, and two names a few points apart may differ by a whole axis " +
+      "or by nothing but coverage. The full arithmetic is on the name's own card.";
   }
 
   function toneClass(v) {
@@ -396,6 +424,11 @@
     foot.className = "fd-foot";
     const conv = document.createElement("span");
     conv.textContent = isNum(row.cnv) === null ? DASH : row.cnv + " conv";
+    /* WHAT THE COMPOSITE IS MOSTLY MADE OF, on the number the board sorts by.
+       See convictionTitle: agreement is three-valued and carries the heaviest
+       weight, so two nearby convictions can differ by a whole axis. */
+    const convWhy = convictionTitle(row);
+    if (convWhy) conv.title = convWhy;
     /* The move priced over a FIXED horizon — the same number of sessions for
        every card on the board. The vendor's own implied_move_perc is quoted to
        each name's next listed expiry, so a column of those is a column of
@@ -423,7 +456,12 @@
 
     card.setAttribute("aria-label",
       `${row.t}, rank ${row.r != null ? row.r : index + 1}, score ${score === null ? "unavailable" : score}, ` +
-      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}. ` +
+      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}` +
+      /* A SCREEN READER GETS THE CATEGORY TOO, because the title attribute
+         above is a hover affordance and this is the same fact. */
+      (isNum(row.agr) === null || isNum(row.bth) === null
+        ? ". "
+        : `, with ${row.agr} of ${row.bth} signed axes agreeing. `) +
       (isNum(row.hm) === null ? ""
         : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
           `${horizonSessions || 10} trading sessions. `) +
@@ -775,7 +813,7 @@
     tr.append(px);
 
     tr.append(scoreCell(row.s));
-    tr.append(cell(fmtInt(row.cnv), "c-num"));
+    tr.append(cell(fmtInt(row.cnv), "c-num", convictionTitle(row) || undefined));
     tr.append(familyCell(row.fam));
     /* PURITY CHANGED MEANING AT VERSION 2, from |SUM dir| / SUM|total| — a net
        over a gross, where two different cancellations fought each other — to

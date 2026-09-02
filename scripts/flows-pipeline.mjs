@@ -1531,7 +1531,16 @@ function scoreBoard(features, tilts, sectors, caps) {
       fam: subs,
       conviction: conv.conviction,
       agreement: conv.agreement,
+      agree: conv.agree,
       breadth: conv.breadth,
+      /* THE CLAMPED TERMS, taken from the returned object rather than from
+         `f`. The scored row already carries f.coverage and f.persistence as
+         they were measured; these are what the weighted sum actually used
+         after clamping to [0,1], and publishing the wrong one of the two is
+         how a reader's reconstruction of the composite fails to close on a
+         name whose coverage came in above 1. */
+      convCoverage: conv.coverage,
+      convPersistence: conv.persistence,
       dispersion,
       weights,
     };
@@ -1990,6 +1999,23 @@ function boardRow(r, s, rank) {
     r: rank,
     s: r.score,
     cnv: r.conviction,
+    /* THE DOMINANT TERM OF `cnv`, so a ranked list can say what its own
+       ranking key is made of.
+
+       Conviction is 0.45·agreement + 0.35·coverage + 0.20·persistence, and
+       agreement is agree-over-present across at most three signed axes — so
+       it takes THREE values and carries the heaviest weight. A board sorted
+       on `cnv` alone therefore orders by a number whose largest single input
+       is a category the reader cannot see: two names ten points apart may
+       differ by a whole axis or by nothing but coverage, and the composite
+       does not say which. On the emitted corpus this is visible as three
+       clusters — 60-66, 75-82, 90-96 — one per agreement level.
+
+       Two small numbers against a 128KB cap: ~2.4% of a board payload. The
+       full identity stays on the card, which is where a derivation belongs;
+       what the board owes its reader is the category behind its own sort. */
+    agr: r.agree === null || r.agree === undefined ? null : r.agree,
+    bth: r.breadth === null || r.breadth === undefined ? null : r.breadth,
     px: close || r.spot,
     chg: prev > 0 ? (close - prev) / prev : null,
     purity: r.purity === null ? null : Number(r.purity.toFixed(3)),

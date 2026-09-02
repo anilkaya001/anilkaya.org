@@ -101,6 +101,27 @@ const glyph = await page.evaluate(() => {
 });
 
 
+/* THE CONVICTION TITLE ON A BOARD THAT PREDATES IT.
+
+   `agr`/`bth` — how many signed axes agreed, out of how many were measured —
+   are the newest fields on a board row, published so a ranked list can say
+   what its own sort key is mostly made of. This fixture is a REAL v1 board
+   and carries neither, which is precisely the deploy window this file exists
+   for: new assets, old payload. The renderer must add no title at all rather
+   than compose one out of undefined, and the conviction number itself must
+   keep printing — losing the explanation is not losing the reading. */
+const legacyConv = await page.evaluate(() => {
+  const td = document.querySelector("#flowsBody tr").children[4];
+  const badge = document.querySelector(".fd-foot span");
+  return {
+    cellText: td.textContent.trim(),
+    cellTitled: td.hasAttribute("title"),
+    badgeTitled: badge ? badge.hasAttribute("title") : null,
+    aria: (document.querySelector(".fd-card") || { getAttribute: () => "" })
+      .getAttribute("aria-label") || "",
+  };
+});
+
 /* A DEEP-LINKED SORT ON A WITHHELD COLUMN. purity changed meaning at v2, so
    on this v1 board the column renders the em dash and sortable() is false —
    but ?sort=purity arrives from links minted while it was sortable. The table
@@ -160,7 +181,11 @@ currentCard.weights = { F: 2.1, P: 0.9, D: 0.8 };
 currentCard.conv = { agreement: 1, breadth: 3, coverage: 1, gate: 1.42 };
 const currentBoard = JSON.parse(JSON.stringify(legacyBoard));
 currentBoard.v = 2;
-currentBoard.rows = [{ ...legacyBoard.rows[0], t: "CURR", fam: currentCard.fam }];
+/* THE AGREEMENT COUNTS, on the current side of the boundary. Two of three
+   signed axes agreeing is the modal case on the live corpus (64 of 96 rows)
+   and is the one worth carrying here: it is the value a reader most often
+   sees, and the one a renderer that rounded a ratio would get wrong. */
+currentBoard.rows = [{ ...legacyBoard.rows[0], t: "CURR", fam: currentCard.fam, agr: 2, bth: 3 }];
 await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
@@ -257,6 +282,21 @@ await page.click('.flows-view[data-view="table"]');
 const v2Purity = await page.evaluate(() =>
   document.querySelector("#flowsBody tr").children[6].textContent.trim());
 
+/* AND THE OTHER SIDE OF THE CONVICTION BOUNDARY. Withholding the title
+   always satisfies "a v1 board adds no title", so the modern board has to
+   prove the title actually arrives — and that it carries the counts rather
+   than a weight restated in this renderer. */
+const v2Conv = await page.evaluate(() => {
+  const td = document.querySelector("#flowsBody tr").children[4];
+  const badge = document.querySelector(".fd-foot span");
+  return {
+    cellTitle: td.getAttribute("title") || "",
+    badgeTitle: badge ? (badge.getAttribute("title") || "") : "",
+    aria: (document.querySelector(".fd-card") || { getAttribute: () => "" })
+      .getAttribute("aria-label") || "",
+  };
+});
+
 const assertions = [
   ["a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
    "between new assets and the next pipeline run must not dark the card reader",
@@ -296,6 +336,27 @@ const assertions = [
   [v2Purity !== "\u2014" && v2Purity.length > 0,
     `a v2 board publishes purity rather than withholding it (got "${v2Purity}")`],
   [v2("F").v === "−73", "signed axes are unaffected by the version"],
+  /* ---- the conviction decomposition, across the version boundary ---- */
+  [legacyConv.cellText === "79",
+   `a v1 board still prints its conviction (got "${legacyConv.cellText}")`],
+  [!legacyConv.cellTitled,
+   "but the table cell carries NO title: the agreement counts are not on this " +
+   "payload, and a title composed from undefined would explain a number with a " +
+   "blank where its reason goes"],
+  [!legacyConv.badgeTitled,
+   "and neither does the deck badge, which reads the same two absent fields"],
+  [!/signed axes/.test(legacyConv.aria),
+   "and the screen-reader label claims no agreement count it was never given"],
+  [/\b2 of 3\b/.test(v2Conv.cellTitle),
+   `a board carrying the counts explains its conviction with them (got "${v2Conv.cellTitle}")`],
+  [/\b2 of 3\b/.test(v2Conv.badgeTitle),
+   "on the deck badge as well as the table cell — the same number in two views"],
+  [/2 of 3 signed axes agreeing/.test(v2Conv.aria),
+   `and a screen reader is told the same fact, not left with the composite alone`],
+  [!/0\.45|45%|0\.35|0\.2\b/.test(v2Conv.cellTitle),
+   "while the board names no WEIGHT: the blend is stated once, on the card, from the " +
+   "payload's own numbers — a second copy here is how a page ends up describing " +
+   "arithmetic the pipeline stopped doing"],
   [errors.length === 0, "no page errors: " + errors.join(" | ")],
 ];
 let failed = 0;

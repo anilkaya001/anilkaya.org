@@ -62,7 +62,7 @@ export const CARD_SCHEMA_VERSION = 2;
 import {
   horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
   greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
-  callDeltaLeg, putDeltaLeg,
+  callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS,
 } from "./flows-features.js";
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
@@ -942,10 +942,33 @@ export function buildCard({
        five numbers with no stated relationship to the headline, and a reader
        cannot tell that one axis carried half the board and another a tenth. */
     weights: weights || null,
+    /* THE COMPOSITE'S OWN ARITHMETIC, complete enough to be re-done.
+
+       `conviction` above is 0.45·agreement + 0.35·coverage + 0.20·persistence
+       rounded to an integer, and this block used to publish two of those three
+       terms — so the number could be described but not checked, and the third
+       term could move a published 76 to a published 87 with nothing on the
+       card accounting for the difference.
+
+       THE WEIGHTS SHIP TOO. A renderer that restated 0.45/0.35/0.20 in its own
+       prose would be a second copy of a constant that has already moved once,
+       and when the two disagree the page describes arithmetic the pipeline did
+       not do. `coverage` here is the CLAMPED value the sum used, not the raw
+       measurement, for the same reason: a reconstruction has to close.
+
+       The shape matters as much as the terms. `agreement` is agree/present
+       over at most three signed families — a count over a count, which steps
+       rather than varying smoothly — and it carries the heaviest weight while
+       the other two are continuous. A reader given only the composite cannot
+       tell a step from a change of degree, which on the emitted corpus is the
+       difference between the 60-66, 75-82 and 90-96 clusters and the spread
+       inside each. */
     conv: {
       agreement: numOrNull(f.agreement),
       breadth: numOrNull(f.breadth),
-      coverage: numOrNull(f.coverage),
+      coverage: numOrNull(f.convCoverage !== undefined ? f.convCoverage : f.coverage),
+      persistence: numOrNull(f.convPersistence),
+      weights: CONVICTION_WEIGHTS,
       gate: numOrNull(f.gate),
     },
     /* THE TWO REASONS THE GATE SUPPRESSED THIS NAME, as numbers rather than
