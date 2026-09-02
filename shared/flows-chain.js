@@ -290,6 +290,56 @@ function wingMiss(priced, targetM, tol, type) {
 }
 
 /**
+ * What a run's skew misses add up to, and what a wider window would buy.
+ *
+ * EXTRACTED SO IT CAN BE CHECKED. This lived inline in the pipeline as a log
+ * line, which meant the arithmetic that will decide SKEW_TOLERANCE was the
+ * one part of the diagnostic nothing tested — and a wrong count here produces
+ * a confident, wrong decision about a published constant. The corpus cannot
+ * reach it either: all fifty synthetic names carry a skew, so the branch
+ * never runs in a dry run.
+ *
+ * THE THREE GROUPS DO NOT OVERLAP and every wing lands in exactly one, which
+ * is the property worth asserting: a wing is unlisted, or listed-and-unpriced,
+ * or has a nearest priced candidate — and only that last group is reachable by
+ * widening anything. Counting a wing twice would inflate what a wider window
+ * appears to buy, which is the specific way this could mislead.
+ *
+ * `wouldCatch` counts WINGS, not names, and says so: a name needs BOTH wings
+ * inside the window, so catching four wings does not mean recovering four
+ * readings. Reporting it as names would overstate the gain by up to a factor
+ * of two.
+ */
+export function summariseSkewMisses(misses, { tolerance = SKEW_TOLERANCE } = {}) {
+  const list = Array.isArray(misses) ? misses.filter(Boolean) : [];
+  let unlisted = 0, unpriced = 0, inside = 0;
+  const gaps = [];
+  for (const m of list) {
+    for (const w of [m.put, m.call]) {
+      if (!w || !w.listed) { unlisted++; continue; }
+      if (w.nearest === null || w.nearest === undefined) { unpriced++; continue; }
+      /* A WING INSIDE THE WINDOW ON A NAME WITH NO READING is the OTHER wing's
+         fault, and counting it as a near-miss would suggest a widening that
+         changes nothing for this name. Tracked separately so the groups still
+         partition. */
+      if (w.nearest <= tolerance) { inside++; continue; }
+      gaps.push(w.nearest);
+    }
+  }
+  gaps.sort((a, b) => a - b);
+  return {
+    names: list.length,
+    wings: list.length * 2,
+    unlisted, unpriced, inside,
+    outside: gaps.length,
+    gaps,
+    tolerance,
+    /* How many WINGS a given window would reach. Never names. */
+    wouldCatch: (t) => gaps.filter((g) => g <= t).length,
+  };
+}
+
+/**
  * skew, term and the front at-the-money level.
  *
  * skew = iv(ln K/S = −0.10) − iv(ln K/S = +0.10), in volatility points.
