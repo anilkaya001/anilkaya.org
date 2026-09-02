@@ -780,6 +780,34 @@ p.fb-empty {
 .px-dot.is-pos { fill: var(--flow-up); }
 .px-dot.is-neg { fill: var(--flow-down); }
 
+/* ---------- second-order Greek term structures ---------------------
+
+   TWO LEGS THAT ARE NEVER ADDED, so they are never drawn as one bar. The
+   vendor's put leg is dealer-signed against its call leg for gamma and charm
+   and is NOT for vanna, on the same endpoint — so a netted bar would mean
+   something different on one of these three panels than on the other two,
+   and nothing on the page would say which.
+
+   SIGN IS POSITION FIRST. A leg below the zero line is negative, which
+   survives greyscale, a colour-blind reader and a printout; the two LEGS are
+   then told apart by fill weight rather than by hue, for the same reason. */
+
+.gts { display: block; width: 100%; }
+.gts-zero { stroke: var(--hairline); stroke-width: 1; }
+.gts-x { fill: var(--ink-faint); font-family: var(--font-mono); font-size: 10px; }
+
+.gts-bar { stroke: none; }
+/* The call leg reads as the solid one, the put leg as the outlined one:
+   two textures, legible with no colour at all. */
+.gts-bar.is-call { fill: var(--gold-harvest); }
+.gts-bar.is-put { fill: var(--gold-celadon); opacity: 0.55; }
+/* A measured zero is a hairline the reader can see and hover, never an empty
+   slot — an empty slot is the leg the vendor never sent, which is a
+   different fact. */
+.gts-bar.is-flat { fill: var(--ink-faint); }
+
+.gts-unit, .gts-sign, .gts-shed { max-width: var(--measure); }
+
 /* ---------- score over price --------------------------------------
 
    TWO SERIES, TWO UNITS, ONE DATE AXIS. The price line is the context and

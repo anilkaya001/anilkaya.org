@@ -97,6 +97,41 @@ const truncated = cards.filter((c) =>
   ok(!TICKER_PANEL_KEYS.includes(SCORE_KEY),
      "the score sentinel is excluded from the payload-key list, since it is drawn from the card's top level");
 
+  /* ---------- AND THE OTHER DIRECTION, which is the one that was missing.
+
+     The assertion above catches a registry entry with no payload behind it.
+     It does NOT catch the reverse — a panel the pipeline publishes on every
+     card that no registry entry mounts — and that is the failure this file's
+     own header describes: four chain panels shipped for weeks, on the wire,
+     costing vendor calls, and simply not drawn.
+
+     It happened again while this suite was passing. `vanna`, `charm` and
+     `deltaExposure` were added to buildCard, published on every emitted card,
+     and reached no page. Nothing failed, because nothing looked this way.
+
+     A panel may be published and undrawn only by being named below, with a
+     reason. That keeps the omission an argued decision rather than the silent
+     default it was. The list is empty today and that is the point: every
+     panel this pipeline pays for is on a page. */
+  const DELIBERATELY_UNDRAWN = new Map([
+    /* e.g. ["someKey", "why the ticker page is not where this belongs"] */
+  ]);
+  for (const card of withChain) {
+    for (const key of Object.keys(card.panels)) {
+      if (DELIBERATELY_UNDRAWN.has(key)) continue;
+      ok(TICKER_PANEL_KEYS.includes(key),
+         `${card.ticker}: published panel "${key}" is mounted by the registry — a panel on ` +
+         `the wire that no page draws is a vendor call nobody reads`);
+    }
+  }
+  for (const [key, why] of DELIBERATELY_UNDRAWN) {
+    ok(typeof why === "string" && why.length > 20,
+       `the exemption for "${key}" states a real reason rather than a placeholder`);
+    ok(!TICKER_PANEL_KEYS.includes(key),
+       `and "${key}" is genuinely not in the registry — a stale exemption is a comment ` +
+       `that has stopped being true`);
+  }
+
   /* Ids are unique, or getElementById silently returns the first and one
      panel draws into another's box. */
   const ids = TICKER_PANELS.map((p) => p.id);
@@ -1113,6 +1148,107 @@ try {
        "was never on a board");
 
     eq(errors.length, 0, `the overlay renders without throwing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 6g. the second-order Greeks -------------------------
+
+     PAID FOR, PUBLISHED, AND INVISIBLE until now. These three come off a
+     vendor call the pipeline was already making, and they sat on every card
+     with no renderer — the same failure the four chain panels had, repeated
+     while this suite was green, because nothing asserted the payload→registry
+     direction. That assertion now exists in §1; this section checks the
+     drawing.
+
+     THE SIGN CONVENTION IS THE THING TO GET RIGHT. The payload says the
+     vendor's put leg is dealer-signed against its call leg for gamma and
+     charm and is NOT for vanna — on the same endpoint. So the two legs must
+     never be netted, and this proves the renderer does not net them by
+     counting the bars. */
+  {
+    const base = withChain.find((c) =>
+      ["vanna", "charm", "deltaExposure"].every((k) =>
+        c.panels[k] && c.panels[k].status === "ok" && c.panels[k].rows.length >= 2));
+    ok(base, "an emitted card carries all three second-order Greek ladders with data");
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, base, { ticker: base.ticker });
+
+    for (const key of ["vanna", "charm", "deltaExposure"]) {
+      const panel = base.panels[key];
+      const got = await page.evaluate((k) => {
+        const host = document.querySelector('.ft-panel[data-panel="' + k + '"] > div');
+        if (!host) return null;
+        const svg = host.querySelector("svg.gts");
+        const bars = [...host.querySelectorAll(".gts-bar")];
+        const zero = host.querySelector(".gts-zero");
+        return {
+          bars: bars.length,
+          calls: bars.filter((b) => b.classList.contains("is-call")).length,
+          puts: bars.filter((b) => b.classList.contains("is-put")).length,
+          above: bars.filter((b) => b.classList.contains("is-pos")).length,
+          below: bars.filter((b) => b.classList.contains("is-neg")).length,
+          zeroY: zero ? Number(zero.getAttribute("y1")) : null,
+          negBelow: bars.filter((b) => b.classList.contains("is-neg"))
+            .every((b) => Number(b.getAttribute("y")) >= (zero ? Number(zero.getAttribute("y1")) - 0.5 : 0)),
+          par: svg ? svg.getAttribute("preserveAspectRatio") : null,
+          said: host.textContent,
+        };
+      }, key);
+
+      ok(got, `panel ${key} has a drawing host`);
+      /* ONE BAR PER PRESENT LEG, NEVER ONE PER EXPIRY. If the renderer ever
+         nets the two legs this count halves, which is the cheapest possible
+         detector for the defect the sign convention warns about. */
+      let legs = 0;
+      for (const r of panel.rows) {
+        if (typeof r.call === "number") legs++;
+        if (typeof r.put === "number") legs++;
+      }
+      eq(got.bars, legs,
+         `${key}: one bar per PRESENT leg (${legs}), never one per expiry — the two legs ` +
+         `are never netted, because the vendor's put convention differs by Greek`);
+      ok(got.calls > 0 && got.puts > 0,
+         `${key}: both legs are drawn and told apart by class`);
+      ok(got.negBelow,
+         `${key}: every negative leg is drawn BELOW the zero line — sign lives in position, ` +
+         `so it survives greyscale and a printout`);
+      eq(got.par, "xMidYMid meet",
+         `${key}: one viewBox unit is one CSS pixel`);
+      /* THE UNIT IS THE PAYLOAD'S OWN, not a copy in the renderer: three
+         panels share one drawer and only the unit distinguishes a per-day
+         figure from a per-vol-point one. */
+      ok(got.said.includes(panel.unit),
+         `${key}: the panel's own published unit is on the page verbatim`);
+      ok(got.said.includes(panel.signConvention),
+         `${key}: and its sign convention, which is why nothing here is a direction`);
+      ok(/[Gg]ross size/.test(got.said),
+         `${key}: the total is labelled a SIZE — with two un-nettable legs it cannot be a direction`);
+    }
+
+    /* A MEASURED ZERO IS NOT AN ABSENCE, and on this panel the difference is
+       a hairline bar versus no bar at all. */
+    const zeroed = JSON.parse(JSON.stringify(base));
+    zeroed.panels.charm.rows[0].call = 0;
+    zeroed.panels.charm.rows[0].put = null;
+    await mount(page, zeroed, { ticker: zeroed.ticker });
+    const zg = await page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="charm"] > div');
+      const bars = [...host.querySelectorAll(".gts-bar")];
+      return {
+        flats: bars.filter((b) => b.classList.contains("is-flat")).length,
+        flatHeight: bars.filter((b) => b.classList.contains("is-flat"))
+          .map((b) => Number(b.getAttribute("height"))),
+      };
+    });
+    eq(zg.flats, 1, "a leg measured at exactly zero is still drawn");
+    ok(zg.flatHeight.every((h) => h >= 1),
+       "as a visible hairline, because a zero-height bar is indistinguishable from the leg " +
+       "the vendor never sent — and those are different facts");
+
+    eq(errors.length, 0, `the Greek ladders render without throwing (${errors.join("; ")})`);
     await page.close();
   }
 
