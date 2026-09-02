@@ -801,6 +801,91 @@ function chain({
      "one expiry back, but not the one that was asked for, identifies nothing");
 }
 
+/* ---------- why a skew window misses, in its three ways -------------
+
+   THE REASON WAS ONE SENTENCE FOR THREE DIFFERENT PROBLEMS. A null skew said
+   "no expiry past 7 days quoted BOTH a put within 0.04 of −0.10 and a call
+   within 0.04 of +0.10" — true, and useless for deciding what to do. A live
+   run measured 37 of 50 names with a reading; the thirteen without could have
+   been a strike ladder too coarse for the window (which a wider tolerance
+   fixes, at a cost in how good the stand-in is), a wing listed with no
+   implied volatility (which no tolerance reaches), or a side not listed at
+   all. Three different decisions, one sentence.
+
+   The default fixture lands a strike exactly on ±0.10, so it can never
+   exercise any of this — the same "the corpus cannot reach the branch"
+   problem the overlay suite names. Each case is staged deliberately. */
+{
+  /* --- 1. A LADDER TOO COARSE. Strikes every 0.15 in log-moneyness put the
+     nearest candidate 0.05 from the target: outside the 0.04 window, and by
+     an amount a slightly wider window would reach. This is the only one of
+     the three a constant can fix, and the diagnostic has to say so. */
+  const coarse = buildChainPanels(chain({ strikeStep: 0.15 }), { spot: SPOT, asOf: ASOF });
+  eq(coarse.scalars.skew, null, "a ladder that steps past the window carries no skew");
+  const miss = coarse.skewTerm.skewMiss;
+  ok(miss, "and the miss is published as numbers, not only as prose");
+  ok(miss.put && miss.call, "with both wings measured, because either can be the one that failed");
+  ok(miss.call.listed > 0, "the call wing HAS contracts listed — this is not an absence");
+  ok(miss.call.nearest !== null,
+     "and a nearest priced candidate, so the miss has a distance");
+  ok(miss.call.nearest > SKEW_TOLERANCE,
+     `whose distance is outside the window (${miss.call.nearest} > ${SKEW_TOLERANCE}) — ` +
+     `which is what makes it a ladder-spacing miss rather than a coverage one`);
+  ok(Math.abs(miss.call.nearest - 0.05) < 1e-6,
+     `and it is the 0.05 the fixture was built to produce, not an accident (${miss.call.nearest})`);
+  eq(miss.call.unpriced, 0, "nothing inside the window was unpriced here");
+  ok(/nearest priced strike/.test(coarse.skewTerm.skewReason),
+     "the reason names the nearest strike and its distance");
+  ok(/ladder-spacing problem a wider\s+tolerance would fix|ladder-spacing/.test(
+       coarse.skewTerm.skewReason.replace(/\s+/g, " ")),
+     "and says plainly that this is the case a wider window would catch");
+
+  /* --- 2. A WING LISTED AND UNPRICED. No tolerance reaches a contract with
+     no implied volatility, so reporting this as a near-miss would send an
+     operator to widen a constant that cannot help. */
+  const unpricedRows = chain().map((r) => {
+    const m = Math.log(Number(String(r.option_symbol).slice(-8)) / 1000 / SPOT);
+    return Math.abs(m - 0.10) <= SKEW_TOLERANCE && String(r.option_symbol).includes("C")
+      ? { ...r, implied_volatility: null }
+      : r;
+  });
+  const unpriced = buildChainPanels(unpricedRows, { spot: SPOT, asOf: ASOF });
+  /* ASSERTED, NOT GUARDED. An `if` here is how a staged case quietly stops
+     being staged: the fixture drifts, the branch stops firing, and the suite
+     keeps reporting a total that includes assertions nobody ran. That defect
+     shipped in this repository one pull request ago. */
+  eq(unpriced.scalars.skew, null, "nulling the call wing's IV really does cost the skew");
+  ok(unpriced.skewTerm.skewMiss, "and the staged case reaches the diagnostic");
+  {
+    const m2 = unpriced.skewTerm.skewMiss;
+    ok(m2.call.listed > 0, "the unpriced wing is still LISTED — absence and silence differ");
+    ok(m2.call.nearest === null || m2.call.unpriced > 0,
+       "and the diagnostic records it as unpriced rather than as a distance a window could close");
+    ok(/no implied volatility/.test(unpriced.skewTerm.skewReason),
+       "the reason says so in words");
+  }
+
+  /* --- 3. A SIDE NOT LISTED AT ALL, which is neither of the above. */
+  const noCalls = chain().filter((r) => !String(r.option_symbol).includes("C"));
+  const oneSided = buildChainPanels(noCalls, { spot: SPOT, asOf: ASOF });
+  eq(oneSided.scalars.skew, null, "a chain with no calls carries no skew");
+  ok(oneSided.skewTerm.skewMiss, "and the one-sided chain reaches the diagnostic too");
+  {
+    eq(oneSided.skewTerm.skewMiss.call.listed, 0,
+       "and the call wing reports zero listed, which is a third finding again");
+    ok(/no contract of that type listed/.test(oneSided.skewTerm.skewReason),
+       "named as such rather than as a distance");
+  }
+
+  /* --- AND A NAME THAT HAS A READING PUBLISHES NO MISS. The basis beside a
+     real skew already names the two contracts it used; a miss block there
+     would be describing a failure that did not happen. */
+  const fine = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  ok(fine.scalars.skew !== null, "the default fixture does carry a skew");
+  eq(fine.skewTerm.skewMiss, null, "so it publishes no miss diagnostic");
+  eq(fine.skewTerm.skewReason, null, "and no reason");
+}
+
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +
   `wings that are the nearest listed strike or nothing at all, one at-the-money answer shared ` +
   `with the surface, an aggressor ladder signed by what the buyer is long and withheld rather ` +

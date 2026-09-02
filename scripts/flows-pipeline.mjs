@@ -32,7 +32,7 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS }
+import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, SKEW_TOLERANCE }
   from "../shared/flows-chain.js";
 import {
   rankUnusual, rankUnusualNames, describeOiBasis,
@@ -5025,6 +5025,55 @@ async function main() {
       if (c.scalars.atmIv === null) console.warn(`    ${t}: no ATM level — ${c.skewTerm.atmReason}`);
       if (c.foreignRows) console.warn(`    ${t}: dropped ${c.foreignRows} adjusted-series row(s)`);
     }
+    /* ---- WHY THE SKEW WINDOW MISSES, aggregated across the run ----
+
+       THE PER-NAME LINES ABOVE CANNOT SETTLE A CONSTANT. Thirteen separate
+       "no skew" warnings tell an operator that thirteen names missed; they do
+       not say whether widening SKEW_TOLERANCE from 0.04 would have caught
+       twelve of them or none, and that is the only question the number is
+       there to answer.
+
+       So the misses are pooled and reported as a distribution. A cluster of
+       near-misses just outside the window is a ladder-spacing problem a wider
+       tolerance fixes, at a stated cost in how good a stand-in the wing is. An
+       unpriced wing is not — no tolerance reaches a contract with no implied
+       volatility — and a side that is not listed at all is a third thing
+       again. One run now distinguishes them.
+
+       The tolerance is NOT changed here. Choosing it from a guess is what
+       this diagnostic exists to replace. */
+    const misses = [];
+    for (const [, c] of built) {
+      if (c.skewTerm.status !== "ok" || c.scalars.skew !== null) continue;
+      if (c.skewTerm.skewMiss) misses.push(c.skewTerm.skewMiss);
+    }
+    if (misses.length) {
+      let unlisted = 0, unpricedWing = 0;
+      const gaps = [];
+      for (const m of misses) {
+        for (const w of [m.put, m.call]) {
+          if (!w || !w.listed) { unlisted++; continue; }
+          if (w.nearest === null) { unpricedWing++; continue; }
+          if (w.nearest > SKEW_TOLERANCE) gaps.push(w.nearest);
+        }
+      }
+      gaps.sort((a, b) => a - b);
+      /* WHAT A GIVEN WIDENING WOULD ACTUALLY BUY, per wing, from the measured
+         distances rather than from a rule of thumb. */
+      const wouldCatch = (t) => gaps.filter((g) => g <= t).length;
+      console.log(
+        `  skew misses: ${misses.length} name(s) with no reading — ` +
+        `${gaps.length} wing(s) listed and priced but outside the ${SKEW_TOLERANCE} window, ` +
+        `${unpricedWing} listed with no implied volatility, ${unlisted} not listed at all` +
+        (gaps.length
+          ? `. Nearest misses ${gaps.slice(0, 5).map((g) => g.toFixed(4)).join(", ")}` +
+            `; a window of 0.05 would reach ${wouldCatch(0.05)} of them, 0.06 ${wouldCatch(0.06)}, ` +
+            `0.08 ${wouldCatch(0.08)}`
+          : "") +
+        ". A wider window reaches only the first group; the other two are coverage facts " +
+        "no constant can fix.");
+    }
+
     /* ZERO LEVELLED ACROSS THE WHOLE BOARD is not a thin day, it is a broken
        assumption — most plausibly that the vendor's `volume` is not today's
        session volume at the hour this job runs, which would mean no expiry

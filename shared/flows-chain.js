@@ -241,6 +241,55 @@ function wingAt(priced, targetM, tol, type) {
 }
 
 /**
+ * Why a wing was not found, in the three ways it can fail.
+ *
+ * THE REASON WAS ONE SENTENCE FOR THREE DIFFERENT PROBLEMS. When a skew came
+ * back null the payload said "no expiry past 7 days quoted BOTH a put within
+ * 0.04 of −0.10 and a call within 0.04 of +0.10" — true, and useless for
+ * deciding what to do, because it does not say WHICH wing failed or HOW it
+ * failed. A live run measured 37 of 50 names with a reading and thirteen
+ * without, and there was no way to tell from the payload whether those
+ * thirteen were:
+ *
+ *   - a strike ladder too coarse to land inside the window, which a slightly
+ *     wider tolerance would fix and which costs a little accuracy;
+ *   - a wing that is listed but carries no implied volatility, which a wider
+ *     tolerance would NOT fix and which is a vendor-coverage fact;
+ *   - a side of the chain that is simply not listed at all.
+ *
+ * Those are three different decisions and the first is the only one a constant
+ * can address. So this reports the nearest candidate's distance and the
+ * unpriced count, and the next live run settles it with numbers instead of a
+ * guess. No behaviour changes here: the skew itself is unchanged, and a
+ * diagnostic that altered the reading it explains would be worse than none.
+ */
+function wingMiss(priced, targetM, tol, type) {
+  let listed = 0, unpriced = 0;
+  let nearest = null, nearestM = null, nearestStrike = null;
+  for (const p of priced) {
+    if (type && p.type !== type) continue;
+    const m = numOrNull(p.moneyness);
+    if (m === null) continue;
+    listed++;
+    const lm = Math.log1p(m);
+    const d = Math.abs(lm - targetM);
+    const iv = numOrNull(p.iv);
+    if (iv === null || !(iv > 0)) {
+      /* INSIDE THE WINDOW AND UNPRICED is the finding that a wider tolerance
+         cannot fix, so it is counted separately rather than folded into the
+         distance. */
+      if (d <= tol) unpriced++;
+      continue;
+    }
+    if (nearest === null || d < nearest) {
+      nearest = d; nearestM = round(lm, 4); nearestStrike = round(p.strike, 2);
+    }
+  }
+  return { listed, unpriced, nearest: nearest === null ? null : round(nearest, 4),
+    nearestM, nearestStrike };
+}
+
+/**
  * skew, term and the front at-the-money level.
  *
  * skew = iv(ln K/S = −0.10) − iv(ln K/S = +0.10), in volatility points.
@@ -312,10 +361,49 @@ export function chainScalars(pricedByExpiry, surface, {
   }
 
   const reachedFloor = anyColumn.some((e) => e.days >= minDays);
+
+  /* WHERE THE MISS ACTUALLY WAS, measured on the first expiry past the floor
+     — the one the loop above would have used. Reported only when the skew is
+     null, because on a name that HAS a reading the basis beside it already
+     says exactly which two contracts were used. */
+  let skewMiss = null;
+  if (skew === null && reachedFloor) {
+    const col = anyColumn.find((e) => e.days >= minDays);
+    const e = col ? byExpiry.get(col.expiry) : null;
+    if (e) {
+      skewMiss = {
+        expiry: col.expiry, days: col.days,
+        put: wingMiss(e.priced, -targetM, tol, "P"),
+        call: wingMiss(e.priced, targetM, tol, "C"),
+      };
+    }
+  }
+
+  /* THE SENTENCE NAMES THE WING AND THE DISTANCE. "Both wings missing" and
+     "the call wing missed by 0.003" are different findings, and only the
+     second says a wider tolerance would have caught it. */
+  const missClause = (side, w) => {
+    if (!w) return `${side}: not measured`;
+    if (!w.listed) return `${side}: no contract of that type listed on this expiry`;
+    if (w.nearest === null) {
+      return `${side}: ${w.listed} listed, none carrying an implied volatility`;
+    }
+    return `${side}: nearest priced strike ${w.nearestStrike} at ln(K/S) ${w.nearestM}, ` +
+      `${w.nearest} away from the target (window is ${tol})` +
+      (w.unpriced ? `, and ${w.unpriced} inside the window carried no implied volatility` : "");
+  };
+
   const skewReason = skew !== null ? null
     : !reachedFloor ? `no listed expiry on this chain reached ${minDays} days`
       : `no expiry past ${minDays} days quoted BOTH a put within ${tol} of ` +
-        `ln(K/S) = −${targetM} and a call within ${tol} of +${targetM}`;
+        `ln(K/S) = −${targetM} and a call within ${tol} of +${targetM}` +
+        (skewMiss
+          ? `. On ${skewMiss.expiry} (${skewMiss.days}d) — ` +
+            missClause("put wing", skewMiss.put) + "; " +
+            missClause("call wing", skewMiss.call) +
+            ". A miss inside a tick of the window is a ladder-spacing problem a wider " +
+            "tolerance would fix; an unpriced wing is not, and is a fact about coverage."
+          : "");
 
   const rawAtm = nearLevel ? nearLevel.atmIv : null;
   const overCeiling = rawAtm !== null && rawAtm > ATM_IV_CEILING;
@@ -344,6 +432,11 @@ export function chainScalars(pricedByExpiry, surface, {
     skew: round(skew, 4),
     skewReason,
     skewBasis,
+    /* THE MISS AS NUMBERS, not only as prose. The reason string is what a
+       reader sees; this is what a run can aggregate across fifty names to
+       decide whether the window is one tick too narrow or the wings are
+       unpriced. null whenever a skew was found. */
+    skewMiss,
     term: round(term, 4),
     termReason,
     termBasis: term !== null
