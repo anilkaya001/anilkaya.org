@@ -973,6 +973,21 @@ function timingSafeEqualStr(a, b) {
 /** The one ticker pattern. Both the ingest key check and the card read use it. */
 const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
+/* THE KEYS THAT ARE A RECORD RATHER THAN A VIEW.
+
+   `board:long`, `pulse`, `market` and the rest describe TODAY and are meant
+   to be overwritten every morning — rewriting them is the product working.
+   These are different: each one is what a specific past session said, and
+   shared/flows-record.js reads them to compute the accuracy the deck
+   publishes. Overwriting one revises history.
+
+   DELIBERATELY THE SAME SHAPE THE DELETE BRANCH ACCEPTS. The two have to
+   agree: a key immutable to writes but not deletable would be permanent by
+   accident, and a key deletable but freely writable is the defect this
+   pattern was added to fix. Written once, used in both places, so they
+   cannot drift. */
+const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
+
 /** Fetch a stored blob by key. Returns {payload, updatedAt}, or null if absent. */
 /* =============================================================
    INTRADAY FRESHNESS — the cron re-reads the two feeds that fill
@@ -2395,7 +2410,7 @@ async function route(request, env, url, ctx) {
        in steady state almost every name it tries is a day that was never
        written. The caller treats 404 as an ordinary empty day. */
     if (request.method === "DELETE") {
-      if (!/^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/.test(key)) {
+      if (!DATED_ARCHIVE_KEY_RE.test(key)) {
         throw new HttpError(400, "undeletable_key", "Only dated archive keys can be removed");
       }
       await ensureFlowsTables(env);
@@ -2417,6 +2432,49 @@ async function route(request, env, url, ctx) {
     catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
 
     await ensureFlowsTables(env);
+
+    /* ---------- the dated archive is actually immutable now ----------
+
+       IT SAID SO IN THREE COMMENTS AND NOTHING ENFORCED IT. Every key,
+       dated ones included, was written with ON CONFLICT DO UPDATE, so a
+       second run on the same day silently replaced the archived board with
+       a different one. Measured, not theorised: two POSTs to
+       `board:long:2026-08-24` with contradictory rows both returned 200 and
+       the archive then reported the second.
+
+       That is not a cosmetic problem. This archive exists so the product can
+       be shown to have been right or wrong — shared/flows-record.js reads
+       exactly these keys to compute the hit rate the deck publishes — and a
+       record that can be quietly rewritten is not a record. The crons fire
+       twice for the two US timezones and have been observed running hours
+       late, so a same-day second run is an ordinary event, not a rare one.
+
+       AN IDENTICAL REWRITE IS NOT A REVISION and still succeeds. The
+       pipeline retries its own writes on a 5xx, and refusing a retry that
+       carries the same bytes would turn this guard into an outage. What is
+       refused is a write that would CHANGE what a past session said.
+
+       THE ESCAPE HATCH ALREADY EXISTS and is deliberately two steps: DELETE
+       above accepts exactly these dated keys. Correcting a genuinely bad
+       archive day is therefore possible, visible, and impossible to do by
+       accident — which is the whole difference between a record and a draft. */
+    if (DATED_ARCHIVE_KEY_RE.test(key)) {
+      const existing = await readFlowsPayload(env, key);
+      if (existing && existing.payload !== payload) {
+        throw new HttpError(409, "archive_immutable",
+          "A dated archive key already holds a different payload. The dated boards are " +
+          "the record this product's accuracy claims are computed from, so a write that " +
+          "would change what a past session said is refused. Delete the key first if it " +
+          "genuinely must be corrected.");
+      }
+      if (existing) {
+        /* Byte-identical: nothing to do, and saying so is more useful than a
+           bare ok — a run that reports `unchanged` on a key it thought it was
+           publishing is a retry, and a reader of the log should see that. */
+        return json({ ok: true, key, bytes: payload.length, stored: "unchanged" });
+      }
+    }
+
     await env.DB.prepare(
       "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"

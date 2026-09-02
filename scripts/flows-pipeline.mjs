@@ -3013,11 +3013,18 @@ async function publish(key, payload) {
     const detail = (await response.text().catch(() => "")) || lastDetail;
     const ray = response.headers.get("cf-ray") || "none";
     const server = response.headers.get("server") || "unknown";
-    throw new Error(
+    const failure = new Error(
       `ingest ${key} -> HTTP ${response.status}` +
       ` (server: ${server}, cf-ray: ${ray})` +
       (detail ? ` body: ${detail.slice(0, 300).replace(/\s+/g, " ")}` : " body: <empty>"),
     );
+    /* THE STATUS, READABLE BY A CALLER. Every caller until now only had the
+       message string, so telling one refusal from another meant matching
+       prose — and the archive leg needs to tell a 409 (the dated key is
+       already written and says something else, which is a finding) from a 500
+       (the store is unwell, which is an outage). */
+    failure.status = response.status;
+    throw failure;
   }
   console.log(`  published ${key}: ${summarize(payload)}, ${body.length} bytes`);
 }
@@ -4232,7 +4239,28 @@ async function main() {
          comes to describe a session the reader never saw. */
       await publish(key, payloads[side]);
     } catch (error) {
-      console.warn(`  archive ${key}: ${error.message}`);
+      if (error && error.status === 409) {
+        /* TWO RUNS ON ONE DAY THAT DISAGREE, which is a finding rather than a
+           failure — and it is the finding the immutability guard was added to
+           surface. The archive keeps what the FIRST run published, because
+           that is what the reader saw and what the record scorer will grade;
+           this run's board is live on the undated key either way.
+
+           Loud, because the interesting question is why they differ. The
+           crons fire twice for the two US timezones and have been observed
+           running hours late, so the ordinary cause is a second run against a
+           later tape — but a same-session disagreement is also exactly what a
+           scoring bug looks like from outside. */
+        console.warn(
+          `  archive ${key}: ALREADY WRITTEN by an earlier run today, and this run's board ` +
+          `differs from it — the archive is immutable and KEEPS THE FIRST, which is the ` +
+          `board the reader saw and the one the record will be scored against. This run's ` +
+          `board is live on board:${side} regardless. Two runs on one session disagreeing ` +
+          `is worth understanding: usually a second run against a later tape, but it is ` +
+          `also what a scoring change mid-session would look like from here.`);
+      } else {
+        console.warn(`  archive ${key}: ${error.message}`);
+      }
     }
   }
 
