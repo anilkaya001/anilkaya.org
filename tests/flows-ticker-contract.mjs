@@ -999,6 +999,123 @@ try {
     await page.close();
   }
 
+  /* ---------- 6f. the score laid over the price -------------------
+
+     THE CHART THE DIRECTIVE ASKED FOR, and the one whose failure mode is
+     invisible: two ~40-point series zipped by position draw a smooth,
+     plausible, entirely fictional line. The join is tested in
+     tests/flows-overlay-contract.mjs against a fixture built to break an
+     index join; what is tested HERE is that the drawing tells the truth
+     about what the join returned — above all that a gap breaks the line
+     rather than being bridged or zeroed. */
+  {
+    const base = withChain.find((c) =>
+      c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
+      c.panels.scoreOverlay.rows.length >= 6);
+    ok(base, "an emitted card carries a joined score overlay");
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    const readOvl = async (card) => {
+      await mount(page, card, { ticker: card.ticker });
+      return page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="scoreOverlay"] > div');
+        const svg = host.querySelector("svg.ovl");
+        const score = host.querySelector(".ovl-score");
+        return {
+          hasSvg: !!svg,
+          viewBox: svg ? svg.getAttribute("viewBox") : null,
+          par: svg ? svg.getAttribute("preserveAspectRatio") : null,
+          box: svg ? (({ width, height }) => ({ width, height }))(svg.getBoundingClientRect()) : null,
+          scoreD: score ? score.getAttribute("d") : null,
+          dots: host.querySelectorAll(".ovl-dot").length,
+          band: !!host.querySelector(".ovl-band"),
+          said: host.textContent,
+          aria: svg ? svg.getAttribute("aria-label") : null,
+          empty: [...host.querySelectorAll("[data-empty]")].map((n) => n.getAttribute("data-empty")),
+        };
+      });
+    };
+
+    const good = await readOvl(base);
+    ok(good.hasSvg, "the overlay draws a chart");
+    eq(good.par, "xMidYMid meet",
+       "with the aspect ratio that keeps one viewBox unit at one CSS pixel — `none` " +
+       "scales the axes independently and distorts every slope on the panel");
+    /* THE REPOSITORY'S CHART INVARIANT, measured from the visible host. */
+    const vbW = Number(good.viewBox.split(/\s+/)[2]);
+    const ratio = good.box.width / vbW;
+    ok(Math.abs(ratio - 1) < 0.02,
+       `one viewBox unit is one CSS pixel (drawn ${vbW}, laid out ${good.box.width.toFixed(1)}, ` +
+       `ratio ${ratio.toFixed(3)})`);
+    ok(/\bM/.test(good.scoreD), "the score line is drawn");
+    ok(good.aria && /sessions from/.test(good.aria),
+       "and the chart names its own window to a screen reader");
+
+    /* ---- THE GAP. A hole must break the path, not bridge it. ---- */
+    const holed = JSON.parse(JSON.stringify(base));
+    const mid = Math.floor(holed.panels.scoreOverlay.rows.length / 2);
+    holed.panels.scoreOverlay.rows[mid].score = null;
+    holed.panels.scoreOverlay.scored -= 1;
+    holed.panels.scoreOverlay.gaps += 1;
+    const gapped = await readOvl(holed);
+    const moveCount = (d) => (d.match(/M/g) || []).length;
+    eq(moveCount(gapped.scoreD), moveCount(good.scoreD) + 1,
+       "a hole in the middle splits the score path into one more subpath — the line " +
+       "BREAKS rather than bridging a session nobody scored");
+    ok(/no score/i.test(gapped.said),
+       "and the panel says in words how many sessions carry no score");
+
+    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. A one-point subpath has
+       no length and renders as nothing at all, so a real measurement would
+       simply vanish. It gets a dot instead. ---- */
+    const island = JSON.parse(JSON.stringify(base));
+    const rows = island.panels.scoreOverlay.rows;
+    for (let i = 0; i < rows.length; i++) if (i !== 2) rows[i].score = null;
+    island.panels.scoreOverlay.scored = 1;
+    island.panels.scoreOverlay.gaps = rows.length - 1;
+    const lone = await readOvl(island);
+    eq(lone.dots, 1, "a scored session with holes on both sides is drawn as a dot, not lost");
+
+    /* ---- A ZERO IS A READING, NOT A HOLE. ---- */
+    const zeroed = JSON.parse(JSON.stringify(base));
+    zeroed.panels.scoreOverlay.rows[mid].score = 0;
+    const atZero = await readOvl(zeroed);
+    eq(moveCount(atZero.scoreD), moveCount(good.scoreD),
+       "a measured zero does NOT break the line: it is a name sitting at neutral, " +
+       "which is a reading this system publishes and means");
+
+    /* ---- THE TWO EMPTY STATES, which are not the same sentence. ---- */
+    const disjoint = JSON.parse(JSON.stringify(base));
+    disjoint.panels.scoreOverlay = {
+      status: "quiet",
+      reason: "the price window and the score window do not share a single session",
+      priceSpan: { from: "2027-01-04", to: "2027-03-01", sessions: 42 },
+      scoreSpan: { from: "2026-08-03", to: "2026-08-24", sessions: 16 },
+      overlap: 0,
+    };
+    const noOverlap = await readOvl(disjoint);
+    ok(!noOverlap.hasSvg, "disjoint windows draw no chart");
+    ok(noOverlap.empty.includes("quiet"),
+       "and are tagged as the MEASURED silence: both windows were read in full");
+
+    const absent = JSON.parse(JSON.stringify(base));
+    absent.panels.scoreOverlay = {
+      status: "unavailable",
+      reason: "the score track was not assembled this run",
+    };
+    const noTrack = await readOvl(absent);
+    ok(noTrack.empty.includes("unavailable"),
+       "while a track that was never assembled is the pipeline-side absence, tagged " +
+       "differently — a reader must be able to tell a skipped leg from a name that " +
+       "was never on a board");
+
+    eq(errors.length, 0, `the overlay renders without throwing (${errors.join("; ")})`);
+    await page.close();
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({

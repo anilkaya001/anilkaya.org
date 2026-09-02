@@ -71,6 +71,7 @@ import {
    a copy here would silently stop matching the check the moment that number
    moves, and the card publishes it as the population the counts describe. */
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
+import { joinScoreToPrice } from "./flows-overlay.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -780,6 +781,48 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * live gamma panel, and no panel failure can remove the name from the board.
  */
 /**
+ * The score history laid over the dated price window, or a stated absence.
+ *
+ * A THIN WRAPPER ON PURPOSE. The join itself lives in shared/flows-overlay.js
+ * where it is tested against hand-checkable inputs; this only maps the two
+ * ways the INPUTS can be missing onto the sentences a card reader needs, and
+ * keeps them apart from the two ways the JOIN can come back empty.
+ *
+ * Four states reach the page and they are four different facts:
+ *   - the track was never read this run          → unavailable, pipeline-side
+ *   - the track was read and this name is absent → quiet, a fact about the name
+ *   - the card has no dated price window         → unavailable, from the join
+ *   - both windows read, no shared session       → quiet, from the join
+ * Collapsing any two of them into "no data" is how a reader loses the ability
+ * to tell a skipped leg from a name that was never on a board.
+ */
+function scoreOverlayPanel(history, contextPanel) {
+  if (!history || !Array.isArray(history.sessions)) {
+    return {
+      status: "unavailable",
+      reason: "the score track was not assembled this run, so there is no score history " +
+        "to lay over this name's price. It is built by walking the dated board archive, " +
+        "which is a leg of its own and can be skipped without costing any other panel",
+    };
+  }
+  if (!Array.isArray(history.scores)) {
+    return {
+      status: "unavailable",
+      reason: "the score track was assembled but holds no session for this name — it " +
+        "covers only names that appeared on a board inside its window",
+    };
+  }
+  const ctx = contextPanel && contextPanel.status === "ok" ? contextPanel : null;
+  return joinScoreToPrice({
+    closes: ctx ? ctx.closes : null,
+    closeDates: ctx ? ctx.closeDates : null,
+    sessions: history.sessions,
+    scores: history.scores,
+    deadBand: history.deadBand,
+  });
+}
+
+/**
  * The open-interest basis check, in the shape a card publishes.
  *
  * THE LOG LINE DOES NOT SHIP. describeOiBasis returns a `line` written for a
@@ -920,6 +963,15 @@ export function buildCard({
      boundary. Cards from before these existed simply lack the keys, which
      is the same transitional story the chain panels told. */
   darkpool = null, oiDeltas = null, termStructure = null, ivRank = null,
+  /* THIS NAME'S SCORE HISTORY, out of the scoretrack payload the pipeline has
+     already built by the time it reaches the card loop. `{ sessions, scores,
+     deadBand }` — sessions is the track's own dated calendar and scores is
+     index-aligned to it, exactly as the track publishes them.
+
+     null means the track was not read this run, which is an ORDINARY state:
+     the track leg walks the dated archive and can be skipped or fail without
+     costing any other panel. */
+  scoreHistory = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -927,6 +979,18 @@ export function buildCard({
   const painRow = pickMaxPainRow(maxPain, { asOf: sessionDate });
   const prev = numOrNull(row && row.prev_close);
   const close = numOrNull(row && row.close);
+
+  /* BUILT BEFORE THE RETURN because two panels need it: `context` publishes
+     it, and `scoreOverlay` joins the score history onto its dated closes. A
+     second call would build it twice and, worse, let the two drift if either
+     ever took an argument the other did not. */
+  const contextPanel = buildContext({
+    closes: f.closes,
+    closeDates: f.closeDates,
+    r5: f.r5, r21: f.r21, r42: f.r42,
+    week52Pos: f.week52Pos,
+    changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
+  }, { asOf: sessionDate });
 
   return {
     v: CARD_SCHEMA_VERSION,
@@ -1053,6 +1117,16 @@ export function buildCard({
          for them, and a payload from before they existed carries the key not
          at all, which is the same transitional story every other panel here
          already tells. */
+      /* THE SCORE LAID OVER THE PRICE IT WAS SCORED AGAINST, joined by date.
+
+         `scoreHistory` is this name's row out of the scoretrack payload plus
+         that payload's session calendar — the pipeline holds both by the time
+         it builds cards, so the join is done once here rather than in a
+         browser. shared/flows-overlay.js states why the join is a named
+         operation: both series are about forty points and both run oldest
+         first, so an index zip draws a plausible chart out of two windows
+         that need not describe the same days. */
+      scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
       ivSurface: chainPanel(chain, "ivSurface"),
       skewTerm: chainPanel(chain, "skewTerm"),
       topContracts: chainPanel(chain, "topContracts"),
@@ -1092,13 +1166,7 @@ export function buildCard({
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
       }),
-      context: buildContext({
-        closes: f.closes,
-        closeDates: f.closeDates,
-        r5: f.r5, r21: f.r21, r42: f.r42,
-        week52Pos: f.week52Pos,
-        changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
-      }, { asOf: sessionDate }),
+      context: contextPanel,
       congress: buildCongress(congress, { asOf: sessionDate }),
       darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool),
       oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas),

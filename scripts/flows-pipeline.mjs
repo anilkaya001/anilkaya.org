@@ -3664,6 +3664,38 @@ function fakePulseRaws(tickers) {
   };
 }
 
+/* THE SESSION EVERY DRY-RUN FIXTURE DESCRIBES.
+
+   It was a literal in one place and five string prefixes elsewhere, and the
+   candle generator anchored to a different day entirely — which is how the
+   emitted corpus ended up carrying closes dated FIVE MONTHS AFTER the session
+   they were supposed to describe. The pipeline reads /ohlc/1d with
+   end_date=sessionDate, so a fixture whose last candle is in the future is
+   not a fixture of anything this code path can receive. */
+export const DRY_SESSION_DATE = "2026-08-24";
+
+/**
+ * `count` trading days ending at `endDate`, oldest first.
+ *
+ * STEPPING ONE CALENDAR DAY IS NOT A DAILY BAR SERIES. The candle fixture
+ * stepped 86400000ms per bar, so its "252 sessions" ran 252 consecutive
+ * calendar days — weekends included — and its 42-session window covered 42
+ * calendar days where a real one covers about sixty. Anything joining these
+ * dates to the board archive, which is weekday-only by construction, was
+ * joining against a calendar no exchange keeps.
+ */
+function tradingDaysEndingAt(endDate, count) {
+  const out = [];
+  let t = Date.parse(endDate + "T13:30:00Z");
+  if (!Number.isFinite(t)) return out;
+  while (out.length < count) {
+    const dow = new Date(t).getUTCDay();
+    if (dow !== 0 && dow !== 6) out.push(t);
+    t -= 86400000;
+  }
+  return out.reverse();
+}
+
 function fakeEnrichment(ticker, spot, seed) {
   const rnd = mulberry(seed);
   const bias = rnd() - 0.5;
@@ -3777,14 +3809,17 @@ function fakeEnrichment(ticker, spot, seed) {
   });
 
   let px = spot;
-  const day0 = Date.UTC(2026, 5, 24, 13, 30);
+  /* ENDING AT THE SESSION, NOT STARTING SOMEWHERE. The prices are unchanged —
+     they come off `rnd()` and never off the clock — so only the dates move,
+     and they move onto the days this pipeline actually asks the vendor for. */
+  const days = tradingDaysEndingAt(DRY_SESSION_DATE, 252);
   const ohlc = Array.from({ length: 252 }, (_, i) => {
     const move = (rnd() - 0.5) * spot * 0.03;
     const open = px; px = Math.max(1, px + move);
     return {
       // A real candle carries a timestamp; without one the fixture would not
       // exercise either candlesAscending or the session-date derivation.
-      start_time: new Date(day0 + i * 86400000).toISOString(),
+      start_time: new Date(days[i]).toISOString(),
       open: open.toFixed(2), close: px.toFixed(2),
       high: (Math.max(open, px) * 1.008).toFixed(2),
       low: (Math.min(open, px) * 0.992).toFixed(2),
@@ -3822,7 +3857,7 @@ async function main() {
 
   /* 0. THE SESSION, resolved before anything else is fetched, so every
         per-name call can be pinned to it. */
-  const sessionDate = DRY_RUN ? "2026-08-24" : await resolveSessionDate();
+  const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
   const dating = await verifyDating(sessionDate);
   console.log(`dating: date=${dating.date} end_date=${dating.endDate}`);
@@ -4525,6 +4560,11 @@ async function main() {
     console.warn(`  record: ${error.message}`);
   }
 
+  /* The assembled track, held for the card loop below. null when the leg was
+     skipped or threw, which every card then says in its own words rather than
+     drawing an empty chart. */
+  let scoreTrack = null;
+
   /* 7c-ter. THE SCORE TRACK — each name's daily score, traced.
 
      ZERO VENDOR CALLS, and a VIEW rather than a store: rebuilt from the
@@ -4579,6 +4619,12 @@ async function main() {
       `  scoretrack: ${track.names.length} name(s) over ${track.sessions.length} session(s) ` +
       `(${track.sources.full} full, ${track.sources.boardsOnly} board-only)` +
       (track.namesShed ? `; ${track.namesShed} name(s) shed for the size cap` : ""));
+    /* HELD FOR THE CARD LOOP. Every card gets its own name's score history
+       laid over its price, and the join is by date — see
+       shared/flows-overlay.js. Kept as the whole track rather than a
+       per-ticker map because `sessions` is the calendar all of them are
+       index-aligned to, and splitting the two apart is how they drift. */
+    scoreTrack = track;
   } catch (error) {
     console.warn(`  scoretrack: ${error.message}`);
   }
@@ -5696,6 +5742,17 @@ async function main() {
         expiries: e.raw.expiries,
         surface,
         chain: chainByTicker.get(ticker) || null,
+        /* THIS NAME'S ROW OUT OF THE TRACK, with the calendar it is aligned
+           to. `scores` is undefined — not null, not [] — when the track was
+           read and this name is not in it, which buildCard tells apart from
+           the track never having been assembled. */
+        scoreHistory: scoreTrack
+          ? {
+            sessions: scoreTrack.sessions,
+            scores: (scoreTrack.names.find((n) => n && n.t === ticker) || {}).s,
+            deadBand: scoreTrack.deadBand,
+          }
+          : null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
         darkpool: dpRaw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankRaw,
