@@ -1118,6 +1118,25 @@
         parts.push(payload.neutral + " of " + (payload.scored || "?") +
           " inside the ±" + payload.deadBand + " band");
       }
+      /* THE NAMES THAT CLEARED THE BAND AND ARE NOT ON THIS PAGE.
+
+         This product's rule is that the dead band decides: outside it is a
+         signal, inside it goes on the watch list. Then the board's own length
+         cap truncates each side and the overflow reaches NEITHER surface —
+         the watch list holds only the names INSIDE the band. On a measured
+         session that was four names, fully scored, past the threshold, and
+         visible nowhere.
+
+         So it is said HERE, in the line that already reconciles the counts,
+         rather than left as a subtraction a reader has no reason to attempt.
+         Silent when nothing was shed, because a "0 more" on every quiet
+         session trains the eye to skip the clause on the session it matters. */
+      const shed = isNum(payload.shed);
+      if (shed !== null && shed > 0) {
+        const cleared = isNum(payload.cleared);
+        parts.push(shed + " more cleared the band and did not fit" +
+          (cleared === null ? "" : " (" + rows.length + " of " + cleared + " shown)"));
+      }
       if (isNum(payload.dispersion) !== null) {
         /* This is the 95th percentile of |composite| across the scored pool, not
            a standard deviation, so it does not get a sigma suffix — a quantile

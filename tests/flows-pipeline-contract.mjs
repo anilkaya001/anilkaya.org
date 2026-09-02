@@ -1715,6 +1715,93 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
+  /* THE EMITTED BOARDS, LOADED ONCE AND ASSERTED TO EXIST.
+
+     A FILE THAT IS NOT THERE MUST FAIL, NOT SKIP. The first version of the
+     agreement-count block below built its path as `-board-long.json` when the
+     emitter writes `e-board-long.json`, then guarded the read with
+     `if (!fs.existsSync(full)) continue;`. Every assertion in it was skipped
+     silently — the suite reported its total and none of those checks had run.
+     A test that passes by not executing is worse than a missing test, because
+     it reads as coverage. So the path is built from the emitter's own prefix
+     and the file's absence is an assertion, not a branch. */
+  const boardFile = (side) => prefix + `-board-${side}.json`;
+  const readBoard = (side) => {
+    const full = boardFile(side);
+    ok(fs.existsSync(full), `the dry run emitted board:${side} at ${path.basename(full)}`);
+    return JSON.parse(fs.readFileSync(full, "utf8"));
+  };
+
+  /* ---------- every scored name reaches a surface, or is counted -----
+
+     THE PRODUCT'S RULE IS THAT THE DEAD BAND DECIDES: a name outside it is a
+     signal and goes on a board, a name inside it goes on the watch list. The
+     rule was not quite true. `boardSize` truncates each side, and the
+     overflow reached NEITHER surface — the watch list holds only the names
+     inside the band, so a name that cleared the threshold and ranked 51st on
+     its side simply vanished.
+
+     Measured on the emitted corpus before the fix: 100 scored, 3 inside the
+     band, 97 therefore cleared it, 93 published. Four names fully scored,
+     past the threshold this product names as the threshold, on no surface at
+     all — and no published number from which a reader could work out that
+     they existed.
+
+     This is the assertion that closes the arithmetic, and it is written as a
+     conservation law rather than as four separate counts, because that is the
+     property that actually matters: nothing scored may go missing unrecorded. */
+  {
+    const boards = {
+      long: readBoard("long"), short: readBoard("short"), watch: readBoard("watch"),
+    };
+
+    for (const side of ["long", "short"]) {
+      const b = boards[side];
+      ok(Number.isFinite(b.cleared), `board:${side} publishes how many names cleared the band`);
+      ok(Number.isFinite(b.shed), `board:${side} publishes how many of them it could not hold`);
+      eq(b.shed, b.cleared - b.rows.length,
+         `board:${side}: shed is exactly the pool minus the rows shown, so the two cannot ` +
+         `drift into disagreeing about the same names`);
+      ok(b.shed >= 0, `board:${side}: a board never shows more rows than cleared the band`);
+      ok(b.rows.length <= b.cleared, `board:${side}: and never claims more than it had`);
+    }
+
+    /* THE CONSERVATION LAW. Every scored name is inside the band or outside
+       it; the ones outside are on a board or counted as shed. If this ever
+       fails, some name was scored and went missing with nothing saying so —
+       which is the whole defect, restated as arithmetic. */
+    const scored = boards.long.scored;
+    const neutral = boards.long.neutral;
+    eq(boards.long.cleared + boards.short.cleared, scored - neutral,
+       `the two sides' pools account for every scored name that cleared the band ` +
+       `(${boards.long.cleared} + ${boards.short.cleared} vs ${scored} - ${neutral})`);
+    const shown = boards.long.rows.length + boards.short.rows.length;
+    const shed = boards.long.shed + boards.short.shed;
+    eq(shown + shed, scored - neutral,
+       `and every one of them is either on a board or counted as shed — nothing scored ` +
+       `goes missing unrecorded (${shown} shown + ${shed} shed vs ${scored - neutral} cleared)`);
+
+    /* AND THE FIXTURE ACTUALLY EXERCISES THE SHEDDING BRANCH. A corpus where
+       nothing is ever shed would pass every assertion above while proving
+       nothing about the case they exist for. */
+    ok(shed > 0,
+       `the emitted corpus really does shed names (${shed}), so these assertions are ` +
+       `about a branch that runs rather than one that never fires`);
+
+    /* THE WATCH LIST IS THE OTHER HALF, and it is not where shed names go.
+       Asserting this is what stops a future "fix" that quietly dumps the
+       overflow onto the watch list, where it would read as "inside the band"
+       — a wrong reading rather than a missing one. */
+    if (boards.watch) {
+      const banded = new Set(boards.watch.rows.map((r) => r.t));
+      for (const r of [...boards.long.rows, ...boards.short.rows]) {
+        ok(!banded.has(r.t),
+           `${r.t} is on a ranked board, so it is NOT also on the watch list — the two ` +
+           `surfaces partition the pool, they do not overlap`);
+      }
+    }
+  }
+
   /* ---------- the board says what its own sort key is made of --------
 
      THE BOARD RANKS ON A COMPOSITE AND PUBLISHED ONLY THE COMPOSITE.
@@ -1730,10 +1817,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      0.667 for two-of-three and any consumer multiplying back is doing
      arithmetic on a rounding error. */
   for (const side of ["long", "short"]) {
-    const file = `-board-${side}.json`;
-    const full = path.join(path.dirname(prefix), file);
-    if (!fs.existsSync(full)) continue;
-    const board = JSON.parse(fs.readFileSync(full, "utf8"));
+    const board = readBoard(side);
     const rows = board.rows || [];
     ok(rows.length > 0, `board:${side} has rows to check`);
     let withCounts = 0;

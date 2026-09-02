@@ -186,6 +186,13 @@ currentBoard.v = 2;
    and is the one worth carrying here: it is the value a reader most often
    sees, and the one a renderer that rounded a ratio would get wrong. */
 currentBoard.rows = [{ ...legacyBoard.rows[0], t: "CURR", fam: currentCard.fam, agr: 2, bth: 3 }];
+/* NAMES THAT CLEARED THE BAND AND DID NOT FIT. The dead band is the rule this
+   product states for publication, but each board's own length cap truncates
+   the side and the overflow lands on NEITHER surface — the watch list holds
+   only the names inside the band. On a measured session that was four names,
+   fully scored, past the threshold, and visible nowhere. */
+currentBoard.cleared = 5;
+currentBoard.shed = 4;
 await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
@@ -286,6 +293,15 @@ const v2Purity = await page.evaluate(() =>
    always satisfies "a v1 board adds no title", so the modern board has to
    prove the title actually arrives — and that it carries the counts rather
    than a weight restated in this renderer. */
+/* READ WITH THE ROW COUNT IT DESCRIBES. The board loaded at this point is
+   `withDeep`, not `currentBoard`, so hard-coding the numerator pins which
+   fixture happens to be current — a brittleness that has nothing to do with
+   what is being tested. The denominator is the fixture's `cleared`; the
+   numerator must be whatever this board actually rendered. */
+const v2Status = await page.evaluate(() => ({
+  text: (document.querySelector(".flows-status") || { textContent: "" }).textContent,
+  rendered: document.querySelectorAll(".fd-card").length,
+}));
 const v2Conv = await page.evaluate(() => {
   const td = document.querySelector("#flowsBody tr").children[4];
   const badge = document.querySelector(".fd-foot span");
@@ -357,6 +373,13 @@ const assertions = [
    "while the board names no WEIGHT: the blend is stated once, on the card, from the " +
    "payload's own numbers — a second copy here is how a page ends up describing " +
    "arithmetic the pipeline stopped doing"],
+  /* ---- the names that cleared the band and are not on the page ---- */
+  [/4 more cleared the band and did not fit/.test(v2Status.text),
+   `the board says how many scored names past the threshold it could not hold ` +
+   `(status line: "${v2Status.text}")`],
+  [new RegExp(`\\b${v2Status.rendered} of 5 shown\\b`).test(v2Status.text),
+   `with both halves of the fraction — the rows actually drawn (${v2Status.rendered}) ` +
+   `over the pool that cleared the band (5) — so the reader is not left to subtract`],
   [errors.length === 0, "no page errors: " + errors.join(" | ")],
 ];
 let failed = 0;
