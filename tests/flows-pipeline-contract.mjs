@@ -1715,6 +1715,55 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
+  /* ---------- the basis check reaches the reader ---------------------
+
+     THE MEASUREMENT EXISTED AND WAS THROWN AWAY. describeOiBasis has run on
+     every chain since it was written — arithmetic over rows already in memory
+     — and the pipeline logged one of them and published none. Meanwhile the
+     top-contracts caption told readers ΔOI was "what stuck overnight, as
+     against what churned", which asserts the open-interest pair and the
+     volume span the same interval. The check exists precisely to test that,
+     and on live rows it has refuted it. A maintainer reading a job log knew;
+     a reader holding the table did not.
+
+     So this pins the plumbing: the counts must arrive on the panel that
+     prints the column they judge, and on no other. */
+  const tc = card.panels.topContracts;
+  if (tc.status === "ok") {
+    const basis = tc.oiBasis;
+    ok(basis && typeof basis === "object",
+       "the top-contracts panel publishes the open-interest basis check it was measured with");
+    ok(Number.isFinite(basis.seen) && basis.seen >= 0,
+       "carrying how many contracts could be checked at all");
+    ok(["no-data", "falsified", "inconclusive"].includes(basis.verdict),
+       `and one of the three verdicts, never a bare number (got ${basis.verdict})`);
+    /* THE FLOOR TRAVELS OR THE COUNT IS UNREADABLE. The check runs only over
+       contracts clearing UA_MIN_VOLUME, so `seen` is a subset of the rows on
+       screen; "2 of 105" beside a ten-row table is not a contradiction, but
+       only if the reader is told what the 105 were drawn from. */
+    ok(Number.isFinite(basis.minVolume) && basis.minVolume > 0,
+       "and the volume floor that defines the population those counts describe");
+    ok(!("line" in basis),
+       "but NOT the log line: it is written for a job log, carries a [dry-run] tag " +
+       "and addresses a maintainer, so the card publishes counts and the renderer says it");
+    ok(basis.exceeded === null || Number.isFinite(basis.exceeded),
+       "the exceeding count is a number or an explicit null, never a coerced zero");
+    if (basis.verdict === "falsified") {
+      ok(basis.exceeded > 0,
+         "a falsified verdict is backed by at least one contract that actually exceeded");
+    }
+    if (basis.verdict === "inconclusive") {
+      eq(basis.exceeded, 0, "an inconclusive verdict found none, and says so as a measured zero");
+    }
+  }
+  /* AND ON NO OTHER PANEL. Three of the four chain panels do not print ΔOI;
+     publishing the check on them would be a field no renderer reads, which
+     the payload/renderer contract would then have to carry forever. */
+  for (const key of ["ivSurface", "skewTerm", "aggressor"]) {
+    ok(!("oiBasis" in card.panels[key]),
+       `panels.${key} does not carry the basis check — it prints no open-interest change to judge`);
+  }
+
   /* The two free screener readings that were parsed and dropped for months. */
   const pm = card.panels.pricedMove;
   ok("atmVol" in pm, "the priced-move panel finally publishes the vendor's own at-the-money vol");

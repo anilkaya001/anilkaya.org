@@ -438,8 +438,9 @@ export function describeOiBasis(rows, { minVolume = UA_MIN_VOLUME, dryRun = fals
       line: `${tag}oi basis: ${exceeded} of ${seen} contracts showed an open-interest ` +
         `change LARGER than their own volume. Open interest cannot move further across ` +
         `one settlement than the volume traded between them, so the pair and the counter ` +
-        `are NOT aligned in time — which also contradicts the reading published beside ` +
-        `doi elsewhere in this product. Both cannot be right.` +
+        `are NOT aligned in time. This verdict now travels with the card: the chain's ` +
+        `top-contracts panel publishes these counts and prints them beside the column ` +
+        `they judge, so a reader of the page sees what this line sees.` +
         (dryRun ? " On synthetic rows this number is two unrelated fixture formulas" +
           " disagreeing, and is not evidence about the vendor." : "") };
   }

@@ -424,8 +424,14 @@ export function buildTopContracts(rows, { spot, ivDivisor = 1, limit = TOP_CONTR
       cp: p.type,
       vol: volume,
       oi,
-      /* Open-interest CHANGE is what stuck overnight; volume is what churned.
-         A contract with huge volume and no OI change was opened and closed. */
+      /* THE DIFFERENCE OF THE TWO OPEN-INTEREST COUNTS THE VENDOR SENT, and
+         nothing more than that. The tempting reading — "volume is what
+         churned, this is what stuck, so big volume with no change was opened
+         and closed" — requires the two counts to bracket the same span as the
+         volume, which describeOiBasis() below TESTS and has refuted on live
+         rows: open interest cannot move further across one settlement than
+         the volume traded between them, and some contracts did. The vendor
+         stamps neither count, so the pairing is not available to assume. */
       doi: oi !== null && prevOi !== null ? oi - prevOi : null,
       bidPx: round(numOrNull(row.nbbo_bid), 2),
       askPx: round(numOrNull(row.nbbo_ask), 2),

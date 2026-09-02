@@ -819,6 +819,120 @@ try {
     await page.close();
   }
 
+  /* ---------- 6d. the open-interest basis note --------------------
+
+     THE CAPTION USED TO MAKE A CLAIM THE PAYLOAD HAD ALREADY REFUTED.
+     It read "ΔOI is open_interest − prev_oi: what stuck overnight, as
+     against what churned", which asserts two things the vendor never
+     states: that the two open-interest counts bracket the same span as
+     the volume, and that the span is one night. describeOiBasis exists
+     to test the first, and on a live run it found four of eight
+     contracts whose open interest moved further than their own volume —
+     which cannot happen across one settlement. The measurement was
+     logged and thrown away while the page kept asserting the opposite.
+
+     All three verdicts are staged here because the ASYMMETRY is the
+     whole reading: exceeding rows falsify the pairing, while zero
+     exceeding rows prove nothing at all. A note that phrased the second
+     as reassurance would be the confident inference this panel exists
+     to avoid, and it would read as the more natural sentence — which is
+     exactly why it needs a test and not a comment. */
+  {
+    const base = withChain.find((c) => c.panels.topContracts.oiBasis);
+    ok(base, "an emitted card carries the basis check on its top-contracts panel");
+
+    const staged = (verdict, seen, exceeded) => {
+      const c = JSON.parse(JSON.stringify(base));
+      c.panels.topContracts.oiBasis = {
+        seen, exceeded, exceedShare: seen ? exceeded / seen : null,
+        verdict, minVolume: 250,
+      };
+      return c;
+    };
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    const read = async (card) => {
+      await mount(page, card, { ticker: card.ticker });
+      return page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="topContracts"] > div');
+        const note = host.querySelector(".ftt-oibasis");
+        const basis = host.querySelector(".ftt-basis");
+        return {
+          note: note ? note.textContent : null,
+          cls: note ? note.className : null,
+          empty: note ? note.getAttribute("data-empty") : null,
+          caption: basis ? basis.textContent : "",
+          /* Everything the ΔOI column says in its tooltips, which is where
+             the overnight claim survived longest. */
+          doiTitles: [...host.querySelectorAll(".ftt-doi[title]")]
+            .map((n) => n.getAttribute("title")).join(" "),
+        };
+      });
+    };
+
+    const falsified = await read(staged("falsified", 105, 4));
+    ok(falsified.note, "a falsified check renders a note beside the table");
+    ok(/\b4\b/.test(falsified.note) && /\b105\b/.test(falsified.note),
+       "carrying both counts, so the reader can see the share for themselves");
+    ok(/250/.test(falsified.note),
+       "and the volume floor, so '4 of 105' beside a ten-row table is not a contradiction");
+    ok(/NOT/.test(falsified.note),
+       "and saying plainly that the two counts are not describing the same span");
+    ok(!/inconclusive/i.test(falsified.note),
+       "a falsification is not hedged: this is the branch that actually proves something");
+
+    const inconclusive = await read(staged("inconclusive", 105, 0));
+    ok(/INCONCLUSIVE/.test(inconclusive.note),
+       "a zero count says INCONCLUSIVE in the sentence, not merely in a comment");
+    ok(/not evidence/i.test(inconclusive.note),
+       "and refuses the reading that finding none confirms the pairing");
+    ok(!/aligned\.|confirm|verified/i.test(inconclusive.note),
+       "with no word that would let a skimming reader take it as reassurance");
+
+    const nodata = await read(staged("no-data", 0, 0));
+    eq(nodata.empty, "quiet",
+       "and a check that could not run is the MEASURED silence, not a failure");
+    ok(/could not be checked/i.test(nodata.note),
+       "saying which of the silences it is");
+
+    /* THE CONTRADICTORY PAYLOAD, which is where the first draft of this
+       renderer was wrong. A "falsified" verdict whose count is absent fell
+       through to the branch that says "none of 105 exceeded" — a confident
+       claim about every contract on the chain, built from a number nobody
+       read, and the FRIENDLIER of the two available sentences. That is the
+       house defect exactly, and it appeared in the code written to fix an
+       instance of it, so it is pinned in both directions. */
+    const noCount = await read(staged("falsified", 105, null));
+    ok(!/none of/i.test(noCount.note),
+       "a verdict with no count never falls through to claiming none exceeded");
+    eq(noCount.empty, "unavailable",
+       "it is a publisher fault and is tagged as one, not as a measured silence");
+
+    const contradictory = await read(staged("falsified", 105, 0));
+    ok(!/none of/i.test(contradictory.note),
+       "and a falsified verdict carrying zero exceeding rows is not reported as the quiet half " +
+       "of its own contradiction");
+    eq(contradictory.empty, "unavailable", "that too is a publisher fault");
+
+    /* THE CAPTION ITSELF. The claim is gone from the prose and from every
+       tooltip on the column — a note that contradicts the sentence above it
+       would leave the reader to pick, and they would pick the shorter one. */
+    for (const got of [falsified, inconclusive, nodata, noCount, contradictory]) {
+      ok(!/stuck overnight/i.test(got.caption),
+         "the caption no longer claims ΔOI is what stuck overnight against what churned");
+      ok(!/overnight/i.test(got.doiTitles),
+         "and no ΔOI tooltip names a span the vendor never stamped");
+    }
+    ok(/spacing|whatever span/i.test(falsified.caption),
+       "it says instead that the spacing of the two counts is unstated");
+
+    eq(errors.length, 0, "and none of the three verdicts throws");
+    await page.close();
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({
