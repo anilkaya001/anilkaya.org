@@ -1957,8 +1957,27 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
        exist — the watch list is published from a local and never enters this
        object — so the fallback silently supplied the number and the whole
        thing worked by luck. The band travels on the long board too. */
-    const band = num(payloads.long && payloads.long.deadBand)
-      ?? num(payloads.short && payloads.short.deadBand) ?? 1;
+    const publishedBand = num(payloads.long && payloads.long.deadBand)
+      ?? num(payloads.short && payloads.short.deadBand);
+    /* A SILENT FALLBACK IS WHAT HID THE ORIGINAL BUG. The first version read
+       this off `payloads.watch`, which does not exist — the watch list is
+       published from a local and never enters this object — so `?? 1` supplied
+       the number and the synthesiser worked entirely by luck. It kept working
+       because DEAD_BAND happens to be 1, which means no emitted payload could
+       ever have shown the difference.
+
+       The fallback stays, because a corpus is worth more than an exception.
+       What changes is that taking it is now a line in the log rather than a
+       silence: the next person to widen the band gets told that this
+       fixture's crossings were computed against a threshold the boards did
+       not agree with, instead of finding out when a suite passes for the
+       wrong reason. */
+    const band = publishedBand ?? 1;
+    if (publishedBand === null) {
+      console.log("  NOTE: neither board published a dead band, so the synthetic history's " +
+        "crossings were computed against a fallback of 1 rather than against the session's " +
+        "own threshold");
+    }
 
     /** One name's score on one prior day, or null for a day it was absent. */
     const historic = (row, i, inBandToday) => {
