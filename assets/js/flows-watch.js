@@ -20,6 +20,31 @@
    about conviction. The score column carries its sign but no bar —
    the board's centre-origin bar is a visual claim of strength and
    these rows have none.
+
+   AND THE PART THAT WAS MISSING: THE DIRECTION OF TRAVEL.
+
+   This page could say how far a name was from the edge and could not
+   say whether it was walking toward it. Two names sitting at the same
+   distance are not the same row — one closed half the gap last night
+   and the other opened it — and on a page whose whole subject is what
+   is ABOUT to happen, that is the difference between the two most
+   useful rows and two rows that look identical.
+
+   It was not an oversight. Distance is measured on the RESIDUAL,
+   because at a band of ±1 every row inside it scores 0 and the score
+   cannot separate them; and the residual was computed every morning,
+   used to rank, and never archived. There was no yesterday to
+   subtract. The dated score archive now carries it, and the pooled
+   trace publishes each name's residual CHANGE since the session it
+   was last scored — so the second half of this page's question is
+   answerable for the first time from bytes the run already held.
+
+   WHAT IS PUBLISHED HERE IS A RATE, NOT A FORECAST. The approach
+   column is an observed change between two archived sessions. The
+   projection beside it divides one distance by one rate and says so
+   on the row: it is arithmetic a reader could do, offered so they do
+   not have to, and it is withheld wherever the arithmetic would be
+   dressing a single observation as a trend.
    ============================================================= */
 (() => {
   "use strict";
@@ -134,7 +159,89 @@
     return { value: Math.max(0, b - Math.abs(s)), exact: null, unit: "score", edge: b };
   }
 
-  function rowFor(row, band) {
+  /**
+   * WHICH WAY THIS NAME IS WALKING, and how fast.
+   *
+   * The two archived residuals are the whole input. `d1.qv` is the change in
+   * residual since the session this name was LAST SCORED, in units of 1e-4,
+   * so the previous residual is `resid - qv/1e4` — and running both through
+   * the same 100*tanh transform distanceToBand uses gives two distances in
+   * the same unit, whose difference is the approach.
+   *
+   * THE SAME TRANSFORM, NOT A LINEARISATION OF IT. tanh is curved, so the
+   * residual change does not map to a fixed number of score points: the same
+   * step covers more score near zero than near the edge, which is precisely
+   * where the rows on this page live. Differencing the two transformed values
+   * rather than scaling the residual delta keeps that curvature, and the
+   * difference is exact rather than a first-order approximation of itself.
+   *
+   * SIGN CONVENTION: POSITIVE MEANS CLOSER TO THE EDGE. The underlying
+   * distance shrinks as a name approaches, so the naive subtraction is
+   * negative for the interesting case — and a column where the good news is
+   * the negative number is a column every reader misreads once. It is
+   * negated here, once, rather than in the renderer.
+   *
+   * @returns null when there is nothing to compare, else
+   *   { now, before, per, gap, sessions } — `per` is the approach PER SESSION
+   *   (the raw move divided by the sessions it spanned) and `sessions` is the
+   *   projection, null wherever projecting would be dishonest.
+   */
+  function approachOf(row, band, entry) {
+    const here = distanceToBand(row, band);
+    /* NO APPROACH WITHOUT AN EXACT DISTANCE. A row carrying only the rounded
+       integer score has a distance quantised to whole points; differencing two
+       of those would report a name as motionless whenever its move was smaller
+       than a point, which on this page is almost every move. */
+    if (here === null || here.exact === null) return null;
+    if (!entry || !entry.d1) return null;
+
+    const qv = isNum(entry.d1.qv);
+    const gap = isNum(entry.d1.gap);
+    const resid = isNum(row && row.resid);
+    /* BOTH ENDS OR NEITHER, the same rule the archive itself applies: qv is
+       absent when either observation lacked a residual, and a difference
+       taken against an absent one is a different quantity rather than a
+       smaller number. */
+    if (qv === null || resid === null || gap === null || gap < 1) return null;
+
+    const b = isNum(band);
+    if (b === null) return null;
+
+    const before = 100 * Math.tanh((resid - qv / 1e4) / SCORE_SCALE);
+    const beforeDist = Math.max(0, b - Math.abs(before));
+    /* Negated so positive reads as "closer". */
+    const moved = beforeDist - here.value;
+    const per = moved / gap;
+
+    /* THE PROJECTION, AND THE FOUR CASES WHERE IT IS WITHHELD.
+       It is one distance over one rate, which is arithmetic a reader could do
+       and is offered so they do not have to. It is withheld when doing it
+       would dress a single observation as a trend:
+
+         - the name is not approaching (per <= 0): there is nothing to project
+           toward, and an "away from the edge" projection is a number with no
+           question behind it;
+         - the rate was measured across more than three sessions: a move
+           averaged over four or more sessions says nothing about tonight, and
+           dividing it by the gap does not make it a nightly rate;
+         - the answer exceeds the archive's own window: past about a month the
+           projection is longer than the evidence supporting it, and "44
+           sessions" reads as a measurement when it is an extrapolation of one
+           night;
+         - the arithmetic is not finite.
+
+       Every one of those renders as no projection rather than as a large one,
+       because a large number in this column would be read as a reading. */
+    let sessions = null;
+    if (per > 0 && gap <= 3) {
+      const n = here.value / per;
+      if (Number.isFinite(n) && n <= 21) sessions = n;
+    }
+
+    return { now: here.value, before: beforeDist, per, gap, sessions, moved };
+  }
+
+  function rowFor(row, band, entry) {
     const tr = document.createElement("tr");
 
     const th = document.createElement("th");
@@ -164,6 +271,50 @@
       d === null ? DASH
         : d.exact !== null ? d.value.toFixed(2) : d.value.toFixed(0),
       "c-num c-toband");
+
+    /* THE DIRECTION OF TRAVEL, IN THE SAME CELL AS THE DISTANCE.
+
+       It belongs here rather than in columns of its own, and not only for
+       want of room. "Four tenths from the edge, closing eight hundredths a
+       session, about five sessions at that rate" is ONE sentence about one
+       thing; split across three headed columns it becomes three numbers a
+       reader has to reassemble, and the reassembly is the whole reading.
+
+       The table's column count is also fixed by the head, which is emitted
+       from the page template — a renderer that appends a tenth cell to a
+       nine-column head produces a table whose every heading is off by one
+       from the row beneath it, silently, with no overflow to give it away. */
+    const ap = approachOf(row, band, entry);
+    if (ap !== null) {
+      const line = document.createElement("span");
+      line.className = ap.per > 0 ? "c-approach is-closing"
+        : ap.per < 0 ? "c-approach is-widening" : "c-approach";
+      /* THE ARROW IS THE SIGN, and the signed number repeats it. Two channels,
+         neither of them hue, so the direction survives greyscale and a
+         monochrome printout. */
+      const arrow = ap.per > 0 ? "\u25B8" : ap.per < 0 ? "\u25C2" : "\u00B7";
+      line.textContent = arrow + " " + signed(ap.per, 2) +
+        (ap.sessions === null ? ""
+          : "  \u2248" + (ap.sessions < 1 ? "<1" : Math.round(ap.sessions)) + "s");
+      /* THE GAP TRAVELS WITH THE RATE. Half a point over one session and the
+         same half point over three are the same number here only because the
+         second was divided by three, and a reader who is not told cannot
+         check it. */
+      line.title =
+        (ap.moved >= 0 ? "Closer to the edge by " : "Further from the edge by ") +
+        Math.abs(ap.moved).toFixed(2) + " score points across " + ap.gap +
+        (ap.gap === 1 ? " session" : " sessions, shown here divided by " + ap.gap) +
+        ", measured between the two sessions this name was actually scored." +
+        (ap.sessions === null ? ""
+          : " At that rate it reaches the edge in about " +
+            (ap.sessions < 1 ? "less than one session" : Math.round(ap.sessions) + " sessions") +
+            " — " + ap.now.toFixed(2) + " points divided by " + ap.per.toFixed(2) +
+            " a session. That is an extrapolation of one observation and not a " +
+            "forecast; it is withheld entirely where the rate was measured across " +
+            "more than three sessions, or where the answer runs past the archive's " +
+            "own window.");
+      dCell.append(document.createElement("br"), line);
+    }
     /* THE THRESHOLD IS DERIVED FROM THE EDGE, NOT A CONSTANT. "Within three"
        was three SCORE units against a ±20 band — a seventh of the way in.
        Hard-coded against a band of 1 it selected every row. A fifth of the
@@ -205,6 +356,20 @@
     tr.append(cell(fixed(row.putCallRatio, 2), "c-num"));
     tr.append(cell(pct(row.w52, 0), "c-num"));
 
+    /* THE NAME THAT WAS ACTIONABLE YESTERDAY AND IS NOT NOW. On this page a
+       faded crossing is not a small event: the row is here BECAUSE it fell
+       in, and a reader scanning for what is about to leave the band should
+       not have to work out that one of these rows just arrived from outside
+       it. The mark is a glyph and a title, so it survives greyscale. */
+    if (entry && entry.d1 && entry.d1.cross === "faded") {
+      const mark = document.createElement("span");
+      mark.className = "c-faded";
+      mark.textContent = " \u25BE";
+      mark.title = "This name was outside the band when it was last scored and " +
+        "is inside it now. It did not approach the edge; it came back through it.";
+      th.append(mark);
+    }
+
     return tr;
   }
 
@@ -220,19 +385,44 @@
     wrap.hidden = false;
   }
 
-  fetch("/api/flows/board?side=watch", {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  }).then((response) => {
-    if (response.status === 401) { location.replace("/flows/"); return null; }
-    if (!response.ok) throw new Error("HTTP " + response.status);
-    const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
-    return response.json().then((payload) => {
-      if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
-      return payload;
+  function get(url, { stamp = false } = {}) {
+    return fetch(url, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    }).then((response) => {
+      if (response.status === 401) { location.replace("/flows/"); return null; }
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const updatedAt = stamp ? Number(response.headers.get("X-Payload-Updated")) || null : null;
+      return response.json().then((payload) => {
+        if (stamp && payload && typeof payload === "object") payload.__updatedAt = updatedAt;
+        return payload;
+      });
     });
-  }).then((payload) => {
+  }
+
+  Promise.all([
+    get("/api/flows/board?side=watch", { stamp: true }),
+    /* THE SECOND READ, AND WHY IT IS WORTH ONE.
+       The watch board carries each name's residual for THIS session and
+       nothing about any other. The pooled trace carries the residual CHANGE
+       since the session each name was last scored — which is the only place
+       the second half of this page's question is answerable. It is a cached
+       key the reader has almost certainly already fetched on another route,
+       and its failure is caught separately below so a slow or missing trace
+       costs this page its approach column and nothing else. */
+    get("/api/flows/scoretrack").catch(() => null),
+  ]).then(([payload, track]) => {
     if (!payload) return;
+
+    /* THE TRACE, KEYED BY NAME. Built once rather than searched per row: the
+       trace runs to several hundred names and the board to eighty, and a
+       linear scan per row is the shape that turns a rendering into a
+       measurable pause on the widest boards. */
+    const trackBy = new Map();
+    if (track && Array.isArray(track.names)) {
+      for (const n of track.names) if (n && n.t) trackBy.set(String(n.t).toUpperCase(), n);
+    }
+    const entryFor = (r) => trackBy.get(String((r && r.t) || "").toUpperCase()) || null;
 
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const band = payload.deadBand;
@@ -266,6 +456,24 @@
        name above every strongly bearish one, which is an ordering about sign
        rather than about how close anything came. */
     rows.sort((a, b) => {
+      /* CLOSING FIRST, THEN CLOSEST. A name three tenths from the edge and
+         walking toward it is a more urgent row than one two tenths away and
+         drifting off, and a pure distance sort cannot say so — which was the
+         whole of this page's blind spot. The projection is the key rather
+         than the raw rate, because it already divides the distance by the
+         rate and is therefore the answer to the question being ranked.
+
+         The distance sort survives underneath as the tiebreak and as the
+         ordering for every row with no trace, so a page whose trace failed to
+         load is exactly the page that shipped before this — never a page
+         ordered by nothing, which is what Array.prototype.sort's stability
+         quietly produced the last time this comparator ran out of key. */
+      const pa = approachOf(a, band, entryFor(a));
+      const pb = approachOf(b, band, entryFor(b));
+      const ea = pa && pa.sessions !== null ? pa.sessions : Infinity;
+      const eb = pb && pb.sessions !== null ? pb.sessions : Infinity;
+      if (ea !== eb) return ea - eb;
+
       const x = distanceToBand(a, band), y = distanceToBand(b, band);
       if (x === null && y === null) return 0;
       if (x === null) return 1;                 // unmeasured never wins a ranking
@@ -278,7 +486,7 @@
     });
 
     const frag = document.createDocumentFragment();
-    for (const r of rows) frag.append(rowFor(r, band));
+    for (const r of rows) frag.append(rowFor(r, band, entryFor(r)));
     body.append(frag);
     wrap.hidden = false;
 
@@ -300,7 +508,46 @@
       " inside the ±" + (band ?? "") + " band",
     ];
     if (payload.sessionDate) parts.push("session " + payload.sessionDate);
-    if (near) parts.push(near + " within three of the edge");
+    /* THE SENTENCE MATCHED A THRESHOLD THAT NO LONGER EXISTS. "Within three of
+       the edge" was three SCORE units against a ±20 band; the mark it
+       describes has been edge-relative for some time — a fifth of the band's
+       half-width — and the prose was never moved with it. Against a band of 1
+       it claimed a distance of three on rows that are at most one from the
+       centre, which is not merely stale, it is arithmetically impossible on
+       the numbers printed beside it. The threshold is stated as what it is. */
+    if (near) parts.push(near + " within a fifth of the band's half-width of the edge");
+
+    /* WHAT IS WALKING TOWARD THE EDGE, counted against what could be asked.
+       A page that shows a projection on six rows owes the reader the other
+       denominator too: how many names had a comparable prior session at all.
+       Without it, "six approaching" is indistinguishable from "six approaching
+       and seventy-four we could not measure". */
+    let comparable = 0, closing = 0, projected = 0, faded = 0;
+    for (const r of rows) {
+      const e = entryFor(r);
+      if (e && e.d1 && e.d1.cross === "faded") faded++;
+      const ap = approachOf(r, band, e);
+      if (ap === null) continue;
+      comparable++;
+      if (ap.per > 0) closing++;
+      if (ap.sessions !== null) projected++;
+    }
+    if (comparable) {
+      parts.push(
+        closing + " of " + comparable + " measurable moved toward the edge" +
+        (projected ? ", " + projected + " within a projectable distance" : ""));
+    } else if (track) {
+      /* MEASURED EMPTINESS, NOT AN ABSENCE. The trace loaded and no row in it
+         had a second scored session to difference against — which on a young
+         archive is the ordinary state and is a different sentence from the
+         trace having failed to load. */
+      parts.push("no name here has a prior scored session to measure against yet");
+    } else {
+      parts.push("the score trace did not load, so no direction of travel is shown");
+    }
+    if (faded) {
+      parts.push(faded + (faded === 1 ? " name" : " names") + " came back through the edge");
+    }
     /* THE LIST CAN BE CAPPED BELOW THE BAND COUNT, and a page that showed 40
        rows while claiming 48 would be lying by omission about the other eight. */
     const inBand = isNum(payload.neutral);
