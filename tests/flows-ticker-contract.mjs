@@ -24,7 +24,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
-import { TICKER_PANELS, TICKER_PANEL_KEYS, SCORE_KEY } from "../shared/flows-panels.js";
+import {
+  TICKER_PANELS, TICKER_PANEL_KEYS, SCORE_KEY, TICKER_GROUPS, PANEL_TIERS,
+} from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -191,7 +193,7 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
  * discrimination and the header wiring — every part of this file that decides
  * WHICH state the reader gets. The stub answers the two real endpoints.
  */
-async function mount(page, card, { ticker = null, boards = null } = {}) {
+async function mount(page, card, { ticker = null, boards = null, hash = "" } = {}) {
   await page.addInitScript(({ card, boards }) => {
     window.__requested = [];
     window.fetch = (url) => {
@@ -212,8 +214,13 @@ async function mount(page, card, { ticker = null, boards = null } = {}) {
       });
     };
   }, { card, boards });
+  /* THE HASH IS PART OF THE URL THE READER WAS SENT, so it has to be on the
+     goto rather than assigned afterwards: the controller reads it once the
+     card has painted, and a hash set after load would test a different code
+     path from the one a pasted link exercises. */
   const url = "https://example.test/flows/ticker/" +
-    (ticker ? "?t=" + encodeURIComponent(ticker) : "");
+    (ticker ? "?t=" + encodeURIComponent(ticker) : "") +
+    (hash ? "#" + hash : "");
   await page.route("**/*", (route) => route.fulfill({ contentType: "text/html", body: pageHTML }));
   await page.goto(url);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
@@ -1380,6 +1387,14 @@ try {
     await mount(page, card, { ticker: card.ticker });
     const box = await page.evaluate(() => {
       const p = document.querySelector(".ft-panel");
+      /* SCROLLED INTO VIEW FIRST, and `instant` because base.css sets
+         `html { scroll-behavior: smooth }` — a rect read in the same tick as a
+         smooth scroll is the rect from before it. The sticky bar and the
+         change block now sit above the grid, so the first panel starts below
+         the fold at this viewport and a mouse.move to a point outside the
+         viewport lands on nothing at all. That is a property of the page, not
+         of the spotlight this section is about. */
+      p.scrollIntoView({ block: "center", behavior: "instant" });
       const r = p.getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });

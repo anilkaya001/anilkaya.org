@@ -2285,6 +2285,156 @@
    * and no meaningful zero. The two lines crossing therefore means nothing,
    * which the note says out loud: they share only the date axis.
    */
+  /**
+   * WHAT CHANGED — derived from the same joined rows the overlay draws.
+   *
+   * THE PAGE LED ON A SNAPSHOT AND THE PRODUCT IS AN EARLY WARNING. Twenty-one
+   * panels described one session in enormous detail and NOTHING on the page
+   * said what the number had just done: no move against the previous scored
+   * session, no run length, no crossing of the dead band, no note that the
+   * newest reading was three sessions old. A reader could not tell a name that
+   * had just cleared the band from one that had been sitting outside it for a
+   * month, which is the single distinction this product exists to draw.
+   *
+   * WHY IT IS DERIVED HERE AND NOT FETCHED. The `scoretrack` payload publishes
+   * d1/run/ext/lastAt per name and is the RIGHT home for this arithmetic — it
+   * is computed once, in the pipeline, against the track's own session
+   * calendar. But the card already carries `panels.scoreOverlay.rows`: the
+   * dated score joined onto the dated close, built by shared/flows-overlay.js
+   * and already on the wire. Fetching the track from this page would spend a
+   * second read on every ticker view to recompute what is in the payload the
+   * page has already parsed. So: derived from the card, and the derivation
+   * lives here beside the renderer that draws the same rows rather than inside
+   * the controller, so a test can call it on a staged payload.
+   *
+   * THE ONE THING THIS CANNOT SAY, and the renderer must not pretend it can:
+   * `gap` counts sessions of the JOINED window — the sessions the card's price
+   * window and the score archive have in common — not sessions of the track's
+   * own calendar. Where the price window is shorter, a gap of 2 here can be a
+   * gap of 2 there or fewer. The sentence beside it names the window.
+   *
+   * @param {object} join `card.panels.scoreOverlay`, in any of its states.
+   * @returns a tagged union: unavailable / quiet / ok. Never a number on its own.
+   */
+  function changeFrom(join) {
+    /* THE THREE SILENCES, told apart before a number is touched. `undefined`
+       is a card built before the overlay panel existed; "unavailable" is the
+       pipeline declining, with its own reason; "quiet" is both windows read
+       in full and found disjoint, which is an ordinary state for a name new
+       to the board. One generic "no data" would collapse all three. */
+    if (join === undefined || join === null) {
+      return { status: "unavailable",
+        reason: "this card was built before the score overlay existed, so it carries " +
+          "no score history to measure a move against" };
+    }
+    if (join.status !== "ok") {
+      return { status: join.status === "quiet" ? "quiet" : "unavailable",
+        reason: join.reason ||
+          (join.status === "quiet"
+            ? "the score archive and this card's price window share no session"
+            : "the score history for this name was not published on this card") };
+    }
+
+    const rows = Array.isArray(join.rows) ? join.rows : [];
+    const scored = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (isNum(rows[i] && rows[i].score) !== null) scored.push(i);
+    }
+    if (!scored.length) {
+      return { status: "quiet",
+        reason: "not one of the " + rows.length + " sessions this card shares with the " +
+          "score archive carries a score for this name" };
+    }
+
+    const window = {
+      sessions: rows.length,
+      from: rows[0].d,
+      to: rows[rows.length - 1].d,
+      scored: scored.length,
+    };
+    const iAt = scored[scored.length - 1];
+    const at = { i: iAt, d: rows[iAt].d, score: isNum(rows[iAt].score) };
+    /* THE STALENESS COUNT, which is `lastAt` stated as a distance. Zero means
+       the newest session in the window scored this name; anything else means
+       the reading below is not about the latest session and a page leading on
+       CHANGE has to say so before it says anything else. */
+    const stale = rows.length - 1 - iAt;
+
+    let prior = null, d1 = null;
+    if (scored.length >= 2) {
+      const iPrior = scored[scored.length - 2];
+      prior = { i: iPrior, d: rows[iPrior].d, score: isNum(rows[iPrior].score) };
+      d1 = {
+        v: at.score - prior.score,
+        /* ALWAYS BESIDE THE DELTA. A move of +23 over one session and the same
+           +23 over five — with the name absent from the board in between — are
+           different facts, and a delta printed without its gap is the exact
+           defect this layer replaced. */
+        gap: iAt - iPrior,
+        from: prior.d, to: at.d,
+      };
+    }
+
+    /* THE RUN, on the CURRENT SIGN. A run of 1 is a new opinion; 30 is an old
+       one. Zero is its own answer: the newest score is exactly zero, which is
+       the centre of the dead band and a reading this pipeline assigns — not a
+       run of length zero on some side. */
+    let run = 0, runBroken = false, runCapped = false;
+    if (at.score === 0) {
+      run = 0;
+    } else {
+      const sign = at.score < 0 ? -1 : 1;
+      let i = iAt;
+      for (;;) {
+        run++;
+        if (i === 0) { runCapped = true; break; }
+        const prevV = isNum(rows[i - 1].score);
+        /* AN UNSCORED SESSION ENDS THE RUN RATHER THAN BEING STEPPED OVER.
+           Claiming six consecutive sessions across a day nobody scored would
+           be a continuity nothing measured — the same refusal the overlay
+           line makes when it breaks at a gap instead of bridging it. */
+        if (prevV === null) { runBroken = true; break; }
+        if ((prevV < 0 ? -1 : prevV > 0 ? 1 : 0) !== sign) break;
+        i--;
+      }
+    }
+
+    let hi = null, hiAt = null, lo = null, loAt = null;
+    for (const i of scored) {
+      const v = isNum(rows[i].score);
+      if (hi === null || v > hi) { hi = v; hiAt = rows[i].d; }
+      if (lo === null || v < lo) { lo = v; loAt = rows[i].d; }
+    }
+
+    /* THE DEAD BAND IS THE BOARD'S MEMBERSHIP RULE, so crossing it is the
+       event: a name that has just left the band became actionable this
+       session, and one that has just entered it is the exit signal. Without a
+       published band neither can be stated, and the renderer says THAT rather
+       than quietly reporting no crossing — "we cannot tell" and "it did not
+       happen" are different sentences. */
+    const band = isNum(join.deadBand);
+    const bandKnown = band !== null && band >= 0;
+    const insideOf = (v) => Math.abs(v) <= band;
+    let cross = null;
+    if (bandKnown && prior) {
+      const wasIn = insideOf(prior.score), isIn = insideOf(at.score);
+      if (wasIn && !isIn) cross = "cleared";
+      else if (!wasIn && isIn) cross = "faded";
+      else if (!wasIn && !isIn && Math.sign(prior.score) !== Math.sign(at.score)) cross = "flipped";
+    }
+
+    return {
+      status: "ok",
+      window, at, prior, d1, stale,
+      run, runBroken, runCapped,
+      ext: { hi, hiAt, lo, loAt },
+      band: bandKnown ? band : null,
+      inside: bandKnown ? insideOf(at.score) : null,
+      cross,
+      crossKnown: bandKnown && !!prior,
+    };
+  }
+
   function renderOverlay(host, join, questionIn) {
     const question = questionIn ||
       "How has this name\u2019s daily score moved against its own price?";
@@ -2734,8 +2884,14 @@
     deltaExposure: (host, panel, card, q) => greekTermPanel(host, panel, q,
       "How much directional exposure are dealers carrying, by expiry?"),
 
+    /* THE OVERLAY'S ARITHMETIC, exported beside the drawer that draws the
+       same rows. /flows/ticker/ leads on it and the card dialog does not, so
+       it is a function rather than a second copy in the controller. */
+    changeFrom,
+
     /* scaffolding */
-    el, svgEl, isNum, deadPanel, quietPanel, emptyPanel, statList, panelHead, panelWidth,
+    el, svgEl, isNum, fmtOr, polarity, deadPanel, quietPanel, emptyPanel, statList,
+    panelHead, panelWidth,
     niceStep, quantileAbs, symlog, surfaceRamp,
     DASH, MINUS, neg, signed, pct, pct1, sigma, px2, vol1, money, compact,
     AXIS_CH,
