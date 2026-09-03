@@ -884,8 +884,32 @@ p.fb-empty {
    items in five columns pushed the sixth dt onto a new row and left its dd
    under the wrong label — on every desktop card, silently. */
 .fc-stats {
+/* =============================================================
+   A HARD TRACK MINIMUM IS A HORIZONTAL SCROLLBAR WAITING FOR A
+   NARROW ENOUGH PHONE.
+
+   `repeat(auto-fit, minmax(19rem, 1fr))` reads as "at least 19rem
+   per column, as many as fit". The first half is the problem: 19rem
+   is 304px and it is a FLOOR, not a preference, so in a container
+   narrower than 304px the track does not shrink — the container
+   overflows. The market page's pulse grid did exactly that at 320px,
+   by three pixels, and no suite saw it because the 320px
+   zero-overflow invariant is asserted on the public pages and on the
+   two Flows routes that have a render suite. The market page has
+   neither.
+
+   `minmax(min(19rem, 100%), 1fr)` is the whole fix. Above the
+   threshold `min()` returns the rem value and every one of these
+   rules behaves exactly as it did; below it the track is allowed to
+   be the container, which is the only honest answer when the column
+   cannot have what it asked for. Applied to every auto-fit and
+   auto-fill track rather than only the one that was caught, because
+   the ones that are safe today are safe by arithmetic on the current
+   padding rather than by construction, and the guard costs nothing
+   where it does not bind.
+   ============================================================= */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
   gap: 0.5rem 1rem;
   margin: 0.8rem 0 0;
 }
@@ -1149,7 +1173,7 @@ body.is-stale .flows-tablewrap {
   /* auto-fill rather than auto-fit: with auto-fit a board of three names
      stretches three cards across a 1600px monitor, and a 500px-wide card of
      six numbers is not a card. */
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
   gap: 0.75rem;
   margin: 1.1rem 0 0;
 }
@@ -2709,7 +2733,7 @@ body.is-stale .flows-tablewrap {
 
 .mk-movers-grid {
   display: grid; gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
 }
 .mk-movers-h {
   margin: 0 0 0.4rem; font-size: 0.78rem; font-weight: 600;
@@ -3861,7 +3885,7 @@ body.is-stale .flows-tablewrap {
 .mk-pulse-grid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr));
 }
 @media (min-width: 76rem) {
   .mk-pulse-card.is-wide { grid-column: span 2; }
@@ -3914,7 +3938,7 @@ body.is-stale .flows-tablewrap {
 .mk-sea {
   display: grid;
   gap: 2px;
-  grid-template-columns: repeat(auto-fill, minmax(3.4rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(3.4rem, 100%), 1fr));
 }
 .mk-sea-cell {
   display: flex;
@@ -4125,7 +4149,7 @@ body.is-stale .flows-tablewrap {
   grid-column: 1 / -1;
   display: grid;
   gap: 1px;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
   background: var(--panel-border);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
