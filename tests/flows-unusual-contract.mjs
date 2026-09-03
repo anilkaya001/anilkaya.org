@@ -449,8 +449,33 @@ const rebuild = (em) => {
 
 /* ---------- §8 st is null when EITHER average is missing --------- */
 {
-  const em = PAYLOAD.names.rows.find(REBUILDABLE);
-  const row = rebuild(em);
+  /* THE ROW IS CHOSEN FOR THE PROPERTY UNDER TEST, not taken first.
+
+     This read `PAYLOAD.names.rows.find(REBUILDABLE)` — whichever rebuildable
+     row happened to be at the front — and then asserted that a one-sided
+     fallback on THAT row would publish at least half again its true ratio.
+     But that margin is a property of the row's own call/put balance, not of
+     the module: it held only while the corpus happened to put a lopsided name
+     first. Widening the dry-run screener's earnings window changed which names
+     clear the gate, a differently balanced row moved to the front, and the
+     assertion failed on a change that touched nothing it was testing —
+     2.29 against a true 1.879, a real margin that simply was not 1.5x.
+
+     So the row is SEARCHED FOR, by the very quantity the section is about,
+     and the search coming back empty is itself the finding: it would mean the
+     corpus contains no name lopsided enough to demonstrate what the guard
+     prevents, which is a fixture problem and should be reported as one rather
+     than passing quietly on a row that proves nothing. */
+  const candidates = PAYLOAD.names.rows.filter(REBUILDABLE).map((r) => {
+    const built = rebuild(r);
+    const oneSided = (Number(built.call_volume) + Number(built.put_volume)) /
+      Number(built.avg_30_day_put_volume);
+    return { em: r, built, oneSided, margin: oneSided / r.st };
+  }).sort((a, b) => b.margin - a.margin);
+
+  ok(candidates.length > 0, "the corpus offers a rebuildable name row to work from");
+  const em = candidates[0].em;
+  const row = candidates[0].built;
   const st = (r) => unusualNameRow(r, screenerTilt(r)).st;
   eq(st(row), em.st, "the intact row reproduces the emitted st");
 
@@ -465,8 +490,7 @@ const rebuild = (em) => {
 
   /* The specific lie: the numerator is (call + put), so a module that fell back
      to the surviving denominator would publish roughly double the true ratio. */
-  const inflated = (Number(row.call_volume) + Number(row.put_volume)) /
-    Number(row.avg_30_day_put_volume);
+  const inflated = candidates[0].oneSided;
   ok(inflated > em.st * 1.5,
      `the one-sided fallback would have published about ${inflated.toFixed(2)} against a ` +
      `true ${em.st} — the failure this null is refusing, and it is large enough to be a ` +
