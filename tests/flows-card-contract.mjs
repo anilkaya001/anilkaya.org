@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
   buildCalendar, buildDisplacement, buildPricedMove, buildContext, buildSurface,
+  buildCohort, COHORT_ROWS, COHORT_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
@@ -950,4 +951,132 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(live.volContext.ivRank.rows[0].rank1y, 44, "beside a rank whose unit the payload states");
 }
 
-console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, and wave-2 panels holding the three-silences boundary`);
+
+/* ---------- the cohort: who this name was measured against ---------
+
+   A 21-PANEL WORKSPACE THAT COULD NOT NAME ITS OWN CROSS-SECTION. Four
+   surfaces print the sentence "sector and log-capitalisation neutralised out
+   before ranking", and the page a reader opens to understand ONE name could
+   not tell them which cohort that was, how many names were in it, or whether
+   this name's sector was so small it was pooled into the reference bucket.
+
+   The question the panel exists to answer is the obvious follow-up to every
+   strong reading on the page: is my top long simply the strongest name in a
+   sector being bought wholesale? */
+{
+  const peers = [
+    { t: "AAA", s: 71 }, { t: "BBB", s: 12 }, { t: "CCC", s: 3 },
+    { t: "DDD", s: 0 },                            // a REAL zero, not an absence
+    { t: "EEE", s: -8 }, { t: "GGG", s: -20 },
+    { t: "FFF", s: null },                         // absent — must not become a zero
+  ];
+  const c = buildCohort({ ticker: "AAA", sector: "Technology", peers, pooled: false, minGroup: 3 });
+
+  eq(c.status, "ok", "a cohort with scored peers is ok");
+  eq(c.sector, "Technology", "and it NAMES the cohort, which is the panel's entire point");
+  eq(c.n, 6,
+     "counting the six peers that carried a score. The seventh carried null and was " +
+     "DROPPED rather than coerced: Number(null) is 0, zero sits at the centre of the " +
+     "dead band, and a phantom zero would drag the median — the one number this panel " +
+     "is read for — toward a value nobody measured");
+  eq(c.rank, 1, "this name is the strongest in its cohort");
+  eq(c.score, 71, "at the score every other surface prints for it");
+  eq(c.median, 1.5,
+     "against a cohort median of 1.5 — so the name stands out from its own sector rather " +
+     "than riding it, which is the answer the panel exists to give");
+  eq(c.best, 71, "the cohort's extremes are published");
+  eq(c.worst, -20, "signed, so the short end is not folded onto the long");
+
+  /* THE WHOLESALE COUNT, AND THE ZERO THAT BELONGS TO NEITHER SIDE. */
+  eq(c.sameSide, 3, "three peers share this name's sign");
+  eq(c.otherSide, 2, "two oppose it");
+  eq(c.neutral, 1,
+     "and the name scoring exactly zero is counted APART — it sits at the centre of the " +
+     "dead band and holds no position, so folding it into either side would invent one");
+  eq(c.sameSide + c.otherSide + c.neutral, c.n,
+     "the three counts partition the cohort exactly, so a reader can check the arithmetic " +
+     "rather than take it");
+
+  /* THE MEDIAN'S OFF-BY-ONE, which is the whole of a median. */
+  eq(buildCohort({ ticker: "AAA", peers: [{ t: "AAA", s: 10 }, { t: "BBB", s: 4 }] }).median, 7,
+     "an even-length cohort takes the mean of its two middle values — a list of two must " +
+     "not report its larger member as the median, which is what a naive middle index does");
+  eq(buildCohort({ ticker: "AAA", peers: [{ t: "AAA", s: 5 }] }).median, 5,
+     "and a cohort of one is its own median");
+  eq(buildCohort({ ticker: "AAA", peers: [{ t: "AAA", s: 5 }] }).n, 1,
+     "with a size of one, which is itself the finding on that card");
+
+  /* POOLED IS NOT MISSING, AND NULL IS NOT FALSE. */
+  eq(c.pooled, false, "a level with enough members is reported as not pooled");
+  eq(buildCohort({ ticker: "AAA", peers, pooled: true }).pooled, true,
+     "and a pooled level says so — the name WAS adjusted, against a cohort that is not " +
+     "its sector, which is the case a reader most needs flagged");
+  eq(buildCohort({ ticker: "AAA", peers }).pooled, null,
+     "while a caller that said nothing yields NULL, not false. 'This level was not pooled' " +
+     "and 'nobody told this panel whether it was' are different facts, and the second must " +
+     "not render as the reassuring first");
+  eq(buildCohort({ ticker: "AAA", peers, sector: "" }).sector, null,
+     "an empty sector label is null rather than an empty string a renderer would print");
+
+  /* THE PEER LIST IS CAPPED AND SAYS SO. */
+  const many = Array.from({ length: 40 }, (_, i) => ({ t: "T" + i, s: 40 - i }));
+  many.push({ t: "AAA", s: 100 });
+  const big = buildCohort({ ticker: "AAA", peers: many });
+  eq(big.n, 41, "the cohort's SIZE is the whole cohort");
+  eq(big.rows.length, COHORT_ROWS,
+     "while the rows carried are capped — a reader who cannot see the names behind the " +
+     "median has a number to trust rather than a comparison to check, and forty names is " +
+     "not a comparison either");
+  eq(big.shown, COHORT_ROWS, "and the payload states the cut rather than leaving it inferred");
+  ok(big.n > big.shown, "so the two numbers genuinely differ on this fixture");
+  eq(big.rows[0].t, "AAA", "the rows are ordered strongest first");
+  eq(big.rank, 1, "and the rank is over the WHOLE cohort, not over the shown slice");
+
+  /* DETERMINISTIC ORDER. Ties broken on the ticker so a re-run of the same
+     session builds the same card bytes. */
+  const tied = buildCohort({ ticker: "BBB", peers: [
+    { t: "CCC", s: 5 }, { t: "AAA", s: 5 }, { t: "BBB", s: 5 }] });
+  assert.deepEqual(tied.rows.map((r) => r.t), ["AAA", "BBB", "CCC"],
+    "a cohort where every score ties is ordered by ticker, so a re-run writes identical " +
+    "bytes rather than whatever the input order happened to be"); checks++;
+  eq(tied.rank, 2, "and this name's rank falls out of that same total order");
+
+  /* THE THREE SILENCES, ALL THREE REACHED. */
+  const noPeers = buildCohort({ ticker: "AAA" });
+  eq(noPeers.status, "unavailable",
+     "no peer list at all is UNAVAILABLE — the pool was not carried into the build");
+  ok(/score itself is unaffected/.test(noPeers.reason),
+     "and the reason says the score is unaffected, because a reader seeing an unavailable " +
+     "panel beside a confident +71 needs to know which of the two is in doubt");
+  ok(!("n" in noPeers) && !("median" in noPeers),
+     "an unavailable panel carries no numbers at all");
+
+  const allNull = buildCohort({ ticker: "AAA", peers: [{ t: "BBB", s: null }, { t: "CCC" }] });
+  eq(allNull.status, "quiet",
+     "a peer list that ARRIVED and held no scored name is QUIET — measured emptiness, not " +
+     "an absent source, and the two are opposite facts about the same blank space");
+  ok(!("median" in allNull), "and carries no numbers either");
+
+  const absent = buildCohort({ ticker: "ZZZ", peers });
+  eq(absent.status, "quiet",
+     "a cohort that was measured but does not contain this name is QUIET rather than an " +
+     "error: a card can be built for a name the scorer dropped after the cohort was " +
+     "assembled, and inventing a rank for it would be worse than saying so");
+  ok(/held 6 name/.test(absent.reason),
+     "and the reason still reports the cohort's own size, which is the part that was measured");
+
+  eq(buildCohort({}).status, "unavailable", "no ticker is unavailable, not a throw");
+
+  /* THE NOTES ARE PUBLISHED, because the median's meaning is genuinely
+     counter-intuitive and a renderer restating it would be a second copy. */
+  ok(COHORT_NOTES.median.length > 40 && /near zero is/.test(COHORT_NOTES.median),
+     "the payload carries the note that a median near zero is the ORDINARY outcome of " +
+     "neutralisation and not a finding — without it a reader draws a sector call out of " +
+     "a number that has had the sector removed from it");
+  ok(/reference bucket/.test(COHORT_NOTES.pooled),
+     "and the note explaining that a pooled name was adjusted against a cohort that is " +
+     "not its sector");
+  eq(c.notes, COHORT_NOTES, "the notes ride on the panel rather than on the renderer");
+}
+
+console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, and a cohort panel that finally names the cross-section the score was neutralised against`);

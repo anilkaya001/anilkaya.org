@@ -954,6 +954,173 @@ function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
   };
 }
 
+/**
+ * THE COHORT THIS NAME WAS COMPARED AGAINST — named, sized, and ranked.
+ *
+ * A 21-PANEL WORKSPACE THAT COULD NOT SAY WHO THE NAME WAS MEASURED AGAINST.
+ * `grep -c "peer\|sector" shared/flows-card.js` returned zero. The published
+ * score is a cross-sectional residual with sector and log-capitalisation
+ * neutralised out before ranking — that sentence appears on four surfaces —
+ * and the page a reader opens to understand one name could not tell them
+ * which cohort the "cross-section" was, how many names were in it, or whether
+ * this name's sector had so few members that it was pooled into the reference
+ * bucket rather than given a level of its own.
+ *
+ * THE QUESTION THIS ANSWERS, and it is the obvious follow-up to every strong
+ * reading on the page: is my top long simply the strongest name in a sector
+ * that is being bought wholesale? A reader told "+71, sector neutralised"
+ * cannot ask it. A reader told "+71, rank 1 of 9 in Technology, whose median
+ * is +3" has the answer in the same glance — and a reader told "+71, rank 1
+ * of 9, whose median is +58" has a very different answer and needs it more.
+ *
+ * WHAT THE SCORES HERE ARE, because getting this wrong would make the panel
+ * worse than nothing: they are the PUBLISHED, POST-NEUTRALISATION scores —
+ * the same numbers every other surface prints. Neutralisation removes the
+ * cohort's LINEAR mean, so a cohort median near zero is the ordinary outcome
+ * and is not a finding. A median far from zero is: it means the adjustment
+ * did not absorb the cohort's tilt, which happens when the level was pooled
+ * for being under `minGroup`, when the cohort is small enough that its mean
+ * is noise, or when the tilt is not linear in the terms that were removed.
+ * That is a fact about the SCORE rather than about the sector, and the panel
+ * says so rather than inviting the reader to read a sector call out of it.
+ *
+ * POOLED IS NOT MISSING. A name whose sector had fewer than `minGroup`
+ * members was not left un-neutralised; it was folded in with every other
+ * small level into one reference bucket, so it WAS adjusted — against a
+ * cohort that is not its sector. Rendering that as "no cohort" would be a
+ * lie in the reassuring direction, and it is the case a reader most needs
+ * flagged, because the name's score carries an adjustment estimated off names
+ * it has nothing to do with.
+ *
+ * @param {object}   input
+ * @param {string}   input.ticker    The name this card is for.
+ * @param {string}   input.sector    Its sector label, as the scorer saw it.
+ * @param {Array}    input.peers     [{t, s}] for every name in the same
+ *                                   neutralisation level, this name included.
+ * @param {number}   input.minGroup  The pooling floor the scorer used.
+ * @param {boolean}  input.pooled    Whether this level was pooled into the
+ *                                   reference bucket. Passed rather than
+ *                                   re-derived: the scorer's own rule decides
+ *                                   it, and a second implementation of that
+ *                                   rule here is a second thing to drift.
+ */
+export function buildCohort({
+  ticker, sector = null, peers = null, minGroup = 3, pooled = null,
+} = {}) {
+  if (!ticker) {
+    return unavailable(
+      "this card carries no ticker, so there is no name to place inside a cohort");
+  }
+  if (!Array.isArray(peers)) {
+    return unavailable(
+      "the scored pool was not carried into the card build for this run, so the " +
+      "cohort this name was measured against cannot be named. The score itself is " +
+      "unaffected — this panel reports the comparison, it does not perform it");
+  }
+
+  const want = String(ticker).toUpperCase();
+  const rows = [];
+  for (const p of peers) {
+    const t = p && p.t;
+    const s = numOrNull(p && p.s);
+    /* A PEER WITH NO SCORE IS NOT A PEER WITH A SCORE OF ZERO. Zero sits at
+       the centre of the dead band and is a reading this pipeline assigns, so
+       coercing an absent one would move the cohort's median toward a value
+       nobody measured — and the median is the number this panel is read for. */
+    if (!t || s === null) continue;
+    rows.push({ t: String(t).toUpperCase(), s });
+  }
+
+  if (!rows.length) {
+    return quiet(
+      "no name in this cohort carried a score this session, so there is nothing " +
+      "to rank this one against");
+  }
+
+  rows.sort((a, b) => b.s - a.s || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+
+  const at = rows.findIndex((r) => r.t === want);
+  if (at < 0) {
+    /* MEASURED, AND THIS NAME IS NOT IN IT. Not an error and not an absence:
+       a card can be built for a name the scorer dropped after the cohort was
+       assembled, and the honest reading is the cohort's own shape with this
+       name stated as absent from it rather than a rank invented for it. */
+    return quiet(
+      "this name is not in the scored cohort that was carried in, so it has no " +
+      "rank within it. The cohort held " + rows.length +
+      (rows.length === 1 ? " name" : " names") + " and this was not one of them");
+  }
+
+  /* The median of an even-length list is the mean of the two middle values —
+     written out rather than reached for, because the off-by-one is the whole
+     of it and a list of two would otherwise report its larger member. */
+  const mid = rows.length >> 1;
+  const median = rows.length % 2
+    ? rows[mid].s
+    : (rows[mid - 1].s + rows[mid].s) / 2;
+
+  const self = rows[at].s;
+  /* HOW MUCH OF THE COHORT AGREES WITH THIS NAME, which is the wholesale
+     question stated as a count. Names at exactly zero belong to neither side
+     and are counted apart rather than assigned to one: zero is the centre of
+     the dead band and is a reading, so folding it into "agrees" or
+     "disagrees" would invent a position it does not hold. */
+  let sameSide = 0, otherSide = 0, neutral = 0;
+  for (const r of rows) {
+    if (r.s === 0 || self === 0) { if (r.s === 0) neutral++; continue; }
+    if (Math.sign(r.s) === Math.sign(self)) sameSide++; else otherSide++;
+  }
+
+  return ok({
+    sector: sector === null || sector === undefined || sector === "" ? null : String(sector),
+    /* NULL, NOT FALSE, when the caller did not say. "This level was not
+       pooled" and "nobody told this panel whether it was" are different
+       facts, and the second must not render as the first — pooling is the
+       case a reader most needs flagged. */
+    pooled: pooled === null || pooled === undefined ? null : !!pooled,
+    minGroup: numOrNull(minGroup),
+    n: rows.length,
+    /* One-based, to match every other rank this product prints. */
+    rank: at + 1,
+    score: self,
+    median,
+    best: rows[0].s,
+    worst: rows[rows.length - 1].s,
+    sameSide, otherSide, neutral,
+    /* THE COHORT ITSELF, CAPPED AND SAID TO BE CAPPED. A reader who cannot
+       see the nine names that made the median has been given a number to
+       trust rather than a comparison to check. Twelve is the card's own
+       convention for a peer list and the payload states the cut. */
+    rows: rows.slice(0, COHORT_ROWS),
+    shown: Math.min(rows.length, COHORT_ROWS),
+    notes: COHORT_NOTES,
+  });
+}
+
+/** How many peers a cohort panel carries. A cut, stated on the payload. */
+export const COHORT_ROWS = 12;
+
+export const COHORT_NOTES = Object.freeze({
+  scores:
+    "These are the published scores, after neutralisation — the same numbers " +
+    "every other surface prints for these names.",
+  median:
+    "Neutralisation removes the cohort's linear mean, so a median near zero is " +
+    "the ordinary outcome and is not a finding. A median far from zero means " +
+    "the adjustment did not absorb the cohort's tilt, which happens when the " +
+    "level was pooled for being small, when the cohort is small enough that " +
+    "its mean is noise, or when the tilt is not linear in the terms removed. " +
+    "That is a fact about the score, not a sector call.",
+  pooled:
+    "A sector with fewer than the pooling floor's worth of members is not left " +
+    "un-neutralised. It is folded in with every other small level into one " +
+    "reference bucket, so the name WAS adjusted — against a cohort that is not " +
+    "its sector.",
+  sides:
+    "Names scoring exactly zero sit at the centre of the dead band and belong " +
+    "to neither side, so they are counted apart rather than assigned to one.",
+});
+
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   chain, generatedAt, sessionDate, weights,
