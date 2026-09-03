@@ -535,7 +535,7 @@
         "Whether this name crossed the dead band since its previous scored " +
         "session — cleared it, faded back inside it, or flipped sides. " +
         "Everything else the change layer reports is drift, however large.",
-        "7.2rem"));
+        "7rem"));
       hr.append(headCell("st-c-move", "\u0394 \u00b7 over", ctx.notes.change ||
         "The change in score since this name's PREVIOUS SCORED session, and how " +
         "many sessions that change spans. The two observations need not be " +
@@ -570,7 +570,7 @@
         "Consecutive scored sessions on the current sign. One is a new opinion, " +
         "thirty is an old one, and zero means the newest score is exactly zero, " +
         "which belongs to neither side.",
-        "3.4rem"));
+        "2.8rem"));
     }
 
     const hN = el("th", "c-num st-c-n");
@@ -610,7 +610,7 @@
      forty pixels wide — which is what the old `Math.round(w) || 240` did the
      moment a fixed layout squeezed the column to zero: a falsy 0 fell through
      to the fallback and every mark landed under the wrong date. */
-  const MIN_STRIP = 140;
+  const MIN_STRIP = 120;
 
   function stripWidth() {
     if (panelEl) panelEl.hidden = false;
