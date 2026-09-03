@@ -24,6 +24,21 @@
    than an empty box, because an empty box is indistinguishable from
    a panel that drew nothing on purpose.
 
+   TWO TABLES HERE ARE PROJECTIONS OF THAT ONE LIST, not second
+   opinions about it: DRAW maps each key to its renderer, and
+   PANEL_CHROME maps each key to the registry's own `group` and
+   `tier`. `shared/` is never served, so a browser file cannot import
+   the registry — and both tables are compared against it, key for
+   key and value for value, by tests/flows-ticker-contract.mjs. A
+   duplicate a test compares is a projection; a duplicate a test
+   cannot see is a drift.
+
+   THE PAGE OPENS ON WHAT CHANGED. It used to open on twenty-one
+   panels of one session with no index, no group boundaries, no way
+   to link a colleague to a panel, an identity block that scrolled
+   away, and nothing anywhere saying what the score had DONE. See
+   THE WORKSPACE, below.
+
    THE TEN SHIPPED RENDERERS ARE NOT COPIED HERE. They are
    window.FlowsPanels, extracted from flows-card.js so the dialog and
    this page draw the SAME code and can never disagree about a chart.
@@ -5031,9 +5046,18 @@
     changeEl.append(h);
 
     if (chg.status !== "ok") {
-      const p = el("p", "fc-note",
-        chg.reason.charAt(0).toUpperCase() + chg.reason.slice(1) + ".");
-      p.setAttribute("data-empty", chg.status === "quiet" ? "quiet" : "unavailable");
+      /* THE SAME TWO HEADINGS THE PANELS USE, and the reason VERBATIM under
+         them. deadPanel and quietPanel already teach this page's reader that
+         "Unavailable." is a failure and "Nothing to report." is a
+         measurement; a third vocabulary for the same distinction on the block
+         above them would be a third thing to learn. Capitalising the
+         publisher's sentence would also stop it being verbatim, which is the
+         property the suites check. */
+      const quiet = chg.status === "quiet";
+      const p = el("p", quiet ? "fc-quiet" : "fc-dead");
+      p.setAttribute("data-empty", quiet ? "quiet" : "unavailable");
+      p.append(el("strong", null, quiet ? "Nothing to report. " : "Unavailable. "));
+      p.append(document.createTextNode(chg.reason + "."));
       changeEl.append(p);
       return chg;
     }
@@ -5335,6 +5359,66 @@
     return out;
   }
 
+  /**
+   * Why this name has no card, IN THE FUNNEL PAYLOAD'S OWN TERMS.
+   *
+   * `st` is the stage the pipeline stopped this name at, and the two that
+   * matter here read completely differently to a reader: "gated" is a rule
+   * that fired before any number existed, and every other stage means the
+   * name was allowed through and did not get far enough. Collapsing them into
+   * one apologetic sentence is what the old copy did.
+   *
+   * NOTHING IS INFERRED FROM AN ABSENCE. The calendar is capped, so a name
+   * with no row in it may have been shed rather than never gated — and this
+   * says so rather than concluding it was not gated, which would be the
+   * reassuring guess.
+   */
+  function sayWhyAbsent(ticker, events) {
+    const lead = ticker + " is not on today's board, so no card was built for it. ";
+    const rows = events && Array.isArray(events.rows) ? events.rows : null;
+    const row = rows ? rows.find((r) => r && String(r.t).toUpperCase() === ticker) : null;
+
+    const parts = [lead];
+    if (!rows) {
+      parts.push(
+        "The earnings calendar could not be read just now, so this page cannot say which " +
+        "stage of the funnel it stopped at. It is not on the watch list either: that list " +
+        "holds only names that were scored and landed inside the dead band.");
+    } else if (row && row.st === "gated") {
+      const dte = isNum(row.dte);
+      parts.push(
+        "It reports on " + (row.d ? String(row.d) : "a date the calendar did not publish") +
+        (dte === null
+          ? ", with no calendar-day count published beside it, "
+          : ", " + dte + " calendar " + (dte === 1 ? "day" : "days") + " from " +
+            (events.gateOrigin || "the run's own Eastern date") + ", ") +
+        "and the earnings gate removed it BEFORE the composite ran" +
+        (isNum(events.gateDays) === null
+          ? ". " : " \u2014 the gate covers day 0 to day " + events.gateDays + ". ") +
+        "So there is no score under this name at all today, not a low one. It is not on " +
+        "the watch list either: that list holds only names that were scored and landed " +
+        "inside the dead band.");
+    } else if (row) {
+      parts.push(
+        "The funnel stopped it at \u201c" + String(row.st || "an unclassified stage") +
+        "\u201d: it cleared the earnings gate and did not reach the board. Cards are built " +
+        "only for board names, so there is nothing to draw for it today.");
+    } else {
+      parts.push(
+        "The earnings calendar carries no row for this name, so this page cannot say which " +
+        "stage of the funnel it stopped at \u2014 and that calendar is capped, so its " +
+        "silence is not evidence that the name was never gated.");
+    }
+
+    statusEl.replaceChildren(document.createTextNode(parts.join("")));
+    /* THE WAY ON, because the page a reader wants next is the funnel itself
+       and the old copy sent them nowhere. */
+    const link = el("a", "ft-link");
+    link.href = "/flows/events/";
+    link.textContent = " The earnings calendar and the whole funnel.";
+    statusEl.append(link);
+  }
+
   function start() {
     const ticker = readTicker();
 
@@ -5363,25 +5447,42 @@
     getJSON("/api/flows/card?t=" + encodeURIComponent(ticker)).then((card) => {
       if (!card) return;
       if (card.status === "pending" || !card.panels) {
-        /* TWO DIFFERENT FACTS THAT LOOK IDENTICAL FROM HERE, and the boards
-           are fetched ONLY to tell them apart. "Not on the board" is a
-           permanent property of this name today; "the card has not landed"
-           is a race that resolves itself in a minute. Telling a reader the
-           wrong one costs them either a pointless reload or a name they
-           give up on. */
+        /* THREE DIFFERENT FACTS THAT LOOK IDENTICAL FROM HERE, and the two
+           boards plus the funnel are fetched ONLY to tell them apart. "The
+           card has not landed" is a race that resolves itself in a minute;
+           "not on the board" is a permanent property of this name today; and
+           "the earnings gate removed it before the composite ran" is a THIRD
+           thing, which is the common case rather than the rare one — 57 of
+           the 60 rows on a typical funnel payload are gated.
+
+           THE SENTENCE THIS REPLACES WAS WRONG IN BOTH HALVES for exactly
+           those 57 names. It said cards are built only for the names the
+           board publishes "so there is nothing to show for this name today —
+           it may be on the watch list". A gated name is absent because the
+           board was FORBIDDEN to score it, not because it scored poorly; and
+           it cannot be on the watch list, which by construction holds only
+           names that WERE scored and landed inside the dead band. Every
+           ticker on /flows/events/ links here, so that sentence was the
+           landing page for most of the funnel.
+
+           THE FUNNEL PAYLOAD IS SAME-ORIGIN, ALREADY BUILT AND ALREADY
+           CACHED — no vendor call, and the cost is paid only on the path
+           where the page has nothing else to say. */
         return Promise.all([
           getJSON("/api/flows/board?side=long").catch(() => null),
           getJSON("/api/flows/board?side=short").catch(() => null),
-        ]).then(([long, short]) => {
+          getJSON("/api/flows/events").catch(() => null),
+        ]).then(([long, short, events]) => {
           const rows = boardRows(long, short);
           const onBoard = rows.some((r) => r.t === ticker);
-          statusEl.textContent = onBoard
-            ? "The board published " + ticker + " but its card has not landed yet. " +
-              "Cards are published after the boards, so one can briefly lag its row."
-            : ticker + " is not on today's board. Cards are built only for the " +
-              "names the board publishes, so there is nothing to show for this " +
-              "name today \u2014 it may be on the watch list.";
-          if (!onBoard && rows.length) {
+          if (onBoard) {
+            statusEl.textContent =
+              "The board published " + ticker + " but its card has not landed yet. " +
+              "Cards are published after the boards, so one can briefly lag its row.";
+            return;
+          }
+          sayWhyAbsent(ticker, events);
+          if (rows.length) {
             showPicker(rows, "These are the names that do have a card today.");
           }
         });

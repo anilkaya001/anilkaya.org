@@ -34,6 +34,30 @@
    in words when it does not.
 
    ============================================================
+   AND THE QUESTION THIS PAGE COULD NOT BE ASKED: WHICH NAME MOVED.
+
+   For its whole life the page offered three orderings and all
+   three ranked the same snapshot column. The default ranked on
+   |last| — the newest score ANYWHERE in the window — so a name
+   last scored thirty sessions ago at +45 sat above a name scored
+   that morning at +30, under a header reading "the most recent
+   published score in the window" that every reader took to mean
+   yesterday. Nothing on the page stated the age of a reading. And
+   the key coerced the absence on the way past: Math.abs(b.last ?? 0)
+   does not sort a missing score last, it sorts it into the middle.
+
+   The change layer is now READ, never re-derived. `lastAt` dates
+   every row and marks the stale ones by how many sessions they
+   are behind; `d1` carries the move WITH THE SPAN IT COVERS, so a
+   five-session move cannot masquerade as an overnight one; its
+   `cross` names the crossing, which is the early-warning event and
+   outranks any magnitude; `run` says whether the opinion is new or
+   old; `ext` says where the window's own edges are. The page opens
+   on the latest session's score with the names that were not
+   scored in it sorted LAST, and the paragraph above the table
+   states the population every count came out of.
+
+   ============================================================
    THE DRAWING CONTRACT, same as every chart on this product: one
    viewBox unit is one CSS pixel, measured from a VISIBLE host (the
    panel is unhidden before the measurement — flows-events measured
@@ -1113,10 +1137,33 @@
     return said.join(" ");
   }
 
+  /**
+   * WHICH SILENCE THIS IS, AS A TAG AND NOT ONLY AS PROSE — the same
+   * three-way distinction every other Flows surface carries, so a reader and
+   * a test can both tell them apart without parsing a sentence:
+   *
+   *   unavailable — the change layer was never published, or the archive
+   *                 holds nothing to compare. A fact about the pipeline.
+   *   quiet       — every comparable name was compared and none moved. A
+   *                 measurement of the session, and the only one of the three
+   *                 that makes a claim about the market.
+   *   (no tag)    — the layer is present and something moved.
+   */
+  function changeSilence() {
+    const ch = ctx.change;
+    if (!ch) return "unavailable";
+    if (ch.status === "cold" || ch.status === "single-session") return "unavailable";
+    if (ch.status === "flat") return "quiet";
+    return null;
+  }
+
   function renderChange() {
     if (!changeEl) return;
     const stale = staleSaid();
     changeEl.textContent = changeSaid() + (stale ? " " + stale : "");
+    const kind = changeSilence();
+    if (kind) changeEl.dataset.empty = kind;
+    else delete changeEl.dataset.empty;
   }
 
   /* ---------- the note under the track ----------------------------- */
@@ -1268,10 +1315,27 @@
         : ""));
 
     if (sources) {
-      const full = isNum(sources.full) ?? 0;
-      const boardsOnly = isNum(sources.boardsOnly) ?? 0;
-      parts.push(full + " " + plural(full, "session", "sessions") + " scored in full, " +
-        boardsOnly + " reconstructed from the archived boards alone");
+      /* A CONFIDENT ZERO IN A PRINTED COUNT, and it was in the sentence that
+         tells the reader how much of this window is a reconstruction rather
+         than a full scoring. These read `isNum(x) ?? 0`, so a payload that
+         stopped publishing either key would have printed "0 sessions
+         reconstructed from the archived boards alone" — a reassurance nobody
+         measured. Each half is now printed only if it was published. */
+      const full = isNum(sources.full);
+      const boardsOnly = isNum(sources.boardsOnly);
+      const fullSaid = full === null ? null
+        : full + " " + plural(full, "session", "sessions") + " scored in full";
+      const backSaid = boardsOnly === null ? null
+        : boardsOnly + " " + plural(boardsOnly, "session", "sessions") +
+          " reconstructed from the archived boards alone";
+      if (fullSaid && backSaid) parts.push(fullSaid + ", " + backSaid);
+      else if (fullSaid || backSaid) {
+        parts.push((fullSaid || backSaid) + ", and the other half of that split " +
+          "was not published");
+      } else {
+        parts.push("this payload carried a source split with neither count in it, so " +
+          "how much of the window is a board-only reconstruction is not stated");
+      }
     }
 
     if (archive) {
