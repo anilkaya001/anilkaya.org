@@ -93,7 +93,7 @@ export const SIZE_BASIS =
 export const POLITICAL_NOTES = Object.freeze({
   unit:
     "One row is one statutory disclosure, not a transaction seen on a tape. " +
-    "The filing states a date, a side, an issuer and a dollar RANGE — never " +
+    "The filing states a date, a side, a security and a dollar RANGE — never " +
     "an amount — so every size on this page is an estimate from a band.",
   lag:
     "Disclosure is late by law and later in practice: the STOCK Act allows 45 " +
@@ -201,10 +201,31 @@ export function valueBand(raw) {
 /**
  * One disclosure, shaped. Null when it carries no usable identity.
  *
+ * `issuer` IS NOT THE COMPANY, AND THIS FILE USED TO SAY IT WAS. The line
+ * below read `raw.issuer || raw.asset` on the belief that the two were spellings
+ * of one field. They are two different fields on two different schemas, and the
+ * vendor's own spec settles it:
+ *
+ *   Insider Trades Issuer:  "The person who executed the transaction."
+ *                           example: spouse        (docs/uw-openapi.yaml:6042)
+ *   Politician Trades:      asset: NVIDIA Corporation - Common Stock
+ *                           ticker: NVDA           (docs/uw-openapi.yaml:9573)
+ *
+ * `issuer` takes values like "self", "spouse", "joint" and "not-disclosed" —
+ * WHOSE ACCOUNT the trade came from — and it does not appear on the
+ * /congress/recent-trades schema at all. Preferring it meant that on every row
+ * the live feed happened to carry it, the page printed "joint" or
+ * "not-disclosed" beside the ticker in the place a company name belongs. That
+ * is not a missing label, it is a wrong one, and it shipped.
+ *
+ * Both fields are now read for what they are. The executing account is worth
+ * keeping — a spouse's trade is a different fact from the member's own — but
+ * it is a qualifier on the filing, never its name.
+ *
  * TWO WIRE SPELLINGS, ONE ROW. The congress endpoints return `txn_type` with
  * an `amounts` RANGE STRING ("$15,001 - $50,000"); the unusual-trades family
  * returns `transaction_type` with a numeric `low_value`/`mid_value`/
- * `high_value` triple and calls the issuer `asset` (docs/uw-openapi.yaml,
+ * `high_value` triple and names the security `asset` (docs/uw-openapi.yaml,
  * "Senate Stock" and "Politician Trades"). Reading only the first spelling
  * would not throw on the second — it would classify every side as null and
  * every band as unparseable, and the ranking would come back CONFIDENTLY
@@ -242,7 +263,13 @@ export function filingRow(raw) {
     memberType: raw.member_type === null || raw.member_type === undefined
       ? null : raw.member_type,
     t,
-    issuer: str(raw.issuer) || str(raw.asset),
+    /* THE SECURITY, from the field that names the security. */
+    asset: str(raw.asset),
+    /* WHOSE ACCOUNT EXECUTED IT — "self", "spouse", "joint", "not-disclosed".
+       null when the feed does not carry it, which is most of /recent-trades:
+       absent and "not-disclosed" are different facts and only one of them is
+       the member declining to say. */
+    executedBy: str(raw.issuer) || null,
     side: sideOf(raw.txn_type || raw.transaction_type),
     txnType: str(raw.txn_type) || str(raw.transaction_type),
     lo: band.lo, hi: band.hi, mid: band.mid, openBand: band.open,
@@ -352,7 +379,7 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
   for (const r of rows) {
     if (!r || !r.t) continue;
     let a = by.get(r.t);
-    if (!a) a = { t: r.t, issuer: r.issuer, boughtMid: 0, boughtLo: 0, boughtHi: 0,
+    if (!a) a = { t: r.t, asset: r.asset, boughtMid: 0, boughtLo: 0, boughtHi: 0,
                   openFloor: 0, openBands: 0,
                   soldMid: 0, buys: 0, sells: 0, who: new Set(), lags: [] }, by.set(r.t, a);
     if (r.who) a.who.add(r.id || r.who);
@@ -378,7 +405,7 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
   for (const a of by.values()) {
     if (!a.buys) continue;
     out.push({
-      t: a.t, issuer: a.issuer,
+      t: a.t, asset: a.asset,
       bought: a.boughtMid, boughtLo: a.boughtLo, boughtHi: a.boughtHi,
       sold: a.soldMid, buys: a.buys, sells: a.sells,
       filers: a.who.size, medianLagDays: median(a.lags),

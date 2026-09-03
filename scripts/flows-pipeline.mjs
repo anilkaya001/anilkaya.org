@@ -32,6 +32,7 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
+import { makePermitQueue } from "../shared/flows-permits.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
@@ -573,7 +574,17 @@ const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 /** Delay between publishes, to stay under the edge's burst-rate challenge. */
 const PUBLISH_SPACING_MS = 150;
 
-const stats = { calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now() };
+/* THE THREE NUMBERS THIS FILE ASKED FOR AND NEVER HAD. The floorCeilingMs
+   comment above says the binding 750ms ceiling "is NOT obviously right — a 429
+   costs a Retry-After wait, so a higher floor trades a certain per-call tax
+   against an uncertain saving, and the run has never been instrumented to say
+   which is larger. Do not raise it on intuition; measure the 429 wait first."
+   These are that measurement: what the run spent WAITING FOR ITS TURN, what it
+   spent ON THE WIRE, and what it spent BEING REFUSED. */
+const stats = {
+  calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
+  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0,
+};
 let delayMs = RATE.startDelayMs;
 
 /* THE FLOOR IS A VARIABLE, and it was not one until 2026-08-26.
@@ -590,6 +601,24 @@ let delayMs = RATE.startDelayMs;
 let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- the permit queue -------------------------------------
+
+   THE IMPLEMENTATION AND ITS ARGUMENT LIVE IN shared/flows-permits.js, which
+   states at length why this is NOT the `Promise.all` the sector, card and
+   pulse legs each refuse. The short version: requests still leave exactly
+   delayMs apart — the vendor cannot tell the schemes apart — but the round
+   trip no longer sits on the critical path in front of the next call's wait.
+
+   `delayMs` is passed as a FUNCTION because the rate controller raises it
+   mid-run on a 429; reading it at reservation time is what makes a raised
+   floor govern every slot booked after it. */
+const permits = makePermitQueue({
+  delayMs: () => delayMs,
+  now: () => Date.now(),
+  sleep,
+  maxInFlight: 6,
+});
 
 
 async function uw(path, params = {}) {
@@ -610,9 +639,13 @@ async function uw(path, params = {}) {
   }
 
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
-    await sleep(delayMs);
+    /* A RETRY TAKES A FRESH PERMIT. It is a new request on the wire and the
+       vendor counts it as one, so it queues like one. */
+    stats.permitWaitMs += await permits.acquire();
     stats.calls++;
     let response;
+    const wireStarted = Date.now();
+    const landed = permits.enter();
     try {
       response = await fetch(url, {
         headers: {
@@ -621,12 +654,16 @@ async function uw(path, params = {}) {
         },
       });
     } catch (error) {
+      stats.networkMs += Date.now() - wireStarted;
+      landed();
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
       if (attempt === RATE.maxRetries) throw error;
       continue;
     }
+    stats.networkMs += Date.now() - wireStarted;
+    landed();
 
     if (response.status === 429) {
       stats.rateLimited++;
@@ -644,6 +681,12 @@ async function uw(path, params = {}) {
          fact does not expire six clean responses later. */
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "limited"));
+      /* EVERYONE BACKS OFF, not just the caller that was refused. Serially
+         that distinction did not exist — there was only ever one caller in
+         flight. With permits outstanding, letting the others walk into the
+         same wall is how one 429 becomes six. */
+      permits.defer(wait);
+      stats.rateLimitWaitMs += wait;
       await sleep(wait);
       continue;
     }
@@ -5381,6 +5424,29 @@ async function main() {
     console.warn(`  pulse: ${error.message} — every key above published before this leg ran`);
   }
 
+  /* THE DEEP DISCLOSURE WINDOW, HELD FOR THE CARDS.
+
+     The political leg below walks a date ladder over POLITICAL_WINDOW_DAYS and
+     ends up holding far more filings than the single `limit: 100` page the
+     card leg reads for itself. Those are two windows onto one feed, and until
+     they were joined the product contradicted itself on the page: /flows/
+     political/ ranked a name first while that same name's card said "the
+     disclosure tape was read and named no member trading this ticker" — true
+     of the hundred rows the card leg saw, and false as the sentence a reader
+     understood.
+
+     Held here rather than re-fetched: the political leg runs first, the rows
+     are already in memory, and a second read of the same window would be a
+     call spent to disagree with itself more slowly. */
+  let politicalFilings = null;
+
+  /* HOW FAR BACK THE LADDER WALKS. Module-scoped rather than declared inside
+     the leg, because the card leg below now names it when it reports how the
+     two disclosure windows were joined — and a window one surface cites and
+     another owns privately is the shape that let them disagree in the first
+     place. */
+  const POLITICAL_WINDOW_DAYS = 90;
+
   /* 7i. THE POLITICAL SECTION — who disclosed the largest purchases.
 
      WHY congress-trader AND NOT recent-trades. A ranking needs a POPULATION,
@@ -5405,7 +5471,6 @@ async function main() {
      without it — and the first refusal ends the walk rather than spending one
      call per name to be told the same thing six times. */
   try {
-    const POLITICAL_WINDOW_DAYS = 90;
     const POLITICAL_PAGE_LIMIT = 200;
     const POLITICAL_MAX_PAGES = 8;
     const POLITICAL_HOLDER_NAMES = 6;
@@ -5416,6 +5481,12 @@ async function main() {
     let pagesRead = 0, paginated = null, fellBack = false;
     if (DRY_RUN) {
       Object.assign(raws, fakePoliticalRaws((payloads.long.rows || []).map((r) => r.t)));
+      /* THE FIXTURE FEEDS THE JOIN TOO. Without this the dry run leaves
+         politicalFilings null, the card leg takes its shallow-window branch on
+         every run, and the merge that fixes the card/political contradiction
+         is never once executed by the corpus — the same "the fixture cannot
+         reach the branch" hole this repository keeps finding. */
+      if (Array.isArray(raws.filings) && raws.filings.length) politicalFilings = raws.filings;
       /* NULL, NOT ZERO. A fixture read no pages, and "0 pages, 154 filings"
          is a self-contradicting pair that a reader would have to guess at.
          The same distinction the payloads keep everywhere else. */
@@ -5526,6 +5597,10 @@ async function main() {
         }
       }
       if (!raws.filings) raws.filings = filings;
+      /* Only the successfully-read rows travel. A leg that failed publishes
+         {__failed}, and handing that to the card leg as a filing list would
+         turn one leg's outage into fifty silently-empty panels. */
+      if (Array.isArray(filings) && filings.length) politicalFilings = filings;
 
       /* Holders, for the names the boards already care about. */
       const holderNames = deepNames(published, POLITICAL_HOLDER_NAMES).map((d) => d.t);
@@ -5700,19 +5775,47 @@ async function main() {
       const recent = DRY_RUN
         ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
         : await uw("/api/congress/recent-trades", { limit: 100 });
-      marketWide = recent.length;
+      /* THE DEEP WINDOW JOINS THE SHALLOW ONE, at zero extra vendor cost.
+
+         `recent` is one page of the hundred most recent disclosures — a
+         recency-biased sample, and a poor basis for "no member traded this
+         name". The political leg above already walked a date ladder over
+         POLITICAL_WINDOW_DAYS and its rows are still in memory. Reading one
+         and not the other is how the product came to rank a name first on
+         /flows/political/ while that name's own card denied any member had
+         traded it.
+
+         Deduped on the same identity the political ladder uses, because the
+         two windows overlap on the recent end by construction. */
+      const identity = (r) => `${(r && r.politician_id) || (r && r.name) || ""}|` +
+        `${(r && r.ticker) || ""}|${(r && r.transaction_date) || ""}|` +
+        `${(r && r.filed_at_date) || ""}|${(r && r.amounts) || ""}|${(r && r.mid_value) || ""}`;
+      const merged = [];
+      const seenFiling = new Set();
+      for (const row of [...(politicalFilings || []), ...recent]) {
+        const key = identity(row);
+        if (seenFiling.has(key)) continue;
+        seenFiling.add(key);
+        merged.push(row);
+      }
+      marketWide = merged.length;
       /* The read happened. Every board name is now either in the map or
          genuinely absent from the filings, and both are knowable facts. */
       congressRead = "ok";
-      for (const row of recent) {
+      for (const row of merged) {
         const t = row && (row.ticker || row.symbol);
         if (!t || !onBoard.has(t)) continue;
         if (!congressByTicker.has(t)) congressByTicker.set(t, []);
         congressByTicker.get(t).push(row);
       }
       console.log(
-        `  congress: ${recent.length} disclosure(s) market-wide, ` +
-        `${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
+        `  congress: ${merged.length} disclosure(s) market-wide ` +
+        `(${recent.length} from this leg's own page` +
+        (politicalFilings
+          ? `, ${politicalFilings.length} joined from the political leg's ${POLITICAL_WINDOW_DAYS}-day ladder ` +
+            `— the two windows are now one, so a card can no longer deny what /flows/political/ ranks`
+          : `; the political ladder read nothing to join, so this card window is the shallow one`) +
+        `), ${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
     } catch (error) {
       congressRead = "failed";
       console.warn(`  congress: market-wide read failed — ${error.message}`);
@@ -5985,6 +6088,39 @@ async function main() {
     (delayFloorMs > RATE.minDelayMs ? "" : ", never raised") + ")",
   );
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
+
+  /* ---- WHERE THE WALL CLOCK WENT, which this file has been asking for ----
+
+     The floorCeilingMs comment states the open question outright: raising the
+     750ms ceiling "trades a certain per-call tax against an uncertain saving,
+     and the run has never been instrumented to say which is larger. Do not
+     raise it on intuition; measure the 429 wait first." This is that meter.
+
+     HOW TO READ IT. `queued` is time spent waiting for a turn — it is the tax
+     the floor charges, and it is the number a lower floor would reduce. `wire`
+     is time the vendor took to answer; under the old serial limiter that time
+     was ADDED to `queued` on every call, and under the permit queue it
+     overlaps, so `wire` is roughly what this change bought back. `refused` is
+     what the 429s actually cost in backoff — the other side of the trade. If
+     `refused` is small against `queued`, the floor is too conservative and can
+     come down; if it rivals `queued`, the ceiling is doing its job and must
+     not move. Those are numbers, not intuitions, which was the whole ask. */
+  const pct = (ms) => `${(ms / 1000).toFixed(1)}s (${(100 * ms / Math.max(elapsed * 1000, 1)).toFixed(0)}% of the run)`;
+  console.log(
+    `wall clock: queued ${pct(stats.permitWaitMs)}` +
+    ` | wire ${pct(stats.networkMs)}` +
+    ` | refused ${pct(stats.rateLimitWaitMs)}` +
+    ` | peak in flight ${permits.stats().peakInFlight}` +
+    (stats.calls
+      ? ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
+        `${Math.round(stats.networkMs / stats.calls)}ms wire`
+      : ""));
+  if (stats.networkMs > 0 && permits.stats().peakInFlight <= 1) {
+    console.log(
+      "  peak in flight was 1, so no round trip ever overlapped another: the vendor answers " +
+      "faster than the floor issues permits. That is the expected shape at a high floor and it " +
+      "means the saving here is the serial delay+network stacking, not concurrency.");
+  }
 }
 
 export {

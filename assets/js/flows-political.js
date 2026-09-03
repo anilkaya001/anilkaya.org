@@ -341,7 +341,13 @@
       tr.append(td(j + 1, "c-num pl-rank"));
       var name = el("td", "pl-who");
       name.append(el("span", "pl-tick", r.t || DASH));
-      if (r.issuer) name.append(el("span", "pl-issuer", String(r.issuer)));
+      /* THE SECURITY'S NAME, from the field that names the security. This read
+         `r.issuer` until 2026-09-03 and printed "joint" or "not-disclosed"
+         where a company belongs — the vendor's spec types `issuer` as "The
+         person who executed the transaction", and it is not on the
+         recent-trades schema at all. shared/flows-political.js states the
+         correction at length. */
+      if (r.asset) name.append(el("span", "pl-asset", String(r.asset)));
       tr.append(name);
       var bar = el("td", "pl-c-bar");
       bar.append(rankBar(scale, r.bought, r.boughtLo, r.boughtHi));
