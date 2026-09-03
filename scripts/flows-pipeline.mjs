@@ -1894,21 +1894,185 @@ const ARCHIVE_READ_RETRY_MS = 600;
    rather than that the archive is empty. */
 const ARCHIVE_READ_GIVE_UP = 8;
 
-async function collectDatedBoards(sessionDate, payloads, enriched) {
+async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday = null) {
   const boards = [];
   if (DRY_RUN) {
     const calendar = tradingCalendar(
       enriched.map((e) => (e.raw.ohlc || []).map(candleDate)));
-    for (const d of calendar.filter((day) => day < sessionDate).slice(-22)) {
-      for (const side of ["long", "short"]) {
-        boards.push({ d, side, rows: payloads[side].rows });
+    const days = calendar.filter((day) => day < sessionDate).slice(-22);
+
+    /* THE HISTORY USED TO BE TODAY, TWENTY-TWO TIMES.
+
+       This pushed `payloads[side].rows` — the CURRENT session's board, the
+       same object — once per prior day, so every name carried an identical
+       score across the whole window. The comment above it claimed "no fixture
+       that could agree with the code by construction", and against the
+       backfill path that was true: the walk, the dedup and the window cut
+       were all exercised.
+
+       What it could not exercise was any question about CHANGE, because a
+       constant series is the one series in which nothing changes. Measured on
+       the emitted corpus after the change layer shipped: 94 names comparable,
+       0 moved, 94 held, every run length exactly 23, and zero crossings of
+       any kind. Four branches — the move, the gap, the dead-band crossing and
+       the residual difference — were certified by a corpus that could not
+       reach a single one of them. The unit fixtures cover them; the corpus
+       every contract suite actually runs over did not, and a suite that
+       passes over a corpus like that is asserting the absence of a defect it
+       has no way to see.
+
+       So the history is SHAPED. Deterministically, from the ticker and the
+       day index — no randomness anywhere, because the archive's whole
+       immutability contract rests on a re-run producing identical bytes, and
+       a fixture that moves between runs turns every downstream assertion into
+       a coin toss.
+
+       Four populations, cut by a hash of the ticker so the membership is
+       stable and the slices do not overlap:
+
+         - MOST names drift, by a small amount that varies with the day, so
+           run lengths and move magnitudes both spread out;
+         - a slice sat INSIDE the dead band on the immediately prior day, so
+           they read as having CLEARED it into today's board;
+         - a slice sat on the OPPOSITE side, so they read as FLIPPED;
+         - a slice is ABSENT from a run of middle days, so their change spans
+           a gap greater than one and the denominator has something to say.
+
+       And the watch board joins the history, which the real archive walk does
+       not do — deliberately. A name inside the band today can only be shown
+       to have FADED into it if the archive holds it outside the band
+       yesterday, and today's long and short boards are outside it by
+       construction, so that branch was unreachable from the two sides alone. */
+    const hash = (s) => {
+      let h = 2166136261;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return (h >>> 0) / 4294967296;
+    };
+    const last = days.length - 1;
+    /* The band the current session partitioned on, so "inside" here means the
+       same thing it means everywhere else rather than a number chosen here. */
+    /* THE BAND THE CURRENT SESSION PARTITIONED ON, read off the payload
+       rather than restated, so "inside" here means what it means everywhere
+       else. A first version read it from `payloads.watch`, which does not
+       exist — the watch list is published from a local and never enters this
+       object — so the fallback silently supplied the number and the whole
+       thing worked by luck. The band travels on the long board too. */
+    const band = num(payloads.long && payloads.long.deadBand)
+      ?? num(payloads.short && payloads.short.deadBand) ?? 1;
+
+    /** One name's score on one prior day, or null for a day it was absent. */
+    const historic = (row, i, inBandToday) => {
+      const s = num(row && row.s);
+      if (s === null) return null;
+      const t = String(row.t || "");
+      const bucket = hash(t);
+      const age = last - i;                       // 0 is the day before today
+
+      /* ABSENT, IN TWO DIFFERENT PLACES, FOR TWO DIFFERENT REASONS.
+
+         Chosen by a second hash of the name so absence does not correlate
+         with the crossing slices — a fixture in which the gapped names are
+         also the crossing names proves less than one where they are disjoint.
+
+         A first version put every absence in a run of MIDDLE days, which
+         produced a lot of holes in the series and not one change that spanned
+         a gap: `d1` compares the last two SCORED sessions, so a hole three
+         weeks back is invisible to it and every name still reported gap 1.
+         The measured corpus said so — zero names with a gap above one, on a
+         fixture built specifically to produce them. The absence has to be
+         adjacent to the end to reach that branch, so a slice is missing from
+         the most recent archived day and a smaller slice from the two most
+         recent, giving gaps of two and three. */
+      const absent = hash(t + "|gap");
+      if (absent < 0.06 && age === 0) return null;                 // gap 2
+      if (absent >= 0.06 && absent < 0.10 && age <= 1) return null;  // gap 3
+      if (absent >= 0.10 && absent < 0.20 && age >= 3 && age <= 6) return null;  // interior holes
+
+      if (age === 0) {
+        /* THE DAY BEFORE TODAY decides the crossing, and only that day: a
+           crossing is a change between the last two SCORED sessions. */
+        if (inBandToday) {
+          /* Outside yesterday, inside today: faded. */
+          return s >= 0 ? band + 6 : -(band + 6);
+        }
+        if (bucket < 0.10) return s > 0 ? 0 : 0;          // cleared, from dead centre
+        if (bucket < 0.16) return s > 0 ? -(band + 9) : band + 9;   // flipped
       }
-    }
-    /* No dated scores fixtures exist, so the dry-run track exercises the
-       BACKFILL path over these synthetic boards plus the "scores" path via
-       the current session's own pool — both branches, no fixture that could
-       agree with the code by construction. */
-    return { boards, scoreDays: [], probed: boards.length };
+
+      /* THE ORDINARY DRIFT. A slow ramp toward today's value with a
+         name-specific wobble, so magnitudes and run lengths both spread
+         rather than every row moving by the same step. */
+      const ramp = 0.55 + 0.45 * (1 - age / Math.max(1, days.length));
+      const wobble = Math.round((bucket - 0.5) * 18 * Math.sin((age + 1) * (0.3 + bucket)));
+      const v = Math.round(s * ramp) + wobble;
+      return Math.max(-100, Math.min(100, v));
+    };
+
+    const shaped = (rows, inBandToday) => (rows || []).map((row) => {
+      const s = num(row && row.s);
+      return { row, s, inBandToday };
+    }).filter((x) => x.s !== null);
+
+    const pools = [
+      ...shaped(payloads.long && payloads.long.rows, false),
+      ...shaped(payloads.short && payloads.short.rows, false),
+      /* THE DEAD-BAND MIDDLE, PASSED IN. It is the population a name can only
+         have FADED into, and it lives in a local at the call site rather than
+         in `payloads` — which is why the first version of this reached for
+         `payloads.watch`, got undefined, and produced a corpus with three
+         band-resident names whose entire history was null. */
+      ...shaped(inBandToday, true),
+    ];
+
+    days.forEach((d, i) => {
+      const rows = [];
+      for (const { row, inBandToday } of pools) {
+        const v = historic(row, i, inBandToday);
+        if (v === null) continue;
+        /* THE WHOLE ROW, WITH ONLY THE SCORE VARIED.
+
+           A first version emitted `{ t, s }` and broke something two hundred
+           lines away that nothing here mentions: the record's evidence table
+           derives its columns from these archived rows, so stripping them to
+           two fields produced a feature table with ZERO columns and an
+           assertion that read "the evidence table measures the board's own
+           vocabulary (0 columns)". The archive's job is to hold what a board
+           held; a synthesiser that holds less is not a smaller archive, it is
+           a different one. */
+        rows.push({ ...row, s: v });
+      }
+      /* Pushed as ONE side rather than two, because these are already the
+         union of both boards plus the watch list and splitting them would
+         make boardsToScoreRows dedup a list against itself. The walk does not
+         care which side a board came from; it cares that a day has rows. */
+      boards.push({ d, side: "long", rows });
+    });
+
+    /* AND A FEW DATED SCORES DAYS, which did not exist at all.
+
+       The trace's residual difference needs a residual at BOTH ends, and a
+       board row has never carried one — so `qv` was absent on every name in
+       every emitted corpus, and the branch that publishes it had no fixture
+       anywhere near it. These days carry `q` so the difference is taken, and
+       they also exercise the precedence rule the walk applies when a date has
+       both a scores day and a boards day: the scores day wins, because it is
+       a superset by construction. Every date below deliberately ALSO has a
+       board above, so that rule is under test rather than merely stated. */
+    const scoreDays = days.slice(-4).map((d, k) => ({
+      d,
+      source: "scores",
+      rows: pools.map(({ row, inBandToday }) => {
+        const v = historic(row, days.length - 4 + k, inBandToday);
+        if (v === null) return null;
+        /* A residual consistent with the score it sits beside: the scorer's
+           own inverse, so a consumer differencing the two gets a number in
+           the units it thinks it has rather than one from a second scale. */
+        const q = Math.round(SCORE_SCALE * Math.atanh(Math.max(-0.999, Math.min(0.999, v / 100))) * 1e4);
+        return { t: row.t, s: v, q };
+      }).filter(Boolean),
+    }));
+
+    return { boards, scoreDays, probed: boards.length + scoreDays.length };
   }
   const base = Date.parse(sessionDate + "T00:00:00Z");
   if (!Number.isFinite(base)) {
@@ -4683,7 +4847,12 @@ async function main() {
      the reader today's session. */
   let archiveWalk = null;
   try {
-    archiveWalk = await collectDatedBoards(sessionDate, payloads, enriched);
+    archiveWalk = await collectDatedBoards(sessionDate, payloads, enriched,
+      /* Normalised to the board row's own vocabulary here rather than inside
+         the walk: `neutralRows` are scorer rows carrying `ticker`/`score`, and
+         a synthesiser that had to know both spellings is a synthesiser that
+         will read the wrong one. */
+      (sides.neutralRows || []).map((r) => ({ t: r.ticker, s: r.score })));
     const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
       absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
       statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } = archiveWalk;

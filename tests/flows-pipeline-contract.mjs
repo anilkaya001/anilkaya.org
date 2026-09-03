@@ -1645,6 +1645,104 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
   ok(/not side-signed/.test(feat.method), "and the method names the return convention");
 
+  /* ---------- the corpus must be able to reach the change layer ------
+
+     THE FIXTURE THAT COULD NOT EXECUTE THE BRANCH IT CERTIFIED — caught by
+     reading an emitted payload rather than by any assertion, which is exactly
+     why these lines exist.
+
+     collectDatedBoards' dry-run arm pushed the CURRENT board once per prior
+     day, the same object twenty-two times, so every name carried an identical
+     score across the whole window. Against the backfill path that was a
+     perfectly good fixture: the walk, the dedup and the window cut were all
+     exercised, and the comment above it said as much.
+
+     What a constant series cannot exercise is any question about CHANGE.
+     Measured on the corpus the moment the change layer shipped: 94 names
+     comparable, ZERO moved, 94 held, every run length exactly 23, zero
+     crossings of any kind, and not one name carrying a residual difference.
+     Four branches certified by a corpus that could not reach one of them —
+     and every suite over that corpus passed, because a suite cannot see the
+     absence of a case it was never handed.
+
+     So the branches are asserted as REACHED, not merely as correct. The unit
+     fixtures in flows-scores-contract prove the arithmetic; these prove the
+     corpus every other suite runs over can get to it. */
+  {
+    const track = read("scoretrack");
+    const ch = track.change;
+
+    ok(ch.moved > 0 && ch.held > 0,
+       `the corpus contains names that MOVED and names that HELD (${ch.moved} and ${ch.held}) — ` +
+       "before the history was shaped it was 0 and 94, and a suite over that corpus could not " +
+       "tell a change layer that worked from one returning zero for everything");
+    ok(ch.comparable > ch.consecutive,
+       `and the two denominators genuinely differ (${ch.comparable} comparable, ` +
+       `${ch.consecutive} consecutive), so a page printing one where it means the other is ` +
+       "visibly wrong rather than accidentally right");
+
+    for (const kind of ["cleared", "faded", "flipped"]) {
+      ok(ch.crossings[kind] > 0,
+         `the corpus reaches the ${kind.toUpperCase()} crossing (${ch.crossings[kind]}) — the ` +
+         "dead-band crossing is the one move on this product that is an event rather than a " +
+         "degree, and all three kinds were unreachable from two boards that sit outside the " +
+         "band by construction. 'faded' in particular needs the dead-band middle in the " +
+         "history, which is why the walk is now handed it");
+    }
+
+    const gaps = new Map();
+    let withResidual = 0;
+    for (const n of track.names) {
+      if (!n.d1) continue;
+      gaps.set(n.d1.gap, (gaps.get(n.d1.gap) || 0) + 1);
+      if ("qv" in n.d1) withResidual++;
+    }
+    ok(gaps.size >= 3,
+       `changes span at least three distinct session gaps (${[...gaps.keys()].sort((a, b) => a - b).join(", ")}) — ` +
+       "the gap is the denominator the whole change layer exists to carry, and a corpus in " +
+       "which every gap is 1 cannot tell an overnight move from a three-week one. A first " +
+       "attempt put the absences in a run of MIDDLE days and produced no gap above one at " +
+       "all: the change compares the last two SCORED sessions, so a hole three weeks back is " +
+       "invisible to it");
+    ok((gaps.get(1) || 0) > 0, "with overnight moves still the majority case");
+    ok(withResidual > 0,
+       `${withResidual} names carry a residual difference — a board row has never held a ` +
+       "residual, so until the walk synthesised dated scores days this branch had no fixture " +
+       "anywhere near it and the field was absent on every name of every emitted corpus");
+    ok(track.sources.full > 0 && track.sources.boardsOnly > 0,
+       `and the window holds both kinds of session (${track.sources.full} full, ` +
+       `${track.sources.boardsOnly} board-only), so the rule that a scores day beats a boards ` +
+       "day for a shared date is under test rather than merely stated");
+
+    const runs = new Set(track.names.map((n) => n.run));
+    ok(runs.size >= 4,
+       `run lengths spread across ${runs.size} distinct values rather than every name reporting ` +
+       "the window length, which is what a constant history produces and what makes 'a run of " +
+       "one is a new opinion' a distinction with no instances");
+
+    /* THE BOARD'S EARNINGS COLUMN, on the same principle. The screener
+       generated a date for 15% of rows inside a 0-19 day window, three
+       quarters of which the twelve-day gate then removed — so the emitted
+       corpus carried ONE board row in 96 with an earnings date: a branch that
+       technically executed and proved nothing. */
+    let withEarnings = 0, nearEarnings = 0;
+    for (const side of ["board-long", "board-short"]) {
+      for (const r of read(side).rows) {
+        if (!r.ed) continue;
+        withEarnings++;
+        if (r.edte !== null && r.edte < 25) nearEarnings++;
+      }
+    }
+    ok(withEarnings >= 10,
+       `${withEarnings} board rows carry an earnings date, so the column is exercised rather ` +
+       "than merely reached");
+    ok(nearEarnings > 0,
+       "and at least one of them reports soon — a top-ranked name that leaves the board in a " +
+       "fortnight for a reason unrelated to its signal decaying is the case the column exists " +
+       "for, and it is the case a sparse fixture never produces");
+  }
+
+
   /* ---------- the chain leg, as the dry run emits it ----------
 
      The leg is fifty vendor calls the dry run does not make, so what is
@@ -2201,4 +2299,4 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, and the truncated-chain probe's three distinct verdicts`);
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, and a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them`);
