@@ -1,24 +1,41 @@
 /* =============================================================
    flows-overview.js — the Session Overview, as a command center.
 
-   WHAT THIS PAGE IS FOR: answering "what should I look at today" without
-   leaving it. The previous version fetched both full board payloads — every
-   ranked name on each side — and drew SIX TILES from them, three a side,
-   throwing the rest away. Everything else the session knows (the level, the
-   flagged windows, what reports next, what is a hair outside the band, and
-   which scores actually moved) lived on four other routes, so the first
-   question anyone asks cost five page loads to answer.
+   WHAT THIS PAGE IS FOR, RESTATED. It used to answer "what is the LEVEL":
+   both tails ranked, the band drawn, the calendar beside them. That is the
+   right page at 16:00 and the wrong one at 09:15, when the reader already
+   knows GOOG is +71 because it was +71 yesterday and the day before. The
+   question at 09:15 is WHAT IS DIFFERENT, and the four names that crossed
+   the dead band overnight are the answer.
 
-   Nothing new is fetched to fix that. Every region below is drawn from an
-   endpoint that already existed; the change is that the page no longer
-   discards what it already had in hand.
+   So the page now LEADS ON CHANGE. "What changed" is the first region under
+   the verdict bar and spans the whole grid; the two ranked poles follow it.
+   Nothing new is fetched to do that — every region is drawn from an endpoint
+   that already existed.
+
+   AND THE CHANGE ARITHMETIC IS NO LONGER THIS FILE'S. The version this
+   replaces did, in the browser:
+
+       const measured = name.s.map(isNum).filter(v => v !== null);
+       const delta = measured[len - 1] - measured[len - 2];
+
+   The .filter() is the defect. A null in the aligned series means the name
+   WAS NOT SCORED that session, so the two survivors can be one session apart
+   or twenty and the subtraction produces the same integer either way — a
+   name last scored three weeks ago came back with a "+40" that read as an
+   overnight move, printed under a region subtitled "since each name's prior
+   scored session" on today's page. shared/flows-scores.js derives the move
+   once, beside the series it comes from, and publishes it WITH its
+   denominator: d1.v, d1.gap, d1.cross, lastAt, run. This file reads those
+   and does no delta arithmetic of its own.
 
    SEVEN REGIONS, AND EACH ONE IS ALLOWED TO SAY NOTHING. A region with an
-   unpublished key, a region whose request never came back, and a region the
-   pipeline measured and found empty are THREE DIFFERENT FACTS, and this file
-   words them as three different sentences. Only the third is a claim about
-   the market; the other two are claims about this page, and printing the
-   third one for all three is how a surface starts lying quietly.
+   unpublished key, a region whose request never came back, a region whose
+   payload predates the field it needs, and a region the pipeline measured
+   and found empty are FOUR DIFFERENT FACTS, and this file words them as
+   four different sentences. Only the last is a claim about the market; the
+   others are claims about this page, and printing the last one for all of
+   them is how a surface starts lying quietly.
 
    THE PRIMITIVES ARE THE LIBRARY'S. This file used to re-derive isNum, el,
    svgEl, the em dash and the U+2212 minus — the sixth such copy in the repo,
@@ -52,8 +69,9 @@
   const verdictHost = host("ccVerdict");
   if (!statusEl || !spineHost || !verdictHost) return;
 
-  const ROW_MAX = 10;   // rows per ranked region; the side pages hold the rest
-  const LIST_MAX = 8;   // rows in the narrow regions, which are indexes
+  const ROW_MAX = 10;    // rows per ranked region; the side pages hold the rest
+  const LIST_MAX = 8;    // rows in the narrow regions, which are indexes
+  const CHANGE_MAX = 12; // rows in the lead region, which is the page's answer
 
   /* A row the pipeline built no detail card for. Same sentence the board
      uses, because it is the same fact and a reader who notices that some
@@ -86,6 +104,13 @@
     return sign + "$" + a.toFixed(0);
   };
 
+  /* THE UNIT TRAVELS WITH THE COUNT. "+37 over 6" is not a reading; "+37
+     over 6 sessions" is. A delta printed without its span is the exact
+     defect the shared change layer replaced, and it is not allowed back in
+     through a terse cell. */
+  const sessionsSaid = (n) => n + (n === 1 ? " session" : " sessions");
+  const daysSaid = (n) => n + (n === 1 ? " calendar day" : " calendar days");
+
   /* HUE IS CONFIRMATION, NEVER THE CARRIER. Every cell this tints already
      prints its own sign, so the colour repeats what the glyph says. */
   const tone = (v) => {
@@ -93,21 +118,24 @@
     return n === null ? "" : n > 0 ? " is-pos" : n < 0 ? " is-neg" : "";
   };
 
-  /* ---------- the three silences ----------------------------------
+  /* ---------- the silences ----------------------------------------
 
-     "Nothing here" is three different facts and they may not share a
+     "Nothing here" is four different facts and they may not share a
      sentence:
 
-       unreadable — the request did not come back. Nothing is known, and
-                    the fault is this page's, not the market's.
-       pending    — the key has never been published for this session. The
-                    pipeline has not spoken yet; nothing was measured.
-       empty      — the pipeline measured, and measured nothing. THIS one
-                    is a reading, and it is the only one of the three that
-                    says anything about the market.
+       unreadable  — the request did not come back. Nothing is known, and
+                     the fault is this page's, not the market's.
+       pending     — the key has never been published for this session. The
+                     pipeline has not spoken yet; nothing was measured.
+       unavailable — the key IS published and the FIELD this region is made
+                     of is not on it. The payload predates the layer. Also
+                     not a fact about the market.
+       empty       — the pipeline measured, and measured nothing. THIS one
+                     is a reading, and it is the only one of the four that
+                     says anything about the market.
 
      `kind` lands on data-empty so a test can tell them apart without
-     parsing prose, which is what stops the three collapsing back into one. */
+     parsing prose, which is what stops them collapsing back into one. */
 
   function quiet(into, kind, text) {
     const p = emptyState(kind, text);
@@ -118,7 +146,7 @@
 
   /**
    * Word the two silences that are about the fetch rather than the session.
-   * Returns true when it wrote one, so a caller only has to word the third.
+   * Returns true when it wrote one, so a caller only has to word the rest.
    */
   function silent(into, payload, what) {
     if (!payload) {
@@ -161,8 +189,19 @@
   function ranked(rows) {
     const list = (Array.isArray(rows) ? rows : []).slice();
     const published = list.length > 0 && list.every((r) => isNum(r && r.r) !== null);
-    if (published) list.sort((a, b) => isNum(a.r) - isNum(b.r));
-    else list.sort((a, b) => Math.abs(isNum(b && b.s) ?? 0) - Math.abs(isNum(a && a.s) ?? 0));
+    if (published) { list.sort((a, b) => isNum(a.r) - isNum(b.r)); return list; }
+    /* `?? 0` IS THE CONFIDENT ZERO WEARING NEWER SYNTAX, and it used to be
+       right here: a row whose score never arrived sorted as though it had
+       been measured at exactly neutral, which on a fallback ordering BY
+       DISTANCE FROM NEUTRAL is the strongest possible claim about a number
+       nobody published. An unscored row cannot be placed on this ordering at
+       all, so it goes last rather than being placed by a fabricated value. */
+    list.sort((a, b) => {
+      const av = isNum(a && a.s), bv = isNum(b && b.s);
+      if (av === null) return bv === null ? 0 : 1;
+      if (bv === null) return -1;
+      return Math.abs(bv) - Math.abs(av);
+    });
     return list;
   }
 
@@ -183,15 +222,12 @@
      have a card — so the test is on the PAYLOAD first. Withholding data-t
      is what actually keeps a cardless row out of the click delegation; a
      class name would only keep it out of the stylesheet. */
-  function nameCell(row, knowsDeep) {
-    const td = el("td", "cc-t");
-    const t = String((row && row.t) || "");
-    const deep = !knowsDeep || (row && row.dp === 1);
-    if (!deep || !t) {
-      const flat = el("span", "cc-flat", t || DASH);
-      if (t) flat.title = NO_CARD_SAID;
-      td.append(flat);
-      return td;
+  function nameNode(t, hasCard) {
+    if (!t) return el("span", "cc-flat", DASH);
+    if (!hasCard) {
+      const flat = el("span", "cc-flat", t);
+      flat.title = NO_CARD_SAID;
+      return flat;
     }
     const button = el("button", "cc-open", t);
     button.type = "button";
@@ -201,8 +237,40 @@
     button.addEventListener("pointerenter", () => {
       if (window.flowsCardPrefetch) window.flowsCardPrefetch(t);
     });
-    td.append(button);
-    return td;
+    return button;
+  }
+
+  /* ---------- the earnings marker ----------------------------------
+
+     THE MOST EXPENSIVE MISTAKE THIS SURFACE CAN LET A READER MAKE is
+     carrying a long signal into a print. Both boards and the events
+     calendar were already fetched in the same Promise.all and were never
+     joined: the page ranked ORCL #1 bullish in one region while another
+     region, three hundred pixels below, said ORCL reports in three
+     sessions. Neither region knew about the other and the reader had to.
+
+     TWO SOURCES, TWO UNITS, AND THE UNIT IS PRINTED. The board row now
+     carries `edte` in CALENDAR DAYS (the gate's own arithmetic, on the row
+     the gate spared) and the events payload carries `sdte` in TRADING
+     SESSIONS. They are different quantities and "3" means different things
+     in each, so the glyph is followed by the number AND its unit letter,
+     and the title spells both out with the date. The events count is
+     preferred where both exist because it is the count the earnings gate
+     itself measured. */
+  function earningsMark(row, ev) {
+    const s = isNum(ev && ev.sdte);
+    const d = isNum(row && row.edte);
+    const date = (ev && ev.d) || (row && row.ed) || null;
+    let text = null, said = null;
+    if (s !== null) { text = "⚠" + s + "s"; said = sessionsSaid(s) + " away"; }
+    else if (d !== null) { text = "⚠" + d + "d"; said = daysSaid(d) + " away"; }
+    else if (date) { text = "⚠"; said = null; }
+    if (!text) return null;
+    const mark = el("span", "cc-dim cc-ern", text);
+    mark.title = "Reports " + (date || "inside the events window") +
+      (said ? " · " + said : "") +
+      ". A signal carried into a print stops being the signal that was ranked.";
+    return mark;
   }
 
   /** A table that scrolls inside its own box rather than widening the page. */
@@ -214,16 +282,42 @@
     return wrap;
   }
 
+  /* Column headers carry the UNIT of a numeric column, which is how a
+     tabular column keeps its numbers bare without becoming bare numbers.
+     The optional third entry is a title: the change layer publishes its own
+     prose for exactly these columns, and a header that carries the
+     publisher's sentence cannot drift from the arithmetic the way a caption
+     re-written here would. */
   function headRow(cols) {
     const thead = el("thead");
     const tr = el("tr");
-    for (const [label, cls] of cols) {
+    for (const [label, cls, said] of cols) {
       const th = el("th", cls || null, label);
       th.setAttribute("scope", "col");
+      if (said) th.title = said;
       tr.append(th);
     }
     thead.append(tr);
     return thead;
+  }
+
+  function nameCell(row, knowsDeep, mark, cross) {
+    const td = el("td", "cc-t");
+    const t = String((row && row.t) || "");
+    const deep = !knowsDeep || (row && row.dp === 1);
+    td.append(nameNode(t, Boolean(t) && deep));
+    /* THE CROSSING, ON THE RANKED ROW ITSELF. A name that cleared the band
+       this session is a new arrival on this board and a name that faded is
+       on its way off it; both were visible only in the change region, which
+       meant a reader working down the ranked list could not see which of
+       these ten opinions is one session old. */
+    if (cross) {
+      const tag = el("span", "cc-dim cc-cross", cross);
+      tag.title = CROSS_SAID[cross] || "";
+      td.append(tag);
+    }
+    if (mark) td.append(mark);
+    return td;
   }
 
   /* ---------- a ranked side, ten deep ------------------------------
@@ -232,7 +326,7 @@
      track page already draws and the one thing the six tiles could never
      show: whether a name arrived at this score this morning or has been
      sitting on it for a month. */
-  function sideTable(into, rows, knowsDeep, track, label) {
+  function sideTable(into, rows, knowsDeep, track, label, evBy) {
     const wrap = tableWrap(label);
     const table = el("table", "cc-tbl");
     table.append(headRow([
@@ -243,8 +337,10 @@
     const body = el("tbody");
     for (const row of rows.slice(0, ROW_MAX)) {
       const tr = el("tr");
+      const d1 = track.d1By[row.t] || null;
       tr.append(el("td", "cc-rank", isNum(row.r) === null ? DASH : String(row.r)));
-      tr.append(nameCell(row, knowsDeep));
+      tr.append(nameCell(row, knowsDeep, earningsMark(row, evBy.get(String(row.t || ""))),
+        d1 && typeof d1.cross === "string" ? d1.cross : null));
       tr.append(el("td", "c-num cc-score" + tone(row.s), fmtSigned(row.s)));
       tr.append(el("td", "c-num", isNum(row.cnv) === null ? DASH : String(Math.round(row.cnv))));
       tr.append(el("td", "c-num" + tone(row.chg), pct(row.chg)));
@@ -279,12 +375,14 @@
 
   function readTrack(payload) {
     const byName = Object.create(null);
+    const d1By = Object.create(null);
     let lo = 0, hi = 0, sessions = 0;
     if (payload && Array.isArray(payload.names)) {
       for (const name of payload.names) {
         if (!name || !name.t) continue;
         const series = Array.isArray(name.s) ? name.s : [];
         byName[name.t] = series;
+        if (name.d1) d1By[name.t] = name.d1;
         if (series.length > sessions) sessions = series.length;
         for (const value of series) {
           const v = isNum(value);
@@ -295,7 +393,7 @@
       }
     }
     return {
-      byName, domain: { lo, hi },
+      byName, d1By, domain: { lo, hi },
       deadBand: payload ? isNum(payload.deadBand) : null,
       /* The column header states the window it drew rather than a constant:
          a track that published nothing gets a header that promises nothing. */
@@ -303,61 +401,353 @@
     };
   }
 
-  /* ---------- what changed ----------------------------------------
+  /* ---------- what changed: the page's lead region -----------------
 
-     The one question no existing route answers. Each name's move is its last
-     archived score minus the one before it — where "before" means the
-     previous session THE NAME WAS SCORED, because a gap in the trace means
-     the name was not scored that day and never means it scored zero. */
-  function paintChanged(into, payload) {
+     THE FOUR EVENTS, IN THE PAYLOAD'S OWN WORDS. Everything the change layer
+     reports other than a crossing is drift, however large — so a crossing
+     outranks a magnitude here regardless of size, which is the whole
+     inversion this region exists for. A +56 flip and a +8 drift are not two
+     sizes of the same thing. */
+  const CROSS_WORDS = { cleared: "cleared", faded: "faded", flipped: "flipped" };
+  const CROSS_SAID = {
+    cleared: "Was inside the dead band at the previous scored session and is " +
+      "outside it now. The name became actionable this session.",
+    faded: "Was outside the dead band and is inside it now. The exit signal, " +
+      "and exactly as load-bearing as the entry.",
+    flipped: "Outside the band at both ends with opposite signs. The name did " +
+      "not weaken and re-strengthen; it changed sides without resting in the middle.",
+  };
+
+  /**
+   * The denominator, in one paragraph, in four different sentences.
+   *
+   * "Eight names moved" is not a reading. Eight out of twelve is a session
+   * that turned; eight out of four hundred is a Tuesday. The change layer
+   * counts the whole pool BEFORE the payload's size cap sheds rows, so this
+   * paragraph can state a denominator no renderer counting its own visible
+   * rows could reach.
+   */
+  function changeLede(change, band, sessionRows, shedBy, shed) {
+    const said = [];
+    const dateAt = (i) => (sessionRows[i] && sessionRows[i].d) || null;
+    const bandSaid = band === null
+      ? "No dead band was published with this track, so no crossing can be claimed " +
+        "and none is."
+      : "The dead band is ±" + band + " score points wide.";
+
+    if (!change) {
+      /* The payload carries per-name d1 but no pooled change block. The rows
+         below are still true; the population behind them is not published. */
+      said.push("This track published no pooled change summary, so the rows below " +
+        "are the moves this payload carries rather than a share of a stated " +
+        "population. " + bandSaid);
+      return said.join(" ");
+    }
+
+    const n = (v) => isNum(v);
+    const comparable = n(change.comparable), moved = n(change.moved), held = n(change.held);
+    const consecutive = n(change.consecutive);
+    const entered = n(change.entered), left = n(change.left);
+    const cr = change.crossings || {};
+    const cleared = n(cr.cleared), faded = n(cr.faded), flipped = n(cr.flipped);
+    const from = change.prior || dateAt(sessionRows.length - 2);
+    const to = change.session || dateAt(sessionRows.length - 1);
+
+    /* FOUR STATUSES, FOUR SENTENCES. "flat" is a reading about the market
+       and "cold" is a statement about the archive; collapsing them into one
+       "no data" is how a page reports a session in which nothing happened
+       as a session it could not see. */
+    if (change.status === "single-session") {
+      said.push("The archive holds a single session" + (to ? " (" + to + ")" : "") +
+        ", so there is nothing to compare it against. The first change lands once " +
+        "a second session is archived.");
+      said.push(bandSaid);
+      return said.join(" ");
+    }
+    if (change.status === "cold") {
+      said.push("No name in the pool was scored on two sessions inside this window, " +
+        "so no change exists to report. That is the shape of the archive, not a " +
+        "market that stood still.");
+      said.push(bandSaid);
+      return said.join(" ");
+    }
+    if (change.status === "flat") {
+      said.push("Every one of the " + (comparable === null ? "compared" : comparable) +
+        " names with two scored sessions held its score" +
+        (from && to ? " between " + from + " and " + to : "") +
+        ". Nothing moved, which is a reading about the session rather than a gap " +
+        "in the archive.");
+      said.push(bandSaid + " No name crossed it.");
+      return said.join(" ");
+    }
+
+    said.push((moved === null ? "Some" : moved) + " of " +
+      (comparable === null ? "the" : comparable) + " names with two scored sessions " +
+      "moved" + (from && to ? " between " + from + " and " + to : "") +
+      (held === null ? "" : "; " + held + " held their score") + ".");
+    if (consecutive !== null && moved !== null) {
+      said.push(consecutive + " of the " + (comparable === null ? "comparisons" : comparable) +
+        " comparisons span a single session; the rest reach back further, and each " +
+        "row below prints how far.");
+    }
+    if (cleared !== null && faded !== null && flipped !== null) {
+      const total = cleared + faded + flipped;
+      said.push(bandSaid + " " + (total === 0
+        ? "No name crossed it this session, so everything below is drift."
+        : total + (total === 1 ? " name" : " names") + " crossed it: " +
+          cleared + " cleared, " + faded + " faded back inside, " + flipped +
+          " flipped sides."));
+    } else {
+      said.push(bandSaid);
+    }
+    if (entered) {
+      said.push(entered + (entered === 1 ? " name was" : " names were") +
+        " scored for the first time in this window and has no prior reading to " +
+        "compare against.");
+    }
+    if (left) {
+      said.push(left + (left === 1 ? " name was" : " names were") +
+        " scored on the prior session and not on this one.");
+    }
+    if (shedBy && shed) {
+      said.push(shed + (shed === 1 ? " name is" : " names are") +
+        " counted above but not carried on this payload — the " +
+        (shedBy === "names" ? "row ceiling" : "byte ceiling") +
+        " shed them, so the list below is shorter than the count.");
+    }
+    return said.join(" ");
+  }
+
+  /**
+   * The lead region: what is different this morning, crossings first.
+   *
+   * EVERY NUMBER HERE ARRIVES DERIVED. `payload.names[].d1` is the move with
+   * its span and its category; `lastAt` says whether the reading is about
+   * today at all; `run` says whether the opinion is new or old. The local
+   * filter-and-subtract this replaced could produce none of them, and its
+   * output could not be told apart from an overnight move.
+   */
+  function paintChanged(into, payload, cards, evBy, boardBy) {
     if (silent(into, payload, "score track")) return;
 
+    const names = Array.isArray(payload.names) ? payload.names : [];
+    const sessionRows = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const change = payload.change && typeof payload.change === "object" ? payload.change : null;
+    const notes = payload.notes && typeof payload.notes === "object" ? payload.notes : {};
+    const band = isNum(payload.deadBand);
+    const shedBy = typeof payload.shedBy === "string" ? payload.shedBy : null;
+    const shed = isNum(payload.namesShed);
+
+    /* THE PAYLOAD IS READABLE AND PREDATES THE LAYER. That is neither a
+       failed fetch nor a quiet market, and it must not borrow either
+       sentence — the honest thing is to name the missing field. It is also
+       the branch that refuses to fall back to the browser-side subtraction
+       this region was built to delete. */
+    const anyMove = names.some((nm) => nm && nm.d1);
+    if (!change && !anyMove) {
+      quiet(into, "unavailable",
+        "This score track was published without a change layer: no name carries a " +
+        "d1 move and the payload states no session-level change. Nothing about " +
+        "what moved can be read from it, and this page will not subtract two " +
+        "scores itself — a difference with no session span attached is not a reading.");
+      return;
+    }
+
+    const lastIndex = sessionRows.length - 1;
+    const dated = lastIndex >= 0;
+
     const moves = [];
-    let comparable = 0;
-    for (const name of (Array.isArray(payload.names) ? payload.names : [])) {
-      const measured = (Array.isArray(name && name.s) ? name.s : [])
-        .map((v) => isNum(v)).filter((v) => v !== null);
-      if (measured.length < 2) continue;
-      comparable++;
-      const delta = measured[measured.length - 1] - measured[measured.length - 2];
-      if (delta !== 0) moves.push({ t: name.t, d: delta, last: measured[measured.length - 1] });
+    for (const nm of names) {
+      const d1 = nm && nm.d1;
+      if (!d1) continue;
+      const v = isNum(d1.v), gap = isNum(d1.gap);
+      if (v === null || gap === null) continue;
+      const cross = typeof d1.cross === "string" ? d1.cross : null;
+      /* A NAME THAT HELD ITS SCORE IS NOT A CHANGE, and the change layer
+         counts it in `held` so the paragraph above still has it. A crossing
+         with a zero move cannot exist by construction, so the guard cannot
+         drop an event. */
+      if (v === 0 && !cross) continue;
+      const at = isNum(nm.lastAt);
+      moves.push({
+        t: String(nm.t || ""), v, gap, cross,
+        qv: isNum(d1.qv), at, now: isNum(nm.last), run: isNum(nm.run),
+        ext: nm.ext && typeof nm.ext === "object" ? nm.ext : null,
+        /* STALE MEANS "REAL, BUT NOT ABOUT TODAY". The name's newest score
+           is not in the newest session, so its move happened before this
+           morning. A page that leads on change owes that distinction before
+           it owes the magnitude. */
+        stale: dated && at !== null && at !== lastIndex,
+      });
     }
-    moves.sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
 
-    /* TWO DIFFERENT EMPTINESSES, TWO SENTENCES. An archive one session deep
-       has nothing to subtract from; an archive that measured every name
-       twice and found them all unchanged is a reading about the session. */
-    if (!comparable) {
-      quiet(into, "empty",
-        "No name has two archived sessions to compare yet, so there is no move " +
-        "to report. The first comparison lands once a second session is archived.");
-      return;
-    }
+    /* CROSSINGS OUTRANK MAGNITUDE, THEN FRESHNESS OUTRANKS MAGNITUDE, and
+       only then does size decide. The old ordering was |delta| alone, which
+       systematically promoted the names returning from the earnings gate —
+       roughly a seventh of the pool on any session — to the top of a list a
+       reader reads as "what happened overnight". */
+    moves.sort((a, b) =>
+      (a.cross ? 0 : 1) - (b.cross ? 0 : 1)
+      || (a.stale ? 1 : 0) - (b.stale ? 1 : 0)
+      || Math.abs(b.v) - Math.abs(a.v)
+      || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+
+    const lede = changeLede(change, band, sessionRows, shedBy, shed);
+
     if (!moves.length) {
-      quiet(into, "empty",
-        "No name's score moved between the last two archived sessions. " +
-        comparable + " names were compared and every one of them held its score.");
+      /* THE STATUS DECIDES WHICH SILENCE THIS IS. "flat" is a measurement of
+         the session — every name compared, none moved. "cold" and
+         "single-session" are statements about how much archive exists, which
+         is a fact about this pipeline and not about the market. */
+      const measured = change && change.status === "flat";
+      /* AND THE FOURTH CASE: the pool moved, and none of the names that
+         moved survived the payload's size cap. The count above is still
+         true; the rows behind it are simply not on the wire, and saying
+         "nothing moved" here would contradict the sentence beside it. */
+      const shedOut = change && change.status === "ok"
+        ? " No name that moved is carried on this payload, so the count above " +
+          "has no rows behind it — the row ceiling shed them."
+        : "";
+      quiet(into, measured ? "empty" : "unavailable", lede + shedOut);
       return;
     }
 
-    const list = el("ul", "cc-moves");
-    for (const move of moves.slice(0, ROW_MAX)) {
-      const li = el("li");
-      li.append(el("span", "cc-t", move.t || DASH));
-      li.append(el("span", "c-num" + tone(move.d), fmtSigned(move.d)));
-      li.append(el("span", "cc-dim", "now " + fmtSigned(move.last)));
-      list.append(li);
+    const p = el("p", "cc-quiet cc-lede", lede);
+    into.append(p);
+
+    const wrap = tableWrap("What changed since each name's prior scored session");
+    const table = el("table", "cc-tbl");
+    table.append(headRow([
+      ["Event", null, notes.crossing || null],
+      ["Name", null],
+      ["Δ score", "c-num", notes.change || null],
+      ["Over", null, notes.gaps || null],
+      ["Now", "c-num", notes.score || null],
+      ["Δ resid ×10⁴", "c-num", notes.saturation || null],
+      ["Run · sessions", "c-num", notes.run || null],
+      ["As of", null,
+        "Which session this name was last scored on. A move on an older " +
+        "session is real and is not about today."],
+    ]));
+
+    const body = el("tbody");
+    for (const mv of moves.slice(0, CHANGE_MAX)) {
+      const tr = el("tr", mv.stale ? "cc-old" : null);
+
+      /* THE EVENT, AS A WORD. Sign and category survive greyscale and a
+         monochrome printout because they are spelled out; the class is a
+         hook for a tint that repeats what the word already says. */
+      const ev = el("td", mv.cross ? "cc-cross is-" + mv.cross : "cc-dim");
+      ev.append(el("span", null, mv.cross ? CROSS_WORDS[mv.cross] : "drift"));
+      if (mv.cross) ev.title = CROSS_SAID[mv.cross];
+      /* A WINDOW EXTREME IS FREE IN THE SAME PAYLOAD. "at its 42-session
+         high" is the strongest sentence this archive can produce and it was
+         sitting in `ext` with nobody reading it. */
+      if (mv.ext && mv.at !== null) {
+        const hiAt = isNum(mv.ext.hiAt), loAt = isNum(mv.ext.loAt);
+        const extreme = hiAt === mv.at ? "window high" : loAt === mv.at ? "window low" : null;
+        if (extreme) {
+          const tag = el("span", "cc-dim", " · " + extreme);
+          tag.title = "The highest and lowest score this name recorded inside the " +
+            "published window, with the session it happened on.";
+          ev.append(tag);
+        }
+      }
+      tr.append(ev);
+
+      tr.append(nameCell(
+        { t: mv.t, dp: cards.has(mv.t) ? 1 : 0 }, true,
+        earningsMark(boardBy.get(mv.t) || null, evBy.get(mv.t)), null));
+
+      tr.append(el("td", "c-num" + tone(mv.v), fmtSigned(mv.v)));
+
+      /* THE GAP, ALWAYS, WITH ITS UNIT. This cell is the whole reason the
+         change layer exists: "+37" is the headline of the session when it
+         happened overnight and is noise when it happened across three weeks
+         the name spent off the board, and the integer is identical. */
+      const over = el("td", mv.gap === 1 ? null : "cc-dim");
+      over.append(el("span", null, sessionsSaid(mv.gap)));
+      if (mv.at !== null && mv.gap > 0) {
+        const from = mv.at - mv.gap;
+        let boardOnly = false, crossedEpoch = false;
+        if (from >= 0 && mv.at < sessionRows.length) {
+          for (let i = from; i <= mv.at; i++) {
+            if (sessionRows[i] && sessionRows[i].source === "boards") boardOnly = true;
+          }
+          const a = sessionRows[from], b = sessionRows[mv.at];
+          if (a && b && Boolean(a.preEpoch) !== Boolean(b.preEpoch)) crossedEpoch = true;
+        }
+        /* A BOARD-ONLY SESSION IS SPARSER, NOT QUIETER. Those columns were
+           reconstructed from archived boards, which carry only the names
+           that made a board that day, so a comparison spanning one is not a
+           comparison across a full pool. */
+        if (boardOnly) {
+          const tag = el("span", "cc-dim", " · board-only");
+          tag.title = notes.backfill ||
+            "One of the sessions this comparison spans was reconstructed from " +
+            "archived boards and is genuinely sparser.";
+          over.append(tag);
+        }
+        if (crossedEpoch) {
+          const tag = el("span", "cc-dim", " · across the epoch");
+          tag.title = notes.epoch ||
+            "The two observations come from different selection pools.";
+          over.append(tag);
+        }
+      }
+      tr.append(over);
+
+      tr.append(el("td", "c-num" + tone(mv.now), fmtSigned(mv.now)));
+
+      /* THE SAME MOVE IN UNSATURATED UNITS. The score is 100·tanh of the
+         residual, so +94 to +97 and +4 to +7 both print +3 and are not the
+         same event. Absent when either end carried no residual, which is
+         most of the archive's older half — and absent is an em dash, not a
+         zero. */
+      tr.append(el("td", "c-num" + tone(mv.qv), mv.qv === null ? DASH : fmtSigned(mv.qv)));
+
+      const runCell = el("td", "c-num", mv.run === null ? DASH : String(mv.run));
+      runCell.title = mv.run === null
+        ? "This payload published no run length for the name."
+        : mv.run === 0
+          ? "The newest score is exactly zero, which belongs to neither side and " +
+            "ends the run."
+          : sessionsSaid(mv.run) + " in a row on this sign. A run of one is a new " +
+            "opinion; a run of thirty is an old one.";
+      tr.append(runCell);
+
+      const asOf = el("td", "cc-dim");
+      if (!dated || mv.at === null) {
+        asOf.textContent = DASH;
+        asOf.title = "This payload published no session index for the name, so " +
+          "which session it was last scored on cannot be stated.";
+      } else if (!mv.stale) {
+        asOf.textContent = "this session";
+      } else {
+        const behind = lastIndex - mv.at;
+        const on = (sessionRows[mv.at] && sessionRows[mv.at].d) || null;
+        asOf.textContent = (on ? on : "an earlier session") +
+          " · " + sessionsSaid(behind) + " back";
+        asOf.title = "This name was not scored in the newest session, so its move " +
+          "is real and is not about today.";
+      }
+      tr.append(asOf);
+
+      body.append(tr);
     }
-    into.append(list);
+    table.append(body);
+    wrap.append(table);
+    into.append(wrap);
   }
 
   /* ---------- the verdict bar --------------------------------------
 
-     Six readings the rest of the page then explains. Every one of them is
+     Seven readings the rest of the page then explains. Every one of them is
      allowed to be an em dash: a tile whose endpoint did not answer says so
      by not saying a number, which is the only honest thing a tile can do. */
   function paintVerdict(into, long, short, market, alerts) {
     const breadth = (market && market.breadth) || {};
+    const premium = (market && market.premium) || {};
     const bulls = rowCount(long);
     const bears = rowCount(short);
 
@@ -369,10 +759,30 @@
     if (alerts && alerts.status === "pending") alertNote = "not published yet";
     else if (alerts) alertNote = alerts.refreshed === "intraday" ? "refreshed intraday" : "nightly read";
 
+    /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE.
+       breadth.tilt counts names, premium.tilt weights dollars; they are the
+       same ratio under two weightings, and shared/flows-market.js says in
+       so many words that publishing both is what removes the weighting
+       choice instead of burying it. This bar used to print ONE of them
+       under the bare label "Tilt", so on a day the two part company the
+       landing page showed the opposite sign to /flows/market/ over the same
+       payload — and it printed a bounded ratio to four decimals with no
+       unit at all. Both are now shares, in per cent, of the thing being
+       weighted. */
+    const bt = isNum(breadth.tilt);
+    const pt = isNum(premium.tilt);
+    const disagree = bt !== null && pt !== null && bt !== 0 && pt !== 0 && (bt > 0) !== (pt > 0);
+    const DISAGREE_SAID = "the two weightings disagree in sign";
+
     const tiles = [
       ["Session", (long && long.sessionDate) || DASH, "", null],
       ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), "names", null],
-      ["Tilt", fmtSigned(breadth.tilt, 4), "bought / sold", tone(breadth.tilt)],
+      ["Tilt · names", pct(bt, 1),
+        bt === null ? "not measured this session"
+          : disagree ? DISAGREE_SAID : "of names, bull − bear", tone(bt)],
+      ["Tilt · dollars", pct(pt, 1),
+        pt === null ? "not measured this session"
+          : disagree ? DISAGREE_SAID : "of gross premium, calls − puts", tone(pt)],
       ["Breadth",
         (isNum(breadth.bull) === null ? DASH : String(breadth.bull)) + " / " +
         (isNum(breadth.bear) === null ? DASH : String(breadth.bear)), "bull / bear", null],
@@ -423,7 +833,14 @@
     into.append(wrap);
   }
 
-  /* ---------- what reports next ------------------------------------ */
+  /* ---------- what reports next ------------------------------------
+
+     THE RECIPROCAL OF THE EARNINGS MARKER. The event row already carries
+     the funnel stage the name reached and the score it was given, and this
+     region printed neither — so "Reporting soon" was a calendar sitting on
+     the same page as a ranking, with no thread between them. Printing the
+     score here turns it into a cross-reference: the reader sees that the
+     name reporting in three sessions is the one ranked second above. */
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) return;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
@@ -434,7 +851,12 @@
 
     const wrap = tableWrap("Names reporting inside the window");
     const table = el("table", "cc-tbl");
-    table.append(headRow([["Name", null], ["Date", null], ["In", "c-num"], ["Priced move", "c-num"]]));
+    table.append(headRow([
+      ["Name", null], ["Date", null], ["In · sessions", "c-num"],
+      ["Priced move", "c-num"], ["Score", "c-num"],
+      ["Stage", null, "Where this name stopped in the run's funnel. \"gated\" means " +
+        "the board was forbidden from holding an opinion on it, not that it had none."],
+    ]));
     const body = el("tbody");
     for (const row of rows.slice(0, LIST_MAX)) {
       const tr = el("tr");
@@ -444,6 +866,11 @@
       tr.append(el("td", "c-num", isNum(row.sdte) === null ? DASH : row.sdte + "s"));
       const im = isNum(row.im);
       tr.append(el("td", "c-num", im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%"));
+      /* A SCORE OF ZERO IS A MEASUREMENT AND AN ABSENT ONE IS NOT. A gated
+         name reaches this calendar with no score at all, and printing 0 for
+         it would claim the run looked and found neutrality. */
+      tr.append(el("td", "c-num" + tone(row.s), fmtSigned(row.s)));
+      tr.append(el("td", "cc-dim", row.st || DASH));
       body.append(tr);
     }
     table.append(body);
@@ -497,15 +924,53 @@
   }
 
   /* ---------- the spine --------------------------------------------
-     UNCHANGED, and deliberately so: a fixed −100..+100 axis with the dead
-     band hatched onto it. FIXED, not data-scaled — the score has a real
-     unit and a stated dead band, so an axis that rescaled to the day's
-     extremes would make a quiet session look like a violent one. It keeps
-     its place at the foot of the page because it is the only view of the
-     WHOLE distribution, and the regions above it are an index, not a
-     replacement. */
+
+     A fixed −100..+100 axis with the dead band hatched onto it. FIXED, not
+     data-scaled — the score has a real unit and a stated dead band, so an
+     axis that rescaled to the day's extremes would make a quiet session
+     look like a violent one. It keeps its place at the foot of the page
+     because it is the only view of the WHOLE distribution, and the regions
+     above it are an index, not a replacement.
+
+     IT NOW DRAWS THE CHANGE AS WELL AS THE LEVEL. Each mark trails a line
+     back to the score the name held at its previous scored session, so the
+     distribution of MOVEMENT is visible on the same axis as the
+     distribution of level — where each name is, and where it came from,
+     without a second unit and without giving up the fixed scale that makes
+     two sessions comparable at a glance. A trail spanning more than one
+     session is dashed, because a move across six sessions drawn identically
+     to an overnight one is the same lie the delta arithmetic used to tell.
+
+     THE CHART INVARIANT, WHICH THIS FUNCTION USED TO BREAK. One viewBox
+     unit is one CSS pixel (assets/js/flows-ui.js:20-27). The old code
+     measured the host, then clamped W to 900 and emitted width:"100%" — so
+     on the 132rem canvas tier, where this region spans all twelve columns
+     and the host is around 2000px, a 900-unit viewBox was stretched to
+     ~2.2 CSS px per unit: every dot rendered at radius ~10 instead of 4.5,
+     the 6-unit hatch became ~13px, and the 9px tick labels rendered near
+     20px. The width is now the measured host width and it is emitted as an
+     attribute, which is the shape scoreStrip has always used. */
+
+  let spineDrawn = null;   // the last payload drawn, kept for the resize repaint
+  let spineW = 0;          // and the width it was drawn at
+
+  /* MEASURED FROM A VISIBLE HOST, AND NEVER FLOORED ABOVE IT. A hidden
+     element reports clientWidth 0, which is the only reason a fallback
+     exists; the ceiling is a sanity bound on a runaway layout rather than a
+     design width, and it sits above the widest canvas tier so it never binds
+     in practice.
+
+     THE OLD FLOOR OF 300 CANNOT COME BACK. With width:"100%" a floor was
+     harmless — the svg scaled down to fit. With an explicit width attribute
+     a floor wider than the host is horizontal overflow on the document, and
+     zero horizontal overflow at 320px is a tested invariant of this site. */
+  function spineWidth() {
+    const measured = Math.round(spineHost.clientWidth);
+    return measured > 0 ? Math.min(2400, measured) : 720;
+  }
 
   function renderSpine(payload) {
+    spineDrawn = payload;
     spineHost.replaceChildren();
     /* NO BAND PUBLISHED MEANS NO HATCH, NOT A ±20 ONE.
        The `?? 20` here painted 174px of hatch on an 872px axis whenever the
@@ -518,15 +983,17 @@
     const band = isNum(payload.deadBand);
     const scored = isNum(payload.scored);
     const neutral = isNum(payload.neutral);
+    const moves = payload.__moves instanceof Map ? payload.__moves : new Map();
 
-    const W = Math.max(300, Math.min(900, spineHost.clientWidth || 720));
+    const W = spineWidth();
+    spineW = W;
     const H = 92;
     const padX = 14, axisY = 56;
     const plotW = W - padX * 2;
     const xOf = (s) => padX + ((s + 100) / 200) * plotW;
 
     const svg = svgEl("svg", {
-      class: "sp", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      class: "sp", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
       role: "img", preserveAspectRatio: "xMidYMid meet",
     });
 
@@ -571,14 +1038,50 @@
         : "±" + band + " dead band · not named";
     svg.append(bandLabel);
 
-    /* One mark per PUBLISHED name, at its true score. The regions above show
-       ten a side; this shows every one that cleared the band, so the reader
-       can see how far the tail actually reaches. */
+    /* One mark per PUBLISHED name, at its true score, trailing the move that
+       put it there. The regions above show ten a side; this shows every one
+       that cleared the band, so the reader can see how far the tail actually
+       reaches and how much of it arrived this morning. */
+    let trails = 0;
     for (const [rows, cls] of [[payload.__bull, "is-bull"], [payload.__bear, "is-bear"]]) {
       for (const r of rows || []) {
         const s = isNum(r.s);
         if (s === null) continue;
         const t = String(r.t || "");
+        const d1 = moves.get(t) || null;
+        const v = d1 ? isNum(d1.v) : null;
+        const gap = d1 ? isNum(d1.gap) : null;
+        if (v !== null && v !== 0 && gap !== null) {
+          /* The trail runs from where the name WAS to where it is. Nothing
+             is interpolated and nothing is invented: the origin is the
+             current score minus the published move, which is the previous
+             scored observation exactly. */
+          const from = Math.max(-100, Math.min(100, s - v));
+          const trail = svgEl("line", {
+            class: "sp-move " + cls + (gap > 1 ? " is-gapped" : ""),
+            x1: xOf(from), x2: xOf(s), y1: axisY, y2: axisY,
+            stroke: "currentColor", "stroke-width": 2.2, "stroke-linecap": "round",
+            opacity: 0.42,
+            /* A DASH IS THE GAP, VISIBLY. Not a hue: the difference between
+               an overnight move and a three-week one has to survive a
+               monochrome printout. */
+            "stroke-dasharray": gap > 1 ? "3 2.5" : null,
+          });
+          const trailSaid = svgEl("title");
+          trailSaid.textContent = t + " " + fmtSigned(v, 0) + " over " + sessionsSaid(gap) +
+            ", from " + fmtSigned(s - v, 0);
+          trail.append(trailSaid);
+          svg.append(trail);
+          trails++;
+        }
+        /* A CROSSING IS RINGED, not tinted. It is the one event on this axis
+           that is a change of category rather than of degree. */
+        if (d1 && typeof d1.cross === "string") {
+          svg.append(svgEl("circle", {
+            class: "sp-cross is-" + d1.cross, cx: xOf(s), cy: axisY, r: 8,
+            fill: "none", stroke: "currentColor", "stroke-width": 1.2, opacity: 0.85,
+          }));
+        }
         /* THE MARK CARRIES ITS NAME. A row of anonymous dots says how far the
            tail reaches and refuses to say who is in it — and on a wide
            session the regions above name only the first ten a side, so many
@@ -588,7 +1091,8 @@
           class: "sp-dot " + cls, cx: xOf(s), cy: axisY, r: 4.5, "data-t": t,
         });
         const label = svgEl("title");
-        label.textContent = t + " " + fmtSigned(s, 0);
+        label.textContent = t + " " + fmtSigned(s, 0) +
+          (v === null ? "" : ", " + fmtSigned(v, 0) + " over " + sessionsSaid(gap));
         dot.append(label);
         svg.append(dot);
       }
@@ -599,8 +1103,84 @@
       (neutral !== null && scored !== null
         ? neutral + " of " + scored + " names scored inside the plus or minus " + band + " dead band and are not published. "
         : "") +
-      ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) + " bearish names cleared it.");
+      ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) +
+      " bearish names cleared it." +
+      (trails ? " " + trails + " of them trail the move since their previous scored session." : ""));
     spineHost.append(svg);
+  }
+
+  /* REDRAWN AT THE NEW WIDTH, NEVER SCALED TO IT. One viewBox unit is one
+     CSS pixel, and a resize that left the old svg in place would break that
+     on the first rotation of a phone or drag of a window edge. Debounced
+     because a drag fires this continuously; the 2px threshold stops a
+     scrollbar appearing from triggering a repaint loop. */
+  let spineTimer = 0;
+  window.addEventListener("resize", () => {
+    if (!spineDrawn) return;
+    clearTimeout(spineTimer);
+    spineTimer = setTimeout(() => {
+      if (spineDrawn && Math.abs(spineWidth() - spineW) > 2) renderSpine(spineDrawn);
+    }, 150);
+  });
+
+  /* ---------- the staleness guard ----------------------------------
+
+     THE ONLY FLOWS ROUTE WITHOUT ONE, AND IT IS THE ROUTE THE SECTION OPENS
+     ON. loadBoard and loadRegion read r.json() and dropped the
+     X-Payload-Updated response header the Worker stamps on every payload —
+     so during a pipeline outage /flows/long/ warned and /flows/ rendered
+     Tuesday's board on Friday with a "Session" tile that named a date and no
+     warning anywhere.
+
+     TWO INDEPENDENT FAILURES, REPORTED SEPARATELY, because the remedies
+     differ. A dead pipeline has an old WRITE time: GitHub disables scheduled
+     workflows after 60 days of repository inactivity and the only symptom is
+     a date that stops advancing. A frozen upstream has a recent write time
+     and an old SESSION. */
+  const STALE_WRITE_MS = 30 * 60 * 60 * 1000;      // one publish cadence plus slack
+  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000; // a weekend plus one holiday
+
+  function localStaleness(payload, now) {
+    if (!payload) return null;
+    const written = isNum(payload.__updatedAt);
+    if (written !== null && written > 0 && now - written > STALE_WRITE_MS) {
+      const hours = Math.floor((now - written) / 3600000);
+      const days = Math.floor(hours / 24);
+      return {
+        kind: "write",
+        message: "This session was last written " +
+          (days >= 1 ? days + (days === 1 ? " day" : " days") : hours + (hours === 1 ? " hour" : " hours")) +
+          " ago. The pipeline has not published since, so nothing on this page is " +
+          "today's — check the Actions tab.",
+      };
+    }
+    if (payload.sessionDate) {
+      const session = Date.parse(payload.sessionDate + "T21:00:00Z");
+      if (Number.isFinite(session) && now - session > STALE_SESSION_MS) {
+        return {
+          kind: "session",
+          message: "These numbers describe the " + payload.sessionDate + " session, " +
+            "which is more than four days old. The pipeline is running but its data " +
+            "is not advancing.",
+        };
+      }
+    }
+    return null;
+  }
+
+  /* The board agent is lifting this out of flows-board.js into the shared
+     library. Use the shared one the moment it exists so the two routes
+     cannot word the same failure differently; fall back to the local copy
+     until it does. */
+  const staleness = typeof UI.staleness === "function" ? UI.staleness : localStaleness;
+
+  function setStale(messages) {
+    const text = messages.filter(Boolean).join(" ");
+    if (staleEl) {
+      staleEl.hidden = !text;
+      staleEl.textContent = text;
+    }
+    document.body.classList.toggle("is-stale", Boolean(text));
   }
 
   /* ---------- the rail badges --------------------------------------
@@ -617,13 +1197,46 @@
     slot.hidden = false;
   }
 
+  /* ---------- the page leads on change -----------------------------
+
+     "What changed" was two of twelve columns beside the poles — about 194px
+     of content at the 78rem clamp — holding a three-item list, and it fell
+     BELOW both ranked tables in the reading order. The region that answers
+     the only question this page is opened to ask cannot be its narrowest.
+
+     Re-seated here rather than in the stylesheet because this file owns the
+     renderer and not the grid; the span is an inline declaration of the same
+     `1 / -1` the spine region already carries, and the phone breakpoint's
+     `!important` one-column rule still wins over it, which is the behaviour
+     we want. The stylesheet should grow a `.cc-chg { grid-column: 1 / -1 }`
+     rule and a source-order move, and this can then go. */
+  function promoteChange() {
+    const body = host("ccChg");
+    const region = body && body.closest ? body.closest(".cc-region") : null;
+    if (!region || !region.parentNode || region.parentNode !== verdictHost.parentNode) return;
+    region.style.gridColumn = "1 / -1";
+    verdictHost.insertAdjacentElement("afterend", region);
+  }
+  promoteChange();
+
   /* ---------- data --------------------------------------------------
 
      Seven reads, every one of an endpoint that already existed. The two
      boards are the page: a failure there is reported on the status line.
      The other five are regions, and each one's failure is CONTAINED — an
      events calendar that does not answer must not blank the five regions
-     that did. */
+     that did.
+
+     THE WRITE TIME RIDES ON THE PAYLOAD. It answers a question no field in
+     the body can: whether the PIPELINE ran, as distinct from whether the
+     DATA moved. `0` is not a write time — the Worker sends "0" for a key it
+     has never written — so it is rejected rather than coerced into an epoch
+     date in 1970. */
+  function stampUpdated(response, body) {
+    const at = isNum(response.headers.get("X-Payload-Updated"));
+    if (body && typeof body === "object") body.__updatedAt = at !== null && at > 0 ? at : null;
+    return body;
+  }
 
   function loadBoard(side) {
     return fetch("/api/flows/board?side=" + side, {
@@ -631,13 +1244,13 @@
     }).then((r) => {
       if (r.status === 401) { location.replace("/flows/"); return null; }
       if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
+      return r.json().then((body) => stampUpdated(r, body));
     });
   }
 
   function loadRegion(path) {
     return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body)) : null))
       .catch(() => null);
   }
 
@@ -654,6 +1267,29 @@
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);
+
+    /* ---- the joins the page used to refuse to make ----
+
+       Both payloads were already in this closure and neither region could
+       see the other. One Map each, built once. */
+    const evBy = new Map();
+    if (events && events.status !== "pending" && Array.isArray(events.rows)) {
+      for (const row of events.rows) if (row && row.t) evBy.set(String(row.t), row);
+    }
+    const boardBy = new Map();
+    const cards = new Set();
+    for (const [payload, rows] of [[lng, bull], [sht, bear]]) {
+      /* `deep` at the root says this board knows which rows carry a card.
+         Its absence means the board predates the distinction, and every row
+         on such a board does have one. */
+      const knows = isNum(payload && payload.deep) !== null;
+      for (const row of rows) {
+        if (!row || !row.t) continue;
+        const t = String(row.t);
+        boardBy.set(t, row);
+        if (!knows || row.dp === 1) cards.add(t);
+      }
+    }
 
     /* ---- the verdict bar and the two ranked sides ---- */
     paintVerdict(verdictHost, lng, sht, market, alerts);
@@ -681,10 +1317,7 @@
         if (sub) { sub.textContent = "0 ranked"; sub.hidden = false; }
         continue;
       }
-      /* `deep` at the root says this board knows which rows carry a card.
-         Its absence means the board predates the distinction, and every row
-         on such a board does have one. */
-      sideTable(into, rows, isNum(payload && payload.deep) !== null, trk, label);
+      sideTable(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
       if (sub) {
         sub.textContent = rows.length > ROW_MAX
           ? "top " + ROW_MAX + " of " + rows.length : "all " + rows.length;
@@ -692,10 +1325,11 @@
       }
     }
 
-    /* ---- the four narrow regions ---- */
+    /* ---- the lead region ---- */
     const chg = host("ccChg");
-    if (chg) { chg.replaceChildren(); paintChanged(chg, track); }
+    if (chg) { chg.replaceChildren(); paintChanged(chg, track, cards, evBy, boardBy); }
 
+    /* ---- the three narrow regions ---- */
     const alr = host("ccAlerts");
     if (alr) { alr.replaceChildren(); paintAlerts(alr, alerts); }
     const alrSub = host("ccAlertsSub");
@@ -724,18 +1358,32 @@
     const meta = lng || sht || {};
     meta.__bull = bull;
     meta.__bear = bear;
+    meta.__moves = new Map(Object.entries(trk.d1By));
     renderSpine(meta);
 
-    /* THE TWO HALVES MUST BE THE SAME SESSION. They are two fetches of two
-       rows, and a pipeline that failed between them would put yesterday's
-       bulls beside today's bears with nothing in either payload to disagree
-       about it. Nothing forces them to agree, so the page has to check. */
+    /* ---- what is wrong with this page, in one line ----
+
+       THREE WAYS THE SESSION ON SCREEN IS NOT TODAY'S, and they are three
+       different failures. The two halves are two fetches of two rows, and a
+       pipeline that failed between them would put yesterday's bulls beside
+       today's bears with nothing in either payload to disagree about it;
+       nothing forces them to agree, so the page has to check. The other two
+       come off the write time and the session date, which every deeper
+       route has warned on since the board shipped and this one never did. */
+    const notes = [];
     const ld = lng && lng.sessionDate, sd = sht && sht.sessionDate;
     if (ld && sd && ld !== sd) {
-      staleEl.hidden = false;
-      staleEl.textContent = "These two halves are from different sessions — bullish " +
-        ld + ", bearish " + sd + ". Treat the comparison with care.";
+      notes.push("These two halves are from different sessions — bullish " +
+        ld + ", bearish " + sd + ". Treat the comparison with care.");
     }
+    const now = Date.now();
+    const seen = new Set();
+    for (const payload of [lng, sht]) {
+      const verdict = payload ? staleness(payload, now) : null;
+      const message = typeof verdict === "string" ? verdict : (verdict && verdict.message) || null;
+      if (message && !seen.has(message)) { seen.add(message); notes.push(message); }
+    }
+    setStale(notes);
 
     const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
     const bullN = rowCount(lng), bearN = rowCount(sht);
