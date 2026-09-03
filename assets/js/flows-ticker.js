@@ -4643,7 +4643,14 @@
   border-left: 2px solid var(--flow-down);
   color: var(--ink); font-size: 0.9rem;
 }
-.ft-change .fc-stats { margin: var(--space-2) 0 0; }
+/* WIDER COLUMNS THAN THE PANEL DEFAULT. Two of these readings are a signed
+   score AND the date it was set on; in the 8rem track .fc-stats hands out they
+   broke mid-ISO-date, as "2026-08-" over "17" — a date split across two lines
+   is a date a reader has to reassemble. */
+.ft-change .fc-stats {
+  margin: var(--space-2) 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
 .ft-change .fc-note { margin: var(--space-2) 0 0; }
 /* THE POLARITY CLASSES THIS BLOCK EMITS HAVE RULES, all four of them. A
    modifier with no rule is not neutral chrome, it is a promise the
@@ -4656,6 +4663,43 @@
 @media (max-width: 30rem) {
   .ft-change { padding: var(--space-2); }
   .ft-chg-v { font-size: 1.25rem; }
+}
+
+/* THE STICKY BAR IS A TAX ON EVERY SCREENFUL, and on a phone the screenful is
+   small. Measured at 380x667 the untightened bar took 195px — 29% of the
+   viewport, permanently — which is not an index, it is a wall. The chips keep
+   every word (nothing is display:none, so nothing leaves the accessibility
+   tree or a find-in-page); they are set smaller and packed tighter, and the
+   reading order above puts the name, the score, the price and the move ahead
+   of the metadata that now wraps below them. */
+@media (max-width: 46rem) {
+  /* THE IDENTITY ROW SCROLLS INSTEAD OF WRAPPING, which is the whole saving:
+     wrapped, ten chips are four lines and 90px; on one scrolling line they are
+     28px. The reading order set above is what makes that safe — name, score,
+     price, day, side, move come first and are what a phone shows at rest;
+     conviction, the gamma regime, the two dates and the switch are a swipe
+     away. The same treatment .flows-rail already takes on a phone, and the
+     same reason.
+
+     NOTHING IS display:none. Every chip stays in the document, in the
+     accessibility tree and in a find-in-page — hiding a reading to save
+     height would be answering a layout problem with a missing fact. */
+  .ft-bar .ft-head {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    gap: var(--space-1) var(--space-2);
+    padding-bottom: 0.2rem;
+  }
+  /* Or the flex line squeezes the ticker itself to fit, and the one word the
+     whole page is about is the one that gets ellipsised. */
+  .ft-bar .ft-head > * { flex: none; }
+  .ft-bar .ft-head h2 { font-size: 1.15rem; }
+  .ft-id, .ft-bar .fc-meta { font-size: 0.76rem; }
+  .ft-jump-b { padding: 0.2rem 0.42rem; font-size: 0.64rem; letter-spacing: 0.08em; }
+  .ft-all-s { font-size: 0.64rem; }
+  .ft-bar { padding-top: var(--space-1); }
 }
 `;
 
@@ -4990,7 +5034,13 @@
       $("ftD1").remove();
     }
 
-    const anchor = $("ftSwitch");
+    /* INSERTED AFTER THE SCORE, NOT AT THE END OF THE HEADER. The emitted
+       markup runs name, score, conviction, regime, dates, switch — so
+       appending would have put the price, the day's move and the overnight
+       delta AFTER three pieces of metadata, and on a phone that is three
+       wrapped lines below the reading. Name, score, price, side, move first;
+       conviction, regime and the two dates after them. */
+    const anchor = $("ftConv") || $("ftSwitch");
     for (const node of [price, day, side, d1Node]) {
       if (!node) continue;
       if (anchor) headEl.insertBefore(node, anchor);
@@ -5009,7 +5059,7 @@
       title: "Rank on today's " + (me.side === "short" ? "short" : "long") + " board, read " +
         "from the board payload the name switcher fetched. It is not published on this card.",
     });
-    const anchor = $("ftSwitch");
+    const anchor = $("ftConv") || $("ftSwitch");
     if (anchor) headEl.insertBefore(chip, anchor);
     else headEl.append(chip);
   }

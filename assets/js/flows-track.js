@@ -610,18 +610,30 @@
      forty pixels wide — which is what the old `Math.round(w) || 240` did the
      moment a fixed layout squeezed the column to zero: a falsy 0 fell through
      to the fallback and every mark landed under the wrong date. */
-  const MIN_STRIP = 120;
+  const MIN_STRIP = 100;
 
   function stripWidth() {
     if (panelEl) panelEl.hidden = false;
     /* The inline width is cleared BEFORE measuring, every time: a floor
        applied on a phone must not survive the rotation that made it
-       unnecessary. */
+       unnecessary, and a floor left in place is what turns a laptop's
+       comfortable table into one that scrolls sideways by twenty pixels. */
     if (stripHead) stripHead.style.width = "";
     let w = Math.round((axisHost && axisHost.clientWidth) || 0);
     if (stripHead && w < MIN_STRIP) {
+      /* THE FLOOR IS A CONTENT WIDTH AND `width` IS A BORDER-BOX ONE —
+         base.css sets box-sizing:border-box globally — so setting it to the
+         floor delivers the floor MINUS the cell's padding. The shortfall is
+         measured and added back rather than the stylesheet's padding being
+         guessed at from here: a hard-coded 16 would be a second copy of a
+         number that lives in flows.css. */
       stripHead.style.width = MIN_STRIP + "px";
-      w = Math.round(axisHost.clientWidth) || MIN_STRIP;
+      let got = Math.round(axisHost.clientWidth) || 0;
+      if (got < MIN_STRIP) {
+        stripHead.style.width = (2 * MIN_STRIP - got) + "px";
+        got = Math.round(axisHost.clientWidth) || MIN_STRIP;
+      }
+      w = got;
     }
     return Math.max(48, Math.min(1600, w || 240));
   }
