@@ -2714,7 +2714,10 @@ body.is-stale .flows-tablewrap {
    claim that the element still exists, and this file is read by people
    deciding what the page is made of. Its ancestor .spine survives, above. */
 
-.flows-lede { margin: 0; font-size: var(--fs-body); color: var(--ink-dim); }
+/* min-width:0 so a long lede in a flex `.flows-controls` shrinks rather than
+   pushing the controls beside it off the row — the same reason every grid
+   child in this file says it. */
+.flows-lede { margin: 0; min-width: 0; font-size: var(--fs-body); color: var(--ink-dim); }
 
 /* ---------- the market level -------------------------------------
 
@@ -4578,6 +4581,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    with two thirds of the page blank beside them. Columns hold each line near
    the same measure while using the width — the same answer the canvas tier
    already reached for the section's other prose. */
+/* The measured-hit-rate slot. It ships as a sentence and may be replaced by a
+   measurement; either way it is the only part of the footer a reader is meant
+   to stop on, so it takes the note ink rather than the footer's faint one. A
+   number in here without its horizon and its n is the defect this slot exists
+   to end, and the controller owes both. */
+.foot-hit { color: var(--ink-dim); }
+.foot-hit [data-empty] { color: var(--ink-faint); }
+
 .flows-foot .flows-foot-p { margin: 0 0 var(--space-2); }
 .flows-foot .flows-foot-p:last-child { margin-bottom: 0; }
 #plFoot {
@@ -4989,6 +5000,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    lines and have it look like the rest of the section.
    ============================================================== */
 .fui-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+/* In the control bar the field's baseline should meet the lede's, not its
+   centre — `.flows-controls` centres its children, and a two-row field
+   (label over input) centred against one line of prose sits visibly high. */
+.flows-controls .fui-field { align-self: flex-end; }
 
 .fui-label {
   font-family: var(--font-mono);

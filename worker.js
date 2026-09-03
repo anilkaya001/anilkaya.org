@@ -18,7 +18,7 @@ import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 import { rankChain, RANK_KEYS, crossesEarnings } from "./shared/flows-premium.js";
-import { buildFlowAlerts } from "./shared/flows-alerts.js";
+import { buildFlowAlerts, mergeAlerts } from "./shared/flows-alerts.js";
 import { shapeTide } from "./shared/flows-pulse.js";
 import { isRefreshWindow } from "./shared/flows-freshness.js";
 
@@ -1011,7 +1011,53 @@ const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
    schema, which is the class of drift the shape suite exists to
    kill. On any failure the stored copy stands untouched, and its
    readAt says honestly how old the read is.
+
+   AND FOR THE ALERTS, MERGE RATHER THAN REPLACE. The two feeds are
+   not the same kind of thing. The tide is a SERIES the vendor
+   restates whole, so re-reading it IS the whole update. The flow
+   alerts are a rolling WINDOW of the vendor's newest flags, so
+   re-reading them and writing the result deleted every flag older
+   than the last few minutes — a name flagged at 09:31 was gone
+   from the page at 09:46, all session, every session. What an
+   early-warning surface needs is the session's accumulated record,
+   so the alerts branch unions each read into the day's record
+   (shared/flows-alerts.js owns that arithmetic, because derived
+   arithmetic belongs where it can be tested) and starts the record
+   over at the session boundary.
    ============================================================= */
+/**
+ * The EASTERN calendar date a read belongs to.
+ *
+ * The alerts record accumulates across a session and resets at the session
+ * boundary, so it has to be able to NAME its day — an accumulation that
+ * cannot say which day it covers is exactly the record that silently carries
+ * yesterday's flags into today. The day is an Eastern one because that is the
+ * day the market is in and the day `sessionDate` on this key already names;
+ * a UTC date would name the same span by a different calendar and the two
+ * would disagree on every payload a reader compares them across.
+ *
+ * Read through the IANA zone rather than an offset table for the reason
+ * shared/flows-freshness.js reads its window that way: an offset table has
+ * already gone stale in this repository once and cost half a year of runs.
+ * It lives here rather than in that module because the gate answers one
+ * question — is this instant inside the window — while the record's day is a
+ * property of the write.
+ *
+ * Null on an unreadable instant, which mergeAlerts treats as "this read
+ * cannot name its day, so do not accumulate into it".
+ */
+function easternSessionDate(at) {
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(d).map((x) => [x.type, x.value]));
+  return parts.year && parts.month && parts.day
+    ? `${parts.year}-${parts.month}-${parts.day}` : null;
+}
+
 async function refreshFlowsIntraday(env) {
   if (!env.DB || !env.UW_API_KEY) return;
   if (!isRefreshWindow(new Date())) return;
@@ -1039,7 +1085,7 @@ async function refreshFlowsIntraday(env) {
          the tide refresh below has always carried, and whose absence here
          cost the product its entire alerts feed every session.
 
-         The spread `{...prev, ...alerts}` overwrites prev.rows, prev.seen and
+         The spread `{...prev, ...alerts}` overwrote prev.rows, prev.seen and
          prev.status wholesale. With the envelope defect above, `alerts` was a
          well-formed empty feed, so sixty real rows were replaced by zero on
          the first cron firing after 09:15 ET and again every fifteen minutes.
@@ -1049,19 +1095,52 @@ async function refreshFlowsIntraday(env) {
          The two conditions are separate on purpose: a shape bug is now
          impossible (the shaper unwraps), and a genuinely empty vendor read is
          still refused here. Fixing only one of them would leave the other
-         able to blank the key on its own. */
-      if (alerts.status === "ok" && alerts.rows.length) {
+         able to blank the key on its own.
+
+         MERGING DOES NOT SOFTEN THIS GUARD, and it is worth saying why it
+         still has to be here now that a wholesale replacement is gone. An
+         empty read merged into the record would leave the ROWS intact — but
+         it would advance the envelope's readAt, and readAt is the page's
+         claim about how fresh the rows are. Writing "read at 11:00" over rows
+         nothing confirmed at 11:00 is the same defect in slower motion.
+
+         The third condition is new and is the merge's own: a ceiling that
+         somehow kept nothing must not be able to blank the key either. It
+         cannot happen with the published ceilings; it is here because the
+         first version of this handler also could not happen. */
+      const readAt = new Date();
+      const merged = (alerts.status === "ok" && alerts.rows.length)
+        ? mergeAlerts(prev, alerts, {
+            at: readAt.toISOString(),
+            sessionDate: easternSessionDate(readAt),
+          })
+        : null;
+      if (merged && merged.rows.length) {
         await upsert("flowalerts", {
-          ...prev, ...alerts,
-          readAt: new Date().toISOString(),
+          ...prev, ...merged,
+          readAt: readAt.toISOString(),
           refreshed: "intraday",
         });
+        /* What the merge actually did, in the numbers that distinguish it
+           from the replacement it replaced: `carried` is the count of windows
+           the vendor's rolling list has already dropped and this record still
+           holds — every one of which the old spread deleted. */
+        console.log(JSON.stringify({
+          message: "flowalerts intraday record merged",
+          date: merged.record.date, reads: merged.record.reads,
+          read: alerts.rows.length, entered: merged.record.entered,
+          again: merged.record.again, carried: merged.record.carried,
+          kept: merged.record.kept, union: merged.record.union,
+          shed: merged.record.shed, shedBy: merged.record.shedBy,
+          bytes: merged.record.bytes, reset: merged.record.reset,
+        }));
       } else {
         /* Not silent: a refresh that declines to write is a fact about this
            read, and the stored copy's own readAt still says how old it is. */
         console.log(JSON.stringify({
           message: "flowalerts intraday refresh declined to write",
           status: alerts.status, shaped: alerts.rows.length, unusable: alerts.unusable,
+          merged: merged ? merged.rows.length : null,
         }));
       }
     }
