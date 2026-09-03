@@ -1449,7 +1449,12 @@
     const span = document.createElement("span");
     span.style.display = "block";
     span.style.fontSize = "0.72em";
-    span.style.opacity = "0.7";
+    /* THE PALETTE'S OWN SECONDARY INK, not an opacity. Fading the text would
+       set its contrast from whatever happens to be behind it — and the row
+       behind it changes on hover and on the unaffordable marker — where the
+       token is the one colour this site has already decided is readable for
+       text at this weight. */
+    span.style.color = "var(--ink-faint)";
     span.style.letterSpacing = "0.02em";
     span.textContent = text;
     if (title) span.title = title;
