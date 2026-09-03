@@ -32,6 +32,7 @@ import {
 } from "../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
+import { makePermitQueue } from "../shared/flows-permits.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
@@ -573,7 +574,17 @@ const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 /** Delay between publishes, to stay under the edge's burst-rate challenge. */
 const PUBLISH_SPACING_MS = 150;
 
-const stats = { calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now() };
+/* THE THREE NUMBERS THIS FILE ASKED FOR AND NEVER HAD. The floorCeilingMs
+   comment above says the binding 750ms ceiling "is NOT obviously right — a 429
+   costs a Retry-After wait, so a higher floor trades a certain per-call tax
+   against an uncertain saving, and the run has never been instrumented to say
+   which is larger. Do not raise it on intuition; measure the 429 wait first."
+   These are that measurement: what the run spent WAITING FOR ITS TURN, what it
+   spent ON THE WIRE, and what it spent BEING REFUSED. */
+const stats = {
+  calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
+  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0,
+};
 let delayMs = RATE.startDelayMs;
 
 /* THE FLOOR IS A VARIABLE, and it was not one until 2026-08-26.
@@ -590,6 +601,24 @@ let delayMs = RATE.startDelayMs;
 let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- the permit queue -------------------------------------
+
+   THE IMPLEMENTATION AND ITS ARGUMENT LIVE IN shared/flows-permits.js, which
+   states at length why this is NOT the `Promise.all` the sector, card and
+   pulse legs each refuse. The short version: requests still leave exactly
+   delayMs apart — the vendor cannot tell the schemes apart — but the round
+   trip no longer sits on the critical path in front of the next call's wait.
+
+   `delayMs` is passed as a FUNCTION because the rate controller raises it
+   mid-run on a 429; reading it at reservation time is what makes a raised
+   floor govern every slot booked after it. */
+const permits = makePermitQueue({
+  delayMs: () => delayMs,
+  now: () => Date.now(),
+  sleep,
+  maxInFlight: 6,
+});
 
 
 async function uw(path, params = {}) {
@@ -610,9 +639,13 @@ async function uw(path, params = {}) {
   }
 
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
-    await sleep(delayMs);
+    /* A RETRY TAKES A FRESH PERMIT. It is a new request on the wire and the
+       vendor counts it as one, so it queues like one. */
+    stats.permitWaitMs += await permits.acquire();
     stats.calls++;
     let response;
+    const wireStarted = Date.now();
+    const landed = permits.enter();
     try {
       response = await fetch(url, {
         headers: {
@@ -621,12 +654,16 @@ async function uw(path, params = {}) {
         },
       });
     } catch (error) {
+      stats.networkMs += Date.now() - wireStarted;
+      landed();
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
       if (attempt === RATE.maxRetries) throw error;
       continue;
     }
+    stats.networkMs += Date.now() - wireStarted;
+    landed();
 
     if (response.status === 429) {
       stats.rateLimited++;
@@ -644,6 +681,12 @@ async function uw(path, params = {}) {
          fact does not expire six clean responses later. */
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "limited"));
+      /* EVERYONE BACKS OFF, not just the caller that was refused. Serially
+         that distinction did not exist — there was only ever one caller in
+         flight. With permits outstanding, letting the others walk into the
+         same wall is how one 429 becomes six. */
+      permits.defer(wait);
+      stats.rateLimitWaitMs += wait;
       await sleep(wait);
       continue;
     }
@@ -5985,6 +6028,39 @@ async function main() {
     (delayFloorMs > RATE.minDelayMs ? "" : ", never raised") + ")",
   );
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
+
+  /* ---- WHERE THE WALL CLOCK WENT, which this file has been asking for ----
+
+     The floorCeilingMs comment states the open question outright: raising the
+     750ms ceiling "trades a certain per-call tax against an uncertain saving,
+     and the run has never been instrumented to say which is larger. Do not
+     raise it on intuition; measure the 429 wait first." This is that meter.
+
+     HOW TO READ IT. `queued` is time spent waiting for a turn — it is the tax
+     the floor charges, and it is the number a lower floor would reduce. `wire`
+     is time the vendor took to answer; under the old serial limiter that time
+     was ADDED to `queued` on every call, and under the permit queue it
+     overlaps, so `wire` is roughly what this change bought back. `refused` is
+     what the 429s actually cost in backoff — the other side of the trade. If
+     `refused` is small against `queued`, the floor is too conservative and can
+     come down; if it rivals `queued`, the ceiling is doing its job and must
+     not move. Those are numbers, not intuitions, which was the whole ask. */
+  const pct = (ms) => `${(ms / 1000).toFixed(1)}s (${(100 * ms / Math.max(elapsed * 1000, 1)).toFixed(0)}% of the run)`;
+  console.log(
+    `wall clock: queued ${pct(stats.permitWaitMs)}` +
+    ` | wire ${pct(stats.networkMs)}` +
+    ` | refused ${pct(stats.rateLimitWaitMs)}` +
+    ` | peak in flight ${permits.stats().peakInFlight}` +
+    (stats.calls
+      ? ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
+        `${Math.round(stats.networkMs / stats.calls)}ms wire`
+      : ""));
+  if (stats.networkMs > 0 && permits.stats().peakInFlight <= 1) {
+    console.log(
+      "  peak in flight was 1, so no round trip ever overlapped another: the vendor answers " +
+      "faster than the floor issues permits. That is the expected shape at a high floor and it " +
+      "means the saving here is the serial delay+network stacking, not concurrency.");
+  }
 }
 
 export {
