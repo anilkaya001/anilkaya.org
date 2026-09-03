@@ -51,7 +51,29 @@
     return n;
   };
 
-  const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  /* THE MISSING-VALUE TEST COMES BEFORE THE COERCION, and this copy used to
+     be the odd one out.
+
+     It read `typeof v === "number" && Number.isFinite(v) ? v : null`, which
+     is safe against the confident zero — Number(null) never runs — but it is
+     STRICTER than the contract every other surface in this product holds. The
+     canonical form (assets/js/flows-ui.js, and numOrNull in shared/) admits a
+     numeric STRING, because the vendor quotes several fields that way and the
+     pipeline passes some of them through untouched. So one payload field
+     rendered as a value on the board and as an em dash in the card panel, for
+     the same card, in the same session — the two files disagreeing about what
+     "present" means, with nothing failing either way.
+
+     Written out rather than delegated to window.FlowsUI: flows-ui.js is
+     loaded on two of the eleven Flows routes and this file is loaded on four,
+     so reaching for it here would make the panels depend on a script that is
+     absent on the page they are drawn on. The duplication is the smaller
+     defect until the loader is fixed; the DIVERGENCE was the real one. */
+  const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
   /* ONE MINUS SIGN, U+2212, everywhere on the card. JavaScript's own toFixed
      emits U+002D, which is narrower and sits lower, so a card mixed the two
      within a single numeric column — the money formatter used the typographic
@@ -59,6 +81,23 @@
   const MINUS = "\u2212";
   const neg = (str) => String(str).replace(/-/g, MINUS);
   const signed = (n, body) => (n < 0 ? MINUS : n > 0 ? "+" : "") + body(Math.abs(n));
+
+  /**
+   * Guard once, then format the value THE GUARD RETURNED.
+   *
+   * Sixteen sites in this file were written as
+   * `isNum(x) === null ? DASH : <expression using x>` — they tested one thing
+   * and then formatted another. That was harmless only while isNum was the
+   * narrow copy that could not coerce; the moment it was aligned with the
+   * canonical contract (which admits a numeric string, because the vendor
+   * quotes several fields that way) `x.toFixed(2)` on a passing value became
+   * a TypeError inside a renderer. A guard whose result is discarded is not a
+   * guard, it is a comment with a runtime cost.
+   *
+   * The em dash is the absence, not a zero: this whole helper exists so a
+   * missing reading can never arrive as one.
+   */
+  const fmtOr = (v, body) => { const n = isNum(v); return n === null ? DASH : body(n); };
 
   /* THE SIGN AS A CLASS, THREE-WAY, IN ONE PLACE.
 
@@ -76,11 +115,11 @@
      has no rule is not a neutral line, it is an invisible one. */
   const polarity = (n) => (n === null || n === undefined || !Number.isFinite(Number(n))
     ? "is-null" : Number(n) < 0 ? "is-neg" : Number(n) > 0 ? "is-pos" : "is-flat");
-  const pct = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(2) + "%"));
-  const pct1 = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(1) + "%"));
-  const sigma = (v) => (isNum(v) === null ? DASH : signed(v, (a) => a.toFixed(2) + "σ"));
-  const px2 = (v) => (isNum(v) === null ? DASH : neg(v.toFixed(2)));
-  const vol1 = (v) => (isNum(v) === null ? DASH : neg((v * 100).toFixed(1)) + "%");
+  const pct = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(2) + "%"));
+  const pct1 = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(1) + "%"));
+  const sigma = (v) => fmtOr(v, (n) => signed(n, (a) => a.toFixed(2) + "σ"));
+  const px2 = (v) => fmtOr(v, (n) => neg(n.toFixed(2)));
+  const vol1 = (v) => fmtOr(v, (n) => neg((n * 100).toFixed(1)) + "%");
   // "$-1.23B" prints the sign inside the currency symbol. The minus belongs in
   // front of the whole quantity, which is where a reader scanning a column
   // expects it.
@@ -1529,7 +1568,7 @@
       ["Front expiry", rows[0].expiry],
       ["Front share", (rows[0].share * 100).toFixed(0) + "%"],
       ["Half-life", panel.halfLifeExpiry || DASH],
-      ["Mean life", isNum(panel.meanLifeDays) === null ? DASH : panel.meanLifeDays.toFixed(0) + " days"],
+      ["Mean life", fmtOr(panel.meanLifeDays, (n) => n.toFixed(0) + " days")],
       ["Expiries", String(panel.expiries)],
     ]));
 
@@ -1671,11 +1710,11 @@
       // implied leg is quoted over. Labelled by what was measured.
       ["Realized vol, 21 sessions", vol1(panel.rv30)],
       ["Variance risk premium",
-        isNum(panel.vrp) === null ? DASH : signed(panel.vrp, (a) => (a * 100).toFixed(1) + " vol pts")],
+        fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
       ["Band", panel.richness === null ? DASH : panel.richness],
-      ["IV rank", isNum(panel.ivRank) === null ? DASH : Math.round(panel.ivRank * 100) + "% of its year"],
-      ["IV, past week", isNum(panel.ivMomentum) === null ? DASH
-        : signed(panel.ivMomentum, (a) => (a * 100).toFixed(1) + " vol pts")],
+      ["IV rank", fmtOr(panel.ivRank, (n) => Math.round(n * 100) + "% of its year")],
+      ["IV, past week",
+        fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
     ]));
 
     host.append(el("p", "fc-note",
@@ -1757,7 +1796,7 @@
       ["21 sessions", pct1(panel.r21)],
       ["42 sessions", pct1(panel.r42)],
       ["52-week position",
-        isNum(panel.week52Pos) === null ? DASH : Math.round(panel.week52Pos * 100) + "% of range"],
+        fmtOr(panel.week52Pos, (n) => Math.round(n * 100) + "% of range")],
     ]));
 
     host.append(el("p", "fc-note",
@@ -2497,7 +2536,7 @@
         (isNum(panel.seen) !== null && panel.seen !== rows.length
           ? " of " + panel.seen + " read" : "")],
       ["Largest leg", compact(peak)],
-      ["Gross size", isNum(panel.grossAbs) === null ? DASH : compact(panel.grossAbs)],
+      ["Gross size", compact(panel.grossAbs)],
     ]));
 
     if (panel.unit) host.append(el("p", "fc-note gts-unit", String(panel.unit)));
@@ -2572,19 +2611,17 @@
 
     const conv = card.conv || {};
     host.append(statList([
-      ["Score", isNum(card.score) === null ? DASH
-        : (card.score > 0 ? "+" : card.score < 0 ? MINUS : "") + Math.abs(card.score)],
-      ["Conviction", isNum(card.conviction) === null ? DASH : String(card.conviction)],
-      ["Agreement", isNum(conv.agreement) === null ? DASH : Math.round(conv.agreement * 100) + "%"],
-      ["Axes present", isNum(conv.breadth) === null ? DASH : conv.breadth + " of 3"],
-      ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
+      ["Score", fmtOr(card.score, (n) => signed(n, (a) => String(a)))],
+      ["Conviction", fmtOr(card.conviction, (n) => String(n))],
+      ["Agreement", fmtOr(conv.agreement, (n) => Math.round(n * 100) + "%")],
+      ["Axes present", fmtOr(conv.breadth, (n) => n + " of 3")],
+      ["Sources", fmtOr(conv.coverage, (n) => Math.round(n * 5) + " of 5")],
       /* THE THIRD TERM OF THE COMPOSITE, which this list showed two of.
          A reader could see agreement and coverage, could not see persistence,
          and so watched a published conviction move by eleven points with
          nothing on the card accounting for it. */
-      ["Persistence", isNum(conv.persistence) === null ? DASH
-        : Math.round(conv.persistence * 100) + "%"],
-      ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
+      ["Persistence", fmtOr(conv.persistence, (n) => Math.round(n * 100) + "%")],
+      ["Quality gate", fmtOr(conv.gate, (n) => "\u00d7" + n.toFixed(2))],
     ]));
 
     convictionArithmetic(host, card, conv);
