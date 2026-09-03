@@ -490,6 +490,8 @@ export function mergeAlerts(prev, next, {
   const shed = union.length - rows.length;
   const priorReads = !reset && heldRecord && Number.isFinite(heldRecord.reads)
     ? heldRecord.reads : 0;
+  const priorEver = !reset && heldRecord && Number.isFinite(heldRecord.everEntered)
+    ? heldRecord.everEntered : 0;
 
   return {
     rows,
@@ -522,6 +524,21 @@ export function mergeAlerts(prev, next, {
       entered,
       again,
       carried: carriedIn - again,
+      /* THE DENOMINATOR THAT KEEPS MOVING AFTER THE CEILING BITES, and it is
+         needed because the ceiling COMPOUNDS: each read merges into the rows
+         the last one KEPT, so once the record is full `union` can never
+         exceed cap + one read again. A reader watching `union` would see the
+         session's population stop growing at exactly the moment it started
+         overflowing — a ceiling read as a population, which is the defect
+         `cap` and `shed` exist to prevent everywhere else here.
+
+         `everEntered` counts how many times a window has entered this record
+         today. That equals the distinct windows the session flagged unless
+         the ceiling shed one that the vendor then flagged again, which counts
+         it twice — so it is an UPPER bound on the day's distinct windows, and
+         `union` is the lower one: what the record still holds. Two honest
+         bounds beat one number that is quietly neither. */
+      everEntered: priorEver + entered,
       shed,
       shedBy,
       byteCap,

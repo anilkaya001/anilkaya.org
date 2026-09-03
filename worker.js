@@ -1116,6 +1116,12 @@ async function refreshFlowsIntraday(env) {
           })
         : null;
       if (merged && merged.rows.length) {
+        /* The spread survives, and now it is safe: `merged.rows` IS the union
+           of the stored rows and this read, so replacing prev.rows with it
+           adds rather than deletes. Everything the pipeline owns — v,
+           generatedAt, sessionDate, vendorLimit, vendorTruncated — still
+           rides through from `prev` untouched, because the cron is not a
+           second publisher of this key's shape. */
         await upsert("flowalerts", {
           ...prev, ...merged,
           readAt: readAt.toISOString(),
