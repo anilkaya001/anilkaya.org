@@ -1504,6 +1504,34 @@ try {
 
     eq(errors.length, 0, `the workspace chrome throws nothing (${errors.join("; ")})`);
     await page.close();
+
+    /* THE JUMP CHIPS ARE A REAL TOUCH TARGET, MEASURED BY HIT-TESTING.
+
+       They are 25px boxes carrying a 44px transparent pseudo-element, which
+       is the pattern .ft-zoom-open already uses — and it silently did not
+       work here: a box with overflow-x auto has its overflow-y COMPUTED to
+       auto, so the strip is a scroll container in BOTH axes and clipped the
+       extension back to the chip. Nothing looked wrong; the control simply
+       claimed a target it did not have. A geometry assertion on the
+       pseudo-element's declared height would have passed on the broken
+       version, so this walks the viewport with elementFromPoint and counts
+       the rows of pixels that actually hit the anchor. */
+    const touch = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    await mount(touch, withChain[0], { ticker: withChain[0].ticker });
+    const hit = await touch.evaluate(() => {
+      const b = document.querySelector(".ft-jump-b");
+      const r = b.getBoundingClientRect();
+      const cx = Math.round(r.left + r.width / 2);
+      let span = 0;
+      for (let y = Math.round(r.top) - 25; y <= Math.round(r.bottom) + 25; y++) {
+        if (document.elementFromPoint(cx, y) === b) span++;
+      }
+      return { box: Math.round(r.height), span };
+    });
+    ok(hit.span >= 44,
+       `a jump chip is at least 44px of hit area at 320px (${hit.span}px over a ` +
+       `${hit.box}px box) — the extension is worthless if its own scroll container clips it`);
+    await touch.close();
   }
 
   /* ---------- 6k. the page leads on CHANGE ----------------------------
@@ -1582,8 +1610,9 @@ try {
       ok(/1 session earlier/.test(got.lead),
          "and how many sessions the move spans — a delta without its gap is the defect " +
          "this layer replaced");
-      ok(got.text.includes("score points"),
-         "the move carries its unit: a bare number is not a reading");
+      ok(/score points?\b/.test(got.text),
+         "the move carries its unit: a bare number is not a reading, and the score is an " +
+         "index whose differences are POINTS rather than percent");
       ok(got.d1 && /session/.test(got.d1.text),
          `the sticky header carries the move and its gap too (${got.d1 && got.d1.text})`);
     }

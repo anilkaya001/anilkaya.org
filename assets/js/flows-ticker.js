@@ -4511,7 +4511,16 @@
    controller's only job is marking which one is current. */
 .ft-jump {
   display: flex; flex-wrap: nowrap; gap: var(--space-1);
-  margin: 0; padding: 0 0 var(--space-2);
+  margin: 0;
+  /* THE VERTICAL PADDING IS THE HIT AREA, and it is here rather than on the
+     chip because of a rule that is easy to miss: a box with overflow-x auto
+     and overflow-y visible has its overflow-y COMPUTED to auto — so this
+     strip is a scroll container in both axes, and the 44px pseudo-element
+     below was being clipped to the chip's own 25px. Measured: scrollHeight
+     35, clientHeight 35, no overflow at all. The control claimed a touch
+     target it did not have. Ten pixels of padding each side puts the whole
+     extension inside the padding box, where nothing clips it. */
+  padding: 10px 0 calc(var(--space-2) + 10px);
   overflow-x: auto; overscroll-behavior-x: contain;
   scrollbar-width: thin;
 }
@@ -4525,7 +4534,8 @@
 }
 /* A 44px TOUCH TARGET WITHOUT A 44px BOX, exactly the way .ft-zoom-open does
    it: the hit area is a transparent pseudo-element, so five chips stay one
-   line tall on a phone and are still tappable. */
+   line tall on a phone and are still tappable. It only works because the
+   strip above reserves the room for it — see the padding note there. */
 .ft-jump-b::after {
   content: ""; position: absolute; left: 0; right: 0; top: 50%;
   height: 44px; transform: translateY(-50%);
@@ -5007,12 +5017,12 @@
     } else if (Math.abs(score) <= band) {
       sideText = "inside the dead band";
       sideCls = "is-flat";
-      sideTitle = "Within ±" + band + " score points of zero, which is the band the " +
-        "board declines to rank inside.";
+      sideTitle = "Within ±" + band + POINTS(band) + " of zero, which is the band " +
+        "the board declines to rank inside.";
     } else {
       sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
       sideCls = P.polarity(score);
-      sideTitle = "Outside the published dead band of ±" + band + " score points.";
+      sideTitle = "Outside the published dead band of ±" + band + POINTS(band) + ".";
     }
     const side = idChip("ftSide", "", sideText,
       { cls: sideCls, empty: sideEmpty, title: sideTitle });
@@ -5067,6 +5077,11 @@
   /* ---------- what changed ------------------------------------------ */
 
   const SESSIONS = (n) => n + (n === 1 ? " session" : " sessions");
+  /* THE UNIT TRAVELS WITH THE NUMBER, and it agrees with it. The score is a
+     bounded index — 100·tanh of a composite — so its differences are score
+     POINTS and never percent, and "1 score points" is the kind of seam that
+     makes a reader wonder who wrote the sentence. */
+  const POINTS = (n) => (Math.abs(n) === 1 ? " score point" : " score points");
 
   const CROSSING = {
     cleared: "Cleared the dead band — this name became actionable this session.",
@@ -5151,7 +5166,9 @@
       lead.append(el("span", "ft-chg-v " + P.polarity(chg.d1.v),
         P.signed(chg.d1.v, (a) => String(a))));
       lead.append(document.createTextNode(
-        (chg.d1.v === 0 ? "score points — unchanged since " : "score points since ") +
+        (chg.d1.v === 0
+          ? POINTS(chg.d1.v).trim() + " — unchanged since "
+          : POINTS(chg.d1.v).trim() + " since ") +
         chg.d1.from + ", " + SESSIONS(chg.d1.gap) + " earlier" +
         (chg.d1.gap === 1
           ? ". "
@@ -5162,23 +5179,24 @@
       lead.append(el("span", "ft-chg-v " + P.polarity(chg.at.score),
         P.signed(chg.at.score, (a) => String(a))));
       lead.append(document.createTextNode(
-        "score points on " + chg.at.d + ". No earlier session in this window carries a score " +
+        POINTS(chg.at.score).trim() + " on " + chg.at.d +
+        ". No earlier session in this window carries a score " +
         "for this name, so there is no move to state — which is not a move of zero."));
     }
     changeEl.append(lead);
 
     changeEl.append(P.statList([
       ["Move", chg.d1 === null ? DASH
-        : P.signed(chg.d1.v, (a) => String(a)) + " score points",
+        : P.signed(chg.d1.v, (a) => String(a)) + POINTS(chg.d1.v),
       chg.d1 === null ? "is-null" : P.polarity(chg.d1.v)],
       ["Sessions apart", chg.d1 === null ? DASH : String(chg.d1.gap)],
-      ["Now", P.signed(chg.at.score, (a) => String(a)) + " score points",
+      ["Now", P.signed(chg.at.score, (a) => String(a)) + POINTS(chg.at.score),
         P.polarity(chg.at.score)],
       ["Run", chg.run === 0 ? "0 — at neutral"
         : (chg.runCapped ? "≥ " : "") + SESSIONS(chg.run)],
       ["Window high", P.signed(chg.ext.hi, (a) => String(a)) + " on " + chg.ext.hiAt],
       ["Window low", P.signed(chg.ext.lo, (a) => String(a)) + " on " + chg.ext.loAt],
-      ["Dead band", chg.band === null ? DASH : "±" + chg.band + " score points"],
+      ["Dead band", chg.band === null ? DASH : "±" + chg.band + POINTS(chg.band)],
     ]));
 
     /* THE RUN, and the two ways it can be shorter than the truth. */
