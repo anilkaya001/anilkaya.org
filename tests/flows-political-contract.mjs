@@ -67,7 +67,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 /* ---------- §3 one filing, shaped -------------------------------- */
 {
   const r = filingRow({
-    name: "A Member", politician_id: "pid-1", ticker: "AAA", issuer: "Aaa Inc",
+    name: "A Member", politician_id: "pid-1", ticker: "AAA", asset: "Aaa Inc",
     txn_type: "Purchase", amounts: "$15,001 - $50,000",
     transaction_date: "2026-07-01", filed_at_date: "2026-08-20",
   });
@@ -95,7 +95,52 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "AND THE MIDPOINT IS COMPUTED FROM THE BOUNDS, not lifted from the vendor's " +
     "own mid_value (3,000,000) — one basis produces every summed number on the " +
     "page, and SIZE_BASIS states that basis");
-  eq(alt.issuer, "Bbb Corporation - Common Stock", "the issuer is read from `asset` too");
+  eq(alt.asset, "Bbb Corporation - Common Stock",
+     "the SECURITY is read from `asset`, which is the field that names the security");
+
+  /* ---- `issuer` IS NOT THE COMPANY, and this suite used to say it was ----
+
+     The line above asserted `alt.issuer === "Bbb Corporation - Common Stock"`,
+     encoding the same misreading the shaper had: that `issuer` and `asset`
+     were two spellings of one field. The vendor's spec says otherwise —
+
+       Insider Trades Issuer: "The person who executed the transaction."
+                              example: spouse      (docs/uw-openapi.yaml:6042)
+       Politician Trades:     asset: NVIDIA Corporation - Common Stock
+                              ticker: NVDA         (docs/uw-openapi.yaml:9573)
+
+     — and `issuer` does not appear on the /congress/recent-trades schema at
+     all. On every live row that carried it, the page printed "joint" or
+     "not-disclosed" where a company name belongs.
+
+     THE CORRECT READING WAS ALREADY IN THIS REPOSITORY. shared/flows-card.js
+     has read it right since the congress panel shipped, and says why: "A large
+     share of filings are a spouse's or a dependent's. Attributing those to a
+     member's judgement is the classic error." Two files, one field, two
+     readings, and the newer one was wrong. */
+  const spousal = filingRow({
+    name: "C Member", ticker: "CCC", asset: "Ccc Holdings - Common Stock",
+    issuer: "spouse", txn_type: "Purchase", amounts: "$1,001 - $15,000",
+    transaction_date: "2026-06-20", filed_at_date: "2026-07-15",
+  });
+  eq(spousal.asset, "Ccc Holdings - Common Stock",
+     "the company comes from `asset` even when `issuer` is present — which is the row " +
+     "shape that used to print 'spouse' as the company");
+  eq(spousal.executedBy, "spouse",
+     "and `issuer` is kept for what it is: WHOSE ACCOUNT executed the trade. A spouse's " +
+     "trade is a different fact from the member's own and is worth keeping — as a qualifier " +
+     "on the filing, never as its name");
+  ok(spousal.asset !== spousal.executedBy,
+     "the two are never the same string, which is the whole defect stated as an assertion");
+
+  /* ABSENT IS NOT "not-disclosed". /recent-trades omits the field entirely;
+     a member declining to say is a different fact from a schema that never
+     carried it, and only one of those is a disclosure choice. */
+  eq(alt.executedBy, null,
+     "a row with no `issuer` publishes null, not a guess and not 'not-disclosed'");
+  eq(filingRow({ name: "D", ticker: "DDD", issuer: "not-disclosed",
+    txn_type: "Purchase", amounts: "$1,001 - $15,000" }).executedBy, "not-disclosed",
+     "while a member who declined to say has that recorded verbatim");
   eq(alt.lagDays, 25, "and the lag still computes across the spellings");
 
   const oneBound = valueBand({ low_value: "1000001", mid_value: "9999999" });
