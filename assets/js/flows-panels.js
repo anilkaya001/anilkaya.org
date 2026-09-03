@@ -58,7 +58,24 @@
      minus and every other formatter the hyphen. */
   const MINUS = "\u2212";
   const neg = (str) => String(str).replace(/-/g, MINUS);
-  const signed = (n, body) => (n >= 0 ? "+" : MINUS) + body(Math.abs(n));
+  const signed = (n, body) => (n < 0 ? MINUS : n > 0 ? "+" : "") + body(Math.abs(n));
+
+  /* THE SIGN AS A CLASS, THREE-WAY, IN ONE PLACE.
+
+     Four call sites in this file each wrote their own two-armed version —
+     `x >= 0 ? "is-pos" : "is-neg"` — which tints a reading of exactly zero
+     with a side it does not hold. Zero is the centre of the dead band and a
+     score this pipeline assigns; it is not a small positive, and it is not an
+     absence either, which is what `is-null` and the em dash are for.
+
+     A helper rather than four corrected ternaries, because the version that
+     gets forgotten on the next new chart is the one that was never written
+     down. `is-flat` is the stylesheet's existing word for this and the
+     families that use it carry their own neutral rule, since the base classes
+     set `fill: none` or no stroke at all — a path with a polarity class that
+     has no rule is not a neutral line, it is an invisible one. */
+  const polarity = (n) => (n === null || n === undefined || !Number.isFinite(Number(n))
+    ? "is-null" : Number(n) < 0 ? "is-neg" : Number(n) > 0 ? "is-pos" : "is-flat");
   const pct = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(2) + "%"));
   const pct1 = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(1) + "%"));
   const sigma = (v) => (isNum(v) === null ? DASH : signed(v, (a) => a.toFixed(2) + "σ"));
@@ -623,7 +640,7 @@
         if (on) { d += (open ? "L" : "M") + pts[i][0].toFixed(1) + " " + pts[i][1].toFixed(1) + " "; open = true; }
         else open = false;
       });
-      if (d) svg.append(svgEl("path", { class: "gp-cum " + (sign > 0 ? "is-pos" : "is-neg"), d }));
+      if (d) svg.append(svgEl("path", { class: "gp-cum " + (sign > 0 ? "is-pos" : sign < 0 ? "is-neg" : "is-flat"), d }));
     }
 
     /* Plates are nudged apart rather than allowed to overlap.
@@ -1932,12 +1949,12 @@
 
     const dLast = lastOf(dU);
     svg.append(svgEl("path", {
-      class: "fp-line " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"), d: dOf(dU),
+      class: "fp-line " + polarity(delta[dLast]), d: dOf(dU),
       fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linejoin": "round",
     }));
     if (dLast >= 0) {
       svg.append(svgEl("circle", {
-        class: "fp-line-end " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"),
+        class: "fp-line-end " + polarity(delta[dLast]),
         cx: x(dLast), cy: y(dU[dLast]), r: 2.6, fill: "currentColor",
       }));
     }
@@ -2520,7 +2537,7 @@
     for (const axis of AXES) {
       const v = legacy && !axis.signed ? null : isNum(card.fam[axis.k]);
       const li = el("li", (axis.signed ? "is-signed " : "is-gauge ") +
-        (v === null ? "is-null" : !axis.signed ? "is-pos" : v < 0 ? "is-neg" : "is-pos"));
+        (v === null ? "is-null" : !axis.signed ? "is-pos" : polarity(v)));
       li.append(el("span", "fc-fam-k", axis.k));
 
       const track = el("span", "fc-fam-track");

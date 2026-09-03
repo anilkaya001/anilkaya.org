@@ -4457,3 +4457,45 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   column-gap: 2.5rem;
 }
 #plFoot .flows-foot-p { break-inside: avoid; }
+
+/* =============================================================
+   ZERO IS A MEASUREMENT AND IT GETS ITS OWN CHANNEL.
+
+   Eight polarity decisions across six renderers were two-way — a
+   ternary choosing between is-pos and is-neg with nothing in between —
+   so a reading of exactly zero was tinted with a side it does not
+   hold. The score badge on the ticker page was the clearest: its TEXT
+   printed an unsigned zero, correctly, on the line directly above a
+   className that tinted the same zero positive. The two disagreed
+   about the same number, on the same row, one line apart.
+
+   Zero is a score this pipeline assigns and defends. It is the centre
+   of the dead band, the reading that says a name was measured and
+   found to be neither. It is not an absence — absence is `is-null`
+   and the em dash, which these families already have — and it is not
+   a small positive.
+
+   THE NEUTRAL IS INK, NOT A THIRD HUE. A green, a red and an amber
+   would read as three sides. Grey reads as "no side", which is what
+   the measurement says, and it survives greyscale for the same reason
+   the glyphs beside it do: the sign was never carried by hue alone.
+
+   Every family below needs its own rule rather than inheriting one,
+   because the base classes deliberately set `fill: none` or no stroke
+   at all — a path emitted with a polarity class that has no rule is
+   not a neutral line, it is an invisible one. tests/flows-sign.mjs
+   asserts that every polarity class these renderers emit resolves to
+   a rule in this file, so a later consolidation cannot quietly delete
+   one and leave a chart drawing nothing.
+   ============================================================= */
+.fc-score.is-flat { color: var(--ink-dim); }
+.gp-cum.is-flat { stroke: var(--ink-faint); stroke-dasharray: 1 3; }
+.fp-line.is-flat { stroke: var(--ink-faint); }
+.fp-line-end.is-flat { fill: var(--ink-faint); }
+.rc-dot.is-flat { fill: var(--ink-faint); }
+/* The board's centre-origin bar. A zero score already draws a zero-width
+   bar, so this rule adds no ink — it exists so the element stops claiming
+   a SIDE it does not have, which mattered because .is-pos also sets
+   `left: 50%` and a future non-zero minimum width would have grown it in
+   the wrong direction from a reading with no direction. */
+.fd-track i.is-flat { left: 50%; width: 0; background: var(--ink-faint); }

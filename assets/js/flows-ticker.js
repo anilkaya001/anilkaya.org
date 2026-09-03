@@ -247,7 +247,7 @@
     const F = window.FlowsPanels;
     const n = F.isNum(v);
     if (n === null) return F.DASH;
-    return (n < 0 ? F.MINUS : "+") + Math.abs(n * 100).toFixed(1);
+    return (n < 0 ? F.MINUS : n > 0 ? "+" : "") + Math.abs(n * 100).toFixed(1);
   }
 
   /** A ROW LABEL: ln(K/S) to `dp` decimals with U+2212. Not a percentage —
@@ -2975,7 +2975,7 @@
          magnitudes unsigned because its two sides are "short" and "long",
          words its caption carries. Here the sign IS the field's published
          polarity and both halves are readings, so each names itself. */
-      lab.textContent = (t.sgn < 0 ? MINUS : "+") + faTickLabel(t.v);
+      lab.textContent = (t.sgn < 0 ? MINUS : t.sgn > 0 ? "+" : "") + faTickLabel(t.v);
       svg.append(lab);
     }
 
@@ -4343,7 +4343,8 @@
     const badge = $("ftScore");
     badge.textContent = score === null ? DASH
       : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
-    badge.className = "fc-score " + (score === null ? "" : score < 0 ? "is-neg" : "is-pos");
+    badge.className = "fc-score " +
+      (score === null ? "" : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat");
     const conv = isNum(card.conviction);
     $("ftConv").textContent = conv === null ? DASH : conv + " conviction";
     const regime = card.regime && card.regime.label;

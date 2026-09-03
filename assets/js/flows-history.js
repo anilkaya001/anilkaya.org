@@ -169,7 +169,7 @@
     usable.forEach((h, i) => {
       const cy = yOf(h.ls);
       const dot = svgEl("circle", {
-        class: "rc-dot " + (h.ls < 0 ? "is-neg" : "is-pos"),
+        class: "rc-dot " + (h.ls < 0 ? "is-neg" : h.ls > 0 ? "is-pos" : "is-flat"),
         cx: xOf(i), cy, r: 4.5,
       });
       const title = svgEl("title");

@@ -300,7 +300,7 @@
     if (aggr !== null) {
       parts.push(aggr === 0
         ? "Offer side and bid side were equal, at " + count(Math.abs(aggr)) + " contracts apart."
-        : "Offer side less bid side: " + (aggr > 0 ? "+" : MINUS) + count(Math.abs(aggr)) +
+        : "Offer side less bid side: " + (aggr > 0 ? "+" : aggr < 0 ? MINUS : "") + count(Math.abs(aggr)) +
           " contracts.");
     }
     /* NO CLASS AND NO GLYPH ON THIS COLUMN, deliberately. A share above a half
@@ -332,7 +332,7 @@
        arrow on this column reads as a direction, and a rise in open interest
        says contracts stuck between two settlements without saying on which
        side anybody was. */
-    return cell((r > 0 ? "+" : MINUS) + body,
+    return cell((r > 0 ? "+" : r < 0 ? MINUS : "") + body,
       "c-num " + (r > 0 ? "fb-pos" : "fb-neg"),
       (r > 0
         ? body + " more contracts were open at this strike at the later settlement."
