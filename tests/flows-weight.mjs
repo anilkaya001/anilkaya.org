@@ -41,6 +41,24 @@ import assert from "node:assert/strict";
 import { statSync } from "node:fs";
 import * as PAGES from "../shared/flows-pages.js";
 
+/* PATHS RESOLVE AGAINST THIS FILE, NEVER AGAINST THE PROCESS.
+
+   The first version measured `statSync("." + src)`, which resolves against the
+   CURRENT WORKING DIRECTORY. Run from the repository root that is correct; run
+   the way CI runs it — npm scripts execute with the cwd set to `tests/` — it
+   is `tests/assets/js/nav.js`, which does not exist, and every single file
+   came back missing. The suite then failed with its own words: "a deferred
+   script that 404s leaves the route a shell with no renderer".
+
+   The irony is the useful part. A file-existence assertion whose path is wrong
+   reports exactly what a genuinely missing file reports, so the failure text
+   was a confident, well-argued lie about the repository. Every other suite in
+   this directory resolves through `import.meta.url` for this reason, and this
+   one now does too: the file's location is a fact about the file, and the
+   working directory is a fact about whoever happened to run it. */
+const REPO = new URL("../", import.meta.url);
+const sizeOf = (src) => statSync(new URL("." + src, REPO)).size;
+
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
@@ -50,35 +68,48 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
    roughly a quarter of this, but the parse is not, and the parse is the part
    that happens on the reader's own CPU before anything draws.
 
-   Measured 2026-09-03, ratcheted with headroom:
+   FIRST MEASURED 2026-09-03, then RE-RATCHETED the same day when the
+   early-warning refit landed. Both numbers are kept, because the delta is the
+   part worth looking at and a ceiling that quietly absorbs its own overrun is
+   not a ceiling:
 
-     ticker    365k   the deepest route, and the heaviest by a wide margin
-     overview  233k   the LANDING page — the first screen of the section
-     side      214k
-     watch     182k
-     desk       85k
-     market     72k
-     unusual    61k
-     events     60k
-     track      51k
-     political  28k
-     history    26k
-     login       3k
+     route      before   after   what it bought
+     ticker       365k    413k   grouped panels, a jump index, deep-linking
+     side         214k    254k   search, sort, and the board's memory columns
+     overview     233k    251k   the change lead, the earnings join, staleness
+     watch        182k    192k   the direction of travel and its projection
+     desk          85k    107k   a named cut, a sticky header, a live clock
+     track         51k     89k   sorts that answer "what moved"
+     market        72k     73k   the sector sign fix
+     unusual       61k     61k   unchanged
+     events        60k     60k   unchanged
+     political     28k     28k   unchanged
+     history       26k     26k   unchanged
+     login          3k      3k   unchanged
 
-   The shape of the problem is visible in the table rather than in any one
-   row: one 137k panel bundle appears on four routes, three of which are not
-   the panel workspace. It is there for the card overlay a deep link opens,
-   which most visitors to those three routes never open. */
+   THE SHARED BUNDLE IS WHERE THE COST COMPOUNDS. flows-panels.js went from
+   137k to 147k, and it is loaded on FOUR routes — so ten kilobytes of panel
+   work is forty kilobytes of parse across the section, three quarters of it on
+   routes that are not the panel workspace. That is the number this table
+   exists to keep visible, and it is the reason a ceiling per route beats one
+   total.
+
+   RAISING A CEILING IS A DECISION AND IT LOOKS LIKE ONE HERE. These are set
+   above the post-refit measurement with room for ordinary work, not fitted
+   snugly to it — a ceiling set at today's number turns every subsequent commit
+   into a budget negotiation. Tripping one is still not a failure to fix by
+   raising it again: it is a prompt to ask whether the route needed what it
+   just gained. */
 const CEILING_KIB = {
-  tickerPage: 420,
-  overviewPage: 280,
-  sidePage: 260,
-  watchPage: 230,
-  deskPage: 110,
+  tickerPage: 480,
+  overviewPage: 300,
+  sidePage: 300,
+  watchPage: 240,
+  deskPage: 135,
+  trackPage: 115,
   marketPage: 95,
   unusualPage: 85,
   eventsPage: 85,
-  trackPage: 75,
   politicalPage: 45,
   historyPage: 45,
   loginPage: 12,
@@ -121,7 +152,7 @@ for (const name of pageNames) {
        renders, no renderer runs, and the route is a shell with a spinner that
        never resolves. Nothing throws and nothing overflows. */
     let size = null;
-    try { size = statSync("." + src).size; } catch { size = null; }
+    try { size = sizeOf(src); } catch { size = null; }
     ok(size !== null,
        `${name} emits ${src} and that file exists — a deferred script that 404s leaves the ` +
        `route a shell with no renderer, and it fails silently: the document renders, nothing ` +
@@ -175,8 +206,8 @@ for (const name of Object.keys(CEILING_KIB)) {
 {
   const heaviest = measured[0];
   const panelRoutes = measured.filter((m) => m.parts.some((p) => /^flows-panels\.js/.test(p)));
-  ok(heaviest.kib > 300,
-     `the heaviest route still ships over 300k (${Math.round(heaviest.kib)}k on ` +
+  ok(heaviest.kib > 350,
+     `the heaviest route still ships over 350k (${Math.round(heaviest.kib)}k on ` +
      `${heaviest.name}) — asserted as a STANDING FACT rather than as a target, so that the ` +
      `day someone splits that bundle this line fails and has to be rewritten deliberately ` +
      `rather than the improvement passing unnoticed`);
