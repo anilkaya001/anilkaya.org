@@ -247,7 +247,12 @@
      morning when the store was merely unreachable — a page-wide claim about
      the market manufactured out of a failed lookup. So a null memory draws
      NOTHING AT ALL and the page says once, in prose, that there is no
-     yesterday to compare against. */
+     yesterday to compare against.
+
+     THE EARNINGS COUNTDOWN IS NOT PART OF THE MEMORY. `ed`/`edte` come off
+     this morning's screener row, not off yesterday's board, so a cold read
+     must not silence them: on a board that cannot say what changed, "this
+     name reports in 13 days" is still measured and still true. */
 
   /* Inside this many days a board name is about to be taken off the board by
      the earnings gate rather than by its signal decaying. Every name here

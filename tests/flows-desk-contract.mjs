@@ -161,6 +161,62 @@ const ccRow = (ticker, r, ivScale) => ({
 CHAINS.CCC = { spot: 100, rows: CCC_ROWS.map((r) => ccRow("CCC", r, 1)) };
 CHAINS.DDD = { spot: 100, rows: CCC_ROWS.map((r) => ccRow("DDD", r, 100)) };
 
+/* ---------- FFF: a chain the route has to CUT --------------------
+
+   Every fixture above fits inside the route's 120-row slice, so nothing in
+   this file could reach the code that STATES a cut, and nothing could reach
+   the code that decides a re-rank on a cut symbol cannot be answered locally.
+   A fixture that cannot reach the branch it certifies is this repository's
+   most repeated mistake, so this one is built to reach both.
+
+   130 sellable puts on a $1,000 name, in two bands that RANK IN OPPOSITE
+   ORDERS:
+
+     120 cheap out-of-the-money puts — 60c on strikes 20..139, so the yields
+     run 3.00% down to 0.43% and every premium is $60.
+
+     10 deep in-the-money puts — $5.00 on strikes 2000..2009, so every yield is
+     0.25%, below all 120 of them, and every premium is $500, above all 120.
+
+   Ranked by annualised yield the ten are ranks 121-130 and the slice drops
+   every one. Ranked by premium received they are ranks 1-10. So the top 120 by
+   one key and the top 120 by the other do not merely differ in ORDER — they
+   differ in MEMBERSHIP, which is the whole reason a re-rank on a cut symbol
+   cannot be served from the rows already in hand. A desk that re-sorted
+   locally shows the same 120 rows rearranged, with a $60 premium on its top
+   line while ten $500 lines sit unfetched, and it looks completely correct.
+
+   FFF also carries the only in-the-money contracts in this file, which is the
+   other side of the strike cell's OTM/ITM word. */
+CHAINS.FFF = {
+  spot: 1000,
+  rows: [
+    ...Array.from({ length: 120 }, (_, i) => ({
+      option_symbol: "FFF260918P" + String((20 + i) * 1000).padStart(8, "0"),
+      nbbo_bid: "0.60", nbbo_ask: "0.62", implied_volatility: "0.35",
+      open_interest: "200", volume: "100",
+    })),
+    ...Array.from({ length: 10 }, (_, i) => ({
+      option_symbol: "FFF260918P" + String((2000 + i) * 1000).padStart(8, "0"),
+      nbbo_bid: "5.00", nbbo_ask: "5.10", implied_volatility: "0.35",
+      open_interest: "500", volume: "100",
+    })),
+  ],
+};
+
+/* GGG is AAA's chain under another name, and it exists so ONE symbol in this
+   file is guaranteed never to have been fetched before. The age assertions
+   need a response the edge cache has not already answered: every other symbol
+   here is priced several times over by the blocks above, so its X-Chain-Age
+   arrives as whatever the cache's copy happens to be worth, and "a fresh quote
+   reads as fresh" would then be an assertion about test order. */
+CHAINS.GGG = {
+  spot: CHAINS.AAA.spot,
+  rows: CHAINS.AAA.rows.map((r) => ({
+    ...r, option_symbol: r.option_symbol.replace(/^AAA/, "GGG"),
+  })),
+};
+
 const upstream = http.createServer((req, res) => {
   upstreamCalls++;
   const url = new URL(req.url, "http://x");
@@ -665,7 +721,15 @@ try {
     const seen = [];
     for (const tr of await page.locator("#deskBody tr").all()) {
       const ticker = (await tr.locator("th").textContent()).trim();
-      const strike = Number((await tr.locator("td").nth(1).textContent()).trim());
+      /* THE FIRST TEXT NODE, not the cell's whole textContent. The strike cell
+         carries a second line saying how far the strike is from spot, so
+         Number() over the whole cell reads "47.00−7.8% OTM" and answers NaN —
+         which then silently failed the payload lookup below rather than the
+         strike read above it. Reading the leading node also asserts the thing
+         that matters: the strike stays the cell's primary value and the
+         distance is an annotation under it. */
+      const strike = Number(await tr.locator("td").nth(1)
+        .evaluate((td) => (td.firstChild ? td.firstChild.textContent : "").trim()));
       const side = (await tr.locator("td.c-side").textContent()).trim();
       const strategy = side === "Covered call" ? "cc" : "csp";
       const cell = tr.locator("td").nth(collectIdx);
@@ -825,10 +889,21 @@ try {
        an unchanged file. Growing it one step first makes the shrink a real
        measurement rather than a coin toss, and the floor itself is asserted
        explicitly further down. */
+    /* AND OFF THE CEILING BEFORE ASKING IT TO GROW, which is the same defect
+       on the other end and arrived the day the rows grew a second line. maxH()
+       is the viewport less everything above the pane, and a three-row table
+       whose rows each carry a sub-line — the strike's distance from spot, the
+       yield's collateral — is now naturally TALLER than that, so the pane opens
+       already clamped at its maximum. "Press ArrowDown and check it got taller"
+       was then asking a pane at its ceiling to go above it, and it measured the
+       clamp rather than the grip. Step down twice first so the growth is real. */
     await page.focus("#deskGripY");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    const squat = await size();
     await page.keyboard.press("ArrowDown");
     const taller = await size();
-    ok(taller.h > narrower.h, `the height grip grows the pane (${narrower.h} -> ${taller.h})`);
+    ok(taller.h > squat.h, `the height grip grows the pane (${squat.h} -> ${taller.h})`);
     await page.keyboard.press("ArrowUp");
     const shorter = await size();
     ok(shorter.h < taller.h, `and the height grip shortens it (${taller.h} -> ${shorter.h})`);
@@ -1134,6 +1209,267 @@ try {
     }
   }
 
+  /* ---------- the table is a SLICE, and says which slice --------- */
+  {
+    /* A ranked list that truncates in silence reads as "this is everything".
+       The route keeps the top 120 of each chain; the page printed the count
+       BEFORE that slice — "130 sellable" over a table holding 120 — and said
+       nothing anywhere about a cut. */
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized",
+      { waitUntil: "domcontentloaded" });
+    await settle(120);
+    eq(await rowCount(), 120, "the route sends its top 120 and the desk draws all of them");
+
+    const note = await page.locator(".desk-chip__note").first().textContent();
+    ok(/120 of 130 sellable/.test(note),
+       `the chip states what is on the table AND what it was cut from (${note})`);
+
+    const foot = await page.locator("#deskFoot").textContent();
+    ok(/130 of 130 quoted contracts are sellable/.test(foot),
+       `the screened total is still the chain's (${foot})`);
+    ok(/This table is a slice/.test(foot), "the footnote says a cut happened at all");
+    ok(/FFF shows its top 120 of 130 sellable lines/.test(foot),
+       "and names the symbol, the count kept and the count it was cut from");
+    ok(/ranked by annualised yield/.test(foot),
+       "and the ordering that decided WHICH 120 — a top 120 by yield is not a top 120 by premium");
+    ok(/10 lines below the cut are not on this table/.test(foot),
+       "and how many are missing");
+
+    /* ---- a re-rank on a cut symbol cannot be served locally ---- */
+    /* THE SECOND <td>, NOT THE SECOND CHILD. The row leads with a <th>, so a
+       CSS :nth-child(2) selects the Sell cell and every strike read comes back
+       NaN — which does not fail loudly, it just makes every "is a 2000 strike
+       on the table" test quietly answer no. */
+    const strikes = () => page.evaluate(() =>
+      Array.from(document.querySelectorAll("#deskBody tr"))
+        .map((tr) => {
+          const td = tr.querySelectorAll("td")[1];
+          return Number(td && td.firstChild ? td.firstChild.textContent : NaN);
+        }));
+
+    const byYield = await strikes();
+    ok(byYield.length === 120 && !byYield.some((k) => k >= 2000),
+       "ranked by yield, the slice contains none of the ten deep in-the-money lines");
+
+    const asked = [];
+    const watchRank = (req) => {
+      if (req.url().includes("/api/flows/chain")) asked.push(new URL(req.url()).searchParams.get("rank"));
+    };
+    page.on("request", watchRank);
+    const callsBefore = upstreamCalls;
+    await page.selectOption("#deskRank", "premium");
+    /* Swallowed, so the assertions below report rather than a bare timeout. */
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("#deskBody tr"))
+      .some((tr) => {
+        const td = tr.querySelectorAll("td")[1];
+        return Number(td && td.firstChild ? td.firstChild.textContent : NaN) >= 2000;
+      }), null, { timeout: 15000 }).catch(() => {});
+
+    ok(upstreamCalls > callsBefore,
+       "a re-rank on a CUT symbol goes back to the chain — the old slice cannot contain the new key's winners");
+    ok(asked.includes("premium"), `and asks the route for the key it now wants (${asked.join(",")})`);
+    const byPremium = await strikes();
+    eq(byPremium.filter((k) => k >= 2000).length, 10,
+       "and the ten $500 lines the yield slice never contained are now on the table");
+    ok(byPremium.slice(0, 10).every((k) => k >= 2000),
+       "at the top of it, which is what ranking by premium received means");
+    page.off("request", watchRank);
+
+    /* The negative control is already in this file: switching the key on the
+       AAA/BBB desk, where nothing was cut, spends no vendor call. Both halves
+       of the condition are therefore exercised. */
+
+    /* ---- every row says what it ties up and how far out it is ---- */
+    {
+      /* No buying power is entered on this desk, which is the point: the
+         collateral used to live only in the Collect tooltip, and that column
+         does not exist until a balance does. So a reader with no balance typed
+         saw a 4.2% yield and was never told the line reserves $44,300. */
+      eq(await page.locator("#deskBP").inputValue(), "", "no balance is entered here");
+      eq(await page.locator("#deskCollectHead").isHidden(), true, "so there is no Collect column");
+
+      const idx = await page.evaluate(() => {
+        const heads = Array.from(document.querySelectorAll(".desk-table thead th:not([hidden])"));
+        return {
+          strike: heads.findIndex((h) => /Strike/.test(h.textContent)) - 1,
+          yield: heads.findIndex((h) => h.textContent.trim() === "Yield") - 1,
+        };
+      });
+      ok(idx.strike >= 0 && idx.yield >= 0, "the Strike and Yield columns are found by header");
+
+      const cells = await page.evaluate((at) =>
+        Array.from(document.querySelectorAll("#deskBody tr")).map((tr) => {
+          const tds = tr.querySelectorAll("td");
+          const sub = (td) => {
+            const span = td.querySelector("span");
+            return span ? { text: span.textContent, title: span.title } : null;
+          };
+          const lead = (td) => (td.firstChild ? td.firstChild.textContent : "");
+          return {
+            strike: Number(lead(tds[at.strike])),
+            away: sub(tds[at.strike]),
+            yieldText: lead(tds[at.yield]),
+            ties: sub(tds[at.yield]),
+          };
+        }), idx);
+
+      ok(cells.every((c) => c.away && c.ties),
+         "every row carries both annotations, with no balance and no hover");
+      ok(cells.every((c) => /%$/.test(c.yieldText.trim())),
+         "the yield keeps its unit");
+
+      /* THE COLLATERAL IS THE YIELD'S DENOMINATOR AND IT MATCHES THE ROW. A
+         cash-secured put reserves the strike times a hundred; if these two
+         ever disagree the page is printing a percentage of one number beside
+         a different one. */
+      for (const c of cells) {
+        const want = "on $" + (c.strike * 100).toLocaleString("en-US");
+        eq(c.ties.text, want, `strike ${c.strike} states the collateral it reserves`);
+      }
+      ok(cells.every((c) => /cash-secured put ties up/.test(c.ties.title)),
+         "and says which collateral it is — cash for a put, shares for a call");
+
+      /* OTM AND ITM ARE BOTH ON THIS TABLE, and the word is not the sign: a
+         put below spot and a call above it are both out of the money, so a
+         renderer that only printed a signed distance could not say which. */
+      const otm = cells.filter((c) => / OTM$/.test(c.away.text));
+      const itm = cells.filter((c) => / ITM$/.test(c.away.text));
+      eq(itm.length, 10, "the ten puts struck above spot are marked in the money");
+      ok(otm.length >= 100, "and the cheap ones below spot are marked out of it");
+      ok(itm.every((c) => c.strike >= 2000), "the ITM mark is on the strikes above spot");
+      ok(otm.every((c) => c.strike < 1000), "and the OTM mark on the ones below it");
+      const deep = itm.find((c) => c.strike === 2000);
+      ok(deep && deep.away.text === "100.0% ITM",
+         `the distance is a percentage of spot, with its unit (${deep && deep.away.text})`);
+      ok(deep && /below|above/.test(deep.away.title),
+         "and the title says which side of spot, in words");
+
+      /* ---- and the symbol is a door, not a label ---- */
+      const href = await page.locator("#deskBody th a").first().getAttribute("href");
+      eq(href, "/flows/ticker/?t=FFF",
+         "the symbol links to the analysis page, the way every other Flows surface does");
+      eq((await page.locator("#deskBody th").first().textContent()).trim(), "FFF",
+         "and the cell still reads as the ticker alone — the link is the text, not an appended glyph");
+      const linkTitle = await page.locator("#deskBody th a").first().getAttribute("title");
+      ok(linkTitle && /today's board/.test(linkTitle),
+         "and says before the click that a name off the board has no card there");
+    }
+
+    /* ---- what stays put while the rows scroll ---- */
+    {
+      /* The desk had one sticky block, written as a one-off in the stylesheet:
+         the symbol column, pinned left. The same sentence is true of the header
+         row on the other axis, and of the controls on the page — and neither
+         was done. A row whose header has scrolled off is a row of numbers about
+         nothing, exactly like a row whose symbol has. */
+      const style = await page.evaluate(() => {
+        const heads = Array.from(document.querySelectorAll(".desk-table thead th"));
+        const controls = document.querySelector(".desk-controls");
+        const cs = (el) => getComputedStyle(el);
+        return {
+          positions: heads.map((h) => cs(h).position),
+          tops: heads.map((h) => cs(h).top),
+          firstLeft: cs(heads[0]).left,
+          controls: controls
+            ? { position: cs(controls).position, top: cs(controls).top,
+                background: cs(controls).backgroundColor }
+            : null,
+        };
+      });
+      ok(style.positions.every((p) => p === "sticky"), "every header cell is pinned");
+      ok(style.tops.every((t) => t === "0px"), "to the top of the scroller");
+      eq(style.firstLeft, "0px",
+         "and the symbol header keeps the left pin the stylesheet gives it — sticky is two axes, not a choice between them");
+      ok(style.controls && style.controls.position === "sticky", "the controls stay put too");
+      ok(style.controls && parseFloat(style.controls.top) > 0,
+         `offset below the fixed top bar rather than underneath it (${style.controls && style.controls.top})`);
+      ok(style.controls && !/, 0\)$/.test(style.controls.background),
+         `with a ground the rows cannot show through (${style.controls && style.controls.background})`);
+
+      /* AND IT ACTUALLY STICKS. Computed style is the intent; this is the
+         behaviour, and the two come apart the moment an ancestor grows an
+         overflow or a transform. */
+      const stuck = await page.evaluate(() => {
+        const wrap = document.getElementById("deskTableWrap");
+        wrap.scrollTop = 600;
+        wrap.scrollLeft = 260;
+        const head = document.querySelector(".desk-table thead th");
+        const rowHead = document.querySelector("#deskBody th");
+        const box = wrap.getBoundingClientRect();
+        return {
+          scrolled: wrap.scrollTop,
+          headOffset: Math.round(head.getBoundingClientRect().top - box.top),
+          symbolOffset: Math.round(rowHead.getBoundingClientRect().left - box.left),
+        };
+      });
+      ok(stuck.scrolled > 0, "the table scrolls inside its pane");
+      ok(Math.abs(stuck.headOffset) <= 2,
+         `the header row is still at the top of it after scrolling (${stuck.headOffset}px)`);
+      ok(Math.abs(stuck.symbolOffset) <= 2,
+         `and the symbol column still at the left (${stuck.symbolOffset}px)`);
+    }
+
+    await page.setViewportSize({ width: 390, height: 900 });
+  }
+
+  /* ---------- the quote age is a function of NOW ------------------
+
+     The file header's oldest promise is that every number says how old it is,
+     and the desk broke it in the least visible way: X-Chain-Age was read once
+     at fetch, stored on the payload and rendered forever. Every assertion in
+     this file above reads the age within a second of the response, so all of
+     them passed against a clock that never moved. A desk priced at 09:31 and
+     left open still said "just now" at 10:11.
+
+     THE PAGE'S CLOCK IS FAKED, NOT THE TEST'S PATIENCE. Waiting real minutes
+     would make this the slowest assertion in the suite and still only prove
+     one age. The page polls on a thirty-second interval, so the fake clock has
+     to drive the timers too — which is why every wait below is a Node-side
+     poll: an in-page waitForFunction would be waiting on a timer this block
+     has deliberately stopped. */
+  {
+    const clockPage = await context.newPage();
+    const clockErrors = [];
+    clockPage.on("pageerror", (e) => clockErrors.push(String(e)));
+    await clockPage.clock.install({ time: new Date("2026-08-25T14:00:00Z") });
+    await clockPage.goto(server.baseURL + "/flows/desk/?t=GGG", { waitUntil: "domcontentloaded" });
+
+    const noteText = () => clockPage.evaluate(() => {
+      const n = document.querySelector(".desk-chip__note");
+      return n ? n.textContent : "";
+    });
+    const until = async (test, what) => {
+      let last = "";
+      for (let i = 0; i < 300; i++) {
+        last = await noteText();
+        if (test(last)) return last;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error(`timed out waiting for ${what} (last note: "${last}")`);
+    };
+
+    const fresh = await until((t) => /sellable/.test(t), "GGG to price");
+    ok(/just now/.test(fresh), `a quote that has just arrived reads as fresh (${fresh})`);
+
+    /* Eleven minutes, which is past the point where this desk stops calling
+       the table a price — so one jump proves both that the number moves and
+       that the sentence changes. */
+    await clockPage.clock.fastForward(11 * 60 * 1000);
+    const aged = await until((t) => /sellable/.test(t) && !/just now/.test(t),
+      "the printed age to advance");
+    ok(/11m ago/.test(aged),
+       `eleven minutes later the chip says eleven minutes, with no keystroke in between (${aged})`);
+
+    const status = await clockPage.locator("#deskStatus").textContent();
+    ok(/quotes 11m ago/.test(status), `and so does the status line (${status})`);
+    ok(/older than this desk will call a price/.test(status),
+       "which stops claiming a freshness it cannot have, and says what to press");
+
+    eq(clockErrors.length, 0, `nothing threw on the ticking desk (${clockErrors[0] || ""})`);
+    await clockPage.close();
+  }
+
   /* ---------- nothing threw, at a phone width -------------------- */
   {
     eq(pageErrors.length, 0, `no uncaught page error across the whole session (${pageErrors[0] || ""})`);
@@ -1151,8 +1487,12 @@ try {
   console.log(`✓ flows-desk: ${checks} assertions — cross-symbol re-ranking, URL-held state, ` +
     `select-all tri-state, a refresh floor that spends nothing, per-chip failure isolation, ` +
     `a desk sized to a real balance and checked against the module that defines the sizing, ` +
-    `a pane three grips and a keyboard can resize, and an implied volatility surface whose ` +
-    `smile, term structure, stale prints and unit convention are each read out of the DOM`);
+    `a pane three grips and a keyboard can resize, an implied volatility surface whose ` +
+    `smile, term structure, stale prints and unit convention are each read out of the DOM, ` +
+    `a top-120 slice that names its cut and refetches rather than re-sorting it, rows that ` +
+    `state their collateral and their distance from spot without a balance or a hover, ` +
+    `a header and a control bar that stay put while the rows scroll, and a quote age ` +
+    `driven off a faked clock to prove it advances on its own`);
 } finally {
   await browser.close();
   await server.stop();
