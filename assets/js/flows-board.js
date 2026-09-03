@@ -20,6 +20,21 @@
   const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl) return;
 
+  /* ---------- the shared UI module ----------------------------------
+
+     THE STALENESS TEST AND THE TWO LABELLED CONTROLS LIVE IN
+     assets/js/flows-ui.js. The staleness test was assessAge() in THIS file
+     and was lifted there because six routes had grown six copies of the same
+     two tests with the same two constants and six different sentences.
+
+     THIS PAGE IS NOT YET SERVED THAT FILE — shared/flows-pages.js sidePage()
+     emits nav.js, this controller, flows-panels.js and flows-card.js and no
+     UI module — so every use is guarded and the absence is ANNOUNCED rather
+     than swallowed. A freshness banner that quietly stops appearing is
+     indistinguishable from a pipeline that is fine, and that is the one
+     failure this page must never present as health. */
+  const UI = window.FlowsUI || null;
+
   const table = document.getElementById("flowsTable");
   const headCells = table
     ? Array.from(table.querySelectorAll("thead th"))
@@ -106,6 +121,17 @@
     return n === null ? DASH : n.toFixed(2);
   }
 
+  /* THE CANONICAL MONEY LADDER NOW LIVES IN assets/js/flows-ui.js as
+     fmtMoney(v, {dp}) — one premium was rendering three ways on three routes
+     a reader is invited to move between ($2.2M here, $2.18M on the unusual
+     feed, "2.2M" with no currency mark inside the ticker card).
+
+     THIS COPY DELIBERATELY STAYS FOR NOW, and switching it alone would make
+     things worse rather than better: flows-ui.js is not served to this page,
+     and the other eight renderers cannot call it either, so a unilateral move
+     to two decimals here would replace one disagreement with a different one.
+     The ladder is retired in one commit across the nine renderers, the day
+     the module is loaded everywhere — not one file at a time. */
   function fmtMoney(v) {
     const n = isNum(v);
     if (n === null) return DASH;
@@ -199,6 +225,144 @@
     return n > 0 ? "fb-pos" : "fb-neg";
   }
 
+  /* ---------- the board's memory ------------------------------------
+
+     WHAT YESTERDAY'S BOARD SAYS ABOUT TODAY'S ROW. The pipeline reads the
+     previously published board on every run — it always did, for hysteresis —
+     and now keeps what it read: `nw` (new to this side today), `hy` (here on
+     incumbency: it did not clear the entry rank this session and sits inside
+     the exit band, so it is on its way off), `r0` (yesterday's rank) and `dr`
+     (places IMPROVED, signed at the source so up is good and no renderer has
+     to remember to negate a rank subtraction). `ed`/`edte` are the next
+     earnings date and the days to it.
+
+     Until this layer the board answered none of the questions an early-warning
+     product exists for: which name is new, which is climbing, which is about
+     to fall off. A name that arrived overnight looked exactly like one that
+     had sat at the same rank for three weeks.
+
+     NULL IS NOT FALSE, AND NOWHERE ON THIS PAGE DOES IT MATTER MORE. All four
+     memory fields are null TOGETHER when yesterday's board could not be read.
+     A renderer that drew null as false would announce all 44 names as new on a
+     morning when the store was merely unreachable — a page-wide claim about
+     the market manufactured out of a failed lookup. So a null memory draws
+     NOTHING AT ALL and the page says once, in prose, that there is no
+     yesterday to compare against. */
+
+  /* Inside this many days a board name is about to be taken off the board by
+     the earnings gate rather than by its signal decaying. Every name here
+     cleared that gate this morning by definition, so a small count is not a
+     warning about the reading — it is a warning about the row's remaining
+     life. The gate's own threshold is the pipeline's constant and is
+     deliberately not restated here; this is a "soon" window, not the gate. */
+  const EARNINGS_SOON_DAYS = 20;
+
+  /**
+   * THREE ANSWERS, NOT TWO, because these are three different silences:
+   *
+   *   "absent" — no row carries `nw` at all. This board was published before
+   *              the memory layer existed: new assets, old payload, the
+   *              deploy window this file already designs for around `deep`.
+   *   "cold"   — the rows carry `nw: null`. The pipeline ran and could not
+   *              READ yesterday's board, so no name has an answer.
+   *   "warm"   — the comparison happened and the marks mean something.
+   *
+   * Both silences draw the same thing (nothing); only the sentence differs,
+   * which is the whole point of separating them. The test is the same one the
+   * pipeline's own run log uses — a null `nw` on the rows is a cold read.
+   */
+  function memoryState(rows) {
+    if (!Array.isArray(rows) || !rows.length) return "absent";
+    let sawKey = false;
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !("nw" in row)) continue;
+      sawKey = true;
+      if (row.nw !== null) return "warm";
+    }
+    return sawKey ? "cold" : "absent";
+  }
+
+  // Set from the payload on every render, like legacyFamilies and knowsDeep.
+  let memory = "absent";
+
+  /**
+   * WHERE THIS NAME WAS YESTERDAY, in a glyph and a number.
+   *
+   * SIGN IN POSITION AND GLYPH, NEVER IN HUE: ▲/▼ carry the direction and the
+   * digits carry the size, so the mark survives greyscale, a monochrome
+   * printout and every form of colour blindness. The class is confirmation
+   * for everyone else, never the carrier.
+   *
+   * A name that is NEW has no previous rank to have moved from — `dr` is null
+   * there by construction — so it gets the word, which answers the same
+   * question. A `dr` of exactly 0 is a MEASUREMENT ("it held its rank") and
+   * gets its own mark; printing nothing there would make a held rank
+   * indistinguishable from an unreadable one.
+   */
+  function memoryMark(row) {
+    if (!row) return null;
+    if (row.nw === true) {
+      return { cls: "fb-mem is-new", glyph: "NEW", say: "new to this side today" };
+    }
+    const dr = isNum(row.dr);
+    if (dr === null) return null;
+    const places = (n) => n + (n === 1 ? " place" : " places");
+    if (dr > 0) return { cls: "fb-mem is-up", glyph: "▲" + dr, say: "climbed " + places(dr) + " since yesterday" };
+    if (dr < 0) return { cls: "fb-mem is-down", glyph: "▼" + Math.abs(dr), say: "fell " + places(Math.abs(dr)) + " since yesterday" };
+    return { cls: "fb-mem is-same", glyph: "=", say: "same rank as yesterday" };
+  }
+
+  /**
+   * THE TWO REASONS THIS ROW MAY NOT BE HERE TOMORROW, and neither of them is
+   * about the signal weakening.
+   *
+   * `hy` — the name did not clear the entry rank this session; it is on the
+   *        board because it was on the board, and it sits inside the exit
+   *        band. That is a genuinely different kind of row.
+   * `edte` — the earnings gate takes a name off the board when its report is
+   *        close. A row reporting in 13 days is a row that leaves in about a
+   *        week for a calendar reason.
+   *
+   * UNITS TRAVEL WITH THE NUMBER: "earnings in 13d", never a bare 13. A
+   * NEGATIVE count is a vendor date that has gone stale, not a report due
+   * today, so it is withheld rather than printed as an imminent event.
+   */
+  function tenureMarks(row) {
+    const out = [];
+    if (row && row.hy === true) {
+      out.push({
+        cls: "fb-hold", glyph: "incumbent",
+        say: "on the board on incumbency: it did not clear the entry rank this session " +
+          "and sits inside the exit band, so it is on its way off",
+      });
+    }
+    const dte = isNum(row && row.edte);
+    if (dte !== null && dte >= 0 && dte <= EARNINGS_SOON_DAYS) {
+      out.push({
+        cls: "fb-earn", glyph: "earnings in " + dte + "d",
+        say: "reports in " + dte + (dte === 1 ? " day" : " days") +
+          (row.ed ? ", on " + row.ed : "") + ". Every name here cleared the earnings gate " +
+          "this morning; this one clears it by days, so it is about to leave the board for " +
+          "a calendar reason rather than a signal one",
+      });
+    }
+    return out;
+  }
+
+  /* A mark as a DOM node. role="img" plus aria-label, the same pattern the
+     family glyph already uses: the glyph is a picture to a screen reader and
+     the words are the accessible name, so "▲7" is never announced as "black
+     up-pointing triangle seven" and never announced as nothing. */
+  function markNode(mark) {
+    const span = document.createElement("span");
+    span.className = mark.cls;
+    span.textContent = mark.glyph;
+    span.setAttribute("role", "img");
+    span.setAttribute("aria-label", mark.say);
+    span.title = mark.say.charAt(0).toUpperCase() + mark.say.slice(1) + ".";
+    return span;
+  }
+
   function scoreCell(score) {
     const n = isNum(score);
     const td = document.createElement("td");
@@ -237,9 +401,16 @@
      own missing `dp` on a board that DOES publish `deep` is a real answer. */
   let knowsDeep = false;
 
-  function familyCell(fam) {
-    const td = document.createElement("td");
-    td.className = "c-num";
+  /* THE FIVE-BAR FAMILY GLYPH, BUILT ONCE.
+
+     It used to exist only inside familyCell, which meant it existed only in
+     the table — and the table is not the default view and is not the phone
+     view. So the deck, which is what a reader actually looks at, showed price,
+     a price sparkline and three price returns, and withheld the option-flow
+     decomposition that is the entire product. The <td> is now a wrapper around
+     this builder and the card calls the same builder, so the two drawings of
+     F·P·D·V·O cannot drift. */
+  function familyGlyph(fam) {
     const keys = ["F", "P", "D", "V", "O"];
     const wrap = document.createElement("span");
     wrap.className = "fb-fam";
@@ -273,7 +444,13 @@
     wrap.setAttribute("role", "img");
     wrap.setAttribute("aria-label", "Family scores: " + parts.join(", "));
     wrap.title = parts.join("  ");
-    td.append(wrap);
+    return wrap;
+  }
+
+  function familyCell(fam) {
+    const td = document.createElement("td");
+    td.className = "c-num";
+    td.append(familyGlyph(fam));
     return td;
   }
 
@@ -333,7 +510,7 @@
     k.textContent = label;
     const v = document.createElement("span");
     v.className = "fd-ret-v";
-    v.textContent = n === null ? DASH : (n >= 0 ? "+" : MINUS) + (Math.abs(n) / 100).toFixed(1) + "%";
+    v.textContent = n === null ? DASH : (n < 0 ? MINUS : n > 0 ? "+" : "") + (Math.abs(n) / 100).toFixed(1) + "%";
     chip.append(k, v);
     return chip;
   }
@@ -381,6 +558,25 @@
     head.append(rank, tk, sc);
     card.append(head);
 
+    /* WHERE THIS NAME WAS YESTERDAY, on the card that is the default and the
+       phone view. Its own line rather than three more items inside .fd-head:
+       the head is a non-wrapping flex row of rank, ticker and score, and a
+       320px card has no spare width in it. A block line wraps by construction,
+       which is the difference between a mark that folds and one that hands the
+       page a horizontal scrollbar.
+
+       DRAWN ONLY WHEN THERE IS SOMETHING MEASURED TO SAY. On a cold memory
+       every mark is null and the line is not emitted at all — the page says
+       once, in prose, that yesterday could not be read. Fifty cards each
+       shrugging in the same place is not an explanation. */
+    const memMarks = [memoryMark(row), ...tenureMarks(row)].filter(Boolean);
+    if (memMarks.length) {
+      const mem = document.createElement("div");
+      mem.className = "fd-mem";
+      for (const mark of memMarks) mem.append(markNode(mark));
+      card.append(mem);
+    }
+
     const price = document.createElement("div");
     price.className = "fd-price";
     const px = document.createElement("span");
@@ -415,10 +611,30 @@
     const zero = document.createElement("b");
     zero.className = "fd-zero";
     const bar = document.createElement("i");
-    bar.className = score !== null && score < 0 ? "is-neg" : "is-pos";
+    bar.className = score === null ? "is-flat"
+      : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat";
     bar.style.setProperty("--w", score === null ? 0 : Math.min(Math.abs(score) / 100, 1));
     track.append(zero, bar);
     card.append(track);
+
+    /* THE REASON THE NAME IS ON THE BOARD, on the card.
+
+       The deck gave its largest element to a price sparkline any free site
+       draws and withheld every field that is FLOW evidence: the five families,
+       the net premium. Both were built for the table only, so the view nobody
+       uses had the product and the default view had a stock chart. The glyph
+       is the same builder the <td> calls, and net premium is the one scalar
+       that says how much money was behind the reading. */
+    const ev = document.createElement("div");
+    ev.className = "fd-ev";
+    ev.append(familyGlyph(row.fam));
+    const prem = document.createElement("span");
+    prem.className = "fd-prem " + toneClass(row.netPrem);
+    prem.textContent = fmtMoney(row.netPrem);
+    prem.title = "Net premium: call premium bought minus put premium bought, " +
+      "summed across the session. The sign is the direction of the money.";
+    ev.append(prem);
+    card.append(ev);
 
     const foot = document.createElement("div");
     foot.className = "fd-foot";
@@ -465,6 +681,13 @@
       (isNum(row.hm) === null ? ""
         : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
           `${horizonSessions || 10} trading sessions. `) +
+      /* THE MEMORY IS READ OUT TOO. The marks above are role="img" inside the
+         card, and a card is one tab stop whose accessible name is this string
+         — so a mark that is not in it is a mark a screen reader never reaches. */
+      (memMarks.length ? memMarks.map((m) => m.say).join("; ") + ". " : "") +
+      (isNum(row.netPrem) === null
+        ? `Net premium unavailable. `
+        : `Net premium ${fmtMoney(row.netPrem)}. `) +
       (deep ? `Open the detail card.` : NO_CARD_SAID));
     return card;
   }
@@ -506,8 +729,8 @@
     // price, because that is the number in the larger type; sorting by the
     // change would reorder against the digits the eye is tracking.
     { key: "px",    kind: "num",  first: "desc", name: "Last price", get: (row) => isNum(row.px) },
-    { key: "s",     kind: "num",  first: "desc", get: (row) => isNum(row.s) },
-    { key: "cnv",   kind: "num",  first: "desc", get: (row) => isNum(row.cnv) },
+    { key: "s",     kind: "num",  first: "desc", name: "Score", get: (row) => isNum(row.s) },
+    { key: "cnv",   kind: "num",  first: "desc", name: "Conviction", get: (row) => isNum(row.cnv) },
     null,                                        // F·P·D·V·O — see above
     /* Π IS WITHHELD ON A v1 BOARD and so is the sort. The value is still in
        the payload, so a naive comparator would happily rank 25 rows by a
@@ -554,13 +777,70 @@
   let sortKey = null;       // null is the published order, which is a state
   let sortDir = "desc";
   let currentRows = [];
+  /* The find-a-name filter. Empty is "everything", which is the default and is
+     therefore spelled by absence, exactly as ?view=deck and the published sort
+     order are. */
+  let filterText = "";
 
-  const colByKey = (key) => COLS.find((c) => c && c.key === key) || null;
+  /* ---------- sorts that are not columns ----------------------------
+
+     THE MEMORY FIELDS HAVE NO <th> AND MUST NOT GET ONE FROM HERE. COLS binds
+     POSITIONALLY to the header in shared/flows-pages.js — COLS[i] describes
+     the i-th <th> — so appending a fourteenth entry to COLS on a thirteen-
+     column header would make every subsequent header sort by the wrong data,
+     and inserting one would do it visibly on the first click. This file does
+     not own that markup and will not pretend to.
+
+     So the three memory sorts live in their own registry, reachable from the
+     order control and never from a header. They are otherwise ordinary column
+     descriptors — same `get`, same `kind`, same nulls-last comparator — which
+     is the point: one comparator, one null rule, two ways in.
+
+     `available` is asked of the ROWS rather than of the header, because these
+     sorts are withheld by the PAYLOAD: on a cold memory every `dr` is null and
+     an order over 44 nulls is an order the reader can see and cannot account
+     for. It answers true on an empty row set because at that moment the
+     question is undecidable — readSort() runs before the payload lands, and
+     dropping a deep-linked ?sort=dr there would break a shared link that is
+     about to become perfectly valid. render() re-checks once the rows exist. */
+  const EXTRA_SORTS = [
+    {
+      key: "dr", virtual: true, kind: "num", first: "desc",
+      name: "Places climbed since yesterday",
+      get: (row) => isNum(row.dr),
+      available: (rows) => !rows.length || rows.some((r) => r && isNum(r.dr) !== null),
+    },
+    {
+      key: "nw", virtual: true, kind: "num", first: "desc",
+      name: "New to this side today",
+      /* true → 1, false → 0, and a NULL MEMORY STAYS NULL so it sorts last in
+         both directions rather than sorting as "not new" — which is an answer,
+         and null is the absence of one. */
+      get: (row) => (row.nw === true ? 1 : row.nw === false ? 0 : null),
+      available: (rows) => !rows.length || rows.some((r) => r && (r.nw === true || r.nw === false)),
+    },
+    {
+      key: "edte", virtual: true, kind: "num", first: "asc",
+      name: "Days to earnings",
+      /* A NEGATIVE count is a vendor date that has gone stale, not a report
+         due in the past, so it is not a small number here: it is no number. */
+      get: (row) => { const n = isNum(row.edte); return n === null || n < 0 ? null : n; },
+      available: (rows) => !rows.length ||
+        rows.some((r) => { const n = isNum(r && r.edte); return n !== null && n >= 0; }),
+    },
+  ];
+
+  const colByKey = (key) =>
+    COLS.find((c) => c && c.key === key) || EXTRA_SORTS.find((c) => c.key === key) || null;
+  // -1 for a sort that is not a column. Every caller already treats -1 as
+  // "not in the header", which is exactly true of these.
   const colIndex = (key) => COLS.findIndex((c) => c && c.key === key);
 
   /** Is this column drawn on the page as it stands, and sortable right now? */
   function sortable(col) {
     if (!col) return false;
+    // A virtual sort is gated by the payload, not by the header: see EXTRA_SORTS.
+    if (col.virtual) return typeof col.available === "function" ? col.available(currentRows) : true;
     const i = colIndex(col.key);
     if (i < 0 || i >= headCells.length) return false;   // header not shipped yet
     return !(col.withheld && col.withheld());
@@ -594,7 +874,16 @@
 
   /** The rows in the order they should be drawn, each with its PUBLISHED index. */
   function orderedRows() {
-    const view = currentRows.map((row, index) => ({ row, index }));
+    /* THE FILTER RUNS FIRST AND THE PUBLISHED INDEX SURVIVES IT. That index is
+       the row's position in the payload, which is what the rank badge falls
+       back to on a board with no `r`; renumbering the survivors of a filter
+       would have a filtered deck counting 1, 2, 3 while the pipeline ranked
+       those names 7, 19 and 34. */
+    const view = [];
+    currentRows.forEach((row, index) => {
+      if (filterText && !String((row && row.t) || "").toUpperCase().includes(filterText)) return;
+      view.push({ row, index });
+    });
     const col = sortKey ? colByKey(sortKey) : null;
     if (!col || !sortable(col)) return view;
     /* The tie-break on the published index is written out rather than left to
@@ -674,6 +963,10 @@
     else { sortKey = null; sortDir = "desc"; }
     writeSort();
     syncHeaders();
+    /* THE ORDER CONTROL IS THE ONLY STATEMENT OF THE ORDER VISIBLE IN THE DECK,
+       so a header click has to move it. Before this, a sort applied in the
+       table and then read in the deck had no on-screen author at all. */
+    syncSortSelect();
     paintRows();
   }
 
@@ -751,10 +1044,211 @@
     syncHeaders();
   }
 
+  /* ---------- find a name, and one statement of the order ------------
+
+     A FIFTY-ROW BOARD WITH NO WAY TO TYPE A SYMBOL. Until now the only sort
+     affordance on this page was a <th> button — inside .flows-tablewrap, which
+     the default view sets `hidden`. So in the view a reader actually lands on,
+     every control was display:none: to sort the deck you switched to the
+     table, clicked a header and switched back, and the deck you came back to
+     showed rank badges reading 7, 3, 22 with nothing on screen saying what it
+     was ordered by, because the ↓ indicator was hidden along with the header.
+
+     These two controls go in .flows-controls, which sits OUTSIDE the table
+     wrapper and is therefore visible in both views. The select is the page's
+     single statement of the order, and syncSortSelect keeps it true even when
+     the order was set by a header click or by a deep link.
+
+     THE PRIMITIVES COME FROM window.FlowsUI, and so does their styling: they
+     are emitted under the score track's `st` prefix deliberately. The
+     alternative — a private `fb` namespace — would ship a native <select>
+     with no rules at all, and a flex item's min-width is auto, which for a
+     select is its widest OPTION at 16px mono: wider than a 320px phone's whole
+     content column. The .st-field rules already carry the min-width:0 that
+     fixes exactly that, with the measurement in their comment (it overflowed
+     at 333px). One control, one styling, one place it was got right. */
+
+  let controlsBuilt = false;
+  let sortSelectEl = null;
+  let countEl = null;
+  let memNoteEl = null;
+
+  /* The offered orders, each one a whole decision: a key AND a direction. A
+     column plus a direction toggle would offer "closest to earnings" and
+     "furthest from earnings" as equals, and nobody has ever wanted the second.
+     The published rank is first because it is the default and the page's own
+     answer; it is spelled by the empty value for the same reason ?view=deck is
+     spelled by absence. */
+  const SORT_CHOICES = [
+    { key: null,      dir: "desc", label: "Published rank" },
+    { key: "s",       dir: "desc", label: "Score, strongest first" },
+    { key: "cnv",     dir: "desc", label: "Conviction, highest first" },
+    { key: "dr",      dir: "desc", label: "Biggest climb since yesterday" },
+    { key: "nw",      dir: "desc", label: "New to this side first" },
+    { key: "edte",    dir: "asc",  label: "Closest to earnings first" },
+    { key: "netPrem", dir: "desc", label: "Net premium, largest first" },
+    { key: "t",       dir: "asc",  label: "Ticker, A to Z" },
+  ];
+
+  const choiceValue = (key, dir) => (key ? key + ":" + dir : "");
+
+  function applySortValue(value) {
+    const parts = String(value || "").split(":");
+    const col = parts[0] ? colByKey(parts[0]) : null;
+    if (!col || !sortable(col)) { sortKey = null; sortDir = "desc"; }
+    else { sortKey = col.key; sortDir = parts[1] === "asc" ? "asc" : "desc"; }
+    writeSort();
+    syncHeaders();
+    syncSortSelect();
+    paintRows();
+  }
+
+  /**
+   * THE CONTROL MUST NEVER MISSTATE THE ORDER.
+   *
+   * A header click can produce a state the curated list does not contain —
+   * any of thirteen columns, either direction — and a select reading
+   * "Published rank" above a table sorted by last price is worse than no
+   * select at all: it is a wrong answer where the reader expects the only
+   * answer. A state with no curated option therefore gets one, written from
+   * the column's own name, replaced rather than accumulated.
+   */
+  function syncSortSelect() {
+    if (!sortSelectEl) return;
+    const want = choiceValue(sortKey, sortDir);
+    const curated = Array.prototype.some.call(sortSelectEl.options,
+      (o) => o.value === want && o.dataset.adhoc !== "1");
+    let adhoc = sortSelectEl.querySelector('option[data-adhoc="1"]');
+    if (curated) {
+      if (adhoc) adhoc.remove();
+    } else {
+      if (!adhoc) {
+        adhoc = document.createElement("option");
+        adhoc.dataset.adhoc = "1";
+        sortSelectEl.append(adhoc);
+      }
+      const col = colByKey(sortKey);
+      adhoc.value = want;
+      adhoc.textContent = (col && col.name ? col.name : "This board") +
+        (sortDir === "asc" ? ", low to high" : ", high to low");
+    }
+    sortSelectEl.value = want;
+  }
+
+  /* HOW MANY OF HOW MANY. A filtered board that says "8 names" and nothing
+     else has thrown away the denominator, which on a page whose whole subject
+     is a ranked population is the more important half. Silent when no filter
+     is set: a count of everything against everything teaches the eye to skip
+     the line on the session it matters. */
+  function updateCount(shown) {
+    if (!countEl) return;
+    if (!filterText) { countEl.hidden = true; countEl.textContent = ""; return; }
+    countEl.hidden = false;
+    /* THE ECHO IS CAPPED. What the reader typed is already in the field; this
+       line repeats it only to name what was matched, and an uncapped echo of
+       40 typed characters is one unbreakable word at 320px — a horizontal
+       scrollbar on the page, which is a tested invariant here. */
+    const shownQ = filterText.length > 12 ? filterText.slice(0, 12) + "\u2026" : filterText;
+    countEl.textContent = shown + " of " + currentRows.length + " names match \u201c" + shownQ + "\u201d";
+  }
+
+  function buildControls() {
+    if (controlsBuilt) return;
+    const host = document.querySelector(".flows-controls");
+    if (!host || !UI || typeof UI.searchBox !== "function" || typeof UI.sortSelect !== "function") return;
+    controlsBuilt = true;
+
+    const wrap = UI.el("div", "st-controls fb-controls");
+    const search = UI.searchBox({
+      label: "Find", placeholder: "Ticker", prefix: "st", id: "fbQ",
+      /* Upper-cased once here rather than per row per keystroke, and trimmed
+         because a trailing space typed on a phone keyboard is not a filter. */
+      onInput: (v) => { filterText = String(v || "").trim().toUpperCase(); paintRows(); },
+    });
+    /* AN ORDER THIS PAYLOAD CANNOT PRODUCE IS NOT OFFERED. On a cold memory
+       `dr` and `nw` are null on every row, and an option that silently leaves
+       the board in the published order is a control that lies about having
+       done something. */
+    const sort = UI.sortSelect({
+      label: "Order", prefix: "st", id: "fbSort",
+      options: SORT_CHOICES
+        .filter((c) => !c.key || sortable(colByKey(c.key)))
+        .map((c) => ({ value: choiceValue(c.key, c.dir), label: c.label })),
+      onChange: applySortValue,
+    });
+    sortSelectEl = sort.select;
+
+    countEl = UI.el("span", "fb-count");
+    countEl.setAttribute("role", "status");
+    countEl.hidden = true;
+
+    wrap.append(search.root, sort.root, countEl);
+    /* A SIBLING OF .flows-controls, NOT A CHILD OF IT. As a child it is a flex
+       item, and a flex item's min-width is auto — which for a box containing a
+       native <select> is that select's WIDEST OPTION at 16px mono. At 320px
+       "Biggest climb since yesterday" is wider than the whole content column,
+       and the page grew a horizontal scrollbar: measured at 352px against a
+       320px viewport, which is the zero-overflow invariant this repo tests.
+       In normal flow the row is constrained by the content column instead, and
+       the .st-field rules (min-width:0, full-width fields under 40rem) do the
+       rest — the same arrangement they were written for on the score track. */
+    host.parentNode.insertBefore(wrap, host.nextSibling);
+    syncSortSelect();
+  }
+
+  /**
+   * THE ONE SENTENCE ABOUT YESTERDAY, said once for the page rather than fifty
+   * times in the rows.
+   *
+   * TWO SILENCES, TWO SENTENCES, and they are not the same fact: a board that
+   * predates the memory layer never carried the fields, and a board whose
+   * memory is null carried them and could not fill them. Both draw no marks;
+   * only one of them means the store was unreachable. Both are `unavailable`
+   * rather than `quiet`, because neither is a measured emptiness — nobody
+   * measured "no names changed".
+   */
+  function setMemoryNote(state) {
+    const anchor = deck || tableWrap;
+    if (state === "warm" || !anchor || !anchor.parentNode) {
+      if (memNoteEl) { memNoteEl.remove(); memNoteEl = null; }
+      return;
+    }
+    if (!memNoteEl) {
+      memNoteEl = document.createElement("p");
+      memNoteEl.className = "flows-empty fb-memnote";
+      anchor.parentNode.insertBefore(memNoteEl, anchor);
+    }
+    memNoteEl.dataset.empty = "unavailable";
+    memNoteEl.textContent = state === "cold"
+      ? "Yesterday's board could not be read on this run, so no name here claims to be new " +
+        "and no rank move is drawn. Every row's memory is null together — false would be an " +
+        "answer and there is not one. The comparison returns with the next session that reads " +
+        "its predecessor."
+      : "This board was published before the board kept a memory, so it carries no answer to " +
+        "what changed since yesterday: its rows have no new-today, rank-move or " +
+        "earnings-countdown fields at all. The next pipeline run stamps them.";
+  }
+
   function rowFor(row, index) {
     const tr = document.createElement("tr");
     tr.className = "fb-row";
-    tr.append(cell(fmtInt(row.r != null ? row.r : index + 1), "c-rank"));
+    /* A ROW HELD ON INCUMBENCY IS A DIFFERENT ROW and is marked as one on the
+       <tr>, not only in a chip: it did not earn its place this session. The
+       class is for the stylesheet; the chip in the name cell is what carries
+       the fact in text, because a row a reader cannot see the colour of must
+       still say what it is. */
+    if (row.hy === true) tr.classList.add("is-holdover");
+
+    /* THE RANK CELL ANSWERS "WHERE DOES THIS NAME STAND", so the rank move
+       belongs in it and nowhere else. Appended INSIDE the existing cell
+       rather than added as a fourteenth column: the column model binds
+       positionally against a <thead> this file does not own and cannot
+       extend, and a tbody one cell wider than its header is a column with no
+       accessible name at all. */
+    const rankCell = cell(fmtInt(row.r != null ? row.r : index + 1), "c-rank");
+    const move = memoryMark(row);
+    if (move) rankCell.append(markNode(move));
+    tr.append(rankCell);
     /* The ticker is a real button, not a click handler on the row. That buys
        keyboard operability and a focus ring for free and states honest
        semantics; giving the <tr> role="button" would lie to a screen reader
@@ -801,6 +1295,18 @@
       full.title = "Open the full page for " + String(row.t || "");
       tk.append(full);
     }
+    /* THE TWO REASONS THIS ROW MAY BE GONE TOMORROW, folded into the name cell
+       instead of becoming two more columns. Thirteen columns already overflow
+       every phone; two more would be two more the reader has to scroll to, for
+       facts that only a handful of rows carry.
+
+       A NOTE FOR WHOEVER READS THIS CELL FROM A TEST: .fb-tk's textContent is
+       now the ticker PLUS any marks. The ticker alone is .fb-open — which is
+       also what tests/flows-legacy-payload.mjs should read, and does not:
+       it passes today only because a v1 board carries no memory at all. The
+       same hazard is why the full-page arrow is drawn by CSS rather than
+       written into this cell. */
+    for (const mark of tenureMarks(row)) tk.append(markNode(mark));
     tr.append(tk);
 
     const px = document.createElement("td");
@@ -855,37 +1361,41 @@
    * an old SESSION. The board previously showed neither — it rendered the
    * build time in a status line and applied no test at all, so a reader
    * looking at the board alone could not tell it was three days old.
+   *
+   * THE TEST ITSELF NOW LIVES IN assets/js/flows-ui.js. It was written here
+   * first and copied outward: six routes ended up with the same two constants
+   * and six different sentences for the same two failures, and two routes
+   * wording one outage differently is how a reader concludes there are two.
+   * `subject` keeps this page's sentence exactly the one it has always shown.
+   *
+   * THE MODULE IS NOT YET SERVED TO THIS PAGE, and its absence is reported
+   * rather than swallowed. A freshness check that quietly stops running looks
+   * exactly like a pipeline that is fine — the single failure mode this
+   * banner exists to make impossible.
    */
   function assessAge(payload) {
-    const now = Date.now();
-    const written = Number(payload.__updatedAt) || null;
-    // One publish cadence plus slack. Weekends are handled by the session
-    // check below, not here: the pipeline does not run at all on a Saturday.
-    const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
-    // Four days covers a normal weekend plus one public holiday.
-    const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
-
-    if (written && now - written > STALE_WRITE_MS) {
-      const days = Math.floor((now - written) / 86400000);
-      return "This board was last written " +
-        (days >= 1 ? days + (days === 1 ? " day" : " days") : Math.floor((now - written) / 3600000) + " hours") +
-        " ago. The pipeline has not published since — check the Actions tab.";
+    if (!UI || typeof UI.staleness !== "function") {
+      return {
+        kind: "unavailable",
+        message: "The freshness check could not run: this page's shared UI module " +
+          "(flows-ui.js) is not loaded, so nothing here is confirmed to be today's. " +
+          "The session date in the line above is the payload's own claim about itself.",
+      };
     }
-    if (payload.sessionDate) {
-      const session = Date.parse(payload.sessionDate + "T21:00:00Z");
-      if (Number.isFinite(session) && now - session > STALE_SESSION_MS) {
-        return "These numbers describe the " + payload.sessionDate + " session, " +
-          "which is more than four days old. The pipeline is running but its " +
-          "data is not advancing.";
-      }
-    }
-    return null;
+    return UI.staleness(payload, Date.now(), { subject: "This board" });
   }
 
-  function setStale(message) {
+  /* `verdict` is {kind, message} or null. The KIND is stamped on the element
+     as well as the sentence, because "the pipeline stopped" and "the data
+     stopped" want different chrome and a test should not have to parse prose
+     to tell which one is on screen. */
+  function setStale(verdict) {
     if (!staleEl) return;
+    const message = verdict && verdict.message ? verdict.message : "";
     staleEl.hidden = !message;
-    staleEl.textContent = message || "";
+    staleEl.textContent = message;
+    if (message) staleEl.dataset.stale = (verdict && verdict.kind) || "stale";
+    else delete staleEl.dataset.stale;
     document.body.classList.toggle("is-stale", Boolean(message));
   }
 
@@ -898,12 +1408,18 @@
    * loaded", "no name cleared the band") was therefore invisible to a reader
    * in the default view: they saw an empty grid and no reason for it.
    */
-  function showMessage(text) {
+  function showMessage(text, kind) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.className = "fb-empty";
     td.colSpan = COLUMNS;
     td.textContent = text;
+    /* WHICH SILENCE THIS IS, as an attribute and not only as prose. The three
+       are "the key was never published", "the payload could not be read" and
+       "it was measured and is empty", and only the last is a statement about
+       the market. A fourth, `filtered`, is not a silence at all: the rows are
+       here and the reader hid them. */
+    if (kind) td.dataset.empty = kind;
     tr.append(td);
     body.replaceChildren(tr);
 
@@ -911,6 +1427,7 @@
       const note = document.createElement("p");
       note.className = "fb-empty";
       note.textContent = text;
+      if (kind) note.dataset.empty = kind;
       deck.replaceChildren(note);
     }
   }
@@ -938,6 +1455,16 @@
        must not replace it with a silent zero-row table. */
     if (!currentRows.length) return;
     const view = orderedRows();
+    updateCount(view.length);
+    /* A FILTER THAT MATCHES NOTHING IS NOT AN EMPTY BOARD, and the sentence
+       has to say so or the reader reads a typed filter as an outage. The rows
+       are still in `currentRows`, so clearing the field brings them straight
+       back with no fetch. */
+    if (!view.length) {
+      showMessage("No name on this board matches \u201c" + filterText + "\u201d. All " +
+        currentRows.length + " rows are still loaded — clear the field to see them.", "filtered");
+      return;
+    }
     const tableFrag = document.createDocumentFragment();
     for (const { row, index } of view) tableFrag.append(rowFor(row, index));
     body.replaceChildren(tableFrag);              // one insertion, 50 rows
@@ -1058,6 +1585,9 @@
           (isNum(payload.scored) + " names were scored; " +
            (isNum(payload.neutral) ?? "all") + " of them landed inside the band, which is what a " +
            "quiet session looks like. The other side may still have candidates."),
+          /* MEASURED AND EMPTY, which is the one silence of the three that is a
+             reading about the market rather than about the plumbing. */
+          "quiet",
         );
         statusEl.textContent =
           "No " + which + " candidates this session · session " +
@@ -1077,6 +1607,10 @@
           "No board is available for this side. Either the pipeline has not "
           + "published its first session yet, or the store could not be read. "
           + "If this persists past the next trading morning, check the Actions tab.",
+          /* Never published or unreadable: the Worker answers both with the
+             same pending envelope, which is why this one sentence covers two
+             causes and says so. */
+          "unavailable",
         );
         statusEl.textContent = "No published session available.";
         setStale(null);
@@ -1088,12 +1622,25 @@
       knowsDeep = isNum(payload.deep) !== null;
 
       currentRows = rows;
+      /* WARM, COLD OR ABSENT, decided once per payload rather than per row, so
+         every mark and every sentence on the page is answering the same
+         question with the same evidence. */
+      memory = memoryState(rows);
+      setMemoryNote(memory);
+      /* The controls are built HERE and not at boot: which orders this payload
+         can produce depends on the payload, and a select offering "biggest
+         climb" over a board with no memory is a control that does nothing and
+         explains nothing. */
+      buildControls();
       /* A deep-linked sort keyed to a column THIS payload withholds is
          dropped, not half-honoured: nulls-last already leaves the table in
          the published order, so keeping the key would only make every header
-         disagree with the rows. */
+         disagree with the rows. The same test now covers ?sort=dr on a cold
+         board, where the memory sorts are withheld by the rows rather than by
+         the header. */
       if (sortKey && !sortable(colByKey(sortKey))) { sortKey = null; sortDir = "desc"; writeSort(); }
       syncHeaders();      // Π's sortability depends on the payload version
+      syncSortSelect();
       paintRows();
       painted = which;
 
@@ -1137,6 +1684,24 @@
         parts.push(shed + " more cleared the band and did not fit" +
           (cleared === null ? "" : " (" + rows.length + " of " + cleared + " shown)"));
       }
+      /* WHAT CHANGED SINCE YESTERDAY, IN THE LINE THAT ALREADY RECONCILES THE
+         COUNTS — and never without its denominator, which is the row count
+         this same line opens with. "3 names are new" over an unstated
+         population is the defect this product replaced everywhere else.
+
+         A WARM MEMORY WITH NOTHING NEW IS A READING, not a silence, and it
+         gets its own sentence: on a board that turns over daily, a session
+         where nobody arrived is the interesting one. A cold memory says
+         instead that the comparison did not happen; the note above the deck
+         carries the why. */
+      if (memory === "warm") {
+        const fresh = rows.filter((r) => r && r.nw === true).length;
+        const incumbent = rows.filter((r) => r && r.hy === true).length;
+        parts.push(fresh === 0 ? "no new names on this side" : fresh + " new to this side");
+        if (incumbent > 0) parts.push(incumbent + " held on incumbency");
+      } else {
+        parts.push("no comparison with yesterday");
+      }
       if (isNum(payload.dispersion) !== null) {
         /* This is the 95th percentile of |composite| across the scored pool, not
            a standard deviation, so it does not get a sigma suffix — a quantile
@@ -1149,7 +1714,7 @@
       setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;
-      showMessage("The board could not be loaded. Refresh to try again.");
+      showMessage("The board could not be loaded. Refresh to try again.", "unavailable");
       statusEl.textContent = "Could not reach the board service.";
     }).finally(() => {
       body.removeAttribute("aria-busy");
