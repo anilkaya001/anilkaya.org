@@ -27,6 +27,7 @@ import {
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const deepEq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const near = (a, b, tol, msg) => {
   assert.ok(Math.abs(a - b) <= tol, `${msg} — got ${a}, want ${b} ±${tol}`);
   checks++;
@@ -657,7 +658,7 @@ const near = (a, b, tol, msg) => {
      them first fixed that and overcorrected: incumbency came to beat rank
      absolutely, so with 25 incumbents at ranks 5..29 the board was exactly
      those 25 and the four strongest names in the session were not on it. */
-  const slipped = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 });
+  const slipped = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 }).ids;
   for (const t of ["T1", "T2", "T3", "T4"]) {
     ok(slipped.includes(t), `${t} is one of the session's best and is on the board`);
   }
@@ -667,29 +668,83 @@ const near = (a, b, tol, msg) => {
      `the board grows rather than dropping the best (got ${slipped.length})`);
 
   // With no incumbents it is exactly today's top entryRank.
-  const fresh = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 });
+  const fresh = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 }).ids;
   eq(fresh.length, 25, "no incumbents means exactly the top entryRank");
   eq(fresh[0], "T1", "ordered by today's rank");
   eq(fresh[24], "T25", "and cut at entryRank");
 
   // An incumbent past the exit band goes, which is the whole point of exitRank.
-  const dropped = applyHysteresis(today, ["T36", "T50"], { entryRank: 25, exitRank: 35 });
+  const dropped = applyHysteresis(today, ["T36", "T50"], { entryRank: 25, exitRank: 35 }).ids;
   ok(!dropped.includes("T36") && !dropped.includes("T50"),
      "an incumbent beyond exitRank is not held");
   eq(dropped.length, 25, "so the board does not grow for it");
 
   // The board is always ordered by TODAY's rank, never by incumbency.
-  const mixed = applyHysteresis(today, today.slice(25, 34), { entryRank: 25, exitRank: 35 });
+  const mixed = applyHysteresis(today, today.slice(25, 34), { entryRank: 25, exitRank: 35 }).ids;
   const positions = mixed.map((t) => today.indexOf(t));
   ok(positions.every((v, i) => i === 0 || v > positions[i - 1]),
      "the emitted board is in today's rank order");
   ok(new Set(mixed).size === mixed.length, "and holds no duplicates");
 
   // Degenerate inputs must not throw or invent names.
-  eq(applyHysteresis([], ["T1"]).length, 0, "an empty session yields an empty board");
-  eq(applyHysteresis(null, null).length, 0, "and null inputs are safe");
-  const short = applyHysteresis(today.slice(0, 8), today.slice(0, 8), { entryRank: 25, exitRank: 35 });
+  eq(applyHysteresis([], ["T1"]).ids.length, 0, "an empty session yields an empty board");
+  eq(applyHysteresis(null, null).ids.length, 0, "and null inputs are safe");
+  const short = applyHysteresis(today.slice(0, 8), today.slice(0, 8), { entryRank: 25, exitRank: 35 }).ids;
   eq(short.length, 8, "a pool shorter than entryRank is kept whole, not padded");
+}
+
+/* ---------- the board's memory ----------------------------------
+   applyHysteresis already knew which names were new, which returned, and
+   which were here only on incumbency. It returned a flat list of tickers, so
+   a board that had just decided all three published a page on which nothing
+   was new. These are those three facts, and the fourth that keeps them
+   honest: a cold memory is not a memory full of arrivals. */
+{
+  const today = Array.from({ length: 60 }, (_, i) => "T" + (i + 1));
+
+  /* Yesterday held T5..T29. So T1..T4 are new by rank, T5..T25 return by
+     rank, and T26..T29 are here ONLY because they were here yesterday. */
+  const m = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 });
+
+  deepEq(m.entered, ["T1", "T2", "T3", "T4"],
+    "the four names that entered the top 25 overnight are named, in rank order — the " +
+    "single sentence a ranked list most owes a reader who was not looking yesterday");
+  deepEq(m.held, ["T26", "T27", "T28", "T29"],
+    "and the names here on incumbency rather than on rank are named separately: this is " +
+    "the fact no downstream set difference can recover, because it is a statement about " +
+    "WHY a name is on the board");
+  ok(m.returning.length === m.ids.length - m.entered.length,
+    "entered and returning partition the board exactly — no name is both and none is neither");
+  for (const id of m.held) ok(m.returning.includes(id),
+    `${id} is held, so it is by construction also returning`);
+  for (const id of m.entered) ok(!m.held.includes(id),
+    `${id} entered today, so it cannot be here on incumbency`);
+  for (const id of m.entered) ok(m.ids.includes(id), `${id} is on the board it entered`);
+
+  /* THE COLD MEMORY. This is the case that makes the difference between a
+     useful flag and a daily lie: the store read is non-fatal by design, so a
+     week of failed reads would otherwise publish "everything is new" every
+     morning and a reader would learn to ignore the flag entirely. */
+  const cold = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 });
+  ok(cold.cold, "an empty incumbent list is reported as a COLD memory, not as a full board of arrivals");
+  eq(cold.entered.length, 0,
+     "so nothing claims to be new — 25 names would each be technically correct and the " +
+     "page would be wrong");
+  eq(cold.returning.length, 0, "and nothing claims to be returning either");
+  eq(cold.ids.length, 25, "while the board itself is unaffected: the memory is a separate question");
+  eq(cold.held.length, 0, "and no name can be held by an incumbency that does not exist");
+
+  const warm = applyHysteresis(today, ["T1"], { entryRank: 25, exitRank: 35 });
+  ok(!warm.cold, "one incumbent is a memory");
+  eq(warm.entered.length, 24, "and 24 of the 25 are then genuinely new");
+  deepEq(warm.returning, ["T1"], "with the one that was here named");
+
+  /* Order is the board's order in all three, so a renderer can zip them. */
+  const order = new Map(m.ids.map((t, i) => [t, i]));
+  for (const list of [m.entered, m.returning, m.held]) {
+    ok(list.every((t, i) => i === 0 || order.get(t) > order.get(list[i - 1])),
+       "every subset comes back in the board's own rank order");
+  }
 }
 
 /* ---------- asset-version pinning -------------------------------

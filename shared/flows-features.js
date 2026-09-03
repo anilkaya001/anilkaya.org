@@ -1354,12 +1354,38 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
  * A variable-length board is the price, and it is the right price: the
  * alternative is a fixed length that can only be held by excluding the very
  * names the board exists to surface. The dead band already makes length vary.
+ *
+ * IT ALSO RETURNS THE BOARD'S MEMORY, and that is the reason this function
+ * changed shape.
+ *
+ * The rule above already knows three things about every name it emits: that
+ * the name is new to the board, that it was here yesterday, and — separately —
+ * that it is here ONLY because it was here yesterday. It knew all three and
+ * returned a flat list of tickers, so a board that had just decided which
+ * names were new published a page on which nothing was new. A reader opening
+ * it at 09:15 could not answer "what is different from yesterday" without
+ * having kept yesterday's page open, which nobody does.
+ *
+ * The third fact is the one that cannot be reconstructed downstream. "New"
+ * and "returning" are a set difference anyone holding both lists can take.
+ * "Held" is a statement about WHY this name is on the board — it did not earn
+ * a top-`entryRank` place today and is here on incumbency — and that
+ * distinction exists only inside this loop. Published, it is the difference
+ * between a board of twenty-eight names and a board of twenty-five names plus
+ * three that are on their way out.
+ *
+ * @returns {{ids: string[], entered: string[], held: string[], returning: string[]}}
+ *   `ids` is what the old signature returned, unchanged, in today's rank
+ *   order. The other three are subsets of it, in the same order.
  */
 export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exitRank = 35 } = {}) {
   const ranked = todayRanked || [];
-  const held = new Set(yesterdayIds || []);
+  const incumbent = new Set(yesterdayIds || []);
   const taken = new Set();
   const keep = [];
+  /* Membership by RULE, not by rank: a name can sit at rank 3 and still be
+     new, and a name can sit at rank 30 because it is old. */
+  const byHysteresis = new Set();
 
   // Today's top `entryRank`, always. Nothing outranks being one of the best
   // names in the session.
@@ -1372,10 +1398,29 @@ export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exi
   // exit band. This is the hysteresis, and it can only ADD.
   for (let i = entryRank; i < ranked.length && i < exitRank; i++) {
     const id = ranked[i];
-    if (held.has(id) && !taken.has(id)) { keep.push(id); taken.add(id); }
+    if (incumbent.has(id) && !taken.has(id)) {
+      keep.push(id); taken.add(id); byHysteresis.add(id);
+    }
   }
 
   const rankOf = new Map(ranked.map((id, i) => [id, i]));
-  return keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
+  const ids = keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
+
+  /* THE EMPTY INCUMBENT LIST IS NOT AN EMPTY MEMORY, and the two must not
+     render alike. A cold start — no board published yesterday, or a store
+     read that failed, which this pipeline treats identically and non-fatally
+     — makes EVERY name look new, and a page announcing fifty-three arrivals
+     on a morning when nothing arrived is worse than a page that says nothing.
+     So the caller is told the memory was empty, and it is the caller's job to
+     say "no yesterday to compare against" rather than "everything is new". */
+  const cold = incumbent.size === 0;
+
+  return {
+    ids,
+    entered: cold ? [] : ids.filter((id) => !incumbent.has(id)),
+    returning: cold ? [] : ids.filter((id) => incumbent.has(id)),
+    held: ids.filter((id) => byHysteresis.has(id)),
+    cold,
+  };
 }
 

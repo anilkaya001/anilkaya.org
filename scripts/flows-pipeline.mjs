@@ -1779,15 +1779,25 @@ function ret(closes, n) {
 }
 
 /**
- * The tickers on the currently published board, for hysteresis.
+ * The currently published board, for hysteresis AND for the board's memory.
+ *
+ * THIS USED TO RETURN TICKERS AND THREW AWAY THE RANKS IT HAD IN HAND. The
+ * read is one request either way; mapping it down to `r.t` cost nothing and
+ * discarded the only copy of yesterday's ordering the run would ever hold.
+ * With the ranks kept, a row can say it climbed from 31st to 4th — which is
+ * the single most useful sentence a ranked list can print, and the one it
+ * could not print because this function had already deleted the evidence.
  *
  * Non-fatal by design: if this cannot be read, the board is simply built with
  * no incumbents, which is exactly what shipped before hysteresis was wired up.
- * A stale-board read must never stop today's board from publishing.
+ * A stale-board read must never stop today's board from publishing — and an
+ * empty result here reaches applyHysteresis as a COLD memory, which it
+ * reports as such rather than calling every name new.
  */
-async function fetchPublishedTickers(key) {
+async function fetchPublishedRows(key) {
   const body = await fetchStoredPayload(key);
-  return body && Array.isArray(body.rows) ? body.rows.map((r) => r.t).filter(Boolean) : [];
+  if (!body || !Array.isArray(body.rows)) return [];
+  return body.rows.filter((r) => r && r.t);
 }
 
 /**
@@ -2034,9 +2044,17 @@ const hz = (v) => (v === null ? null : Number(v.toFixed(4)));
  * diverged badly enough to take a whole run down after the boards had already
  * committed. The row builder is shared for the same reason.
  */
-function boardRow(r, s, rank) {
+function boardRow(r, s, rank, memory = null, origin = null) {
   const close = num(s.close);
   const prev = num(s.prev_close);
+  /* THE GATE'S OWN ARITHMETIC, ON THE ROW IT SPARED. Every name here cleared
+     the earnings gate by definition, so `edte` is null, negative, or past
+     EARNINGS_GATE_DAYS — and the interesting case is the third: a name ranked
+     third that reports in thirteen days is a name that will be gone from this
+     board tomorrow or the day after, for a reason that has nothing to do with
+     its signal decaying. The run computed this number to decide whether to
+     score the name at all and then dropped it. It costs no vendor call. */
+  const edte = daysToEarnings(s, origin);
   return {
     t: r.ticker,
     r: rank,
@@ -2103,6 +2121,28 @@ function boardRow(r, s, rank) {
     im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
     hm: hz(horizonMove(r.iv30)),
     hr: hz(horizonMove(r.rv30)),
+    /* APPENDED, NEVER INSERTED — the board table binds its columns
+       positionally, and republishWithChain's comment two hundred lines below
+       says why in more detail than it should have had to. */
+    /* THE BOARD'S MEMORY. Null across all three when yesterday could not be
+       read, which is NOT the same as a name having no history: a cold read
+       makes every name look new, and a page announcing fifty-three arrivals
+       on a quiet morning is worse than one that says nothing. The three are
+       null together so a renderer cannot draw one of them from a memory that
+       did not exist. */
+    nw: memory ? memory.nw : null,          // new to this side today
+    hy: memory ? memory.hy : null,          // here on incumbency, not on rank
+    r0: memory ? memory.r0 : null,          // yesterday's rank on this side
+    /* SIGNED SO THAT UP IS GOOD, which is the opposite of the arithmetic:
+       rank 31 to rank 4 is -27 in rank units and +27 places of improvement.
+       Publishing the raw subtraction would make every renderer negate it, and
+       one of them would eventually forget. */
+    dr: memory && memory.r0 !== null ? memory.r0 - rank : null,
+    /* The earnings date as published by the screener, beside the day count,
+       because a count with no origin is not checkable and this file has paid
+       for that lesson once already on /flows/events/. */
+    ed: s.next_earnings_date || null,
+    edte,
   };
 }
 
@@ -2181,14 +2221,39 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
  * them. That is the failure the neutral-list comment above already names: a
  * payload saying 48 above a list of 40.
  */
-function toRows(pool, screenerByTicker, previousIds) {
-  const ids = applyHysteresis(
-    pool.map((r) => r.ticker), previousIds,
+function toRows(pool, screenerByTicker, previousRows, origin) {
+  const prior = Array.isArray(previousRows) ? previousRows : [];
+  const memo = applyHysteresis(
+    pool.map((r) => r.ticker), prior.map((r) => r.t),
     { entryRank: UNIVERSE.boardSize, exitRank: Math.round(UNIVERSE.boardSize * 1.4) },
   );
   const byTicker = new Map(pool.map((r) => [r.ticker, r]));
-  return ids.map((ticker, i) =>
-    boardRow(byTicker.get(ticker), screenerByTicker.get(ticker) || {}, i + 1));
+  /* YESTERDAY'S RANK BY NAME. Read from the published row rather than from
+     the array position, because the two are the same only while nothing has
+     ever filtered the rows in between — and `num` rather than a bare read,
+     because a rank that arrives as a string would sort as one. */
+  const rankBefore = new Map();
+  for (const r of prior) {
+    const v = num(r.r);
+    if (v !== null) rankBefore.set(r.t, v);
+  }
+  const entered = new Set(memo.entered);
+  const held = new Set(memo.held);
+
+  return memo.ids.map((ticker, i) => boardRow(
+    byTicker.get(ticker),
+    screenerByTicker.get(ticker) || {},
+    i + 1,
+    /* NULL MEMORY ON A COLD READ, not a memory full of falses. If yesterday's
+       board could not be read, "is this name new" has no answer, and `false`
+       is an answer. */
+    memo.cold ? null : {
+      nw: entered.has(ticker),
+      hy: held.has(ticker),
+      r0: rankBefore.has(ticker) ? rankBefore.get(ticker) : null,
+    },
+    origin,
+  ));
 }
 
 /**
@@ -3201,8 +3266,23 @@ function fakeScreener(count) {
       week_52_high: (price * (1.05 + rnd() * 0.6)).toFixed(2),
       week_52_low: (price * (0.4 + rnd() * 0.4)).toFixed(2),
       relative_volume: (0.5 + rnd() * 3).toFixed(2),
-      next_earnings_date: rnd() > 0.85
-        ? new Date(Date.now() + Math.floor(rnd() * 20) * 86400000).toISOString().slice(0, 10)
+      /* EARNINGS ON BOTH SIDES OF THE GATE, AND ENOUGH OF THEM TO REACH THE
+         BOARD. This generated a date for 15% of rows inside a 0-19 day
+         window, so about three quarters of the ones it did generate fell
+         INSIDE the twelve-day gate and were filtered out before scoring. The
+         emitted corpus came back with exactly one board row out of 96
+         carrying an earnings date — a branch that technically executed and
+         proved nothing, which is the same "a fixture in which it cannot
+         execute certifies an implementation the live wire will break" this
+         file has now had to say five times.
+
+         Half the rows get a date, spread across 0-45 days. The gate still
+         removes the near ones — that is what the gate is for, and the events
+         page is built from exactly those — and the rest land on the boards
+         where `edte` is the column that says a top-ranked name is about to be
+         removed for a reason that has nothing to do with its signal. */
+      next_earnings_date: rnd() > 0.5
+        ? new Date(Date.now() + Math.floor(rnd() * 46) * 86400000).toISOString().slice(0, 10)
         : null,
     });
   }
@@ -4194,14 +4274,27 @@ async function main() {
      the plain top-N, which is what shipped anyway. */
   const previous = {};
   for (const side of ["long", "short"]) {
-    previous[side] = await fetchPublishedTickers("board:" + side);
+    previous[side] = await fetchPublishedRows("board:" + side);
   }
 
   const published = {};
   const payloads = {};
   const first = scored[0] || {};
   for (const side of ["long", "short"]) {
-    published[side] = toRows(sides[side], screenerByTicker, previous[side]);
+    published[side] = toRows(sides[side], screenerByTicker, previous[side], today);
+  }
+  /* WHAT THE MEMORY SAW, IN THE LOG, because a board that quietly reports no
+     arrivals every morning is indistinguishable from a store read that has
+     been failing for a week. */
+  for (const side of ["long", "short"]) {
+    const rows = published[side];
+    const cold = rows.length && rows[0].nw === null;
+    console.log(
+      `  board:${side} memory: ` + (cold
+        ? `cold — yesterday's board could not be read, so no row claims to be new`
+        : `${rows.filter((r) => r.nw).length} new, ` +
+          `${rows.filter((r) => r.hy).length} held on incumbency, ` +
+          `of ${rows.length} (${previous[side].length} yesterday)`));
   }
 
   /* WHICH ROWS HAVE A CARD, STAMPED ONTO THE ROW ITSELF.
