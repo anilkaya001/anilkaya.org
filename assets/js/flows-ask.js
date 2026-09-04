@@ -724,6 +724,68 @@
     });
   }
 
+  /* SEVERITY IS A WORD AND A POSITION, NEVER A HUE ALONE — the same rule
+     flows.css:880 states for the silence marks. The mark is drawn in a
+     fixed column so "blocking" and "note" are told apart by shape before
+     any colour is read, and the word itself is printed, because a glyph
+     alone is a legend a reader has to have been taught. */
+  var WARN_MARK = { blocking: "!!", caution: "!", note: "\u00b7" };
+
+  function paintWarnings(brief) {
+    var box = el("section", "ak-warns fc-panel ak-panel");
+    var list = brief && Array.isArray(brief.warnings) ? brief.warnings : null;
+    var checked = brief && typeof brief.warningsChecked === "number" ? brief.warningsChecked : null;
+
+    if (list === null) {
+      /* THE KEY PREDATES THE CHECKS, or the field did not survive the
+         wire. Either way this page has not been told anything about the
+         data's consistency, and saying "no warnings" here would be a
+         claim nobody measured. */
+      box.append(el("p", "ak-warns-none fc-note",
+        "This briefing carries no consistency report, so nothing is stated about whether " +
+        "its surfaces agree. That is a gap on this page rather than a clean bill."));
+      return box;
+    }
+
+    if (!list.length) {
+      box.append(el("p", "ak-warns-none fc-note", checked === null
+        ? "No inconsistency was found across the published surfaces."
+        : "No inconsistency was found across the published surfaces, from " + checked + " " +
+          (checked === 1 ? "check that could run" : "checks that could run") + "."));
+      return box;
+    }
+
+    box.append(el("h2", "fc-panel-h", list.length === 1
+      ? "1 thing to know before reading the rest"
+      : list.length + " things to know before reading the rest"));
+    box.append(el("p", "ak-sub fc-note", checked === null
+      ? "Each was found by comparing two published surfaces against each other."
+      : "Found by comparing published surfaces against each other; " + checked + " of these " +
+        (checked === 1 ? "check" : "checks") + " had the inputs to run at all."));
+
+    var ul = el("ul", "ak-warns-list");
+    for (var i = 0; i < list.length; i++) {
+      var w = list[i] || {};
+      var sev = typeof w.severity === "string" && WARN_MARK[w.severity] ? w.severity : "note";
+      var li = el("li", "ak-warn is-" + sev);
+      li.append(el("span", "ak-warn-mark", WARN_MARK[sev]));
+      var body = el("div", "ak-warn-body");
+      body.append(el("p", "ak-warn-say", typeof w.say === "string" ? w.say : ""));
+      var src = Array.isArray(w.sources) ? w.sources.filter(function (x) { return typeof x === "string" && x; }) : [];
+      var line = el("p", "ak-warn-src");
+      line.append(el("span", "ak-warn-sev", sev));
+      if (src.length) {
+        line.append(text(" \u00b7 "));
+        line.append(el("span", "ak-src-key", src.join(", ")));
+      }
+      body.append(line);
+      li.append(body);
+      ul.append(li);
+    }
+    box.append(ul);
+    return box;
+  }
+
   function paintBrief(brief) {
     briefHost.textContent = "";
 
@@ -763,6 +825,16 @@
       }
       return;
     }
+
+    /* WARNINGS FIRST, BECAUSE THEY CHANGE HOW THE REST IS READ. A caution
+       saying a count is a floor rather than a total has to arrive BEFORE
+       the count, or the reader has already formed the comparison it
+       exists to prevent. This is not an overlay and it is not a banner:
+       each line has read two payloads at once, names the surfaces that
+       disagree, and quotes the numbers that make it a fact rather than a
+       worry. `checked` is drawn beside them because a reader must be able
+       to tell "nothing is wrong" from "almost nothing could be asked". */
+    briefHost.append(paintWarnings(brief));
 
     for (var i = 0; i < REGIONS.length; i++) briefHost.append(paintRegion(REGIONS[i], brief));
 

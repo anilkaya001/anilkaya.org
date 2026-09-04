@@ -6412,3 +6412,30 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    `:empty` rather than a flag the script has to remember to clear,
    because the two would drift and the drift shows as this exact box. */
 .ak-answer:empty { display: none; }
+
+/* THE CONSISTENCY REPORT, ABOVE EVERYTHING IT QUALIFIES. */
+.ak-warns { padding: 1.25rem 1.75rem; }
+.ak-warns-none { margin: 0; }
+.ak-warns-list { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.9rem; }
+
+/* THE MARK IS A GLYPH IN A FIXED COLUMN AND THE SEVERITY IS SPELLED OUT.
+   A coloured dot is a legend a reader has to have been taught, and it is
+   the one channel that does not survive greyscale, a printout, or the
+   readers for whom two of these accents are the same colour. Shape and
+   position carry it; the tint is the last channel and it is added on top
+   of a distinction that already works without it. */
+.ak-warn { display: flex; gap: 0.75rem; align-items: baseline; }
+.ak-warn-mark {
+  flex: 0 0 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  text-align: right;
+}
+.ak-warn-body { flex: 1 1 auto; max-width: var(--measure); }
+.ak-warn-say { margin: 0; }
+.ak-warn-src { margin: 0.2rem 0 0; font-size: var(--fs-micro); color: var(--ink-dim); }
+.ak-warn-sev { text-transform: uppercase; letter-spacing: 0.08em; }
+
+.ak-warn.is-blocking .ak-warn-mark { color: var(--flow-down, var(--ink)); }
+.ak-warn.is-caution .ak-warn-mark { color: var(--gold-harvest); }
+.ak-warn.is-note .ak-warn-mark { color: var(--ink-faint); }

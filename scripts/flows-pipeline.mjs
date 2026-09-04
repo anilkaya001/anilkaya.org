@@ -8685,6 +8685,7 @@ async function main() {
   try {
     const { buildBrief, briefStoreFrom } = await import("../shared/flows-brief.js");
     const { buildFactIndex } = await import("../shared/flows-ask.js");
+    const { assess, assessStoreFrom } = await import("../shared/flows-warnings.js");
     /* THE SLOT RENAME IS NOT SPELLED HERE ANY MORE. It was, and
        shared/flows-ask.js spelled it a second time — two copies of a
        six-key mapping whose failure mode is not an exception but a
@@ -8700,11 +8701,31 @@ async function main() {
        reader who opens the page and then asks a question must not be
        answered out of two different sessions. */
     const index = buildFactIndex(publishedStore);
+    /* THE WARNINGS RIDE THE SAME KEY, AND THEY ARE MEASURED HERE FOR THE
+       SAME REASON THE INDEX IS: every one of them reads across two or more
+       payloads at once — a stamp against another stamp, a population
+       against the prior session's, a count against a vendor cap — and no
+       renderer holds more than one payload. The Worker could not do it
+       either without parsing ten keys under a metered CPU budget.
+
+       `checked` travels with them because a reader must be able to tell
+       "nothing is wrong" from "almost nothing was asked". A morning where
+       half the surfaces did not publish produces few warnings for the
+       uninteresting reason that few questions could be put. */
+    const alarm = assess(assessStoreFrom(publishedStore));
+    if (alarm.warnings.length) {
+      console.log(`  warnings: ${alarm.warnings.length} raised from ${alarm.checked} checks that could run`);
+      for (const w of alarm.warnings) console.log(`    [${w.severity}] ${w.say}`);
+    } else {
+      console.log(`  warnings: none, from ${alarm.checked} checks that could run`);
+    }
     await publish("brief", {
       generatedAt, sessionDate,
       ...buildBrief(briefStoreFrom(publishedStore)),
       facts: index.facts,
       silences: index.silences,
+      warnings: alarm.warnings,
+      warningsChecked: alarm.checked,
     });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);

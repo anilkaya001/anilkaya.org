@@ -809,6 +809,30 @@ const CHECKS = [
  * keep the order the checks are declared in so the same store always
  * renders the same page.
  */
+/**
+ * Turn a store keyed by published key into the slots the checks read.
+ *
+ * EXPORTED FROM HERE FOR THE SAME REASON briefStoreFrom LIVES IN
+ * flows-brief.js: the slot names are this module's, so the rename is
+ * this module's to own. A caller writing it out by hand would be the
+ * third copy of a mapping whose failure mode is not an exception but a
+ * check that quietly stops running — and `checked` would fall while
+ * `warnings` stayed empty, which reads exactly like a clean morning.
+ *
+ * An absent key arrives as {status:"pending"} rather than as missing,
+ * matching what the Worker serves for a key nobody wrote; a key present
+ * and null stays null, because a read that FAILED is not a key that was
+ * never written and the checks tell those apart.
+ */
+export function assessStoreFrom(published) {
+  const p = published && typeof published === "object" ? published : {};
+  const out = {};
+  for (const [slot, key] of Object.entries(KEY)) {
+    out[slot] = Object.hasOwn(p, key) ? p[key] : { status: "pending" };
+  }
+  return out;
+}
+
 export function assess(store) {
   const s = store && typeof store === "object" ? store : {};
   const warnings = [];
