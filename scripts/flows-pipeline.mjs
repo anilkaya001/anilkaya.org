@@ -4224,9 +4224,30 @@ function fakeStockOiChange(ticker, spot) {
     const row = {
       option_symbol: `${ticker}260918${rnd() > 0.5 ? "C" : "P"}${String(k * 1000).padStart(8, "0")}`,
       underlying_symbol: ticker,
-      oi_change: String(Math.round((rnd() - 0.35) * 30000)),
-      curr_oi: Math.round(rnd() * 80000),
-      last_oi: Math.round(rnd() * 70000),
+      ...(() => {
+        /* THREE INDEPENDENT RANDOMS USED TO STAND IN FOR ONE RELATION, and
+           the middle one was the wrong shape besides: oi_change was drawn as
+           a signed COUNT in the tens of thousands, when the vendor sends it
+           as (curr_oi - last_oi) / last_oi — a ratio, with the contract
+           difference riding separately as oi_diff_plain. So no row's change
+           agreed with its own two snapshots, and the corpus could not have
+           caught the renderer drawing the ratio as a count, because the
+           corpus made the same mistake.
+
+           Drawn from the two snapshots now, with last_oi floored at 1 so the
+           denominator is never zero. i % 9 leaves one row in nine carrying
+           NO oi_diff_plain, so the branch where the vendor sends a ratio and
+           no count is reached by the corpus rather than only asserted about. */
+        const last = Math.max(1, Math.round(rnd() * 70000));
+        const curr = Math.max(0, Math.round(last * (0.4 + rnd() * 1.6)));
+        const row = {
+          oi_change: String((curr - last) / last),
+          curr_oi: curr,
+          last_oi: last,
+        };
+        if (i % 9 !== 8) row.oi_diff_plain = curr - last;
+        return row;
+      })(),
       volume: Math.round(rnd() * 40000),
       curr_date: "2026-08-28",
       last_date: "2026-08-27",

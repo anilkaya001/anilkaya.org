@@ -518,15 +518,26 @@ try {
   {
     /* NO NAME IS THE INDEX, NOT AN ERROR — and it must not fetch a card. */
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    /* THE FIXTURE IS THE SHAPE THE PIPELINE ACTUALLY WRITES, and the previous
+       one was not. It carried `dp: 0` on the row with no card — a value this
+       payload has never held. flows-pipeline.mjs stamps `row.dp = 1` on the
+       deep set and writes NOTHING on the rest, and publishes the count as
+       `deep` beside `deepRule`. Written the old way, the fixture agreed with
+       the controller's `row.dp === 0` test and both were wrong about the wire:
+       on a live board 21 of 44 rows were listed as openable and were not.
+       A fixture written from the same assumption as the code proves only that
+       the assumption is self-consistent. */
     await mount(page, withChain[0], {
       ticker: null,
-      boards: { rows: [{ t: "AAA", r: 1, s: 42, dp: 1 }, { t: "BBB", r: 2, s: 30, dp: 0 }] },
+      boards: { deep: 1, rows: [{ t: "AAA", r: 1, s: 42, dp: 1 }, { t: "BBB", r: 2, s: 30 }] },
     });
     const state = await page.evaluate(() => ({
       status: document.getElementById("ftStatus").textContent,
       pickerShown: !document.getElementById("ftPicker").hidden,
       gridShown: !document.getElementById("ftGrid").hidden,
       rows: document.querySelectorAll("#ftPickerBody tr").length,
+      names: [...document.querySelectorAll("#ftPickerBody .ft-link")].map((a) => a.textContent),
+      note: document.getElementById("ftPickerNote").textContent,
       requested: window.__requested.slice(),
     }));
     ok(state.pickerShown, "with no ?t= the page shows the picker");
@@ -536,21 +547,90 @@ try {
        "and spends no card read at all");
     /* A NAME WITH NO CARD GETS NO ROW. A link that usually leads to "no card
        for this name" is worse than no link. */
-    eq(state.rows, 1, "only the names with a card are listed (dp:0 is excluded)");
+    eq(state.rows, 1,
+       "only the names the board stamped with a card are listed — a row the run went " +
+       "deep on carries dp:1 and one it did not carries no dp at all");
+    eq(state.names.join(","), "AAA", "and it is the stamped one that is listed");
+    /* AND THE NOTE IS TRUE OF THE LIST UNDER IT. It used to promise "every
+       name today's board went deep enough on to build a card for" above a list
+       that was every row on the board. */
+    ok(/ranks 2 names/.test(state.note) && /card for 1 of them/.test(state.note),
+       `the note counts the list against the board it came from (${state.note})`);
+    ok(/not listed/.test(state.note),
+       "and says what happened to the row it dropped rather than leaving the reader to " +
+       "notice the board is longer than the list");
     await page.close();
   }
   {
-    /* THE TWO PENDING STATES ARE DIFFERENT FACTS and must read differently. */
-    for (const [onBoard, want] of [[true, "has not landed"], [false, "not on today"]]) {
+    /* AN OLD BOARD HAS NO `dp` ON ANY ROW, and absent-on-every-row is not
+       false-on-every-row. Assets deploy the moment main moves and the pipeline
+       runs the next morning, so there is always a day when this JavaScript
+       reads a board written before the flag existed — and treating that as
+       "no name has a card" would empty the index of a section whose whole
+       purpose is opening those cards. The test is the published `deep` count,
+       not the row. */
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, withChain[0], {
+      ticker: null,
+      boards: { rows: [{ t: "AAA", r: 1, s: 42 }, { t: "BBB", r: 2, s: 30 }] },
+    });
+    const state = await page.evaluate(() => ({
+      rows: document.querySelectorAll("#ftPickerBody tr").length,
+      note: document.getElementById("ftPickerNote").textContent,
+    }));
+    eq(state.rows, 2,
+       "a board that publishes no `deep` count lists every row rather than none");
+    ok(/does not publish/.test(state.note),
+       `and the note says the flag is unpublished rather than promising a card (${state.note})`);
+    ok(/may still open a page with no card/.test(state.note),
+       "naming the risk it cannot rule out, instead of a claim it cannot check");
+    await page.close();
+  }
+  {
+    /* THE THREE PENDING STATES ARE DIFFERENT FACTS and must read differently.
+
+       THE THIRD ONE USED TO BE TOLD AS THE FIRST. A name the board RANKS but
+       built no card for is not a card lagging its row: the run never intended
+       to build one, because a card costs two vendor calls it spends only on
+       the names furthest from neutral. "Its card has not landed yet" invited a
+       reload that will never produce one, and on a live board that was 21 of
+       44 names on the long side. */
+    const pendingCases = [
+      [{ deep: 1, rows: [{ t: "ZZZ", r: 1, s: 5, dp: 1 }] }, "has not landed",
+       "a card that really is lagging its row"],
+      [{ deep: 1, rows: [{ t: "QQQ", r: 1, s: 5, dp: 1 }] }, "not on today",
+       "a name the board does not carry at all"],
+      [{ deep: 1, rows: [{ t: "AAA", r: 1, s: 9, dp: 1 }, { t: "ZZZ", r: 2, s: 5 }] },
+       "built no card for it", "a name the board RANKS and this run built no card for"],
+    ];
+    for (const [boards, want, what] of pendingCases) {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+      await mount(page, { status: "pending", ticker: "ZZZ" }, { ticker: "ZZZ", boards });
+      const status = await page.evaluate(
+        () => document.getElementById("ftStatus").textContent);
+      ok(status.includes(want), `${what} says so specifically ("${want}")`);
+      await page.close();
+    }
+    {
+      /* AND THE THIRD ONE NAMES THE RANK INSIDE THE SIDE'S OWN POPULATION,
+         never inside the count of rows this page kept. */
       const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
       await mount(page, { status: "pending", ticker: "ZZZ" }, {
         ticker: "ZZZ",
-        boards: { rows: onBoard ? [{ t: "ZZZ", r: 1, s: 5, dp: 1 }] : [{ t: "QQQ", r: 1, s: 5, dp: 1 }] },
+        boards: { deep: 1, rows: [{ t: "AAA", r: 1, s: 9, dp: 1 }, { t: "ZZZ", r: 2, s: 5 }] },
       });
-      const status = await page.evaluate(
-        () => document.getElementById("ftStatus").textContent);
-      ok(status.includes(want),
-         `a pending card ${onBoard ? "on" : "off"} the board says so specifically ("${want}")`);
+      const state = await page.evaluate(() => ({
+        status: document.getElementById("ftStatus").textContent,
+        rows: document.querySelectorAll("#ftPickerBody tr").length,
+      }));
+      ok(/2 of 2 on the bullish side/.test(state.status),
+         `the rank is stated against the whole side, not against the carded half ` +
+         `(${state.status})`);
+      ok(!/has not landed|briefly lag/.test(state.status),
+         "and never as a lag, because reloading cannot produce a card the run did not " +
+         "budget for");
+      eq(state.rows, 1,
+         "while the list beside it holds only the name that does have a card");
       await page.close();
     }
   }
@@ -668,6 +748,7 @@ try {
         dpNotes: [...dpHost.querySelectorAll(".fc-note")].map((n) => n.textContent).join(" "),
         oiContracts: [...oiHost.querySelectorAll(".foi-oc")].map((n) => n.textContent),
         oiChanges: [...oiHost.querySelectorAll(".foi-chg")].map((n) => n.textContent),
+        oiGrowth: [...oiHost.querySelectorAll(".foi-growth")].map((n) => n.textContent),
         oiStreaks: [...oiHost.querySelectorAll(".foi-streaks")]
           .map((n) => [...n.querySelectorAll(".foi-streak")].map((s) => s.textContent)),
         oiCount: text(oiHost, ".foi-count"),
@@ -726,16 +807,33 @@ try {
     eq(got.oiContracts.length, oi.rows.length, "oiDeltas draws one row per published change");
     ok(/^[CP] [\d.]+ · \d{2}-\d{2}$/.test(got.oiContracts[0]),
        `the contract cell is built from cp, strike and expiry ("${got.oiContracts[0]}")`);
-    const iNeg = oi.rows.findIndex((r) => typeof r.change === "number" && r.change < 0);
+    /* THESE READ `r.diff` NOW, AND THE BLOCK ASSERTS IT FOUND SOMETHING.
+       They used to read `r.change`, the field that carried the vendor's
+       oi_change — a RATIO drawn as a contract count. Renaming it to `diff`
+       and `ratio` left these two findIndex calls looking for a key nothing
+       has, so both returned -1 and both `if` bodies silently stopped running:
+       the suite kept passing while testing nothing, which is the same shape
+       as the six [message, condition] assertions fixed in flows-legacy-payload
+       tonight. A guarded assertion needs a guard on the guard. */
+    const iNeg = oi.rows.findIndex((r) => typeof r.diff === "number" && r.diff < 0);
+    const iPos = oi.rows.findIndex((r) => typeof r.diff === "number" && r.diff > 0);
+    ok(iNeg !== -1 || iPos !== -1,
+       "the emitted corpus carries at least one signed open-interest difference, so the " +
+       "two sign assertions below are about rows that exist rather than about nothing");
     if (iNeg !== -1) {
       ok(got.oiChanges[iNeg].startsWith("−"),
-         `a negative change leads with U+2212 ("${got.oiChanges[iNeg]}")`);
+         `a negative difference leads with U+2212 ("${got.oiChanges[iNeg]}")`);
     }
-    const iPos = oi.rows.findIndex((r) => typeof r.change === "number" && r.change > 0);
     if (iPos !== -1) {
       ok(got.oiChanges[iPos].startsWith("+"),
-         `a positive change leads with its sign ("${got.oiChanges[iPos]}")`);
+         `a positive difference leads with its sign ("${got.oiChanges[iPos]}")`);
     }
+    /* AND THE RATIO IS A RATIO ON THE PAGE. Every drawn growth cell either is
+       the em dash or carries a percent sign — the one mark that stops this
+       column being read as the contract count next to it. */
+    ok(got.oiGrowth.length === oi.rows.length &&
+       got.oiGrowth.every((t) => t === "\u2014" || /%$/.test(t)),
+       `every growth cell carries its unit or says nothing (${got.oiGrowth.join(" ")})`);
     /* Row 0's oiUpDays was staged to null: its ↑OI half is the dash, and its
        V>OI half still renders — a missing counter is not a streak of zero
        and must not take its neighbour down with it. */
@@ -918,8 +1016,14 @@ try {
         when: blocks.map((b) => textOf(b.querySelector(".fmr-when"))),
         cut: blocks.map((b) => textOf(b.querySelector(".fmr-cut"))),
         cover: blocks.map((b) => textOf(b.querySelector(".fmr-cover"))),
+        /* EVERYTHING A BLOCK SAYS, tooltips included, for the vocabulary
+           sweep — the same `saidBy` shape the stock panels use, because a
+           claim hidden in a title attribute is still a claim. */
+        blockText: blocks.map((b) => b.textContent + " " +
+          [...b.querySelectorAll("[title]")].map((n) => n.getAttribute("title")).join(" ")),
         empties: [...host.querySelectorAll("[data-empty]")].map((n) => n.getAttribute("data-empty")),
-        all: host.textContent,
+        all: host.textContent + " " +
+          [...host.querySelectorAll("[title]")].map((n) => n.getAttribute("title")).join(" "),
       };
     });
 
@@ -966,10 +1070,33 @@ try {
          `("${got.cover[i]}")`);
     }
 
-    /* NO CLAIM THIS PANEL CANNOT MAKE. */
-    ok(!/\bbullish\b|\bbearish\b|\bbuying\b|\bselling\b/i.test(got.all),
-       "and it never attributes a side or an intent: membership in a market-wide list is " +
-       "not a direction");
+    /* NO TONE ON A READING WITH NO DIRECTION. A print's dollar size is a
+       magnitude the tape attributes to nobody, so the money cell carries no
+       polarity class at all — the signed open-interest cell above does, and
+       its sign is in the glyph before the class touches it. */
+    ok(/is-up|is-down|is-flat|is-unknown/.test(got.valClasses[0]),
+       "the signed open-interest reading carries a tone class");
+    ok(!/is-up|is-down|is-flat|is-unknown/.test(got.valClasses[1]),
+       `and the print's dollar size carries none ("${got.valClasses[1]}") — the tape ` +
+       "attributes no side, so a tint would invent one");
+
+    /* NO CLAIM THIS PANEL CANNOT MAKE.
+
+       IDENTITY AND INTENT ARE BANNED THROUGHOUT, exactly as they are in the
+       payload notes these feeds already ship (shared/flows-pulse.js). And
+       the tape's own vocabulary is allowed ONLY where the rows really are
+       reported executions: the open-interest half is two clearing snapshots
+       and may not borrow "print" or "trade" from its neighbour, which is the
+       same boundary the three stock panels hold one section down. */
+    const IDENTITY = /\b(whale|smart money|institutional|bought|sold|buyer|seller|paid|bullish|bearish)\b/i;
+    const idHit = IDENTITY.exec(got.all);
+    ok(!idHit,
+       `the panel never attributes a side, an identity or an intent (found "${idHit && idHit[1]}") — ` +
+       "membership in a market-wide list is not a direction");
+    const exHit = /\b(print|prints|trade|trades)\b/i.exec(got.blockText[0]);
+    ok(!exHit,
+       `and the open-interest half never borrows the tape's vocabulary (found ` +
+       `"${exHit && exHit[1]}") — it describes two clearing snapshots, not executions`);
     eq(errors.length, 0, "the panel draws without throwing");
     await page.close();
   }
@@ -1009,6 +1136,12 @@ try {
           return n ? n.getAttribute("data-empty") : null;
         }),
         texts: blocks.map((b) => b.textContent),
+        /* The silence paragraph on its own, so an assertion about how the
+           SENTENCE opens is not reading the block's heading first. */
+        said: blocks.map((b) => {
+          const n = b.querySelector("[data-empty]");
+          return n ? n.textContent.trim() : null;
+        }),
         /* THE PANEL MUST NOT TAKE THE PAGE SIDEWAYS AT 320px, and this
            panel is the one at risk: it is the only reading on the page whose
            values are prose-length strings — a unit phrase, a UTC stamp, a
@@ -1045,6 +1178,10 @@ try {
        "the market answered, and only the third silence is a fact about the market");
     ok(!/Unavailable\./.test(got.texts[0]),
        "and it never wears the Unavailable banner");
+    ok(/^Not in this feed\./.test(got.said[0]),
+       "leading instead on the reading itself — the card's other quiet lead-in, \"Nothing " +
+       "to report\", is false here: what is being reported is that the feed WAS read and " +
+       "this name was not in it");
     ok(/is not in the market-wide open-interest change feed/.test(got.texts[0]),
        `carrying the publisher's own sentence ("${got.texts[0].slice(0, 90)}")`);
     ok(/rows covering/.test(got.texts[0]),
@@ -1674,8 +1811,14 @@ try {
          `heading ${i} carries the group's own fragment id (${g.hash}) — a slug computed ` +
          `at render time would break every link the moment a label was reworded`);
       ok(heads[i].text.includes(g.label), `and its label (${g.label})`);
-      ok(heads[i].text.includes(g.blurb.slice(0, 40)),
-         "and the group's own published sentence, verbatim");
+      /* THE WHOLE SENTENCE, NOT ITS FIRST FORTY CHARACTERS. The controller
+         keeps a second copy of every label, hash and blurb (shared/ is never
+         served), and a prefix comparison pins only the prefix: the two copies
+         could have disagreed about the back half of all five sentences with
+         nothing failing. Equality, because the heading is exactly the label
+         and the blurb and there is nothing else in it. */
+      eq(heads[i].text, g.label + g.blurb,
+         `and the group's own published sentence in full, verbatim (${g.key})`);
       const at = flow.findIndex((n) => n.kind === "h" && n.id === g.hash);
       const first = TICKER_PANELS.find((p) => p.group === g.key);
       eq(flow[at + 1].key, first.key,
@@ -1901,7 +2044,16 @@ try {
     /* THE ORDINARY CASE: the newest scored session and the one before it. */
     const rows = base.panels.scoreOverlay.rows;
     const last = rows[rows.length - 1], prev = rows[rows.length - 2];
-    if (typeof last.score === "number" && typeof prev.score === "number") {
+    /* THE GUARD IS AN ASSERTION, NOT AN `if`. It used to be a bare condition
+       around five assertions, so an emitted card whose last two sessions were
+       not both scored would have skipped them in silence — the block would
+       still print a passing suite while certifying nothing. The fixture
+       requirement is now stated, and a run that cannot meet it fails here
+       instead of quietly shrinking. */
+    ok(typeof last.score === "number" && typeof prev.score === "number",
+       `the emitted card's last two sessions are both scored (${prev.d}, ${last.d}), so ` +
+       "the ordinary-case assertions below actually run");
+    {
       const got = await read(base);
       ok(!got.hidden, "the change block is drawn above the panels");
       ok(got.lead.includes(prev.d),
@@ -2368,12 +2520,33 @@ try {
     ok(!/BEFORE the composite ran/.test(stalled.text),
        "and never borrows the gated sentence");
 
-    const missing = await say({ gateOrigin: "2026-09-03", gateDays: 12, rows: [] });
+    /* THE SILENCE HAS TWO CAUSES AND ONLY THE ONE THAT OPERATED IS NAMED.
+       The sentence used to say "that calendar is capped" whatever the payload
+       said, and on the emitted funnel the cap did not bind at all — a
+       confident wrong cause dressed as caution. The calendar's WINDOW is the
+       cause that always applies and it is published, so it is what is stated;
+       the cap is added only when `capBound` says it bound. */
+    const missing = await say({
+      gateOrigin: "2026-09-03", gateDays: 12, windowDays: 21, capBound: false, rows: [],
+    });
     ok(/cannot say which stage/.test(missing.text),
        `a name with no funnel row gets no invented stage (${missing.text.slice(0, 120)})`);
-    ok(/capped/.test(missing.text),
-       "and is told the calendar is capped, so its silence is not evidence the name was " +
-       "never gated — the reassuring inference is the one refused here");
+    ok(/21 calendar days/.test(missing.text),
+       `and is told the window the calendar covers, in its own unit (${missing.text.slice(0, 160)})`);
+    ok(/silence here is a missing row, not evidence/.test(missing.text),
+       "so its silence is not read as evidence about the name — the reassuring inference " +
+       "is the one refused here");
+    ok(!/capped/.test(missing.text),
+       "and a cap that did NOT bind is not offered as the reason: naming a cause that " +
+       "did not operate is the same defect as naming none");
+
+    const cappedOut = await say({
+      gateOrigin: "2026-09-03", gateDays: 12, windowDays: 21, capBound: true, rows: [],
+    });
+    ok(/capped/.test(cappedOut.text),
+       `and when the cap DID bind the calendar says so (${cappedOut.text.slice(0, 200)})`);
+    ok(/does not reach every name even inside it/.test(cappedOut.text),
+       "naming what the cap cost — a window the drawing cannot speak for all of");
 
     const unread = await say({ status: "pending" });
     ok(/could not be read/.test(unread.text),
@@ -2458,6 +2631,24 @@ try {
     });
     ok(hit.h >= 44, `the enlarge control is at least 44px tall including its hit extension (${hit.h})`);
     ok(hit.w >= 44, `and at least 44px wide (${hit.w})`);
+
+    /* ZERO HORIZONTAL OVERFLOW AT 320px, ON THE WHOLE PAGE.
+    
+       tests/regression.mjs holds this invariant for the public routes and
+       cannot hold it here: /flows/ is credential-gated and is not in its PAGES
+       list. So the page that grew a sticky identity strip, a jump strip, a
+       collapsed index of every panel, five group headings and a change block —
+       all of them built at runtime by the controller, none of them served —
+       had no assertion anywhere that it does not take a phone sideways. The
+       strips scroll INSIDE themselves at this width; that is the mechanism,
+       and this is the measurement that says it works. */
+    const spill = await page.evaluate(() => ({
+      doc: document.documentElement.scrollWidth - window.innerWidth,
+      body: document.body.scrollWidth - window.innerWidth,
+    }));
+    ok(spill.doc <= 1,
+       `the painted ticker page does not scroll sideways at 320px (${spill.doc}px)`);
+    ok(spill.body <= 1, `and neither does its body (${spill.body}px)`);
     await page.close();
   }
 } finally {

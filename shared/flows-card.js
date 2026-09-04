@@ -1456,7 +1456,8 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
      that never cut anything would be a stated threshold that does not
      exist, which is the same defect as an unstated one pointing the other
      way. The flag is published so the sentence can be right either way. */
-  const capped = numOrNull(limit) !== null && shaped.length >= limit;
+  const lim = numOrNull(limit);
+  const capped = lim !== null && shaped.length >= lim;
 
   return {
     status: "ok", feed, label: CROSS_LABEL[feed],
@@ -1518,7 +1519,13 @@ function crossFrame(f) {
     asOf: f.asOf || null, asOfStated: !!f.asOfStated,
     asOfSessions: numOrNull(f.asOfSessions), sameSession:
       f.sameSession === null || f.sameSession === undefined ? null : !!f.sameSession,
-    coverage: f.coverage || null,
+    /* COVERAGE IS NOT ON THE PER-NAME READING, and that is deliberate. How
+       many of the board's names placed in a feed is a fact about the JOIN,
+       identical on all fifty cards, and copying it onto every feed reading as
+       well as onto the panel would be the same number in two places on one
+       payload — which is how two numbers that must agree eventually stop
+       agreeing. The panel carries it once, under `coverage`, and the drawer
+       reads it there. */
   };
 }
 
@@ -1616,7 +1623,12 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
      be sized by how much of the board the feed reached. */
   const coverage = {};
   for (const feed of CROSS_FEEDS) {
-    coverage[feed] = feeds[feed].coverage || null;
+    /* TAKEN FROM THE INDEX, NOT FROM THIS NAME'S READING. The per-name
+       reading deliberately does not carry it — coverage is a fact about the
+       join and is the same on every card — so this is the one place it is
+       written onto a card. */
+    const f = index[feed];
+    coverage[feed] = f && f.coverage ? f.coverage : null;
   }
   return ok({ feeds, coverage, notes: CROSS_NOTES }, asOf);
 }
@@ -1633,7 +1645,10 @@ export const CROSS_NOTES = Object.freeze({
     "one did not make a market-wide list; it is not a name with no " +
     "open-interest change and no off-exchange prints. The per-name feeds on " +
     "this page are what measure that, and they are read separately for every " +
-    "name on the board.",
+    "name on the board. The vendor states that its open-interest list carries " +
+    "no index or exchange-traded-fund contracts at all, so a fund cannot " +
+    "appear in it at any size and its absence there says nothing whatever " +
+    "about it.",
   timing:
     "The vendor states that its market-wide open-interest feed updates once a " +
     "trading day at about 06:45 Eastern, and this pipeline runs at 05:15 " +

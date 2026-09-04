@@ -428,8 +428,15 @@ try {
     oiChange: {
       status: "ok", seen: 2, cap: 20, shed: 0,
       rows: [
-        { t: "AAA", cp: "C", k: 150, exp: "2026-09-18", change: 0, currOi: 12000, vol: 3400 },
-        { t: "BBB", cp: "P", k: 80, exp: "2026-10-16", change: -2500, currOi: 9000, vol: 1200 },
+        /* TWO READINGS PER ROW. The vendor sends a ratio (oi_change) and a
+           contract count (oi_diff_plain); this table drew the ratio under a
+           contracts header until 2026-09-04, so both now ride the fixture
+           with values that reconcile against curr/prev. AAA is the measured
+           zero in BOTH: no contracts moved and the ratio is 0. */
+        { t: "AAA", cp: "C", k: 150, exp: "2026-09-18", diff: 0, ratio: 0,
+          currOi: 12000, prevOi: 12000, vol: 3400 },
+        { t: "BBB", cp: "P", k: 80, exp: "2026-10-16", diff: -2500, ratio: -0.2174,
+          currOi: 9000, prevOi: 11500, vol: 1200 },
       ],
     },
     netImpact: {
@@ -800,6 +807,18 @@ try {
      "an open-interest change measured at exactly zero prints '0', never '+0' — the row " +
      "reports that the contract's open interest did not move, which is a measurement");
   eq(oi.rows[1][0], "−2,500", "while a real fall keeps its minus and its grouping");
+  /* THE COLUMN THAT USED TO CARRY THE WRONG READING, now carrying both under
+     their own units. The vendor's oi_change is (curr-last)/last, and this
+     table rendered it through signedGrouped() beneath a contracts header:
+     a line that went 2,119 to 35,207 printed "+16", and one that grew 21.5%
+     printed "+0" — a measured rise drawn as no movement. */
+  eq(oi.rows[0][1], "0%",
+     "a growth of exactly zero prints '0%' — unsigned for the same reason the count is, " +
+     "but STILL CARRYING ITS UNIT, because a bare 0 in a column beside a contract count " +
+     "is the ambiguity this pair was split to remove");
+  eq(oi.rows[1][1], "−21.7%",
+     "and the ratio is multiplied into a percent and CARRIES THE PERCENT SIGN, so it " +
+     "can never again be read as a number of contracts");
   eq(read.seaValues[0], "0.00%",
      "a seasonal average of exactly zero prints '0.00%', never '+0.00%'");
   eq(read.seaValues[1], "−1.25%", "and a negative month keeps the U+2212 minus");

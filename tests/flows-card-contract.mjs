@@ -1260,7 +1260,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(emptyFeed.status, "quiet",
      "a feed that ANSWERED and held nothing is quiet — the request worked and the market " +
      "was silent, which is the one arm of the three that is a reading");
-  eq(emptyFeed.coverage.in, 0, "its coverage is a measured zero rather than an absent count");
+  eq(emptyFeed.coverage.in, 0,
+     "the INDEX's coverage is a measured zero rather than an absent count");
   ok(/none missed it/.test(readCrossFeed(emptyFeed, "AAA").reason),
      "and a name's reading against an empty feed says nobody made it and nobody missed it, " +
      "which is not the same sentence as missing a cut");
@@ -1284,6 +1285,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(panel.asOf, "2026-08-24", "and carries the session the CARD describes");
   eq(panel.feeds.oiChange.rank, 1, "with each feed's own reading under its own key");
   eq(panel.coverage.oiChange.of, 10, "and the coverage of the join across the deep names");
+  ok(!("coverage" in panel.feeds.oiChange),
+     "which lives on the PANEL and not on each feed reading: how far the join reached is a " +
+     "fact about the join, identical on all fifty cards, and the same number in two places " +
+     "on one payload is two numbers that will eventually stop agreeing");
   eq(panel.coverage.oiChange.in, 4,
      "measured, not asserted: four of the ten names carded appear in this feed");
   eq(panel.coverage.darkpool.in, 3, "and three of them in the print feed");
@@ -1321,6 +1326,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   /* ---- the notes carry the refusals, in the payload's own words ------- */
   ok(/SELECTIONS/.test(CROSS_NOTES.absence),
      "the payload states in words that these lists are selections rather than the market");
+  ok(/exchange-traded-fund/.test(CROSS_NOTES.absence),
+     "and names the exclusion the vendor documents — the open-interest list carries no index " +
+     "or fund contracts, so a fund's absence from it is a fact about the list's construction " +
+     "and not a reading of the fund");
   ok(/06:45/.test(CROSS_NOTES.timing) && /05:15/.test(CROSS_NOTES.timing),
      "and names both clocks, which is the whole of the timing trap");
   ok(/population/.test(CROSS_NOTES.rank),

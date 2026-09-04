@@ -49,17 +49,28 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 /* ---------- §2 OI deltas: vendor order, contract from one parser - */
 {
+  /* oi_change IS A RATIO AND oi_diff_plain IS THE COUNT — the fixture wrote
+     the ratio as though it were a count, which is the shaper's own former
+     misreading reproduced in the test that was supposed to catch it. */
   const oi = shapeStockOiChange([
-    { option_symbol: "AAPL260918C00150000", oi_change: "50", curr_oi: 10,
+    { option_symbol: "AAPL260918C00150000",
+      oi_change: "0.21534300646906180330", oi_diff_plain: 5892,
+      curr_oi: 33253, last_oi: 27361,
       days_of_oi_increases: 4, days_of_vol_greater_than_oi: 2 },
-    { option_symbol: "AAPL260918P00140000", oi_change: "-900", curr_oi: 99 },
-    { option_symbol: "unparseable", oi_change: "5" },
-    { option_symbol: "AAPL261218C00160000" },                     // no change value
+    { option_symbol: "AAPL260918P00140000",
+      oi_change: "-0.3", oi_diff_plain: -900, curr_oi: 99, last_oi: 999 },
+    { option_symbol: "unparseable", oi_change: "5", oi_diff_plain: 5 },
+    { option_symbol: "AAPL261218C00160000" },              // neither reading sent
   ]);
-  deep(oi.rows.map((r) => r.change), [50, -900],
-    "VENDOR ORDER PRESERVED — the selection is the vendor's, and |change| " +
-    "re-sorting would claim a rule this payload cannot state (the fixture's " +
-    "order differs from magnitude order on purpose)");
+  deep(oi.rows.map((r) => r.diff), [5892, -900],
+    "VENDOR ORDER PRESERVED — the selection is the vendor's, and re-sorting by " +
+    "magnitude would claim a rule this payload cannot state (the fixture's order " +
+    "differs from magnitude order on purpose)");
+  ok(Math.abs(oi.rows[0].ratio - (33253 - 27361) / 27361) < 1e-9,
+    "the ratio reconciles with that row's own two snapshots, which is the property " +
+    "that tells it apart from the count it used to be published as");
+  ok(!("change" in oi.rows[0]),
+    "and the name that carried both meanings is gone rather than aliased");
   eq(oi.rows[0].cp, "C", "side comes off the option symbol through the shared parser");
   eq(oi.rows[0].oiUpDays, 4, "the per-name streak counters ride when sent");
   eq(oi.rows[1].oiUpDays, null, "and are null when not sent — not zero streaks");

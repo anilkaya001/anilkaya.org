@@ -107,9 +107,42 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 /* ---------- §6 the contract column derives from the symbol ------- */
 {
+  /* THE FIXTURE USED TO WRITE oi_change: "250" AS THOUGH IT WERE A COUNT,
+     which is the misreading the shaper had and the reason no suite here
+     caught it: a test built on the same wrong model cannot see the defect.
+     The numbers below are the vendor's own example (docs/uw-openapi.yaml),
+     where oi_change is (curr-last)/last and the contract difference rides
+     separately as oi_diff_plain. */
   const oi = shapeOiChange([{
-    option_symbol: "AAPL260918C00150000", oi_change: "250", curr_oi: 5000,
+    option_symbol: "AAPL260918C00150000",
+    oi_change: "15.6149126946672959", oi_diff_plain: 33088,
+    curr_oi: 35207, last_oi: 2119,
   }]);
+  eq(oi.rows[0].diff, 33088, "the CONTRACT difference is published from oi_diff_plain");
+  eq(oi.rows[0].ratio, 15.6149126946672959, "and the ratio under its own name");
+  ok(Math.abs(oi.rows[0].ratio - (35207 - 2119) / 2119) < 1e-9,
+     "the ratio reconciles with the two snapshots on the same row, which is what makes " +
+     "it a ratio rather than a difference — reconstructed here so the two fields can " +
+     "never be silently swapped back");
+  ok(!("change" in oi.rows[0]),
+     "and the name that meant both things is gone rather than kept as an alias, because " +
+     "an alias is how a renderer keeps reading the wrong one");
+  /* NEITHER READING IS DERIVED FROM THE OTHER. curr-last would give the same
+     number, but one field carrying two provenances is the confusion being
+     fixed, so an absent count stays absent. */
+  const noDiff = shapeOiChange([{
+    option_symbol: "AAPL260918C00150000", oi_change: "0.5", curr_oi: 30, last_oi: 20,
+  }]);
+  eq(noDiff.rows[0].diff, null,
+     "a row the vendor sent no oi_diff_plain for publishes no count — not curr minus last");
+  eq(noDiff.rows[0].ratio, 0.5, "while the ratio it did send is still published");
+  const noRatio = shapeOiChange([{
+    option_symbol: "AAPL260918C00150000", oi_diff_plain: 10, curr_oi: 30, last_oi: 20,
+  }]);
+  eq(noRatio.rows[0].diff, 10, "and a row with only the count keeps it");
+  eq(noRatio.rows[0].ratio, null, "with the ratio absent rather than computed");
+  eq(shapeOiChange([{ option_symbol: "AAPL260918C00150000", curr_oi: 30 }]).status, "quiet",
+     "a row carrying NEITHER reading measures nothing and is dropped");
   eq(oi.rows[0].t, "AAPL", "the underlying falls out of the symbol when the vendor omits it");
   eq(oi.rows[0].cp, "C", "and so do side");
   eq(oi.rows[0].k, 150, "strike");

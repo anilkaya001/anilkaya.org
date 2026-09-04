@@ -53,6 +53,16 @@
      differently is how a reader concludes they are looking at two outages. */
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  /* A SESSION DATE IS A CALENDAR DAY AND NOTHING ELSE, and the shape is
+     checked BEFORE the parse. This was the one place the duplicate had
+     already drifted from the copy in flows-ui.js it promises not to drift
+     from: it handed `payload.sessionDate` straight to Date.parse, and
+     Date.parse is lenient enough to be dangerous — "2026-09" + "T21:00:00Z"
+     comes back FINITE in V8 and dates this record to the first of a month
+     nobody published, while a bare "2026" dates it to January and raises a
+     four-day-stale banner over a record that may be this morning's. What did
+     not parse as a day belongs with the silences, not the measurements. */
+  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   /* The missing-value test comes BEFORE the coercion — Number(null) is 0 and
      0 is finite, so the naive shape turns an absent hit rate into "0%" and
@@ -128,7 +138,20 @@
    * moment the floor stopped being masked by width:100%.
    */
   function curveWidth() {
-    const host = Math.round(curveHost.clientWidth) || 0;
+    /* MEASURED TWO WAYS AND THE SMALLER TAKEN, because `clientWidth` alone
+       broke the promise the comment above makes. It ROUNDS: a 284.813px host
+       reports 285, so the svg went out with width="285" over a 285-unit
+       viewBox into a 284.813px box — wider than the box it is "clamped DOWN
+       to", with the `max-width:100%` rule that exists for the 160ms of a
+       resize holding it in permanently and one viewBox unit worth 0.99934 CSS
+       pixels. getBoundingClientRect() is the border box, so it is the
+       truthful reading only while this host carries no padding or border (it
+       carries neither); if that changes, the larger reading loses and this
+       falls back to exactly what it did before. */
+    const rect = Math.floor(curveHost.getBoundingClientRect().width);
+    const client = Math.floor(curveHost.clientWidth);
+    const host = rect > 0 && client > 0 ? Math.min(rect, client)
+      : Math.max(rect > 0 ? rect : 0, client > 0 ? client : 0);
     return host > 0 ? Math.min(760, host) : 300;
   }
 
@@ -357,10 +380,28 @@
       "Long-minus-short price return by holding horizon. " + said.join(". ") + ".");
     curveHost.append(svg);
 
-    /* A horizon neither population could plot. Counted over the union, because
-       "too few closed sessions" said of a horizon the prior rule DID measure
-       would be false. */
-    const skipped = rows.length - axis.length;
+    /* A HORIZON NEITHER POPULATION COULD PLOT — AND THE TWO REASONS IT COULD
+       NOT ARE NOT THE SAME SENTENCE.
+
+       This counted `rows.length - axis.length` and reported the whole
+       remainder as "too few closed sessions", which is a measurement. It is
+       only a measurement for the horizons whose n WAS published and fell
+       under the floor. A horizon that published a mean and no n at all — or
+       no mean — was refused for the opposite reason: nothing about its depth
+       was stated, and saying it has "too few closed sessions" invents the
+       very count whose absence caused the refusal. Two silences, two
+       sentences, the same rule the rest of this product prints them under.
+       (Counting off the rows rather than off `axis.length` also stops two
+       rows sharing one k from being reported as one skipped horizon.) */
+    const plotState = (v, n) => (v === null || n === null ? "unstated"
+      : n >= MIN_SESSIONS ? "plot" : "thin");
+    let thin = 0, unstated = 0;
+    for (const h of rows) {
+      const a = plotState(h.ls, h.n), b = plotState(h.prior, h.priorN);
+      if (a === "plot" || b === "plot") continue;
+      if (a === "thin" || b === "thin") thin++;
+      else unstated++;
+    }
     if (curveNote) {
       const note = ["Equal-weighted price return of the published long names minus the " +
         "short names, measured from the close each board was published at."];
@@ -377,9 +418,17 @@
            methodology it is supposed to be quoting. */
         if (drawnMeta.epochNote) note.push(drawnMeta.epochNote + ".");
       }
-      if (skipped > 0) {
-        note.push(skipped + " horizon" + (skipped === 1 ? " has" : "s have") +
-          " too few closed sessions in either population to plot yet.");
+      if (thin > 0) {
+        note.push(thin + " horizon" + (thin === 1 ? " has" : "s have") +
+          " been measured in at least one population and has fewer than " +
+          MIN_SESSIONS + " closed sessions there, which is under the floor this " +
+          "page plots at.");
+      }
+      if (unstated > 0) {
+        note.push(unstated + " horizon" + (unstated === 1 ? " carries" : "s carry") +
+          " no population with both a mean and the number of sessions it was taken " +
+          "over, so " + (unstated === 1 ? "it is" : "they are") + " not plotted — " +
+          "that is a gap in what was published, not a count of closed sessions.");
       }
       curveNote.textContent = note.join(" ");
     }
@@ -609,7 +658,7 @@
       message = "This record was last written " + age + " ago. The pipeline has " +
         "not published since — check the Actions tab. Every figure below is that " +
         "run's, and no session has been scored into it since.";
-    } else if (payload && payload.sessionDate) {
+    } else if (payload && ISO_DAY.test(String(payload.sessionDate || ""))) {
       /* 21:00Z is after every US close, so a session date is aged from the end
          of its own session rather than from its midnight. */
       const session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
@@ -761,7 +810,13 @@
         /* A floor, not a total: an absent half contributes nothing rather than
            inventing a count, and a floor can only ever UNDER-report the
            truncation it is used to detect. */
-        if (n !== null || pn !== null) closedAtStated = (n || 0) + (pn || 0);
+        /* The absence test comes first and contributes nothing, rather than
+           `(n || 0)` coercing it — the same arithmetic, written so the next
+           reader cannot mistake the shape for the coalesce that is banned
+           three lines from here. */
+        if (n !== null || pn !== null) {
+          closedAtStated = (n === null ? 0 : n) + (pn === null ? 0 : pn);
+        }
       }
     }
     if (sessions.length) {
