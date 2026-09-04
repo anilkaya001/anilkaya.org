@@ -16,7 +16,7 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
-  runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
+  runPooled, foldCardOutcomes, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote,
   readBoardMemory, fakePriorBoard,
@@ -2526,6 +2526,139 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "guard above distinguishes absence from measurement rather than banning zero");
 }
 
+/* ---------- the cards leg's own shape, at a width the dry run never reaches --
+
+   THE CARDS LEG IS THE LAST SERIAL STRETCH AND THE ONE A READER PAYS FOR: six
+   calls a name over up to fifty names, running after every other payload has
+   committed, so the names it does not reach before the deadline are a morning
+   with fewer cards. Pooling it is worth nothing if the leg then MISCOUNTS what
+   it did, and the dry run cannot notice: DRY_RUN makes zero vendor calls, so
+   poolWidth() answers "not evidence", the leg runs one wide, nothing overlaps
+   and the fold is exercised on a list that could not have been folded wrong.
+
+   So the coverage is here, against runPooled directly, at a width above one
+   and with a fixture that COMPLETES OUT OF ORDER — which is the only shape in
+   which "folds in input order" and "counts off `attempted`" can fail. */
+{
+  /* The board, in the order the cards leg would publish it. Name 0 is made the
+     slowest so that at any width above one it lands LAST: a fold that
+     collected in completion order would return its gamma profile at the end
+     rather than the front. */
+  const board = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"];
+  const slow = { AAA: 40 };
+  /* Four outcomes. Three are what the live worker returns:
+       AAA, CCC, FFF — built, each carrying a gamma profile;
+       BBB          — threw inside the worker, caught, returned "failed";
+       DDD          — on the board with no enrichment row to build from.
+     EEE is the fourth and it is deliberately one the worker does NOT produce
+     today: a worker that returned nothing at all. `undefined` is a legal
+     result — runPooled's own doc says so — and the card worker returns a
+     tagged object on every path only because it is written that way this
+     morning. The fold must not read that discipline as a guarantee, because
+     the day one path stops returning is the day a built card would start
+     being reported as a name the deadline took. */
+  const outcome = {
+    AAA: { status: "built", gamma: ["AAA-bars"] },
+    BBB: { status: "failed" },
+    CCC: { status: "built", gamma: ["CCC-bars"] },
+    DDD: { status: "unenriched" },
+    EEE: undefined,
+    FFF: { status: "built", gamma: ["FFF-bars"] },
+  };
+  const finished = [];
+  let live = 0, peak = 0;
+  const run = await runPooled(board, async (ticker) => {
+    live++; if (live > peak) peak = live;
+    await new Promise((r) => setTimeout(r, slow[ticker] || 2));
+    live--; finished.push(ticker);
+    return outcome[ticker];
+  }, { width: 2 });
+
+  ok(peak > 1, `the fixture really ran wide (peak ${peak}) — at width 1 this block would ` +
+     "certify nothing, which is exactly the gap the dry run leaves");
+  eq(finished[finished.length - 1], "AAA",
+     "and it really completed out of order: the first name on the board finished last");
+
+  const fold = foldCardOutcomes(board, run);
+  assert.deepEqual(fold.gammaProfiles, [["AAA-bars"], ["CCC-bars"], ["FFF-bars"]],
+     "the fold returns the gamma profiles in BOARD order, not completion order — the " +
+     "profile of the name that finished last is still the first one folded");
+  checks++;
+  eq(fold.built, 3, "three names built");
+  eq(fold.failed, 2,
+     "and TWO failed — the name that threw and the name that returned nothing. A worker that " +
+     "was reached and produced no card is a failure, not a name the clock ran out on");
+  eq(fold.unenriched, 1, "the name with no enrichment row is its own outcome");
+  eq(fold.deadlineSkipped, 0, "and nothing was skipped: the pool reached every name");
+  eq(fold.skipped, 1,
+     "the published skip count is the two skips together — the deadline's and the missing " +
+     "row's — which is what `meta` has always carried");
+
+  /* ---- THE COUNTERS EQUAL WHAT `attempted` SAYS ----
+
+     The invariant, stated as arithmetic rather than as four separate numbers:
+     every name the pool attempted is accounted for by exactly one of built,
+     failed and unenriched, and every name it did not attempt is a deadline
+     skip. If that ever stops holding, some name is being counted twice or not
+     at all, whatever the individual numbers look like. */
+  eq(fold.built + fold.failed + fold.unenriched, run.done,
+     "built + failed + unenriched is exactly what the pool ATTEMPTED");
+  eq(fold.deadlineSkipped, board.length - run.done,
+     "and the deadline skips are exactly what it did not attempt");
+
+  /* ---- THE SAME FIXTURE, COUNTED OFF TRUTHINESS, IS WRONG ----
+
+     This is the bug the fold exists to refuse, run side by side with it so a
+     reader can see the size of the lie rather than take the comment's word.
+     EEE returned `undefined`; a fold reading `results[i] === undefined` as
+     "never reached" reports it as a name the deadline took. */
+  const naive = board.filter((_, i) => run.results[i] === undefined).length;
+  eq(naive, 1,
+     "counted off a missing result, this run reports a name skipped past the deadline");
+  eq(fold.deadlineSkipped, 0,
+     "counted off `attempted`, it reports none — the pool ran to the end of the board. The " +
+     "two disagree, and only one of them can be printed under the deadline's name");
+
+  /* ---- AND THE DEADLINE, WHICH IS THE COUNT THAT MATTERS ON A SLOW MORNING --
+
+     stopEarly fires after two names, so four are never claimed. This is the
+     shape a real slow morning has, and the one whose count reaches both the
+     operator's log line and the published `meta` key. */
+  let started = 0;
+  const cut = await runPooled(board, async (ticker) => {
+    started++;
+    return { status: "built", gamma: [ticker] };
+  }, { width: 2, stopEarly: () => started >= 2 });
+  const cutFold = foldCardOutcomes(board, cut);
+  eq(cutFold.built, 2, "two cards were built before the clock ran out");
+  eq(cutFold.deadlineSkipped, 4, "and the four names never claimed are the deadline's");
+  eq(cutFold.failed, 0,
+     "none of them is reported as a FAILURE — a name the pool never reached did not fail, and " +
+     "a leg that said it did would send an operator looking for a defect that is a deadline");
+  assert.deepEqual(cutFold.gammaProfiles, [["AAA"], ["BBB"]],
+     "and only the names actually built contribute a gamma profile");
+  checks++;
+
+  /* ---- DEGENERATE INPUTS, because this fold reads a foreign object ---- */
+  const nothing = foldCardOutcomes([], { results: [], attempted: [] });
+  eq(nothing.built + nothing.failed + nothing.skipped, 0, "an empty board folds to zeros");
+  eq(foldCardOutcomes(["AAA"], {}).deadlineSkipped, 1,
+     "and a run object carrying no arrays at all reports the name as NOT ATTEMPTED rather " +
+     "than throwing or claiming it was built");
+
+  /* ---- main() USES THIS FOLD RATHER THAN COUNTING INLINE ----
+
+     The extraction is the whole reason the assertions above reach anything. A
+     copy of this arithmetic written back into the card loop would be a copy
+     the dry run certifies at width 1 and nothing certifies at width 2. */
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/foldCardOutcomes\(cardTickers, cardsRun\)/.test(src),
+     "the cards leg folds its pooled run through foldCardOutcomes");
+  ok(/runPooled\(cardTickers,/.test(src) && /stopEarly: \(\) => Date\.now\(\) > deadline/.test(src),
+     "and the leg is pooled with the deadline checked by every worker before it claims a name, " +
+     "rather than once at dispatch");
+}
+
 /* ---------- the floor verdict, at every rung it can reach ----------
 
    RATE.floorCeilingMs's own comment is an open question — "a higher floor
@@ -3196,17 +3329,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   /* ---- the pool did not change what a run publishes ----
 
-     At zero vendor calls poolWidth answers "not evidence" and both pooled
-     legs run one wide, so this asserts the fallback IS the serial loop rather
-     than the pool's behaviour. Reported in the log so the width a live run
-     chose is readable there rather than inferred. */
+     At zero vendor calls poolWidth answers "not evidence" and all three
+     pooled legs run one wide, so this asserts the fallback IS the serial loop
+     rather than the pool's behaviour. Reported in the log so the width a live
+     run chose is readable there rather than inferred. */
   ok(/enrichment: 1 name\(s\) in flight/.test(runLog),
      "the enrichment leg reports the width it chose, and on a call-free run that width is 1");
   ok(/chains: \d+ name\(s\), 1 in flight/.test(runLog),
      "so does the chain leg");
+  ok(/cards: \d+ name\(s\), 1 in flight/.test(runLog),
+     "and so does the cards leg, which was the last serial stretch — on this run it is the " +
+     "serial loop it replaced, which is the only thing a call-free corpus can say about it");
   ok(/which is not evidence/.test(runLog),
-     "and both name the reason — a run with no calls has measured no refusal rate, which is " +
-     "not the same as having measured zero");
+     "and all three name the reason — a run with no calls has measured no refusal rate, which " +
+     "is not the same as having measured zero");
 
   /* ---- the two Worker-only legs still complete when detached ----
 

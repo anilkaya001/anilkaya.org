@@ -5144,6 +5144,96 @@
         : "Change against the previous close, from the price context panel.",
     });
 
+    /* HOW FAR SPOT IS FROM THE LEVEL WHERE DEALER HEDGING REVERSES SIGN.
+
+       This is the most forward-looking number the card carries — every other
+       reading in the header describes where the name IS — and it was sitting
+       at panel 4 of 22 in the `reading` tier, which is the de-emphasised
+       chrome, while the header above it held a hidden <span id="ftQuote">
+       whose own comment promised "spot, today's change, ATR, the gamma flip
+       and its distance". That span was emitted, styled by four CSS rules, and
+       written to by nothing: `grep ftQuote` found no JavaScript anywhere. It
+       is gone now, and the header carries what it promised.
+
+       READ, NOT RE-DERIVED. `card.gammaFlip` and `card.atr` are both on the
+       top level and the arithmetic is two lines, which is exactly why it is
+       tempting — and it is how one quantity ends up with two conventions.
+       buildLevels already measures this as `(px - spot) / spot` and
+       `(px - spot) / atr` (shared/flows-card.js:222-226), so the header reads
+       that measurement rather than making a second one that could drift from
+       it by a sign or a denominator. If the panel could not resolve a flip,
+       neither can this chip, and it says so.
+
+       GEOMETRY, NOT OPINION. The levels table states the rule this follows:
+       distance carries a direction — above spot or below it — and that is not
+       a bullish or bearish claim, so it is NOT tinted with the directional
+       palette. `is-above`/`is-below` here mirror .fc-levels exactly.
+
+       AND THE BAND IT WAS MEASURED INSIDE IS NAMED. The ladder is fetched over
+       a window around spot, so "no flip" means no sign change WITHIN THAT
+       WINDOW rather than nowhere in the book. A reader told only "no flip"
+       would take it for a fact about the name. */
+    const levelsPanel = card.panels && card.panels.levels;
+    const flipLevel = levelsPanel && levelsPanel.status === "ok" &&
+      Array.isArray(levelsPanel.levels)
+      ? levelsPanel.levels.find((l) => l && l.kind === "gamma_flip") || null
+      : null;
+    const flipPct = flipLevel ? isNum(flipLevel.distPct) : null;
+    const flipAtr = flipLevel ? isNum(flipLevel.distAtr) : null;
+    const regime = card.regime || null;
+    const bandLo = regime ? isNum(regime.bandMin) : null;
+    const bandHi = regime ? isNum(regime.bandMax) : null;
+    const bandSaid = bandLo !== null && bandHi !== null
+      ? " The ladder was read over $" + bandLo.toFixed(2) + " to $" + bandHi.toFixed(2) +
+        ", so this is the nearest sign change inside that window rather than in the whole book."
+      : "";
+
+    let flipNode;
+    if (flipPct === null) {
+      /* ABSENCE BEFORE COERCION, and the sentence matters more here than in
+         most slots: 0% would read as "spot is sitting exactly on the flip",
+         which is the single most actionable state this page can report. It is
+         the opposite of what an unresolved ladder means. */
+      flipNode = idChip("ftFlip", "", DASH, {
+        empty: "unavailable",
+        title: levelsPanel && levelsPanel.status === "ok"
+          ? "No gamma flip resolved on this name's ladder, so there is no distance to " +
+            "one. That is not a distance of zero — a book with no sign change over the " +
+            "strikes read has no flip to be near." + bandSaid
+          : "The levels panel is unavailable for this name today, so the distance to the " +
+            "gamma flip was not measured." + bandSaid,
+      });
+    } else {
+      /* UNITS TRAVEL WITH THE NUMBER, and there are two of them because they
+         answer different questions. The percent says how far in price; the ATR
+         multiple says how far in THIS name's own daily range, which is the one
+         that compares across names — 3% is a routine day in one book and a
+         three-sigma move in another. distAtr is null rather than Infinity when
+         ATR is unavailable, so the second reading is simply absent. */
+      const atrSaid = flipAtr === null
+        ? ""
+        : " (" + P.signed(flipAtr, (a) => a.toFixed(2)) + "σ)";
+      /* THE CLASS IS TWO-ARMED AND THE SENTENCE IS THREE-ARMED, deliberately.
+         `is-above`/`is-below` is emphasis and mirrors .fc-levels exactly, so a
+         zero taking the brighter of two greys costs a reader nothing. The WORD
+         cannot do that: at distPct === 0 spot is sitting ON the flip, which is
+         the single most actionable state this page can report, and calling it
+         "above spot" would be false at the one moment it matters most. */
+      const whereSaid = flipPct > 0 ? "above spot"
+        : flipPct < 0 ? "below spot"
+        : "exactly at spot — the name is sitting on its flip";
+      flipNode = idChip("ftFlip", "", P.pct1(flipPct) + " to flip" + atrSaid, {
+        cls: flipPct >= 0 ? "is-above" : "is-below",
+        title: "Gamma flip at $" + flipLevel.px.toFixed(2) + ", " + whereSaid +
+          ". Past it the sign of dealer " +
+          "hedging reverses: the flow that has been damping moves starts amplifying " +
+          "them." + (flipAtr === null
+            ? " No ATR was published for this name, so the distance is stated in percent only."
+            : " The second figure is that distance in this name's own average true range.") +
+          bandSaid,
+      });
+    }
+
     /* THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against
        zero. A score of +1 with a band of ±1 is not a bullish name; it is a
        name the board declined to rank, and calling it bullish in the header
@@ -5207,7 +5297,7 @@
        wrapped lines below the reading. Name, score, price, side, move first;
        conviction, regime and the two dates after them. */
     const anchor = $("ftConv") || $("ftSwitch");
-    for (const node of [price, day, side, d1Node]) {
+    for (const node of [price, day, side, d1Node, flipNode]) {
       if (!node) continue;
       if (anchor) headEl.insertBefore(node, anchor);
       else headEl.append(node);

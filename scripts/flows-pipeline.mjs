@@ -886,6 +886,64 @@ async function runPooled(items, work, { width = 1, stopEarly = null } = {}) {
   return { results, attempted, stopped, done: attempted.filter(Boolean).length };
 }
 
+/**
+ * What the pooled cards leg did, counted from what it ATTEMPTED.
+ *
+ * A FOLD WRITTEN INLINE IN main() IS A FOLD NO SUITE CAN REACH, which is the
+ * same argument describeFloorVerdict and describeChainProbe are extracted on —
+ * and it bites harder here, because the dry run cannot reach the pooled path
+ * at all: DRY_RUN makes no vendor calls, so poolWidth() answers "not evidence"
+ * and every leg runs one wide. At width 1 nothing overlaps and every counting
+ * mistake below is invisible. This is where they are made visible.
+ *
+ * THE SKIP IS READ OFF `attempted`, NEVER OFF A MISSING RESULT. `undefined` is
+ * a legal thing for a worker to return — runPooled says so at the `attempted`
+ * declaration — so `results[i] === undefined` cannot tell "the pool never
+ * reached this name" from "the pool reached it and it returned nothing". The
+ * two are different findings with different fixes: the first is a deadline the
+ * run ran into, the second is a name that failed. Counted the wrong way round,
+ * a run that built forty cards can report forty skipped, and that number is
+ * published on the `meta` key and printed in the one line an operator reads on
+ * a slow morning.
+ *
+ * THE TWO SKIPS ARE SEPARATED because they are fixed by different things. A
+ * name past the deadline is a run that ran out of clock; a name with no
+ * enrichment row never had the features a card is built from and would not
+ * have been built at midnight either. They were one counter printed under the
+ * deadline's name, which was a true count carrying a false reason.
+ *
+ * @param {Array}  tickers  the leg's input list, and the order this folds in
+ * @param {{results:Array, attempted:boolean[]}} run  a runPooled return
+ */
+export function foldCardOutcomes(tickers, run) {
+  const list = Array.isArray(tickers) ? tickers : [];
+  const attempted = (run && run.attempted) || [];
+  const results = (run && run.results) || [];
+  const out = {
+    built: 0, failed: 0, unenriched: 0, deadlineSkipped: 0, skipped: 0, gammaProfiles: [],
+  };
+  list.forEach((ticker, i) => {
+    if (!attempted[i]) { out.deadlineSkipped++; out.skipped++; return; }
+    const outcome = results[i];
+    /* ATTEMPTED AND CARRYING NO OUTCOME IS A FAILURE, not a skip. The worker
+       returns a tagged object on every path it can take, so a missing one
+       means the pool reached the name and no card came back — which is what
+       "failed" means. The conservative reading is the one that does not let a
+       lost card be reported as a name nobody had time for. */
+    if (!outcome || outcome.status === "failed") { out.failed++; return; }
+    if (outcome.status === "unenriched") { out.unenriched++; out.skipped++; return; }
+    out.built++;
+    /* THE GAMMA PROFILES TRAVEL WITH THE FOLD, so they land in board order
+       whatever order the round trips did. describeGammaRange sorts its
+       per-name decades before taking a median and a 90th percentile, so its
+       answer does not depend on arrival order today — but a published number
+       that is order-independent only because of what a describer happens to
+       do is one refactor away from moving with the wire. */
+    if (outcome.gamma) out.gammaProfiles.push(outcome.gamma);
+  });
+  return out;
+}
+
 
 
 /**
@@ -7512,15 +7570,51 @@ async function main() {
     }
   }
 
-  let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
-  const gammaProfiles = [];
+  /* ---- THE CARDS, THROUGH THE SAME BOUNDED POOL AS THE OTHER TWO LEGS ----
+
+     THIS WAS THE LAST SERIAL STRETCH, AND IT IS THE ONE A READER PAYS FOR.
+     Six calls a name over up to fifty names is 300 of the run's call budget,
+     and the leg runs LAST: both boards, the dated archive, the watch list, the
+     movers band, the record, the sector panel and the chains have all
+     committed by the time it starts. So the names it does not reach before the
+     deadline are not a slower morning, they are a morning with fewer cards.
+
+     WHAT POOLING BUYS, AND WHAT IT DOES NOT. Serial, a name departed at one
+     call per (delay + wire) and the permit queue idled through every round
+     trip; pooled, the leg departs at the rate the floor already permits. That
+     is NOT a 2x run and nothing here should be read as claiming one — the
+     floor spacing and the 429 backoff are the great majority of the wall clock
+     and neither is touched by concurrency. What it buys is that the leg gets
+     further down the board before the deadline stops it, which is a product
+     outcome rather than a speed one.
+
+     THE WIDTH IS THIS RUN'S OWN VERDICT rather than a number anybody chose:
+     on a run that is being refused, poolWidth answers 1 and this is
+     byte-for-byte the serial loop it replaced. Two rather than four for the
+     reason the enrichment leg takes two — a name here already fires six calls
+     in one Promise.all, so the width multiplies QUEUED requests, not
+     departures. `permits` keeps departures delayMs apart and its own
+     maxInFlight bounds the open sockets whatever the width is.
+
+     THE WRITE PATH IS ALREADY SAFE, and it was not before this week. This
+     worker calls publish(), and publish() claims a permit from `ingestWrites`
+     BEFORE each POST rather than sleeping after it — so the ingest route sees
+     one departure every PUBLISH_SPACING_MS however many workers are producing.
+     Spacing added here instead would be spacing only this leg observes, which
+     is exactly the shape that presented 37 POSTs in eleven seconds and drew a
+     rate challenge on the first live run. */
   // The surface shape is reported once per run, not once per card.
   let surfaceReported = false;
   const deadline = stats.startedAt + DEADLINE_MS;
-  for (const ticker of onBoard.keys()) {
-    if (Date.now() > deadline) { cardsSkipped++; continue; }
+  const cardTickers = [...onBoard.keys()];
+  const cardLane = poolWidth(2);
+  console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
+  const cardsRun = await runPooled(cardTickers, async (ticker, index) => {
     const e = byTicker.get(ticker);
-    if (!e) { cardsSkipped++; continue; }
+    /* NO ENRICHMENT ROW IS ITS OWN OUTCOME. It is neither a failure nor a
+       deadline skip: it is a name on the board that never carried the features
+       a card is built from, and the fold below counts it as that. */
+    if (!e) return { status: "unenriched" };
     try {
       /* THE HORIZON FOR THE GAMMA SURFACE, taken from the expiry rows already
          in hand. /spot-exposures/expiry-strike requires expirations[] — it
@@ -7596,6 +7690,11 @@ async function main() {
          Bounded to the FIRST card of the run and to one row's keys, so a
          systematic failure is reported once rather than twelve times, and a
          working run costs one line. */
+      /* ONE CARD REPORTS, AND POOLED THAT IS THE FIRST CARD TO GET HERE
+         RATHER THAN THE FIRST NAME ON THE BOARD. The read and the set are one
+         synchronous step, so exactly one worker passes this gate however wide
+         the leg ran — but which name it speaks for is now whichever six calls
+         landed first, so the position is printed rather than implied. */
       if (!surfaceReported && !DRY_RUN) {
         surfaceReported = true;
         const rows = Array.isArray(surface) ? surface : (surface && surface.data) || [];
@@ -7611,7 +7710,8 @@ async function main() {
             Object.entries(rows[0]).slice(0, 12)
               .map(([k, v]) => `${k}=${String(v).slice(0, 18)}`).join(" "));
         } else {
-          console.log(`  surface: ${ticker} ${rows.length} rows over ${surfaceExpiries.length} expiries`);
+          console.log(`  surface: ${ticker} (board position ${index + 1}) ${rows.length} rows ` +
+            `over ${surfaceExpiries.length} expiries`);
         }
       }
 
@@ -7697,21 +7797,58 @@ async function main() {
           `${dropped.length} panel(s), still over the ingest cap`);
       }
       await publish("card:" + ticker, card);
-      cardsBuilt++;
       /* THE AXIS QUESTION'S ONE MEASUREMENT, collected free from a card that
-         was being built anyway. See describeGammaRange. */
-      if (card.panels && card.panels.gamma && card.panels.gamma.status === "ok") {
-        gammaProfiles.push(card.panels.gamma.bars);
-      }
+         was being built anyway. See describeGammaRange.
+
+         RETURNED RATHER THAN PUSHED. describeGammaRange sorts its per-name
+         decades before taking a median and a 90th percentile, so the answer
+         does not depend on the order the profiles arrive in — but a leg whose
+         published number was order-independent only by the accident of what
+         the describer does today is a leg one refactor away from a figure
+         that moves with the wire. The bars ride the outcome and are folded in
+         board order below, where the fold can be read. */
+      return {
+        status: "built",
+        gamma: card.panels && card.panels.gamma && card.panels.gamma.status === "ok"
+          ? card.panels.gamma.bars
+          : null,
+      };
     } catch (error) {
-      cardsFailed++;
+      /* THE WORKER MUST NOT THROW. runPooled says why: a rejection here takes
+         down the pool and loses every name still in flight, which is strictly
+         worse than the serial loop this replaced — one fat card would cost
+         the whole tail of the board instead of itself. */
       console.warn(`  card ${ticker}: ${error.message}`);
+      return { status: "failed" };
     }
-  }
+  }, {
+    width: cardLane.width,
+    /* THE DEADLINE, CHECKED BY EVERY WORKER BEFORE IT CLAIMS A NAME — the
+       guard the serial loop had at the top of its body. A pool that tested it
+       once at dispatch would keep going for as long as its longest queue. */
+    stopEarly: () => Date.now() > deadline,
+  });
+
+  /* FOLDED BACK IN onBoard ORDER, BY A FUNCTION THE SUITE CAN REACH. The
+     counting discipline is foldCardOutcomes' whole subject — see it for why
+     the skip is read off `attempted` and never off a missing result, and why
+     the two skips are separated. Board order matters here because the gamma
+     profiles ride the fold; nothing else downstream reads it today, and "it
+     does not matter yet" is how that stops being true unnoticed. */
+  const cards = foldCardOutcomes(cardTickers, cardsRun);
+  const { built: cardsBuilt, failed: cardsFailed, skipped: cardsSkipped,
+    unenriched, deadlineSkipped, gammaProfiles } = cards;
   console.log(
     `cards: ${cardsBuilt}/${onBoard.size} built` +
     (cardsFailed ? `, ${cardsFailed} failed` : "") +
-    (cardsSkipped ? `, ${cardsSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline` : ""),
+    /* THE TWO SKIPS SAY WHICH THEY ARE. They were one counter printed as
+       "skipped past the deadline", so a name that never carried an enrichment
+       row was reported as a name the clock ran out on — a true count under a
+       false reason, and the two are fixed by different things. */
+    (unenriched ? `, ${unenriched} with no enrichment row to build from` : "") +
+    (deadlineSkipped
+      ? `, ${deadlineSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline`
+      : ""),
   );
   /* ONE LINE, ONCE PER RUN, AND IT DECIDES A DESIGN ARGUMENT. The gamma
      ladder's own note tells the reader to treat bar length as rank rather

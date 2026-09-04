@@ -2037,6 +2037,15 @@ try {
           empties: c ? [...c.querySelectorAll("[data-empty]")]
             .map((n) => n.getAttribute("data-empty")) : [],
           d1: chip("ftD1"), price: chip("ftPrice"), side: chip("ftSide"),
+          flip: (() => {
+            const n = document.getElementById("ftFlip");
+            return n ? {
+              text: n.textContent,
+              empty: n.getAttribute("data-empty"),
+              cls: n.className,
+              title: n.getAttribute("title") || "",
+            } : null;
+          })(),
         };
       });
     };
@@ -2066,6 +2075,107 @@ try {
          "index whose differences are POINTS rather than percent");
       ok(got.d1 && /session/.test(got.d1.text),
          `the sticky header carries the move and its gap too (${got.d1 && got.d1.text})`);
+
+      /* THE DISTANCE TO THE GAMMA FLIP, IN THE HEADER.
+
+         It is the most forward-looking number the card carries, and it used to
+         sit at panel 4 of 22 in the de-emphasised `reading` tier while the
+         header held a hidden <span id="ftQuote"> that no JavaScript ever wrote
+         to. The span is gone; these assertions are what stop the chip going
+         the same way — an element nothing tests can be deleted by omission,
+         which is exactly how the board's filter died.
+
+         THE FLIP IS STAGED, NOT BORROWED FROM THE CORPUS. The first draft
+         asserted against whatever `base` happened to carry and its own
+         guard-on-the-guard caught it: the card selected for its overlay
+         resolves NO gamma flip, so every assertion here would have passed by
+         never running. That is the failure this file names as its most
+         repeated mistake, and it fired on the commit that introduced it.
+         Staged numbers also let the exact string be asserted rather than a
+         pattern that would match a wrong magnitude. */
+      const flipCard = JSON.parse(JSON.stringify(base));
+      flipCard.panels.levels = {
+        status: "ok", spot: 100, atr: 2,
+        levels: [{ kind: "gamma_flip", label: "Gamma flip", px: 104,
+                   distPct: 0.04, distAtr: 2 }],
+      };
+      const fg = await read(flipCard);
+      ok(fg.flip, "the header carries a flip-distance chip (#ftFlip)");
+      ok(fg.flip && /\+4\.0%/.test(fg.flip.text),
+         `the distance is drawn from the panel's own measurement, signed and in percent ` +
+         `(${fg.flip && fg.flip.text}) — read rather than re-derived, so the header and ` +
+         `the levels table cannot disagree about a denominator`);
+      ok(fg.flip && /to flip/.test(fg.flip.text),
+         "and names what the distance is TO — a signed percent alone, in a header of " +
+         "prices and score points, does not say which of them it is measured against");
+      ok(fg.flip && /\+2\.00σ/.test(fg.flip.text),
+         `and carries the same distance in this name's own ATR (${fg.flip && fg.flip.text}), ` +
+         "which is the figure that compares across names: 4% is a routine day in one book " +
+         "and a three-sigma move in another");
+      ok(fg.flip && /is-above/.test(fg.flip.cls),
+         "a flip above spot takes the GEOMETRY class, not the directional palette: the " +
+         "levels table already states that above-or-below is a fact about where the price " +
+         "is and not a bullish or bearish claim");
+      ok(fg.flip && !/is-pos|is-neg/.test(fg.flip.cls),
+         "and specifically NOT is-pos/is-neg, which would tint a distance with the " +
+         "bull/bear hues and turn a measurement into an opinion");
+      ok(fg.flip && /gamma flip at \$104\.00/i.test(fg.flip.title),
+         "the title states the level itself, so the percent has a price behind it");
+
+      /* SPOT SITTING ON THE FLIP IS A MEASUREMENT, and the one the page most
+         needs to state plainly. The class may round it to the brighter grey —
+         emphasis costs nothing — but the WORD must not call it "above spot". */
+      const onFlip = JSON.parse(JSON.stringify(flipCard));
+      onFlip.panels.levels.levels[0] = { kind: "gamma_flip", label: "Gamma flip",
+                                         px: 100, distPct: 0, distAtr: 0 };
+      const og = await read(onFlip);
+      ok(og.flip && /exactly at spot/i.test(og.flip.title),
+         `a distance of exactly zero says the name is sitting ON its flip ` +
+         `(${og.flip && og.flip.title.slice(0, 90)}) rather than above it — the two-armed ` +
+         "form would have called a measured zero “above spot” at the one moment " +
+         "the reading matters most");
+    }
+
+    /* NO FLIP RESOLVED IS NOT A DISTANCE OF ZERO. 0% in this slot reads as
+       "spot is sitting exactly on the flip", which is the single most
+       actionable state the page can report — the precise opposite of a ladder
+       that resolved nothing. This is the confident zero in the one slot where
+       it would be most expensive, so the branch gets a fixture. */
+    /* TWO WAYS TO HAVE NO FLIP, AND THEY ARE NOT THE SAME SENTENCE. A ladder
+       that was read and produced no sign change is a MEASUREMENT about this
+       name's book; a levels panel that never answered is an absence of one.
+       The first draft staged only the second and asserted the first's wording,
+       which is how a renderer ends up with one apology for two conditions. */
+    {
+      const ladderRead = JSON.parse(JSON.stringify(base));
+      ladderRead.panels.levels = {
+        status: "ok", spot: 100, atr: 2,
+        levels: [{ kind: "max_pain", label: "Max pain", px: 98,
+                   distPct: -0.02, distAtr: -1 }],
+      };
+      const got = await read(ladderRead);
+      ok(got.flip, "the chip is still drawn when the ladder resolved no flip — a header " +
+         "that silently loses a slot teaches the eye that the slot means nothing");
+      eq(got.flip && got.flip.empty, "unavailable",
+         "and it is TAGGED, so a test never has to parse prose to know which silence this is");
+      ok(got.flip && !/%/.test(got.flip.text),
+         `and prints no percentage at all (${got.flip && got.flip.text}) — least of all ` +
+         "0%, which would claim spot is sitting on a flip that was never found");
+      ok(got.flip && /not a distance of zero/i.test(got.flip.title),
+         "and the title refuses the inference in as many words: a book with no sign change " +
+         "over the strikes read has no flip to be near, which is the opposite of being on one");
+
+      const noPanel = JSON.parse(JSON.stringify(base));
+      noPanel.panels.levels = { status: "unavailable", note: "no spot price" };
+      const np = await read(noPanel);
+      eq(np.flip && np.flip.empty, "unavailable",
+         "a levels panel that never answered is tagged the same way to a machine");
+      ok(np.flip && /not measured/i.test(np.flip.title),
+         `but says something different to a reader (${np.flip && np.flip.title.slice(0, 80)}) ` +
+         "— nothing was read here, so there is no finding about this name's book to report");
+      ok(np.flip && !/no gamma flip resolved/i.test(np.flip.title),
+         "and specifically does NOT claim the ladder resolved nothing, which would be a " +
+         "statement about the name made from a panel that did not run");
     }
 
     /* A MOVE OF EXACTLY ZERO IS A MEASUREMENT. It must read as "unchanged",
