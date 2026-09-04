@@ -640,14 +640,12 @@
       /* A SCAN THAT FOUND NOTHING TO SCAN IS NOT A SCAN THAT PASSED, and this
          is the line where that matters most. answerHow() already refuses to
          call an empty scan a verification, but it does so inside the
-         disclosure; this sentence sits in the open under the answer and is
-         the one a reader actually meets. It read "every figure it wrote was
-         checked" over an answer stating no figure at all — vacuously true
-         over an empty set, and awarded to the answer the guard did the least
-         work on, which is also the answer whose claims are least checkable:
-         prose carrying no number is prose the guard cannot touch. The count
-         is compared `=== null` before it is compared to 0, because a measured
-         0 is a real reading and here it is the interesting one. */
+         disclosure; this sentence is in the open and is the one a reader
+         meets. It read "every figure it wrote was checked" over an answer
+         stating no figure — vacuously true over an empty set, and awarded to
+         the answer whose claims are least checkable, since prose carrying no
+         number is prose the guard cannot touch. `=== null` is asked before 0,
+         because a measured 0 is a real reading and here it is the finding. */
       var scanned = guard && Array.isArray(guard.numerals) ? guard.numerals.length : null;
       line.append(text(" The wording above came back from a language model, which was given " +
         "the measured facts and asked to restate them. " + (scanned === null
@@ -1324,18 +1322,16 @@
      verify is highest.
 
      `n` IS NOT THE GUARD'S ALLOWED SET AND MAY NOT BE OFFERED AS ONE. The
-     guard scans the answer against `say` — the sentences the model was
-     handed — and `n` holds fewer values than those sentences hold numerals:
-     a ticker carries digits of its own, so the fact whose say is "the short
-     board's leading name is SYN35 at 58" has n {score:58} and a sentence
-     containing the numerals 35 and 58. This paragraph closed by asserting
-     that every figure in the prose above was one of these values, which is
-     false for that fact and for every fact naming a ticker or a date. A
-     reader auditing the answer against the list would have found a figure
-     missing from it and concluded the guard had let one through, when the
-     guard had checked it correctly against the sentence — the audit trail
-     accusing the check it exists to evidence. answerHow() states the real
-     rule one function above; this one now agrees with it.
+     guard scans the answer against `say`, and `n` holds fewer values than
+     those sentences hold numerals: a ticker carries digits of its own, so a
+     fact saying "the short board's leading name is SYN35 at 58" has n
+     {score:58} beside the numerals 35 and 58. This paragraph closed by
+     asserting every figure in the prose was one of these values — false for
+     that fact and for every fact naming a ticker or a date. A reader
+     auditing against the list would find a figure missing and conclude the
+     guard had let one through, when the guard had checked it correctly
+     against the sentence: the audit trail accusing the check it evidences.
+     answerHow() states the real rule above; this one now agrees with it.
 
      THE VALUES ARE NOT REFORMATTED. No thousands separator, no rounding, no
      currency mark: reformatting a measurement on the way to the page is the

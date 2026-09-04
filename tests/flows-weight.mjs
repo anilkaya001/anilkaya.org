@@ -149,7 +149,10 @@ const CEILING_KIB = {
      thing this codebase is strictest about.
 
      WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
-     is 55k and arrives only when a reader opens the panel, so it is absent
+     is 79k — it was 55k when this note was written, and a figure left at
+     the size a file used to be is worse than no figure, because a reader
+     takes it for a measurement — and it arrives only when a reader opens
+     the panel, so it is absent
      from a measurement of what a route loads ON ARRIVAL — which is what
      this suite measures and should keep measuring. It is a real cost, paid
      on open, by the readers who asked for it. Stating it here is what stops
@@ -194,7 +197,25 @@ const CEILING_KIB = {
      forecast qualifier into an arm that folds and an arm that never does
      cost bytes to SAVE a reader lines, which is the trade this page was
      asked to make. */
-  askPage: 78,
+  /* 78 -> 84 on 2026-09-04, and it is the political case above rather than
+     an absorbed overrun: 78 was set against a 77.5k measurement, which is
+     the snug fit this file's own header refuses. A ceiling with half a
+     kilobyte of room is a tripwire, and the next commit to trip it fails
+     with a message about a budget rather than about what the commit did.
+
+     WHAT THE ROUTE GAINED IS THREE CORRECTED CLAIMS, all of them the page
+     stating something it had not measured: a consistency report printing
+     `warningsChecked` with no denominator, so four of thirteen questions
+     asked read as a complete sweep; a provenance line telling a reader
+     "every figure it wrote was checked" over an answer that stated no
+     figure; and an audit paragraph offering `n` as the set of figures in
+     the prose when the guard scans `say`, so a ticker's own digits looked
+     like a figure that had slipped through. The prose that fixes them is
+     the deliverable, and the entry above says what to do if this route
+     approaches its ceiling — move work into shared/flows-ask.js, which the
+     Worker bundles and the browser never pays for — not shorten what the
+     page says. That is the shed to make; it is not this change. */
+  askPage: 84,
   strategyPage: 120,
   trackPage: 118,
   /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
