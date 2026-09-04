@@ -2848,21 +2848,40 @@ body.is-stale .flows-tablewrap {
 
 /* --- the identity block --------------------------------------------- */
 
-/* IT SCROLLED AWAY AND NEVER CAME BACK. This page is 5,729px tall at its
-   widest measured tier (see the note above the 108rem rule), and the one
-   element that says WHICH NAME you are reading sat at the top of it in normal
-   flow. A reader who has scrolled to the gamma surface on a page this tall has
-   nothing on screen that names the stock. (It said "a twenty-one panel page"
-   until a twenty-second panel landed — a count restated in prose is a count
-   that goes stale silently, and the measured height above is the fact this
-   sentence actually rests on.)
+/* THIS BLOCK IS THE FALLBACK, NOT THE FIX. On the shipped ticker route the
+   header is already persistent and has been since the workspace landed:
+   flows-ticker.js re-parents `#ftHead` into `.ft-bar`, and `.ft-bar` is
+   sticky at the site's topbar clearance (see its rule below). A review pass
+   read `.ft-head` on its own, found no `position`, and concluded the identity
+   block scrolled away — it does not, because its ANCESTOR pins it. What is
+   left uncovered is the served shape: between first paint and the frame the
+   controller builds the bar, and permanently if that script throws, `#ftHead`
+   is a plain child of `.flows-main` above `#ftGrid`. That is the only state
+   these three declarations are for.
 
-   Sticky, and it costs no layout: `top: 0` against the page scroll, an OPAQUE
-   ground (a translucent one lets a chart's ink read through the header and
-   both become unreadable), and a hairline under it so the boundary is a shape
-   and not a colour. z-index 5 puts it over the panels it scrolls past; the
-   card and zoom dialogs are <dialog> elements painted in the top layer, which
-   no z-index on this page can reach past, so nothing here can cover them.
+   4.4rem, NOT 0. `.topbar` is `position: fixed` at z-index 100 and the site's
+   clearance constant is 4.4rem — the same number `.flows-rail`, `.course-nav`
+   and `.ft-bar` all use, and `.ft-bar`'s rule below writes down why. This rule
+   landed on this branch with `top: 0`, and that was measured rather than
+   argued: in the served shape at a 1280px desk width the pinned header's whole
+   51.8px box came to rest inside the topbar's 63.7px band, ticker and score and
+   price painted underneath a navigation bar it cannot outrank. A sticky offset
+   on this site is never 0. tests/flows-motion.mjs measures both shapes now.
+
+   INSIDE `.ft-bar` THESE ARE INERT AND MUST BE. The bar is pinned at 4.4rem
+   and the header sits below the bar's own padding, so a 4.4rem constraint on
+   the child never binds — which is the point: the fallback costs the composed
+   layout nothing. The ground, the hairline and the vertical padding ARE
+   undone there by `.ft-bar .ft-head` below, because inside the bar they would
+   be a second opaque ground, a second hairline above the jump strip, and
+   0.7rem added to a bar whose phone height is a measured budget (the 46rem
+   note at the foot of this section).
+
+   An OPAQUE ground, because a translucent one lets a chart's ink read through
+   the header and both become unreadable. z-index 5 puts it over the panels it
+   scrolls past; the card and zoom dialogs are <dialog> elements painted in the
+   top layer, which no z-index on this page can reach past, so nothing here can
+   cover them.
 
    THE HEADER IS A HOST, not a fixed set of five slots. Whatever the ticker
    controller paints into it rides along; the rules here only guarantee it
@@ -2871,7 +2890,7 @@ body.is-stale .flows-tablewrap {
    added to defend. */
 .ft-head {
   position: sticky;
-  top: 0;
+  top: 4.4rem;
   z-index: 5;
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--space-2); margin: 0 0 var(--space-3);
@@ -3103,11 +3122,25 @@ body.is-stale .flows-tablewrap {
   margin: 0 0 var(--space-3);
   padding-top: var(--space-2);
 }
-/* (0,2,0), so it beats the .ft-head margin set at the top of this section
-   whatever the order — the identity block gives up a step of bottom margin
-   once it is inside the bar, because the jump strip below it supplies the
-   separation the margin was there for. */
-.ft-bar .ft-head { margin: 0 0 var(--space-2); }
+/* (0,2,0), so it beats the .ft-head rule at the top of this section whatever
+   the order — the identity block gives up a step of bottom margin once it is
+   inside the bar, because the jump strip below it supplies the separation the
+   margin was there for.
+
+   AND IT GIVES UP ITS OWN STICKY CHROME HERE, all three pieces. Inside the bar
+   the ground would be a second opaque layer over the bar's own, the hairline
+   would draw a rule between the name and the jump strip that nothing asked
+   for, and the 0.7rem of vertical padding would be spent twice — on a phone
+   that padding is charged against a MEASURED budget: the note at the foot of
+   this section records the untightened bar at 195px, 29% of a 380x667
+   viewport, and every rule in that media block exists to get it back. A
+   fallback that quietly grows the composed layout is not a fallback. */
+.ft-bar .ft-head {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  background: none;
+  border-bottom: 0;
+}
 .ft-id {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -4722,8 +4755,17 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    twelve-column arrangement below has somewhere to spend it; below it main is
    pinned and a span-2 region is 190px of column for a list of names. Pinning
    the widest overview tier to a width the page could not yet use is the only
-   thing 100rem ever said. */
-@media (max-width: 92rem) {
+   thing 100rem ever said.
+
+   AND IT IS 91.99rem, NOT 92rem, for the reason base.css states and the
+   one-column tier below broke. `min-width: 92rem` already exists twice at the
+   top of this file — it is where `.flows-main` is let off its 78rem leash and
+   where the prose takes two columns — so a `max-width: 92rem` here matches at
+   exactly the same width, and the page spends that tier contradicting itself:
+   main off its leash, prose in two columns, and the overview folded on the
+   argument that there is no width to spend. The fold down from 100rem is what
+   created that collision; 100rem had no partner to collide with. */
+@media (max-width: 91.99rem) {
   .cc-bull, .cc-bear { grid-column: span 6; }
   .cc-chg { grid-column: span 12; }
   .cc-alerts { grid-column: span 7; }
@@ -4731,8 +4773,18 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .cc-watch { grid-column: span 12; }
 }
 /* One column. A phone gets the same seven regions in the same order, not a
-   shrunken twelve-column desk. */
-@media (max-width: 60rem) {
+   shrunken twelve-column desk.
+
+   59.99rem AND NOT 60rem, which is what it said. base.css states the rule — a
+   min and a max at the same step are written `min-width: 60rem` and
+   `max-width: 59.99rem`, because a pair written 60/60 BOTH match at exactly
+   60rem — and this was the query in the file that broke it. At exactly 960px
+   (or 1200px for a reader running a 20px root, which is the whole reason these
+   are rem) the rail had already become a 13rem column and `.flows-main` had
+   the desk width beside it, while this rule collapsed the twelve-column
+   overview to one: full width, one column, on the tier where the layout stops
+   being a phone. */
+@media (max-width: 59.99rem) {
   .cc > * { grid-column: 1 / -1 !important; }
 }
 

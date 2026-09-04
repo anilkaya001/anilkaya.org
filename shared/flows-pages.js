@@ -1212,10 +1212,15 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
          the gamma flip and its distance are all already on the card this page
          holds; they cost no vendor call and no payload change.
 
-         The header is sticky now (assets/css/flows.css, .ft-head), so
-         whatever lands here stays on screen for the whole 5,729px of panels
-         below it. Hidden until filled: an empty quote bar under a ticker
-         reads as a quote that came back blank. -->
+         This header is already persistent and has been since the workspace
+         landed: flows-ticker.js re-parents it into .ft-bar, which is sticky
+         at the site's 4.4rem topbar clearance, so whatever lands here stays
+         on screen for the whole 5,729px of panels below it. (.ft-head carries
+         a sticky rule of its own, but only as the fallback for the frames
+         before that re-parenting — see the note on it in
+         assets/css/flows.css. It is not what makes this stay.)
+         Hidden until filled: an empty quote bar under a ticker reads as a
+         quote that came back blank. -->
     <span class="ft-quote" id="ftQuote" hidden></span>
     <!-- ONCE YOU WERE ON A NAME THERE WAS NO WAY OFF IT. The index below
          renders only when ?t= is absent, so comparing two names meant editing
