@@ -599,6 +599,81 @@ try {
     await put("political", payload);
   }
 
+  /* ---------- §5e the status line's own count ---------------------
+
+     ONE LINE CARRIED TWO DEFECTS AND NEITHER HAD A TEST. It read
+     `(isNum(p.filings) || 0) + " disclosure" + (p.filings === 1 ? "" : "s")`.
+
+     The `|| 0` is the confident zero in the lead clause of the page's status
+     line: a filings key that never arrived printed "0 disclosures filed
+     between May and August", which is a measured emptiness asserted about a
+     window nobody counted, in the one sentence a reader takes as the summary
+     of everything below it.
+
+     The plural is the other half and it is subtler — the count is COERCED and
+     the plural is compared RAW, so a vendor-quoted "1" prints the number 1 and
+     then takes the plural arm, because `"1" === 1` is false. "1 disclosures".
+     The same shape the market tape carried until flows-market.js bound its
+     ratio once, and it only became reachable when isNum widened to admit the
+     quoted numbers the vendor actually sends — so the fix that made the page
+     read more fields is what made this line able to disagree with itself.
+
+     AND THE THIRD FIXTURE IS THE WHITESPACE ONE. `Number(" ")` is 0, exactly
+     as `Number("")` is, and the guard §5d added stopped one character short of
+     it. A blank is not a reading whichever blank the vendor sends. */
+  {
+    /* Quoted "1": the count and its plural must agree, and they are two
+       different expressions reading the same field. */
+    await put("political", { ...payload, filings: "1" });
+    const pa = await browser.newPage();
+    await pa.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await pa.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await pa.waitForSelector("#plStatus");
+    const one = (await pa.textContent("#plStatus")) || "";
+    ok(/\b1 disclosure\b/.test(one) && !/1 disclosures/.test(one),
+      `a vendor-quoted count of "1" is drawn as "1 disclosure" and takes the singular with ` +
+      `it (${one.slice(0, 70)}) — the number was coerced and the plural compared raw, so the ` +
+      "two halves of one clause read the same field and disagreed about it");
+    await pa.close();
+
+    /* Absent: no count is published, so no count is claimed — but the window
+       IS known and is still stated, because the dates did arrive. */
+    const noCount = { ...payload };
+    delete noCount.filings;
+    await put("political", noCount);
+    const pb = await browser.newPage();
+    await pb.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await pb.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await pb.waitForSelector("#plStatus");
+    const none = (await pb.textContent("#plStatus")) || "";
+    ok(!/\b0 disclosures\b/.test(none),
+      `a filings key that never arrived does not print "0 disclosures" (${none.slice(0, 70)}) ` +
+      "— that is an absence wearing a measurement's clothes, in the lead clause of the " +
+      "sentence that summarises the page");
+    ok(/filed between/.test(none),
+      "while the window it was filed over is still stated, because those dates DID arrive: " +
+      "withholding the count is not a reason to withhold what was measured beside it");
+    await pb.close();
+
+    /* Whitespace: the character §5d's guard did not cover. */
+    await put("political", { ...payload, buyers: { ...payload.buyers, rows: [
+      { ...payload.buyers.rows[0], sells: 2, sold: " " },
+      ...payload.buyers.rows.slice(1),
+    ] } });
+    const pc = await browser.newPage();
+    await pc.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await pc.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await pc.waitForSelector("#plBuyers tbody tr");
+    const blank = await pc.evaluate(() =>
+      document.querySelector("#plBuyers tbody tr").children[10].textContent);
+    eq(blank, "—",
+      "and a field the vendor sent as a single space reads as absent rather than as a " +
+      "disclosed sale of $0 — Number(\" \") is 0 exactly as Number(\"\") is, and a guard " +
+      "that excludes only the empty string leaves the same confident zero one space away");
+    await pc.close();
+    await put("political", payload);
+  }
+
   /* ---------- §8 the notes reach the page, one paragraph each ----- */
   {
     const foot = await page.evaluate(() =>

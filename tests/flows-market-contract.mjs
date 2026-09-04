@@ -1677,9 +1677,139 @@ try {
        "and admitting a string at one of them would not be the fix");
   }
 
+  /* ---------- THE MEASURED ZERO, ON THE THREE FIELDS THAT DROPPED IT ------
+
+     Everything above this line is drawn from a busy session, which is exactly
+     the payload under which a falsy-zero guard behaves perfectly. isNum
+     RETURNS the reading rather than a boolean, so `!isNum(x)` and `isNum(x) ?`
+     read a measured 0 as an absence — and this page publishes three counts
+     that can legitimately come back 0: a ladder that admitted nobody, a
+     screener that returned nothing, and a session in which no name moved.
+
+     THE FIRST ONE COST THE WHOLE PAGE. `!isNum(m.n)` gated the branch that
+     draws every panel, so `status: "ok", n: 0` fell through to "No session has
+     been measured yet" — a claim about the pipeline, made about a run that
+     completed. Not one assertion above could catch it: every fixture up to
+     here has n = 200, and the sentence the reader gets is the same sentence
+     the genuinely-unpublished store gets. */
+  {
+    const empty = {
+      netPositive: 0, netNegative: 0, net: 0, priced: 0, oneLegged: 0, tilt: 0, topShare: 0,
+    };
+    await put("market", Object.assign({}, payload, {
+      n: 0, screened: 0,
+      premium: empty,
+      breadth: { bull: 0, bear: 0, flat: 0, unpriced: 0, tilt: 0 },
+      pcr: { volume: null, premium: null, quotedVolume: 0, quotedPremium: 0 },
+      aggressor: { callAsk: 0, callBid: 0, putAsk: 0, putBid: 0, callLift: null, putLift: null, quoted: 0 },
+      vol: { iv30dMedian: null, iv30dQuoted: 0, ivRankMedian: null, ivRankQuoted: 0 },
+    }));
+
+    const zero = await browser.newPage();
+    await zero.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await zero.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    /* THE PANEL IS THE WITNESS, NOT THE SENTENCE. paintTape clears
+       panel.hidden as its last act and is only ever reached past the guard, so
+       an unhidden tape panel is proof the payload was rendered rather than
+       explained away. The wait is bounded and its failure is swallowed for the
+       same reason the quoted block above swallows its own: a panel that never
+       unhides is the symptom, and the assertion under it says what did not
+       render. */
+    try {
+      await zero.waitForSelector("#mktTapePanel:not([hidden])", { timeout: 8000 });
+    } catch { /* deliberately swallowed — the assertions below report it */ }
+    const drawn = await zero.evaluate(() => ({
+      status: (document.getElementById("mktStatus") || {}).textContent || "",
+      panels: [...document.querySelectorAll(".fc-panel")].filter((p) => !p.hidden).length,
+      tape: !(document.getElementById("mktTapePanel") || {}).hidden,
+    }));
+    await zero.close();
+
+    ok(drawn.tape,
+       "a session that screened zero names still DRAWS: `status: \"ok\", n: 0` is a ladder " +
+       "that admitted nobody, and the guard read `!isNum(m.n)` — isNum returns the reading, " +
+       "0 is falsy, so the whole page took the never-published branch");
+    ok(drawn.panels > 0,
+       `with panels on the page (${drawn.panels}) rather than none — the pending branch ` +
+       "draws no tilt, breadth, tape, sector, mover, pulse or against panel at all");
+    ok(!/no session has been measured yet/i.test(drawn.status),
+       `and the reader is not told the pipeline has never run (${drawn.status}). That ` +
+       "sentence is a claim about the STORE, and here the store had been written to");
+    ok(/^0 screened names of 0 returned by the ladder/.test(drawn.status),
+       `the status line keeps its denominator on a measured zero (${drawn.status}). It read ` +
+       "`isNum(m.screened) ? … : \"\"`, so `screened: 0` dropped the clause entirely and left " +
+       "no way to tell a ladder that returned nothing from a payload that never published " +
+       "the field — the two silences this page spends its prose separating");
+  }
+
+  /* ---------- A BLANK IS NOT A READING -------------------------------------
+
+     The widened helper excluded only the literal "", and Number() is generous
+     in exactly the directions that manufacture a measurement: Number(" ") is
+     0, Number(false) is 0, Number([]) is 0. So a field the vendor sent as a
+     space rendered "$0" — a sum this page states as measured, invented out of
+     whitespace, and the one error mode worse than the em dash it replaced.
+
+     BOTH FORMATTERS ARE ASKED, for the same reason the quoted block above asks
+     both: usd() and pct() call the helper separately, and a fix applied at one
+     of them would not be one. */
+  {
+    await put("market", Object.assign({}, payload, {
+      premium: Object.assign({}, payload.premium, { net: " " }),
+      vol: Object.assign({}, payload.vol, { iv30dMedian: false }),
+      /* QUOTED WITH THE VENDOR'S OWN WHITESPACE, which is the reading that
+         tells a coerced value apart from a raw one. The breadth note tested
+         `isNum(b.unpriced)` and then concatenated `b.unpriced`, so the string
+         the vendor sent reached the sentence with its padding intact. */
+      breadth: Object.assign({}, payload.breadth, { unpriced: "20 " }),
+    }));
+
+    const blank = await browser.newPage();
+    await blank.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await blank.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    await blank.waitForSelector("#mktTapePanel:not([hidden])");
+    const { tape, note } = await blank.evaluate(() => ({
+      tape: [...document.querySelectorAll("#mktTapeBody tr")].map((tr) => ({
+        k: tr.querySelector("th").textContent,
+        v: tr.querySelectorAll("td")[0].textContent,
+        cls: tr.querySelectorAll("td")[0].className,
+      })),
+      note: (document.getElementById("mktBreadthNote") || {}).textContent || "",
+    }));
+    await blank.close();
+
+    const netRow = tape.find((r) => /^Net premium/.test(r.k));
+    eq(netRow.v, "—",
+       `a net premium sent as a single space prints the em dash (${netRow.v}) — the mark ` +
+       'this page keeps for a reading nobody took. Number(" ") is 0, and the guard excluded ' +
+       'only the literal "", so the cell read "$0": not a missing number rendered wrongly ' +
+       "but a measured sum invented out of whitespace");
+    eq(netRow.cls.trim(), "c-num",
+       `and it carries no tone class (${netRow.cls}) — toneClass() calls the helper too, so ` +
+       "a blank that coerced to 0 would also have painted the cell as neither-way LEVEL, " +
+       "which is a third claim about a session nobody measured");
+    const ivRow = tape.find((r) => /implied vol/i.test(r.k));
+    eq(ivRow.v, "—",
+       `and a boolean prints the em dash rather than a measured 0.0% (${ivRow.v}). ` +
+       "Number(false) is 0 and false is neither null nor undefined nor \"\", so the old " +
+       "guard passed it straight into the coercion");
+
+    ok(/\b20 of 200 screened names quoted no usable\b/.test(note),
+       `the breadth note prints the COERCED count (${note.slice(0, 120)}…). It tested ` +
+       "`isNum(b.unpriced) !== null` and then concatenated the RAW field, so a count the " +
+       "vendor quoted as \"20 \" reached the sentence carrying the vendor's whitespace — " +
+       "the same guarded-then-raw shape that sent a quoted ratio into String.prototype." +
+       "toFixed two rows up, one string concatenation away from being a crash instead of " +
+       "a typo");
+  }
+
 } finally {
   await browser.close();
   await server.stop();
 }
 
-console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is rather than as the em dash this page keeps for a reading nobody took, two ratios that formatted the coerced value rather than the raw one and a row below them proving nothing threw on the way, and every chart asserted at its DRAWN size rather than its declared one`);
+console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is rather than as the em dash this page keeps for a reading nobody took, two ratios that formatted the coerced value rather than the raw one and a row below them proving nothing threw on the way, a ladder that admitted nobody rendered as the session it is rather than as a pipeline that never ran, a screened count of zero that keeps the denominator telling it apart from an unpublished field, a blank string and a boolean refused before the coercion that would have made either a measured zero, and every chart asserted at its DRAWN size rather than its declared one`);

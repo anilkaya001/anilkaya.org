@@ -298,10 +298,12 @@ const railFull = await page.evaluate(() => {
   return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
 });
 eq(railFull.text, "8",
-   "the rail badge for this side reads the row count of the board on screen — the nav is served " +
-   "with the slot empty and hidden because filling it there would cost a D1 row read per page " +
-   "view for a number the page is about to fetch anyway, so the controller holding the payload " +
-   "fills it");
+   "the rail badge for this side is filled by the page — the nav is served with the slot empty " +
+   "and hidden because filling it there would cost a D1 row read per page view for a number the " +
+   "page is about to fetch anyway, so the controller holding the payload fills it. This board " +
+   "publishes no `cleared`, so 8 here is also the FALLBACK arm: a board written before that " +
+   "field existed has nothing but its rows to state, and the section below is the one that " +
+   "proves the field is preferred when it is there");
 eq(railFull.hidden, false, "and the slot is shown once it has a measurement in it");
 
 /* THE PENDING CASE IS WRITTEN, NOT ARRANGED BY DELETION. This is the exact
@@ -361,6 +363,93 @@ eq(railQuiet.hidden, false,
    "and that zero is VISIBLE: a rail that hides a measured emptiness collapses a quiet session " +
    "into an outage, the same error as the pending case with its sign reversed");
 
+/* ---- 10-bis. the badge counts the POPULATION, not the page ---------- */
+
+/* THE DEFECT THIS SECTION EXISTS FOR, and it survived every fixture above.
+   The publisher derives two counts from one list — `cleared`, the side's whole
+   pool past the dead band, and `shed`, what the board's length cap could not
+   hold (flows-pipeline.mjs:5687) — and the status line has printed "4 more
+   cleared the band and did not fit (93 of 97 shown)" since those fields
+   shipped. The badge filled from rows.length, so the rail read 93 directly
+   above a sentence saying 97 of them existed. One page, one quantity, two
+   numbers, and the smaller one in the element a reader uses to decide whether
+   the section is worth opening at all.
+
+   ONLY A BOARD WHOSE `cleared` STRICTLY EXCEEDS ITS ROWS CAN CATCH IT. On
+   every other fixture in this file the two are equal — the eight-name board
+   publishes no cleared at all — so each of them passes against the defect and
+   against the fix alike, which is exactly how the defect reached the line the
+   previous commit rewrote. Eight rows out of a pool of twelve, four shed. */
+await put("board:long", {
+  ...board("long", true), deadBand: 20, scored: 130, neutral: 118,
+  cleared: 12, shed: 4,
+});
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const capped = await page.evaluate(() => {
+  const el = document.querySelector('[data-rail-count="long"]');
+  return {
+    text: el ? el.textContent : null,
+    hidden: el ? el.hidden : null,
+    cards: document.querySelectorAll(".fd-card").length,
+    status: document.getElementById("flowsStatus").textContent,
+  };
+});
+eq(capped.cards, 8,
+   "the page draws the eight rows the payload published, so it really is an excerpt of the " +
+   "twelve names that payload says cleared the band — a fixture where the two counts agreed " +
+   "could not tell the badge's two candidate sources apart");
+eq(capped.text, "12",
+   "and the rail badges TWELVE, the population the publisher measured, rather than the eight " +
+   "this board had room for. A badge that silently means “as many as we chose to draw” is the " +
+   "truncation defect one element wide");
+eq(capped.hidden, false, "shown, because there is a measured population behind it");
+
+/* THE TWO NUMBERS ARE READ OFF THE PAGE AND COMPARED WITH EACH OTHER, not
+   each with a literal this file picked. A later change that moves one of them
+   moves either the badge or the sentence, and this is the assertion that
+   notices they have stopped agreeing — which is the whole subject of the fix
+   and the one part a pair of hard-coded 12s would not defend. */
+const said = /\((\d+) of (\d+) shown\)/.exec(capped.status);
+ok(said, `the status line states the pool it is an excerpt of at all (${capped.status})`);
+eq(said && said[2], capped.text,
+   "the population in the sentence and the population in the badge are the SAME number. " +
+   "flows-events.js:1126 states the rule for two routes — “two routes wording one quantity " +
+   "differently is how a reader concludes there are two quantities” — and two ELEMENTS on one " +
+   "page are no better than two routes");
+eq(said && said[1], String(capped.cards),
+   "while the numerator in that sentence is the rows actually drawn, so the clause reconciles " +
+   "the page against the pool instead of restating either of them twice");
+
+/* THE PRODUCTION SHAPE OF THE MEASURED-QUIET SIDE, which the arm above is
+   not: the pipeline publishes `cleared: sides[side].length` on every board, so
+   a real quiet side carries a 0 rather than omitting the field, and the arm
+   above — written before the field was read here — omits it and therefore only
+   ever exercised the fallback.
+
+   THIS ARM IS A SHAPE ARM AND IT DISCRIMINATES NOTHING BY ITSELF, which is
+   said here rather than left to be discovered. `cleared` is a length and can
+   never be below the rows it produced, so on a quiet side both sources are 0
+   and every plausible fill prints the same "0": it passed against the defect
+   too. What it holds is the GUARD — keyed on `scored`, not on `cleared` — so a
+   later rewrite that keys the guard on the field this commit introduced hides
+   the zero and fails here as well as one arm above. */
+await put("board:short", {
+  ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 130,
+  cleared: 0, shed: 0,
+});
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForFunction(() => !!document.querySelector('[data-empty="quiet"]'));
+const railZero = await page.evaluate(() => {
+  const el = document.querySelector('[data-rail-count="short"]');
+  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
+});
+eq(railZero.text, "0",
+   "a side that scored 130 names and cleared none of them badges the published “0” — the same " +
+   "reading the fallback arm above prints, now arriving from the field rather than from the " +
+   "absence of it");
+eq(railZero.hidden, false, "and it is visible, for the reason the fallback arm already gives");
+
 /* ---- 11. nothing threw along the way -------------------------------- */
 
 eq(errors.length, 0,
@@ -373,4 +462,6 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control bar ex
   `library it depends on is named before its symptoms, a denominator that stays silent until ` +
   `it has something to say, a measured zero match distinguished from an empty board, orders ` +
   `withheld exactly when the payload cannot produce them, a rail badge that is silent on a ` +
-  `pending board and prints its measured zero on a quiet one, and no overflow at 320px`);
+  `pending board, prints its measured zero on a quiet one and its whole POOL on a board the ` +
+  `length cap truncated — the same number the sentence beside it reconciles against — and no ` +
+  `overflow at 320px`);

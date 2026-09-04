@@ -1801,15 +1801,45 @@
          the data lands is honest; a badge that says 0 while the fetch is in
          flight is not."
 
-         NOT THE GUARD THE SIBLINGS USE. flows-watch.js and flows-events.js
-         write `if (slot && rows.length)`, which is right for them and wrong
-         here: on a board a zero can be a MEASUREMENT — a side where names were
-         scored and none cleared the dead band — and suppressing that would
-         collapse a working quiet day into an outage, which is the other half of
-         the same rule. `scored` is what separates them, exactly as the block
-         directly below already uses it for the sentence it prints. */
-      if (slot && (rows.length || isNum(payload.scored) > 0)) {
-        slot.textContent = String(rows.length);
+         NOT THE GUARD THE SIBLINGS USE. flows-watch.js:434 and
+         flows-events.js:1142 write `if (slot && rows.length)`, which is right
+         for them and wrong here: on a board a zero can be a MEASUREMENT — a
+         side where names were scored and none cleared the dead band — and
+         suppressing that would collapse a working quiet day into an outage,
+         which is the other half of the same rule. `scored` is what separates
+         them, exactly as the block directly below already uses it for the
+         sentence it prints. It is hoisted because it now answers for this
+         guard and for both the branch and the sentence at :1852 — one field
+         read three times across ten lines, beside `legacyFamilies`,
+         `horizonSessions` and `knowsDeep`, which are hoisted for this reason.
+
+         AND THE NUMBER IT PRINTS IS THE POPULATION, NOT THE PAGE.
+         `rows.length` is post-cap. The publisher derives both counts from one
+         list — `cleared` is the side's whole pool and `shed` is what did not
+         fit (flows-pipeline.mjs:5687) — and the line at :1960 already prints
+         "4 more cleared the band and did not fit (93 of 97 shown)". Filling
+         this slot from `rows.length` put 93 in the rail directly above a
+         sentence saying 97 of them existed: the same defect flows-events.js:1126
+         records for the calendar badge, and its reason applies twice over here.
+         "Two routes wording one quantity differently is how a reader concludes
+         there are two quantities" — and two ELEMENTS on one page are no better
+         than two routes. /flows/ fills this same slot (flows-overview.js:1679),
+         so both move together or the fix recreates the split it is closing.
+         `rows.length` remains the fallback for a board published before
+         `cleared` existed, where the page has nothing else to state.
+
+         THE THREE CASES THE GUARD STILL HAS TO KEEP APART, which is why it is
+         unchanged. A pending envelope carries neither `scored` nor `cleared`,
+         so it fails the guard and prints nothing. A measured-quiet side
+         publishes `scored` > 0 and `cleared` 0, so it passes and prints that
+         zero — the reading, not a silence. An ordinary side publishes
+         `cleared` >= rows.length and prints the pool. `cleared` is never
+         published without `scored` beside it, so admitting it to the guard
+         would widen nothing and would only give the guard a second key. */
+      const scoredN = isNum(payload.scored);
+      if (slot && (rows.length || scoredN > 0)) {
+        const clearedN = isNum(payload.cleared);
+        slot.textContent = String(clearedN === null ? rows.length : clearedN);
         slot.hidden = false;
       }
 
@@ -1819,10 +1849,10 @@
          its first session yet" reports a working quiet day as an outage. The
          published `scored` count separates the two: a board that scored names
          and placed none here is a reading, not a failure. */
-      if (!rows.length && isNum(payload.scored) > 0) {
+      if (!rows.length && scoredN > 0) {
         showMessage(
           "No name on this side cleared the ±" + (payload.deadBand ?? "") + " band this session. " +
-          (isNum(payload.scored) + " names were scored; " +
+          (scoredN + " names were scored; " +
            (isNum(payload.neutral) ?? "all") + " of them landed inside the band, which is what a " +
            "quiet session looks like. The other side may still have candidates."),
           /* MEASURED AND EMPTY, which is the one silence of the three that is a

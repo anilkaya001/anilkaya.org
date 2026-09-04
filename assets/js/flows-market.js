@@ -24,22 +24,24 @@
   var MINUS = "−";           // U+2212, not a hyphen
   var DASH = "—";
 
-  /* THE CANONICAL FORM, WHICH ADMITS A NUMERIC STRING. This read
-     `typeof v === "number" && isFinite(v)` — safe against the confident zero,
-     but STRICTER than the contract every other surface here holds, and the
-     harm ran the other way: the vendor quotes several fields, so a measured
-     reading printed an em dash. flows-panels.js:56-70 diagnosed the same
-     divergence after it shipped, and shared/flows-market.js numOrNull coerces
-     the same way on the wire.
+  /* A NUMBER, OR THE VENDOR'S QUOTED NUMBER, AND NOTHING ELSE. Two wrong
+     versions preceded this one. `typeof v === "number"` alone rejected the
+     quoted fields the vendor really sends, printing an em dash over a measured
+     reading (flows-panels.js:56-70). Widening to `v !== ""` then let Number()
+     invent: Number(" "), Number(false) and Number([]) are all 0, so a blank
+     rendered "$0".
 
-     ALIGNED RATHER THAN DELETED, which is a measurement: flows-ui.js owns
-     `UI.isNum`, but it is 24k of parse and tests/flows-weight ceilings both
-     routes carrying this copy — market 91k to 115k against 95k, political 49k
-     to 73k against 55k. Both trip. */
+     IT RETURNS THE READING, so `!isNum(x)` and `isNum(x) ?` are bugs, not
+     idioms — a measured 0 is falsy. Ask `=== null`; format what comes back.
+
+     Aligned with flows-ui.js:65 rather than importing it: that module is 24k
+     and takes this route from 91k to 115k against a 95k weight ceiling. */
   function isNum(v) {
-    if (v === null || v === undefined || v === "") return null;
-    var n = typeof v === "number" ? v : Number(v);
-    return isFinite(n) ? n : null;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    if (v.trim() === "") return null;
+    var n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -47,16 +49,14 @@
     if (text !== undefined && text !== null) n.textContent = String(text);
     return n;
   }
-  /* ZERO PRINTS UNSIGNED, BECAUSE IT IS A MEASUREMENT AND NOT A LEAN.
-
-     Every signed formatter in this file used to test `n >= 0 ? "+" : MINUS`,
-     which stamps a plus on a reading that came back exactly level. "The
-     dollars were balanced" and "the dollars leaned a hair positive" then
-     rendered identically — the same family of defect as Number(null) === 0,
-     one step further down the pipe: a real measured zero dressed as a
-     positive. flows-ui.js states the rule and the board, the events page and
-     the watch list all obey it; this file now does too, in all three of its
-     signed formatters and in the bar classes they sit beside. */
+  /* ZERO PRINTS UNSIGNED, BECAUSE IT IS A MEASUREMENT AND NOT A LEAN. Every
+     signed formatter here used to test `n >= 0 ? "+" : MINUS`, stamping a plus
+     on a reading that came back exactly level: "the dollars were balanced" and
+     "they leaned a hair positive" then rendered identically — the measured-zero
+     defect one step further down the pipe than Number(null) === 0. flows-ui.js
+     states the rule and the board, the events page and the watch list obey it;
+     so now do all three signed formatters here and the bar classes beside
+     them. */
   function signGlyph(n) {
     return n < 0 ? MINUS : (n > 0 ? "+" : "");
   }
@@ -341,12 +341,10 @@
     var breadth = m.breadth || {};
     var premium = m.premium || {};
 
-    /* NEVER A CONFIDENT ZERO IN A POPULATION. This line read
-       `isNum(breadth.bull) || 0`, which is Number(null) === 0 wearing newer
-       syntax: a count the payload never published printed as "0 bought", and
-       a session in which nothing was bought became indistinguishable from a
-       field that was never written. The em dash is this file's mark for "not
-       measured" and it belongs in a count as much as in a price. */
+    /* NEVER A CONFIDENT ZERO IN A POPULATION. This read `isNum(breadth.bull)
+       || 0`: a count the payload never published printed as "0 bought", and a
+       session in which nothing WAS bought became indistinguishable from a
+       field never written. count() prints the em dash for exactly that. */
     host.append(tiltRow(
       "Breadth tilt — counting names",
       breadth.tilt,
@@ -477,10 +475,12 @@
             ? "More than half the total is five names: read the aggregate as those names, not as the universe."
             : "The total is spread across the universe rather than owned by a handful of prints."));
       }
-      if (isNum(b.unpriced) !== null) {
-        parts.push(b.unpriced + " of " + count(m.n) + " screened names quoted no usable " +
+      // A zero one-legged count drops the clause on purpose: it adds nothing.
+      var unpriced = isNum(b.unpriced), oneLeg = isNum(p.oneLegged);
+      if (unpriced !== null) {
+        parts.push(unpriced + " of " + count(m.n) + " screened names quoted no usable " +
           "net premium and are excluded from every total above rather than counted as level" +
-          (isNum(p.oneLegged) && p.oneLegged ? " — " + p.oneLegged + " of them quoted one leg only." : "."));
+          (oneLeg ? " — " + oneLeg + " of them quoted one leg only." : "."));
       }
       note.textContent = parts.join(" ");
     }
@@ -494,15 +494,13 @@
     body.textContent = "";
 
     var p = m.premium || {}, pcr = m.pcr || {}, ag = m.aggressor || {}, vol = m.vol || {};
-    /* THE COERCED VALUE IS THE ONE THAT GETS FORMATTED. These two rows were
-       the only place here that tested with isNum and then formatted the RAW
-       field — harmless while isNum rejected strings, a CRASH once it was
-       widened: a quoted ratio passes the test and calls .toFixed on a String.
-       The list below is built entirely before a single row is appended, so
-       that costs the whole table and panel.hidden is never cleared; and it
-       escapes as an unhandled REJECTION from the fetch chain, so window.onerror
-       never sees it. The page renders one panel fewer, in silence. A widened
-       guard that hands the unwidened value onward is not a widened guard. */
+    /* THE COERCED VALUE IS THE ONE THAT GETS FORMATTED — at these two rows,
+       and at the breadth note and status line they were once named apart from.
+       Formatting the RAW field was harmless while isNum rejected strings and a
+       CRASH once it was widened: a quoted ratio passes the test and calls
+       .toFixed on a String. The list is built entirely before a row is
+       appended, so that costs the whole table, panel.hidden is never cleared,
+       and the TypeError escapes as a REJECTION window.onerror never sees. */
     var pcrVol = isNum(pcr.volume), pcrPrem = isNum(pcr.premium);
     var rows = [
       ["Net premium, signed", usd(p.net), p.priced, toneClass(p.net)],
@@ -1978,7 +1976,9 @@
        a client-side annotation, not a claim the pipeline publishes it. */
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
 
-    if (m.status === "pending" || !isNum(m.n)) {
+    // `!isNum(m.n)` sent an ok payload with `n: 0` down the pending branch.
+    var n = isNum(m.n);
+    if (m.status === "pending" || n === null) {
       /* THE ORDINARY STATE BEFORE THE FIRST RUN, stated as a fact about the
          store rather than as an error. */
       if (status) {
@@ -2001,8 +2001,10 @@
     paintPulse(all[3]);
 
     if (status) {
-      status.textContent = m.n + " screened names" +
-        (isNum(m.screened) ? " of " + m.screened + " returned by the ladder" : "") +
+      // `isNum(m.screened) ?` lost the denominator on a ladder that returned 0.
+      var screened = isNum(m.screened);
+      status.textContent = n + " screened names" +
+        (screened === null ? "" : " of " + screened + " returned by the ladder") +
         " · session " + (m.sessionDate || "unknown") +
         (m.generatedAt ? " · built " + new Date(m.generatedAt).toLocaleString() : "");
     }

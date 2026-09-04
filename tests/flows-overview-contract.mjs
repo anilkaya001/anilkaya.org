@@ -1289,6 +1289,70 @@ try {
     ok(/all 5/.test(sub), `the region header says how many the side actually holds (${sub})`);
     eq(await page.locator("#ccBullSub").getAttribute("href"), "/flows/long/",
        "and is the way to the full side, which is a page rather than a state");
+
+    /* THE FIVE AND THE FOUR ABOVE ARE ALSO THE FALLBACK ARM. Neither fixture
+       board publishes `cleared`, so those badges came from `rowCount` — which
+       is the right answer for a board written before that field existed and
+       the WRONG one for every board since. Only a payload whose pool exceeds
+       its published rows can tell the two sources apart, and this file had
+       none. */
+    await post("board:long", board("long", bullRows, SESSION,
+      { deep: 4, cleared: 12, shed: 7 }));
+    await post("board:short", board("short", bearRows, SESSION,
+      { deep: 4, cleared: 9, shed: 5 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    const pooled = await page.evaluate(() => {
+      const out = {};
+      for (const el of document.querySelectorAll("[data-rail-count]")) {
+        out[el.dataset.railCount] = el.textContent.trim();
+      }
+      out.__bullRows = document.querySelectorAll(".cc-bull tbody tr").length;
+      return out;
+    });
+    eq(pooled.__bullRows, 5,
+       "the page still draws the five names the bullish board published, so it really is an " +
+       "excerpt of the twelve that payload says cleared the band");
+    eq(pooled.long, "12",
+       "and the rail badges TWELVE, the side's whole pool, rather than the five rows the " +
+       "publisher's length cap left on the wire. The badge is the size of the SECTION its link " +
+       "opens, and a badge that silently means “as many as we chose to publish” is the " +
+       "truncation defect one element wide");
+    eq(pooled.short, "9", "and nine on the bearish side, out of four published rows");
+    eq(pooled.watch, "2",
+       "while the watch badge is unchanged at its two rows: board:watch publishes `neutral` and " +
+       "no `cleared` at all (flows-pipeline.mjs:5824), and flows-watch.js:434 fills this same " +
+       "slot from its own rows.length, so moving this one alone would open the split the two " +
+       "board badges just closed");
+
+    /* THE ASSERTION THE WHOLE FIX IS FOR: ONE SLOT, TWO ROUTES, ONE NUMBER.
+       Each half of this pair passed on its own while the two disagreed — the
+       overview badged 5 and /flows/long/ badged 5 out of a pool of 12, and a
+       reader moving between them saw one badge change under one label. The
+       cross-route reading is the only one that can fail when they drift, so
+       the number is carried from this page to that one rather than compared
+       to a literal in each file. */
+    await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    const onBoard = await page.evaluate(() => {
+      const el = document.querySelector('[data-rail-count="long"]');
+      return {
+        badge: el ? el.textContent.trim() : null,
+        status: document.getElementById("flowsStatus").textContent,
+      };
+    });
+    eq(onBoard.badge, pooled.long,
+       "/flows/long/ fills the same slot with the same number /flows/ did. Two routes wording " +
+       "one quantity differently is how a reader concludes there are two quantities, and these " +
+       "two are the pair the rail puts a link between");
+    ok(/\(5 of 12 shown\)/.test(onBoard.status),
+       `and the board's own status line reconciles that pool against the rows it drew ` +
+       `(${onBoard.status})`);
+
+    await post("board:long", board("long", bullRows, SESSION, { deep: 4 }));
+    await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
   }
 
   /* ---------- nothing overflows a phone -------------------------- */
@@ -2064,7 +2128,9 @@ try {
     `twelve "all 12", the read instant on a 24-hour clock that names its zone, a ranked ` +
     `price change that no longer shares a word with the score move seated above it, and a ` +
     `fourth rail badge filled from the calendar's own population rather than the rows this ` +
-    `page drew from it, so /flows/ and /flows/events/ badge one quantity and not two`);
+    `page drew from it, so /flows/ and /flows/events/ badge one quantity and not two — and the ` +
+    `two board badges filled from the side's whole pool for the same reason, read back off ` +
+    `/flows/long/ so the two routes cannot drift apart under one label`);
 } finally {
   await browser.close();
   await server.stop();

@@ -4671,6 +4671,14 @@
 
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  /* Mirrored from flows-ui.js:155 — the shape the publisher validates on the
+     way out, and the gate the parse below sits behind. This page cannot call
+     the shared function: shared/flows-pages.js:1308 serves it flows-panels.js
+     and flows-ticker.js and no third file, and the route is already 445k
+     against the 470k ceiling tests/flows-weight.mjs enforces. So it is aligned
+     here the way assets/js/flows-market.js:216 aligned its own copy, and the
+     alignment is named so a future reader knows which file is the original. */
+  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   /* TWO INDEPENDENT TESTS, because a card can be freshly WRITTEN from a stale
      SESSION: the pipeline runs, the vendor is behind, and the payload lands
@@ -4678,13 +4686,54 @@
   function assessAge(card) {
     const now = Date.now();
     const parts = [];
-    const written = isNum(card.__updatedAt);
+
+    /* A NON-POSITIVE STAMP IS AN ABSENT ONE, normalised once here rather than
+       tested at each use. isNum(0) is 0, not null, so the bare `written !==
+       null` this carried let a stamp of 0 — the epoch — through the age test
+       and dated a card built minutes ago to more than fifty-six years back.
+       worker.js:1224 does emit exactly that zero, as
+       `String(stored.updatedAt || 0)`, and getJSON at flows-ticker.js:4772
+       catches it with `Number(header) || null`. But that guard holds only for
+       the values `||` treats as false: any other non-positive stamp — a
+       negative one out of a skewed clock or a sentinel column — passes
+       straight through it and lands here. A second line of defence that works
+       only while the first holds is not one, and this one did not even cover
+       the same set. The shape assets/js/flows-ui.js:216 fixed and
+       flows-market.js:234 mirrored. */
+    const stamped = isNum(card.__updatedAt);
+    const written = stamped !== null && stamped > 0 ? stamped : null;
     if (written !== null && now - written > STALE_WRITE_MS) {
-      parts.push("this card was last written " +
-        Math.round((now - written) / 3600000) + " hours ago");
+      const hours = Math.floor((now - written) / 3600000);
+      const days = Math.floor(hours / 24);
+      /* DAYS ONCE THERE ARE DAYS, because every other Flows surface says
+         "3 days ago" where this said "83 hours ago" — one product, two
+         units for one quantity. The hour branch cannot fire while the
+         threshold is 30 hours; it is here so that lowering the threshold can
+         never start printing "0 days", a confident zero wearing a unit. */
+      const age = days >= 1
+        ? days + (days === 1 ? " day" : " days")
+        : hours + (hours === 1 ? " hour" : " hours");
+      parts.push("this card was last written " + age + " ago");
     }
-    const session = card.sessionDate ? Date.parse(card.sessionDate + "T00:00:00Z") : NaN;
-    if (Number.isFinite(session) && now - session > STALE_SESSION_MS) {
+
+    /* THE SHAPE IS CHECKED BEFORE THE PARSE, because Date.parse is lenient
+       enough to be dangerous: a truncated "YYYY-MM" plus the suffix comes back
+       FINITE in V8 and dates the card to the first of that month, raising
+       "it reports the session of 2026-09" over numbers written minutes ago.
+       A string that parses is not a date that was measured.
+
+       AND 21:00Z, NOT MIDNIGHT. 21:00Z is after every US close, so a session
+       date is aged from the end of its own session rather than from its
+       midnight. Aging from midnight called a session stale up to 21 hours
+       before flows-ui.js:255 and flows-history.js:664 did — the deepest
+       per-name surface in the product disagreeing with every page a reader
+       could have reached it from. */
+    let session = null;
+    if (ISO_DAY.test(String(card.sessionDate || ""))) {
+      const parsed = Date.parse(String(card.sessionDate) + "T21:00:00Z");
+      if (Number.isFinite(parsed)) session = parsed;
+    }
+    if (session !== null && now - session > STALE_SESSION_MS) {
       parts.push("it reports the session of " + card.sessionDate);
     }
     return parts;
