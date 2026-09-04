@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "98";
+export const ASSET_VERSION = "99";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1237,22 +1237,26 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <span class="fc-meta" id="ftConv"></span>
     <span class="fc-meta" id="ftRegime"></span>
     <span class="fc-meta" id="ftDates"></span>
-    <!-- THE PRICE, WHICH THIS PAGE NEVER SHOWED. The identity block carried
-         the ticker, the score, conviction, the gamma regime and two dates —
-         and not one number a trader checks first. Spot, today's change, ATR,
-         the gamma flip and its distance are all already on the card this page
-         holds; they cost no vendor call and no payload change.
+    <!-- THE PRICE IS IN THE HEADER NOW, AS CHIPS, AND THIS SPAN IS GONE.
 
-         This header is already persistent and has been since the workspace
-         landed: flows-ticker.js re-parents it into .ft-bar, which is sticky
-         at the site's 4.4rem topbar clearance, so whatever lands here stays
-         on screen for the whole 5,729px of panels below it. (.ft-head carries
-         a sticky rule of its own, but only as the fallback for the frames
-         before that re-parenting — see the note on it in
-         assets/css/flows.css. It is not what makes this stay.)
-         Hidden until filled: an empty quote bar under a ticker reads as a
-         quote that came back blank. -->
-    <span class="ft-quote" id="ftQuote" hidden></span>
+         It used to read: "THE PRICE, WHICH THIS PAGE NEVER SHOWED ... spot,
+         today's change, ATR, the gamma flip and its distance are all already
+         on the card this page holds; they cost no vendor call and no payload
+         change." Every word of that was right, and the span it justified was
+         emitted, hidden, styled by four CSS rules, and written to by NOTHING —
+         no JavaScript in the repository ever referenced ftQuote. A promise in
+         a comment over an element no controller fills is a claim that the
+         feature exists.
+
+         paintIdentity builds ftPrice, ftChgPct, ftSide, ftD1, ftRank and now
+         ftFlip through the one idChip() helper, so there is one way a header
+         reading is drawn rather than a chip mechanism and a quote-bar
+         mechanism that would drift apart. The header is persistent either way:
+         flows-ticker.js re-parents it into .ft-bar, sticky at the site's
+         4.4rem topbar clearance, so it stays on screen for the whole scroll.
+         (.ft-head carries a sticky rule of its own, but only as the fallback
+         for the frames before that re-parenting — see the note in
+         assets/css/flows.css. It is not what makes this stay.) -->
     <!-- ONCE YOU WERE ON A NAME THERE WAS NO WAY OFF IT. The index below
          renders only when ?t= is absent, so comparing two names meant editing
          the URL by hand. This is the way back to it, and it is in the header

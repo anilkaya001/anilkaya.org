@@ -2899,23 +2899,16 @@ body.is-stale .flows-tablewrap {
   border-bottom: 1px solid var(--hairline);
 }
 
-/* The dense quote row: price, change, ATR, the flip and its distance — one
-   line of mono the header keeps pinned. Hidden until a controller fills it,
-   because an empty bar under a ticker reads as a reading that came back
-   blank. See the note on #ftQuote in shared/flows-pages.js. */
-.ft-quote {
-  display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: 0 var(--space-2);
-  font-family: var(--font-mono); font-size: var(--fs-fine);
-  color: var(--ink-dim);
-}
-.ft-quote b { font-weight: 600; color: var(--ink); }
-/* HUE REPEATS THE SIGN, it does not carry it. The controller writes the value
-   with its own U+2212 or "+" in the text, so a monochrome printout and a
-   reader who cannot separate these two hues both keep the reading. A tint
-   with no sign character in the string is the defect, not the rule. */
-.ft-quote .is-pos { color: var(--flow-up); }
-.ft-quote .is-neg { color: var(--flow-down); }
+/* EVERY HEADER CHILD MAY SHRINK. A flex item's min-width is auto, which is
+   its min-content — for a chip carrying "$1,284.20 to flip (+2.31s)" that is
+   wider than a 320px content column, and the page grows a horizontal
+   scrollbar the §2 sweep fails on.
+
+   (This comment used to describe "the dense quote row ... hidden until a
+   controller fills it", which was a description of #ftQuote sitting above a
+   rule that has nothing to do with it. The span is gone and the header draws
+   those readings as chips; the rule below is the min-width guard it always
+   was.) */
 .ft-head > * { min-width: 0; }
 .ft-head h2 {
   margin: 0; font-family: var(--font-mono); font-size: var(--fs-mark);
@@ -3149,6 +3142,14 @@ body.is-stale .flows-tablewrap {
   white-space: nowrap;
 }
 .ft-id b { font-weight: 600; color: var(--ink); }
+/* DISTANCE IS GEOMETRY, NOT AN OPINION. The flip chip says whether the level
+   sits above spot or below it, and the levels table states the rule these
+   mirror (.fc-levels .is-above/.is-below): a direction is a fact about where
+   the price is, not a bullish or bearish claim, so it never takes the
+   directional palette. The sign is in the string either way — P.pct1 writes
+   its own U+2212 or "+" — so greyscale keeps the whole reading. */
+.ft-id.is-above { color: var(--ink); }
+.ft-id.is-below { color: var(--ink-dim); }
 .ft-id.is-pos b { color: var(--flow-up); }
 .ft-id.is-neg b { color: var(--flow-down); }
 .ft-id.is-flat b { color: var(--flow-flat); }
