@@ -216,6 +216,31 @@ export const RATE = {
    run that carries the new terms. */
 export const CALL_BUDGET = 1250;
 
+/* WHAT THIS RUN IS BOUND BY, MEASURED, SO IT IS NOT RE-LITIGATED AS A
+   THROUGHPUT PROBLEM.
+
+   The recurring ask on this file is a "vectorized backend": batch the maths,
+   go faster. The maths was benchmarked at production shape and it is not the
+   constraint, by three orders of magnitude. Per enriched name: aggressorGamma
+   0.426ms, bookDisplacement 0.365ms, pathSignature 0.279ms, positioningQuality
+   0.230ms, flowPurity 0.115ms, four candlesAscending 0.206ms, gammaDecay
+   0.022ms — 1.64ms, so 128 names is 210ms. buildChainPanels over a 500-row
+   chain is 5.65ms, so DEEP_NAMES of them is 282ms. Fifty gamma profiles are
+   24ms. scoreBoard end to end — seven robustZ over winsorized columns, eight
+   percentileRank, neutralize, effectiveBreadth — is ~1.5ms, ONCE. Total CPU
+   for the whole cross-section: about 0.6 seconds.
+
+   Against it, 1076 modelled calls at the floor the run actually pinned at
+   (RATE.floorCeilingMs = 750ms) is 807 seconds of scheduled waiting inside a
+   DEADLINE_MS of 2160. CPU is under a tenth of a percent of the sleep.
+
+   So the levers on this file's wall clock are, in order: the number of calls
+   it makes, the floor those calls are spaced at, and whether the process sits
+   idle through the round trips between them. The third is what the permit
+   queue and runPooled() address; the first two are what the budget above and
+   RATE's ceiling are for. Vectorizing anything here buys milliseconds. Write
+   the measurement down rather than the intuition, which is the whole rule. */
+
 /**
  * How near an earnings date has to be for a name to leave the board.
  *
@@ -620,6 +645,198 @@ const permits = makePermitQueue({
   maxInFlight: 6,
 });
 
+/* ---------- the bounded worker pool -------------------------------
+
+   TWO LEGS ARE ONE NAME WIDE AND NEITHER NEEDS TO BE. The enrichment loop and
+   the chain loop both `await` one name before starting the next, so with the
+   permit queue underneath them the process spends every round trip idle: the
+   queue is willing to issue the next permit `delayMs` after the last, and
+   nobody is there to take it. Measured shape at the 750ms floor and a ~0.66s
+   mean wire, the chain leg's 80 calls cost ~113s of wall clock to deliver 60s
+   of permitted rate. That gap is the whole of what this pool recovers.
+
+   THIS IS NOT THE `Promise.all` THE SECTOR, CARD AND PULSE LEGS REFUSE, and
+   the distinction is exact rather than rhetorical. Those refusals are about
+   N REQUESTS fired together: under the old sleep-then-fetch limiter they all
+   slept the same delayMs at the same instant and arrived as one volley, which
+   is not a rate limit at all. Here the `Promise.all` is over WORKERS, and each
+   worker issues its requests one at a time through `permits`, whose reservation
+   step is synchronous — so two workers can never be granted the same instant
+   and departures stay exactly delayMs apart no matter how many workers there
+   are. What changes is only which process is idle.
+
+   WHAT IT DOES CHANGE, HONESTLY. A serial leg departs at 1/(delay + wire); a
+   pooled one departs at 1/delay, which is the rate the floor already permits
+   but that the leg was not reaching. That is a real increase in arrival rate
+   at the vendor, and the run's own 429 meter says whether it can be afforded —
+   see poolWidth() below, which refuses to widen a leg on a run that is already
+   being refused. It is measurement, not intuition, exactly as RATE's own
+   comment demands.
+
+   ORDER IS PRESERVED BY CONSTRUCTION. Results land in an index-addressed array
+   and the caller reads them back in the input's order, so a pooled leg emits
+   byte-identical payloads to a serial one. That is not a nicety: fixture seeds
+   here are derived from position, the archive's immutability contract rests on
+   a re-run producing identical bytes, and a leg whose output depended on which
+   round trip happened to land first would turn every downstream assertion into
+   a coin toss. */
+
+/** The widest any pooled leg goes. A backstop, never a throughput dial. */
+const POOL_MAX_WIDTH = 4;
+
+/* How much of the run has to have happened before its refusal rate is
+   evidence about anything. Thirty-odd calls is the screener ladder, which is
+   the first leg every run completes. */
+const POOL_EVIDENCE_MIN = 24;
+
+/* THE TWO RUNGS AT WHICH THIS RUN GIVES UP WIDTH.
+
+   The survey that asked for the pool also asked, in the same breath, for the
+   sequencing: "adding concurrency at a 17% refusal rate raises the refusal
+   rate ... only after the refusal rate is in single digits should the pooled
+   legs be widened." That is not a comment, it is a condition, so it is written
+   as one. On the 2026-08-26 shape — 170 refusals in 1022 attempts, 16.6% —
+   this yields width 1 and the legs behave exactly as they do today. On a run
+   that is not being refused it yields the full width and the idle time goes
+   away. Neither outcome is chosen in advance by a person. */
+const POOL_REFUSAL_HALT = 0.10;
+const POOL_REFUSAL_EASE = 0.05;
+
+/**
+ * How wide this run has EARNED the right to be, from its own 429 meter.
+ *
+ * THE METER IS A PARAMETER so this decision can be tested at every rung. It
+ * defaults to the run's own `stats`, which is what every call site passes by
+ * omission; a suite hands it {calls, rateLimited} and reads back the width.
+ * A control decision that could only ever be exercised by a live 429 regime
+ * is a control decision nothing checks — and the branch that matters most
+ * here is the one that REFUSES to widen, which by definition never fires on a
+ * healthy run.
+ *
+ * @returns {{width:number, rate:number|null, seen:number, why:string}}
+ */
+function poolWidth(max = POOL_MAX_WIDTH, meter = stats) {
+  const seen = Number(meter && meter.calls) || 0;
+  /* NULL, NOT ZERO, FOR "NOT MEASURED YET". A run that has made four calls has
+     not observed a 0% refusal rate; it has observed nothing, and treating the
+     two the same is how a confident zero gets into a control decision. */
+  if (seen < POOL_EVIDENCE_MIN) {
+    return { width: 1, rate: null, seen, why: `only ${seen} call(s) so far, which is not evidence` };
+  }
+  const rate = (Number(meter && meter.rateLimited) || 0) / seen;
+  if (rate > POOL_REFUSAL_HALT) {
+    return { width: 1, rate, seen, why: `${(rate * 100).toFixed(1)}% of calls refused so far` };
+  }
+  if (rate > POOL_REFUSAL_EASE) {
+    return { width: Math.min(2, max), rate, seen, why: `${(rate * 100).toFixed(1)}% refused` };
+  }
+  return { width: max, rate, seen, why: `${(rate * 100).toFixed(1)}% refused` };
+}
+
+/**
+ * Run `work` over `items` with at most `width` of them in flight.
+ *
+ * @param {Array}    items
+ * @param {function} work      (item, index) => Promise<any>. It must not throw:
+ *                             a pooled leg that lets one name's failure reject
+ *                             the pool loses every name still in flight, which
+ *                             is strictly worse than the serial loop it
+ *                             replaced. Callers keep their own try/catch inside.
+ * @param {number}   width     How many workers. 1 is the serial loop exactly.
+ * @param {function} [stopEarly] Checked by EVERY worker before it claims the
+ *                             next item — not once at dispatch. A deadline
+ *                             tested only at the top would let a pool that
+ *                             started in time run for as long as its longest
+ *                             queue, which is precisely the card window the
+ *                             chain leg reserves.
+ * @returns {{results:Array, attempted:boolean[], stopped:boolean, done:number}}
+ */
+async function runPooled(items, work, { width = 1, stopEarly = null } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length).fill(undefined);
+  /* ATTEMPTED IS A SEPARATE ARRAY BECAUSE `undefined` IS A LEGAL RESULT. A
+     caller counting skipped names off `results[i] === undefined` would count
+     every name whose worker returned nothing as skipped, which is the same
+     confident-zero confusion this file hunts everywhere else. */
+  const attempted = new Array(list.length).fill(false);
+  let next = 0;
+  let stopped = false;
+
+  const worker = async () => {
+    for (;;) {
+      if (stopped) return;
+      if (stopEarly && stopEarly()) { stopped = true; return; }
+      const i = next++;
+      if (i >= list.length) return;
+      attempted[i] = true;
+      results[i] = await work(list[i], i);
+    }
+  };
+
+  const lanes = Math.max(1, Math.min(Math.floor(width) || 1, list.length || 1));
+  await Promise.all(Array.from({ length: lanes }, worker));
+  return { results, attempted, stopped, done: attempted.filter(Boolean).length };
+}
+
+
+
+/**
+ * One sentence about whether RATE.floorCeilingMs is the right number, from
+ * the meter rather than from anybody's intuition.
+ *
+ * A DESCRIBER, LIKE describeChainProbe AND describeOiBasis, and for the same
+ * reason: a verdict written inline in main() is a verdict no suite can reach.
+ * Only a live 429 regime produces the branch that matters — the one that says
+ * DO NOT RAISE THE CEILING — so an inline version would be certified by a dry
+ * run that has never been refused anything, which is no certification at all.
+ *
+ * RETURNS null WHEN THERE IS NOTHING TO SAY. A run that made no calls has not
+ * observed a 0% refusal rate; it has observed nothing, and printing "0.0%
+ * refused, the floor is conservative" off an empty meter would be exactly the
+ * confident zero this file exists to refuse.
+ *
+ * @param {{calls:number, rateLimited:number, permitWaitMs:number, rateLimitWaitMs:number}} meter
+ */
+function describeFloorVerdict(meter) {
+  const calls = Number(meter && meter.calls) || 0;
+  if (!calls) return null;
+  const refused = Number(meter && meter.rateLimited) || 0;
+  const queuedMs = Number(meter && meter.permitWaitMs) || 0;
+  const backoffMs = Number(meter && meter.rateLimitWaitMs) || 0;
+  const rate = refused / calls;
+  /* REFUSED AGAINST QUEUED IS THE WHOLE TRADE. `queued` is what the floor
+     charges every call for its turn; `backoff` is what the refusals cost. A
+     floor that is too slow shows a large queued and a negligible backoff; a
+     floor that is too fast shows the reverse. Null rather than 0 when nothing
+     queued: a ratio against a zero denominator is not a small ratio. */
+  const share = queuedMs > 0 ? backoffMs / queuedMs : null;
+  /* The RATE, not the raw count: 170 refusals in 1022 calls and 170 in 10,000
+     are different findings. It is the same quantity poolWidth() reads mid-run
+     to decide whether a leg may widen, against the same two rungs, so the
+     verdict and the throttle can never disagree about what "being refused"
+     means. */
+  const head =
+    `floor verdict: ${refused} of ${calls} calls refused (${(rate * 100).toFixed(1)}%), ` +
+    `backoff ${(backoffMs / 1000).toFixed(1)}s against ${(queuedMs / 1000).toFixed(1)}s of queueing` +
+    (share === null
+      ? " — nothing queued, so the floor was never the binding cost this run. "
+      : ` (${(share * 100).toFixed(0)}% as large). `);
+  if (rate > POOL_REFUSAL_HALT) {
+    return head +
+      "THE CEILING IS DOING ITS JOB and must not move up: the controller asked to go slower " +
+      `than RATE.floorCeilingMs=${RATE.floorCeilingMs}ms and was refused anyway. Cut calls ` +
+      "before touching the rate, and expect every pooled leg to have run one wide.";
+  }
+  if (rate > POOL_REFUSAL_EASE) {
+    return head +
+      "The floor is roughly where the vendor wants it. Neither raising nor lowering the " +
+      "ceiling is supported by this run.";
+  }
+  return head +
+    `The floor is CONSERVATIVE — refusals are under ${(POOL_REFUSAL_EASE * 100).toFixed(0)}% ` +
+    "and the queueing above is what this run actually paid. RATE.floorCeilingMs can come " +
+    "down one step at a time, re-reading this line each morning.";
+}
 
 async function uw(path, params = {}) {
   const url = new URL(BASE + path);
@@ -2581,6 +2798,116 @@ function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } 
  * publishing the ticker alone would be eleven rows a reader has to already
  * know by heart.
  */
+/* ---------- the counter feed's memory ----------------------------
+
+   THE FEED'S WHOLE SUBJECT IS A CONTRACT WHOSE VOLUME STANDS ABOVE ITS OPEN
+   INTEREST, and until this ran the page could not say which of those
+   contracts was not there yesterday. Every field the `unusual` payload
+   carried was built from THIS run's chains; nothing historical was read at
+   all. On a feed about newly-crowded strikes, "this line was not in
+   yesterday's list" is the reading, and it was the one reading unavailable.
+
+   It costs no vendor call. The prior payload is one Worker read of a key this
+   pipeline itself wrote, on the same paced path the boards' memory already
+   uses.
+
+   THREE ANSWERS, NOT TWO — the same three silences the rest of the product
+   is held to:
+
+     - the prior key could not be read, or was never written  -> nw null
+     - the prior key was read and named no contracts          -> nw null
+     - the prior key named contracts                          -> nw 1 or 0
+
+   The second is the one that is easy to get wrong. A prior payload whose
+   contract list is empty makes EVERY line today look new, which is a
+   confident claim built on a comparison against nothing. "New" is only
+   meaningful against a list that named something, so an empty prior is
+   reported as no comparison rather than as a clean sweep. */
+
+/**
+ * One contract's identity across sessions.
+ *
+ * THE STRIKE IS TAKEN AS PUBLISHED, not re-rounded. Both sides of this
+ * comparison come out of buildUnusualRows, which rounds the strike to two
+ * places once — so the two strings agree by construction. Re-deriving it here
+ * would be a second spelling of one quantity, and the day the builder's
+ * rounding changed the feed would silently report every contract as new.
+ *
+ * Null when any leg is missing: a row that cannot be identified must not
+ * collide with another row that also cannot be, which is what a partial key
+ * built from the legs that happened to be present would do.
+ */
+function unusualContractId(row) {
+  if (!row) return null;
+  const t = row.t;
+  const k = row.k;
+  const expiry = row.expiry;
+  const cp = row.cp;
+  if (typeof t !== "string" || !t) return null;
+  if (!Number.isFinite(Number(k))) return null;
+  if (typeof expiry !== "string" || !expiry) return null;
+  if (cp !== "C" && cp !== "P") return null;
+  return `${t}|${k}|${expiry}|${cp}`;
+}
+
+/**
+ * Stamp `nw` onto today's contract rows from the previously published feed.
+ *
+ * MUTATES THE ROWS IN PLACE and returns what the comparison was. In place
+ * because `contracts` is the object about to be published and copying it to
+ * add one integer per row would leave two arrays that a later edit could let
+ * drift apart.
+ *
+ * @param {Array}  rows        today's ranked contract rows
+ * @param {object} priorBody   the previously published `unusual` payload, or null
+ * @returns {{status:"ok"|"quiet"|"unavailable", contracts:number|null,
+ *            fresh:number|null, readAt:string|null, sessionDate:string|null}}
+ */
+function markNewContracts(rows, priorBody) {
+  const list = Array.isArray(rows) ? rows : [];
+  const priorRows = priorBody && priorBody.contracts && Array.isArray(priorBody.contracts.rows)
+    ? priorBody.contracts.rows : null;
+  const readAt = priorBody && typeof priorBody.readAt === "string" ? priorBody.readAt : null;
+  const sessionDate = priorBody && typeof priorBody.sessionDate === "string"
+    ? priorBody.sessionDate : null;
+
+  if (!priorRows || !priorRows.length) {
+    for (const row of list) row.nw = null;
+    return {
+      status: priorRows ? "quiet" : "unavailable",
+      contracts: priorRows ? 0 : null,
+      fresh: null, readAt, sessionDate,
+    };
+  }
+
+  const seen = new Set();
+  for (const row of priorRows) {
+    const id = unusualContractId(row);
+    if (id) seen.add(id);
+  }
+  /* A PRIOR LIST THAT NAMED ROWS BUT NO IDENTIFIABLE ONES is the same
+     no-comparison case as an empty one, and it is not hypothetical: it is
+     exactly what a payload written before this shipped would look like if the
+     row shape ever changed underneath it. Marking fifty contracts new against
+     a set of zero keys would be the confident sweep this whole block refuses. */
+  if (!seen.size) {
+    for (const row of list) row.nw = null;
+    return { status: "quiet", contracts: 0, fresh: null, readAt, sessionDate };
+  }
+
+  let fresh = 0;
+  for (const row of list) {
+    const id = unusualContractId(row);
+    /* A row THIS run cannot identify gets null rather than 1. "I could not
+       build a key for you" is not "you are new". */
+    if (!id) { row.nw = null; continue; }
+    const isNew = !seen.has(id);
+    row.nw = isNew ? 1 : 0;
+    if (isNew) fresh++;
+  }
+  return { status: "ok", contracts: seen.size, fresh, readAt, sessionDate };
+}
+
 const SECTOR_ETFS = [
   { sector: "Materials", etf: "XLB" },
   { sector: "Communication Services", etf: "XLC" },
@@ -3820,6 +4147,60 @@ function fakeCongress(ticker) {
    2026-08-28); sometimes-absent fields are absent from SOME fixture rows on
    purpose, because the module's whole contract is that an absent flag is not
    a false one and an absent premium is not a zero. */
+/**
+ * YESTERDAY'S COUNTER FEED, so the dry run exercises the comparison rather
+ * than only its absence.
+ *
+ * WITHOUT THIS THE FIXTURE COULD ONLY EVER REACH ONE BRANCH. readStored()
+ * answers every dry-run read as absent, so the emitted corpus would carry
+ * `nw: null` on all fifty rows and a suite reading it would certify the
+ * no-prior sentence and nothing else — the branch-it-cannot-reach mistake
+ * this file has paid for four times. The prior therefore has to be
+ * synthesised, and it has to differ from today or the comparison is vacuous
+ * in the other direction: a prior identical to today marks nothing new.
+ *
+ * DETERMINISTIC BY POSITION, no randomness anywhere. Two thirds of today's
+ * rows are carried over so `nw: 0` is populated; the remaining third is
+ * withheld so `nw: 1` is populated; and a handful of contracts that do NOT
+ * appear today are added, because a real prior session names lines that have
+ * since gone quiet and a fixture whose prior is a strict subset of today
+ * would never exercise the set lookup missing.
+ */
+function fakePriorUnusual(rows, sessionDate) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return null;
+  const kept = list.filter((_, i) => i % 3 !== 0).map((r) => ({
+    t: r.t, k: r.k, expiry: r.expiry, cp: r.cp,
+  }));
+  /* Lines that were in yesterday's feed and are not in today's. They change no
+     `nw` on their own — a contract that left the feed simply is not ranked
+     today — but they make the prior a different session rather than a slice
+     of this one. */
+  for (let i = 0; i < 5 && i < list.length; i++) {
+    const r = list[i];
+    kept.push({ t: r.t, k: Number((Number(r.k) + 5).toFixed(2)), expiry: r.expiry, cp: r.cp === "C" ? "P" : "C" });
+  }
+  /* The prior session, walked back over the weekend so the fixture's own
+     dates are the dates a real archive would hold. */
+  let prior = null;
+  const base = Date.parse(String(sessionDate || "") + "T00:00:00Z");
+  if (Number.isFinite(base)) {
+    for (let back = 1; back <= 4; back++) {
+      const d = new Date(base - back * 86400000);
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      prior = d.toISOString().slice(0, 10);
+      break;
+    }
+  }
+  return {
+    v: BOARD_SCHEMA_VERSION,
+    sessionDate: prior,
+    readAt: (prior || "2026-01-01") + "T09:20:00.000Z",
+    contracts: { rows: kept, shown: kept.length },
+  };
+}
+
 function fakeFlowAlerts(tickers) {
   const rnd = mulberry(4177);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
@@ -4368,25 +4749,54 @@ async function main() {
     `(the largest ${UNIVERSE.enrichCount} of ${tilted.length} gated), ` +
     `${byIndex} added by Nasdaq-100 membership (list dated ${NDX_AS_OF})`);
 
+  /* THE LARGEST LEG IN THE RUN, AND IT IS RATE-BOUND RATHER THAN SHAPE-BOUND.
+     Say so here so nobody spends a week on the wrong lever.
+
+     enrich() already fires its five calls together, so overlap exists WITHIN a
+     name. What did not exist was overlap ACROSS names: the loop awaited the
+     slowest of five round trips before the next name asked for its first
+     permit, so at every name boundary the queue idled max(0, wire − delayMs).
+     Pipelining names removes exactly that idle and nothing else.
+
+     WHAT IT CANNOT DO. 128 names x 5 calls is 640 requests, and at the 750ms
+     floor 640 requests cost 480 seconds however they are scheduled. The
+     boundary idle at that floor is about 3% of the leg — pipelining is nearly
+     free and nearly worthless there, and this comment exists so that a future
+     reader measuring a slow morning does not conclude that more concurrency
+     will fix it. At the 120ms start floor the same leg is half boundary idle
+     and the pool is worth its whole width. The only other levers are the call
+     count per name (five, none of which has a comma-list bulk sibling on this
+     vendor: every one is a typed SingleTicker path) and RATE.floorCeilingMs. */
   const enriched = [];
   let failed = 0;
-  for (const [i, pick] of picks.entries()) {
-    const ticker = pick.row.ticker;
-    const spot = num(pick.row.close);
-    try {
-      let features, raw;
-      if (DRY_RUN) {
-        const fake = fakeEnrichment(ticker, spot, 1000 + i);
-        features = computeFeatures({ ...fake, sessionDate, tilt: pick.tilt });
-        raw = fake;
-      } else {
-        ({ features, raw } = await enrich(ticker, spot, sessionDate, dating));
-        features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
+  {
+    const lane = poolWidth(2);
+    console.log(`  enrichment: ${lane.width} name(s) in flight — ${lane.why}`);
+    /* Results land by INDEX and are folded in `picks` order below, so the
+       cross-section the scorer normalises against is identical whatever order
+       the round trips land in. A pooled leg that reordered `enriched` would
+       reorder every tie in every percentile rank downstream. */
+    const { results } = await runPooled(picks, async (pick, i) => {
+      const ticker = pick.row.ticker;
+      const spot = num(pick.row.close);
+      try {
+        let features, raw;
+        if (DRY_RUN) {
+          const fake = fakeEnrichment(ticker, spot, 1000 + i);
+          features = computeFeatures({ ...fake, sessionDate, tilt: pick.tilt });
+          raw = fake;
+        } else {
+          ({ features, raw } = await enrich(ticker, spot, sessionDate, dating));
+          features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
+        }
+        return { features, raw, tilt: pick.tilt, row: pick.row };
+      } catch (error) {
+        console.warn(`  ${ticker}: enrichment failed — ${error.message}`);
+        return null;
       }
-      enriched.push({ features, raw, tilt: pick.tilt, row: pick.row });
-    } catch (error) {
-      failed++;
-      console.warn(`  ${ticker}: enrichment failed — ${error.message}`);
+    }, { width: lane.width });
+    for (const e of results) {
+      if (e) enriched.push(e); else failed++;
     }
   }
 
@@ -4548,6 +4958,19 @@ async function main() {
     payloads[side] = {
       v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
+      /* THE CLOCK `edte` IS COUNTED FROM, PUBLISHED BESIDE THE COUNT.
+
+         `sessionDate` is the last COMPLETED session; at 05:15 Eastern that is
+         one to three calendar days behind the day the earnings gate actually
+         ran. A renderer that counted days to `ed` from `sessionDate` would
+         draw the window early and disagree with the gate that spared the row —
+         and it would disagree silently, because both numbers look like day
+         counts. /flows/events/ publishes exactly this pair for exactly this
+         reason; the board owes its reader the same. `gateDays` rides along so
+         a page can say why a name with edte 13 is on the board at all and a
+         name with edte 11 is not. */
+      gateOrigin: today,
+      gateDays: EARNINGS_GATE_DAYS,
       universe: universe.length,
       enriched: enriched.length,
       /* WHAT THE SCORE MEANS, published beside it. The score is now a fixed
@@ -4592,6 +5015,53 @@ async function main() {
     };
     await publish("board:" + side, payloads[side]);
   }
+
+  /* 7a-bis. THE TWO WORKER-ONLY LEGS, STARTED HERE AND AWAITED WHERE THEY ARE
+     NEEDED.
+
+     Neither of these spends a vendor call. `collectDatedBoards` walks up to
+     126 calendar days x 3 keys against the Cloudflare Worker at
+     ARCHIVE_READ_PACE_MS plus round trip — the file's own measurement is 180
+     unpaced requests in thirteen seconds, so paced it is ~30s. `pruneArchive`
+     names 90 dated keys and pays PUBLISH_SPACING_MS after each DELETE, of
+     which in steady state exactly three match anything — ~20s, most of it
+     spent being told 404 by a route that was never going to have the row.
+
+     Awaited in sequence they were ~50 seconds of housekeeping standing in
+     front of the sector, chain and card legs, charged in full against the
+     chain leg's minute-30 cut-off — about twenty names of chain budget, on a
+     morning DEADLINE_MS's own comment records losing sixteen.
+
+     They contend for a DIFFERENT SERVICE than the vendor legs do, so
+     overlapping them with the fetches costs nothing on either side and the
+     permit queue never sees them. Started as soon as both live boards are
+     committed, which is the earliest point at which their failure can cost
+     the reader nothing.
+
+     THE `.catch` IS ATTACHED AT CREATION, not at the await. A detached promise
+     that rejects before anyone awaits it is an unhandled rejection, which in
+     this runtime is a process-level event and not a caught leg failure — the
+     one way this change could have turned a best-effort leg into a run-ending
+     one. Both resolve to null on failure, which is exactly what the awaiting
+     code already handled.
+
+     NO READ-YOUR-WRITE HAZARD. The walk starts at back=1 and never reads
+     today's keys; the prune only names days past ARCHIVE_RETENTION_DAYS, and
+     the walk stops at it — the two ranges do not touch. */
+  const archiveWalkPromise = collectDatedBoards(sessionDate, payloads, enriched,
+    /* Normalised to the board row's own vocabulary here rather than inside
+       the walk: `neutralRows` are scorer rows carrying `ticker`/`score`, and
+       a synthesiser that had to know both spellings is a synthesiser that
+       will read the wrong one. */
+    (sides.neutralRows || []).map((r) => ({ t: r.ticker, s: r.score })))
+    .catch((error) => {
+      console.warn(`  record archive: the walk failed — ${error.message}`);
+      return null;
+    });
+  const prunePromise = pruneArchive(sessionDate).catch((error) => {
+    console.warn(`  prune: ${error.message}`);
+    return null;
+  });
 
   /* 7b. THE ARCHIVE, THE WATCH LIST, AND THE PRUNE — every one of them AFTER
      both live boards are committed, and every one of them best-effort.
@@ -4875,24 +5345,18 @@ async function main() {
     console.warn(`  events: ${error.message}`);
   }
 
-  try {
-    await pruneArchive(sessionDate);
-  } catch (error) {
-    console.warn(`  prune: ${error.message}`);
-  }
-
   /* 7c'. THE TRACK RECORD — the archive finally scored. Best-effort like
      everything in this stretch, and placed AFTER today's boards, archive and
      watch list are committed: a record that fails to score must never cost
-     the reader today's session. */
+     the reader today's session.
+
+     The walk itself was started back at 7a-bis, against the Worker, while the
+     events and movers legs were being built; this is where its result is
+     first needed and therefore where it is awaited. */
   let archiveWalk = null;
   try {
-    archiveWalk = await collectDatedBoards(sessionDate, payloads, enriched,
-      /* Normalised to the board row's own vocabulary here rather than inside
-         the walk: `neutralRows` are scorer rows carrying `ticker`/`score`, and
-         a synthesiser that had to know both spellings is a synthesiser that
-         will read the wrong one. */
-      (sides.neutralRows || []).map((r) => ({ t: r.ticker, s: r.score })));
+    archiveWalk = await archiveWalkPromise;
+    if (!archiveWalk) throw new Error("the dated-archive walk returned nothing to score");
     const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
       absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
       statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } = archiveWalk;
@@ -5183,15 +5647,20 @@ async function main() {
       `${boardTickers.length} calls on panels that would land after the cards were abandoned`);
   } else {
     const chainDeadline = stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS;
-    let chainOk = 0, chainFailed = 0, chainSkipped = 0, scalarsRecovered = 0;
-    for (const ticker of boardTickers) {
-      if (Date.now() > chainDeadline) {
-        chainSkipped = boardTickers.length - chainOk - chainFailed;
-        console.warn(
-          `  chains: stopping after ${chainOk + chainFailed} names — within ` +
-          `${CHAIN_RESERVE_MS / 60000}min of the deadline and the cards still need it`);
-        break;
-      }
+    let scalarsRecovered = 0;
+    /* THE LEG IS POOLED, AND THE WIDTH IS THIS RUN'S OWN VERDICT. See
+       runPooled and poolWidth: serial, this leg departed at one call per
+       (delay + wire) and the queue idled through every round trip; pooled, it
+       departs at the rate the floor already permits. On a run that is being
+       refused, poolWidth answers 1 and the leg is byte-for-byte the serial
+       loop it replaced.
+
+       THE RECOVERY AND PROBE CALLS STAY INSIDE THE WORKER, so a name still
+       costs one lane rather than three, and name N's recovery overlaps name
+       N+1's broad call instead of blocking it. */
+    const chainLane = poolWidth();
+    console.log(`  chains: ${boardTickers.length} name(s), ${chainLane.width} in flight — ${chainLane.why}`);
+    const chainRun = await runPooled(boardTickers, async (ticker, index) => {
       try {
         const rows = DRY_RUN
           /* THE FIRST TWO NAMES FILL THE PAGE, the rest fit. Both shapes are
@@ -5202,9 +5671,16 @@ async function main() {
 
              TWO rather than one, because one cannot distinguish "the probe
              runs once per run" from "the probe runs once per truncated name",
-             and the difference is nine wasted vendor calls on a live morning. */
-          ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + chainOk + chainFailed,
-            { wide: chainOk + chainFailed < 2 })
+             and the difference is nine wasted vendor calls on a live morning.
+
+             SEEDED BY POSITION IN boardTickers, NOT BY A RUNNING SUCCESS
+             COUNT. The old seed was `7000 + chainOk + chainFailed`, which is
+             an ordering-dependent quantity: pooled, two names could read the
+             same counter and draw the same synthetic chain, and the archive's
+             immutability contract rests on a re-run producing identical
+             bytes. The index is fixed before any request leaves. */
+          ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + index,
+            { wide: index < 2 })
           : await uw(`/api/stock/${ticker}/option-contracts`, {
             /* NOT maybe_otm_only. The desk filters to the sellable book because
                it is pricing a sale; this leg is measuring a SURFACE, and the
@@ -5278,7 +5754,11 @@ async function main() {
                    Asking the narrow ladder for an expiry it does not list would
                    return nothing and quietly exercise the failure path instead
                    of the one under test. */
-                ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 8000 + chainOk,
+                /* Seeded by POSITION for the same reason the broad call is:
+                   `8000 + chainOk` read a counter whose value depends on how
+                   many names had finished, which pooled is not a fact about
+                   this name at all. */
+                ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 8000 + index,
                   { wide: true, expiry: near })
                 : await uw(`/api/stock/${ticker}/option-contracts`, {
                   expiry: near,
@@ -5311,13 +5791,28 @@ async function main() {
           }
         }
 
-        chainByTicker.set(ticker, panels);
-        if (panels.status === "ok") chainOk++; else chainFailed++;
-
         /* ONE CALL, ONCE, ON THE FIRST TRUNCATED NAME. Its own try/catch and
            its own flag: a diagnostic that can fail the leg it is diagnosing is
            worse than no diagnostic, and a probe that repeats is a second call
-           per name for an answer that does not vary by name. */
+           per name for an answer that does not vary by name.
+
+           THE FLAG IS SAFE UNDER THE POOL because the test and the set are
+           separated by nothing that awaits — nearestProbeExpiry is
+           synchronous — so JavaScript runs the pair to completion before any
+           other worker is scheduled. The same is true of `chainReported`
+           above. A flag whose test and set straddled an await would let two
+           workers both spend the probe, which is the one way this leg could
+           have grown a call by being pooled.
+
+           THE WHOLE STANZA IS GUARDED, not just the request inside it. The
+           serial loop reached here having ALREADY written this name's panels
+           into chainByTicker, so a throw in nearestProbeExpiry cost the name
+           a double count and nothing else; the pooled worker returns its
+           panels at the end, so the same throw would silently discard a
+           perfectly good chain to run a diagnostic. A diagnostic that can
+           cost the measurement it is diagnosing is the thing this stanza's
+           first sentence already refuses. */
+        try {
         if (!chainProbed && panels.truncated) {
           const probeExpiry = nearestProbeExpiry(expiriesByTicker.get(ticker), {
             asOf: sessionDate, minDays: SKEW_MIN_DAYS,
@@ -5346,10 +5841,40 @@ async function main() {
             }
           }
         }
+        } catch (error) {
+          console.warn(`  chain probe (${ticker}): ${error.message} — the chain itself stands`);
+        }
+        return panels;
       } catch (error) {
-        chainFailed++;
         console.warn(`  chain ${ticker}: ${error.message}`);
+        return null;
       }
+    }, {
+      width: chainLane.width,
+      /* THE DEADLINE IS TESTED BY EVERY WORKER BEFORE IT CLAIMS A NAME, which
+         is the guard the serial loop had at the top of its body and which a
+         pool tested only at dispatch would lose. A leg that started in time is
+         not a leg entitled to run past the reserve the cards depend on. */
+      stopEarly: () => Date.now() > chainDeadline,
+    });
+
+    /* FOLDED BACK IN boardTickers ORDER. `chainByTicker` decides the iteration
+       order of three downstream readers — the unusual feed's pooling, the
+       `aggr` relation harvest and the oi-basis diagnostic all take "the first
+       chain" from it — so a map built in completion order would make those
+       three answers depend on which round trip landed first. */
+    let chainOk = 0, chainFailed = 0, chainSkipped = 0;
+    boardTickers.forEach((ticker, i) => {
+      if (!chainRun.attempted[i]) { chainSkipped++; return; }
+      const panels = chainRun.results[i];
+      if (!panels) { chainFailed++; return; }
+      chainByTicker.set(ticker, panels);
+      if (panels.status === "ok") chainOk++; else chainFailed++;
+    });
+    if (chainSkipped) {
+      console.warn(
+        `  chains: stopped after ${chainOk + chainFailed} names, ${chainSkipped} not attempted ` +
+        `— within ${CHAIN_RESERVE_MS / 60000}min of the deadline and the cards still need it`);
     }
     const built = [...chainByTicker.entries()].filter(([, c]) => c.status === "ok");
     const levelled = built.filter(([, c]) => c.scalars.atmIv !== null).length;
@@ -5487,6 +6012,19 @@ async function main() {
     const contracts = rankUnusual(pooled, { namesSeen });
     const names = rankUnusualNames(withTilt);
 
+    /* WHICH OF THESE LINES WAS NOT HERE LAST TIME. One read of the key this
+       pipeline itself wrote — no vendor call — against the same route the
+       board's memory already reads through. See markNewContracts for why an
+       empty prior is a refusal to compare rather than a clean sweep.
+
+       In a dry run the store answers every read as absent, so the prior is
+       synthesised: without it the emitted corpus would carry `nw: null` on
+       every row and certify only the branch that says nothing. */
+    const priorUnusual = DRY_RUN
+      ? fakePriorUnusual(contracts.rows, sessionDate)
+      : await fetchStoredPayload("unusual");
+    const priorMark = markNewContracts(contracts.rows, priorUnusual);
+
     await publish("unusual", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
@@ -5507,6 +6045,22 @@ async function main() {
       namesComplete: namesSeen - namesTruncated,
       foreign,
       ivConventionsSeen: divisors.size,
+      /* WHAT `nw` ON EACH CONTRACT ROW IS A COMPARISON AGAINST, published so
+         the claim is checkable rather than asserted. `readAt` and
+         `sessionDate` are the PRIOR payload's own stamps, so a page can say
+         "not in the feed read at 09:20 on the 21st" instead of "new", which
+         is a word with no denominator. `status` is the three silences: "ok"
+         is a comparison that happened, "quiet" is a prior payload that named
+         no contracts, "unavailable" is a prior payload that could not be
+         read. Under the last two every `nw` is null and no row claims
+         anything. */
+      prior: {
+        status: priorMark.status,
+        readAt: priorMark.readAt,
+        sessionDate: priorMark.sessionDate,
+        contracts: priorMark.contracts,
+        fresh: priorMark.fresh,
+      },
       coverage,
       contracts,
       names: { ...names, earningsGated: withTilt.length - tilted.length },
@@ -5532,6 +6086,18 @@ async function main() {
           }
           return null;
         })(),
+        /* THE PROSE FOR `nw`, written HERE rather than in the renderer,
+           because the sentence has to say what the comparison was and only
+           the publisher knows. Deliberately free of the banned vocabulary:
+           this is still a counter and a first appearance in a ranked list is
+           not an event on the tape. */
+        new: "`nw` is 1 when this contract was absent from the previously published " +
+          "counter feed, 0 when it was present in it, and null when there was no readable " +
+          "prior feed to compare against — see `prior` for which of the three happened, " +
+          "and for the session and read time the comparison was made against. It is a " +
+          "statement about this list, not about the strike: a contract can be absent " +
+          "from the prior feed because it was quiet, or because it sat below the per-name " +
+          "cap that morning.",
         lift: UNUSUAL_NOTES.lift,
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
@@ -5547,6 +6113,16 @@ async function main() {
       `${names.shown} of ${names.ranked} names ranked of ${names.universe}` +
       (names.unranked ? `, ${names.unranked} unranked for want of a 30-day average` : "") +
       (divisors.size > 1 ? `; ${divisors.size} IV conventions in one table` : ""));
+    /* WHAT THE MEMORY SAW, IN THE LOG, for the same reason the board's memory
+       line exists: a feed that quietly reports nothing new every morning is
+       indistinguishable from a store read that has been failing for a week. */
+    console.log("  unusual memory: " + (DRY_RUN ? "[dry-run] " : "") + (
+      priorMark.status === "ok"
+        ? `${priorMark.fresh} of ${contracts.rows.length} contract(s) absent from the ` +
+          `${priorMark.contracts}-contract feed published for ${priorMark.sessionDate || "an unstamped session"}`
+        : priorMark.status === "quiet"
+          ? "the prior feed was read and named no contracts, so no row claims to be new"
+          : "no prior feed could be read, so no row claims to be new"));
 
     /* THE OPEN-INTEREST BASIS DIAGNOSTIC. Costs nothing, run on the first
        chain that produced feed rows, and its zero branch reports itself as
@@ -6370,6 +6946,17 @@ async function main() {
         " to solve. Only a live run answers this."
       : ""));
 
+  /* THE PRUNE, COLLECTED. It was started at 7a-bis and has been running
+     against the Worker for the whole vendor stretch; awaiting it here is what
+     keeps the process alive until its DELETEs have actually been answered.
+     Without this await the run could exit with a sweep half-issued and the
+     retention window would quietly stop being a window. Its own log line is
+     printed by pruneArchive whenever it finishes, so the line may land
+     anywhere in the vendor stretch above — that is the price of the overlap
+     and it is worth roughly twenty names of chain budget. */
+  const pruned = await prunePromise;
+  if (pruned === null) console.warn("  prune: the sweep did not complete this run");
+
   /* meta is a DIAGNOSTIC, not the product, so its failure must not fail the
      run. The first live publish proved why: both boards and all 34 cards
      landed, and then this last write tripped a Cloudflare rate challenge — so
@@ -6438,6 +7025,10 @@ async function main() {
       "faster than the floor issues permits. That is the expected shape at a high floor and it " +
       "means the saving here is the serial delay+network stacking, not concurrency.");
   }
+
+  /* ---- THE VERDICT ON THE FLOOR CEILING, FROM THIS RUN'S OWN NUMBERS ---- */
+  const verdict = describeFloorVerdict(stats);
+  if (verdict) console.log("  " + verdict);
 }
 
 export {
@@ -6451,6 +7042,9 @@ export {
   TRIX_FULL_SCALE_BP, ema, trixSeriesBp, scaleTrix, sectorTrix,
   MOVER_ROWS, moverRow, buildMovers,
   describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
+  runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
+  POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
+  unusualContractId, markNewContracts, fakePriorUnusual,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

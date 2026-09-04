@@ -573,7 +573,10 @@
     var feed = p.clusters;
     if (!feed) return;                     // an older payload: draw nothing, claim nothing
     var box = el("div", "pl-clusters");
-    box.append(el("h3", "fc-subhead", "The same window, ordered by how many filers"));
+    /* NO CLASS: `.fc-panel h3` already styles a sub-heading inside a panel by
+       element, and a class the stylesheet does not define is a hook that reads
+       like styling and is not. */
+    box.append(el("h3", null, "The same window, ordered by how many filers"));
 
     if (feed.status === "unavailable") {
       box.append(tagged("p", "fc-q", "unavailable",

@@ -393,6 +393,26 @@
         "subset, or how large the rest is.";
       th.append(sup);
     }
+    /* WHERE THE BOARD PUT THIS NAME, when the payload says.
+
+       The alerts table above has carried a Stage column since it shipped and
+       this feed carried none, so its Name column was a bare link: a forty-times
+       volume-over-open-interest on a name the board ranks LONG and the same
+       ratio on a name it scored into the dead band are different facts, and the
+       page could not tell them apart. Drawn INSIDE the name cell rather than as
+       an eleventh column, because the <thead> is markup this file does not
+       write; the reading is the same and the table's shape is unchanged.
+
+       The key is absent on a payload published before the field shipped, which
+       draws nothing — an absence, not a name with no stage. */
+    const stage = typeof row.st === "string" && row.st ? row.st : null;
+    if (stage) {
+      const badge = el("span", "ua-stage", stage);
+      badge.title = "Where the board's own funnel put this name this session: " + stage +
+        ". Every name in this feed is a board name — the pipeline reads a chain only " +
+        "for one — so this says which side of the board, not whether it is on it.";
+      th.append(badge);
+    }
     return th;
   }
 

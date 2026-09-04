@@ -952,6 +952,27 @@ const rebuild = (em) => {
      "a percent-quoted chain decides on a divisor of 100 from its own median");
   eq(panel.ivDivisor, 1, "while the fraction-quoted one decides on 1");
 
+  /* ---- the board's own view of the name, threaded through --------
+
+     The alerts table beside this feed has carried a Stage column since it
+     shipped and the counter feed carried none, so a 40x volume-over-open-
+     interest on a name the board ranks LONG and the same ratio on a name it
+     scored into the dead band were indistinguishable on this page. */
+  const staged = buildChainPanels(CHAIN,
+    { spot: SPOT, asOf: "2026-08-24", ticker: "SYN001", stage: "long" });
+  ok(staged.unusualRows.length > 0 && staged.unusualRows.every((r) => r.st === "long"),
+     "a stage supplied to buildChainPanels reaches every row of the feed it builds");
+  ok(panel.unusualRows.every((r) => !("st" in r)),
+     "AND ITS ABSENCE OMITS THE KEY rather than publishing null on every row: sixty " +
+     "rows of `\"st\":null` is bytes spent saying nothing, and a renderer testing for " +
+     "the key can tell a payload built before this shipped from a name with no stage");
+  ok(buildUnusualRows(CHAIN, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24" })
+    .every((r) => !("st" in r)),
+     "and the same holds when the feed builder is called directly");
+  ok(buildUnusualRows(CHAIN, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24",
+    stage: "" }).every((r) => !("st" in r)),
+     "an empty string is not a stage either — it would render as a badge with no word in it");
+
   const bySymbol = new Map();
   for (const r of pct) {
     const m = /^SYN001(\d{2})(\d{2})(\d{2})([PC])(\d{8})$/.exec(r.option_symbol);
@@ -1142,6 +1163,217 @@ const rebuild = (em) => {
      "adjusted series' pre-split strike would look like against a live spot");
 }
 
+/* ============================================================
+   §16. THE PAGE, IN A BROWSER.
+
+   Everything above is arithmetic the shaper can be held to. What
+   this section pins is the half the arithmetic cannot reach: two
+   payloads, two fetches, and a page that has to join them without
+   letting either one's failure become the other's.
+
+   THE JOIN IS THE POINT. The alerts table and the counter feed carry
+   the same four-tuple — name, side, strike, expiry — and until this
+   layer a trader could find a contract in both only by scanning sixty
+   rows against fifty by hand. AAA appears in both fixtures below and
+   ZZZ and BBB appear in exactly one each, so a mark that fired on
+   everything, or on nothing, fails here rather than shipping.
+   ============================================================ */
+{
+  /* The alerts <thead> in shared/flows-pages.js has ten columns and the
+     renderer's ALERT_COLS has to match it exactly or the wiring bails; the
+     count is written here rather than imported because the renderer is a
+     browser IIFE with nothing to import from. */
+  const ALERT_COLUMNS = 10;
+  const { chromium } = await import("playwright");
+  const { signSession } = await import("../shared/session.js");
+  const { startWorker, SESSION_SECRET, FLOWS_TEST_USER } =
+    await import("./worker-server.mjs");
+
+  const INGEST = "unusual-token-aaaaaaaa";
+  const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST}`] });
+  const at = (path) => server.baseURL + path;
+  const session = await signSession(
+    { sub: FLOWS_TEST_USER, aud: "flows", epoch: "1", exp: Date.now() + 600000 },
+    SESSION_SECRET);
+  const put = (key, body) => fetch(at("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST },
+    body: JSON.stringify(body),
+  });
+
+  const contract = (t, cp, k, expiry, vol, stage) => {
+    const row = {
+      t, k, expiry, cp, vol, oi: 100, doi: 5, vor: vol / 100, bidPx: 1, askPx: 1.2,
+      nlo: 1000, nhi: 1200, aggr: 10, lift: 0.6, iv: 0.3, m: 0.01, dte: 20, p: 0,
+    };
+    /* BBB carries no stage, so the badge has a negative case to fail on: a
+       renderer that drew one unconditionally would pass an assertion that only
+       looked at AAA. */
+    if (stage) row.st = stage;
+    return row;
+  };
+  await put("unusual", {
+    v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", status: "ok",
+    contracts: {
+      rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long"),
+             contract("BBB", "P", 50, "2026-10-16", 400)],
+      shown: 2, eligible: 2, cap: 60, perName: 30, capBound: null,
+    },
+    coverage: [{ t: "AAA", rows: 400 }, { t: "BBB", rows: 300 }],
+    namesSeen: 2, dteAnchor: "sessionDate",
+    names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0, earningsGated: 0 },
+    basis: { unit: "A contract counter, and not a trade.",
+             date: "no date parameter, the span is unobserved, readAt is when it was read" },
+  });
+  await put("flowalerts", {
+    v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
+    seen: 2, shed: 0, cap: 50, coverage: { withContract: 2, calls: 1, puts: 1 },
+    rows: [
+      /* AAA is in BOTH feeds, on the same strike and the same expiry. */
+      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", oc: "AAA260918C00100000",
+        prem: 250000, askPrem: 200000, bidPrem: 50000, size: 800, trades: 12,
+        sweep: true, floor: false, single: true, opening: null,
+        spanStart: "2026-09-01T13:31:00Z", spanEnd: "2026-09-01T13:36:00Z",
+        rule: "RepeatedHits", st: "long" },
+      /* ZZZ is in the vendor's selection only — the counter feed never saw it. */
+      { t: "ZZZ", cp: "P", k: 20, exp: "2026-09-25", oc: "ZZZ260925P00020000",
+        prem: 90000, askPrem: 10000, bidPrem: 80000, size: 300, trades: 4,
+        sweep: false, floor: false, single: false, opening: false,
+        spanStart: "2026-09-01T14:00:00Z", spanEnd: "2026-09-01T14:02:00Z",
+        rule: "Sweep", st: "foreign" },
+    ],
+  });
+
+  const browser = await chromium.launch();
+  try {
+    /* 320px FROM THE FIRST FRAME. Zero horizontal overflow is a tested
+       invariant of this site, and the filter group added here is four pills in
+       a flex row whose shared rule does not wrap. */
+    const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    const thrown = [];
+    page.on("pageerror", (e) => thrown.push(String(e)));
+    await page.context().addCookies([{
+      name: "flows_session", value: session, url: server.baseURL,
+    }]);
+    await page.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+    await page.waitForSelector("#uaFeedBody tr");
+
+    const first = await page.evaluate(() => ({
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      feedBoth: [...document.querySelectorAll("#uaFeedBody .ua-both")].length,
+      feedBothTitle: (document.querySelector("#uaFeedBody .ua-both") || {}).title || "",
+      alertBoth: [...document.querySelectorAll("#uaAlertsBody .ua-both")].length,
+      feedRows: document.querySelectorAll("#uaFeedBody tr").length,
+      alertRows: document.querySelectorAll("#uaAlertsBody tr").length,
+      alertHeads: document.querySelectorAll("#uaAlerts thead .fb-sort").length,
+      feedHeads: document.querySelectorAll("#uaFeed thead .fb-sort").length,
+      pressed: [...document.querySelectorAll("#uaFilters button")]
+        .map((b) => b.textContent + ":" + b.getAttribute("aria-pressed")),
+      stages: [...document.querySelectorAll("#uaFeedBody tr")]
+        .map((tr) => (tr.querySelector(".ua-stage") || {}).textContent || null),
+    }));
+    eq(first.overflow, 0, "nothing overflows at 320px with the filter group on the page");
+    eq(thrown.length, 0, `the page threw nothing: ${thrown.join("; ")}`);
+
+    eq(first.alertHeads, ALERT_COLUMNS,
+       "EVERY ALERTS HEADING IS A SORT CONTROL. This table was the newer, richer and " +
+       "fresher of the two on the page and was the one a reader could not rank at all — " +
+       "wireHeads opened with a guard on the feed table and served it alone");
+    eq(first.feedHeads, 10, "and the counter feed keeps its own, unchanged");
+
+    eq(first.feedBoth, 1,
+       "exactly one counter-feed row is marked as also flagged by the vendor — a mark " +
+       "that fired on every row, or on none, would pass a laxer assertion than this");
+    eq(first.alertBoth, 1, "and exactly one alerts row is marked reciprocally");
+    ok(/RepeatedHits/.test(first.feedBothTitle),
+       "with the vendor's own rule named on the mark rather than left to a legend");
+    ok(/premium/.test(first.feedBothTitle),
+       "and the window's premium beside it, so the mark carries the reading and not just " +
+       "the fact of a match");
+    deep(first.pressed, ["All:true", "Calls:false", "Puts:false", "Both feeds:false"],
+       "the filter group starts unfiltered and says so on every control");
+
+    deep(first.stages, ["long", null],
+       "THE BOARD'S OWN VIEW REACHES THE COUNTER FEED'S NAME CELL, and only where the " +
+       "payload states one — a badge drawn unconditionally would look identical on the " +
+       "row that carries a stage and would be a fabrication on the row that does not");
+
+    /* THE FILTER IS ONE CONTROL OVER TWO TABLES. A filter that narrowed one
+       and not the other would publish two counts of one population. */
+    await page.click("#uaFilters button:nth-child(3)");
+    const puts = await page.evaluate(() => ({
+      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
+        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
+      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      note: document.getElementById("uaFilterNote").textContent,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    }));
+    deep(puts.feed, ["BBB"], "filtering to puts narrows the counter feed");
+    deep(puts.alerts, ["ZZZ"], "and the alerts table, from the same control");
+    ok(/1 of 2 flagged windows and 1 of 2 contracts/.test(puts.note),
+       `and the note states both drawn counts against both published ones — got: ${puts.note}`);
+    ok(/published and hidden, not absent from the read/.test(puts.note),
+       "SO A NARROWED TABLE IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
+       "risk a filter introduces to a page that reports what a vendor did not send");
+    eq(puts.overflow, 0, "and the filtered page still does not overflow at 320px");
+
+    /* IN BOTH FEEDS: the single strongest reading this page can produce, and
+       the one that needed sixty rows read against fifty by hand. */
+    await page.click("#uaFilters button:nth-child(1)");
+    await page.click("#uaFilters button:nth-child(4)");
+    const both = await page.evaluate(() => ({
+      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
+        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
+      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+    }));
+    deep(both.feed, ["AAA"],
+      "the counter feed narrows to the one contract both selections agree on");
+    deep(both.alerts, ["AAA"],
+      "and so does the vendor's table — two independent selections, one line");
+
+    /* THE ALERTS TABLE RANKS, AND SAYS SO TO A SCREEN READER. */
+    await page.click("#uaFilters button:nth-child(4)");        // release the join filter
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    const ranked = await page.evaluate(() => ({
+      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
+      others: [...document.querySelectorAll("#uaAlerts thead th")]
+        .map((n) => n.getAttribute("aria-sort")),
+      label: document.querySelector("#uaAlerts thead th:nth-child(3) .fb-sort")
+        .getAttribute("aria-label"),
+    }));
+    deep(ranked.order, ["AAA", "ZZZ"], "premium ranks the larger window first");
+    eq(ranked.aria, "descending", "with aria-sort carrying the state, not the glyph");
+    eq(ranked.others.filter((v) => v === "none").length, ALERT_COLUMNS - 1,
+       "and every other heading is explicitly reset — a stale attribute announces two " +
+       "sorted columns and there is only ever one");
+    ok(/activate to/.test(ranked.label),
+       "with an accessible name that names the action rather than the abbreviation");
+
+    /* A THIRD ACTIVATION RETURNS THE VENDOR'S OWN ORDER. The published rank
+       must be recoverable: it is the ordering the payload argued for. */
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    const restored = await page.evaluate(() => ({
+      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
+    }));
+    deep(restored.order, ["AAA", "ZZZ"], "the third activation restores the published order");
+    eq(restored.aria, "none", "and reports no ranking at all");
+    eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
+  } finally {
+    /* THE WORKER IS A CHILD PROCESS AND IT MUST BE STOPPED. Without this the
+       suite prints its success line and then hangs forever holding a wrangler
+       process open — which reads to a runner exactly like a failing test. */
+    await browser.close();
+    await server.stop();
+  }
+}
+
 console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite because the ` +
   `population is defined and not because a guard caught it, floors that decide membership ` +
   `and claim nothing about what they exclude, a lift and a notional bracket withheld whole ` +
@@ -1149,5 +1381,11 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `a per-name cap derived from the board and the binding constraint named, a name with no ` +
   `30-day average counted rather than ranked at zero, twelve probe outcomes that stay ` +
   `pairwise distinct so a rate limit never becomes a refusal, a diagnostic whose zero ` +
-  `branch says INCONCLUSIVE in words, and a vocabulary ban enforced over the payload's own ` +
-  `prose with four named exceptions and no weakened regex`);
+  `branch says INCONCLUSIVE in words, a vocabulary ban enforced over the payload's own ` +
+  `prose with four named exceptions and no weakened regex, one parse of every contract ` +
+  `symbol per chain counted through a getter rather than asserted from memory, the board's ` +
+  `own stage threaded to the feed and OMITTED rather than nulled when absent, and — in a ` +
+  `browser at 320px — two payloads joined on the four-tuple they share with a mark that ` +
+  `fires on exactly the one contract both selections chose, a filter group both tables ` +
+  `honour whose note keeps a narrowed table from reading as a thin market, and an alerts ` +
+  `table that finally ranks, announces its ranking, and gives the vendor's order back`);

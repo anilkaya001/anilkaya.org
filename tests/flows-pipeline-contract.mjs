@@ -16,6 +16,9 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
+  runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
+  POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
+  unusualContractId, markNewContracts,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
   DEEP_NAMES, deepNames, publishRetryDelay,
@@ -2296,6 +2299,418 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(!/Authorization: "Bearer " \+ process\.env\.FLOWS_INGEST_TOKEN/.test(window),
        "and none of them still builds an Authorization header inline, which is what a copied " +
        "call site looks like on the way back in");
+  }
+}
+
+/* ---------- the bounded worker pool, and the run's veto over it ----
+
+   THE DRY RUN CANNOT REACH ANY OF THIS. It makes zero vendor calls, so
+   poolWidth() answers "not evidence" and every leg runs one wide — the pooled
+   path and the serial path emit identical bytes there, which is the property
+   the corpus block below asserts and is exactly why the corpus can say
+   nothing about what happens when the pool is actually wide. These are the
+   assertions that do. */
+{
+  /* ---- ORDER SURVIVES OUT-OF-ORDER COMPLETION ----
+
+     The whole reason this is safe to put in front of the scorer. Item 0 is
+     made the SLOWEST so that with any width above one it finishes last; if
+     results were collected in completion order the array would come back
+     rotated and every percentile tie downstream would move. */
+  const delays = [40, 5, 5, 5, 5, 5, 5, 5];
+  const items = delays.map((ms, i) => ({ i, ms }));
+  const seen = [];
+  let live = 0, peak = 0;
+  const pooled = await runPooled(items, async (item) => {
+    live++; if (live > peak) peak = live;
+    await new Promise((r) => setTimeout(r, item.ms));
+    live--;
+    seen.push(item.i);
+    return item.i * 10;
+  }, { width: 4 });
+
+  assert.deepEqual(pooled.results, items.map((x) => x.i * 10),
+    "runPooled returns results in INPUT order, not completion order");
+  checks++;
+  ok(seen[seen.length - 1] === 0,
+     `and the fixture really did complete out of order (last to finish was ${seen[seen.length - 1]}), ` +
+     "so the assertion above is not passing because everything happened to finish in sequence");
+  ok(peak > 1 && peak <= 4,
+     `the pool genuinely overlapped work (peak ${peak}) and never exceeded its width — a pool ` +
+     "that peaked at 1 would certify nothing, and one that exceeded 4 would be a burst");
+
+  /* ---- WIDTH 1 IS THE SERIAL LOOP, EXACTLY ----
+
+     Every leg falls back to this whenever the run is being refused, so "width
+     1 never overlaps" is the property that makes the fallback a real fallback
+     rather than a smaller burst. */
+  let serialLive = 0, serialPeak = 0;
+  await runPooled(items, async (item) => {
+    serialLive++; if (serialLive > serialPeak) serialPeak = serialLive;
+    await new Promise((r) => setTimeout(r, item.ms));
+    serialLive--;
+  }, { width: 1 });
+  eq(serialPeak, 1, "width 1 never has two items in flight — it is the serial loop it replaced");
+
+  /* ---- `attempted` IS NOT DERIVED FROM `results` ----
+
+     A caller counting skipped names off `results[i] === undefined` would count
+     every name whose worker legitimately returned nothing. This is the same
+     confident-zero confusion the payloads refuse everywhere else, and here it
+     would misreport the chain leg's own deadline accounting. */
+  const quiet = await runPooled([1, 2, 3], async () => undefined, { width: 2 });
+  assert.deepEqual(quiet.attempted, [true, true, true],
+    "an item whose work returned undefined is still ATTEMPTED — undefined is a result, not a skip");
+  checks++;
+  eq(quiet.done, 3, "and `done` counts attempts rather than truthy results");
+
+  /* ---- stopEarly IS CONSULTED PER ITEM, NOT ONCE AT DISPATCH ----
+
+     This is the chain leg's card reserve. A deadline tested only when the pool
+     starts would let a leg that began in time run for as long as its longest
+     queue — spending the window the cards were guaranteed. The stop here fires
+     only after two items, so a pool that checked once would finish all six. */
+  let started = 0;
+  const stopped = await runPooled([0, 1, 2, 3, 4, 5], async () => {
+    started++;
+    return started;
+  }, { width: 1, stopEarly: () => started >= 2 });
+  ok(stopped.stopped, "the pool reports that it stopped early rather than completing");
+  eq(stopped.done, 2, "exactly the items claimed before the stop were attempted");
+  assert.deepEqual(stopped.attempted.slice(2), [false, false, false, false],
+    "and the tail is marked NOT ATTEMPTED, which is what the chain leg counts as skipped");
+  checks++;
+
+  /* ---- degenerate shapes ---- */
+  const empty = await runPooled([], async () => 1, { width: 4 });
+  eq(empty.done, 0, "an empty list is a no-op rather than a hang");
+  const narrow = await runPooled([7], async (x) => x, { width: 9 });
+  assert.deepEqual(narrow.results, [7], "a width wider than the list is clamped to the list");
+  checks++;
+
+  /* ---- THE RUN'S VETO, AT EVERY RUNG ----
+
+     poolWidth() takes its meter as a parameter precisely so this can be
+     asserted. The rung that matters most is the first: on the shape the
+     2026-08-26 run actually had — 170 refusals in 1022 calls — the pool must
+     REFUSE to widen, because concurrency at a 17% refusal rate raises the
+     refusal rate. A test suite that only ever exercised the healthy branch
+     would certify the opposite of the property this gate exists for. */
+  const cold = poolWidth(POOL_MAX_WIDTH, { calls: POOL_EVIDENCE_MIN - 1, rateLimited: 0 });
+  eq(cold.width, 1, "with too few calls to be evidence, the pool stays one wide");
+  eq(cold.rate, null,
+     "and the rate is NULL rather than 0 — four clean calls is not a measured 0% refusal rate");
+
+  const refused = poolWidth(POOL_MAX_WIDTH, { calls: 1022, rateLimited: 170 });
+  eq(refused.width, 1,
+     "at the 2026-08-26 shape (170 of 1022 refused) the pool refuses to widen at all");
+  near(refused.rate, 170 / 1022, 1e-12, "and it reports the rate it decided on");
+
+  const easing = poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 80 });
+  eq(easing.width, 2, "between the two rungs it widens to two and no further");
+
+  const healthy = poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 10 });
+  eq(healthy.width, POOL_MAX_WIDTH, "and on a run that is not being refused it takes its full width");
+
+  ok(POOL_REFUSAL_EASE < POOL_REFUSAL_HALT,
+     "the two rungs are ordered, so the ladder cannot invert and hand a refused run more width");
+  eq(poolWidth(2, { calls: 1000, rateLimited: 10 }).width, 2,
+     "a leg that asks for a narrower maximum gets it — the gate never widens past the caller");
+
+  /* THE BOUNDARY IS EXCLUSIVE ON BOTH RUNGS, asserted rather than assumed: a
+     rate exactly at a rung takes the FASTER side, and the next person to move
+     a constant should find out here rather than in a live 429 regime. */
+  eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 1000 * POOL_REFUSAL_HALT }).width, 2,
+     "a rate exactly at the halt rung is not halted");
+  eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 1000 * POOL_REFUSAL_EASE }).width,
+     POOL_MAX_WIDTH, "and a rate exactly at the ease rung takes full width");
+}
+
+/* ---------- the floor verdict, at every rung it can reach ----------
+
+   RATE.floorCeilingMs's own comment is an open question — "a higher floor
+   trades a certain per-call tax against an uncertain saving, and the run has
+   never been instrumented to say which is larger. Do not raise it on
+   intuition; measure the 429 wait first." The meter is that measurement and
+   this describer is the sentence that reads it. The branch that matters most
+   is the one that says DO NOT RAISE IT, which by construction only a refused
+   run produces — so it is asserted here rather than left to the first bad
+   morning. */
+{
+  eq(describeFloorVerdict({ calls: 0, rateLimited: 0, permitWaitMs: 0, rateLimitWaitMs: 0 }), null,
+     "a run that made no calls says NOTHING about the floor — an empty meter is not a " +
+     "measured 0% refusal rate, and printing one would be a confident zero about the one " +
+     "constant this file refuses to change on intuition");
+
+  /* The 2026-08-26 shape, from RATE.floorCeilingMs's own comment. */
+  const refused = describeFloorVerdict({
+    calls: 1022, rateLimited: 170, permitWaitMs: 807_000, rateLimitWaitMs: 510_000 });
+  ok(/CEILING IS DOING ITS JOB/.test(refused),
+     "at 170 refusals in 1022 calls the verdict refuses to raise the ceiling");
+  ok(/170 of 1022 calls refused \(16\.6%\)/.test(refused),
+     `and it shows the arithmetic it decided on — got: ${refused}`);
+  ok(/63% as large/.test(refused),
+     "including backoff as a share of queueing, which is the trade the ceiling is a position on");
+
+  const middling = describeFloorVerdict({
+    calls: 1000, rateLimited: 80, permitWaitMs: 700_000, rateLimitWaitMs: 90_000 });
+  ok(/Neither raising nor lowering/.test(middling),
+     "between the rungs it declines to recommend a move in either direction");
+
+  const conservative = describeFloorVerdict({
+    calls: 1000, rateLimited: 10, permitWaitMs: 700_000, rateLimitWaitMs: 9_000 });
+  ok(/floor is CONSERVATIVE/.test(conservative),
+     "and on a run that is barely refused it says the ceiling can come down");
+  ok(/one step at a time/.test(conservative),
+     "one step at a time, because the last time this constant moved on a hunch it moved wrong");
+
+  const unqueued = describeFloorVerdict({
+    calls: 100, rateLimited: 0, permitWaitMs: 0, rateLimitWaitMs: 0 });
+  ok(/nothing queued/.test(unqueued),
+     "a run that never waited for a turn says so rather than publishing a ratio over zero");
+
+  /* THE VERDICT AND THE THROTTLE READ THE SAME RUNGS. Two constants would be
+     two opinions about what "being refused" means, and they would diverge on
+     the first morning somebody tuned one of them. */
+  eq(poolWidth(POOL_MAX_WIDTH, { calls: 1022, rateLimited: 170 }).width, 1,
+     "the same meter that produces the DO-NOT-RAISE verdict also holds every pooled leg at " +
+     "width 1 — the sentence and the throttle cannot disagree");
+}
+
+/* ---------- the counter feed's first-appearance marker -------------
+
+   THE THREE SILENCES, ON A FEED WHOSE SUBJECT IS WHAT CHANGED. `nw` is the
+   only field on this page that makes a claim about a prior session, so it is
+   the only field that can lie about one. The emitted corpus reaches exactly
+   one of its three answers — see the corpus block below — and these reach the
+   other two, which are the ones that must not become a confident sweep. */
+{
+  const row = (t, k, expiry, cp) => ({ t, k, expiry, cp, vol: 10, oi: 10 });
+
+  eq(unusualContractId(row("AAPL", 200, "2026-09-18", "C")), "AAPL|200|2026-09-18|C",
+     "a contract's identity is ticker, strike, expiry and side");
+  ok(unusualContractId(row("AAPL", 200, "2026-09-18", "C")) !==
+     unusualContractId(row("AAPL", 200, "2026-09-18", "P")),
+     "a call and a put at the same strike and expiry are different contracts");
+  ok(unusualContractId(row("AAPL", 200, "2026-09-18", "C")) !==
+     unusualContractId(row("AAPL", 205, "2026-09-18", "C")),
+     "and so are two strikes on one expiry");
+  eq(unusualContractId(row("AAPL", 200, "2026-09-18", "X")), null,
+     "an unrecognised side yields NO identity rather than a key that could collide");
+  eq(unusualContractId({ t: "AAPL", expiry: "2026-09-18", cp: "C" }), null,
+     "and a row with no strike yields none either — a partial key is a collision waiting");
+
+  const priorBody = (rows, readAt = "2026-08-21T09:20:00.000Z", sessionDate = "2026-08-21") =>
+    ({ readAt, sessionDate, contracts: { rows } });
+
+  /* ---- the ordinary comparison ---- */
+  {
+    const today = [
+      row("AAPL", 200, "2026-09-18", "C"),
+      row("AAPL", 205, "2026-09-18", "C"),
+      row("MSFT", 400, "2026-09-18", "P"),
+    ];
+    const mark = markNewContracts(today, priorBody([
+      row("AAPL", 200, "2026-09-18", "C"),
+      row("NVDA", 900, "2026-09-18", "C"),
+    ]));
+    eq(mark.status, "ok", "a prior feed that named contracts is a comparison that happened");
+    assert.deepEqual(today.map((r) => r.nw), [0, 1, 1],
+      "the carried-over line is 0 and the two absent from the prior feed are 1");
+    checks++;
+    eq(mark.fresh, 2, "and `fresh` agrees with the rows rather than travelling separately");
+    eq(mark.contracts, 2, "the denominator is the prior feed's own identifiable row count");
+    eq(mark.readAt, "2026-08-21T09:20:00.000Z", "the prior read time travels with the verdict");
+    eq(mark.sessionDate, "2026-08-21", "and so does the session it was published for");
+  }
+
+  /* ---- THE FAILURE CASE THIS FIELD EXISTS TO AVOID ----
+
+     A prior payload that could not be read must not make every line today
+     look new. Number(null) is 0 and an empty Set answers `has` with false for
+     everything — both are the same defect wearing different syntax, and this
+     one would publish fifty confident firsts on a morning the store was
+     down. */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
+    const mark = markNewContracts(today, null);
+    eq(mark.status, "unavailable", "no prior payload is UNAVAILABLE, not an empty comparison");
+    ok(today.every((r) => r.nw === null),
+       "and NOT ONE row claims to be new when there was nothing to compare against");
+    eq(mark.contracts, null, "the prior count is null rather than 0 — nothing was counted");
+    eq(mark.fresh, null, "and so is the fresh count: zero would be a measurement");
+  }
+
+  /* ---- a prior that was read and named nothing is a THIRD answer ---- */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C")];
+    const mark = markNewContracts(today, priorBody([]));
+    eq(mark.status, "quiet", "a prior feed read with no contracts in it is QUIET, not unavailable");
+    eq(today[0].nw, null,
+       "and still marks nothing new: `new` against a list that named nothing is not a reading");
+    eq(mark.contracts, 0, "the prior count IS zero here, because zero was measured");
+    eq(mark.fresh, null, "while fresh stays null, because no comparison was made");
+  }
+
+  /* ---- a prior whose rows carry no identifiable key ----
+
+     What a payload written before this field shipped would look like if the
+     row shape ever moved underneath it. Fifty rows in, zero keys out — and
+     marking everything new off that is the same sweep as the unavailable
+     case, arrived at by a different road. */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C")];
+    const mark = markNewContracts(today, priorBody([{ symbol: "AAPL260918C00200000" }]));
+    eq(mark.status, "quiet",
+       "a prior feed whose rows yield no identity is treated as no comparison, not as a clean sweep");
+    eq(today[0].nw, null, "so no row claims to be new off it");
+  }
+
+  /* ---- a row TODAY that cannot be identified ---- */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C"), { t: "MSFT", cp: "P" }];
+    markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")]));
+    eq(today[0].nw, 0, "the identifiable row is compared");
+    eq(today[1].nw, null,
+       "and the row this run could not build a key for is NULL — \"I cannot identify you\" " +
+       "is not \"you are new\"");
+  }
+
+  /* ---- the empty feed ---- */
+  {
+    const mark = markNewContracts([], priorBody([row("AAPL", 200, "2026-09-18", "C")]));
+    eq(mark.status, "ok", "an empty feed still records that the comparison was possible");
+    eq(mark.fresh, 0, "and reports zero new contracts, which here is a measurement");
+  }
+}
+
+/* ---------- the emitted corpus, on the fields this pass added ------
+
+   ITS OWN DRY RUN, in its own directory, and every path built from the
+   emitter's own prefix. The block above this file's summary line already
+   proved why: a path guessed rather than derived, guarded by
+   `if (!fs.existsSync(...)) continue`, is how a whole section of this suite
+   once passed without executing. */
+{
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-warn-")) + "/w";
+  const run = spawnSync(process.execPath,
+    ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
+    { cwd: import.meta.dirname, encoding: "utf8" });
+  eq(run.status, 0, "the dry run exits clean");
+  const runLog = run.stdout + run.stderr;
+
+  /* THE EMITTER REPLACES THE FIRST COLON IN A KEY WITH A DASH, so the file
+     name is derived from the listing rather than from a guessed pattern —
+     `board:long:2026-08-24` and `board:long` differ only past that first
+     colon and a naive pattern would read the archive copy for the live one. */
+  const dir = path.dirname(prefix);
+  const base = path.basename(prefix);
+  const emitted = fs.readdirSync(dir);
+  const fileFor = (key) => {
+    const want = base + "-" + key.replace(":", "-") + ".json";
+    ok(emitted.includes(want),
+       `the dry run emitted "${key}" as ${want} (directory holds: ${emitted.slice(0, 6).join(", ")}...)`);
+    return path.join(dir, want);
+  };
+  const read = (key) => JSON.parse(fs.readFileSync(fileFor(key), "utf8"));
+
+  /* ---- the board publishes the clock its own day counts are measured from ----
+
+     `edte` is a count of CALENDAR days from the gate's origin, and `sessionDate`
+     is the last COMPLETED session — one to three days earlier at the hour this
+     job runs. A renderer counting from `sessionDate` would draw the earnings
+     window early and disagree with the gate that spared the row, silently,
+     because both numbers look like day counts. /flows/events/ carries this
+     pair for exactly this reason. */
+  for (const side of ["long", "short"]) {
+    const board = read("board:" + side);
+    ok(/^\d{4}-\d{2}-\d{2}$/.test(String(board.gateOrigin || "")),
+       `board:${side} publishes gateOrigin as an ISO date (${board.gateOrigin})`);
+    eq(board.gateDays, 12,
+       `and the gate's own threshold beside it, so a row with edte 13 explains itself`);
+    ok(board.gateOrigin !== board.sessionDate,
+       `and the two clocks are demonstrably DIFFERENT in this corpus ` +
+       `(gateOrigin ${board.gateOrigin}, sessionDate ${board.sessionDate}) — if they were equal ` +
+       "the distinction would be untested and a renderer could use either");
+
+    /* THE COUNT IS THE GATE'S OWN ARITHMETIC AGAINST THE PUBLISHED ORIGIN,
+       reproduced here rather than trusted. A published count nobody can
+       recompute is a caption. */
+    const dated = board.rows.filter((r) => r.ed !== null);
+    ok(dated.length > 0,
+       `board:${side} carries earnings dates on ${dated.length} of ${board.rows.length} rows, so ` +
+       "these assertions are over a populated column rather than an empty one");
+    for (const r of dated) {
+      const want = Math.round(
+        (Date.parse(r.ed + "T00:00:00Z") - Date.parse(board.gateOrigin + "T00:00:00Z")) / 86400000);
+      eq(r.edte, want, `${r.t}: edte reproduces from ed and gateOrigin alone`);
+    }
+    ok(board.rows.every((r) => (r.ed === null) === (r.edte === null)),
+       `and ${side} publishes the date and the count as a pair — a count with no date is ` +
+       "not checkable, which is the lesson /flows/events/ already paid for");
+    /* THE INTERESTING CASE, and evidence that the corpus reaches it: a name
+       that cleared the twelve-day gate and reports inside the ten-session
+       horizon it is ranked over. */
+    ok(dated.some((r) => r.edte !== null && r.edte > 12 && r.edte <= 21),
+       `board:${side} holds at least one name reporting just past the gate — the row this ` +
+       "column exists for, and proof the branch is reachable");
+  }
+
+  /* ---- the counter feed's memory ---- */
+  {
+    const u = read("unusual");
+    eq(u.prior.status, "ok",
+       "the dry run reaches the COMPARISON branch of the first-appearance marker rather than " +
+       "only its absence — a fixture that could only publish nulls would certify nothing");
+    ok(u.contracts.rows.length > 0, "and the feed has rows to mark");
+    ok(u.contracts.rows.every((r) => r.nw === 0 || r.nw === 1),
+       "every row carries a 1 or a 0 under an `ok` comparison");
+    const fresh = u.contracts.rows.filter((r) => r.nw === 1).length;
+    eq(u.prior.fresh, fresh,
+       "and the published count agrees with the rows it describes rather than travelling separately");
+    ok(fresh > 0 && fresh < u.contracts.rows.length,
+       `the corpus reaches BOTH answers (${fresh} new of ${u.contracts.rows.length}) — a prior ` +
+       "identical to today would mark nothing and a prior of nothing would mark everything, " +
+       "and neither would test the lookup");
+    ok(typeof u.prior.readAt === "string" && !Number.isNaN(Date.parse(u.prior.readAt)),
+       "the comparison names when the prior feed was read");
+    ok(u.prior.sessionDate !== u.sessionDate,
+       `and which session it was published for (${u.prior.sessionDate} against today's ${u.sessionDate}), ` +
+       "so \"new\" has a denominator a reader can see");
+    ok(typeof u.basis.new === "string" && u.basis.new.length > 40,
+       "and the field travels with prose saying what the comparison was");
+  }
+
+  /* ---- the pool did not change what a run publishes ----
+
+     At zero vendor calls poolWidth answers "not evidence" and both pooled
+     legs run one wide, so this asserts the fallback IS the serial loop rather
+     than the pool's behaviour. Reported in the log so the width a live run
+     chose is readable there rather than inferred. */
+  ok(/enrichment: 1 name\(s\) in flight/.test(runLog),
+     "the enrichment leg reports the width it chose, and on a call-free run that width is 1");
+  ok(/chains: \d+ name\(s\), 1 in flight/.test(runLog),
+     "so does the chain leg");
+  ok(/which is not evidence/.test(runLog),
+     "and both name the reason — a run with no calls has measured no refusal rate, which is " +
+     "not the same as having measured zero");
+
+  /* ---- the two Worker-only legs still complete when detached ----
+
+     They are started before the vendor stretch and awaited after it, so the
+     one way this change could have gone wrong is a run that exits with the
+     sweep half-issued. The prune's own line is the evidence that it finished. */
+  ok(/prune: \d+ dated keys past \d+ days named/.test(runLog),
+     "the detached prune completed and reported its sweep before the run ended");
+  ok(/record: \d+ retained session\(s\) of \d+ dated key\(s\) probed/.test(runLog),
+     "and the detached archive walk was awaited in time for the record to score it");
+
+  /* ---- nothing this pass added pushed a payload at the ingest cap ---- */
+  for (const name of emitted) {
+    const bytes = fs.statSync(path.join(dir, name)).size;
+    ok(bytes <= 100 * 1024,
+       `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts ` +
+       "(and inside the 100KB the card shedder targets)");
   }
 }
 
