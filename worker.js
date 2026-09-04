@@ -3238,7 +3238,7 @@ async function route(request, env, url, ctx) {
        and a disallowed method gets 405, so a caller learns which of the
        two things they got wrong rather than being told "not allowed" for
        a request that was merely unauthenticated. */
-    requireMethod(request, path === "/api/flows/ask" ? ["GET", "POST"] : ["GET"]);
+    requireMethod(request, path === "/api/flows/ask" ? ["POST"] : ["GET"]);
     const session = await currentFlowsUser(request, env);
     if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
 
@@ -3398,39 +3398,41 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
+    if (path === "/api/flows/brief") {
+      /* THE BRIEFING, STREAMED LIKE EVERY OTHER KEY. It is one blob the
+         pipeline already computed, so it goes down the same path they all
+         do — passthrough(), no parse, no CPU proportional to its size.
+
+         I FIRST SERVED THIS FROM GET /api/flows/ask, reasoning that one
+         route reading one key could not answer out of two sessions. That
+         was worse on both counts. It broke the convention every other key
+         here follows — /api/flows/<key> streams <key> — so a reader of this
+         file would look for the briefing where it was not; and it made the
+         Worker PARSE a payload in order to re-serialise it, which is the
+         one cost this whole design exists to avoid. The drift window it was
+         guarding against is real and tiny, and the answer carries
+         `briefUpdatedAt` so a page that cares can see it. */
+      const stored = await readFlowsPayload(env, "brief");
+      if (stored === null) {
+        return json({ status: "pending", today: null, yesterday: null, next: null,
+          facts: [], silences: { pending: [], unreadable: [], quiet: [] } });
+      }
+      return passthrough(stored);
+    }
+
     if (path === "/api/flows/ask") {
       /* THE ONE ROUTE UNDER /api/flows THAT PARSES WHAT IT SERVES.
 
-         Every other key here is streamed by passthrough() without being
-         looked inside, because parsing is the cost this design exists to
-         avoid: CPU is metered and a board is hundreds of kilobytes. This
-         route has to read its input, so the input was made small — the
-         pipeline assembles the fact index where CPU is free and publishes
-         it as one key of roughly sixteen kilobytes. Parsing that is
-         affordable; parsing the seventeen surfaces it was built from,
-         here, on every question, would not be.
-
-         GET serves the briefing alone, which is what the page draws before
-         anyone types. POST answers a question. They are one route because
-         they read one key and a second route would be a second chance for
-         the two to answer out of different sessions. */
-      const stored = await readFlowsPayload(env, "brief");
-      if (request.method === "GET") {
-        if (stored === null) {
-          return json({ status: "pending", today: null, yesterday: null, next: null,
-            facts: [], silences: { pending: [], unreadable: [], quiet: [] } });
-        }
-        return passthrough(stored);
-      }
-
-      /* THE QUESTION IS VALIDATED BEFORE THE STORE IS CONSULTED, and the
-         order is the whole point. Answering the pending envelope first
-         meant a POST carrying a broken body got a cheerful 200 on any
-         morning the pipeline had not run — the caller's mistake hidden
-         behind the site's own silence, and no way for them to tell a bad
-         request from an empty one. What the caller sent is wrong or right
-         regardless of what has been published. */
+         Every other key here is streamed without being looked inside,
+         because parsing is the cost this design exists to avoid: CPU is
+         metered and a board is hundreds of kilobytes. This route has to
+         read its input, so the input was made small — the pipeline
+         assembles the fact index where CPU is free and publishes it as one
+         key of roughly sixteen kilobytes. Parsing that is affordable;
+         parsing the seventeen surfaces it was built from, here, on every
+         question, would not be. */
       const asked = await askQuestion(request);
+      const stored = await readFlowsPayload(env, "brief");
 
       if (stored === null) {
         return json({ status: "pending", question: asked, answer: null, llm: false,

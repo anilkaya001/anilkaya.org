@@ -160,14 +160,28 @@
 
     var key = fact && typeof fact.source === "string" && fact.source ? fact.source : fallbackSource;
     var at = fact && typeof fact.at === "string" && fact.at ? fact.at : fallbackAt;
-    var line = el("p", "ak-fact-src");
-    line.append(el("span", "ak-src-key",
-      typeof key === "string" && key ? key : "no source key on this fact"));
-    line.append(text(" · "));
-    var said = stampSaid(at);
-    line.append(el("span", "ak-src-at",
-      said === null ? "no build stamp published on this key" : "built " + said));
-    li.append(line);
+
+    /* PROVENANCE ONLY WHERE IT DIFFERS FROM THE REGION'S. The briefing
+       publishes one key and one stamp per run, so drawing them under every
+       sentence printed the identical line twelve times down one screen. That
+       is not provenance, it is wallpaper: a reader who sees the same twelve
+       words under every fact stops reading them, and the one morning a
+       sentence really does come from a different key with an older stamp is
+       the morning the difference is invisible. The region header states the
+       key and the stamp once; a fact draws its own ONLY when it disagrees
+       with that, which is exactly when a reader needs to look. */
+    var sameKey = key === fallbackSource;
+    var sameAt = at === fallbackAt;
+    if (!sameKey || !sameAt) {
+      var line = el("p", "ak-fact-src");
+      line.append(el("span", "ak-src-key",
+        typeof key === "string" && key ? key : "no source key on this fact"));
+      line.append(text(" · "));
+      var said = stampSaid(at);
+      line.append(el("span", "ak-src-at",
+        said === null ? "no build stamp published on this key" : "built " + said));
+      li.append(line);
+    }
     return li;
   }
 
@@ -418,11 +432,22 @@
          and this page draws all of it, so the sentences in hand ARE the
          section. Nothing here is truncated, and nothing here claims to be a
          selection. */
-      section.append(el("p", "ak-sub fc-note", facts.length === 1
+      /* THE KEY AND THE STAMP, ONCE. factItem() now draws a sentence's own
+         provenance only where it DIFFERS from this, so this line has to
+         carry the default or the page would show none at all — and a
+         briefing whose readings had no stated origin would be the one thing
+         this product will not ship. Said once and read; said twelve times
+         and skipped. */
+      var regionAt = brief && typeof brief.generatedAt === "string" ? brief.generatedAt : null;
+      var regionSaid = stampSaid(regionAt);
+      section.append(el("p", "ak-sub fc-note", (facts.length === 1
         ? "1 reading was published for this region, and it is drawn."
-        : facts.length + " readings were published for this region, and all of them are drawn."));
-      section.append(factList(facts, "brief",
-        brief && typeof brief.generatedAt === "string" ? brief.generatedAt : null));
+        : facts.length + " readings were published for this region, and all of them are drawn.") +
+        (regionSaid === null
+          ? " They come from the brief key, which published no build stamp."
+          : " All of them come from the brief key, built " + regionSaid + "; any sentence " +
+            "below that came from somewhere else says so under itself.")));
+      section.append(factList(facts, "brief", regionAt));
     }
 
     var said = typeof cfg.qualify === "function" ? cfg.qualify(payload) : [];
@@ -635,8 +660,8 @@
   box.append(el("p", "fc-note",
     "This box answers from the payloads this site has already published. It reads nothing " +
     "live, it places no vendor call, and it performs no arithmetic: every figure in an " +
-    "answer is quoted from a payload, and an answer carrying a figure that is not gets " +
-    "refused before it reaches this page."));
+    "answer is quoted from a payload. An answer that states a figure no payload published " +
+    "is refused before it reaches this page, and the measured reading is served instead."));
 
   var form = el("form", "ak-ask");
   form.id = "askForm";

@@ -80,6 +80,31 @@ const KEY = {
 const answered = (p) => (p && typeof p === "object" && p.status !== "pending" ? p : null);
 const rowsOf = (p) => (p && typeof p === "object" && p.status !== "pending" && Array.isArray(p.rows) ? p.rows : null);
 
+/* THE FIELD CHOOSES THE BOARD, AND NOT THE OTHER WAY ROUND.
+   Several checks below need one value the boards publish once between
+   them — the session they rank, the gate they applied — and the two
+   sides normally carry identical envelopes, so reaching for whichever
+   side answered first looks like a free choice. It is not one. When the
+   first side is published and SILENT about the field — a thin copy, or
+   one written before the field existed — reading it off that side
+   discards the reading the other side is still publishing, and the check
+   then declines on a store that could have answered it. The decline is
+   invisible from outside: DELETING the quiet board from that same store
+   makes the contradiction reappear, which is a warning engine whose
+   findings depend on how much of the store it was handed. So each field
+   is resolved across the sides in turn and the board that actually
+   carried it is the board the sentence names. */
+function boardReading(s, read) {
+  for (const slot of ["long", "short"]) {
+    const p = answered(s[slot]);
+    if (!p) continue;
+    const v = read(p);
+    if (v === null) continue;
+    return { key: KEY[slot], v };
+  }
+  return null;
+}
+
 const plural = (k, one, many) => (k === 1 ? one : many);
 
 /* THE SHAPE TEST BEFORE THE PARSE, for the reason shared/flows-freshness.js
@@ -331,11 +356,11 @@ function checkSessionBoundary(s) {
   const al = answered(s.alerts);
   const record = al && al.record && typeof al.record === "object" ? al.record : null;
   const day = record ? ymd(record.date) : null;
-  const board = answered(s.long) || answered(s.short);
-  const session = board ? ymd(board.sessionDate) : null;
-  if (day === null || session === null) return null;
+  const board = boardReading(s, (p) => ymd(p.sessionDate));
+  if (day === null || board === null) return null;
+  const session = board.v;
   if (day === session) return [];
-  const boardKey = answered(s.long) ? KEY.long : KEY.short;
+  const boardKey = board.key;
   const ahead = day > session;
   return [warn(ahead ? "note" : "caution", "session:boundary",
     ahead
@@ -379,7 +404,7 @@ function checkSessionBoundary(s) {
 function checkPopulation(s) {
   let prior = 0;
   let held = 0;
-  let priorSession = null;
+  const priorSessions = [];
   const sides = [];
   const sources = [];
   for (const [slot, word] of [["long", "bullish"], ["short", "bearish"]]) {
@@ -411,9 +436,22 @@ function checkPopulation(s) {
     held += r.length;
     sides.push(word);
     sources.push(KEY[slot]);
-    if (priorSession === null) priorSession = ymd(memory.sessionDate);
+    priorSessions.push(ymd(memory.sessionDate));
   }
   if (!sides.length) return null;
+  /* THE PRIOR BOARD IS NAMED ONLY WHEN EVERY SIDE COUNTED NAMES THE SAME
+     ONE. `prior` is a sum across the sides, so a date taken from the first
+     side that stated one would be printed as the date the whole sum came
+     from — and the store in which the two sides disagree is exactly the
+     store this module exists for: a leg that failed and left an older
+     copy standing carries an older memory with it. Naming one of two
+     sessions there tells a reader that eighty names were on the board of a
+     day when twenty of them were on the board of a week earlier. When the
+     sides disagree, or when any of them could not state a session at all,
+     the sentence falls back to "the previous board" — which is vaguer and
+     true, and the branch that prints it already exists below. */
+  const agreed = priorSessions[0];
+  const priorSession = priorSessions.every((d) => d !== null && d === agreed) ? agreed : null;
   if (prior === 0) return [];
   if (held >= prior * THRESHOLDS.shrinkFraction) return [];
   const fellPct = Math.round((1 - held / prior) * 100);
@@ -694,38 +732,39 @@ function checkPartition(s) {
  * silently.
  */
 function checkGate(s) {
-  const board = answered(s.long) || answered(s.short);
   const ev = answered(s.events);
-  if (!board || !ev) return null;
-  const boardKey = answered(s.long) ? KEY.long : KEY.short;
+  if (!ev) return null;
   const out = [];
   let ran = false;
 
-  const boardDays = num(board.gateDays);
+  /* THE TWO CLOCKS ARE RESOLVED SEPARATELY, because a board can publish
+     one of them and not the other and each half of the gate is its own
+     comparison against the calendar. */
+  const board = boardReading(s, (p) => num(p.gateDays));
   const eventsDays = num(ev.gateDays);
-  if (boardDays !== null && eventsDays !== null) {
+  if (board !== null && eventsDays !== null) {
     ran = true;
-    if (boardDays !== eventsDays) {
+    if (board.v !== eventsDays) {
       out.push(warn("blocking", "gate:window",
-        "The boards apply a " + boardDays + "-day earnings gate and events publishes a " +
+        "The boards apply a " + board.v + "-day earnings gate and events publishes a " +
         eventsDays + "-day window, so a name the board kept can read as gated on the " +
         "calendar beside it.",
-        { boardDays, eventsDays },
-        [boardKey, KEY.events]));
+        { boardDays: board.v, eventsDays },
+        [board.key, KEY.events]));
     }
   }
 
-  const boardOrigin = ymd(board.gateOrigin);
+  const origin = boardReading(s, (p) => ymd(p.gateOrigin));
   const eventsOrigin = ymd(ev.gateOrigin);
-  if (boardOrigin !== null && eventsOrigin !== null) {
+  if (origin !== null && eventsOrigin !== null) {
     ran = true;
-    if (boardOrigin !== eventsOrigin) {
+    if (origin.v !== eventsOrigin) {
       out.push(warn("blocking", "gate:origin",
-        "The boards count days to earnings from " + boardOrigin + " and events counts from " +
+        "The boards count days to earnings from " + origin.v + " and events counts from " +
         eventsOrigin + ", so one name's day count differs between two pages that both call " +
         "it days to earnings.",
-        { boardOrigin, eventsOrigin },
-        [boardKey, KEY.events]));
+        { boardOrigin: origin.v, eventsOrigin },
+        [origin.key, KEY.events]));
     }
   }
 

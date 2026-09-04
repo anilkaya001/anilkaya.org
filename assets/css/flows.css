@@ -6270,3 +6270,145 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 }
 
 .sg-refuse dd strong { color: var(--ink); }
+
+/* =============================================================
+   /flows/ask — the briefing and the question box.
+
+   THIS ROUTE'S PROSE IS SHORT ON PURPOSE, SO IT DOES NOT TAKE COLUMNS.
+   The rule at :189 splits `.fc-note`, `.fc-q`, `.flows-foot` and
+   `.flows-lede` into 32rem columns above 92rem, and the reasoning there
+   is sound for the pages it was written for: a long method paragraph
+   costs 5-9% more height when capped at 68ch, and columns buy that back.
+   But columns only pay when there is enough text to fill them. This
+   page's lede is three lines. Split in two it became two lines a side,
+   and the eye had to jump a 2.5rem gutter mid-sentence — the shot read
+   "Ask a question and | the wording may be a model's", which is not a
+   measure problem, it is two broken fragments. CSS cannot count lines,
+   so the judgement is made per route by the author who knows how long
+   the prose is. Here it is short, so it stays in one column.
+   ============================================================= */
+.ak-panel .flows-lede,
+.ak-panel .fc-note,
+.ak-panel .fc-q,
+.flows-body .flows-lede { columns: auto; max-width: var(--measure); }
+
+.ak-brief { display: grid; gap: 1.25rem; }
+.ak-region, .ak-askbox { padding: 1.5rem 1.75rem; }
+
+.ak-panel .fc-panel-h { margin: 0 0 0.35rem; font-size: var(--fs-head); }
+.ak-sub { margin: 0.5rem 0 1rem; font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* THE FACTS TILE, BECAUSE A BRIEFING IS SCANNED AND NOT READ THROUGH.
+   Each fact is an independent statement — the tilt does not depend on the
+   sector lean, and neither depends on the alert count — so stacking them
+   in one column down a 2560px screen spent 55% of every panel on gutter
+   and pushed the third region below the fold. They are laid out as cards
+   that fill the width the canvas already earned. `auto-fill` with a 30rem
+   floor is what keeps each one near the same measure the prose uses, so
+   widening the window adds COLUMNS rather than lengthening lines. */
+.ak-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem 1.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+}
+.ak-fact { margin: 0; padding: 0.7rem 0 0.7rem 0.9rem; border-left: 2px solid var(--panel-border); }
+
+/* THE FIRST FACT IS THE FINDING AND SPANS THE ROW. flows.css:5934 records
+   the survey: across fourteen renderers the method was drawn 87 times
+   against 4 drawings of the reading. Promoting index 0 here is only half
+   the fix — a lead sentence the same size as the four beside it is not
+   promoted, it is merely first. It takes the full row so the eye lands on
+   it before the grid starts. */
+.ak-fact.is-lead { grid-column: 1 / -1; border-left-color: var(--gold-harvest); }
+.ak-fact-say { margin: 0; }
+.ak-fact.is-lead .ak-fact-say { font-size: var(--fs-lead); line-height: 1.45; }
+
+.ak-fact-src { margin: 0.3rem 0 0; font-size: var(--fs-micro); color: var(--ink-dim); }
+.ak-src-key { font-family: var(--font-mono); }
+
+/* THE QUESTION BOX IS AS WIDE AS ITS PANEL. It rendered at the browser's
+   default textarea size — about 190px, narrower than the placeholder it
+   was showing — inside a panel two thousand pixels across. A control
+   sized smaller than its own example text tells a reader to type
+   something short, which is the opposite of what this box wants.
+   16px is the floor iOS uses to decide whether to zoom the viewport on
+   focus; below it the page jumps. */
+.ak-ask { margin: 0.75rem 0 0; }
+.ak-ask-l { display: block; margin-bottom: 0.4rem; font-size: var(--fs-note); color: var(--ink-dim); }
+/* THE ROW IS CAPPED, NOT STRETCHED. Left to fill a 2000px panel the
+   textarea became roughly 1700px wide and the button ended up most of a
+   screen away from the field it submits — a target the eye has to hunt
+   for after typing. A question here is a sentence, so the field is sized
+   for a sentence and the button stays beside it. */
+.ak-ask-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  max-width: 62rem;
+}
+.ak-ask-in {
+  flex: 1 1 24rem;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: max(1rem, 16px);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  resize: vertical;
+}
+.ak-ask-go {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0.6rem 1.4rem;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+/* A BUTTON THAT LOOKS THE SAME WHILE IT IS REFUSING CLICKS IS PRESSED
+   TWICE, and the second press costs a second question out of a daily
+   allowance shared with every other reader on this account. */
+.ak-ask-go[disabled] { opacity: 0.5; cursor: progress; }
+.ak-busy { margin: 0.6rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* THE ANSWER IS SET APART FROM THE FACTS IT WAS BUILT FROM, because the
+   whole safety story of this page is that those are two different kinds
+   of thing: the sentences are evidence this pipeline measured, and the
+   paragraph may be a model's wording of them. A reader who cannot tell
+   which is which at a glance has none of the guarantee. */
+.ak-answer { margin: 1.25rem 0 0; padding: 1rem 1.25rem; border: 1px solid var(--panel-border); border-radius: var(--radius-1); }
+.ak-asked-l { font-size: var(--fs-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.ak-asked { margin: 0 0 0.75rem; color: var(--ink-dim); }
+.ak-answer-list { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+.ak-answer-item { margin: 0.25rem 0; }
+
+/* WHO WROTE THE WORDING, IN A GLYPH AND A POSITION — NEVER IN A HUE
+   ALONE. flows.css:880 states the rule for the four silence marks and
+   flows-political.js:31 for its freshness glyph: the mark has to survive
+   greyscale, a monochrome printout and the eight percent of readers for
+   whom two of our accents are the same colour. The mark sits in a fixed
+   column so the two states are told apart by shape and alignment before
+   any colour is read. */
+.ak-prov { margin: 0.75rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); display: flex; gap: 0.5rem; }
+.ak-prov-mark { flex: 0 0 1em; font-family: var(--font-mono); }
+
+@media (max-width: 60rem) {
+  .ak-facts { grid-template-columns: 1fr; }
+  .ak-region, .ak-askbox { padding: 1.1rem 1rem; }
+}
+
+/* AN EMPTY ANSWER BOX IS A FRAME AROUND NOTHING. Before anyone asks, the
+   region has no content, and a bordered box waiting there reads as an
+   answer that failed to load rather than as a question not yet put. It is
+   `:empty` rather than a flag the script has to remember to clear,
+   because the two would drift and the drift shows as this exact box. */
+.ak-answer:empty { display: none; }

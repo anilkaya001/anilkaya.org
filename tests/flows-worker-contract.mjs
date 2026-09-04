@@ -430,15 +430,18 @@ try {
          and would make its own result depend on a quota. Empty is a
          supported configuration, so what is exercised here is a branch a
          reader can really land in and not a stub. */
-      const askGet = await get("/api/flows/ask", { headers: { Cookie: "flows_session=" + token } });
-      eq(askGet.status, 200, "GET serves the briefing on its own, which is what the page draws " +
-         "before anyone types");
+      const askGet = await get("/api/flows/brief", { headers: { Cookie: "flows_session=" + token } });
+      eq(askGet.status, 200, "the briefing is served from its own key, at the path every other " +
+         "key here is served from, and streamed rather than parsed");
       const brief = await askGet.json();
       ok("today" in brief && "facts" in brief,
          "carrying both shapes from one key — the three sections the page draws and the flat " +
          "index the question box selects from, so the two can never answer out of different " +
          "sessions");
-      eq((await get("/api/flows/ask")).status, 401, "and it refuses an anonymous reader");
+      eq((await get("/api/flows/brief")).status, 401, "and it refuses an anonymous reader");
+      eq((await get("/api/flows/ask", { headers: { Cookie: "flows_session=" + token } })).status, 405,
+         "a GET on the question route is 405: the briefing has its own key now, so a GET here " +
+         "would be a second way to ask for the same bytes");
 
       const ask = (body, headers) => fetch(url("/api/flows/ask"), {
         method: "POST", redirect: "manual",
@@ -501,7 +504,7 @@ try {
          "the index holds readings");
       const methodDenied = await fetch(url("/api/flows/ask"),
         { method: "DELETE", redirect: "manual", headers: auth });
-      eq(methodDenied.status, 405, "and only GET and POST are allowed");
+      eq(methodDenied.status, 405, "and only POST is allowed");
 
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");

@@ -119,7 +119,7 @@ const PUBLISHED_UNREADABLE = new Set(["unreadable", "unavailable"]);
    which is shared mutable state in a file whose entire claim is that
    it has none — and the failure mode is a scan that silently starts
    in the middle of the text it was asked to read. */
-const NUMERAL_SOURCE = "-?\\d[\\d,]*(?:\\.\\d+)?";
+const NUMERAL_SOURCE = "(?<![\\d.])-?\\d+(?:,\\d+)*(?:\\.\\d+)?";
 
 /**
  * Every numeral in a piece of text, exactly as it is written.
@@ -132,8 +132,23 @@ const NUMERAL_SOURCE = "-?\\d[\\d,]*(?:\\.\\d+)?";
  * "1.2M" has written the numeral 1.2, which appears in no fact it
  * was given, and the answer is refused as the arithmetic it is.
  *
- * Group separators stay in the token — "1,234" and "1234" are two
- * different strings and only one of them can have been quoted.
+ * A GROUP SEPARATOR SITS BETWEEN DIGITS; A COMMA AFTER A NUMBER IS
+ * PUNCTUATION. "1,234" and "1234" are two different strings and only
+ * one of them can have been quoted, so a separator between digits
+ * stays inside the token. A trailing one used to stay as well, and
+ * "Of 118, 61 leaned bullish" then scanned as the token "118," —
+ * which matches nothing in a fact that wrote 118 with a space after
+ * it, so a verbatim quote was refused and the caller was handed a
+ * refused "token" that is not a number. A guard that fires on correct
+ * answers is the one failure this file cannot afford, because it is
+ * the guard somebody eventually switches off.
+ *
+ * AND A HYPHEN BETWEEN DIGITS IS A DATE, NOT A MINUS SIGN. Every
+ * stamp this pipeline publishes is ISO, so "2026-09-04" scanned as
+ * 2026, -09 and -04: two negative figures the model never wrote,
+ * reported to the caller as arithmetic it had invented. A sign is
+ * only a sign where a number begins, which is what the lookbehind
+ * says and what the hyphen inside a date is not.
  */
 export function numeralsIn(text) {
   if (typeof text !== "string" || text === "") return [];
@@ -230,8 +245,15 @@ function marketFacts(p, at) {
      abbreviated. Turning 12345678 into "12.3 million" is arithmetic
      on a measurement, and the rounding that matters is the one that
      would turn a small nonzero into a confident zero. */
+  /* AND ONLY WHERE THERE ARE FIVE NAMES TO BE THE LARGEST OF. The five
+     is flows-market.js's slice and this payload publishes no count
+     beside `topShare`, so on a run that priced fewer than five names
+     the sentence named five movements over three — and the ratio it
+     quotes is 1 by construction there, because every priced name is
+     inside the top five. A reader would have read total concentration
+     off a tape that was too thin to measure concentration at all. */
   const share = num(prem.topShare);
-  if (all(share, priced)) {
+  if (all(share, priced) && priced >= 5) {
     out.push(f("market/concentration", ["concentration", "share", "largest", "premium"],
       "The five largest absolute net-premium movements account for " + share +
       " of gross premium, as a ratio, over " + priced + " priced names.",
@@ -385,7 +407,18 @@ function newsFacts(p, at) {
      leaves the population UNKNOWN and at least as large as what
      arrived, and a reader comparing two days of counts is then
      comparing two ceilings rather than two markets. */
-  if (p.atVendorLimit === true && all(returned, requested)) {
+  /* AND THE FLAG AND THE ARITHMETIC HAVE TO AGREE BEFORE EITHER IS
+     REPEATED. `atVendorLimit` is set at publish time as wire >= the
+     limit the fetch actually sent (scripts/flows-pipeline.mjs:4010),
+     and the publisher's own comment says a later edit to that fetch
+     would turn the claim into a lie rather than into a failure. A true
+     flag beside a return well under the request is that lie arriving,
+     and repeating it would take a population this page knows EXACTLY —
+     63 rows came back, so 63 is the count — and publish it as unknown
+     and at least 63, which is the rule the sentence exists to serve
+     running backwards. shared/flows-warnings.js:484 refuses the same
+     pair for the same reason. */
+  if (p.atVendorLimit === true && all(returned, requested) && returned >= requested) {
     out.push(f("news/ceiling", ["news", "ceiling", "limit", "truncated", "population"],
       "That response came back at the vendor's own limit of " + requested +
       " rows, so the population above it is unknown and at least " + returned + ".",
@@ -408,11 +441,24 @@ function alertFacts(p, at) {
   const out = [];
   const rows = Array.isArray(p.rows) ? p.rows.length : null;
   const seen = num(p.seen), shed = num(p.shed), cap = num(p.cap);
+  /* THE ROWS THAT NEVER BECAME ALERTS ARE NOT INSIDE `seen`, so a
+     sentence built from `seen` alone reports a page holding everything
+     the vendor sent on a read where five rows arrived and could not be
+     shaped. shared/flows-alerts.js:281 sets seen to the SHAPED rows and
+     counts the rest separately, which makes `unusable` the unreadable
+     silence in miniature — a fault on this page — and the news tape one
+     function above never has this problem because its `returned` is the
+     wire. Null when the read carried no count of its own, which is not
+     a measured zero and may not be printed as one. */
+  const unusable = num(p.unusable);
   if (all(rows, seen, shed, cap)) {
     out.push(f("flowalerts/coverage", ["alerts", "flow", "tape", "coverage", "cap"],
       "The flow-alert page holds " + rows + " of the " + seen + " alerts read, with " +
-      shed + " removed by a cap of " + cap + " rows.",
-      { keptAlerts: rows, seenAlerts: seen, shedAlerts: shed, rowCap: cap }));
+      shed + " removed by a cap of " + cap + " rows" +
+      (unusable === null ? "" : ", beside " + unusable +
+        " rows the vendor sent that this page could not read") + ".",
+      Object.assign({ keptAlerts: rows, seenAlerts: seen, shedAlerts: shed, rowCap: cap },
+        unusable === null ? {} : { unusableRows: unusable })));
   }
 
   /* THE BRIEFING ALREADY SAYS HOW MANY WINDOWS WERE FLAGGED. What it
@@ -731,7 +777,15 @@ export function buildFactIndex(store) {
          Every other silence in the briefing is decided by silenceOf
          against the key itself, sees the pending marker directly, and
          passes through untouched. */
-      if (name === "yesterday" && q.kind === "unreadable" && boardsPending.length) {
+      /* EACH RE-FILING NAMES THE ONE SILENCE IT IS FOR. The section is
+         not enough to identify it: the next-session section also
+         carries the earnings calendar's own quiet, which is a real
+         reading — the calendar was read and held no dated report — and
+         a re-filing that matched on kind alone swallowed it and told a
+         reader the calendar had not been published when it had been
+         read that morning. */
+      if (name === "yesterday" && q.what === "both boards" &&
+          q.kind === "unreadable" && boardsPending.length) {
         record("pending", q.what,
           boardsPending.length === 2
             ? "Neither board has been published for this session yet, so nothing has " +
@@ -749,7 +803,8 @@ export function buildFactIndex(store) {
           "brief", null);
         continue;
       }
-      if (name === "next" && q.kind === "quiet" && nextUnmeasured.length) {
+      if (name === "next" && q.what === "the next session" &&
+          q.kind === "quiet" && nextUnmeasured.length) {
         /* WHICH SILENCE THE UNMEASURED INPUTS ADD UP TO, rather than
            one word for both of them. Inputs still unpublished are a job
            that has not run; an input that arrived and could not be read
@@ -925,18 +980,35 @@ export function selectFacts(index, question, options) {
     for (const w of words) if (topic.has(w)) hitWords++;
     const ms = f.at === null ? NaN : Date.parse(f.at);
     const recency = span > 0 && Number.isFinite(ms) ? (ms - oldest) / span : 0;
-    return { f, i, hitTickers, hitWords,
-      score: hitTickers * 100 + hitWords * 10 + recency };
+    return { f, i, hitTickers, hitWords, recency,
+      score: hitTickers * 100 + hitWords * 10 };
   });
 
   const matched = scored.filter((x) => x.hitTickers > 0 || x.hitWords > 0);
   const pool = matched.length ? matched : scored;
+  /* RECENCY BREAKS A TIE; IT DOES NOT SET THE ORDER. Held inside the
+     score it was the only term that ever varied among facts that
+     matched nothing, so the unmatched fallback sorted by whichever key
+     was republished last rather than by the fixed list below — and the
+     Worker's intraday cron republishes the alert feed and the news tape
+     every fifteen minutes. A reader asking a question that matched
+     nothing was answered "the run spent 812 vendor calls" while being
+     told these were the session's headline readings in the briefing's
+     order. Ranked after the source, it does what its own comment says. */
   pool.sort((a, b) => (b.score - a.score) ||
-    (sourceRank(a.f.source) - sourceRank(b.f.source)) || (a.i - b.i));
+    (sourceRank(a.f.source) - sourceRank(b.f.source)) ||
+    (b.recency - a.recency) || (a.i - b.i));
 
-  const picked = pool.slice(0, max).map((x) => x.f);
+  const chosen = pool.slice(0, max);
+  const picked = chosen.map((x) => x.f);
   const capped = pool.length > max;
-  const tickerHits = matched.reduce((n, x) => n + (x.hitTickers > 0 ? 1 : 0), 0);
+  /* COUNTED OVER THE FACTS THE READER IS HOLDING, because that is the
+     list the sentence below opens by naming. Counted over `matched` it
+     described a population the reader never sees: three facts served
+     under "5 matched a ticker named in the question", which is the
+     defect the block comment further down says it fixed one clause
+     earlier and then reintroduced in the next one. */
+  const tickerHits = chosen.reduce((n, x) => n + (x.hitTickers > 0 ? 1 : 0), 0);
 
   /* THE POPULATION IS KNOWN AND IS SAID, because a list that
      truncates without saying so reads as a population — and here the
@@ -949,12 +1021,16 @@ export function selectFacts(index, question, options) {
      reader the cap had dropped thirty-seven when it had dropped six and
      the other thirty-one had simply not matched the question. Both
      totals are ours and both are exactly countable, so each sentence
-     states the one it is about. */
+     states the one it is about.
+
+     AND "THE REST" HAS TO BE SOMEBODY. When every fact served matched a
+     ticker there is no remainder, and a clause describing one invented
+     a second group out of the same facts it had just counted. */
   const why = matched.length
     ? "Picked " + picked.length + " of the " + matched.length +
       " facts that matched: " + (tickerHits
-        ? tickerHits + " matched a ticker named in the question and the rest matched " +
-          "topic words"
+        ? tickerHits + " of those matched a ticker named in the question" +
+          (tickerHits < picked.length ? " and the rest matched topic words" : "")
         : "matched on topic words, no ticker in the question matched one") +
       (capped ? ", and the list was cut at the cap." : ".")
     : "Nothing in the question matched a ticker or a topic word in the index, so these " +

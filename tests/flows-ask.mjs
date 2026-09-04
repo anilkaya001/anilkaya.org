@@ -242,6 +242,27 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   same(numeralsIn(null), [],
      "and a non-string is absent rather than coerced — the house rule the whole file " +
      "is organised around");
+
+  /* A SEPARATOR SITS BETWEEN DIGITS; A COMMA AFTER A NUMBER IS
+     PUNCTUATION. The two used to scan alike, so a sentence naming a
+     figure and then pausing yielded a token no fact could ever carry. */
+  same(numeralsIn("Of 118, 61 leaned bullish"), ["118", "61"],
+     "a comma that ends a clause is punctuation and stays OUT of the token: '118,' " +
+     "matches nothing in a fact that wrote 118 with a space after it, so the guard " +
+     "refused a verbatim quote and named a refused token that is not a number");
+  same(numeralsIn("1,234 of 5,678,900"), ["1,234", "5,678,900"],
+     "while a separator BETWEEN digits is still part of the number, on one group and " +
+     "on three — that distinction is the reason the token keeps commas at all");
+
+  /* EVERY STAMP THIS PIPELINE PUBLISHES IS ISO, so the scanner meets
+     dates constantly and used to read their hyphens as minus signs. */
+  same(numeralsIn("The session dated 2026-09-04"), ["2026", "09", "04"],
+     "a hyphen between digits is a date, not a sign: this used to scan as 2026, -09 " +
+     "and -04, and a caller reading the refusal was told the model had written two " +
+     "negative figures it never wrote");
+  same(numeralsIn("a fall of -0.0377 on the day"), ["-0.0377"],
+     "while a sign where a number BEGINS is still a sign, which is the reading the " +
+     "movers' change ratios depend on");
 }
 
 /* ---------- 2. a measured zero is a reading ---------------------- */
@@ -396,6 +417,50 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(cold.silences.pending.some((q) => /neither board has been published/i.test(q.say)),
      "including the comparison against yesterday, which is unavailable rather than broken");
 
+  /* A HALF-PUBLISHED STORE IS WHAT THE TWO RE-FILINGS ARE FOR, and
+     each of them asked the wrong question about it. Both tested
+     whether EVERY input was missing before refusing to let the
+     briefing's own sentence stand — so one surface arriving was enough
+     to put the strongest claim back on the page, which is the wrong
+     way round: a claim needs all of its evidence, not any of it. */
+  const calendarOnly = buildFactIndex({
+    events: { status: "ok", generatedAt: STAMP, rows: [] } });
+  ok(!calendarOnly.silences.quiet.some((q) => q.what === "the next session"),
+     "a measured-empty calendar beside three unpublished surfaces does not make the " +
+     "next session a measured emptiness — 'no name sits on a threshold this session' " +
+     "is read from the two boards and the watch board, and none of the three had been " +
+     "published");
+  ok(calendarOnly.silences.pending.some((q) => q.what === "the next session"),
+     "it is pending instead, because an emptiness nobody measured is not a reading");
+  ok(calendarOnly.silences.quiet.some((q) => q.what === "the earnings calendar"),
+     "while the calendar that WAS read and held no dated report keeps its own quiet " +
+     "silence: that one is a measurement, and a re-filing that swallowed it would lose " +
+     "a reading to fix a claim");
+
+  const oneBoard = buildFactIndex({
+    "board:short": { status: "ok", side: "short", generatedAt: STAMP, scored: 118 } });
+  ok(!oneBoard.silences.unreadable.some((q) => /neither board could be read/i.test(q.say)),
+     "one board never published is not 'neither board could be read' — the briefing " +
+     "reaches that sentence the moment neither side yields rows, and it sends a reader " +
+     "hunting a breakage on a morning when half the run has simply not finished");
+  ok(oneBoard.silences.pending.some((q) => q.what === "both boards"),
+     "the comparison against the previous session is pending, and it says which half is " +
+     "missing rather than blaming this page for both");
+  ok(oneBoard.silences.unreadable.some((q) => q.what === "bearish board"),
+     "while the board that DID arrive carrying no rows keeps its own fault beside it: " +
+     "one silence of each kind, still told apart");
+
+  /* AND THE OTHER DIRECTION, which the pending re-filing must not
+     swallow. Four failed reads are a fault here; a reader told a job
+     has not run waits, and the fault stays exactly where it was. */
+  const nextBroken = buildFactIndex({
+    "board:long": null, "board:short": null, "board:watch": null, events: null });
+  ok(nextBroken.silences.unreadable.some((q) => q.what === "the next session"),
+     "when every surface the next session is read from failed to read, the next session " +
+     "is UNREADABLE — not a job that has not run, and not an empty calendar");
+  ok(!nextBroken.silences.quiet.some((q) => q.what === "the next session"),
+     "and never quiet, which would be this page reporting a calendar it never read");
+
   /* The feeds inside a compound key own their own silence: one dead
      block does not make the key dead, and the census counts only
      what answered. */
@@ -478,6 +543,25 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "a zero the facts themselves put in front of the model passes, because the guard " +
      "asks whether a figure was handed over and not whether it is a zero");
 
+  /* THE GUARD FIRING ON A CORRECT ANSWER IS THE ONE FAILURE THIS FILE
+     CANNOT AFFORD, because it is the guard somebody eventually switches
+     off. Both of these are verbatim quotes that the scanner used to
+     tokenise differently from the fact they were quoting. */
+  const paused = guardAnswer("Of 118, 61 leaned bullish and 57 leaned bearish.", [breadth]);
+  ok(paused.ok,
+     "a figure quoted exactly and then followed by a comma is ACCEPTED — the fact wrote " +
+     "118 with a space after it and the answer wrote it with a comma, and those are the " +
+     "same measurement however the sentence goes on");
+  same(paused.rejected, [],
+     "with nothing refused, and in particular no '118,' offered to a caller as a figure " +
+     "the model invented");
+
+  const stamped = guardAnswer("The 2026-09-04 session read 118 names.", [breadth]);
+  ok(stamped.ok,
+     "and so is an ISO date beside a quoted count: the month and day used to scan as " +
+     "-09 and -04, refusing a faithful answer and reporting two negative figures that " +
+     "were never written as arithmetic the model had done");
+
   const empty = guardAnswer("   ", picked);
   eq(empty.ok, false,
      "an empty answer is refused rather than shown: there is nothing to check and " +
@@ -519,6 +603,79 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(/\bof \d+ facts\b/.test(capped.why),
      "with the POPULATION stated: the cap here is ours, so the total is exactly " +
      "reportable and a list that truncates silently would read as the whole index");
+
+  /* AND IT IS THE POPULATION THE CAP WAS APPLIED TO. The cap cuts the
+     facts that MATCHED, so reporting the index total told a reader
+     every fact left out had been cut when nearly all of them had
+     simply not matched the question — the same defect as a silent
+     truncation, one step quieter, because the number is there and it
+     is the wrong number. */
+  const pooled = { facts: [] };
+  for (let k = 0; k < 40; k++) {
+    pooled.facts.push({ id: "p" + k, topic: k < 9 ? ["premium"] : ["zzz"],
+      say: "A reading.", n: {}, source: "market", at: null });
+  }
+  const cut = selectFacts(pooled, "premium", { max: 3 });
+  eq(cut.capped, true, "nine facts matched and three fitted, so the list was cut");
+  ok(/\b3 of the 9 facts that matched\b/.test(cut.why),
+     "and the sentence counts the nine that matched, not the forty in the index: the " +
+     "cap dropped six, and 'of 40' would say it dropped thirty-seven");
+
+  /* AND EVERY OTHER COUNT IN THAT SENTENCE DESCRIBES THE LIST THE
+     READER IS HOLDING. The ticker tally was counted over everything
+     that matched while the sentence around it opened by naming what was
+     picked, so a reader served three facts was told five of them had
+     matched a ticker — the same population defect as above, one clause
+     later, inside the sentence that says it was fixed. */
+  const many = { facts: [] };
+  for (let k = 0; k < 5; k++) {
+    many.facts.push({ id: "sym" + k, topic: ["syn46"], say: "A.", n: {},
+      source: "movers", at: null });
+  }
+  for (let k = 0; k < 4; k++) {
+    many.facts.push({ id: "top" + k, topic: ["premium"], say: "B.", n: {},
+      source: "market", at: null });
+  }
+  const three = selectFacts(many, "SYN46 premium please", { max: 3 });
+  eq(three.picked.length, 3, "three facts are served");
+  ok(/\b3 of those matched a ticker\b/.test(three.why),
+     "and the ticker tally counts THOSE three, not the five in the matched pool the " +
+     "reader never sees — a number in a sentence has to describe the list the sentence " +
+     "is about");
+
+  ok(!/the rest/.test(three.why),
+     "with no remainder claimed when there is none: every fact served here matched the " +
+     "ticker, so 'and the rest matched topic words' would invent a second group out of " +
+     "the same three facts it had just counted");
+  ok(/the rest matched topic words/.test(selectFacts(many, "SYN46 premium please",
+       { max: 7 }).why),
+     "while a genuine remainder is still named, because that clause is a reading when " +
+     "the facts behind it exist");
+
+  /* THE ORDER THE SENTENCE CLAIMS IS THE ORDER THE SELECTION USES.
+     Recency lived inside the score, where it was the only term that
+     varied among facts that matched nothing — so the unmatched fallback
+     ranked by whichever key was republished last while telling the
+     reader these were the headline readings in the briefing's order.
+     The news tape carries the fixture's newest stamp for exactly this
+     reason: the Worker's intraday cron really does republish it. */
+  const unmatched = selectFacts(INDEX, "zqx wibble frobnicate");
+  eq(unmatched.picked[0].source, "brief",
+     "an unmatched question leads with the briefing, which is what its sentence says " +
+     "and what SOURCE_ORDER exists to decide — led by recency it opened on the news " +
+     "tape, and on a live store it would open on the run summary");
+  ok(/in the order the briefing states them/.test(unmatched.why),
+     "and the sentence making that claim is the one being held to it");
+
+  /* Read over the whole index rather than the default fourteen, because
+     the briefing alone fills that cap and the two surfaces whose stamps
+     disagree sit behind it. */
+  const order = selectFacts(INDEX, "zqx wibble frobnicate",
+    { max: INDEX.facts.length }).picked.map((f) => f.source);
+  ok(order.indexOf("market") !== -1 && order.indexOf("market") < order.indexOf("news"),
+     "and the market-wide reading precedes the news tape even though the news tape " +
+     "carries the newer stamp — recency breaks a tie between two facts, it does not " +
+     "decide which section a reader is shown first");
 
   const roomy = selectFacts(INDEX, "", { max: INDEX.facts.length + 5 });
   eq(roomy.capped, false, "and false when everything fitted — capped is a fact, not a mood");
@@ -585,6 +742,38 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(!/error|failed|sorry/i.test(nothing),
      "and it reads as an answer rather than as a breakage: the facts were always " +
      "deterministic, so a reader who lands here has lost the phrasing and nothing else");
+
+  /* AND IT MAY NOT NAME WHICH SILENCE IT IS, because it is handed
+     facts and never the store. An empty list looks the same from here
+     on the morning before the run, on a morning when every payload
+     arrived and none of it could be read, and on a session that really
+     was measured and empty — so the sentence names all three and
+     asserts none. It used to assert one: "Nothing has been published",
+     which on the second of those mornings told a reader the pipeline
+     had not run while every key sat in the store unreadable. */
+  ok(!/^Nothing has been published/.test(nothing),
+     "the empty answer does not open by declaring the pipeline silent, which is one of " +
+     "three possibilities and the only one it cannot see from here");
+  for (const [silence, re] of [["pending", /published/i],
+    ["unreadable", /could not be read/i], ["quiet", /measured/i]]) {
+    ok(re.test(nothing),
+       `it names the ${silence} silence among the three it refuses to choose between, ` +
+       "so a reader is told what is unknown rather than told the wrong one of them");
+  }
+
+  /* THE MORNING THE OLD WORDING WAS WRONG ABOUT, run end to end. */
+  const readFailed = {};
+  for (const key of Object.keys(STORE)) {
+    readFailed[key] = { status: "unreadable", generatedAt: STAMP, reason: "read failed" };
+  }
+  const broken = buildFactIndex(readFailed);
+  eq(broken.facts.length, 0, "every key published and every one unreadable yields no facts");
+  ok(broken.silences.unreadable.length > 10,
+     "and a fault named on every surface, which is where a reader learns what happened");
+  ok(!/^Nothing has been published/.test(
+       renderFactsPlain(selectFacts(broken, "what happened today").picked, "what happened")),
+     "so the answer served beside those faults does not tell a reader the opposite of " +
+     "what they say");
 
   const answered = renderFactsPlain(selectFacts(INDEX, "premium").picked, "premium");
   ok(!/premium\?/.test(answered),
@@ -682,6 +871,75 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "the facts are listed UNNUMBERED: a model asked to cite 'fact 15' writes a 15 that " +
      "no payload published, and its own answer would then be refused for a numeral this " +
      "prompt handed it");
+}
+
+/* ---------- 11. a ceiling, a cap and a count that cannot exist --- */
+{
+  /* WHOSE CEILING, AND WHETHER ONE WAS HIT AT ALL. `atVendorLimit` is
+     set at publish time as wire >= the limit the fetch sent, and the
+     publisher's own comment says a later edit to that fetch would turn
+     the claim into a lie rather than into a failure. This index reads
+     both counts, so it can refuse to repeat the lie — and it must,
+     because repeating it takes a population that is known EXACTLY and
+     republishes it as unknown. shared/flows-warnings.js:484 refuses the
+     same pair for the same reason. */
+  const short = buildFactIndex({ news: { ...NEWS, requested: 100, returned: 63,
+    atVendorLimit: true } });
+  ok(!short.facts.some((f) => f.id === "news/ceiling"),
+     "a vendor-limit flag standing beside a return well UNDER the request states no " +
+     "ceiling: 63 rows came back against a request for 100, so the population is 63 " +
+     "and known, and 'unknown and at least 63' is this rule running backwards");
+  ok(short.facts.some((f) => f.id === "news/coverage"),
+     "while the counts that were measured are still stated — a disagreement between a " +
+     "flag and its arithmetic silences the claim built on it, not the surface");
+
+  const atLimit = byId("news/ceiling");
+  ok(atLimit && /vendor's own limit of 100 rows/.test(atLimit.say),
+     "and a response that really did fill the request keeps the ceiling sentence, " +
+     "because that is the fact that separates a population we bounded from one they did");
+
+  /* A COUNT IN PROSE THAT NO FIELD CAN CARRY. The five is
+     flows-market.js's slice and nothing beside `topShare` publishes it,
+     so a run that priced fewer than five names had the sentence naming
+     five movements over three — and topShare is 1 by construction
+     there, because every priced name is inside the top five. */
+  const thinTape = buildFactIndex({ market: { ...MARKET,
+    premium: { ...MARKET.premium, priced: 3, topShare: 1 } } });
+  ok(!thinTape.facts.some((f) => f.id === "market/concentration"),
+     "a tape that priced three names states no five-name concentration reading: the " +
+     "ratio would be 1 because all three names are inside the top five, and a reader " +
+     "would have read total concentration off a tape too thin to measure any");
+  ok(thinTape.facts.some((f) => f.id === "market/premium"),
+     "and the other readings on the same key are untouched, as they are for any absent " +
+     "field — one sentence that cannot be said does not silence a surface");
+  ok(byId("market/concentration"),
+     "while a tape that priced 112 names keeps it, because there are five names there " +
+     "to be the largest of");
+
+  /* THE ROWS THAT NEVER BECAME ALERTS. `seen` counts the SHAPED rows,
+     so a sentence built from it alone reported a page holding every
+     alert the vendor sent on a read where five arrived unreadable —
+     the unreadable silence in miniature, swallowed by a clean count. */
+  const junked = buildFactIndex({ flowalerts: { ...ALERTS, unusable: 5 } });
+  const alerts = junked.facts.find((f) => f.id === "flowalerts/coverage");
+  ok(/5 rows the vendor sent that this page could not read/.test(alerts.say),
+     "rows the vendor sent that could not be shaped are named beside the count, not " +
+     "folded into it: they are a fault on this page, and '2 of the 2 alerts read' " +
+     "reads as a page holding everything that arrived");
+  eq(alerts.n.unusableRows, 5, "and pinned like every other figure in the sentence");
+
+  eq(byId("flowalerts/coverage").n.unusableRows, 0,
+     "a read that shaped every row says so with a measured 0 rather than by leaving " +
+     "the clause out — Number(null) is 0 and this one was counted");
+
+  const uncounted = buildFactIndex({ flowalerts: { ...ALERTS, unusable: null } });
+  const quietOn = uncounted.facts.find((f) => f.id === "flowalerts/coverage");
+  ok(!/could not read/.test(quietOn.say),
+     "while a read that carried NO count of its own says nothing about unreadable rows: " +
+     "shared/flows-alerts.js publishes null there precisely so that a count nobody took " +
+     "is never printed as a zero");
+  ok(!Object.hasOwn(quietOn.n, "unusableRows"),
+     "and pins no figure it does not have");
 }
 
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +

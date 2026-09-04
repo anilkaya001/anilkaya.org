@@ -342,6 +342,26 @@ const CHECKS_ON_CLEAN = 13;
   eq(out.checked, CHECKS_ON_CLEAN - 1,
      "and the check does not count itself, because it had nothing to compare");
 }
+{
+  /* A BOARD PUBLISHED AND SILENT ABOUT THE DAY MUST NOT SUPPRESS THE ONE
+     BESIDE IT. Taking whichever side answered first and then reading the
+     session off it drops the session the other side is still publishing,
+     and the loss is invisible from outside: the same store with the quiet
+     board REMOVED reports the contradiction. A finding that appears when a
+     payload is deleted is a finding that depends on how much of the store
+     the engine was handed rather than on what the payloads say. */
+  const s = clean();
+  s.long = { status: "ok", generatedAt: STAMP, rows: [] };
+  s.alerts.record.date = "2026-09-01";
+  const w = byId(run(s), "session:boundary");
+  ok(w !== null,
+     "board:short still names the session it ranks, so a record that never reset at the " +
+     "boundary is reported rather than lost behind a board that published nothing about a day");
+  eq(w.n.session, SESSION, "measured against the session the board that spoke actually names");
+  assert.deepEqual(w.sources.slice().sort(), ["board:short", "flowalerts"],
+    "and the sentence cites the board it read, not the one that was silent");
+  checks++;
+}
 
 /* ---------- 7. a population that shrank --------------------------- */
 {
@@ -393,6 +413,34 @@ const CHECKS_ON_CLEAN = 13;
   assert.deepEqual(w.sources.slice().sort(), ["board:long", "board:short"],
     "and both sides cited, because the comparison is across the pair");
   checks++;
+}
+{
+  /* TWO PRIORS FROM TWO SESSIONS, AND THE SENTENCE NAMES NEITHER. `prior`
+     is a sum across the sides, so a date taken from the first side that
+     stated one is printed as the day the whole sum came from — and the
+     store where the two sides disagree is the one this module exists for,
+     because a leg that failed and left an older copy standing carries an
+     older memory with it. */
+  const s = clean();
+  s.long.memory.named = 60;
+  s.short.memory.named = 20;
+  s.short.memory.sessionDate = "2026-08-28";
+  const w = byId(run(s), "population:shrank");
+  ok(w !== null, "a fall measured across two sides is still reported");
+  eq(w.n.prior, 80, "with both priors summed, because both sides were counted");
+  ok(!("priorSession" in w.n),
+     "and no prior session named: 60 of those 80 were on the 2026-09-02 board and 20 on the " +
+     "2026-08-28 one, so naming either dates the whole sum to a day most of it is not from");
+  ok(/on the previous board/.test(w.say),
+     'the sentence falling back to "the previous board", which is vaguer and true');
+
+  const t = clean();
+  t.long.memory.named = 40;
+  t.short.memory.named = 40;
+  delete t.short.memory.sessionDate;
+  ok(!("priorSession" in byId(run(t), "population:shrank").n),
+     "and a side that counted names without stating its session is the same fault: the sum " +
+     "spans a board whose day nothing published, so no day can be put on the sum");
 }
 {
   const s = clean();
@@ -673,6 +721,32 @@ const CHECKS_ON_CLEAN = 13;
   delete t.events.gateOrigin;
   eq(run(t).checked, CHECKS_ON_CLEAN - 1,
      "and a calendar publishing neither clock stops the check rather than agreeing by default");
+}
+{
+  /* AND THE GATE IS RESOLVED THE SAME WAY THE DAY IS. A thin board:long
+     standing in front of a board:short that still publishes both clocks
+     must not cost the calendar its comparison — the contradiction is
+     between what a board applied and what events published, and either
+     board can be the one that says what was applied. */
+  const s = clean();
+  s.long = { status: "ok", generatedAt: STAMP, rows: [] };
+  s.events.gateDays = 10;
+  const w = byId(run(s), "gate:window");
+  ok(w !== null,
+     "board:short applies a 7-day gate beside a 10-day calendar, and a board:long that " +
+     "states no window at all does not make that disagreement unobservable");
+  eq(w.n.boardDays, 7, "with the window read from the board that actually stated one");
+  assert.deepEqual(w.sources.slice().sort(), ["board:short", "events"],
+    "and cited to that board, so a reader opening the pair opens the two that disagree");
+  checks++;
+
+  const gone = clean();
+  gone.events.gateDays = 10;
+  delete gone.long;
+  ok(byId(run(gone), "gate:window") !== null,
+     "which is the answer the same store gives with board:long absent rather than quiet: a " +
+     "warning that appeared only once a payload was DELETED would be a warning about how " +
+     "much of the store the engine was handed");
 }
 
 /* ---------- 12. severity is earned, and ordered ------------------- */
