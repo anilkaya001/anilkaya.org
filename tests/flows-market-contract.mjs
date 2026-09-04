@@ -38,10 +38,15 @@
    browser starts, so an impossible row can no longer be typed into this file.
    ============================================================= */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
+/* The cadence the Worker's cron is configured for, imported from the module
+   that owns it. Typing 15 into this file would recreate, on the test side,
+   exactly the second copy the renderer just stopped keeping. */
+import { REFRESH_CADENCE_MINUTES } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -215,6 +220,36 @@ const SECTOR_FIXTURE = [
   eq(scaleTrix(-71.4), 0, "and a reading past the band saturates at the rail rather than going negative");
 }
 
+/* ---------- the cadence is not the renderer's to keep ---------------
+
+   assets/js/flows-market.js declared `var REFRESH_CADENCE_MINUTES = 15`
+   under a comment admitting the copy was linked to shared/flows-freshness.js
+   by that comment and nothing else. shared/flows-pulse.js publishes
+   `cadenceMinutes` on the pulse the market page already fetches, so the copy
+   is gone. Asserted over the SOURCE as well as the page below, because a
+   rendered stamp cannot tell a payload read from a local constant that
+   happens to agree with the fixture — which is precisely how the copy
+   survived for as long as it did. */
+{
+  const src = readFileSync(new URL("../assets/js/flows-market.js", import.meta.url), "utf8");
+  /* COMMENTS OUT FIRST, for the reason tests/flows-payload-shape.mjs strips
+     them: the renderer's own account of the constant it deleted names that
+     constant, and a scan that reads prose as code reports the warning as the
+     defect. */
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+  ok(!/REFRESH_CADENCE_MINUTES/.test(code),
+     "assets/js/flows-market.js keeps no cadence constant of its own. A browser IIFE cannot " +
+     "import shared/, which is why the number travels on the payload now instead of being " +
+     "restated somewhere nothing can keep it true");
+  ok(/pulseStamp\(\s*pulse\.readAt,\s*pulse\.refreshed,\s*pulse\.cadenceMinutes\s*\)/.test(code),
+     "and the stamp is handed the cadence off the payload the page already fetched, rather " +
+     "than a second request or a second literal");
+  ok(/function pulseStamp\(readAt, refreshed, cadenceMinutes\)/.test(code),
+     "which pulseStamp takes as an argument instead of closing over a module constant — a " +
+     "closed-over copy is the shape this change removed, and it would pass every page " +
+     "assertion below while quietly disagreeing with the cron");
+}
+
 /* ---------- the page ---------------------------------------------- */
 const TOKEN = "market-token-aaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
@@ -353,9 +388,31 @@ try {
       callVol: 5_000_000, putVol: 3_000_000,
     });
   }
+  /* THE CADENCE IS TWENTY HERE AND FIFTEEN IN shared/flows-freshness.js, ON
+     PURPOSE. The renderer used to carry `var REFRESH_CADENCE_MINUTES = 15`
+     mirroring that module, under a comment admitting the mirror was the only
+     link between them; shared/flows-pulse.js now publishes `cadenceMinutes`
+     and the renderer reads it. A fixture that repeated the shared constant
+     would pass against a renderer that had gone back to hard-coding it, so
+     this one deliberately does not: the number on the page has to be the
+     number in the payload, and 20 is a number no constant in this repository
+     holds.
+
+     ASSERTED, NOT MERELY INTENDED. "20 is not 15" is the whole discriminating
+     power of every stamp assertion below, and it is a claim about a constant
+     in another module that this file cannot see change. Move the cron to
+     twenty minutes and this suite would go on passing against a renderer that
+     had quietly gone back to mirroring it, so the divergence fails here
+     instead — loudly, and next to the number to change. */
+  const FIXTURE_CADENCE = 20;
+  ok(FIXTURE_CADENCE !== REFRESH_CADENCE_MINUTES,
+     `the pulse fixture's cadence (${FIXTURE_CADENCE}) is not the one the Worker's cron ships ` +
+     `with (${REFRESH_CADENCE_MINUTES}), which is what makes the stamp assertions below able ` +
+     "to tell a payload read from a mirrored constant");
+
   const pulsePayload = (over) => Object.assign({
     v: 2, generatedAt: new Date().toISOString(), sessionDate: FRESH_SESSION,
-    readAt: new Date().toISOString(), refreshed: "intraday",
+    readAt: new Date().toISOString(), refreshed: "intraday", cadenceMinutes: FIXTURE_CADENCE,
     tide: {
       status: "ok", seen: 5, cap: 480, shed: 0,
       points: [
@@ -406,6 +463,12 @@ try {
     const svgs = [...document.querySelectorAll(".mk-tide-svg")].map((g) => ({
       viewBox: g.getAttribute("viewBox"),
       width: g.getAttribute("width"),
+      height: g.getAttribute("height"),
+      /* THE DRAWN BOX, NOT THE DECLARED ONE. Every "chart invariant"
+         assertion in this repository has read the ATTRIBUTE, which is exactly
+         the number a stylesheet width overrides without touching. */
+      rectW: Number(g.getBoundingClientRect().width.toFixed(3)),
+      rectH: Number(g.getBoundingClientRect().height.toFixed(3)),
       par: g.getAttribute("preserveAspectRatio"),
       hostWidth: Math.round(g.parentNode.clientWidth),
       callD: (g.querySelector(".mk-tide-call") || {}).getAttribute
@@ -673,6 +736,7 @@ try {
      "ten-row table");
   read.svgs.forEach((g, i) => {
     const vbWidth = Number(g.viewBox.split(" ")[2]);
+    const vbHeight = Number(g.viewBox.split(" ")[3]);
     eq(String(vbWidth), g.width,
        `chart ${i}: the width attribute equals the viewBox width, so one viewBox unit is ` +
        "one CSS pixel and nothing is scaled");
@@ -680,6 +744,27 @@ try {
     ok(Math.abs(vbWidth - g.hostWidth) <= 1,
        `chart ${i}: the width was measured from a VISIBLE host (${vbWidth} vs ${g.hostWidth}) — ` +
        "a hidden element reports clientWidth 0 and the chart silently falls back");
+
+    /* THE ASSERTION THE ATTRIBUTE ONES COULD NOT MAKE, and the reason this
+       block was passing over a chart that was in fact being rescaled.
+       assets/css/flows.css gives .mk-tide-svg `width: 100%`, which overrides
+       the width ATTRIBUTE without changing it: the host measured 282.81px,
+       the renderer rounded that to 283, and the browser then squeezed 283
+       viewBox units into 282.81 CSS pixels. Every assertion above still
+       passed, because every one of them reads the attribute. The renderer
+       now floors the measured box and pins the size inline, so the identity
+       is exact — and this is the assertion that says so. The flows.css
+       comment on .cc-trk states the same rule for scoreStrip in so many
+       words; nothing was enforcing it here. */
+    eq(g.rectW, vbWidth,
+       `chart ${i}: the DRAWN width is exactly the viewBox width (${g.rectW} vs ${vbWidth}) — ` +
+       "one viewBox unit is one CSS pixel in the rendered box, not merely in the markup");
+    eq(g.rectH, vbHeight,
+       `chart ${i}: and the drawn height too, so nothing is scaled on either axis`);
+    ok(g.rectW <= g.hostWidth,
+       `chart ${i}: and the drawing never exceeds the host it was measured from ` +
+       `(${g.rectW} in ${g.hostWidth}), which is what keeps a pinned pixel width from ` +
+       "pushing a 320px viewport sideways");
   });
 
   /* NO INTERPOLATION ACROSS A GAP. The tide fixture drops one call bucket;
@@ -729,9 +814,12 @@ try {
      "while a feed that answered with nothing is QUIET — a fact about the tape, not an outage");
 
   /* THE STAMP, on a read taken just now. */
-  ok(/refreshes about every 15 minutes/.test(read.pulseStamp),
-     `a read inside one cadence may claim the intraday refresh (${read.pulseStamp})`);
-  ok(!/\d{4}/.test(read.pulseStamp.replace(/15 minutes/, "")),
+  ok(new RegExp("refreshes about every " + FIXTURE_CADENCE + " minutes").test(read.pulseStamp),
+     `a read inside one cadence may claim the intraday refresh (${read.pulseStamp}), and ` +
+     `the interval it claims is the PAYLOAD'S — ${FIXTURE_CADENCE}, which is not the ` +
+     `${REFRESH_CADENCE_MINUTES} that shared/flows-freshness.js holds. A renderer mirroring ` +
+     "that constant would print 15 here and pass every other assertion in this block");
+  ok(!/\d{4}/.test(read.pulseStamp.replace(new RegExp(FIXTURE_CADENCE + " minutes"), "")),
      "and carries no calendar date, because the read is from today");
 
   /* ---------- 320px, WITH EVERY PANEL POPULATED ------------------------
@@ -748,19 +836,17 @@ try {
   const narrow = await page.evaluate(() => {
     const grid = document.getElementById("mkPulseGrid");
     const asShipped = document.documentElement.scrollWidth - window.innerWidth;
-    /* ONE DECLARATION ISOLATED, RATHER THAN A TOLERANCE.
+    /* THE SHIPPED STYLESHEET, MEASURED AS SHIPPED.
 
-       assets/css/flows.css gives .mk-pulse-grid `repeat(auto-fit,
-       minmax(19rem, 1fr))`. 19rem is 304px and it is a HARD minimum, so on a
-       320px phone the track is wider than the padded container and the grid
-       pushes the document three pixels past the viewport. The rule's own
-       comment says "on a phone every card is one column and nothing can
-       overflow sideways", which is true of the column count and false of the
-       track width. The fix is `minmax(min(19rem, 100%), 1fr)` and it lives in
-       a stylesheet this renderer does not own, so the measurement below
-       applies it and then asserts the REST of the page is at zero — a
-       tolerance of "3px is fine" would quietly absorb the next regression,
-       and this cannot. */
+       This block used to override .mk-pulse-grid before measuring, because
+       `repeat(auto-fit, minmax(19rem, 1fr))` put a HARD 304px track minimum
+       inside a padded 320px viewport and pushed the document three pixels
+       sideways. That declaration has since been relaxed to `minmax(min(19rem,
+       100%), 1fr)` in assets/css/flows.css, so the override is now the
+       shipped value and measuring only the overridden page would assert
+       nothing: it would pass just as happily if the stylesheet regressed.
+       `asShipped` is therefore the assertion, and the override is kept
+       alongside it purely to prove the two now agree. */
     grid.style.gridTemplateColumns = "repeat(auto-fit, minmax(min(19rem, 100%), 1fr))";
     const relaxed = document.documentElement.scrollWidth - window.innerWidth;
     grid.style.gridTemplateColumns = "";
@@ -780,12 +866,15 @@ try {
         .map((g) => Number(g.getAttribute("width"))),
     };
   });
-  ok(narrow.relaxed <= 1,
-     `with the pulse grid's track minimum relaxed, the fully populated page has no ` +
-     `horizontal overflow at 320px (${narrow.relaxed}px). tests/regression.mjs walks this ` +
-     "route but cannot publish a payload, so it has only ever measured the EMPTY page — " +
-     "two charts, four mover columns, five tables and the join panel all draw only when " +
-     "the store is full");
+  ok(narrow.asShipped <= 1,
+     `THE PAGE AS SHIPPED has no horizontal overflow at 320px (${narrow.asShipped}px), with ` +
+     "the stylesheet exactly as it stands. tests/regression.mjs walks this route but cannot " +
+     "publish a payload, so it has only ever measured the EMPTY page — two charts, four " +
+     "mover columns, five tables and the join panel all draw only when the store is full");
+  eq(narrow.relaxed, narrow.asShipped,
+     "and relaxing the pulse grid's track minimum by hand changes nothing, because that " +
+     "relaxation is now what the stylesheet ships — an override that still mattered would " +
+     "mean this suite was measuring a page no reader gets");
   Object.keys(narrow.panels).forEach((k) => {
     ok(narrow.panels[k] !== null && narrow.panels[k] <= 1,
        `and the ${k} panel's own right edge is inside the viewport (${narrow.panels[k]}px past)`);
@@ -817,6 +906,7 @@ try {
     }]);
     await failing.route("**/api/flows/sectors", (route) => route.abort());
     await failing.route("**/api/flows/movers", (route) => route.abort());
+    await failing.route("**/api/flows/pulse", (route) => route.abort());
     await failing.goto(url("/flows/market/"), { waitUntil: "networkidle" });
     await failing.waitForSelector("#mktTiltPanel:not([hidden])");
 
@@ -834,6 +924,8 @@ try {
         sectors: read("mktSectorPanel", "mktSectors"),
         movers: read("mktMoversPanel", "mktMovers"),
         against: read("mktAgainstPanel", "mktAgainst"),
+        pulse: read("mkPulsePanel", "mkPulseGrid"),
+        charts: document.querySelectorAll(".mk-tide-svg").length,
       };
     });
 
@@ -852,6 +944,16 @@ try {
        "reason the reader cannot see is the worst of the silences");
     eq(dead.movers.kind, "unavailable", "with the same tag");
     ok(/did not come back/.test(dead.movers.text), "and the same distinction in words");
+
+    eq(dead.pulse.hidden, false,
+       "and the whole pulse SECTION is drawn: seven feeds and two charts used to disappear " +
+       "together on a failed request, with no sentence left where they had been");
+    eq(dead.pulse.kind, "unavailable", "tagged as a read failure");
+    ok(/did not come back/.test(dead.pulse.text),
+       `naming the request rather than the pipeline (${dead.pulse.text})`);
+    eq(dead.charts, 0,
+       "with no chart left standing from a payload the page no longer holds — the handles " +
+       "are cleared with the panel, or a resize repaints a tide that is no longer there");
 
     eq(dead.against.hidden, false,
        "the join panel is drawn too, because it needs the movers it could not read");
@@ -878,6 +980,22 @@ try {
     await put("pulse", pulsePayload({
       readAt: new Date(Date.now() - 26 * 3600000).toISOString(),
       refreshed: "intraday",
+      /* A BUCKET WITH NO NEIGHBOURS. The gap rule broke the line at a null,
+         which is right; the consequence nobody had a fixture for is that a
+         reading whose two neighbours are BOTH null became a lone "M x y" —
+         a path that moves and never draws, so a measurement the vendor did
+         send rendered as nothing at all. Refusing to invent a reading must
+         not turn into losing one. */
+      tide: {
+        status: "ok", seen: 5, cap: 480, shed: 0,
+        points: [
+          { t: dayStamp(9) + "T13:30:00Z", callPrem: null, putPrem: -4.0e7 },
+          { t: dayStamp(9) + "T14:00:00Z", callPrem: 1.4e8, putPrem: -5.0e7 },
+          { t: dayStamp(9) + "T14:30:00Z", callPrem: null, putPrem: -6.0e7 },
+          { t: dayStamp(9) + "T15:00:00Z", callPrem: 1.1e8, putPrem: -5.5e7 },
+          { t: dayStamp(9) + "T15:30:00Z", callPrem: 1.2e8, putPrem: -7.0e7 },
+        ],
+      },
       totals: {
         status: "ok", seen: 3, cap: 20, shed: 0,
         rows: [
@@ -895,12 +1013,19 @@ try {
     await old.goto(url("/flows/market/"), { waitUntil: "networkidle" });
     await old.waitForSelector("#mktStale:not([hidden])");
 
-    const aged = await old.evaluate(() => ({
-      stale: (document.getElementById("mktStale") || {}).textContent || "",
-      bodyClass: document.body.className,
-      stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
-      rank: (document.querySelector(".mk-pulse-rank") || {}).textContent || "",
-    }));
+    const aged = await old.evaluate(() => {
+      const svg = document.querySelector(".mk-tide-svg");
+      const call = svg && svg.querySelector(".mk-tide-call");
+      return {
+        stale: (document.getElementById("mktStale") || {}).textContent || "",
+        staleKind: (document.getElementById("mktStale") || {}).dataset
+          ? document.getElementById("mktStale").dataset.stale : null,
+        bodyClass: document.body.className,
+        stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
+        rank: (document.querySelector(".mk-pulse-rank") || {}).textContent || "",
+        callD: call ? call.getAttribute("d") : null,
+      };
+    });
 
     ok(/more than four days old/.test(aged.stale),
        `a session nine days old raises the banner (${aged.stale})`);
@@ -908,6 +1033,31 @@ try {
        "and names the failure: the pipeline is running, its data is not moving. A dead " +
        "pipeline is the other failure and has the other remedy");
     ok(/is-stale/.test(aged.bodyClass), "and the page marks itself stale for the stylesheet");
+    eq(aged.staleKind, "session",
+       "WHICH of the two outages is stamped on the element, not only spelled in the prose: " +
+       "a dead pipeline and a frozen upstream send the reader to two different people, and " +
+       "a test should not have to parse a sentence to tell them apart. This is the shape " +
+       "assets/js/flows-board.js has carried since the staleness test was lifted into " +
+       "flows-ui.js, and the market page's own copy of that test had dropped it");
+    ok(/These numbers describe the/.test(aged.stale),
+       `and the sentence is flows-ui.js's sentence to the word (${aged.stale}). The first ` +
+       'version of this page\'s copy said "These readings describe the … session" — six ' +
+       "routes wording one outage six ways is exactly why that function was lifted out of " +
+       "the renderers, and this page had quietly become the seventh");
+
+    /* AN ISOLATED READING IS STILL DRAWN. */
+    eq((aged.callD.match(/M/g) || []).length, 2,
+       `the call line has two runs (${aged.callD}): one real segment, and one lone bucket ` +
+       "whose neighbours were both null");
+    ok((aged.callD.match(/L/g) || []).length >= 2,
+       "and BOTH runs draw. A one-sample run used to emit a bare moveto — a path that " +
+       "moves and never paints — so a bucket the vendor did send disappeared from the " +
+       "chart entirely. The gap rule exists to stop a missing reading being invented, not " +
+       "to make a taken one vanish");
+    ok(/^M[\d.]+ [\d.]+L[\d.]+ [\d.]+M/.test(aged.callD),
+       `the lone bucket is drawn as a short tick centred on it (${aged.callD}), in the ` +
+       "series' own stroke and dash, far too short to be read as a segment bridging two " +
+       "buckets");
 
     /* THE STAMP USED TO LIE TWICE on exactly this input: a bare HH:MM with no
        date, plus an unconditional "refreshes about every 15 minutes", so a
@@ -928,9 +1078,356 @@ try {
 
     await old.close();
   }
+
+  /* ---------- THE HALF-PUBLISHED SESSION ---------------------------------
+
+     EVERY BRANCH BELOW EXISTS BECAUSE A PAYLOAD CAN ARRIVE INCOMPLETE, and
+     until this block none of them had a fixture: the suite had only ever been
+     shown a payload with every field on it, so each of these branches was
+     prose nobody had read and arithmetic nobody had run.
+
+     This block is LAST on purpose. It republishes market, movers and both
+     boards, and a block that rewrites the store has to run after everything
+     reading the old contents — the stale block above republishes `market` and
+     `pulse` for the same reason. */
+  {
+    await put("market", {
+      v: 2, generatedAt: new Date().toISOString(), sessionDate: FRESH_SESSION, status: "ok",
+      n: 140, screened: 200,
+      premium: { netPositive: 5e8, netNegative: 5e8, net: 0, priced: 100, oneLegged: 3,
+                 tilt: 0, topShare: 0.2 },
+      /* `bear` IS ABSENT, not zero. The renderer coerced each of the three
+         counts with `isNum(x) || 0`, so a count the publisher never wrote
+         became a segment of width zero AND a contribution of zero to the
+         denominator: the two counts that did arrive were then drawn as 100%
+         of a whole this session never measured, and the bar's aria-label read
+         "0 names net sold" out loud to the reader least able to check it. */
+      breadth: { bull: 60, flat: 4, unpriced: 12, tilt: 0.2 },
+      pcr: { volume: 0.9, premium: 0.9, quotedVolume: 100, quotedPremium: 100 },
+      aggressor: { callLift: 0.5, putLift: 0.5, quoted: 100 },
+      vol: { iv30dMedian: 0.3, iv30dQuoted: 100, ivRankMedian: 0.5, ivRankQuoted: 100 },
+      notes: MARKET_NOTES,
+    });
+
+    /* ONE PREMIUM EXTREME, NOT BOTH — and one mover list absent while another
+       is measured and empty. The join's guard used to require BOTH premium
+       lists to be missing before it would say so, so this payload rendered
+       "No long-board name appears in the session's largest net put premium":
+       a measured-emptiness sentence about a ranking that was never taken. */
+    await put("movers", {
+      v: 2, status: "ok",
+      fallers: [],
+      premium: { bullish: [{ t: "GGG", netPrem: 4e8 }, { t: "ZZZ", netPrem: 3e8 }] },
+    });
+
+    /* A WINDOW WHERE ONLY SOME SESSIONS CAN BE RANKED, and where the newest
+       TIES for the top. Both are ordinary and neither had a fixture: the rank
+       sentence said "of the N sessions this feed returned" while N was the
+       count that could be ranked, and it called a tied session "the most
+       put-leaning session in the window". */
+    await put("pulse", pulsePayload({
+      /* A PAYLOAD WITH NO CADENCE — one written before the field existed.
+         ABSENT IS NOT ZERO: `Number(null)` would make every read stale and
+         announce a refresh "about every 0 minutes", and a fallback of 15
+         would print an interval nobody published. The stamp has to withhold
+         the verdict and say why. */
+      cadenceMinutes: null,
+      totals: {
+        status: "ok", seen: 5, cap: 20, shed: 0,
+        rows: [
+          { date: dayStamp(1), callPrem: 6e8, putPrem: 6e8, callVol: 1e6, putVol: 1e6 },
+          { date: dayStamp(2), callPrem: null, putPrem: 5e8, callVol: 1e6, putVol: 1e6 },
+          { date: dayStamp(3), callPrem: 1e9, putPrem: 1e9, callVol: 1e6, putVol: 1e6 },
+          { date: dayStamp(4), callPrem: null, putPrem: 4e8, callVol: 1e6, putVol: 1e6 },
+          { date: dayStamp(5), callPrem: 8e8, putPrem: 2e8, callVol: 1e6, putVol: 1e6 },
+        ],
+      },
+    }));
+
+    /* A SECTOR PAYLOAD WITH NO PUBLISHED BAND, and one row carrying a clamp
+       score with no raw reading beside it. Both branches were added with the
+       sign fix and neither had a fixture: the fallback caption — the one that
+       says the axis is this session's own and cannot be set beside another
+       day's — was prose nobody had ever read, in the very panel whose caption
+       was the last thing found to be wrong.
+
+       The XLB row is DELIBERATELY DEFECTIVE. The publisher writes `trix` and
+       `trixBp` together or writes both null; 62.5 is a value it can emit, so
+       this is a payload regression rather than an impossible number, and the
+       renderer is required to count it and name it as a defect rather than
+       drop a sector on the floor. */
+    await put("sector:trix", {
+      v: 2, status: "ok", measured: 3,
+      span: 15, price: "log", seriesSessions: 42, warmupSessions: 63,
+      basis: "SPDR Select Sector ETFs, not GICS index levels",
+      sectors: [
+        { sector: "Technology", etf: "XLK", trixBp: 6.25, trix: scaleTrix(6.25) },
+        { sector: "Energy", etf: "XLE", trixBp: -4.13, trix: scaleTrix(-4.13) },
+        { sector: "Materials", etf: "XLB", trixBp: null, trix: 62.5 },
+      ],
+    });
+
+    const half = await browser.newPage();
+    await half.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await half.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    await half.waitForSelector("#mktAgainstPanel:not([hidden])");
+
+    const part = await half.evaluate(() => {
+      const col = (hostId) => [...document.querySelectorAll("#" + hostId + " .mk-movers-col")]
+        .map((c) => ({
+          title: (c.querySelector(".mk-movers-h") || {}).textContent,
+          kind: c.querySelector("[data-empty]")
+            ? c.querySelector("[data-empty]").getAttribute("data-empty") : null,
+          text: c.querySelector("[data-empty]")
+            ? c.querySelector("[data-empty]").textContent : "",
+          names: [...c.querySelectorAll(".mk-mv-t")].map((n) => n.textContent),
+        }));
+      const breadthEmpty = document.querySelector("#mktBreadth [data-empty]");
+      return {
+        breadth: {
+          kind: breadthEmpty ? breadthEmpty.getAttribute("data-empty") : null,
+          text: breadthEmpty ? breadthEmpty.textContent : "",
+          segments: document.querySelectorAll("#mktBreadth .mk-seg").length,
+          aria: (document.querySelector("#mktBreadth .mk-stack") || {}).getAttribute
+            ? document.querySelector("#mktBreadth .mk-stack").getAttribute("aria-label") : null,
+        },
+        tiltNote: (document.querySelector("#mktTilt .mk-tilt-n") || {}).textContent || "",
+        tiltVerdict: (document.getElementById("mktTiltNote") || {}).textContent || "",
+        movers: col("mktMovers"),
+        against: col("mktAgainst"),
+        againstNote: (document.getElementById("mktAgainstNote") || {}).textContent || "",
+        rank: (document.querySelector(".mk-pulse-rank") || {}).textContent || "",
+        stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
+        sectorNote: (document.getElementById("mktSectorNote") || {}).textContent || "",
+        sectorBars: [...document.querySelectorAll(".mk-sector")].map((li) => ({
+          name: (li.querySelector(".mk-sector-k") || {}).textContent,
+          width: (li.querySelector(".mk-bar") || {}).style
+            ? li.querySelector(".mk-bar").style.width : null,
+        })),
+      };
+    });
+
+    /* A PART-TO-WHOLE BAR NEEDS THE WHOLE. */
+    eq(part.breadth.segments, 0,
+       "a breadth split missing one of its three counts draws NO segments: two parts of an " +
+       "unknown whole summing to 100% is a total this session never measured");
+    eq(part.breadth.kind, "unavailable",
+       "and the absence is tagged as a failure to produce a reading, not as a quiet market");
+    ok(/net sold/.test(part.breadth.text),
+       `naming WHICH count never arrived (${part.breadth.text})`);
+    eq(part.breadth.aria, null,
+       'and no aria-label announces "0 names net sold" to the one reader who cannot check ' +
+       "the bar against the numbers beside it");
+    ok(/— sold/.test(part.tiltNote),
+       `the tilt row's population reads the em dash for the count nobody published ` +
+       `(${part.tiltNote}) — "0 sold" is Number(null) === 0 wearing newer syntax, and a ` +
+       "session where nothing was sold must not look like a field that was never written");
+    ok(!/0 sold/.test(part.tiltNote), "which is exactly what it used to print");
+
+    /* A MEASURED ZERO IS A THIRD ANSWER. The premium tilt of this fixture is
+       exactly 0 while the breadth tilt is +0.2. The disagreement test cannot
+       fire — a zero has no sign to disagree with, and it correctly guarded
+       itself — so the page fell through to "Both weightings agree in sign",
+       a confident claim about a reading that has no sign. */
+    ok(/exactly level/.test(part.tiltVerdict),
+       `a weighting that came back exactly level is reported as level (${part.tiltVerdict})`);
+    ok(/neither agree nor disagree/.test(part.tiltVerdict),
+       "and the pair is neither agreeing nor disagreeing, which is the third sentence this " +
+       "note owed and did not have");
+    ok(!/agree in sign/.test(part.tiltVerdict),
+       "never \"Both weightings agree in sign\", which is what it used to say about a " +
+       "session where one of the two had no sign at all");
+
+    /* THE TWO SILENCES OF A RANKED COLUMN, which shared one untagged
+       "Nothing ranked." for the life of the panel. */
+    const mv = (t) => part.movers.find((c) => c.title === t);
+    eq(mv("Largest risers").kind, "unavailable",
+       "a ranking the payload never published is UNAVAILABLE");
+    ok(/never measured/.test(mv("Largest risers").text),
+       "and says so rather than implying no name qualified");
+    eq(mv("Largest fallers").kind, "quiet",
+       "while a ranking that was taken and came back empty is QUIET — one untagged " +
+       '"Nothing ranked." used to be the whole vocabulary for both');
+    eq(mv("Most net put premium").kind, "unavailable",
+       "and the missing premium extreme is unavailable too");
+    assert.deepEqual(mv("Most net call premium").names, ["GGG", "ZZZ"],
+      "while the one ranking that did arrive is drawn"); checks++;
+
+    /* THE JOIN, WITH ONE SIDE UNJOINABLE. */
+    const ag = (t) => part.against.find((c) => c.title === t);
+    eq(ag("Long board, in the largest net PUT premium").kind, "unavailable",
+       "the side whose premium ranking was never published is UNAVAILABLE, not quiet: the " +
+       "guard that used to cover this required BOTH lists to be missing, so a payload " +
+       "carrying one of the two published a measured-emptiness sentence about a ranking " +
+       "nobody took — the confident zero one level up from the arithmetic");
+    ok(/never taken/.test(ag("Long board, in the largest net PUT premium").text),
+       "and says the overlap was never taken rather than that it is empty");
+    assert.deepEqual(ag("Short board, in the largest net CALL premium").names, ["GGG #1"],
+      "while the side that could be joined is joined, with its board rank"); checks++;
+    ok(/1 of 2 published board names \(2 short\)/.test(part.againstNote),
+       `THE DENOMINATOR COUNTS ONLY WHAT WAS JOINED (${part.againstNote}) — the long ` +
+       "board's three names were never compared with anything and cannot sit in a " +
+       '"1 of 5 appear" that reads as a measurement of agreement');
+    ok(/long board \(3 names\) could not be joined/.test(part.againstNote),
+       "and those three names are accounted for in words rather than silently deducted");
+
+    /* THE RANK'S DENOMINATOR IS THE COMPARABLE POPULATION, AND SAYS SO. */
+    ok(/the 1st highest of the 3 sessions in this window that quoted both legs/.test(part.rank),
+       `the denominator is the sessions that could be RANKED (${part.rank}), under that ` +
+       'noun — "of the 20 sessions this feed returned" over a denominator of 3 is the ' +
+       "right number wearing the wrong population");
+    ok(/5 sessions were returned; 2 quoted only one leg and cannot be ranked/.test(part.rank),
+       "with the rows it could not rank counted out loud rather than quietly deducted");
+    ok(/tied for the most put-leaning/.test(part.rank),
+       `a session TIED at the top does not get the superlative (${part.rank}): "the most " +
+       "put-leaning session in the window" is a claim about uniqueness that two equal " +
+       "shares do not support`);
+    ok(/2nd largest of the 3 sessions that quoted both legs/.test(part.rank),
+       "and the size rank keeps its noun — \"the 2nd largest of 3\" is three what, " +
+       "measured how");
+
+    /* A STAMP WITH NO CADENCE TO JUDGE ITSELF BY. */
+    ok(/did not publish the refresh cadence/.test(part.stamp),
+       `a pulse carrying no cadence says the page cannot judge the read (${part.stamp})`);
+    ok(!/refreshes about every/.test(part.stamp),
+       "rather than falling back to an interval nobody published");
+    ok(!/0 minutes/.test(part.stamp),
+       "and a read taken seconds ago does not round to \"0 minutes ago\" — a measurement " +
+       "of nothing printed beside a sentence about a field that is missing");
+
+    /* THE AXIS WITHOUT A PUBLISHED BAND, and the caveat that comes back with it. */
+    ok(/no full-scale band/.test(part.sectorNote),
+       `a payload with no scaling block says so (${part.sectorNote}) rather than silently ` +
+       "inventing a band and drawing on it");
+    ok(/never with another day/.test(part.sectorNote),
+       "and the session-scaled caveat RETURNS on the session-scaled axis. It was retired " +
+       "from the fixed-axis caption because it is false there; it is true here, and a " +
+       "caption that dropped it on both would be wrong on one");
+    eq(part.sectorBars.length, 2,
+       "the row carrying a clamp score with no raw reading is not drawn — it cannot be " +
+       "placed on a signed axis, and drawing it at neutral would invent a measurement");
+    eq(part.sectorBars.find((r) => r.name === "Technology").width, "50%",
+       "and the widest reading of the session fills the half-axis, which is what a " +
+       "session-scaled axis means");
+    ok(/1 sector published a clamp score with no raw reading/.test(part.sectorNote),
+       `while the defective row is COUNTED and named as a payload defect (${part.sectorNote}) ` +
+       "rather than silently dropped — a quietly shrinking panel is how the last two " +
+       "defects on this surface stayed invisible for weeks");
+    ok(!/too little history/.test(part.sectorNote),
+       "and it is not filed under 'too little history', which is a statement about the " +
+       "market and would hide a publisher bug behind a fact about a sector");
+
+    await half.close();
+
+    /* ---------- AND A JOIN WITH NO POPULATION AT ALL --------------------
+       Both boards publish, neither ranks a name. "0 of 0 published board
+       names appear in the opposite premium extreme" is a fraction over an
+       empty set: it looks like a measurement of agreement and is a statement
+       that nothing was compared. */
+    await put("board:long", { v: 2, side: "long", status: "ok", sessionDate: FRESH_SESSION, rows: [] });
+    await put("board:short", { v: 2, side: "short", status: "ok", sessionDate: FRESH_SESSION, rows: [] });
+    await put("movers", {
+      v: 2, status: "ok", risers: [], fallers: [],
+      premium: { bullish: [{ t: "GGG", netPrem: 4e8 }], bearish: [{ t: "DDD", netPrem: -6e8 }] },
+    });
+
+    const bare = await browser.newPage();
+    await bare.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await bare.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    await bare.waitForSelector("#mktAgainstPanel:not([hidden])");
+    const none = await bare.evaluate(() => ({
+      note: (document.getElementById("mktAgainstNote") || {}).textContent || "",
+      kinds: [...document.querySelectorAll("#mktAgainst [data-empty]")]
+        .map((n) => n.getAttribute("data-empty")),
+      texts: [...document.querySelectorAll("#mktAgainst [data-empty]")]
+        .map((n) => n.textContent),
+    }));
+    ok(/no population to state a count against/.test(none.note),
+       `a join over two empty boards states that there is no population (${none.note}) ` +
+       'rather than publishing "0 of 0 published board names appear", which is a ratio ' +
+       "over an empty set wearing the shape of a measurement");
+    ok(!/0 of 0/.test(none.note), "and the empty fraction never reaches the page");
+    assert.deepEqual(none.kinds, ["quiet", "quiet"],
+      "both columns are QUIET: the boards were read and ranked nobody, which is a fact " +
+      "about the boards"); checks++;
+    ok(none.texts.every((t) => /ranked no name this session/.test(t)),
+       "and each names the board rather than claiming the overlap is empty — an empty " +
+       "board has no overlap to be empty");
+    await bare.close();
+  }
+
+  /* ---------- THE CADENCE IS JUDGED BY, NOT ONLY PRINTED ----------------
+
+     Everything above proves the page QUOTES the published interval. The
+     stamp's other use of it decides whether the read is still worth
+     believing — "one cadence plus one cadence of slack" — and that branch
+     would go on passing against a renderer holding its own 15 for as long as
+     the two verdicts happened to agree.
+
+     THIRTY MINUTES IS THE READING THAT SEPARATES THEM. Under the payload's
+     twenty it is inside the slack and live; under the fifteen this file used
+     to mirror it is stale by a whisker, and the page would tell a reader the
+     intraday refresh had stopped keeping up while the cron was doing exactly
+     what it is configured to do. That is the direction shared/flows-pulse.js
+     names as the worst one: a staleness banner that cries wolf is a banner
+     readers learn to ignore.
+
+     AND THE ZERO, published rather than inferred. `Number(null)` is this
+     repository's recurring defect and a cadence is where it does the most
+     damage: every read stale, and a refresh schedule of "about every 0
+     minutes" printed as though someone had chosen it. A cadence of zero is
+     not a schedule, so it is read as the absence it is. */
+  {
+    const stampFor = async (body) => {
+      await put("pulse", body);
+      const p = await browser.newPage();
+      await p.context().addCookies([{
+        name: "flows_session", value: token, url: server.baseURL,
+      }]);
+      await p.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+      await p.waitForSelector("#mkPulsePanel:not([hidden])");
+      const out = await p.evaluate(() => ({
+        stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
+        cards: document.querySelectorAll(".mk-pulse-card").length,
+      }));
+      await p.close();
+      return out;
+    };
+
+    const slack = await stampFor(pulsePayload({
+      readAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    }));
+    ok(!/not keeping it current/.test(slack.stamp),
+       `a read thirty minutes old is INSIDE one cadence plus one cadence of slack at the ` +
+       `published ${FIXTURE_CADENCE} minutes (${slack.stamp}) — at the ` +
+       `${REFRESH_CADENCE_MINUTES} this renderer used to mirror, the same read would be ` +
+       "called stale and the reader told the refresh had stopped keeping up");
+    ok(new RegExp("refreshes about every " + FIXTURE_CADENCE + " minutes").test(slack.stamp),
+       "so it still claims the intraday refresh, in the payload's own interval");
+
+    const zeroed = await stampFor(pulsePayload({ cadenceMinutes: 0 }));
+    ok(!/every 0 minutes/.test(zeroed.stamp),
+       `a published zero is never quoted as a schedule (${zeroed.stamp}): "refreshes about ` +
+       'every 0 minutes" is what Number(null) prints, and it reads as a decision somebody ' +
+       "made rather than a field nobody wrote");
+    ok(!/not keeping it current/.test(zeroed.stamp),
+       "nor is it judged by — `ageMin < 0 * 2` is false for every read ever taken, so a zero " +
+       "cadence marks a payload written seconds ago as stale");
+    ok(/did not publish the refresh cadence/.test(zeroed.stamp),
+       "it is treated as the absence it is, and the verdict is withheld in the same words a " +
+       "missing field gets: a refresh every zero minutes is not a schedule");
+    eq(zeroed.cards, 7,
+       "and all seven feed cards are still drawn. A cadence nobody published costs this " +
+       "section one sentence, not a panel — the silence is in the stamp, where the missing " +
+       "field is, and nowhere else");
+  }
 } finally {
   await browser.close();
   await server.stop();
 }
 
-console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire, and no line bridged across a bucket the vendor never sent`);
+console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, and every chart asserted at its DRAWN size rather than its declared one`);

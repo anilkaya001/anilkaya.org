@@ -77,6 +77,12 @@
     if (n === null) return "";
     return n > 0 ? "fb-pos" : (n < 0 ? "fb-neg" : "");
   }
+  /* A POPULATION COUNT, or the em dash. A count is the one place a zero and
+     an absence look most alike in prose, and this page publishes several. */
+  function count(v) {
+    var n = isNum(v);
+    return n === null ? DASH : String(n);
+  }
 
   /* ---------- the silences, told apart in the DOM as well as in prose ----
 
@@ -154,45 +160,94 @@
      the page where a reader cannot tell yesterday's copy from today's, and it
      was the only Flows surface with the element but not the test.
 
+     THE TEST IS NOT THIS FILE'S TO WRITE. assets/js/flows-ui.js `staleness()`
+     owns it. It was lifted out of flows-board.js precisely because six routes
+     had grown six copies of the same two constants and SIX DIFFERENT
+     SENTENCES for the same two outages, and two routes wording one outage
+     differently is how a reader concludes there are two outages. The first
+     version of this block was a seventh copy, and it had already drifted in
+     the retelling — "These readings describe the … session" against the
+     shared "These numbers describe the … session" — which is that whole
+     failure in miniature, committed in the same change that fixed the banner.
+
+     shared/flows-pages.js:861 serves this route nav.js and this file and no
+     UI module, so `window.FlowsUI` does not exist here and the shared
+     function cannot be called. What follows is therefore a MIRROR, not a
+     second opinion: the same two constants, the same two branches, the same
+     two sentences to the word, and the same four-way {kind, message}
+     contract — including the "unknown" that a bare null cannot express,
+     because "nothing datable arrived" and "it was checked and it is fresh"
+     are not the same answer. The wording lives in flows-ui.js:185 and must be
+     changed there first. When marketPage() is served flows-ui.js this whole
+     block is deleted and replaced by one call to it.
+
      TWO FAILURES, TWO REMEDIES, which is why there are two branches rather
      than one age check. A dead pipeline has an old WRITE time — GitHub
      disables scheduled workflows after 60 days of repository inactivity and
      the only symptom is a date that stops advancing. A frozen upstream has a
-     recent write time and an old SESSION. This is the shape assets/js/
-     flows-board.js has carried since it shipped, said in this page's nouns. */
+     recent write time and an old SESSION. */
   var staleEl = document.getElementById("mktStale");
+
+  // Mirrored from assets/js/flows-ui.js:143-145. One publish cadence plus
+  // slack; one weekend plus one public holiday. Weekends fall to the session
+  // check: the pipeline does not run at all on a Saturday.
+  var STALE_WRITE_MS = 30 * 60 * 60 * 1000;
+  var STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
 
   function assessAge(payload) {
     var now = Date.now();
-    var written = isNum(payload && payload.__updatedAt);
-    // One publish cadence plus slack. Weekends fall to the session check
-    // below: the pipeline does not run at all on a Saturday.
-    var STALE_WRITE_MS = 30 * 60 * 60 * 1000;
-    // Four days covers a normal weekend plus one public holiday.
-    var STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+    if (!payload || typeof payload !== "object") return { kind: "unknown", message: null };
 
+    /* THE MISSING-VALUE TEST BEFORE THE COERCION, and it matters more here
+       than almost anywhere: Number(null) is 0, 0 is a finite millisecond
+       stamp — the epoch — and a payload with no write header would be
+       reported as fifty-six years stale. A non-positive stamp is absent for
+       the same reason. */
+    var written = isNum(payload.__updatedAt);
     if (written !== null && written > 0 && now - written > STALE_WRITE_MS) {
       var hours = Math.floor((now - written) / 3600000);
       var days = Math.floor(hours / 24);
-      return "This market level was last written " +
-        (days >= 1 ? days + (days === 1 ? " day" : " days") : hours + " hours") +
-        " ago. The pipeline has not published since — check the Actions tab.";
+      /* The hour branch cannot fire while the threshold is 30 hours — every
+         age past it is at least one day. It is here so that lowering the
+         threshold can never start printing "0 days", which is a confident
+         zero wearing a unit. */
+      var age = days >= 1
+        ? days + (days === 1 ? " day" : " days")
+        : hours + (hours === 1 ? " hour" : " hours");
+      return {
+        kind: "write",
+        message: "This market level was last written " + age +
+          " ago. The pipeline has not published since — check the Actions tab.",
+      };
     }
-    var sessionDate = payload && payload.sessionDate;
-    if (typeof sessionDate === "string" && sessionDate) {
-      var session = Date.parse(sessionDate + "T21:00:00Z");
+
+    if (payload.sessionDate) {
+      /* 21:00Z is after every US close, so a session date is aged from the
+         end of its own session rather than from its midnight. */
+      var session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
       if (isFinite(session) && now - session > STALE_SESSION_MS) {
-        return "These readings describe the " + sessionDate + " session, which is more " +
-          "than four days old. The pipeline is running but its data is not advancing.";
+        return {
+          kind: "session",
+          message: "These numbers describe the " + payload.sessionDate + " session, " +
+            "which is more than four days old. The pipeline is running but its " +
+            "data is not advancing.",
+        };
       }
     }
-    return null;
+    if (written === null && !payload.sessionDate) return { kind: "unknown", message: null };
+    return { kind: "fresh", message: null };
   }
 
-  function setStale(message) {
+  /* THE KIND IS STAMPED AS WELL AS THE SENTENCE — flows-board.js's shape.
+     "The pipeline stopped" and "the data stopped" want different chrome, and
+     a test should not have to parse prose to tell which one is on screen. */
+  function setStale(verdict) {
     if (!staleEl) return;
+    var message = (verdict && verdict.message) || "";
     staleEl.hidden = !message;
-    staleEl.textContent = message || "";
+    staleEl.textContent = message;
+    if (message) staleEl.setAttribute("data-stale", (verdict && verdict.kind) || "stale");
+    else staleEl.removeAttribute("data-stale");
     document.body.classList.toggle("is-stale", Boolean(message));
   }
 
@@ -243,12 +298,18 @@
     var breadth = m.breadth || {};
     var premium = m.premium || {};
 
+    /* NEVER A CONFIDENT ZERO IN A POPULATION. This line read
+       `isNum(breadth.bull) || 0`, which is Number(null) === 0 wearing newer
+       syntax: a count the payload never published printed as "0 bought", and
+       a session in which nothing was bought became indistinguishable from a
+       field that was never written. The em dash is this file's mark for "not
+       measured" and it belongs in a count as much as in a price. */
     host.append(tiltRow(
       "Breadth tilt — counting names",
       breadth.tilt,
-      (isNum(breadth.bull) || 0) + " bought, " + (isNum(breadth.bear) || 0) +
-      " sold, " + (isNum(breadth.flat) || 0) + " level, of " +
-      (isNum(premium.priced) || 0) + " names that quoted both legs."));
+      count(breadth.bull) + " bought, " + count(breadth.bear) + " sold, " +
+      count(breadth.flat) + " level, of " + count(premium.priced) +
+      " names that quoted both legs."));
 
     host.append(tiltRow(
       "Premium tilt — weighting by dollars",
@@ -266,7 +327,25 @@
       if (b === null || p === null) {
         note.textContent = "One of the two weightings could not be measured this session, " +
           "so they cannot be compared.";
-      } else if ((b > 0) !== (p > 0) && b !== 0 && p !== 0) {
+      } else if (b === 0 || p === 0) {
+        /* A MEASURED ZERO IS A THIRD ANSWER, not a quiet member of the
+           majority. The disagreement test guarded itself with `b !== 0 &&
+           p !== 0` — correctly, because a zero has no sign to disagree with —
+           and then fell through to "Both weightings agree in sign", which is
+           a confident claim about a reading that has no sign at all. A
+           session where the dollars came back exactly level while the names
+           leaned is neither agreement nor disagreement, and it is the third
+           sentence rather than the wrong one of two. */
+        note.textContent = (b === 0 && p === 0
+          ? "Both weightings came back exactly level: the names split evenly and so did the " +
+            "dollars. There is no lean to agree or disagree about."
+          : (b === 0 ? "Counting names, the session was exactly level" +
+              " while the dollars leaned " + (p > 0 ? "positive" : "negative") + "."
+            : "The dollars were exactly level while more names leaned " +
+              (b > 0 ? "positive" : "negative") + ".") +
+            " One weighting has a sign and the other does not, so they neither agree nor " +
+            "disagree — which is itself a reading, and the reason both are drawn.");
+      } else if ((b > 0) !== (p > 0)) {
         note.textContent = "The two weightings DISAGREE in sign. More names leaned one way " +
           "while the dollars leaned the other — breadth without size, or size without " +
           "breadth. That disagreement is the session's most informative reading, and it is " +
@@ -286,32 +365,60 @@
     host.textContent = "";
 
     var b = m.breadth || {}, p = m.premium || {};
-    var bull = isNum(b.bull) || 0, bear = isNum(b.bear) || 0, flat = isNum(b.flat) || 0;
-    var total = bull + bear + flat;
+    var bull = isNum(b.bull), bear = isNum(b.bear), flat = isNum(b.flat);
 
-    var bar = el("div", "mk-stack");
-    bar.setAttribute("role", "img");
-    bar.setAttribute("aria-label",
-      bull + " names net bought, " + bear + " net sold, " + flat + " level, of " + total + " priced.");
-    [["is-pos", bull, "bought"], ["is-flat", flat, "level"], ["is-neg", bear, "sold"]]
-      .forEach(function (seg) {
-        if (!seg[1] || !total) return;
-        var i = el("i", "mk-seg " + seg[0]);
-        i.style.width = (seg[1] / total * 100) + "%";
-        i.title = seg[1] + " " + seg[2];
-        bar.append(i);
-      });
-    host.append(bar);
+    /* A PART-TO-WHOLE BAR NEEDS THE WHOLE, AND THE WHOLE HAS TO HAVE BEEN
+       MEASURED. Each of the three counts used to be coerced with
+       `isNum(x) || 0`, so a count the payload never wrote became a segment of
+       width zero AND a contribution of zero to the denominator — the two
+       parts that did arrive were then drawn as 100% of a total this session
+       never measured, and the aria-label read "0 names net bought" out loud.
+       If any leg is missing there is no whole, and the honest drawing is
+       none. The tilt above is unaffected: it is published as a ratio rather
+       than rebuilt from these three counts. */
+    if (bull === null || bear === null || flat === null) {
+      var absent = [];
+      if (bull === null) absent.push("net bought");
+      if (bear === null) absent.push("net sold");
+      if (flat === null) absent.push("level");
+      host.append(emptyLine("unavailable",
+        "The breadth split cannot be drawn: this payload published no count of names " +
+        absent.join(", ") + ", so its three parts do not add to a whole and drawing the " +
+        "rest would publish a total that was never measured."));
+    } else if (bull + bear + flat === 0) {
+      /* MEASURED AND EMPTY IS THE OTHER SILENCE. All three counts arrived and
+         all three are zero, so no screened name quoted both legs — a fact
+         about the session, and not the same fact as a missing count. */
+      host.append(emptyLine("quiet",
+        "No screened name quoted both a call and a put leg this session, so there is no " +
+        "priced population to split. The three counts were published and all three are zero."));
+    } else {
+      var total = bull + bear + flat;
 
-    var legend = el("ul", "mk-legend");
-    [["is-pos", bull + " bought"], ["is-flat", flat + " level"], ["is-neg", bear + " sold"]]
-      .forEach(function (seg) {
-        var li = el("li");
-        li.append(el("i", "mk-key " + seg[0]));
-        li.append(el("span", null, seg[1]));
-        legend.append(li);
-      });
-    host.append(legend);
+      var bar = el("div", "mk-stack");
+      bar.setAttribute("role", "img");
+      bar.setAttribute("aria-label",
+        bull + " names net bought, " + bear + " net sold, " + flat + " level, of " + total + " priced.");
+      [["is-pos", bull, "bought"], ["is-flat", flat, "level"], ["is-neg", bear, "sold"]]
+        .forEach(function (seg) {
+          if (!seg[1]) return;
+          var i = el("i", "mk-seg " + seg[0]);
+          i.style.width = (seg[1] / total * 100) + "%";
+          i.title = seg[1] + " " + seg[2];
+          bar.append(i);
+        });
+      host.append(bar);
+
+      var legend = el("ul", "mk-legend");
+      [["is-pos", bull + " bought"], ["is-flat", flat + " level"], ["is-neg", bear + " sold"]]
+        .forEach(function (seg) {
+          var li = el("li");
+          li.append(el("i", "mk-key " + seg[0]));
+          li.append(el("span", null, seg[1]));
+          legend.append(li);
+        });
+      host.append(legend);
+    }
 
     /* CONCENTRATION, BESIDE THE TOTAL IT QUALIFIES. A market-wide sum is a
        number one takeover print can own; without this, "the universe bought
@@ -327,8 +434,8 @@
             ? "More than half the total is five names: read the aggregate as those names, not as the universe."
             : "The total is spread across the universe rather than owned by a handful of prints."));
       }
-      if (isNum(b.unpriced)) {
-        parts.push(b.unpriced + " of " + (isNum(m.n) || 0) + " screened names quoted no usable " +
+      if (isNum(b.unpriced) !== null) {
+        parts.push(b.unpriced + " of " + count(m.n) + " screened names quoted no usable " +
           "net premium and are excluded from every total above rather than counted as level" +
           (isNum(p.oneLegged) && p.oneLegged ? " — " + p.oneLegged + " of them quoted one leg only." : "."));
       }
@@ -566,11 +673,25 @@
     panel.hidden = false;
   }
 
+  /* THE COLUMN'S OWN TWO SILENCES. "Nothing ranked." was one untagged
+     sentence for both of them: a ranking the payload never published and a
+     ranking that was taken and came back empty read identically, in the one
+     panel where the difference decides whether the session was quiet or the
+     feed was. Every other empty on this page carries a data-empty; this one
+     did not, so it was also the one silence a test could not see. */
   function moverList(title, rows, key) {
     var box = el("div", "mk-movers-col");
     box.append(el("h3", "mk-movers-h", title));
-    if (!rows || !rows.length) {
-      box.append(el("p", "flows-empty", "Nothing ranked."));
+    if (!Array.isArray(rows)) {
+      box.append(emptyLine("unavailable",
+        "This payload published no ranking for " + title.toLowerCase() + ", so this column " +
+        "was never measured. It is not a statement that no name qualified."));
+      return box;
+    }
+    if (!rows.length) {
+      box.append(emptyLine("quiet",
+        "The ranking for " + title.toLowerCase() + " was taken and came back with no name " +
+        "in it — a fact about the session."));
       return box;
     }
     var ul = el("ul", "mk-movers");
@@ -723,7 +844,13 @@
 
     var notes = pulse.notes || {};
     grid.textContent = "";
-    if (stampEl) stampEl.textContent = pulseStamp(pulse.readAt, pulse.refreshed);
+    /* THE CADENCE COMES OFF THE PAYLOAD, read here with the rest of the
+       root fields so the payload-shape scan can see the claim being made.
+       Handed on raw: pulseStamp owns what counts as a usable cadence and
+       what it says when there is none. */
+    if (stampEl) {
+      stampEl.textContent = pulseStamp(pulse.readAt, pulse.refreshed, pulse.cadenceMinutes);
+    }
 
     grid.append(tideCard(pulse.tide, notes.tide));
     grid.append(totalsCard(pulse.totals, notes.totals));
@@ -750,16 +877,6 @@
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  /* THE CADENCE, RESTATED HERE BECAUSE shared/ IS NOT SERVED TO THE BROWSER.
-
-     shared/flows-freshness.js owns REFRESH_CADENCE_MINUTES and the Worker's
-     cron gate is built from it; a renderer cannot import a shared module, so
-     this constant mirrors it and this comment is the only link between them.
-     It is named once rather than spelled into three sentences so the two can
-     only disagree in one place. The right end state is the pulse payload
-     carrying its own cadence, which would make this constant deletable. */
-  var REFRESH_CADENCE_MINUTES = 15;
-
   /**
    * When the pulse was read, and whether that claim is still worth making.
    *
@@ -770,8 +887,26 @@
    * live feed fifteen minutes old. A freshness stamp that cannot go stale is
    * worse than no stamp: it converts an absence of information into a
    * confident assurance.
+   *
+   * THE CADENCE IS THE PAYLOAD'S NOW, NOT THIS FILE'S. It used to be a local
+   * `var REFRESH_CADENCE_MINUTES = 15` mirroring shared/flows-freshness.js
+   * under a comment admitting the mirror was the only link between the two,
+   * because shared/ is not served to the browser. shared/flows-pulse.js
+   * publishes `cadenceMinutes` on the pulse for exactly this reader, so the
+   * copy is gone: raise the Worker's cron to thirty minutes and this stamp
+   * follows it instead of going on calling a twenty-five-minute-old read
+   * stale, which is how a reader learns to ignore the one line that tells
+   * them the data stopped moving.
+   *
+   * @param {number|null|undefined} cadenceMinutes the published cadence, or
+   *   absent on a payload written before the field existed or one that could
+   *   not be read. ABSENT IS NOT ZERO. Number(null) would make every read
+   *   stale and print "refreshes about every 0 minutes"; a fallback of 15
+   *   would print a number nobody published. So a missing cadence withholds
+   *   the verdict and says why — the age is still measured, because that
+   *   subtraction needs no cadence, and only the judgement of it does.
    */
-  function pulseStamp(readAt, refreshed) {
+  function pulseStamp(readAt, refreshed, cadenceMinutes) {
     if (typeof readAt !== "string") return "";
     var t = new Date(readAt);
     if (isNaN(t.getTime())) return "";
@@ -783,22 +918,39 @@
       t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
     var when = sameDay ? hm : t.toLocaleDateString() + " " + hm;
     var ageMin = (now.getTime() - t.getTime()) / 60000;
+    var build = refreshed === "nightly" ? " with the nightly build" : "";
+
+    /* ABSENCE TESTED BEFORE THE ARITHMETIC, and a non-positive cadence is an
+       absent one: a refresh every zero minutes is not a schedule, and a
+       negative one is a corrupt field, not a fast cron. */
+    var minutes = isNum(cadenceMinutes);
+    var cadence = (minutes !== null && minutes > 0) ? minutes : null;
+    if (cadence === null) {
+      /* The AGE is a subtraction of two stamps and needs no cadence, so it is
+         still reported; only the JUDGEMENT of it is withheld. Under a minute
+         it is left off rather than rounded to "0 minutes ago", which reads as
+         a measurement of nothing beside a sentence about a missing field. */
+      var since = Math.round(ageMin) >= 1 ? ", " + ageWords(ageMin) + " ago" : "";
+      return "Read " + when + build + since + ". This payload did not publish the refresh " +
+        "cadence, so this page cannot say whether that read is still current.";
+    }
+
     // One cadence plus one cadence of slack: a cron that fired late is not
     // yet a cron that stopped firing.
-    var live = ageMin < REFRESH_CADENCE_MINUTES * 2;
+    var live = ageMin < cadence * 2;
     var stale = ", read " + ageWords(ageMin) + " ago — the intraday refresh is not " +
       "keeping it current, so every number below is as of that stamp.";
 
     if (refreshed === "intraday") {
       return live
-        ? "Read " + when + " (refreshes about every " + REFRESH_CADENCE_MINUTES +
-          " minutes during market hours)."
+        ? "Read " + when + " (refreshes about every " + cadence +
+          (cadence === 1 ? " minute" : " minutes") + " during market hours)."
         : "Read " + when + stale;
     }
     if (refreshed === "nightly") {
       return live
-        ? "Read " + when + " with the nightly build (refreshes intraday during market hours)."
-        : "Read " + when + " with the nightly build" + stale;
+        ? "Read " + when + build + " (refreshes intraday during market hours)."
+        : "Read " + when + build + stale;
     }
     return "Read " + when + (live ? "." : ", " + ageWords(ageMin) + " ago.");
   }
@@ -945,9 +1097,31 @@
     var points = spec.points;
     host.textContent = "";
 
-    var W = Math.max(240, Math.min(1600, Math.round(host.clientWidth) || 320));
+    /* THE MEASUREMENT IS FLOORED, NOT ROUNDED, and the drawing is never
+       wider than the box it was measured from. `Math.round(clientWidth)`
+       rounds a host of 282.81px UP to 283, and the stylesheet's
+       `.mk-tide-svg { width: 100% }` then squeezes 283 viewBox units into
+       282.81 CSS pixels — one viewBox unit stops being one CSS pixel by a
+       fraction of a percent, silently, which is the same failure the
+       .cc-strip comment in flows.css warns about in so many words. Flooring
+       the real box width and pinning that width INLINE (an inline width
+       beats the class rule, and is by construction never wider than the
+       host, so it cannot push a 320px viewport sideways) makes the identity
+       exact rather than approximate.
+
+       The old lower clamp of 240 was the other half of the problem: on a
+       host narrower than 240 it would have made the drawing wider than its
+       container. The gutters shrink with the box instead. */
+    var box = host.getBoundingClientRect ? host.getBoundingClientRect().width : 0;
+    var measured = Math.floor(isNum(box) === null ? 0 : box);
+    if (!measured) measured = Math.floor(host.clientWidth) || 0;
+    // A host that measures nothing is a hidden host; 320 is the narrowest
+    // viewport this product supports and is the honest fallback.
+    var W = measured > 0 ? Math.min(1600, measured) : 320;
     var H = spec.height || 180;
-    var padL = 54, padR = 42, padT = 10, padB = 20;
+    var padL = Math.min(54, Math.round(W * 0.19));
+    var padR = Math.min(42, Math.round(W * 0.15));
+    var padT = 10, padB = 20;
     var n = points.length;
 
     var lo = 0, hi = 0;
@@ -973,6 +1147,11 @@
       width: W, height: H, preserveAspectRatio: "xMidYMid meet",
       role: "img", "aria-label": spec.aria,
     });
+    /* The attribute states the size; the inline style DEFENDS it. See above:
+       the stylesheet's width:100% would otherwise override the attribute and
+       rescale every unit in the drawing. */
+    svg.style.width = W + "px";
+    svg.style.height = H + "px";
 
     // The zero rule, before the lines so they draw over it.
     svg.append(svgNode("line", {
@@ -983,13 +1162,31 @@
     /* One path per series, pen up over null buckets: an absent reading is a
        GAP in the line, never a point at zero — 0 is a real published sum. */
     var seriesD = function (key) {
-      var d = "", pen = false;
-      points.forEach(function (p, i) {
-        var v = isNum(p[key]);
-        if (v === null) { pen = false; return; }
-        d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1);
-        pen = true;
-      });
+      var vals = points.map(function (p) { return isNum(p[key]); });
+      var d = "", i = 0;
+      while (i < n) {
+        if (vals[i] === null) { i++; continue; }
+        var j = i;
+        while (j + 1 < n && vals[j + 1] !== null) j++;
+        if (j === i) {
+          /* A ONE-SAMPLE RUN. The old shape emitted a lone "M x y" here — a
+             path that moves and never draws, so it RENDERS NOTHING. The gap
+             rule exists so that a reading nobody took is never invented; it
+             must not also make a reading somebody DID take disappear, and a
+             bucket whose two neighbours both came back null is exactly the
+             case where a measurement was silently dropped. It is drawn as a
+             four-unit tick centred on the sample, in the series' own stroke
+             and dash pattern, far too short to be misread as a segment
+             spanning two buckets. */
+          d += "M" + (x(i) - 2).toFixed(1) + " " + y(vals[i]).toFixed(1) +
+               "L" + (x(i) + 2).toFixed(1) + " " + y(vals[i]).toFixed(1);
+        } else {
+          for (var k = i; k <= j; k++) {
+            d += (k === i ? "M" : "L") + x(k).toFixed(1) + " " + y(vals[k]).toFixed(1);
+          }
+        }
+        i = j + 1;
+      }
       return d;
     };
     var lastIdx = function (key) {
@@ -1068,7 +1265,14 @@
           { key: "callPrem", cls: "mk-tide-call", label: "calls" },
           { key: "putPrem", cls: "mk-tide-put", label: "puts" },
         ],
-        xLabel: function (p) { return String(p.date || DASH).slice(5); },
+        /* "2026-09-03" → "09-03". A session with no date is the em dash:
+           `String(DASH).slice(5)` was the empty string, so an undated point
+           got a BLANK tick — an absence rendered as nothing at all rather
+           than as this file's mark for one. */
+        xLabel: function (p) {
+          var d = (p && typeof p.date === "string") ? p.date : "";
+          return d.length >= 8 ? d.slice(5) : DASH;
+        },
         yFormat: usd,
         aria: "Total call premium and total put premium per session across the " +
           "sessions this feed returned, oldest at the left.",
@@ -1107,8 +1311,23 @@
     if (!measured.length) return null;
     var newest = valueOf(rows[0]);
     if (newest === null) return null;
-    var above = measured.filter(function (v) { return v > newest; }).length;
-    return { rank: above + 1, of: measured.length, value: newest };
+    var above = 0, level = 0;
+    measured.forEach(function (v) {
+      if (v > newest) above++;
+      else if (v === newest) level++;
+    });
+    /* `of` IS THE COMPARABLE POPULATION AND NOT THE ROW COUNT — a session
+       that never quoted both legs cannot be ranked against and must not sit
+       in the denominator. The caller has to say so in the sentence too: "of
+       the 20 sessions this feed returned" over a denominator of 17 is the
+       right number under the wrong noun, which is the same defect as a
+       number under the wrong unit.
+
+       `tied` because a superlative is a claim about uniqueness. Two sessions
+       at the same share both come back rank 1, and calling each of them "the
+       most put-leaning session in the window" is a confident statement the
+       arithmetic does not support. */
+    return { rank: above + 1, of: measured.length, value: newest, tied: level > 1 };
   }
 
   /* Put premium as a share of the session's own two-sided total. A SHARE is
@@ -1153,14 +1372,31 @@
       var size = rankOf(rows, twoSidedTotal);
       var newest = rows[0] || {};
       var said = [];
+      /* THE DENOMINATOR IS THE COMPARABLE POPULATION AND IS NAMED AS SUCH.
+         This sentence used to say "of the N sessions this feed returned"
+         while N was the count of sessions that could be RANKED; the two are
+         the same number only while every session quotes both legs, and the
+         moment one does not the reader is handed a smaller number under the
+         larger noun. The rows that could not be ranked are counted out loud
+         beside it rather than quietly deducted. */
+      var unrankable = function (r) {
+        return r.of < rows.length
+          ? " (" + rows.length + " sessions were returned; " + (rows.length - r.of) +
+            " quoted only one leg and cannot be ranked)"
+          : "";
+      };
+      /* A SUPERLATIVE IS A CLAIM ABOUT UNIQUENESS, so a tie does not get one. */
+      var extreme = function (r, top, bottom) {
+        if (r.rank === 1) return r.tied ? " — tied for the " + top + " in the window." : " — the " + top + " session in the window.";
+        if (r.rank === r.of) return r.tied ? " — tied for the " + bottom + " in the window." : " — the " + bottom + " session in the window.";
+        return ".";
+      };
       if (share) {
         said.push("Put premium was " + pct(share.value, 1) + " of the two-sided total on " +
           (newest.date || "the newest session") + ", the " + ordinal(share.rank) +
           " highest of the " + share.of + " session" + (share.of === 1 ? "" : "s") +
-          " this feed returned" +
-          (share.rank === 1 ? " — the most put-leaning session in the window."
-            : share.rank === share.of ? " — the most call-leaning session in the window."
-              : "."));
+          " in this window that quoted both legs" + unrankable(share) +
+          extreme(share, "most put-leaning", "most call-leaning"));
       } else {
         /* NOT A ZERO AND NOT A MIDDLE. A window in which no session quoted
            both legs supports no rank at all, and saying so is the reading. */
@@ -1168,13 +1404,25 @@
           "newest session cannot be ranked against the others.");
       }
       if (size) {
+        /* THE COUNT KEEPS ITS NOUN. "the 3rd largest of 20" is a bare figure:
+           twenty what, and measured how? */
         said.push("Total premium of " + usd(size.value) + " was the " + ordinal(size.rank) +
-          " largest of " + size.of + ".");
+          " largest of the " + size.of + " session" + (size.of === 1 ? "" : "s") +
+          " that quoted both legs" + unrankable(size));
       }
-      said.push("A rank over " + (share ? share.of : rows.length) + " sessions is an ordinal " +
-        "claim and nothing more: this window is far too short to support a standard " +
-        "deviation, and a sigma computed from it would be a confident number where the " +
-        "honest one is a position in a queue.");
+      /* THE CAVEAT BELONGS TO A RANK THAT WAS ACTUALLY PUBLISHED. It used to
+         print unconditionally, so the window in which nothing could be
+         ranked still ended on "a rank over 3 sessions is an ordinal claim" —
+         a disclaimer for a number the card had just refused to give. */
+      if (share || size) {
+        // Not named `window`: shadowing the global inside a renderer is how a
+        // later edit in this function loses its addEventListener.
+        var span = (share || size).of;
+        said.push("A rank over " + span + " session" + (span === 1 ? "" : "s") +
+          " is an ordinal claim and nothing more: this window is far too short to support a " +
+          "standard deviation, and a sigma computed from it would be a confident number " +
+          "where the honest one is a position in a queue.");
+      }
       card.append(el("p", "fc-note mk-pulse-rank", said.join(" ")));
 
       var shown = rows.slice(0, 10);
@@ -1392,43 +1640,44 @@
      was cut from does. That is a publisher change, not a renderer one, and
      inventing a sector on this side would be a fabricated join. */
 
-  function againstList(title, rows, empty) {
+  /* One column of the join: a heading, and whatever the side has to say. */
+  function againstColumn(title, body) {
     var box = el("div", "mk-movers-col");
     box.append(el("h3", "mk-movers-h", title));
-    if (!rows.length) {
-      box.append(emptyLine("quiet", empty));
-      return box;
-    }
+    box.append(body);
+    return box;
+  }
+
+  function againstRows(rows) {
     var ul = el("ul", "mk-movers");
     rows.forEach(function (r) {
       var li = el("li");
-      // The board rank rides with the ticker: a contradiction on the name
-      // ranked first is not the same news as one on the name ranked
-      // twenty-fifth.
-      li.append(el("span", "mk-mv-t", r.t + " #" + r.rank));
+      /* The board rank rides with the ticker: a contradiction on the name
+         ranked first is not the same news as one on the name ranked
+         twenty-fifth. A row whose rank the board did not publish says that
+         in words — "#—" is a rank-shaped thing that is not a rank. */
+      li.append(el("span", "mk-mv-t",
+        r.rank === null ? r.t + " (board rank not published)" : r.t + " #" + r.rank));
       li.append(el("span", "mk-mv-v " + toneClass(r.netPrem), usd(r.netPrem)));
       ul.append(li);
     });
-    box.append(ul);
-    return box;
+    return ul;
   }
 
   /* Names on one board that appear in the opposite premium extreme. Rank is
      the board's own `r`; when a row carries none the name still counts, and
-     the marker says so rather than inventing a position. */
-  function crossBoard(board, moverRows) {
+     the renderer says so rather than inventing a position. */
+  function crossBoard(boardRows, moverRows) {
     var out = [];
-    var rows = (board && Array.isArray(board.rows)) ? board.rows : [];
     var byTicker = {};
     (Array.isArray(moverRows) ? moverRows : []).forEach(function (mv) {
       if (mv && mv.t) byTicker[mv.t] = mv;
     });
-    rows.forEach(function (r) {
+    boardRows.forEach(function (r) {
       if (!r || !r.t || !Object.prototype.hasOwnProperty.call(byTicker, r.t)) return;
-      var rank = isNum(r.r);
       out.push({
         t: r.t,
-        rank: rank === null ? DASH : rank,
+        rank: isNum(r.r),
         netPrem: isNum(byTicker[r.t].netPrem),
       });
     });
@@ -1436,10 +1685,9 @@
        came from — not by premium, which would put the loudest name first and
        bury a contradiction on the top-ranked one. */
     out.sort(function (a, b) {
-      var ar = isNum(a.rank), br = isNum(b.rank);
-      if (ar === null) return 1;
-      if (br === null) return -1;
-      return ar - br;
+      if (a.rank === null) return 1;
+      if (b.rank === null) return -1;
+      return a.rank - b.rank;
     });
     return out;
   }
@@ -1483,33 +1731,72 @@
     }
 
     var prem = movers.premium || {};
-    var bearish = prem.bearish, bullish = prem.bullish;
-    /* A JOIN AGAINST A LIST THAT WAS NEVER PUBLISHED IS NOT AN EMPTY JOIN.
-       Without this branch a movers payload that carried risers and fallers
-       but no premium split would render two "no name appears" columns —
-       a measured-emptiness sentence produced by a missing input, which is the
-       confident zero one level up from the arithmetic. */
-    if (!Array.isArray(bearish) && !Array.isArray(bullish)) {
+    /* EACH SIDE ANSWERS FOR ITS OWN LIST. The first version of this guard
+       required BOTH premium lists to be missing before it said anything, so a
+       payload carrying only one of the two rendered the other column as "No
+       long-board name appears in the session's largest net put premium" —
+       a measured-emptiness sentence manufactured by an input that was never
+       published, which is the confident zero one level up from the
+       arithmetic and precisely what that guard's own comment claimed to
+       prevent. A side whose ranking never arrived is UNAVAILABLE, is not
+       given the quiet sentence, and its board names are kept out of the
+       denominator: a population that was never joined cannot be part of
+       "N of M appear". */
+    var sides = [
+      {
+        title: "Long board, in the largest net PUT premium",
+        board: boardLong, side: "long", list: prem.bearish,
+        ranking: "the session's largest net put premium",
+        empty: "No long-board name appears in the session's largest net put premium.",
+      },
+      {
+        title: "Short board, in the largest net CALL premium",
+        board: boardShort, side: "short", list: prem.bullish,
+        ranking: "the session's largest net call premium",
+        empty: "No short-board name appears in the session's largest net call premium.",
+      },
+    ];
+
+    if (!sides.some(function (side) { return Array.isArray(side.list); })) {
       host.append(emptyLine("unavailable",
-        "This movers payload published no premium extremes, so there is nothing for the " +
-        "boards to be joined against. The absence is in the payload, not in the overlap."));
+        "This movers payload published neither premium extreme, so there is nothing for " +
+        "the boards to be joined against. The absence is in the payload, not in the overlap."));
       panel.hidden = false;
       return;
     }
-    var longRows = (boardLong && Array.isArray(boardLong.rows)) ? boardLong.rows.length : 0;
-    var shortRows = (boardShort && Array.isArray(boardShort.rows)) ? boardShort.rows.length : 0;
-    var longVsPuts = crossBoard(boardLong, bearish);
-    var shortVsCalls = crossBoard(boardShort, bullish);
 
     var grid = el("div", "mk-movers-grid");
-    grid.append(againstList(
-      "Long board, in the largest net PUT premium",
-      longVsPuts,
-      "No long-board name appears in the session's largest net put premium."));
-    grid.append(againstList(
-      "Short board, in the largest net CALL premium",
-      shortVsCalls,
-      "No short-board name appears in the session's largest net call premium."));
+    var hits = 0, population = 0, joined = [], skipped = [];
+    sides.forEach(function (side) {
+      var boardRows = (side.board && Array.isArray(side.board.rows)) ? side.board.rows : [];
+      if (!Array.isArray(side.list)) {
+        skipped.push("the " + side.side + " board (" + boardRows.length + " name" +
+          (boardRows.length === 1 ? "" : "s") + ") could not be joined, because this " +
+          "payload published no ranking of " + side.ranking);
+        grid.append(againstColumn(side.title, emptyLine("unavailable",
+          "This movers payload published no ranking of " + side.ranking + ", so the " +
+          side.side + " board could not be read against it. Nothing here says the overlap " +
+          "is empty — it says the overlap was never taken.")));
+        return;
+      }
+      if (!boardRows.length) {
+        /* AN EMPTY BOARD IS NOT AN EMPTY OVERLAP EITHER. "No long-board name
+           appears in the largest net put premium" is true of a board with no
+           names on it and says nothing, and its board contributes nothing to
+           the denominator — a side with no population cannot be part of one. */
+        grid.append(againstColumn(side.title, emptyLine("quiet",
+          "The " + side.side + " board ranked no name this session, so there is nothing on " +
+          "this side to read against the tape. That is a fact about the board rather than " +
+          "about the overlap.")));
+        return;
+      }
+      var found = crossBoard(boardRows, side.list);
+      hits += found.length;
+      population += boardRows.length;
+      joined.push(boardRows.length + " " + side.side);
+      grid.append(againstColumn(side.title,
+        found.length ? againstRows(found) : emptyLine("quiet", side.empty)));
+    });
     host.append(grid);
 
     if (note) {
@@ -1517,17 +1804,25 @@
          zero here is weak evidence: the mover lists are capped extremes, not
          the universe, so a name can disagree with the tape and simply not be
          extreme enough to appear in either of them. */
-      var hits = longVsPuts.length + shortVsCalls.length;
-      note.textContent =
-        hits + " of " + (longRows + shortRows) + " published board names (" + longRows +
-        " long, " + shortRows + " short) appear in the opposite premium extreme this " +
-        "session. " +
-        "The board score is a residual — sector and size are divided out before the " +
+      var parts = [];
+      if (!population) {
+        /* NO POPULATION, NO RATIO. "0 of 0 published board names appear" is a
+           fraction over an empty set: it looks like a measurement of
+           agreement and is a statement that nothing was compared. */
+        parts.push("No board name was joined against the tape this session, so there is no " +
+          "population to state a count against.");
+      } else {
+        parts.push(hits + " of " + population + " published board names (" +
+          joined.join(", ") + ") appear in the opposite premium extreme this session.");
+      }
+      if (skipped.length) parts.push(skipped.join("; ") + ".");
+      parts.push("The board score is a residual — sector and size are divided out before the " +
         "ranking — while these premium lists are the raw level, so the two are allowed " +
-        "to disagree; a name where they do is one to read twice, not a signal to fade. " +
-        "Both mover lists are CAPPED extremes rather than the universe, so a name " +
+        "to disagree; a name where they do is one to read twice, not a signal to fade.");
+      parts.push("Both mover lists are CAPPED extremes rather than the universe, so a name " +
         "absent from them has not been shown to agree with the tape: it has only been " +
-        "shown not to be one of the session's loudest disagreements.";
+        "shown not to be one of the session's loudest disagreements.");
+      note.textContent = parts.join(" ");
     }
     panel.hidden = false;
   }
@@ -1574,7 +1869,14 @@
         if (r.status === 401) { location.replace("/flows/"); return null; }
         if (!r.ok) throw new Error("HTTP " + r.status);
         if (path === "/api/flows/market") {
-          marketUpdatedAt = Number(r.headers.get("X-Payload-Updated")) || null;
+          /* ABSENCE TESTED BEFORE THE COERCION. `Number(header) || null`
+             manufactures 0 out of a missing header and then leans on `||` to
+             catch the zero it has just made; flows-ui.js names that exact
+             shape as the reason the staleness test was lifted out of the
+             renderers. A non-positive stamp is an absent one. */
+          var stamp = r.headers.get("X-Payload-Updated");
+          var ms = (stamp === null || stamp === "") ? null : Number(stamp);
+          marketUpdatedAt = (ms !== null && isFinite(ms) && ms > 0) ? ms : null;
         }
         return r.json();
       });
