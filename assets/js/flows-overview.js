@@ -111,6 +111,17 @@
   const sessionsSaid = (n) => n + (n === 1 ? " session" : " sessions");
   const daysSaid = (n) => n + (n === 1 ? " calendar day" : " calendar days");
 
+  /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION. Six
+     regions on this page cap their rows and only the two poles said so. On
+     the watch region that was not an omission but a false statement: the
+     anchor read "all 12" over eight listed names, and it is a link to
+     /flows/watch/, the one route where a reader would have gone to check.
+     The poles' own sentence, in one place, so the six cannot drift apart in
+     how they say it. `of` is the published population wherever the payload
+     carries one — the row array is already capped on the wire, so counting
+     the rows in hand would state a ceiling as a census. */
+  const capSaid = (shown, of) => (of > shown ? shown + " of " + of : "all " + of);
+
   /* HUE IS CONFIRMATION, NEVER THE CARRIER. Every cell this tints already
      prints its own sign, so the colour repeats what the glyph says. */
   const tone = (v) => {
@@ -331,7 +342,17 @@
     const table = el("table", "cc-tbl");
     table.append(headRow([
       ["", "cc-rank"], ["Name", null], ["Score", "c-num"], ["Conv", "c-num"],
-      ["Chg", "c-num"], ["Net prem", "c-num"], [track.label, "cc-trk"],
+      /* TWO DIFFERENT CHANGES, TWELVE PIXELS APART. This cell is a session
+         PRICE return — close over the prior close — and the region seated
+         directly above this table is headed "What changed" and carries a
+         column of score moves. Both were spelled "Chg"/"change" and neither
+         header said which quantity it was, on a page whose whole argument is
+         that a delta means nothing without its unit. */
+      ["Px chg", "c-num",
+        "The session's price return: close over the prior close. Not the " +
+        "score move — that is the \u0394 score column in the region above, " +
+        "and it is in score points."],
+      ["Net prem", "c-num"], [track.label, "cc-trk"],
     ]));
 
     const body = el("tbody");
@@ -430,6 +451,12 @@
       label: sessions ? sessions + " sessions" : "Score track",
     };
   }
+
+  /* The region shell's own subtitle, verbatim: flows-pages.js ships it as
+     the span's default text and this file re-states it whenever it prefixes
+     a count onto it. A "prior scored session" is the previous session the
+     name was SCORED, which is the distinction the whole region turns on. */
+  const CHANGE_SAID = "since each name's prior scored session";
 
   /* ---------- what changed: the page's lead region -----------------
 
@@ -563,6 +590,17 @@
    * output could not be told apart from an overnight move.
    */
   function paintChanged(into, payload, cards, evBy, boardBy) {
+    /* THE HEADER SAYS HOW MANY OF THE MOVERS THE TABLE IS SHOWING. This
+       region caps at twelve and its subtitle was a static span with no slot
+       in it, so a session in which thirty-four names moved presented twelve
+       rows under a sentence that named no count at all — an index read as a
+       population. The prose stays the document's; only the count is written
+       here, and only on the branch that actually drew rows. */
+    const sub = host("ccChgSub");
+    const saySub = (said) => {
+      if (sub) sub.textContent = said ? said + " · " + CHANGE_SAID : CHANGE_SAID;
+    };
+    saySub(null);
     if (silent(into, payload, "score track")) return;
 
     const names = Array.isArray(payload.names) ? payload.names : [];
@@ -650,7 +688,12 @@
     const p = el("p", "cc-quiet cc-lede", lede);
     into.append(p);
 
-    const wrap = tableWrap("What changed since each name's prior scored session");
+    /* THE MOVERS ON THIS PAYLOAD, not the pooled population the lede states.
+       The two are different numbers whenever the row ceiling shed rows, and
+       the lede above already carries the pooled one with its denominator. */
+    saySub(capSaid(Math.min(moves.length, CHANGE_MAX), moves.length));
+
+    const wrap = tableWrap("What changed " + CHANGE_SAID);
     const table = el("table", "cc-tbl");
     table.append(headRow([
       ["Event", null, notes.crossing || null],
@@ -805,7 +848,17 @@
        number that does not exist. */
     let alertNote = "not read";
     if (alerts && alerts.status === "pending") alertNote = "not published yet";
-    else if (alerts) alertNote = alerts.refreshed === "intraday" ? "refreshed intraday" : "nightly read";
+    /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. The
+       else-branch used to print "nightly read" for every payload that was
+       not explicitly intraday, so a payload predating the field asserted a
+       provenance nobody published — the confident default wearing a
+       ternary. Both current writers set it; the one that does not is
+       exactly the reader this sentence is for. */
+    else if (alerts) {
+      alertNote = alerts.refreshed === "intraday" ? "refreshed intraday"
+        : alerts.refreshed === "nightly" ? "nightly read"
+          : "read, cadence not published";
+    }
 
     /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE.
        breadth.tilt counts names, premium.tilt weights dollars; they are the
@@ -823,7 +876,13 @@
     const DISAGREE_SAID = "the two weightings disagree in sign";
 
     const tiles = [
-      ["Session", (long && long.sessionDate) || DASH, "", null],
+      /* EITHER HALF CAN NAME THE SESSION. This read the long board alone,
+         so a long board that did not answer — or has not published yet —
+         put an em dash here while the short board in the same closure
+         carried the date. Neither half is the page's session; they are two
+         writes of one, and the mismatch warning below already fires when
+         they disagree. */
+      ["Session", (long && long.sessionDate) || (short && short.sessionDate) || DASH, "", null],
       ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), "names", null],
       /* EACH SHARE NAMES THE POPULATION IT IS A SHARE OF, and neither
          population is "names" or "premium" in the loose sense the first
@@ -1347,14 +1406,36 @@
     return body;
   }
 
+  /* THE ONE ANSWER THAT IS NOT A REGION'S TO CONTAIN. A 401 says the
+     session is gone and the page is already navigating to the gate, so
+     nothing below may paint over it. It is a FLAG rather than a null return
+     because null is now also what an unreadable board answers, and the two
+     must not be told apart by the same value. */
+  let gated = false;
+
+  /* A BOARD THAT DID NOT ANSWER BLANKS ONE REGION, NOT SEVEN.
+
+     This threw on every non-OK status and had no catch for a network
+     failure, so a 500 on either pole — or an offline laptop, or a TLS
+     error — rejected the Promise.all and skipped the whole render. The five
+     region payloads that HAD come back were parsed and thrown away, and the
+     page came up as seven empty labelled shells with not one of the four
+     silences in any of them: the fetch-then-discard pattern this page exists
+     to end, surviving in the failure path.
+
+     Null is the answer loadRegion already gives, `silent()` already knows
+     the sentence for it, and the containment doctrine three comments below
+     — "an events calendar that does not answer must not blank the five
+     regions that did" — is not a rule the two boards were ever exempt
+     from. */
   function loadBoard(side) {
     return fetch("/api/flows/board?side=" + side, {
       credentials: "same-origin", headers: { Accept: "application/json" },
     }).then((r) => {
-      if (r.status === 401) { location.replace("/flows/"); return null; }
-      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
+      if (!r.ok) return null;
       return r.json().then((body) => stampUpdated(r, body));
-    });
+    }).catch(() => null);
   }
 
   function loadRegion(path) {
@@ -1372,7 +1453,11 @@
     loadRegion("/api/flows/events"),
     loadRegion("/api/flows/scoretrack"),
   ]).then(([lng, sht, watch, market, alerts, events, track]) => {
-    if (!lng && !sht) return;
+    /* ONLY the redirect stops the render. Two boards that both failed to
+       read still leave five regions with something true to say, and the
+       version of this guard that tested `!lng && !sht` could not tell a
+       navigation in progress from two contained failures. */
+    if (gated) return;
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);
@@ -1443,28 +1528,76 @@
     if (alr) { alr.replaceChildren(); paintAlerts(alr, alerts); }
     const alrSub = host("ccAlertsSub");
     if (alrSub) {
-      const read = alerts && alerts.readAt ? Date.parse(alerts.readAt) : NaN;
-      alrSub.textContent = Number.isFinite(read) ? "read " + new Date(read).toLocaleTimeString() : "";
+      const said = [];
+      /* THE CAP AND THE POPULATION, WHICH THE PAYLOAD PUBLISHES. `seen` is
+         the whole read — shared/flows-alerts.js says in so many words that
+         it exists so a page can write "N of SEEN" — and this region shows
+         eight. "Flagged windows 44" sat in the verdict tile beside a list of
+         eight with nothing anywhere saying eight. */
+      const alrRows = alerts && alerts.status !== "pending" && Array.isArray(alerts.rows)
+        ? alerts.rows : null;
+      if (alrRows) {
+        const seen = isNum(alerts.seen);
+        said.push(capSaid(Math.min(alrRows.length, LIST_MAX),
+          seen === null ? alrRows.length : seen));
+      }
+      /* THE INSTANT, WITH A ZONE ON IT AND NO SECONDS. A bare
+         toLocaleTimeString follows the viewer's 12/24-hour locale, prints a
+         seconds field this feed cannot support, and names no zone at all —
+         on a subtitle whose entire subject is WHEN the read was taken. The
+         wall clock is the viewer's, so /flows/unusual/ and this page still
+         show the same number for the same instant; the zone is stated so the
+         number means something. */
+      const read = alerts && typeof alerts.readAt === "string" ? Date.parse(alerts.readAt) : NaN;
+      if (Number.isFinite(read)) {
+        said.push("read " + new Date(read).toLocaleTimeString([], {
+          hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
+        }));
+      }
+      alrSub.textContent = said.join(" · ");
     }
 
     const evr = host("ccEvents");
     if (evr) { evr.replaceChildren(); paintEvents(evr, events); }
     const evSub = host("ccEventsSub");
     if (evSub) {
+      /* THE DENOMINATOR WAS NAMED AND THE NUMERATOR NEVER WAS. "24 in the
+         window" over eight rows is the same omission as the watch anchor,
+         one clause shorter. `inWindow` counts the names the calendar found;
+         `rows` is already capped at 200 on the wire and again at eight
+         here. */
+      const evRows = events && events.status !== "pending" && Array.isArray(events.rows)
+        ? events.rows : null;
       const inWindow = isNum(events && events.inWindow);
-      evSub.textContent = inWindow === null ? "" : inWindow + " in the window";
+      evSub.textContent = evRows === null ? ""
+        : capSaid(Math.min(evRows.length, LIST_MAX),
+            inWindow === null ? evRows.length : inWindow) + " in the window";
     }
 
     const wtc = host("ccWatch");
     if (wtc) { wtc.replaceChildren(); paintWatch(wtc, watch); }
     const wtcSub = host("ccWatchSub");
     if (wtcSub) {
+      /* THE ONE THAT WAS NOT AN OMISSION BUT A CONTRADICTION. `rowCount` is
+         the whole published board — capped at 80 by the publisher — and this
+         region lists eight of it, so with twelve on the wire the anchor read
+         "all 12" over eight names. The word was "all" and the link goes to
+         the one page where the reader could have counted. */
       const n = rowCount(watch);
-      wtcSub.textContent = n === null ? "inside the dead band" : "all " + n;
+      wtcSub.textContent = n === null
+        ? "inside the dead band" : capSaid(Math.min(n, LIST_MAX), n);
     }
 
     /* ---- the spine, over the whole published distribution ---- */
-    const meta = lng || sht || {};
+    /* A PENDING ENVELOPE IS TRUTHY AND CARRIES NOTHING. The worker answers
+       an unpublished key with {status:"pending", rows: []}, so `lng || sht`
+       chose the empty envelope over a published short board and the spine
+       then drew an axis labelled "no dead band published for this session"
+       while the payload three lines away carried one — and the status line
+       lost its session date and its band counts the same way. Same guard
+       `rowCount` has carried since the pending envelope existed. */
+    const answered = (p) => (p && p.status !== "pending" ? p : null);
+    const meta = answered(lng) || answered(sht) || lng || sht || {};
     meta.__bull = bull;
     meta.__bear = bear;
     meta.__moves = new Map(Object.entries(trk.moveBy));
@@ -1504,7 +1637,17 @@
       (bearN === null ? DASH : bearN) + " bearish");
     if (meta.sessionDate) parts.push("session " + meta.sessionDate);
     if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
-    statusEl.textContent = parts.join(" · ") + ".";
+    /* AND A BOARD THAT DID NOT ANSWER IS NAMED HERE. The em dash the count
+       falls back to is the right glyph for "not known" and it is the same
+       glyph five other absences print, so on its own it cannot tell a reader
+       that a fetch failed. The line that reports on this page is where that
+       belongs. */
+    const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
+    statusEl.textContent = parts.join(" · ") + "." + (unread.length
+      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
+        " could not be read, so " + (unread.length > 1 ? "neither side is" : "that side is not") +
+        " on this page. Refresh to try again."
+      : "");
 
     setRailCount("long", bullN);
     setRailCount("short", bearN);

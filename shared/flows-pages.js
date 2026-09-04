@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "97";
+export const ASSET_VERSION = "98";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -344,7 +344,13 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
     <section class="cc-region cc-chg" aria-labelledby="ccChgH">
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccChgH">What changed</h2>
-        <span class="cc-h-s">since each name&#39;s prior scored session</span>
+        <!-- A SLOT, and its default text is the whole truth when nothing
+             fills it. The region caps at twelve rows and this span said no
+             count at all, so a session in which thirty-four names moved
+             showed twelve under a subtitle a reader takes for the whole
+             list. flows-overview.js prefixes the count it drew, and only on
+             the branch that drew rows. -->
+        <span class="cc-h-s" id="ccChgSub">since each name&#39;s prior scored session</span>
       </div>
       <div class="cc-body" id="ccChg"></div>
     </section>
