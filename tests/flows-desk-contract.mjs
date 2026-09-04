@@ -1482,6 +1482,18 @@ try {
   {
     const racer = await context.newPage();
     racer.on("pageerror", (e) => pageErrors.push(String(e)));
+    /* THIS BLOCK MUST RUN WITH NO DEBOUNCE, AND SAYING SO IS THE POINT.
+
+       The two selectOption calls below fire back to back. The re-rank refetch
+       is debounced, so at the shipped 250ms they would coalesce: the premium
+       request would never be sent, the 1500ms hold below would never happen,
+       and every assertion in this block would pass while testing nothing —
+       there would be no superseded slice to be overwritten by.
+
+       That is why the delay is injectable rather than a constant. A hard-coded
+       debounce would not merely have been untestable; it would have voided
+       this block silently, which is worse than a red suite. */
+    await racer.addInitScript(() => { window.__flowsRankDebounceMs = 0; });
     await racer.route("**/api/flows/chain**", async (route) => {
       const rank = new URL(route.request().url()).searchParams.get("rank");
       if (rank === "premium") await new Promise((r) => setTimeout(r, 1500));
@@ -1507,6 +1519,59 @@ try {
     eq(await racer.locator("#deskRank").inputValue(), "cushionSigmas",
        "the select and the table agree about which question was answered");
     await racer.close();
+  }
+
+  /* ---------- the re-rank refetch waits for the reader to settle ----
+     A reader holding the down arrow crosses several distinct wire keys. Each
+     one used to send every CUT symbol back to the chain immediately, so three
+     steps bought three rounds of metered calls for two orderings nobody
+     looked at.
+
+     The waste was always narrower than "a call per step" — an uncut symbol has
+     never been refetched at any key, and serverRank() collapses "collectible"
+     onto "yield on collateral" so those two are free to step between. What it
+     cost was arrowing across DISTINCT keys with a cut chain on screen, which
+     is exactly what this block does. */
+  {
+    const stepper = await context.newPage();
+    stepper.on("pageerror", (e) => pageErrors.push(String(e)));
+    await stepper.addInitScript(() => { window.__flowsRankDebounceMs = 150; });
+    const asked = [];
+    await stepper.route("**/api/flows/chain**", async (route) => {
+      asked.push(new URL(route.request().url()).searchParams.get("rank"));
+      await route.continue();
+    });
+    await stepper.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized",
+      { waitUntil: "domcontentloaded" });
+    await stepper.waitForFunction(
+      () => document.querySelectorAll("#deskBody tr").length === 120, null, { timeout: 20000 });
+    const settled = asked.length;
+    ok(settled > 0,
+       "the first load spends its calls, so the count below is a measurement of the " +
+       "re-ranking rather than of an empty page");
+
+    await stepper.selectOption("#deskRank", "premium");
+    await stepper.selectOption("#deskRank", "cushionSigmas");
+    await stepper.selectOption("#deskRank", "yieldOnCollateral");
+
+    /* THE LOCAL WORK IS NOT DEFERRED, and this is asserted before the wait so
+       a passing debounce cannot be hiding a frozen page: the URL and the table
+       answer the last key immediately, while only the vendor call waits. */
+    eq(await stepper.locator("#deskRank").inputValue(), "yieldOnCollateral",
+       "the select holds the key the reader landed on");
+    ok(/rank=yieldOnCollateral/.test(stepper.url()),
+       `and the URL already tracks it, without waiting for any refetch (${stepper.url()})`);
+
+    await stepper.waitForTimeout(700);
+    const spent = asked.slice(settled);
+    eq(spent.length, 1,
+       `three distinct keys crossed in a burst spend ONE round of calls, not three ` +
+       `(sent: ${JSON.stringify(spent)}) — the two orderings the reader passed through ` +
+       `were never asked for`);
+    eq(spent[0], "yieldOnCollateral",
+       "and the one that is sent is for the key on screen, not for a key the reader " +
+       "has already left");
+    await stepper.close();
   }
 
   /* ---------- a response with no age header is not an age of zero --

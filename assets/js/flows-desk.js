@@ -2329,6 +2329,44 @@
     });
   }
 
+  /* ---------- the re-rank refetch, once the reader has settled ------
+
+     ARROWING THROUGH THE SELECT SPENT A VENDOR CALL PER STEP THAT LANDED ON A
+     DISTINCT KEY. Not per step — the branch below already declines to refetch
+     an uncut symbol, and serverRank() maps two adjacent options onto one wire
+     key, so stepping between "premium collectible" and "yield on collateral"
+     has always cost nothing. What it did cost was a reader holding the down
+     arrow across four distinct keys with a cut chain selected: four rounds of
+     calls for three orderings nobody looked at.
+
+     ONLY THE VENDOR SPEND IS DEFERRED. writeURL() and render() stay immediate,
+     so the URL tracks the select and the local re-sort is instant. What waits
+     is runPool(), and only for the names whose chain was cut — the ones where
+     the key chose the rows rather than ordering them.
+
+     THE PENDING CALL IS CANCELLED ON EVERY CHANGE, including a change to a key
+     with nothing to recut. Otherwise arrowing from a cut key to a clean one
+     would fire a refetch for an ordering the reader had already left.
+
+     THE DELAY IS INJECTABLE, AND THAT IS NOT A CONVENIENCE. A hard-coded delay
+     here would not merely be hard to test — it would SILENTLY VOID AN EXISTING
+     TEST. tests/flows-desk-contract.mjs fires two selectOption calls back to
+     back and holds the first response 1500ms, to prove a superseded slice
+     never overwrites the one the reader asked for. Any debounce longer than
+     the gap between those two calls coalesces them: the first request is never
+     sent, the held response never arrives, and every assertion in that block
+     passes while testing nothing. That block injects 0.
+
+     Read at call time rather than captured at load, so a test can set it
+     before navigation or after, and a value that is absent or unparseable
+     falls back to the shipped default rather than to zero. */
+  const RANK_REFETCH_MS = 250;
+  const rankDebounceMs = () => {
+    const v = Number(window.__flowsRankDebounceMs);
+    return Number.isFinite(v) && v >= 0 ? v : RANK_REFETCH_MS;
+  };
+  let rankRefetchTimer = null;
+
   for (const sel of [strategySel, rankSel]) {
     if (!sel) continue;
     sel.addEventListener("change", () => {
@@ -2403,7 +2441,23 @@
            gone before it can be read. The durable place for this is the
            footnote, which says the cut and now says what a re-rank does about
            it — before the reader changes the key, rather than after. */
-        if (recut.length) runPool(recut, {});
+        /* CANCEL FIRST, UNCONDITIONALLY. A pending refetch belongs to a key
+           the reader has now left, and that is true whether or not the new key
+           has anything of its own to send. */
+        if (rankRefetchTimer !== null) {
+          clearTimeout(rankRefetchTimer);
+          rankRefetchTimer = null;
+        }
+        if (!recut.length) return;
+        const wait = rankDebounceMs();
+        if (wait === 0) { runPool(recut, {}); return; }
+        /* `recut` is this key's list, captured deliberately: if another change
+           follows, this timer is cleared above and its list never runs, so the
+           call that does fire is always the one for the key on screen. */
+        rankRefetchTimer = window.setTimeout(() => {
+          rankRefetchTimer = null;
+          runPool(recut, {});
+        }, wait);
       }
     });
   }
