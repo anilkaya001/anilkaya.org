@@ -304,6 +304,22 @@ try {
       const cs = getComputedStyle(el);
       return { position: cs.position, top: cs.top, bg: cs.backgroundColor };
     });
+    /* AND `hidden` HIDES. `[hidden] { display: none }` is a USER-AGENT rule and
+       any author `display` beats it on cascade origin, so every element this
+       product toggles with `el.hidden` that also carries a layout rule was
+       never hidden. With no ?t= this route is the name picker, and under it
+       #ftGrid laid out its twenty-one panel shells anyway — an empty bordered
+       box per panel — with an empty identity header above them. That is the
+       failure case this assertion reproduces: it fails on the build before
+       the `[hidden]` reset in base.css, on this exact route. */
+    await page.goto(url("/flows/ticker/"), { waitUntil: "load" });
+    const leaked = await page.evaluate(() => [...document.querySelectorAll("[hidden]")]
+      .filter((n) => getComputedStyle(n).display !== "none")
+      .map((n) => (n.id || n.className || n.tagName) + " → " + getComputedStyle(n).display));
+    assert.deepEqual(leaked, [],
+      "every element marked hidden is actually not laid out");
+    checks++;
+
     ok(head, "the ticker page emits its identity block");
     eq(head.position, "sticky", "and it is pinned rather than scrolled away");
     eq(head.top, "0px", "at the top of the viewport");

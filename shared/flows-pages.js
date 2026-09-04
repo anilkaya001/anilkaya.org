@@ -395,8 +395,8 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
 
   </div>
 
-  <!-- THE NUMBER THAT WAS A CLAIM. This footer named an expected hit rate,
-       to the tenth of a percent, on the landing page of a paid product, for
+  <!-- THE NUMBER THAT WAS A CLAIM. This footer named an expected hit rate as
+       a two-point range, on the landing page of a paid product, through
        months in which the store could not hold a past and nothing was being
        measured at all — the exact defect the track record was built to
        correct, restated as a literal in the one file that is not allowed to
