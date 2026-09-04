@@ -138,11 +138,59 @@ function fakeClock() {
 
   for (const bad of [0, -1, NaN, null, undefined, "soon"]) {
     const at = clock.now();
-    q.defer(bad);
+    eq(q.defer(bad), 0,
+       `defer(${JSON.stringify(bad)}) is ignored rather than corrupting the schedule, and ` +
+       `reports having added nothing rather than reporting NaN into a meter`);
     await q.acquire();
     ok(clock.now() - at <= 100,
        `defer(${JSON.stringify(bad)}) is ignored rather than corrupting the schedule`);
   }
+}
+
+/* ---------- 4b. what a defer ADDED, which is not what it was asked for ----
+   THE VOLLEY IS THE CASE THAT MATTERS. Six callers holding permits are refused
+   inside one backoff window. Each asks the queue to back off by the full
+   Retry-After; the FIRST moves the wall, and the other five find it already
+   further out than their own target and move it by nothing.
+
+   Charging every caller the full amount counts one wall six times, and the
+   run's meter then reports refusals as six times more expensive than they
+   were — on the exact number describeFloorVerdict weighs when it recommends
+   moving RATE.floorCeilingMs. The caller's own stall is still real and is
+   still summed separately; this return value is the other reading, in
+   run-seconds rather than caller-seconds, and neither is derived from the
+   other. */
+{
+  const clock = fakeClock();
+  const q = makePermitQueue({ delayMs: () => 100, now: clock.now, sleep: clock.sleep });
+  await q.acquire();
+
+  /* 4900 RATHER THAN 5000, AND THE 100 IS THE POINT. The acquire above already
+     booked the next slot one delay out, so a 5s backoff does not add 5s to the
+     run — it adds 5s MINUS the 100ms the queue was going to spend anyway. What
+     defer reports is the marginal push over what was already scheduled, which
+     is the only version of the number that can be summed across a run without
+     double-counting the floor. The first draft of this assertion expected 5000
+     and the queue was right. */
+  const first = q.defer(5000);
+  eq(first, 4900,
+     "the first caller refused in a window moves the wall by the backoff MINUS the delay the " +
+     "queue had already booked, and defer reports that increment rather than the request");
+
+  const second = q.defer(5000);
+  eq(second, 0,
+     "a second caller refused in the SAME window asks for the same 5s, finds the wall already " +
+     "there, and is charged 0 — six coalesced refusals cost the run one wall, not six");
+
+  const longer = q.defer(8000);
+  eq(longer, 3000,
+     "a refusal asking for MORE than the wall already holds is charged only the difference it " +
+     "actually added (8000 asked, 5000 already standing, 3000 added) — the increment, never " +
+     "the request");
+
+  ok(q.defer(1) === 0,
+     "and a defer shorter than the standing wall adds nothing, so it cannot credit the meter " +
+     "for a backoff the queue never served");
 }
 
 /* ---------- 5. in-flight is paired, and a throw still releases ----- */
@@ -245,6 +293,7 @@ function fakeClock() {
 
 console.log(`✓ flows-permits: ${checks} assertions — requests that leave exactly delayMs apart ` +
   `whether one caller or three enter together, a floor raised mid-run governing every slot booked ` +
-  `after it, a 429 that backs off the whole queue and never pulls it forward, an in-flight count ` +
-  `that survives a throw and a double release, and the saving stated as arithmetic rather than ` +
-  `as a claim`);
+  `after it, a 429 that backs off the whole queue and never pulls it forward, a defer that ` +
+  `reports the increment it ADDED rather than the backoff it was asked for so a coalesced ` +
+  `volley cannot be charged once per caller, an in-flight count that survives a throw and a ` +
+  `double release, and the saving stated as arithmetic rather than as a claim`);

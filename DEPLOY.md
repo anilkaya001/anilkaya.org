@@ -504,7 +504,9 @@ is how this product asserted a hit rate in its own footer for months while
 being structurally incapable of measuring one.
 
 Retention is 126 calendar days (~90 trading sessions, nine times the 10-session
-forecast horizon). Steady state is about 180 rows and +2 row writes per run,
+forecast horizon). Steady state is about 270 rows and +3 row writes per run
+(`scores:<date>` alongside the two dated boards; it said 180 and +2 until the
+`scores:` key joined the archive and the multiplication was not re-run),
 against a 100,000/day budget **shared with the live learning app**.
 
 The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
@@ -523,8 +525,9 @@ does not ratify it, and the track-record page says so.
 
 **THE SCORER READS THE ARCHIVE BACK, AND THAT READ HAS A BUDGET.** Step 7c'
 walks the retention window newest-first and `GET`s each dated key through the
-ingest route: at steady state ~180 sequential reads per run (126 calendar days
-× 5/7 weekdays × 2 sides), once daily, against the same 100,000/day row budget
+ingest route: at steady state ~270 sequential reads per run (126 calendar days
+× 5/7 weekdays × 3 keys — `scores`, `long` and `short`), once daily, against
+the same 100,000/day row budget
 shared with the learning app. It is worker reads only — no vendor call — so it
 sits outside the 30-minute deadline calculus, and it runs after today's boards,
 archive, watch list and movers are all committed, so a failure inside it can
@@ -715,7 +718,7 @@ fifty calls are spent, but the scalars have to reach the DATED row or their
 history never accumulates. At final state the two copies are byte-identical.
 
 VENDOR CALLS ONLY. Two legs read the Worker's own store rather than the
-vendor: the 2 hysteresis reads above, and the track-record scorer's ~180
+vendor: the 2 hysteresis reads above, and the track-record scorer's ~270
 archive reads (§10.4b). Neither touches the Unusual Whales quota or the
 rate limiter, and neither is counted in the 521. The re-publish adds 4 more
 Worker writes (2 sides x dated + live). The truncation probe adds at most 1.

@@ -626,7 +626,24 @@ const PUBLISH_SPACING_MS = 150;
    spent ON THE WIRE, and what it spent BEING REFUSED. */
 const stats = {
   calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
-  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0,
+  /* THREE OF THESE ARE PER-CALLER SUMS AND ONE IS NOT, and mixing them is how
+     a meter starts lying about its own run.
+
+     permitWaitMs, networkMs and rateLimitWaitMs accumulate what each CALLER
+     experienced. With four permits outstanding, four callers wait at once, so
+     these sums can exceed the run's wall clock — legitimately, because they
+     are caller-seconds and not run-seconds. Their RATIOS to each other survive
+     that (concurrency inflates all three about equally), which is why
+     describeFloorVerdict compares backoff against queueing and not against
+     elapsed.
+
+     rateLimitQueueMs is the odd one: it is what the permit QUEUE was pushed
+     back by, summed once per refusal that actually moved it, so it IS in
+     run-seconds. It exists because a coalesced volley of refusals costs the
+     run one wall and costs the callers N. Both are true; neither is derivable
+     from the other; so they travel under separate names. Do not put this one
+     into a ratio with the three above. */
+  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
 };
 let delayMs = RATE.startDelayMs;
 
@@ -968,7 +985,15 @@ async function uw(path, params = {}) {
          that distinction did not exist — there was only ever one caller in
          flight. With permits outstanding, letting the others walk into the
          same wall is how one 429 becomes six. */
-      permits.defer(wait);
+      /* TWO CHARGES FOR ONE REFUSAL, because they are two different questions.
+         `rateLimitWaitMs` is what THIS CALLER lost and is summed across every
+         caller; `rateLimitQueueMs` is what the QUEUE was pushed back by, which
+         defer() returns as 0 when another caller already moved the wall
+         further out than this one asked for. Six callers refused inside one
+         window cost six caller-waits and one run-wait, and a meter that
+         reports only the first makes a coalesced volley look six times as
+         expensive as it was. */
+      stats.rateLimitQueueMs += permits.defer(wait);
       stats.rateLimitWaitMs += wait;
       await sleep(wait);
       continue;
@@ -2284,9 +2309,10 @@ const candleDate = (c) => {
 
 /**
  * Every dated board still in the store, walked newest-first over the
- * retention window. ~180 sequential worker reads on a full archive
- * (126 days x 5/7 weekdays x 2 sides), documented in DEPLOY.md beside the
- * shared D1 budget. In a dry run there is no store, so the current boards
+ * retention window. ~270 sequential worker reads on a full archive
+ * (126 days x 5/7 weekdays x 3 KEYS — scores, long and short), documented in
+ * DEPLOY.md beside the shared D1 budget. In a dry run there is no store, so
+ * the current boards
  * are replayed at prior candle dates — synthetic sessions over synthetic
  * closes, exercising every joint in the scorer with numbers a contract
  * test can recompute.
@@ -2517,10 +2543,13 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
     for (const what of ["scores", "long", "short"]) {
       probed++;
 
-      /* PACED. This walk is up to 180 reads against a route that sits behind
+      /* PACED. This walk is up to 270 reads against a route that sits behind
          Cloudflare, and the run has already seen it answer a WRITE with 403
          under burst. Unpaced it finished 180 requests in thirteen seconds —
-         about fourteen a second, which is the shape a rate rule bites. The
+         about fourteen a second, which is the shape a rate rule bites. (That
+         measurement was taken on a 180-key walk, before `scores:` joined it;
+         the RATE it establishes is what matters here and that does not change
+         with the key count.) The
          delay costs seconds on a leg that spends no vendor call and sits
          outside the deadline calculus, so it is the cheapest thing here. */
       if (probed > 1) await sleep(ARCHIVE_READ_PACE_MS);
@@ -2579,7 +2608,7 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
      fetchStoredPayload() returns null for an absent key and null for a failed
      read — the two are indistinguishable from here, and no amount of care at
      this call site changes that. What CAN be stated is the denominator: a
-     `retained: 0` that probed 180 keys is a cold archive, and a `retained: 0`
+     `retained: 0` that probed 270 keys is a cold archive, and a `retained: 0`
      that probed 0 is a broken date. Without this the page can only say "zero",
      which is the one thing a reader already knows by looking at it. */
   return { boards, scoreDays, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
@@ -3699,9 +3728,20 @@ function summarize(payload) {
    more would not fix that. The point of the window is to make the claim
    MEASURABLE and its uncertainty STATEABLE, not to ratify the footer.
 
-   Steady-state cost: 90 x 2 = 180 rows, and two writes a day. The keys are
-   dated by CALENDAR date, so the retention window is expressed in calendar
-   days; this constant is the one place the two units meet. */
+   Steady-state cost: 90 weekdays x 3 keys = 270 rows, and three writes a day.
+
+   IT SAID 90 x 2 = 180 UNTIL THIS COMMIT, and the arithmetic was right when it
+   was written: the archive held the two boards. `scores:<date>` joined it
+   later (published at the scorer, swept by pruneArchive, and walked by
+   collectDatedBoards alongside the two sides) and neither multiplication here
+   nor the two in DEPLOY.md was re-run. Same shape as the EVENT_ROWS comment
+   corrected one commit ago: every figure true when written, invalidated by a
+   field added elsewhere, and then read INSTEAD of being re-measured — against
+   a row budget shared with the live learning app, where a third of the real
+   cost going unstated is the part that matters.
+
+   The keys are dated by CALENDAR date, so the retention window is expressed in
+   calendar days; this constant is the one place the two units meet. */
 const ARCHIVE_RETENTION_DAYS = 126;
 
 /* How far past the retention edge one run sweeps.
@@ -5552,7 +5592,10 @@ async function main() {
      Neither of these spends a vendor call. `collectDatedBoards` walks up to
      126 calendar days x 3 keys against the Cloudflare Worker at
      ARCHIVE_READ_PACE_MS plus round trip — the file's own measurement is 180
-     unpaced requests in thirteen seconds, so paced it is ~30s. `pruneArchive`
+     unpaced requests in thirteen seconds, i.e. about 14/s, and 270 keys at
+     ARCHIVE_READ_PACE_MS=40 is ~11s of pacing plus 270 round trips. The ~30s
+     this line used to state came from the 180-key walk; the walk is 270 keys
+     now and the estimate moved with it. `pruneArchive`
      names 90 dated keys and pays PUBLISH_SPACING_MS after each DELETE, of
      which in steady state exactly three match anything — ~20s, most of it
      spent being told 404 by a route that was never going to have the row.
@@ -7688,16 +7731,43 @@ async function main() {
      `refused` is small against `queued`, the floor is too conservative and can
      come down; if it rivals `queued`, the ceiling is doing its job and must
      not move. Those are numbers, not intuitions, which was the whole ask. */
-  const pct = (ms) => `${(ms / 1000).toFixed(1)}s (${(100 * ms / Math.max(elapsed * 1000, 1)).toFixed(0)}% of the run)`;
-  console.log(
-    `wall clock: queued ${pct(stats.permitWaitMs)}` +
-    ` | wire ${pct(stats.networkMs)}` +
-    ` | refused ${pct(stats.rateLimitWaitMs)}` +
-    ` | peak in flight ${permits.stats().peakInFlight}` +
-    (stats.calls
-      ? ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
-        `${Math.round(stats.networkMs / stats.calls)}ms wire`
-      : ""));
+  /* A PER-CALLER SUM DIVIDED BY WALL CLOCK IS NOT A SHARE OF THE RUN, and
+     this line printed it as one. Each of these three accumulates per CALLER;
+     with four permits outstanding four callers wait simultaneously, so the sum
+     counts four seconds for one second of run. At peak width the total could
+     read "340% of the run" — a percentage of elapsed time that exceeds elapsed
+     time, which is not a quantity. It was correct exactly while the pipeline
+     was serial, and the permit queue is what stopped it being correct.
+
+     So: absolute caller-seconds, labelled as caller-seconds, plus the per-call
+     means — which ARE well defined at any width because both numerator and
+     denominator are per call. The one number in run-seconds is `queue`, and it
+     is printed beside `refused` precisely so the gap between them is visible:
+     that gap is the concurrency the pool bought back. */
+  const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
+  if (!stats.calls) {
+    /* THE THREE SILENCES, ON THE RUN'S OWN METER. A run that made no vendor
+       call did not measure a queue of zero, a wire of zero and a backoff of
+       zero — it measured nothing at all, and printing three 0.0s says the
+       opposite. This is the dry run's ordinary shape, and it is the reading
+       poolWidth() and describeFloorVerdict() both already refuse to draw a
+       conclusion from. */
+    console.log(
+      "wall clock: no vendor call was made, so queueing, wire time and backoff were not " +
+      "measured this run — these are absent readings rather than zero ones, and nothing " +
+      "about the floor can be concluded from them.");
+  } else {
+    console.log(
+      `wall clock over ${secs(elapsed * 1000)} elapsed, summed per caller: ` +
+      `queued ${secs(stats.permitWaitMs)}` +
+      ` | wire ${secs(stats.networkMs)}` +
+      ` | refused ${secs(stats.rateLimitWaitMs)}` +
+      ` (the queue itself was pushed back ${secs(stats.rateLimitQueueMs)}, which is the ` +
+      `run-seconds the refusals actually cost)` +
+      ` | peak in flight ${permits.stats().peakInFlight}` +
+      ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
+      `${Math.round(stats.networkMs / stats.calls)}ms wire`);
+  }
   if (stats.networkMs > 0 && permits.stats().peakInFlight <= 1) {
     console.log(
       "  peak in flight was 1, so no round trip ever overlapped another: the vendor answers " +

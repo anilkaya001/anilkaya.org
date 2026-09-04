@@ -145,10 +145,24 @@ export function makePermitQueue({ delayMs, now, sleep, maxInFlight = 6, onReserv
      * outstanding it is the difference between one 429 and six, because the
      * calls already holding a slot would otherwise walk into the same wall.
      */
+    /* RETURNS THE MILLISECONDS IT ACTUALLY ADDED, which is not the same as the
+       milliseconds it was asked for. Two callers refused inside the same
+       window both ask for the full backoff; the first moves `nextAt`, and the
+       second finds it already further out than its own target and moves it by
+       nothing. Charging both the full amount counts one wall twice.
+
+       The caller still sleeps what it was told to sleep — that is the caller's
+       own stall, and it overlaps every other caller's. This return value is
+       the other quantity: what the QUEUE was pushed back by, which is what the
+       run as a whole lost. They are two readings of one refusal and the meter
+       keeps them under two names rather than deriving either from the other. */
     defer(ms) {
       const n = Number(ms);
-      if (!Number.isFinite(n) || n <= 0) return;
-      nextAt = Math.max(nextAt, now() + n);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      const target = now() + n;
+      const added = Math.max(0, target - nextAt);
+      nextAt = Math.max(nextAt, target);
+      return added;
     },
 
     /** What the queue did, for the run's own meter. */
