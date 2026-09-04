@@ -4091,6 +4091,24 @@ body.is-stale .flows-tablewrap {
 .st-input { width: 12rem; max-width: 100%; }
 .st-select { min-width: 0; max-width: 100%; }
 
+/* The board's match denominator, a flex sibling of the two fields rather
+   than a third field — it has no label and no control, so `align-items:
+   flex-end` on .st-controls sits it on their baseline without one.
+
+   IT IS THE HALF OF A FILTER THAT KEEPS IT FROM READING AS A POPULATION.
+   "8 of 63 names match NVDA" states the pool the eight came out of; the
+   eight rows on their own are the same shape as a board with eight names
+   on it. `role="status"` on the element (flows-board.js:1288) is why the
+   count is spoken on a filter that draws no rows at all, where there is
+   nothing else on screen to notice. Dim and mono because it is a reading
+   about the table, not a control and not a row. */
+.fb-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-faint);
+  padding-bottom: 0.7rem;
+}
+
 .st-input:focus-visible,
 .st-select:focus-visible,
 .st-more:focus-visible {

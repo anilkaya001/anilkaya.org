@@ -1,0 +1,291 @@
+/* =============================================================
+   flows-board-render.mjs — the board's control bar, which did not
+   exist.
+
+   THIS SUITE IS WRITTEN BECAUSE ITS ABSENCE IS WHAT KILLED THE
+   FEATURE. assets/js/flows-board.js carries ~130 lines building a
+   ticker filter, an eight-way order select and a "8 of 63 names
+   match" denominator — commented, argued, and correct. None of it
+   ever entered the DOM on /flows/long/ or /flows/short/, because
+   shared/flows-pages.js served flows-board.js WITHOUT serving
+   flows-ui.js, and buildControls() opens:
+
+       if (!host || !UI || typeof UI.searchBox !== "function" …) return;
+
+   The guard is right. A page that cannot build its controls must not
+   throw. But a correct guard over an absent dependency is SILENCE,
+   and silence is indistinguishable from a page that was never meant
+   to have controls. Nothing failed, nothing logged, and the route
+   looked finished — because the part that was missing was the part
+   that would have drawn itself.
+
+   Grep the suites as they stood: `fb-controls`, `fbQ`, `fbSort` and
+   `fb-count` appeared in NONE of them. The board had a render test
+   for its rows and none for its chrome, so the chrome could be
+   deleted by omission and every suite stayed green.
+
+   SO THE FIRST ASSERTION HERE IS THE DEPENDENCY ITSELF, not a
+   symptom of it. `window.FlowsUI` being undefined on this route is
+   the cause; a missing `#fbQ` is one of several possible effects, and
+   a suite that only tests the effect reports a broken control bar
+   when what broke was a script tag. Both are pinned, in that order,
+   so the failure names the thing to fix.
+
+   THE TWO BOARDS DIFFER IN ONE PROPERTY ON PURPOSE. `board:long`
+   carries `dr` and `nw` on its rows; `board:short` carries neither —
+   the cold-memory state of any morning after a store reset. The
+   select's own comment says an order the payload cannot produce is
+   not offered, "because an option that silently leaves the board in
+   the published order is a control that lies about having done
+   something". That is a branch, so it gets a board that reaches it.
+   ============================================================= */
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { signSession } from "../shared/session.js";
+import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
+
+let checks = 0;
+const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
+const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+
+const TOKEN = "board-token-aaaaaaaa";
+const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
+const url = (p) => server.baseURL + p;
+const token = await signSession(
+  { sub: FLOWS_TEST_USER, aud: "flows", epoch: "1", exp: Date.now() + 600000 }, SESSION_SECRET);
+const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+  body: JSON.stringify(bodyObj),
+});
+
+/* EIGHT NAMES, AND THE FILTER TEST TURNS ON TWO OF THEM. "NVDA" and
+   "NVAX" both begin NV and nothing else does, so typing NV must leave
+   exactly two — a filter that matched one name could be passed by an
+   implementation that only ever shows the first hit. */
+const TICKERS = ["NVDA", "NVAX", "AAPL", "AMD", "MSFT", "GOOG", "INTC", "TSLA"];
+
+const boardRow = (t, i, warm) => ({
+  t, r: i + 1, s: 90 - i * 7, cnv: 80 - i * 3,
+  px: 100 + i, chg: 0.01, purity: 0.02,
+  gRegime: i % 2 ? "short" : "long", gFlipDist: -0.1 - i / 100,
+  netPrem: (i % 2 ? -1 : 1) * (1e7 - i * 1e5),
+  fam: { F: 10, P: 20, D: 30, V: 40, O: 50 },
+  /* edte IS ON BOTH BOARDS. Days to earnings comes from the vendor's
+     calendar, not from the previous session's board, so a cold memory
+     does not remove it — and putting it only on the warm rows made the
+     two boards differ in THREE properties while the assertion below
+     reasoned about two. The first run caught that: 3 !== 2. A fixture
+     whose control differs in more ways than the test names cannot say
+     which difference produced the result. */
+  edte: 20 + i,
+  /* THE ONE DIFFERENCE BETWEEN THE TWO BOARDS. Warm rows remember the
+     previous session; cold ones have no memory to compare against, so
+     `dr` and `nw` are absent rather than 0 and false — an unmeasured
+     climb is not a climb of zero places. */
+  ...(warm ? { dr: 5 - i, nw: i === 0 } : {}),
+});
+
+const board = (side, warm) => ({
+  side, generatedAt: new Date().toISOString(), sessionDate: "2026-09-03",
+  status: "ok", universe: 264, enriched: 60,
+  rows: TICKERS.map((t, i) => boardRow(t, i, warm)),
+});
+
+await put("board:long", board("long", true));
+await put("board:short", board("short", false));
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+const errors = [];
+page.on("pageerror", (e) => errors.push(e.message));
+page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+await page.context().addCookies([
+  { name: "flows_session", value: token, url: server.baseURL }]);
+
+/* ---- 1. the dependency, before anything that depends on it ---------- */
+
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+
+const uiShape = await page.evaluate(() => {
+  const U = window.FlowsUI;
+  if (!U) return null;
+  return { searchBox: typeof U.searchBox, sortSelect: typeof U.sortSelect, el: typeof U.el };
+});
+ok(uiShape !== null,
+   "window.FlowsUI is defined on /flows/long/ — the board reads it at module scope " +
+   "(flows-board.js:36) and every control below is downstream of this one fact, so it is " +
+   "asserted first and on its own: an undefined library is a missing script tag, while a " +
+   "missing #fbQ could be any of a dozen things");
+eq(uiShape && uiShape.searchBox, "function",
+   "FlowsUI.searchBox is callable — buildControls() tests this exact typeof before proceeding");
+eq(uiShape && uiShape.sortSelect, "function",
+   "FlowsUI.sortSelect is callable — the second half of the same guard");
+
+/* ---- 2. the controls themselves ------------------------------------ */
+
+const controls = await page.evaluate(() => {
+  const wrap = document.querySelector(".fb-controls");
+  if (!wrap) return null;
+  const q = document.querySelector("#fbQ");
+  const s = document.querySelector("#fbSort");
+  const c = document.querySelector(".fb-count");
+  return {
+    wrap: true,
+    q: !!q, s: !!s, c: !!c,
+    /* A SIBLING OF .flows-controls, NOT A CHILD — the file's own comment
+       records that as a child it grew a horizontal scrollbar at 352px
+       against a 320px viewport, because a flex item's min-width is auto
+       and a native select's min-content is its widest option. */
+    isSibling: !!(wrap.parentNode && wrap.previousElementSibling &&
+                  wrap.previousElementSibling.classList.contains("flows-controls")),
+    countHidden: c ? c.hidden : null,
+    countRole: c ? c.getAttribute("role") : null,
+    options: s ? Array.from(s.options).map((o) => o.value) : null,
+  };
+});
+
+ok(controls !== null,
+   "the board's control bar is in the DOM on /flows/long/ — this is the assertion whose " +
+   "absence let ~130 lines of finished code ship dead on the two busiest routes in the section");
+ok(controls.q, "the ticker filter #fbQ exists");
+ok(controls.s, "the order select #fbSort exists");
+ok(controls.c, "the match denominator .fb-count exists");
+ok(controls.isSibling,
+   "the control wrap is a SIBLING of .flows-controls rather than a child — as a child it is a " +
+   "flex item whose min-width is auto, which for a box holding a native <select> is that " +
+   "select's widest option in 16px mono, and the page grew a horizontal scrollbar at 352px");
+
+/* ---- 3. the denominator is silent until it has something to say ----- */
+
+eq(controls.countHidden, true,
+   "with no filter typed the count is HIDDEN rather than reading “8 of 8” — a count of " +
+   "everything against everything teaches the eye to skip the line on the session it matters");
+eq(controls.countRole, "status",
+   "the count carries role=status, so a filter that narrows to nothing is announced: that is " +
+   "the case where no rows remain on screen to notice");
+
+/* ---- 4. the filter narrows, and states what it narrowed FROM -------- */
+
+await page.fill("#fbQ", "NV");
+await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 2);
+
+const filtered = await page.evaluate(() => ({
+  cards: document.querySelectorAll(".fd-card").length,
+  count: document.querySelector(".fb-count").textContent,
+  hidden: document.querySelector(".fb-count").hidden,
+}));
+eq(filtered.cards, 2, "typing NV leaves exactly the two names that begin NV (NVDA, NVAX)");
+eq(filtered.hidden, false, "the count is shown once a filter is set");
+ok(/\b2 of 8 names match\b/.test(filtered.count),
+   "the count states the POPULATION the two came out of — “" + filtered.count + "”. Two rows " +
+   "on their own are the same shape as a board with two names on it, and a list that " +
+   "truncates without saying so reads as a population");
+ok(filtered.count.includes("“NV”"),
+   "the count echoes what was typed, in quotes, so the reader can see the filter that produced it");
+
+/* ---- 5. a filter matching nothing is not an empty board ------------- */
+
+await page.fill("#fbQ", "ZZZZ");
+await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 0);
+const none = await page.evaluate(() => {
+  const msg = document.querySelector(".fb-msg, [data-state='filtered'], .flows-msg");
+  return {
+    count: document.querySelector(".fb-count").textContent,
+    body: document.body.innerText,
+    msg: msg ? msg.textContent : null,
+  };
+});
+ok(/\b0 of 8 names match\b/.test(none.count),
+   "a filter matching nothing reads “0 of 8” rather than going blank — the zero is MEASURED " +
+   "(eight rows were tested and none matched), which is a different statement from a board " +
+   "that published nothing");
+ok(/still loaded|clear the field/i.test(none.body),
+   "the page says the rows are still loaded and the field can be cleared, so a typed filter is " +
+   "not read as an outage");
+
+/* ---- 6. clearing restores, with no refetch -------------------------- */
+
+const requestsBefore = [];
+page.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) requestsBefore.push(r.url()); });
+await page.fill("#fbQ", "");
+await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 8);
+const restored = await page.evaluate(() => ({
+  cards: document.querySelectorAll(".fd-card").length,
+  hidden: document.querySelector(".fb-count").hidden,
+}));
+eq(restored.cards, 8, "clearing the field brings all eight names back");
+eq(restored.hidden, true, "and the count goes silent again with no filter set");
+eq(requestsBefore.length, 0,
+   "clearing the filter spends NO network call — the rows never left currentRows, and a filter " +
+   "that refetches is a filter that costs the reader a round trip per keystroke");
+
+/* ---- 7. an order the payload cannot produce is not offered ---------- */
+
+const warmOptions = controls.options;
+ok(warmOptions.includes("dr:desc"),
+   "the warm board offers “biggest climb since the previous board” — its rows carry dr");
+ok(warmOptions.includes("nw:desc"),
+   "and “new to this side first” — its rows carry nw");
+ok(warmOptions.includes(""),
+   "the published rank is offered, spelled by the empty value the way ?view=deck is spelled " +
+   "by absence");
+
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const coldOptions = await page.evaluate(() => {
+  const s = document.querySelector("#fbSort");
+  return s ? Array.from(s.options).map((o) => o.value) : null;
+});
+ok(coldOptions !== null, "the control bar is built on /flows/short/ too, not only on long");
+ok(!coldOptions.includes("dr:desc"),
+   "the cold board does NOT offer the climb order — no row carries dr, and an option that " +
+   "silently leaves the board in the published order is a control that lies about having " +
+   "done something");
+ok(!coldOptions.includes("nw:desc"),
+   "nor the new-to-this-side order, for the same reason");
+ok(coldOptions.includes("s:desc") && coldOptions.includes("t:asc"),
+   "the orders the payload CAN produce are still offered — the gate is per option, not a " +
+   "blanket refusal to build the select");
+eq(warmOptions.length - coldOptions.length, 2,
+   "exactly two orders are withheld on a cold memory, so a future column that quietly stops " +
+   "being offered fails here rather than disappearing");
+
+/* ---- 8. the select actually reorders ------------------------------- */
+
+await page.selectOption("#fbSort", "t:asc");
+await page.waitForFunction(() =>
+  document.querySelector(".fd-card") &&
+  /AAPL/.test(document.querySelector(".fd-card").innerText));
+const ordered = await page.evaluate(() =>
+  Array.from(document.querySelectorAll(".fd-card"))
+    .map((c) => (c.innerText.match(/\b[A-Z]{2,5}\b/) || [""])[0]));
+const alphabetical = TICKERS.slice().sort();
+eq(ordered[0], alphabetical[0],
+   "choosing “ticker, A to Z” actually reorders the deck — the select is wired to " +
+   "applySortValue and not merely rendered");
+
+/* ---- 9. the invariant the control bar was shaped around ------------- */
+
+await page.setViewportSize({ width: 320, height: 800 });
+await page.waitForTimeout(120);
+const overflow = await page.evaluate(() =>
+  document.documentElement.scrollWidth - window.innerWidth);
+ok(overflow <= 1,
+   `no horizontal overflow at 320px with the controls present (measured ${overflow}px). This is ` +
+   "the measurement the sibling placement and the .st-field min-width:0 both exist for, and it " +
+   "is the one that regressed to 352px when the wrap was a flex child");
+
+/* ---- 10. nothing threw along the way -------------------------------- */
+
+eq(errors.length, 0,
+   "no page error and no console error across both board routes: " + errors.join(" | "));
+
+await browser.close();
+await server.stop();
+
+console.log(`✓ flows-board-render: ${checks} assertions — the control bar exists at all, the ` +
+  `library it depends on is named before its symptoms, a denominator that stays silent until ` +
+  `it has something to say, a measured zero match distinguished from an empty board, orders ` +
+  `withheld exactly when the payload cannot produce them, and no overflow at 320px`);

@@ -1227,7 +1227,8 @@ const near = (a, b, tol, msg) => {
    or a version bump silently leaves the gated pages on stale CSS. */
 {
   const { readFileSync, existsSync } = await import("node:fs");
-  const { ASSET_VERSION } = await import("../shared/flows-pages.js");
+  const PAGES = await import("../shared/flows-pages.js");
+  const { ASSET_VERSION } = PAGES;
   const onDisk = readFileSync(new URL("../assets/version.txt", import.meta.url), "utf8").trim();
   ok(ASSET_VERSION === onDisk,
      `flows-pages ASSET_VERSION (${ASSET_VERSION}) matches assets/version.txt (${onDisk})`);
@@ -1236,17 +1237,43 @@ const near = (a, b, tol, msg) => {
      page that references an asset the bundle does not carry is a 404 the
      reader sees as a page that half works — and flows-panels.js in particular
      is a load-bearing dependency of two controllers, both of which fail
-     closed with a console error rather than a visible one. */
-  for (const asset of [
-    "../assets/css/flows.css",
-    "../assets/js/flows-board.js",
-    "../assets/js/flows-panels.js",
-    "../assets/js/flows-card.js",
-    "../assets/js/flows-ticker.js",
-    "../assets/js/flows-unusual.js",
-    "../assets/js/flows-events.js",
-  ]) {
-    ok(existsSync(new URL(asset, import.meta.url)), `${asset} exists`);
+     closed with a console error rather than a visible one.
+
+     FOUND RATHER THAN LISTED, and the previous version of this block is why.
+     It carried that same sentence — "every file shared/flows-pages.js emits a
+     tag for" — above a hand-written array of SEVEN paths, while the module
+     emitted fourteen. flows-ui.js, flows-overview.js, flows-desk.js,
+     flows-watch.js, flows-market.js, flows-track.js, flows-history.js,
+     flows-political.js and nav.js were all outside it. The array was true when
+     written and the comment stayed true-sounding afterwards, which is the
+     failure this repository keeps paying for: a stale enumeration under a
+     sentence claiming completeness is worse than no check, because it is the
+     thing the next person reads INSTEAD of looking.
+
+     So the list is derived from the HTML each page function actually emits.
+     Adding a route, or a tag to a route, extends the coverage by itself. */
+  const emitted = new Set();
+  for (const [name, fn] of Object.entries(PAGES)) {
+    if (typeof fn !== "function" || !/Page$/.test(name)) continue;
+    let html;
+    try { html = String(fn({ username: "tester", ticker: "AAPL" })); }
+    catch (error) { assert.fail(`${name} threw while rendering: ${error && error.message}`); }
+    for (const m of html.matchAll(/<(?:script[^>]+src|link[^>]+href)="([^"]+)"/g)) {
+      const href = m[1].split("?")[0];
+      if (href.startsWith("/assets/")) emitted.add(href);
+    }
+  }
+
+  ok(emitted.size >= 10,
+     `the emitted-asset set is discovered from the page functions rather than listed ` +
+     `(${emitted.size} found across the section) — a tag added to a route is covered here ` +
+     `without anyone remembering to add it`);
+
+  for (const href of [...emitted].sort()) {
+    ok(existsSync(new URL(".." + href, import.meta.url)),
+       `${href} is emitted by a Flows page and exists on disk — a deferred script or a ` +
+       `stylesheet that 404s fails silently, leaving a document that renders and a route ` +
+       `that never draws`);
   }
 }
 
