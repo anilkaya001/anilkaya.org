@@ -2814,6 +2814,13 @@ body.is-stale .flows-tablewrap {
 .ft-grid {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
+  /* THE FALLBACK UNTIL THE BAR HAS BEEN MEASURED. The controller writes the
+     sticky bar's real height back onto this element as an inline property on
+     every paint and resize; this value is only what an anchor lands against
+     in the frame before the first measurement. It is declared here, on the
+     one rule that owns .ft-grid, rather than in a second .ft-grid block — the
+     scroll-margin rule further down this section is its only reader. */
+  --ft-bar-h: 5.5rem;
 }
 /* Grid items default to min-width:auto, which lets a wide child (the top
    contracts table, a 30-bar ladder) push its column past 1fr and take the
@@ -3034,6 +3041,328 @@ body.is-stale .flows-tablewrap {
 }
 .ft-grid.is-stale .ft-panel svg { opacity: 0.72; }
 
+/* --- the workspace chrome: the bar, the index, the change block ------
+
+   THESE RULES WERE A TEMPLATE LITERAL IN assets/js/flows-ticker.js, injected
+   into document.head on first paint. The argument for that was real — every
+   element they style is CONSTRUCTED by that one file and appears in no served
+   markup, so a stylesheet carrying them would carry selectors for a DOM
+   nobody can find by reading the HTML — and it cost three things:
+
+     - AN INJECTED SHEET HAS NO ?v=. It is never fetched, so the version
+       ritual that busts every other asset cannot reach it: a reader holding a
+       cached flows-ticker.js got the old rules under new markup, and a reader
+       holding a cached flows.css got the reverse. Cache-busting only works on
+       bytes the browser asks for by URL.
+     - NO CSS TEST COULD SEE THEM. tests/flows-sign.mjs reads THIS file and
+       asserts that every polarity class a renderer emits resolves to a rule;
+       .ft-chg-v's four states and the four .ft-change dd states were exempt
+       from that check purely by living somewhere it does not read. A neutral
+       class with no rule is not neutral, it is invisible.
+     - THEY WERE JAVASCRIPT BYTES on the route tests/flows-weight.mjs weighs,
+       parsed and compiled before a single panel draws.
+
+   The dead-rule risk the old note worried about is answered by the suites
+   rather than by the file layout: tests/flows-ticker-contract.mjs mounts the
+   real controller and asserts the chrome it builds, so a selector here whose
+   element stops being created fails there.
+
+   THIS BLOCK SITS AT THE FOOT OF THE TICKER SECTION, AND THAT IS CASCADE,
+   NOT TIDINESS. An injected sheet lands LAST, so these rules beat every
+   equal-specificity rule in this file wherever it sat. Two of them depend on
+   exactly that: .ft-panel[data-tier="lead"] and [data-tier="reading"] are
+   (0,2,0) — the same weight as .ft-panel:hover and as the reduced-motion
+   override of it above — so a tier's box-shadow holds through a hover only
+   while it is written AFTER them. Moved any higher, a lead panel would gain
+   the hover lift it does not have today.
+
+   SEVEN SIZES HERE ARE NOT ON THE TYPE LADDER: 0.84 and 0.76 on .ft-id, 1rem
+   on .ft-group, 1.02 on .ft-chg-lead, 0.7 on .ft-chg-e, 1.25 on the phone
+   .ft-chg-v and 1.15 on the phone .ft-head h2. Every size that IS a ladder
+   step is written as its token; these seven are carried over verbatim,
+   because this is a MOVE. Snapping 1.02 to --fs-lead or 0.7 to --fs-label
+   changes what a reader sees, and the phone sizes were set against a MEASURED
+   bar height (the 46rem note at the foot of this section) — a relocation that
+   quietly redesigns four blocks is not a relocation. They are named here so
+   the next typographic pass decides them against a measurement instead of
+   discovering them.                                                       */
+
+.ft-bar {
+  position: sticky;
+  /* 4.4rem IS THE SITE'S TOPBAR CLEARANCE, not a guess: .flows-rail's top
+     padding and .course-nav's sticky offset are both 4.4rem, and .topbar is
+     position:fixed at z-index 100. A bar stuck at 0 would slide under the
+     navigation pill and take the name with it. */
+  top: 4.4rem;
+  z-index: 6;
+  background: var(--bg);
+  border-bottom: 1px solid var(--panel-border);
+  margin: 0 0 var(--space-3);
+  padding-top: var(--space-2);
+}
+/* (0,2,0), so it beats the .ft-head margin set at the top of this section
+   whatever the order — the identity block gives up a step of bottom margin
+   once it is inside the bar, because the jump strip below it supplies the
+   separation the margin was there for. */
+.ft-bar .ft-head { margin: 0 0 var(--space-2); }
+.ft-id {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.ft-id b { font-weight: 600; color: var(--ink); }
+.ft-id.is-pos b { color: var(--flow-up); }
+.ft-id.is-neg b { color: var(--flow-down); }
+.ft-id.is-flat b { color: var(--flow-flat); }
+.ft-id.is-null b { color: var(--ink-faint); }
+.ft-id[data-empty] b { color: var(--ink-faint); }
+
+/* THE JUMP STRIP. Anchors, not buttons, and not a scripted scroller: a plain
+   <a href="#ftg-tape"> is keyboard-native, is copyable out of the status bar,
+   survives a script error, and is the same mechanism a deep link uses. The
+   controller's only job is marking which one is current. */
+.ft-jump {
+  display: flex; flex-wrap: nowrap; gap: var(--space-1);
+  margin: 0;
+  /* THE VERTICAL PADDING IS THE HIT AREA, and it is here rather than on the
+     chip because of a rule that is easy to miss: a box with overflow-x auto
+     and overflow-y visible has its overflow-y COMPUTED to auto — so this
+     strip is a scroll container in both axes, and the 44px pseudo-element
+     below was being clipped to the chip's own 25px. Measured: scrollHeight
+     35, clientHeight 35, no overflow at all. The control claimed a touch
+     target it did not have. Ten pixels of padding each side puts the whole
+     extension inside the padding box, where nothing clips it. */
+  padding: 10px 0 calc(var(--space-2) + 10px);
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+.ft-jump-b {
+  position: relative; flex: none;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-1);
+  padding: 0.24rem 0.5rem;
+  font-family: var(--font-mono); font-size: var(--fs-label);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim); text-decoration: none;
+}
+/* A 44px TOUCH TARGET WITHOUT A 44px BOX, exactly the way .ft-zoom-open does
+   it: the hit area is a transparent pseudo-element, so five chips stay one
+   line tall on a phone and are still tappable. It only works because the
+   strip above reserves the room for it — see the padding note there. */
+.ft-jump-b::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
+.ft-jump-b:hover, .ft-jump-b:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
+.ft-jump-b:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-jump-b[aria-current="true"] { color: var(--gold-harvest); border-color: var(--gold-harvest); }
+.ft-jump-n { color: var(--ink-faint); }
+
+.ft-all { margin: 0 0 var(--space-2); }
+.ft-all-s {
+  font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-faint); cursor: pointer;
+  list-style: none;
+}
+.ft-all-l {
+  display: flex; flex-wrap: wrap; gap: 0.2rem var(--space-2);
+  margin: var(--space-2) 0 0; padding: 0; list-style: none;
+}
+.ft-all-l a { color: var(--ink-dim); font-size: var(--fs-data); text-decoration: none; }
+.ft-all-l a:hover { color: var(--ink); text-decoration: underline; }
+.ft-all-l a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-all-g {
+  flex-basis: 100%; margin-top: var(--space-1);
+  color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--fs-label);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+/* THE DISCLOSURE MARKER, ONCE, FOR BOTH <details> ON THIS PAGE. The panel
+   decoder (.ft-how, further down) and this index arrived in different commits
+   and each wrote its own +/− marker, its own hover ink and its own focus
+   ring: five rules, twice, character for character. Their SUMMARY rules still
+   differ and stay apart — the decoder's is a reading-size line under a chart,
+   this one is a chip in a sticky bar — but the marker is one idiom and is
+   stated in one place, so a change to how a disclosure opens cannot land on
+   one of them and miss the other.
+   Every rule here outranks the base .ft-how-s / .ft-all-s rules on
+   specificity, so being written above them changes nothing. */
+.ft-how-s::-webkit-details-marker,
+.ft-all-s::-webkit-details-marker { display: none; }
+.ft-how-s::before,
+.ft-all-s::before { content: "+ "; color: var(--gold-harvest); }
+.ft-how[open] .ft-how-s::before,
+.ft-all[open] .ft-all-s::before { content: "\2212 "; }
+.ft-how-s:hover,
+.ft-all-s:hover { color: var(--ink); }
+.ft-how-s:focus-visible,
+.ft-all-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* THE GROUP HEADING IS A GRID CHILD AND TAKES THE WHOLE ROW at every tier.
+   grid-column 1 / -1 is span-agnostic, so it is one declaration for two,
+   three and four columns — the same rule .ft-panel.is-wide already relies on
+   below 132rem. */
+.ft-group {
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 calc(var(--space-2) * -1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--panel-border);
+  /* NOT A LADDER STEP, and it is not text: this <h2> holds two spans that
+     each set their own size, so 1rem is only the line box those spans sit in.
+     It reads as the heading's default size undone. */
+  font-size: 1rem;
+}
+.ft-group:first-child { margin-top: 0; }
+.ft-group-n {
+  font-family: var(--font-mono); font-size: var(--fs-data); font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-harvest);
+}
+.ft-group-b {
+  display: block; margin-top: 0.3rem;
+  font-family: var(--font-serif); font-size: var(--fs-note); font-weight: 400;
+  color: var(--ink-dim);
+}
+.ft-group:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 4px; }
+
+/* THE SCROLL OFFSET IS THE BAR'S MEASURED HEIGHT, written back onto .ft-grid
+   by the controller as an inline custom property. A constant would be wrong
+   at two of the four column tiers and on every phone width where the identity
+   row wraps; the 5.5rem fallback declared on .ft-grid at the top of this
+   section is only what the frame before the first measurement lands against. */
+.ft-grid .ft-panel, .ft-grid .ft-group {
+  scroll-margin-top: calc(4.4rem + var(--ft-bar-h) + 0.6rem);
+}
+
+/* ---- the chrome tiers ------------------------------------------------
+   PAINT ONLY. No padding, no border-width, no margin on the panel or on its
+   drawing host: two of these panels must measure the SAME host width or the
+   term line stops landing on the surface's columns. */
+.ft-panel[data-tier="lead"] { box-shadow: var(--shadow-card), inset 2px 0 0 var(--gold-harvest); }
+.ft-panel[data-tier="lead"] h3 { color: var(--gold-harvest); font-size: var(--fs-fine); }
+.ft-panel[data-tier="table"] h3 { border-bottom-color: var(--ink-faint); }
+/* A TWO-NUMBER PANEL STOPS WEARING A CHART'S BOX. It keeps its border and its
+   heading strip, so the grid still reads as a grid; it loses the raised
+   surface, which is what made a pair of stats look as heavy as a fifty-row
+   table. */
+.ft-panel[data-tier="reading"] { background: transparent; box-shadow: none; }
+.ft-panel[data-tier="reading"] h3 { background: none; color: var(--ink-dim); }
+
+/* ---- what changed ---------------------------------------------------- */
+.ft-change {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-left: 2px solid var(--gold-harvest);
+  border-radius: var(--radius-2);
+  background: var(--panel-bg);
+}
+.ft-change h2 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono); font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-celadon);
+}
+.ft-chg-lead { margin: 0 0 var(--space-2); font-size: 1.02rem; line-height: 1.5; color: var(--ink); }
+.ft-chg-v {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-mark); font-weight: 600; margin-right: 0.4rem;
+}
+.ft-chg-v.is-pos { color: var(--flow-up); }
+.ft-chg-v.is-neg { color: var(--flow-down); }
+.ft-chg-v.is-flat { color: var(--flow-flat); }
+.ft-chg-v.is-null { color: var(--ink-faint); }
+/* THE EVENT IS A WORD BEFORE IT IS A COLOUR, so every state below reads the
+   same in greyscale and on a monochrome printout. */
+.ft-chg-e {
+  display: inline-block; margin: 0 0 var(--space-2);
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--gold-harvest); border-radius: var(--radius-1);
+  font-family: var(--font-mono); font-size: 0.7rem;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-harvest);
+}
+.ft-chg-e.is-quiet { border-color: var(--panel-border); color: var(--ink-faint); }
+.ft-chg-stale {
+  margin: 0 0 var(--space-2); padding: 0.35rem 0.5rem;
+  border-left: 2px solid var(--flow-down);
+  color: var(--ink); font-size: var(--fs-body);
+}
+/* WIDER COLUMNS THAN THE PANEL DEFAULT. Two of these readings are a signed
+   score AND the date it was set on; in the 8.5rem track .fc-stats hands out
+   they broke mid-ISO-date, as "2026-08-" over "17" — a date split across two
+   lines is a date a reader has to reassemble.
+
+   THE min() GUARD IS THE ONE THING THIS RULE GAINED IN THE MOVE, and it is
+   the guard the .fc-stats note above states is on every auto-fit track in
+   this file: below an 11rem container a bare minmax(11rem, 1fr) track is
+   WIDER than its own container and takes the page sideways. It changes no
+   computed value at any width this block is ever laid out at — the narrowest
+   is a 320px phone, where the container is still ~260px against a 176px
+   floor — so it is a construction guarantee replacing an arithmetic one. */
+.ft-change .fc-stats {
+  margin: var(--space-2) 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+}
+.ft-change .fc-note { margin: var(--space-2) 0 0; }
+/* THE POLARITY CLASSES THIS BLOCK EMITS HAVE RULES, all four of them. A
+   modifier with no rule is not neutral chrome, it is a promise the
+   stylesheet does not keep — and .is-flat is the arm a two-armed ternary
+   would have skipped. In this file they are finally visible to
+   tests/flows-sign.mjs, which reads it and asserts exactly that. */
+.ft-change .fc-stats dd.is-pos { color: var(--flow-up); }
+.ft-change .fc-stats dd.is-neg { color: var(--flow-down); }
+.ft-change .fc-stats dd.is-flat { color: var(--flow-flat); }
+.ft-change .fc-stats dd.is-null { color: var(--ink-faint); }
+@media (max-width: 30rem) {
+  .ft-change { padding: var(--space-2); }
+  .ft-chg-v { font-size: 1.25rem; }
+}
+
+/* THE STICKY BAR IS A TAX ON EVERY SCREENFUL, and on a phone the screenful is
+   small. Measured at 380x667 the untightened bar took 195px — 29% of the
+   viewport, permanently — which is not an index, it is a wall. The chips keep
+   every word (nothing is display:none, so nothing leaves the accessibility
+   tree or a find-in-page); they are set smaller and packed tighter, and the
+   reading order above puts the name, the score, the price and the move ahead
+   of the metadata that now wraps below them.
+
+   46rem IS NOT ON THE BREAKPOINT LADDER at the head of base.css, and it is
+   carried over unchanged rather than snapped to the 40rem step beside it. It
+   is the width at which THIS bar stops fitting on one line, which is a
+   property of ten chips of mono in a flex row and not of the page tiers the
+   ladder describes; landing it on 40rem would hand every reader between
+   640px and 736px the untightened 195px wall the measurement above is about.
+   It is the tenth width in this section and it is the only one — if a second
+   appears, the ladder is the thing to move, not this. */
+@media (max-width: 46rem) {
+  /* THE IDENTITY ROW SCROLLS INSTEAD OF WRAPPING, which is the whole saving:
+     wrapped, ten chips are four lines and 90px; on one scrolling line they are
+     28px. The reading order set above is what makes that safe — name, score,
+     price, day, side, move come first and are what a phone shows at rest;
+     conviction, the gamma regime, the two dates and the switch are a swipe
+     away. The same treatment .flows-rail already takes on a phone, and the
+     same reason.
+
+     NOTHING IS display:none. Every chip stays in the document, in the
+     accessibility tree and in a find-in-page — hiding a reading to save
+     height would be answering a layout problem with a missing fact. */
+  .ft-bar .ft-head {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    gap: var(--space-1) var(--space-2);
+    padding-bottom: 0.2rem;
+  }
+  /* Or the flex line squeezes the ticker itself to fit, and the one word the
+     whole page is about is the one that gets ellipsised. */
+  .ft-bar .ft-head > * { flex: none; }
+  .ft-bar .ft-head h2 { font-size: 1.15rem; }
+  .ft-id, .ft-bar .fc-meta { font-size: 0.76rem; }
+  .ft-jump-b { padding: 0.2rem 0.42rem; font-size: var(--fs-micro); letter-spacing: 0.08em; }
+  .ft-all-s { font-size: var(--fs-micro); }
+  .ft-bar { padding-top: var(--space-1); }
+}
+
 /* ==============================================================
    The four chain panels — first drawn on /flows/ticker/.
 
@@ -3194,11 +3523,9 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.04em; text-transform: uppercase;
   padding: 0.35rem 0; list-style: none;
 }
-.ft-how-s::-webkit-details-marker { display: none; }
-.ft-how-s::before { content: "+ "; color: var(--gold-harvest); }
-.ft-how[open] .ft-how-s::before { content: "\2212 "; }
-.ft-how-s:hover { color: var(--ink); }
-.ft-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+/* The marker, the hover ink and the focus ring are stated ONCE for both
+   disclosures on this page, in the workspace-chrome block above — this rule
+   set and .ft-all's were character-for-character identical in two places. */
 .ft-how .fc-note { margin-top: 0.5rem; }
 
 /* =====================================================================
