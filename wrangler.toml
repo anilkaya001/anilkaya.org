@@ -67,6 +67,13 @@ FLOWS_SESSION_EPOCH = "2"
 # deterministic reading and says so. Nothing about the answer's figures depends
 # on it; only the phrasing does.
 FLOWS_ASK_MODEL = "@cf/zai-org/glm-4.7-flash"
+# Neurons per MILLION tokens for the model above, "input,output", from its
+# published price card. It sits next to the model id because a rate belonging
+# to a DIFFERENT model than the one configured is a meter that reads
+# plausibly and is wrong. Unset or unparseable, /api/flows/ask reports the
+# tokens and calls it measured and withholds the neuron figure rather than
+# deriving one from a guess.
+FLOWS_ASK_NEURONS = "5500,36400"
 
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:

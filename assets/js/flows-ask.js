@@ -119,6 +119,126 @@
     return box;
   }
 
+  /* ---------- the model budget --------------------------------------------
+
+     DRAWN BEFORE IT IS SPENT: a budget visible only after you spend from it
+     is a receipt. Fetched on load, redrawn from every answer.
+
+     THE CONDITION DOES NOT FOLD, which is the fold rule applied rather than
+     an exception to it. A sentence may fold only if it does not change what
+     a VISIBLE number means, and "8,412 left" means one thing if this site is
+     the only thing drawing on the account and another if it is not — so
+     "counting only this site's own calls" is the number's units, not
+     reassurance about it. The derivation folds; the condition does not.
+
+     THE BAR IS NOT THE READING — same two numbers as the text, aria-hidden,
+     because a reading whose only output is a length does not survive
+     greyscale or a screen reader. This file's mark glyphs follow that rule. */
+
+  function meterFigure(n) {
+    /* GROUPED FOR THE EYE, and the one place here where reformatting a
+       number is right. `factPins` prints payload values raw so a reader can
+       audit them against the payload; this figure comes from no payload —
+       it is this site's accounting of its own calls, so there is no stored
+       string a separator could disagree with. */
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function spendMeter(spend, reason) {
+    var box = el("div", "ak-meter");
+
+    /* THE METER'S OWN SILENCE, NOT THE MARKET'S. "unreadable" rather than
+       "quiet": a quiet meter would read as a day on which nothing was
+       spent, which is a reading this branch has not earned. */
+    if (!spend || typeof spend !== "object") {
+      box.append(emptyLine("unreadable", "This page could not read what has been spent on " +
+        "the model today" + (reason ? " (" + reason + ")" : "") + ". Nothing follows from " +
+        "that about the allowance or about the readings below, and a question can still be " +
+        "asked: Cloudflare reports a spent allowance itself, and it is the authority here."));
+      return box;
+    }
+
+    var allowance = isNum(spend.allowanceNeurons);
+    var left = isNum(spend.remaining);
+    var spent = isNum(spend.neurons);
+    var calls = isNum(spend.calls);
+    var tokIn = isNum(spend.tokensIn);
+    var tokOut = isNum(spend.tokensOut);
+
+    var how = [];
+    if (typeof spend.day === "string" && spend.day !== "") {
+      how.push("The day is " + spend.day + ", counted in UTC because that is the calendar " +
+        "the allowance resets on — at 00:00 UTC, not at midnight where you are.");
+    }
+    if (calls !== null) {
+      how.push("This site has asked the model " + meterFigure(calls) + " time" +
+        (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null
+          ? ", for " + meterFigure(tokIn) + " tokens in and " + meterFigure(tokOut) +
+            " tokens out. Tokens are what the model itself reported; the credit figure is " +
+            "arithmetic over them at the published rate for the configured model, done when " +
+            "this page was drawn rather than stored, so a corrected rate repairs the whole " +
+            "history rather than leaving it stamped at yesterday's."
+          : "."));
+    }
+    how.push("Cloudflare is the authority on the allowance and this meter is not. It can " +
+      "only see calls this site made; anything else on the same account draws from the same " +
+      "pool and is invisible here. If a question comes back saying the allowance is spent " +
+      "while this still shows credits left, that difference is the answer — something else " +
+      "spent them — and the answer will say so.");
+
+    /* NO RATE, NO CREDIT FIGURE — AND THE CALLS ARE STILL REPORTED. The
+       rate is configuration and can be absent; the token counts are still
+       measurements. Deriving credits from a guessed rate would read
+       plausibly and be wrong. `=== null`, not truthiness: a measured 0
+       spent is the real reading every morning before the first question. */
+    if (left === null || allowance === null) {
+      var said = calls === null
+        ? "What has been spent on the model today could not be counted."
+        : "This site has asked the model " + meterFigure(calls) + " time" +
+          (calls === 1 ? "" : "s") + " today.";
+      box.append(el("p", "ak-meter-say", said + " The credits that cost is not shown: the " +
+        "per-token rate for the configured model is not set here, and deriving one would " +
+        "put a plausible wrong number where a measurement belongs."));
+      box.append(howBox("How this is counted", how));
+      return box;
+    }
+
+    var pct = allowance > 0 ? Math.max(0, Math.min(1, left / allowance)) : 0;
+    var bar = el("div", "ak-meter-bar");
+    bar.setAttribute("aria-hidden", "true");
+    var fill = el("span", "ak-meter-fill");
+    fill.style.width = (pct * 100).toFixed(1) + "%";
+    bar.append(fill);
+    box.append(bar);
+
+    var say = el("p", "ak-meter-say");
+    say.append(el("strong", "ak-meter-n",
+      meterFigure(left) + " of " + meterFigure(allowance)));
+    /* "model credits" rather than "neurons": the reader is being told what
+       they have left, not what Cloudflare's billing unit is called. The
+       fold names the unit for anyone checking. */
+    say.append(text(" model credits left today · counting only this site's own calls"));
+    box.append(say);
+
+    /* THE EMPTY METER IS A DIFFERENT SENTENCE. "0 of 10,000" reads as a
+       closed door and is not one: nothing here refuses a question, and the
+       readings an answer is built from cost no model call. */
+    if (left === 0) {
+      box.append(qualifier("By this count today's model credits are gone. Asking is still " +
+        "allowed and nothing here refuses it — and if the model does decline, the answer is " +
+        "still served: every figure in it was measured by the pipeline, and only the phrasing " +
+        "would have come from a model."));
+    }
+
+    if (spent !== null) {
+      how.unshift("Spent so far today: " + meterFigure(spent) + " of " +
+        meterFigure(allowance) + " credits, rounded up. A meter that rounded a spend down " +
+        "would report less spent than was spent, so this errs toward showing less left.");
+    }
+    box.append(howBox("How this is counted", how));
+    return box;
+  }
+
   /* THE HEADING IS THE QUESTION, SO THE QUESTION IS NOT PRINTED TWICE.
      Each region used to carry a heading and, under it in italics, a
      restatement: "Since the prior session" followed by "What is different
@@ -836,10 +956,26 @@
     "answer is quoted from a payload. An answer that states a figure no payload published " +
     "is refused before it reaches this page, and the measured reading is served instead."));
 
+  /* ABOVE THE FIELD, NOT UNDER THE ANSWER: the reader deciding whether to
+     ask is the one who needs it. One line and a bar. */
+  var meterHost = el("div", "ak-meter-host");
+  meterHost.id = "askMeter";
+  box.append(meterHost);
+
+  function paintSpend(spend, reason) {
+    meterHost.textContent = "";
+    meterHost.append(spendMeter(spend, reason));
+  }
+
   var form = el("form", "ak-ask");
   form.id = "askForm";
   var label = el("label", "ak-ask-l", "Your question");
   label.htmlFor = "askQ";
+  /* A SHORTCUT NOBODY IS TOLD ABOUT IS NOT AN AFFORDANCE. Inside the
+     <label>, so a screen reader announces it as part of the field's name.
+     It survives the density pass because it does not describe data — it
+     describes how to operate the control it is bound to. */
+  label.append(el("span", "ak-ask-hint", "Enter sends \u00b7 Shift-Enter for a new line"));
   var row = el("div", "ak-ask-row");
   var input = el("textarea", "ak-ask-in");
   input.id = "askQ";
@@ -847,8 +983,37 @@
   input.placeholder = "What changed on the short board?";
   input.autocomplete = "off";
   input.spellcheck = false;
+
   var send = el("button", "ak-ask-go", "Ask");
   send.type = "submit";
+  /* ENTER SENDS; SHIFT-ENTER AND THE MODIFIERS MAKE A NEW LINE.
+
+     IT STAYS A TEXTAREA. A single-line <input> sends on Enter for free but
+     cannot hold a line break, and questions here run to a sentence and a
+     half. Two rows plus a handler is the shape every message box behaves
+     like.
+
+     `isComposing` IS CHECKED FIRST AND IT IS NOT A NICETY. An input method
+     editor — Japanese, Chinese, Korean, the Mac accent composers — uses
+     Enter to COMMIT what is being composed. Sending on it submits a
+     half-typed word and eats the key that was finishing it, which makes the
+     box unusable in those languages rather than merely awkward.
+
+     ALL THREE MODIFIERS, not just Shift: Ctrl-Enter and Cmd-Enter are what
+     a reader reaches for elsewhere, and Alt costs nothing to honour. */
+  input.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter") return;
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    /* requestSubmit(), not submit(): submit() bypasses the submit event,
+       which is where every rule of this box lives — the empty-question
+       sentence, the in-flight guard, the gated check. A form submitted
+       around its own handler would navigate the page away. */
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else send.click();
+  });
+
   row.append(input);
   row.append(send);
   form.append(label);
@@ -1169,6 +1334,18 @@
   function paintAnswer(payload, question) {
     answerHost.textContent = "";
 
+    /* THE METER MOVES WHEN THE BUDGET DOES: the route sends the reading as
+       it stands after the call it just made.
+
+       ASKED AS "did the route send one", not "is it truthy". An absent
+       `spend` means this branch said nothing about the budget and the meter
+       drawn on load still stands; a `null` spend means the route looked and
+       could not read it. Repainting on both would blank a good meter every
+       time a 400 came back. */
+    if (Object.prototype.hasOwnProperty.call(payload, "spend")) {
+      paintSpend(payload.spend, null);
+    }
+
     /* THE QUESTION IS ECHOED, AND THAT IS NOT THE RULE shared/flows-ask.js
        BREAKS. That module refuses to quote the question back INSIDE the
        answer, because a reader who wrote "what happened to the 40 names"
@@ -1457,6 +1634,18 @@
       if (gated) return;
       setAsking(false);
     });
+  });
+
+  /* FETCHED ON BOTH MOUNTS, ABOVE THE DOCK'S EARLY RETURN ON PURPOSE. The
+     briefing belongs to the page; the budget belongs to the QUESTION, and
+     the dock is where most questions will be asked. A rail that let a reader
+     spend an allowance it would not show them is the receipt problem again.
+     One small request — an indexed read of a one-row-per-day table — and the
+     only one this file makes when docked. */
+  optional("/api/flows/ai-usage").then(function (res) {
+    if (gated) return;
+    if (res && res.__unreadable) { paintSpend(null, res.__reason); return; }
+    paintSpend(res && typeof res === "object" ? res.spend : null, null);
   });
 
   if (DOCKED) return;

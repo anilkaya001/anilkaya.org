@@ -356,6 +356,201 @@ ok(/failing to reach its route/.test(dropped),
    "saying nothing is implied about what was published — which is true when the route was " +
    "never reached and was the defect only when it had been");
 
+/* ---------- 5. the model budget, and the condition on it ---------
+
+   THE METER SUBTRACTS, SO EVERY WAY THE SUBTRACTION CAN LIE IS A
+   SCENARIO HERE. `remaining` is allowance minus spend, and spend is
+   derived from token counts at a configured rate — so an absent rate
+   makes the spend UNKNOWN, and Number(null) === 0 reaching that
+   subtraction would render an unknown spend as a full tank on a day
+   this route may have emptied. The measured-zero case is asserted
+   beside it: a morning before the first question really is 10,000 of
+   10,000, and a page that withheld both would be the same defect
+   wearing the other sign.
+
+   AND THE CONDITION IS ASSERTED TO BE IN THE OPEN. "8,412 left" means
+   one thing if this site is the only thing drawing on the Cloudflare
+   account and something else if it is not, so the words naming that
+   assumption are the number's units rather than reassurance about it —
+   and this page's fold rule lets reassurance fold and never a
+   withholding. The assertion is structural: the text is read from a
+   copy of the host with the <details> REMOVED, so a later edit that
+   tidies the condition into the disclosure fails here. */
+
+const meterOf = async (body) => {
+  await page.route("**/api/flows/ai-usage", (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify(body) }));
+  await page.goto(url("/flows/ask/"), { waitUntil: "networkidle" });
+  await page.waitForSelector("#askMeter *");
+  const out = await page.evaluate(() => {
+    const live = document.getElementById("askMeter");
+    const copy = live.cloneNode(true);
+    const fold = copy.querySelector("details");
+    const foldText = fold ? fold.textContent : "";
+    if (fold) fold.remove();
+    const fill = live.querySelector(".ak-meter-fill");
+    const bar = live.querySelector(".ak-meter-bar");
+    const empty = live.querySelector("[data-empty]");
+    return {
+      open: copy.textContent, fold: foldText,
+      /* READ AS A NUMBER, NOT AS THE STRING THAT WAS SET. The CSSOM
+         normalises the width it is given — "100.0%" comes back "100%" and
+         "0.0%" comes back "0%" — so asserting the string tests the
+         browser's serialiser and fails on exactly the two endpoints this
+         gauge most needs to draw correctly. */
+      width: fill && /%$/.test(fill.style.width) ? parseFloat(fill.style.width) : null,
+      hasBar: !!bar, barHidden: bar ? bar.getAttribute("aria-hidden") : null,
+      emptyKind: empty ? empty.getAttribute("data-empty") : null,
+    };
+  });
+  await page.unroute("**/api/flows/ai-usage");
+  return out;
+};
+
+const SPEND = (over) => ({ spend: Object.assign({
+  day: "2026-09-04", calls: 7, tokensIn: 41000, tokensOut: 3100,
+  allowanceNeurons: 10000, neurons: 1588, remaining: 8412,
+  assumesSoleSpender: true }, over || {}) });
+
+const spent = await meterOf(SPEND());
+ok(/8,412/.test(spent.open) && /10,000/.test(spent.open),
+   "the budget is drawn as a figure over its allowance, in the open: a reader deciding " +
+   "whether to ask is the one who needs it, and a reader who has already asked has spent it");
+ok(/counting only this site.s own calls/i.test(spent.open),
+   "and the condition the subtraction rests on is in the open WITH it, outside the " +
+   "disclosure — the text here is read from a copy of the host with the <details> removed, " +
+   "so folding the condition away later fails this assertion. It is not reassurance about " +
+   "the number, it is the number's units: 8,412 left means one thing if this site is the " +
+   "only thing drawing on the account and another if it is not");
+ok(/Cloudflare is the authority/i.test(spent.fold),
+   "while what folds is the derivation — who the authority actually is, the day, the token " +
+   "totals — none of which changes what the visible figure means");
+ok(spent.width === 84.1,
+   "the bar is drawn from the same two numbers the sentence states, not from a third: " +
+   "8,412 of 10,000 is 84.1% of the track and the fill measures " + spent.width + "%");
+ok(spent.barHidden === "true",
+   "and it is aria-hidden, because a gauge whose only output is a length is a reading that " +
+   "does not survive greyscale, a printout or a screen reader — the same rule this page's " +
+   "mark glyphs follow");
+
+/* THE CONFIDENT ZERO, IN THE ONE PLACE A SUBTRACTION CREATES IT. */
+const norate = await meterOf(SPEND({ neurons: null, remaining: null }));
+ok(!/10,000/.test(norate.open),
+   "with no rate configured the spend is UNKNOWN, and an unknown spend is not printed as a " +
+   "full allowance: Number(null) === 0 reaching the subtraction would render 10,000 of " +
+   "10,000 left on a day this route may have emptied it, which is the confident zero this " +
+   "codebase is organised against — arriving through arithmetic rather than through a field");
+ok(/7 times today/.test(norate.open),
+   "the call count is still printed, because it was still measured — withholding the derived " +
+   "figure is not a reason to withhold the measurement it was derived from");
+ok(/rate for the configured model is not set/i.test(norate.open),
+   "and the reason is named, so a reader can tell a missing rate from a spent allowance");
+
+/* THE CONTROL: a measured zero spend IS printed, and in full. */
+const fresh = await meterOf(SPEND({ calls: 0, tokensIn: 0, tokensOut: 0,
+  neurons: 0, remaining: 10000 }));
+ok(/10,000 of 10,000/.test(fresh.open),
+   "and the control that keeps the assertion above from passing against a renderer that " +
+   "simply never prints an allowance: a morning before the first question really is 10,000 " +
+   "of 10,000, a measured zero spend rather than an unmeasured one, and it says so");
+ok(fresh.width === 100,
+   "with a full track, drawn rather than withheld");
+
+/* AN EMPTY GAUGE IS NOT A MISSING GAUGE, and it is not a closed door. */
+const drained = await meterOf(SPEND({ neurons: 10000, remaining: 0 }));
+ok(drained.hasBar && drained.width === 0,
+   "a spent budget still draws its track: a gauge that renders as nothing at zero is " +
+   "indistinguishable from a gauge that failed to draw, and those are the two states this " +
+   "box most needs to keep apart");
+ok(/Asking is still allowed/i.test(drained.open),
+   "and it says asking is still allowed, because this meter is a gauge and not a gate — the " +
+   "figures in an answer were measured by the pipeline and cost no model call, so a reader " +
+   "at zero loses the phrasing and nothing else");
+
+/* THE METER'S OWN SILENCE IS NOT THE MARKET'S. */
+const unread = await meterOf({ spend: null });
+ok(unread.emptyKind === "unreadable",
+   "a route that looked and could not read the meter gets the unreadable mark, not the " +
+   "quiet one: a quiet meter would read as a day on which nothing was spent, which is " +
+   "exactly the reading the fresh-morning case above is entitled to and this one is not");
+ok(/Nothing follows from that about the allowance/i.test(unread.open),
+   "and it says what does not follow, rather than leaving a reader to decide whether a " +
+   "blank meter means the budget is gone");
+
+/* ---------- 6. the key that sends ---------------------------------
+
+   ENTER SENDS AND SHIFT-ENTER DOES NOT, asserted from the keyboard
+   rather than from the handler. The field is a <textarea>, whose
+   native behaviour on Enter is a newline, so every one of these is a
+   behaviour the page had to add and could lose to a stray
+   preventDefault or a listener attached to the wrong node.
+
+   THE COMPOSITION CASE IS THE ONE WORTH THE TROUBLE. An input method
+   editor — Japanese, Chinese, Korean, and the accent composers — uses
+   Enter to COMMIT the characters being composed, and a box that sends
+   on that Enter submits a half-typed word and swallows the keystroke
+   that was finishing it. That makes the field unusable in those
+   languages rather than merely awkward, and no amount of clicking Ask
+   would surface it. Playwright's keyboard cannot raise the flag, so
+   the event is dispatched with isComposing set, which is exactly the
+   shape the browser delivers mid-composition. */
+
+await page.route("**/api/flows/ask", (route) => route.fulfill({
+  status: 200, contentType: "application/json",
+  body: JSON.stringify({ answer: "A short board reading.", llm: false, model: null,
+    note: "No model is configured for this route.", capped: false, why: "Picked 1 of 1.",
+    facts: [LEAD], silences: null, guard: null }) }));
+await page.goto(url("/flows/ask/"), { waitUntil: "networkidle" });
+
+const answerText = () => page.evaluate(() =>
+  document.getElementById("askAnswer").textContent);
+
+await page.fill("#askQ", "what leads the short board");
+await page.focus("#askQ");
+await page.keyboard.press("Enter");
+await page.waitForSelector("#askAnswer .ak-asked", { timeout: 5000 });
+ok(/what leads the short board/.test(await answerText()),
+   "Enter in the question field sends it: the field is a textarea, whose native Enter is a " +
+   "newline, so this is behaviour the page adds and can lose");
+ok((await page.inputValue("#askQ")).indexOf("\n") === -1,
+   "and the newline Enter would otherwise have inserted is suppressed, rather than being " +
+   "sent AND left behind in the field for the next question to inherit");
+
+await page.evaluate(() => { document.getElementById("askAnswer").textContent = ""; });
+await page.fill("#askQ", "first line");
+await page.focus("#askQ");
+await page.keyboard.down("Shift");
+await page.keyboard.press("Enter");
+await page.keyboard.up("Shift");
+await page.type("#askQ", "second line");
+ok((await page.inputValue("#askQ")) === "first line\nsecond line",
+   "Shift-Enter makes a new line instead of sending, so a question can still be written " +
+   "across two lines — which is why this field stays a textarea rather than becoming an " +
+   "<input> that would send on Enter for free");
+ok((await answerText()) === "",
+   "and nothing was sent by it: a Shift-Enter that both broke the line and submitted would " +
+   "look correct in the field and be wrong in the answer");
+
+const composed = await page.evaluate(() => {
+  const q = document.getElementById("askQ");
+  const before = document.getElementById("askAnswer").textContent;
+  q.value = "composing";
+  q.focus();
+  /* THE SHAPE A BROWSER DELIVERS MID-COMPOSITION. Chrome sets
+     isComposing on the keydown and reports keyCode 229; either is
+     enough on its own and both are sent here because the handler
+     accepts either as proof. */
+  q.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Enter", keyCode: 229, isComposing: true, bubbles: true, cancelable: true }));
+  return { before, after: document.getElementById("askAnswer").textContent };
+});
+ok(composed.after === composed.before,
+   "an Enter that belongs to an input method editor's composition does not send: it is the " +
+   "keystroke COMMITTING a Japanese, Chinese or Korean word, and sending on it would submit " +
+   "a half-typed question and eat the key that was finishing it");
+
+await page.unroute("**/api/flows/ask");
+
 ok(errors.length === 0,
    "and the renderer threw nothing across every branch above — including the two that hand " +
    "it a failed request, which is where a page that words its own failures is most likely " +
@@ -367,6 +562,9 @@ await server.stop();
 console.log(`✓ flows-ask-render: ${checks} assertions — a consistency report that states no ` +
   `clean bill it did not measure and never prints its numerator as the whole sweep, a ` +
   `guard that reports an empty scan as an empty scan in the open as well as in the fold, ` +
-  `an anti-tamper record that does not claim to hold every figure in the prose, and a ` +
+  `an anti-tamper record that does not claim to hold every figure in the prose, a ` +
   `failed route quoted in its own words so a broken payload is never reported as a broken ` +
-  `connection`);
+  `connection, and a model budget whose condition never folds, whose bar is never the ` +
+  `reading, and which tells a measured zero spend from a spend it could not measure in ` +
+  `both directions, and a question field where Enter sends, Shift-Enter breaks the line, ` +
+  `and an input method editor's composing Enter does neither`);
