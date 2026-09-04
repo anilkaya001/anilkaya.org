@@ -113,6 +113,50 @@ const fact = (id, say, n) => ({ id, say, n: n || {} });
 
 const plural = (k, one, many) => (k === 1 ? one : many);
 
+/* ---------- the store this module reads -------------------------- */
+
+/**
+ * WHICH PUBLISHED KEYS BECOME WHICH SLOTS, in one place.
+ *
+ * The functions below read `store.long`, `store.sectorPremium` and four
+ * more; the pipeline publishes `board:long` and `sector:premium`. A colon
+ * is not an identifier, so the rename is real work and every caller was
+ * doing it by hand — the pipeline in one spelling, shared/flows-ask.js in
+ * another. Two copies of a six-key rename is the drift this codebase keeps
+ * consolidating, and it is worse here than usual: a mistyped slot does not
+ * throw, it produces a SILENCE, and a briefing full of silences is
+ * indistinguishable from a quiet market. It would have read as the product
+ * working.
+ */
+export const BRIEF_SLOTS = Object.freeze({
+  long: "board:long",
+  short: "board:short",
+  watch: "board:watch",
+  events: "events",
+  alerts: "flowalerts",
+  sectorPremium: "sector:premium",
+});
+
+/**
+ * Turn a store keyed by published key into the slots above.
+ *
+ * A KEY THE CALLER DOES NOT HOLD IS `pending`, NOT MISSING. silenceOf()
+ * calls an absent object "unreadable", whose sentence says the fault is on
+ * this page — a lie about a key that was simply never written. The Worker
+ * already answers an unwritten key with {status:"pending"}, so handing the
+ * same shape here keeps the briefing's account of a surface identical to
+ * the account that surface's own page gives. Two pages disagreeing about
+ * which kind of nothing happened is how a reader learns to trust neither.
+ */
+export function briefStoreFrom(published) {
+  const p = published && typeof published === "object" ? published : {};
+  const out = {};
+  for (const [slot, key] of Object.entries(BRIEF_SLOTS)) {
+    out[slot] = Object.hasOwn(p, key) ? p[key] : { status: "pending" };
+  }
+  return out;
+}
+
 /* ---------- TODAY ------------------------------------------------ */
 
 /**

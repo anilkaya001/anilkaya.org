@@ -8683,29 +8683,28 @@ async function main() {
      and exiting non-zero over the summary of that work would report a
      successful morning as a failure. */
   try {
-    const { buildBrief } = await import("../shared/flows-brief.js");
-    /* A KEY THIS RUN DID NOT PUBLISH IS `pending`, NOT MISSING — and the
-       difference is which sentence the reader gets. silenceOf() calls an
-       absent object "unreadable", whose text says the fault is on this page.
-       That would be a lie: nothing failed to read, the key was never written.
-       The Worker already answers an unwritten key with {status:"pending"}, so
-       handing the same shape here is what keeps the briefing's account of a
-       surface identical to the account that surface's own page gives. A
-       briefing that said "could not be read" beside a board page saying "not
-       published yet" would make the reader distrust the one that was right. */
-    const served = (key) => (
-      Object.hasOwn(publishedStore, key) ? publishedStore[key] : { status: "pending" }
-    );
+    const { buildBrief, briefStoreFrom } = await import("../shared/flows-brief.js");
+    const { buildFactIndex } = await import("../shared/flows-ask.js");
+    /* THE SLOT RENAME IS NOT SPELLED HERE ANY MORE. It was, and
+       shared/flows-ask.js spelled it a second time — two copies of a
+       six-key mapping whose failure mode is not an exception but a
+       SILENCE. A briefing reporting six absent surfaces looks exactly
+       like a quiet market, so the drift would have read as the product
+       working. briefStoreFrom owns it now, in the module whose slot names
+       they are, and it is also what decides that a key this run did not
+       publish arrives as {status:"pending"} rather than as missing.
+
+       ONE KEY CARRIES BOTH SHAPES. The page draws three sections; the
+       question box selects from a flat index over every surface. Two
+       calls because they are two shapes, published together because a
+       reader who opens the page and then asks a question must not be
+       answered out of two different sessions. */
+    const index = buildFactIndex(publishedStore);
     await publish("brief", {
       generatedAt, sessionDate,
-      ...buildBrief({
-        long: served("board:long"),
-        short: served("board:short"),
-        watch: served("board:watch"),
-        events: served("events"),
-        alerts: served("flowalerts"),
-        sectorPremium: served("sector:premium"),
-      }),
+      ...buildBrief(briefStoreFrom(publishedStore)),
+      facts: index.facts,
+      silences: index.silences,
     });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
