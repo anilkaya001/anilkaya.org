@@ -343,18 +343,26 @@ const near = (a, b, tol, msg) => {
      two names, so a change to one could not be seen from the other. Both now
      read one record, and these assertions are what would notice if they ever
      stopped: the two ratios must share a denominator BY CONSTRUCTION. */
+  /* THE FOURTH ROW EARNS ITS PLACE: its total_delta_flow is NEGATIVE. Without a
+     sign change in that column, Sigma|total| and |Sigma total| are the same
+     number and nothing in this block can tell a gross accumulator from a net
+     one — a version that dropped the Math.abs passed the first draft of these
+     assertions. Every "gross" claim below is only checkable because this tape
+     reverses. */
   const TAPE = [
     { dir_delta_flow: "600", otm_dir_delta_flow: "150", total_vega_flow: "40", total_delta_flow: "1000" },
     { dir_delta_flow: "-200", otm_dir_delta_flow: "-50", total_vega_flow: "10", total_delta_flow: "400" },
     { dir_delta_flow: "0", otm_dir_delta_flow: "0", total_vega_flow: "5", total_delta_flow: "100" },
+    { dir_delta_flow: "-300", otm_dir_delta_flow: "-90", total_vega_flow: "-20", total_delta_flow: "-500" },
   ];
   const t = greekFlowTotals(TAPE);
-  near(t.dirNet, 400, 1e-9, "dirNet is the one SIGNED accumulator — it answers which way");
-  near(t.dirAbs, 800, 1e-9, "dirAbs is gross, so two cancelling prints still count as flow");
-  near(t.otmAbs, 200, 1e-9, "otmAbs is gross too");
-  near(t.vegaAbs, 55, 1e-9, "vegaAbs is gross");
-  near(t.totalAbs, 1500, 1e-9, "totalAbs is Sigma|total_delta_flow| — the ONE denominator");
-  eq(t.rows, 3, "rows is a COUNT of measured prints, not a ratio");
+  near(t.dirNet, 100, 1e-9, "dirNet is the one SIGNED accumulator — it answers which way");
+  near(t.dirAbs, 1100, 1e-9, "dirAbs is gross, so cancelling prints still count as flow");
+  near(t.otmAbs, 290, 1e-9, "otmAbs is gross too");
+  near(t.vegaAbs, 75, 1e-9, "vegaAbs is gross — a negative vega print is vol traded, not vol undone");
+  near(t.totalAbs, 2000, 1e-9, "totalAbs is Sigma|total_delta_flow| — the ONE denominator");
+  ok(t.totalAbs !== 1000, "and it is GROSS: the reversing row adds 500, it does not subtract it");
+  eq(t.rows, 4, "rows is a COUNT of measured prints, not a ratio");
 
   eq(greekFlowTotals([]).rows, 0, "an empty tape measured zero rows");
   eq(greekFlowTotals(null).rows, 0, "and a missing tape is the same zero rows, never a throw");
@@ -369,6 +377,16 @@ const near = (a, b, tol, msg) => {
   near(purity.dirAbs, t.dirAbs, 0, "and the same gross");
   near(positioningQuality(TAPE).vegaTilt, t.vegaAbs / t.totalAbs, 1e-12,
        "positioningQuality's vegaTilt divides by that same totalAbs");
+  /* THE TWO RATIOS HAVE DIFFERENT DENOMINATORS ON PURPOSE, and the tape is
+     built so they differ numerically (1100 against 2000). otmShare asks what
+     fraction of the DIRECTIONAL flow was out of the money — bounded in [0,1]
+     because |otm_dir| <= |dir| row by row — while vegaTilt asks about the whole
+     tape. Dividing otmShare by totalAbs instead would still look plausible and
+     would still be bounded; only this assertion says which is meant. */
+  near(positioningQuality(TAPE).otmShare, t.otmAbs / t.dirAbs, 1e-12,
+       "otmShare divides the gross OTM by the gross DIRECTIONAL, not by the tape's total");
+  ok(t.dirAbs !== t.totalAbs,
+     "and the two denominators really are different numbers here, so that assertion can fail");
 
   /* THREADING A PRECOMPUTED RECORD MUST CHANGE NOTHING. The pipeline calls both
      measures on one array back to back; handing them one record is a ~33%
@@ -726,10 +744,18 @@ const near = (a, b, tol, msg) => {
     const composed = robustZ(winsorize(col, opts.winsor ?? 0.02), { clamp: opts.clamp ?? 3 });
     const fused = robustZFused(col, opts);
     eq(fused.length, composed.length, `${label}: fused returns one z per input row`);
+    ok(Array.isArray(fused), `${label}: and returns a plain Array, as robustZ does`);
+    /* TYPE BEFORE VALUE, because `Math.abs(0 - null)` is 0 and this suite would
+       otherwise have certified a version that returned an array of nulls as
+       "identical". That is this repository's oldest scar wearing a test
+       helper's clothes: absence must be checked BEFORE coercion, here as much
+       as in the payload. Every z is a finite number or the comparison below
+       means nothing. */
+    ok(fused.every((v) => typeof v === "number" && Number.isFinite(v)),
+       `${label}: every fused z is a finite NUMBER — never null, undefined or NaN`);
     let worst = 0;
     for (let i = 0; i < composed.length; i++) worst = Math.max(worst, Math.abs(composed[i] - fused[i]));
     ok(worst === 0, `${label}: fused equals robustZ(winsorize(...)) exactly (worst |diff| ${worst})`);
-    ok(Array.isArray(fused), `${label}: and returns a plain Array, as robustZ does`);
   };
 
   /* An ordinary board-shaped column: signed, with holes where a name was not
@@ -752,6 +778,10 @@ const near = (a, b, tol, msg) => {
   // refuses to invent a scale from one point.
   agree([5], {}, "a single element");
   agree([null, 7, NaN], {}, "a single measured element among the silences");
+  deepEq(robustZFused([null, 7, NaN], {}), [0, 0, 0],
+     "a column too thin to score is the NEUTRAL VOTE for every row — literally 0, " +
+     "not null and not undefined, because every caller does arithmetic on it");
+  deepEq(robustZFused([], {}), [], "and an empty column is an empty array, not a row of anything");
 
   // n = 2: the smallest column that gets a real scale at all.
   agree([1, 2], {}, "n = 2, the smallest scored column");
