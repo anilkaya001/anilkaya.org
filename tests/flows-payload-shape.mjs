@@ -387,7 +387,7 @@ assert.deepEqual(missingReport, [],
      "about a market-wide selection, and only the third silence makes a claim about the market");
   eq(quietFeed.present, false, "and it says so as data, not only in prose");
   for (const field of ["population", "names", "requested", "capped", "ordered", "orderedBy",
-                       "cut", "cutAt", "asOf", "asOfStated", "sameSession", "coverage",
+                       "cut", "cutAt", "asOf", "asOfStated", "sameSession",
                        "unit", "unitOne", "kind", "reason"]) {
     ok(Object.hasOwn(quietFeed, field),
        "the absence reading still carries `" + field + "` — without it \"not in this feed\" " +
@@ -399,6 +399,9 @@ assert.deepEqual(missingReport, [],
      one thin join and the payload has to be able to say so rather than
      leaving forty-eight cards to read as forty-eight findings. */
   for (const feed of ["oiChange", "darkpool"]) {
+    ok(!("coverage" in okCard.panels.marketRank.feeds[feed]),
+       `the ${feed} reading does not carry its own copy of the join's coverage — one number ` +
+       "in two places on one payload is two numbers that can disagree");
     const cov = okCard.panels.marketRank.coverage[feed];
     ok(cov && typeof cov.of === "number" && typeof cov.in === "number",
        `the ${feed} join publishes its own coverage as counts, not as a claim`);

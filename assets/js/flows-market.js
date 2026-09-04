@@ -1036,6 +1036,19 @@
     if (n === null) return DASH;
     return signGlyph(n) + Math.abs(n).toFixed(2) + "%";
   }
+  /* THE VENDOR'S OI RATIO, MULTIPLIED, BECAUSE IT ARRIVES AS A FRACTION.
+     oi_change is (curr-last)/last: 0.2153 is a 21.5% rise and 15.6149 is a
+     1561% one. Printed raw it reads as a small integer beside a contract
+     count it is not, which is exactly how it came to be drawn as one.
+     Rounded FIRST and signed off the rounded value, so a rise too small to
+     show does not print "−0". */
+  function signedGrowthPct(v) {
+    var n = isNum(v);
+    if (n === null) return DASH;
+    var p = n * 100;
+    var r = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10;
+    return signGlyph(r) + Math.abs(r).toLocaleString("en-US") + "%";
+  }
   function hhmm(iso) {
     return (typeof iso === "string" && iso.length >= 16) ? iso.slice(11, 16) : DASH;
   }
@@ -1464,17 +1477,25 @@
     var card = pulseCard("Open-interest change");
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
+      /* TWO COLUMNS BECAUSE THE VENDOR SENDS TWO READINGS, AND THIS DREW ONE
+         OF THEM UNDER THE OTHER'S NAME. `oi_change` is a ratio and
+         `oi_diff_plain` is the difference in contracts; this table rendered
+         the ratio through signedGrouped() under a contracts header, so a line
+         that went 2,119 to 35,207 printed "+16" and one that grew 21.5%
+         printed "+0". Each reading now has its own column and its own unit. */
       var t = pulseTable([
         { label: "Contract" },
-        { label: "Change", num: true }, { label: "Curr OI", num: true },
-        { label: "Volume", num: true },
-      ], "Contracts the vendor ranked by open-interest change");
+        { label: "Change", num: true }, { label: "Growth", num: true },
+        { label: "Curr OI", num: true }, { label: "Volume", num: true },
+      ], "Contracts the vendor ranked by open-interest change, with the change in " +
+         "contracts and as a share of the previous snapshot");
       rows.forEach(function (r) {
         var tr = document.createElement("tr");
         var th = el("th", null, contractLabel(r));
         th.scope = "row";
         tr.append(th);
-        tr.append(el("td", "c-num " + toneClass(r.change), signedGrouped(r.change)));
+        tr.append(el("td", "c-num " + toneClass(r.diff), signedGrouped(r.diff)));
+        tr.append(el("td", "c-num " + toneClass(r.ratio), signedGrowthPct(r.ratio)));
         tr.append(el("td", "c-num", grouped(r.currOi)));
         tr.append(el("td", "c-num", grouped(r.vol)));
         t.body.append(tr);

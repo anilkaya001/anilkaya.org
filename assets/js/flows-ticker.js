@@ -1807,6 +1807,23 @@
     return r < 0 ? MINUS + body : r > 0 ? "+" + body : "0";
   }
 
+  /** A FRACTION RENDERED AS A PERCENT, WITH THE SIGN ON THE ROUNDED VALUE.
+   *
+   *  The vendor's `oi_change` is (curr-last)/last — 0.2153 is a 21.5% rise
+   *  and 15.6149 is a 1561% one. It used to be drawn through tcSignedInt, so
+   *  a contract that went 2,119 to 35,207 printed "+16" and one that grew
+   *  21.5% printed "+0". The percent sign is not decoration here: it is the
+   *  thing that stops this column being read as a number of contracts. */
+  function tcSignedPct(v) {
+    const { isNum, DASH, MINUS } = window.FlowsPanels;
+    const n = isNum(v);
+    if (n === null) return DASH;
+    const p = n * 100;
+    const r = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10;
+    const body = Math.abs(r).toLocaleString("en-US") + "%";
+    return r < 0 ? MINUS + body : r > 0 ? "+" + body : "0%";
+  }
+
   /**
    * Calendar days from the card's session to this contract's expiry.
    *
@@ -3651,6 +3668,10 @@
       [el("th", "foi-h-oc", "Contract"),
         "Call or put, strike and expiry, from the vendor's option symbol."],
       [thChg, null],
+      [el("th", "c-num", "Growth"),
+        "The same move as a share of the previous snapshot — the vendor's oi_change, " +
+        "which is (curr_oi \u2212 last_oi) / last_oi and NOT a number of contracts. " +
+        "This column and \u0394OI are two readings of one move, not two moves."],
       [el("th", "c-num", "Curr OI"), "Open interest at the newer of the two clearing snapshots."],
       [el("th", "c-num", "Vol"), "The vendor's contract volume beside the change."],
       [el("th", "foi-h-streaks", "Streaks"),
@@ -3676,17 +3697,30 @@
       /* SIGN IS IN THE GLYPH, and the tone class is decoration on top of it.
          tcSignedInt already refuses a sign at zero — a change of exactly zero
          is a measurement without a direction. */
-      const chg = isNum(r.change);
+      /* TWO FIELDS, TWO COLUMNS. This read `r.change`, which carried the
+         vendor's oi_change — a RATIO — and drew it through tcSignedInt under
+         a header whose own tooltip says "curr_oi minus the previous clearing
+         snapshot's". The header was right and the data was not: a line that
+         went 2,119 to 35,207 printed "+16" beside a tooltip naming both
+         snapshots, and a 21.5% rise printed "+0". The count now comes from
+         oi_diff_plain and the ratio has a column of its own. */
+      const chg = isNum(r.diff);
+      const growth = isNum(r.ratio);
       const prevOi = isNum(r.prevOi);
       const currOi = isNum(r.currOi);
       tr.append(tcCell(tcSignedInt(chg),
         "c-num foi-chg " + (chg === null ? "is-unknown" : chg > 0 ? "is-up" : chg < 0 ? "is-down" : "is-flat"),
         chg === null
-          ? "The vendor published no usable change for this line."
+          ? "The vendor published no contract difference for this line."
           : "Between the vendor's two clearing snapshots" +
             (prevOi !== null && currOi !== null
               ? ": " + tcInt(prevOi) + " to " + tcInt(currOi) : "") +
             ". A day late by construction, so it says what stuck — never today's tape."));
+      tr.append(tcCell(tcSignedPct(growth),
+        "c-num foi-growth " + (growth === null ? "is-unknown" : growth > 0 ? "is-up" : growth < 0 ? "is-down" : "is-flat"),
+        growth === null
+          ? "The vendor published no open-interest ratio for this line."
+          : "The same move as a share of the previous snapshot. Not a contract count."));
 
       tr.append(tcCell(tcInt(r.currOi), "c-num foi-oi",
         currOi === null
@@ -4093,13 +4127,26 @@
       "executions, reported with delay, attributing no side and no participant."],
   ];
 
-  /** One silence, with the machine-readable kind on it. Never a blank box. */
+  /**
+   * One feed's silence, with the machine-readable kind on it.
+   *
+   * TWO LEAD-INS, AND NEITHER IS THE OTHER'S. "Unavailable" is the banner the
+   * whole page uses for a source that did not answer. A name that is simply
+   * not in a market-wide list needs the opposite of that banner and cannot
+   * borrow the card's other stock phrase either — "Nothing to report" is
+   * false here, because what is being reported is that the feed WAS read and
+   * this name was not in it. So the quiet arm leads on the reading itself.
+   *
+   * The publisher's sentences are written to follow a lead-in and carry no
+   * closing stop, exactly as every other panel's reason does; the stop is
+   * added here rather than in fifteen builder strings.
+   */
   function fmrSilence(host, kind, sentence) {
     const { el } = window.FlowsPanels;
     const p = el("p", kind === "quiet" ? "ft-quiet fmr-empty" : "fc-dead fmr-empty");
     p.setAttribute("data-empty", kind);
-    if (kind !== "quiet") p.append(el("strong", null, "Unavailable. "));
-    p.append(document.createTextNode(sentence));
+    p.append(el("strong", null, kind === "quiet" ? "Not in this feed. " : "Unavailable. "));
+    p.append(document.createTextNode(String(sentence).trim().replace(/\.+$/, "") + "."));
     host.append(p);
   }
 
@@ -4217,10 +4264,16 @@
           "off by our own limit."));
   }
 
-  /** "19 of 50 board names" — the join's own reach, on every card. */
-  function fmrCoverageLine(f) {
+  /**
+   * "19 of 50 board names" — the join's own reach, on every card.
+   *
+   * READ OFF THE PANEL, NOT OFF THE FEED READING. Coverage is a fact about
+   * the join and is identical on every card of the run; the panel carries it
+   * once and this reads it there, so there is no second copy of a number that
+   * would have to keep agreeing with the first.
+   */
+  function fmrCoverageLine(c) {
     const { el } = window.FlowsPanels;
-    const c = f.coverage;
     if (!c || typeof c.of !== "number" || typeof c.in !== "number" || !c.of) return null;
     const p = el("p", "fc-note fmr-cover",
       c.in + " of " + c.of + " name" + (c.of === 1 ? "" : "s") + " carrying a card today " +
@@ -4261,6 +4314,7 @@
       }
 
       if (f.status === "ok") {
+        const fmrTitles = [];
         const value = fmrValue(f.value, f);
         const rank = isNum(f.rank);
         const pop = isNum(f.population);
@@ -4271,18 +4325,52 @@
           ["Rank",
             rank === null || pop === null ? DASH : tcInt(rank) + " of " + tcInt(pop),
             "fmr-rank"],
+          /* THE TONE CLASS ONLY WHERE THERE IS A SIGN TO DECORATE. A dollar
+             print size has no direction — the tape attributes no side — so
+             tinting it would claim one. Four arms on the signed case, because
+             a change of exactly zero is a measurement and not a small rise. */
           ["Value", value === null ? DASH : value,
-            "fmr-val " + (f.kind === "count"
-              ? (isNum(f.value) === null ? "is-unknown"
+            f.kind === "count"
+              ? "fmr-val " + (isNum(f.value) === null ? "is-unknown"
                 : f.value > 0 ? "is-up" : f.value < 0 ? "is-down" : "is-flat")
-              : "")],
+              : "fmr-val"],
         ];
         if (count !== null && count > 1) {
-          pairs.push(["Rows", tcInt(count) + (key === "oiChange" ? " contracts" : " prints"),
-            "fmr-rows"]);
+          /* ONE LINE IN THE TOP HUNDRED AND A WHOLE BOOK IN IT ARE DIFFERENT
+             READINGS, so the count is printed rather than folded into the
+             rank.
+
+             THE POSITIONS RIDE IN THE CELL'S TITLE, WITH THE CUT STATED. The
+             note this replaces said the alternative was "eleven numbers in an
+             8.5rem cell", which the payload cannot produce: shared/
+             flows-card.js caps the list at CROSS_ROWS and publishes `shown`
+             beside `count`, so it is at most three positions. What does not
+             fit the cell is the sentence around them — three positions plus
+             "the first 3 of 11; the rest are not listed" is prose, and the
+             cell holds the count, which is the reading. */
+          const rows = Array.isArray(f.rows) ? f.rows : [];
+          const shown = isNum(f.shown);
+          const cell = ["Rows", tcInt(count) + (key === "oiChange" ? " contracts" : " prints"),
+            "fmr-rows"];
+          pairs.push(cell);
+          fmrTitles.push([cell, rows.length
+            ? "At position" + (rows.length === 1 ? " " : "s ") + rows.join(", ") +
+              (shown !== null && shown < count
+                ? " (the first " + shown + " of " + count + "; the rest are not listed)"
+                : "") + " in the feed."
+            : "The feed carried no positions for this name."]);
         }
         if (f.at) pairs.push(["Printed", fmrStamp(f.at) || DASH, "fmr-at"]);
-        block.append(statList(pairs));
+        const dl = statList(pairs);
+        /* statList takes no titles, so the tooltip is attached afterwards by
+           finding the pair's own wrapper — the pairs are index-aligned with
+           the wrappers statList builds, and each pair is one wrapper. */
+        for (const [pair, title] of fmrTitles) {
+          const at = pairs.indexOf(pair);
+          const wrap = at >= 0 ? dl.children[at] : null;
+          if (wrap) wrap.title = title;
+        }
+        block.append(dl);
 
         if (value === null && isNum(f.value) !== null) {
           block.append(el("p", "fc-note fmr-nounit",
@@ -4305,7 +4393,7 @@
 
       block.append(fmrCutLine(f));
       block.append(fmrSessionLine(f, card && card.sessionDate));
-      const cov = fmrCoverageLine(f);
+      const cov = fmrCoverageLine((panel.coverage || {})[key]);
       if (cov) block.append(cov);
       host.append(block);
     }
@@ -5091,12 +5179,22 @@
        whole layer replaced. */
     let d1Node = null;
     if (chg && chg.status === "ok" && chg.d1) {
-      d1Node = idChip("ftD1", "", P.signed(chg.d1.v, (a) => String(a)) + " / " +
-        chg.d1.gap + (chg.d1.gap === 1 ? " session" : " sessions"), {
+      /* THE UNIT IS IN THE CHIP, NOT ONLY IN ITS TOOLTIP. This read
+         "+7 / 1 session" beside a chip carrying "$184.20" and one carrying
+         "+1.4%", and the only place that said what the 7 was in was a `title`
+         no touch reader and no keyboard reader ever opens. The count of
+         sessions was already spelled out; the score points now are too.
+
+         AND THE GAP AGREES WITH ITSELF. The tooltip said "1 sessions back"
+         because the plural was hardcoded there while the chip beside it used
+         the ternary — the same seam POINTS exists to close on the other
+         number. Both now go through SESSIONS. */
+      d1Node = idChip("ftD1", "", P.signed(chg.d1.v, (a) => String(a)) + POINTS(chg.d1.v) +
+        " over " + SESSIONS(chg.d1.gap), {
         cls: P.polarity(chg.d1.v),
         title: "Score points against the " + chg.d1.from + " session, the previous one " +
-          "that scored this name, " + chg.d1.gap + " sessions back in this card's window. " +
-          "Full working in the change block below.",
+          "that scored this name, " + SESSIONS(chg.d1.gap) + " back in this card's " +
+          "window. Full working in the change block below.",
       });
     } else if ($("ftD1")) {
       $("ftD1").remove();
@@ -5121,9 +5219,13 @@
   function paintRank() {
     if (!headEl || !painted || !switchRows || !switchRows.length) return;
     const me = switchRows.find((r) => r.t === painted.ticker);
-    if (!me || isNum(me.r) === null) return;
-    const sideCount = switchRows.filter((r) => r.side === me.side).length;
-    const chip = idChip("ftRank", "rank", me.r + " of " + sideCount, {
+    if (!me || isNum(me.r) === null || isNum(me.of) === null) return;
+    /* THE POPULATION IS THE SIDE'S OWN ROW COUNT, off the board payload. It
+       used to be a count of the rows this page had KEPT, which is a different
+       set from the one `r` is a rank inside — and once the carded filter
+       actually filtered, a name ranked 30 on a 44-row side would have been
+       published as "30 of 23". */
+    const chip = idChip("ftRank", "rank", me.r + " of " + me.of, {
       title: "Rank on today's " + (me.side === "short" ? "short" : "long") + " board, read " +
         "from the board payload the name switcher fetched. It is not published on this card.",
     });
@@ -5140,6 +5242,10 @@
      POINTS and never percent, and "1 score points" is the kind of seam that
      makes a reader wonder who wrote the sentence. */
   const POINTS = (n) => (Math.abs(n) === 1 ? " score point" : " score points");
+  /* A POPULATION, WITH ITS NOUN. Used by the picker's notes, where every count
+     is a count of board rows and a bare integer in a sentence about names is
+     the same defect one screen up. */
+  const NAMES = (n) => n + (n === 1 ? " name" : " names");
 
   const CROSSING = {
     cleared: "Cleared the dead band — this name became actionable this session.",
@@ -5252,8 +5358,15 @@
         P.polarity(chg.at.score)],
       ["Run", chg.run === 0 ? "0 — at neutral"
         : (chg.runCapped ? "≥ " : "") + SESSIONS(chg.run)],
-      ["Window high", P.signed(chg.ext.hi, (a) => String(a)) + " on " + chg.ext.hiAt],
-      ["Window low", P.signed(chg.ext.lo, (a) => String(a)) + " on " + chg.ext.loAt],
+      /* THE UNIT TRAVELS WITH THESE TWO AS WELL, and it did not. Every other
+         row of this list carried "score points" and these two printed a bare
+         "+42 on 2026-08-20" — in a block whose neighbouring chips are a dollar
+         price and a percentage day move, which is precisely the reading a
+         unitless number invites. */
+      ["Window high", P.signed(chg.ext.hi, (a) => String(a)) + POINTS(chg.ext.hi) +
+        " on " + chg.ext.hiAt, P.polarity(chg.ext.hi)],
+      ["Window low", P.signed(chg.ext.lo, (a) => String(a)) + POINTS(chg.ext.lo) +
+        " on " + chg.ext.loAt, P.polarity(chg.ext.lo)],
       ["Dead band", chg.band === null ? DASH : "±" + chg.band + POINTS(chg.band)],
     ]));
 
@@ -5384,16 +5497,21 @@
              has actually been read, the chip can be filled. */
           paintRank();
         }
-        if (!switchRows.length) {
-          /* NOT AN ERROR AND NOT A BLANK LIST. The boards failed or are not
-             published yet, and the button says which rather than opening an
-             empty table the reader has to interpret. */
-          btn.textContent = "No board to switch to";
+        const shown = carded(switchRows);
+        if (!shown.length) {
+          /* NOT AN ERROR AND NOT A BLANK LIST, and now three reasons rather
+             than two: the boards failed, they are not published yet, or every
+             row on them is a name this run did not build a card for. The
+             button says which rather than opening an empty table the reader
+             has to interpret. */
+          btn.textContent = switchRows.length
+            ? "No other name has a card today"
+            : "No board to switch to";
           return;
         }
-        showPicker(switchRows,
-          "Every name today's board built a card for. You are on " +
-          ((card && card.ticker) || "a name") + ".",
+        showPicker(shown,
+          pickerNote(switchRows, shown,
+            "You are on " + ((card && card.ticker) || "a name") + "."),
           (card && card.ticker) || null);
       } finally {
         btn.disabled = false;
@@ -5461,19 +5579,82 @@
     if (noteEl) noteEl.textContent = note;
   }
 
-  /* Only the names with a card get a row. `dp` is the deep flag the board
-     publishes; a link that usually leads to "no card for this name" is worse
-     than no link, and this list is meant to be the one place in the section
-     that reliably answers "what can I open?". */
+  /**
+   * Every row of both boards, each carrying whether the run built a CARD for
+   * it and how many names its own side holds.
+   *
+   * `row.dp === 0` WAS A TEST AGAINST A VALUE THIS PAYLOAD HAS NEVER CARRIED.
+   * The pipeline stamps `row.dp = 1` on the names it went deep on and writes
+   * nothing at all on the rest, so `if (row.dp === 0) continue` skipped
+   * exactly zero rows — while the three notes printed above the three lists
+   * built from it each claimed the opposite ("Every name today's board built a
+   * card for"). On the run this was found on, 21 of 44 long rows and 23 of 50
+   * short ones had no card: nearly half of the index, of the name switcher and
+   * of the list handed to a reader who had just been told their name has no
+   * card were links to a page that says there is nothing to draw. The note was
+   * a claim about the list beneath it, and it was false.
+   *
+   * ABSENT ON EVERY ROW IS NOT FALSE ON EVERY ROW, which is why the test is on
+   * the PAYLOAD and not on the row. This is the rule flows-board.js:498
+   * already states and the reason is unchanged: assets deploy the moment main
+   * moves and the pipeline runs the next morning, so there is always a day
+   * when new JavaScript reads an old board — and an old board carries `dp`
+   * nowhere. `deep` is the count the board publishes beside `deepRule`; its
+   * absence means the board predates the distinction and every row on it does
+   * have a card, so `card` is null (unknown) rather than false.
+   *
+   * `of` IS THE SIDE'S OWN POPULATION, taken off the payload, because `r` is a
+   * rank within the WHOLE side. Counting the filtered list instead would have
+   * printed "rank 30 of 23" the first time a name outside the deep set was
+   * ranked — a rank and a population that do not belong to each other.
+   */
   function boardRows(long, short) {
     const out = [];
     for (const [payload, side] of [[long, "long"], [short, "short"]]) {
-      for (const row of (payload && payload.rows) || []) {
-        if (row && row.dp === 0) continue;
-        out.push({ t: row.t, r: row.r, s: row.s, side });
+      const rows = ((payload && payload.rows) || []).filter((r) => r && r.t);
+      const knowsDeep = isNum(payload && payload.deep) !== null;
+      for (const row of rows) {
+        out.push({
+          t: row.t, r: row.r, s: row.s, side,
+          card: knowsDeep ? row.dp === 1 : null,
+          of: rows.length,
+        });
       }
     }
     return out;
+  }
+
+  /** The rows a link can honestly be drawn for: carded, or a board too old to say. */
+  const carded = (rows) => rows.filter((r) => r.card !== false);
+
+  /**
+   * The sentence above the picker, TRUE of the list beneath it.
+   *
+   * THREE STATES AND THEY ARE NOT ONE CLAIM: the board said which of its rows
+   * carry a card and some were dropped; it said and none were; or it does not
+   * say at all, and then the list is every row and the note must not promise a
+   * card it has not checked. The count is never printed without the population
+   * it was taken out of.
+   */
+  function pickerNote(all, shown, tail) {
+    const unknown = all.some((r) => r.card === null);
+    if (unknown) {
+      return "All " + NAMES(all.length) + " on today’s board. This board does not " +
+        "publish which of its rows the run went deep enough on to build a card for, so a " +
+        "name here may still open a page with no card. " + tail;
+    }
+    if (all.length > shown.length) {
+      /* THE COUNT AND ITS POPULATION IN THE SAME CLAUSE, and no number left
+         holding a verb: "the other 1 are ranked" is the same tell as "1 score
+         points", which is why the counts sit where nothing has to agree with
+         them. */
+      return "Today’s board ranks " + NAMES(all.length) + " and this run built a card " +
+        "for " + shown.length + " of them, which are the rows below. A card costs vendor " +
+        "calls the run cannot spend on every name, so the rest are ranked without one and " +
+        "are not listed: such a page would have nothing on it. " + tail;
+    }
+    return "All " + NAMES(all.length) + " on today’s board, every one of which " +
+      "carries a card. " + tail;
   }
 
   /**
@@ -5485,18 +5666,42 @@
    * name was allowed through and did not get far enough. Collapsing them into
    * one apologetic sentence is what the old copy did.
    *
-   * NOTHING IS INFERRED FROM AN ABSENCE. The calendar is capped, so a name
-   * with no row in it may have been shed rather than never gated — and this
-   * says so rather than concluding it was not gated, which would be the
-   * reassuring guess.
+   * NOTHING IS INFERRED FROM AN ABSENCE, and the reason given for the absence
+   * is the one the payload says operated. The calendar holds only names
+   * reporting inside its published window and is capped on top of that, so a
+   * name with no row in it may be reporting far out, or may have been shed —
+   * this states the window always and the cap only when `capBound` says it
+   * bound, rather than concluding the name was never gated (the reassuring
+   * guess) or blaming a cap that did not bind (a confident wrong cause, which
+   * is what this used to do on every run).
    */
-  function sayWhyAbsent(ticker, events) {
-    const lead = ticker + " is not on today's board, so no card was built for it. ";
+  function sayWhyAbsent(ticker, events, boardsRead) {
+    /* THE LEAD IS ONLY EARNED IF A BOARD WAS ACTUALLY READ. Both board
+       requests are wrapped in `.catch(() => null)`, so two failed reads used
+       to arrive here indistinguishable from two successful ones that did not
+       carry this name — and the page then stated "is not on today's board" on
+       the strength of a fetch that never came back. */
+    const lead = boardsRead === false
+      ? "Neither board could be read just now, so this page cannot say whether " + ticker +
+        " is on today's board. What follows is the funnel's own account of it. "
+      : ticker + " is not on today's board, so no card was built for it. ";
     const rows = events && Array.isArray(events.rows) ? events.rows : null;
     const row = rows ? rows.find((r) => r && String(r.t).toUpperCase() === ticker) : null;
 
     const parts = [lead];
-    if (!rows) {
+    if (row && String(row.st || "").startsWith("board:")) {
+      /* THE TWO PAYLOADS DISAGREE, AND THAT IS THE READING. The funnel says
+         this name reached the board and the board this page just read does not
+         carry it. Printing "it cleared the gate and did not reach the board"
+         here would resolve a contradiction in favour of the half that happens
+         to be in this branch. */
+      parts.push(
+        "The funnel places it on today\u2019s " +
+        (row.st === "board:short" ? "bearish" : "bullish") + " board, which the board " +
+        "payload this page just read does not agree with \u2014 either that read failed " +
+        "or the two payloads are from different runs. Reload before concluding anything " +
+        "about this name.");
+    } else if (!rows) {
       parts.push(
         "The earnings calendar could not be read just now, so this page cannot say which " +
         "stage of the funnel it stopped at. It is not on the watch list either: that list " +
@@ -5521,10 +5726,25 @@
         "\u201d: it cleared the earnings gate and did not reach the board. Cards are built " +
         "only for board names, so there is nothing to draw for it today.");
     } else {
+      /* THE CALENDAR'S SILENCE HAS TWO CAUSES AND THE OLD SENTENCE NAMED THE
+         RARER ONE AS THOUGH IT ALWAYS APPLIED. It said "that calendar is
+         capped" unconditionally; on the run this was checked against, the cap
+         did not bind at all (`capBound: false`), and the reason a name is
+         missing is simply that the calendar only holds names reporting inside
+         its window. Both are on the payload, so both are stated — and the
+         cap only when it actually bound. */
+      const win = isNum(events.windowDays);
       parts.push(
-        "The earnings calendar carries no row for this name, so this page cannot say which " +
-        "stage of the funnel it stopped at \u2014 and that calendar is capped, so its " +
-        "silence is not evidence that the name was never gated.");
+        "The earnings calendar carries no row for this name, so this page cannot say " +
+        "which stage of the funnel it stopped at. That calendar holds only names " +
+        "reporting within " +
+        (win === null ? "its own window" : win + " calendar " + (win === 1 ? "day" : "days")) +
+        " of " + (events.gateOrigin || "the run\u2019s own Eastern date") +
+        (events.capBound === true
+          ? ", and it was capped before it ran out of window, so it does not reach every " +
+            "name even inside it"
+          : "") +
+        " \u2014 so its silence here is a missing row, not evidence about this name.");
     }
 
     statusEl.replaceChildren(document.createTextNode(parts.join("")));
@@ -5547,16 +5767,24 @@
         getJSON("/api/flows/board?side=long").catch(() => null),
         getJSON("/api/flows/board?side=short").catch(() => null),
       ]).then(([long, short]) => {
-        const rows = boardRows(long, short);
+        const all = boardRows(long, short);
+        const rows = carded(all);
         if (!rows.length) {
-          statusEl.textContent =
-            "No board has been published yet, so there is no name to choose.";
+          /* TWO REASONS FOR AN EMPTY INDEX, AND THEY ARE NOT THE SAME FACT.
+             No board at all is a publishing state; a board whose every row is
+             a name this run did not build a card for is a budget state, and
+             telling a reader "no board has been published" while one is
+             published and ranked would be a wrong answer about the product's
+             central artifact. */
+          statusEl.textContent = all.length
+            ? "Today’s board ranks " + NAMES(all.length) + ", and this run built a " +
+              "card for none of them, so there is nothing to open here. The board itself " +
+              "is published."
+            : "No board has been published yet, so there is no name to choose.";
           return;
         }
-        showPicker(rows,
-          "Every name today's board went deep enough on to build a card for. " +
-          "A name the board published without a card is not listed, because " +
-          "its page would have nothing on it.");
+        showPicker(rows, pickerNote(all, rows,
+          "Each one opens its own workspace of panels."));
       });
       return;
     }
@@ -5590,17 +5818,40 @@
           getJSON("/api/flows/board?side=short").catch(() => null),
           getJSON("/api/flows/events").catch(() => null),
         ]).then(([long, short, events]) => {
-          const rows = boardRows(long, short);
-          const onBoard = rows.some((r) => r.t === ticker);
-          if (onBoard) {
+          /* THE MEMBERSHIP TEST READS THE WHOLE BOARD, NOT THE CARDED HALF.
+             A name the board ranked but built no card for IS on the board, and
+             answering "not on today's board" for it would be the same class of
+             wrong sentence this branch was rewritten to remove. */
+          const all = boardRows(long, short);
+          const rows = carded(all);
+          const me = all.find((r) => r.t === ticker);
+          if (me && me.card === false) {
+            /* A FOURTH FACT, and it used to be told as the first one. This
+               name is ranked and published; the run simply did not spend the
+               two vendor calls a card costs on it, because it spends them on
+               the names furthest from neutral. "Its card has not landed yet"
+               invited a reload that will never produce one. */
+            statusEl.textContent =
+              "The board ranks " + ticker + " " +
+              (isNum(me.r) === null || isNum(me.of) === null
+                ? "on its " + (me.side === "short" ? "bearish" : "bullish") + " side"
+                : me.r + " of " + me.of + " on the " +
+                  (me.side === "short" ? "bearish" : "bullish") + " side") +
+              ", and this run built no card for it. A card costs vendor calls the run " +
+              "spends only on the names furthest from neutral, so most of the board is " +
+              "scored and ranked without one. This is not a lag, and reloading will not " +
+              "produce a card.";
+          } else if (me) {
             statusEl.textContent =
               "The board published " + ticker + " but its card has not landed yet. " +
               "Cards are published after the boards, so one can briefly lag its row.";
             return;
+          } else {
+            sayWhyAbsent(ticker, events, long !== null || short !== null);
           }
-          sayWhyAbsent(ticker, events);
           if (rows.length) {
-            showPicker(rows, "These are the names that do have a card today.");
+            showPicker(rows, pickerNote(all, rows,
+              "These are the ones you can open today."));
           }
         });
       }

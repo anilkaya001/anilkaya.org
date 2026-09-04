@@ -77,6 +77,7 @@ import { joinScoreToPrice } from "./flows-overlay.js";
    pulse already owns the one reading of that ambiguity. A second copy here
    would be a second place for the envelope rule to be corrected. */
 import { unwrapRows } from "./flows-pulse.js";
+import { easternDay } from "./flows-freshness.js";
 /* Read for the same reason shapeOiChange reads it: the market-wide
    open-interest rows are keyed on the CONTRACT, and `underlying_symbol` is
    documented but has been absent on live rows before, so the option symbol is
@@ -1365,7 +1366,16 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
          on either statistic this index measures, so it is counted out of the
          population rather than carried as a row with nothing in it. */
       if (!t || (value === null && at === null)) continue;
-      shaped.push({ t: String(t).toUpperCase(), value, at, day: isoDay(at), raw: r });
+      /* THE PRINT'S EASTERN DAY, NOT THE FIRST TEN CHARACTERS OF ITS STAMP.
+         `executed_at` is an INSTANT and `sessionDate` is a calendar day
+         resolved in America/New_York, so slicing the ISO date out of the
+         instant compares two different kinds. Off-exchange prints are
+         reported to 20:00 ET; under EST every print after 19:00 ET carries a
+         UTC date one day AHEAD of its own Eastern session — and a 05:15 run
+         asking /darkpool/recent for the newest hundred prints gets exactly
+         those rows. It dated the whole feed to tomorrow and told every card
+         "this ranking is from another session" about prints from its own. */
+      shaped.push({ t: String(t).toUpperCase(), value, at, day: easternDay(at), raw: r });
     }
   }
 
@@ -1396,17 +1406,35 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
     ? measureOrder(shaped.map((s) => (s.at ? Date.parse(s.at) : null)))
     : null;
 
+  /* THE CUT IS THE LAST ROW ONLY WHEN THE FEED RUNS DOWNWARDS.
+     measureOrder tells ascending from descending precisely so a threshold is
+     claimed only where one exists, and both branches then took
+     shaped[length-1] regardless. On an ascending feed the last row is the
+     MAXIMUM: /api/market/oi-change takes an `order` parameter, so a hundred
+     rows returned 100..199 ascending would publish cut = 199 and the panel
+     would say the hundredth place held 199 — the largest value in the feed
+     announced as the floor everything else cleared. Same for a print feed
+     sorted oldest-first, where the newest stamp would be published as the
+     time the window reaches back to.
+
+     A cut-off is the LAST-INCLUDED value in ranked order, so it is the end of
+     the array when descending and the start of it when ascending. When
+     measureOrder finds no order at all, both stay null: there is no threshold
+     to publish, and a number from an arbitrary position is not one. */
+  const edgeOf = (dir, pick) =>
+    pick(dir === "descending" ? shaped[shaped.length - 1] : shaped[0]);
+
   let ordered = null, orderedBy = null, cut = null, cutAt = null;
   if (byTime) {
     ordered = byTime;
     orderedBy = byTime === "descending" ? "execution time, newest first" : "execution time, oldest first";
-    cutAt = shaped[shaped.length - 1].at;
+    cutAt = edgeOf(byTime, (r) => r.at);
   } else if (byValue) {
     ordered = byValue;
     orderedBy = feed === "oiChange"
       ? "the vendor's own open-interest change field"
       : "the print's dollar size";
-    cut = shaped[shaped.length - 1].value;
+    cut = edgeOf(byValue, (r) => r.value);
   }
 
   const oi = feed === "oiChange" ? measureOiBasis(rows) : { basis: null, checked: 0, agreed: 0 };
@@ -1456,7 +1484,8 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
      that never cut anything would be a stated threshold that does not
      exist, which is the same defect as an unstated one pointing the other
      way. The flag is published so the sentence can be right either way. */
-  const capped = numOrNull(limit) !== null && shaped.length >= limit;
+  const lim = numOrNull(limit);
+  const capped = lim !== null && shaped.length >= lim;
 
   return {
     status: "ok", feed, label: CROSS_LABEL[feed],
@@ -1518,7 +1547,13 @@ function crossFrame(f) {
     asOf: f.asOf || null, asOfStated: !!f.asOfStated,
     asOfSessions: numOrNull(f.asOfSessions), sameSession:
       f.sameSession === null || f.sameSession === undefined ? null : !!f.sameSession,
-    coverage: f.coverage || null,
+    /* COVERAGE IS NOT ON THE PER-NAME READING, and that is deliberate. How
+       many of the board's names placed in a feed is a fact about the JOIN,
+       identical on all fifty cards, and copying it onto every feed reading as
+       well as onto the panel would be the same number in two places on one
+       payload — which is how two numbers that must agree eventually stop
+       agreeing. The panel carries it once, under `coverage`, and the drawer
+       reads it there. */
   };
 }
 
@@ -1616,7 +1651,12 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
      be sized by how much of the board the feed reached. */
   const coverage = {};
   for (const feed of CROSS_FEEDS) {
-    coverage[feed] = feeds[feed].coverage || null;
+    /* TAKEN FROM THE INDEX, NOT FROM THIS NAME'S READING. The per-name
+       reading deliberately does not carry it — coverage is a fact about the
+       join and is the same on every card — so this is the one place it is
+       written onto a card. */
+    const f = index[feed];
+    coverage[feed] = f && f.coverage ? f.coverage : null;
   }
   return ok({ feeds, coverage, notes: CROSS_NOTES }, asOf);
 }
@@ -1633,7 +1673,10 @@ export const CROSS_NOTES = Object.freeze({
     "one did not make a market-wide list; it is not a name with no " +
     "open-interest change and no off-exchange prints. The per-name feeds on " +
     "this page are what measure that, and they are read separately for every " +
-    "name on the board.",
+    "name on the board. The vendor states that its open-interest list carries " +
+    "no index or exchange-traded-fund contracts at all, so a fund cannot " +
+    "appear in it at any size and its absence there says nothing whatever " +
+    "about it.",
   timing:
     "The vendor states that its market-wide open-interest feed updates once a " +
     "trading day at about 06:45 Eastern, and this pipeline runs at 05:15 " +

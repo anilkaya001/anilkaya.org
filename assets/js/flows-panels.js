@@ -113,8 +113,20 @@
      families that use it carry their own neutral rule, since the base classes
      set `fill: none` or no stroke at all — a path with a polarity class that
      has no rule is not a neutral line, it is an invisible one. */
-  const polarity = (n) => (n === null || n === undefined || !Number.isFinite(Number(n))
-    ? "is-null" : Number(n) < 0 ? "is-neg" : Number(n) > 0 ? "is-pos" : "is-flat");
+  /* AND THE ABSENCE TEST IS isNum's, NOT A SECOND ONE WRITTEN HERE.
+
+     The first draft of this helper carried its own — `n === null || n ===
+     undefined || !Number.isFinite(Number(n))` — and Number("") is 0, so an
+     empty string arrived as a MEASURED ZERO and was tinted `is-flat`. That is
+     the confident zero, rebuilt inside the helper written to stop two-armed
+     ternaries from doing exactly this. isNum is this file's one answer to "is
+     there a reading here"; a second answer beside it is how the two come to
+     disagree, which is the divergence isNum itself was just realigned to
+     close, two screens up. */
+  const polarity = (v) => {
+    const n = isNum(v);
+    return n === null ? "is-null" : n < 0 ? "is-neg" : n > 0 ? "is-pos" : "is-flat";
+  };
   const pct = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(2) + "%"));
   const pct1 = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(1) + "%"));
   const sigma = (v) => fmtOr(v, (n) => signed(n, (a) => a.toFixed(2) + "σ"));

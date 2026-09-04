@@ -96,8 +96,13 @@ export const ALERTS_NOTES = Object.freeze({
 /**
  * One vendor alert row, shaped for publication. Null on an unusable row
  * (no ticker, or nothing measurable on it at all).
+ *
+ * `stageComplete` declares whether `stageOf` was built from the WHOLE screened
+ * universe. It defaults true because the nightly pipeline's map is; the
+ * Worker's intraday map is not, and that difference decides whether a miss is
+ * a fact about the name or a fact about the map. See `st` below.
  */
-export function alertRow(raw, { stageOf } = {}) {
+export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
   if (!raw || typeof raw !== "object") return null;
   const t = typeof raw.ticker === "string" && raw.ticker ? raw.ticker : null;
   if (!t) return null;
@@ -141,8 +146,24 @@ export function alertRow(raw, { stageOf } = {}) {
     spanEnd: typeof raw.end_time === "string" ? raw.end_time : null,
     rule: typeof raw.alert_rule === "string" && raw.alert_rule ? raw.alert_rule : null,
     /* Where the name stood in the board's own funnel, so a reader can see
-       at a glance whether the flagged name is one the board scores at all. */
-    st: typeof stageOf === "function" ? (stageOf(t) || "foreign") : null,
+       at a glance whether the flagged name is one the board scores at all.
+
+       "foreign" IS A POSITIVE CLAIM AND IT WAS BEING MANUFACTURED OUT OF
+       ABSENCE. The page renders it as "the screener never returned this name,
+       so the board holds no view of it" — true when the caller's map covers
+       the whole screened universe, which the nightly pipeline's does. The
+       Worker's intraday map does NOT: it is rebuilt on each read from the
+       stages the STORED payload already carried, so a name flagged at 09:31
+       that was not among last night's sixty alert rows misses that map for a
+       reason that has nothing to do with the screener. It was stamped
+       "foreign" anyway — and once the record began carrying rows across reads
+       the stamp stuck for the rest of the session, because the next read reads
+       the stage back out of the row it wrote. A caller whose map is partial
+       says so and gets null instead: "this read cannot place the name", which
+       is a different silence and which the page already draws as a dash. */
+    st: typeof stageOf === "function"
+      ? (stageOf(t) || (stageComplete ? "foreign" : null))
+      : null,
   };
 }
 
@@ -241,7 +262,7 @@ function coverageOf(rows) {
  * point: the shaper is the only place that knows what a row is, and one
  * spelling in one function removes the class of bug instead of this instance.
  */
-export function buildFlowAlerts(rawRows, { stageOf, cap = ALERT_ROWS } = {}) {
+export function buildFlowAlerts(rawRows, { stageOf, stageComplete = true, cap = ALERT_ROWS } = {}) {
   const shaped = [];
   let unusable = 0;
   const incoming = Array.isArray(rawRows)
@@ -250,7 +271,7 @@ export function buildFlowAlerts(rawRows, { stageOf, cap = ALERT_ROWS } = {}) {
       ? rawRows.data
       : [];
   for (const raw of incoming) {
-    const row = alertRow(raw, { stageOf });
+    const row = alertRow(raw, { stageOf, stageComplete });
     if (row) shaped.push(row);
     else unusable++;
   }
@@ -328,14 +349,25 @@ export function alertKey(row) {
 /**
  * The record's ceilings, and why these two numbers.
  *
- * The stored payload is served whole to a browser and the ingest route
- * refuses anything over 128KB, so a union that grew with the session would
- * eventually stop being publishable: 28 reads of up to 60 windows is 1680
- * rows in the worst case. One fully-populated row of this shape measures
- * about 505 bytes — MEASURED, not guessed: every vendor field present, a long
- * rule name, and the record's own two ISO instants. 180 rows is therefore
- * about 91KB of rows under a 96KB ceiling, which leaves the envelope, the
- * coverage counts and the notes their room.
+ * The stored payload is served WHOLE to a browser on every page load, and
+ * 128KB is the size the other writer of this key is held to: the pipeline
+ * posts through an ingest route that refuses a larger body
+ * (FLOWS_MAX_PAYLOAD_BYTES in worker.js). The cron writes to D1 directly and
+ * so is held to it by nothing except these two constants — which is exactly
+ * why they have to exist. One key with two writers may not have two sizes,
+ * and a union that grew with the session would leave the smaller one behind:
+ * 28 reads of up to 60 windows is 1680 distinct windows on a busy day.
+ *
+ * THE ARITHMETIC, MEASURED RATHER THAN GUESSED. A maximally populated row of
+ * this shape — every vendor field present, a long rule name, a board stage
+ * and the record's own two ISO instants — serialises to 533 bytes. 180 of
+ * those is 95.9KB, a whisker under the byte ceiling, which is the split
+ * between the two: rows is the ceiling that bites on a busy session, bytes is
+ * the hard bound that bites first if the row shape ever grows a field. At
+ * both ceilings at once the whole stored payload — rows, envelope, coverage
+ * counts and notes — measures about 99KB, and the contract suite pins that
+ * against worker.js's own 128KB constant, because a ceiling justified only in
+ * a comment is a ceiling nobody re-derives when the row grows.
  *
  * Rows is the ceiling that normally bites; bytes is the backstop for a day of
  * unusually fat rows, and `record.shedBy` names which one did. Both are
@@ -420,13 +452,22 @@ export function mergeAlerts(prev, next, {
        "cold"             — no record on it: the nightly build published this
                             key, or a build older than this record shape did.
                             Either way those rows describe a closed session.
-       "undated"          — this read cannot name its own day, so no stored
-                            day can be compared with it.
-       "session-boundary" — the record is real and belongs to another day. */
+       "undated"          — a day could not be named on ONE SIDE of the
+                            comparison: either this read cannot name its own,
+                            or the stored record never named its. The two are
+                            the same fact about the comparison, and neither is
+                            a boundary. Reporting a dateless record as
+                            "session-boundary" — which this did — names a
+                            boundary nothing crossed, and the reset reason is
+                            published prose a page reads out loud.
+       "session-boundary" — both days are known and they differ: the record is
+                            real and belongs to another session. */
+  const heldDate = heldRecord && typeof heldRecord.date === "string" && heldRecord.date
+    ? heldRecord.date : null;
   let reset = null;
   if (!heldRecord) reset = "cold";
-  else if (!date) reset = "undated";
-  else if (heldRecord.date !== date) reset = "session-boundary";
+  else if (!date || !heldDate) reset = "undated";
+  else if (heldDate !== date) reset = "session-boundary";
 
   const byKey = new Map();
   if (!reset) {
@@ -459,7 +500,14 @@ export function mergeAlerts(prev, next, {
            record's own three fields do not. firstAt is the fact being kept,
            so it is read off what was already held and never off `row`. */
         ...row,
-        firstAt: typeof prior.firstAt === "string" && prior.firstAt ? prior.firstAt : readAt,
+        /* AND WHEN THE HELD ROW LOST ITS OWN firstAt, THIS READ'S INSTANT IS
+           NOT AN ANSWER. `prior` is always a row carried out of the store, so
+           some earlier read put it there; stamping now would publish "first
+           flagged 11:00" on a window the record has been holding since 09:31,
+           which is the one fact this whole layer exists to keep. Null says
+           "held before this, instant unknown" — the same choice the record's
+           own firstReadAt makes below, for the same reason. */
+        firstAt: typeof prior.firstAt === "string" && prior.firstAt ? prior.firstAt : null,
         lastAt: readAt,
         reads: (Number.isFinite(prior.reads) ? prior.reads : 1) + 1,
       });
@@ -491,10 +539,32 @@ export function mergeAlerts(prev, next, {
   }
 
   const shed = union.length - rows.length;
+
+  /* THE HELD RECORD'S OWN COUNTERS, AND WHAT TO DO WHEN IT LOST ONE.
+     These are written by this function and by nothing else, so a stored
+     record that carries ROWS but not the count describing them is a payload
+     half-written, or one written by a build older than the counter — real for
+     exactly as long as a deploy takes, and this key is rewritten every
+     fifteen minutes while that is true. Rebuilding the missing count as 0 is
+     the confident zero in its purest form: it publishes "this is the first
+     read of the day" and "nothing has entered the record today" over rows
+     that plainly arrived earlier. Each falls back instead to the minimum that
+     is CERTAINLY true given the rows in hand — the same argument carriedRow()
+     already makes for a single row's `reads`.
+
+     `carriedIn` is 0 whenever `reset` is set, so both fallbacks collapse to 0
+     on a record that is genuinely starting, which is a measured zero. */
   const priorReads = !reset && heldRecord && Number.isFinite(heldRecord.reads)
-    ? heldRecord.reads : 0;
-  const priorEver = !reset && heldRecord && Number.isFinite(heldRecord.everEntered)
-    ? heldRecord.everEntered : 0;
+    ? heldRecord.reads
+    /* Rows are in the record, so at least one read put them there. */
+    : (carriedIn ? 1 : 0);
+  /* And `everEntered` may never fall below `union`, or the two stop being the
+     pair of bounds they are published as: every row the record still holds
+     entered it once, so the rows in hand are a floor under the day's count. */
+  const priorEver = Math.max(
+    !reset && heldRecord && Number.isFinite(heldRecord.everEntered)
+      ? heldRecord.everEntered : 0,
+    carriedIn);
 
   return {
     rows,
@@ -520,8 +590,17 @@ export function mergeAlerts(prev, next, {
     record: {
       date,
       reads: priorReads + 1,
-      firstReadAt: !reset && heldRecord && typeof heldRecord.firstReadAt === "string"
-        ? heldRecord.firstReadAt : readAt,
+      /* WHEN THIS READ STARTS THE RECORD its own instant IS the record's
+         first read, and that is a measurement. When it continues a record
+         that lost the field, it is not: the rows carried in were flagged
+         before now, so stamping this read's instant would publish "N reads
+         since 11:00" over a row whose own firstAt reads 09:31. Null is the
+         only honest answer there — an instant nothing measured is the same
+         defect as a count nothing counted. */
+      firstReadAt: reset
+        ? readAt
+        : (heldRecord && typeof heldRecord.firstReadAt === "string" && heldRecord.firstReadAt
+            ? heldRecord.firstReadAt : null),
       lastReadAt: readAt,
       union: union.length,
       kept: rows.length,

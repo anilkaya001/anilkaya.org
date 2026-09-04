@@ -1248,6 +1248,66 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(readCrossFeed(undated.oiChange, "AAA").asOf, null,
      "the per-name reading carries the refusal too, rather than borrowing the card's date");
 
+  /* ---- A PRINT'S SESSION IS ITS EASTERN DAY, NOT ITS UTC ONE ---------
+
+     Off-exchange prints are reported to 20:00 ET. Under EST every print after
+     19:00 ET carries a UTC date one day AHEAD of its own Eastern session —
+     and /darkpool/recent at a 05:15 ET run returns exactly those newest rows.
+     This took isoDay(executed_at), the first ten characters of the instant,
+     and compared it against a sessionDate resolved in America/New_York: the
+     feed dated itself to TOMORROW and every card said "this ranking is from
+     another session" about prints from its own. */
+  const lateEve = indexCrossFeed("darkpool", { data: [
+    { ticker: "AAA", premium: 900000, executed_at: "2026-01-06T00:10:00Z" },  // 19:10 ET Jan 5
+    { ticker: "BBB", premium: 800000, executed_at: "2026-01-06T00:45:00Z" },  // 19:45 ET Jan 5
+  ] }, { limit: 2, tickers: ["AAA", "BBB"], sessionDate: "2026-01-05" });
+  eq(lateEve.asOf, "2026-01-05",
+     "a print executed 19:10 ET belongs to that evening's session, though its UTC stamp " +
+     "reads the next day — the ISO prefix of an instant is not its Eastern day");
+  eq(lateEve.sameSession, true,
+     "so a feed made entirely of late prints IS this card's session, and the page no " +
+     "longer disowns rows that are its own");
+  eq(lateEve.asOfSessions, 1,
+     "and they span ONE session, not two — the count that would have printed " +
+     "'its rows span 2 sessions' over a feed inside a single evening");
+  /* The summer half, because a fixed offset would pass the winter case alone. */
+  const summerEve = indexCrossFeed("darkpool", { data: [
+    { ticker: "AAA", premium: 900000, executed_at: "2026-07-07T00:10:00Z" },  // 20:10 ET Jul 6
+  ] }, { limit: 1, tickers: ["AAA"], sessionDate: "2026-07-06" });
+  eq(summerEve.asOf, "2026-07-06",
+     "and the same holds under EDT, so the answer is read through the zone rather than " +
+     "an offset that is right for half the year");
+
+  /* ---- THE CUT IS THE FLOOR IN BOTH DIRECTIONS ------------------------
+
+     measureOrder tells ascending from descending so a threshold is claimed
+     only where one exists, and both branches then took the LAST row of the
+     array regardless. On an ascending feed the last row is the MAXIMUM, so
+     the largest value in the feed was published as the floor everything else
+     cleared. /api/market/oi-change takes an `order` parameter, so this is a
+     shape the endpoint can actually return. */
+  const mkOi = (v) => ({ underlying_symbol: "AAA", option_symbol: "AAA260918C00150000",
+                         oi_change: String(v), oi_diff_plain: v, curr_oi: 100 + v,
+                         last_oi: 100, curr_date: "2026-08-21" });
+  const desc = indexCrossFeed("oiChange",
+    { data: [199, 196, 193, 190].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  const asc = indexCrossFeed("oiChange",
+    { data: [190, 193, 196, 199].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  eq(desc.ordered, "descending", "a feed running downwards is measured as such");
+  eq(asc.ordered, "ascending", "and one running upwards as such — the reason to measure");
+  eq(desc.cut, 190, "the cut is the last-included value in ranked order");
+  eq(asc.cut, 190,
+     "which on an ASCENDING feed is the first row, not the last: publishing 199 there " +
+     "would announce the feed's own maximum as the floor everything cleared");
+  const noOrder = indexCrossFeed("oiChange",
+    { data: [190, 199, 193, 196].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  eq(noOrder.ordered, null, "a feed in no measurable order says so");
+  eq(noOrder.cut, null,
+     "and publishes NO cut, because a value from an arbitrary position is not a threshold");
+
   /* ---- the three silences, at the feed level -------------------------- */
   eq(indexCrossFeed("oiChange", undefined, { tickers: names }).status, "unavailable",
      "a feed the run never carried in is unavailable");
@@ -1260,7 +1320,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(emptyFeed.status, "quiet",
      "a feed that ANSWERED and held nothing is quiet — the request worked and the market " +
      "was silent, which is the one arm of the three that is a reading");
-  eq(emptyFeed.coverage.in, 0, "its coverage is a measured zero rather than an absent count");
+  eq(emptyFeed.coverage.in, 0,
+     "the INDEX's coverage is a measured zero rather than an absent count");
   ok(/none missed it/.test(readCrossFeed(emptyFeed, "AAA").reason),
      "and a name's reading against an empty feed says nobody made it and nobody missed it, " +
      "which is not the same sentence as missing a cut");
@@ -1284,6 +1345,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(panel.asOf, "2026-08-24", "and carries the session the CARD describes");
   eq(panel.feeds.oiChange.rank, 1, "with each feed's own reading under its own key");
   eq(panel.coverage.oiChange.of, 10, "and the coverage of the join across the deep names");
+  ok(!("coverage" in panel.feeds.oiChange),
+     "which lives on the PANEL and not on each feed reading: how far the join reached is a " +
+     "fact about the join, identical on all fifty cards, and the same number in two places " +
+     "on one payload is two numbers that will eventually stop agreeing");
   eq(panel.coverage.oiChange.in, 4,
      "measured, not asserted: four of the ten names carded appear in this feed");
   eq(panel.coverage.darkpool.in, 3, "and three of them in the print feed");
@@ -1321,6 +1386,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   /* ---- the notes carry the refusals, in the payload's own words ------- */
   ok(/SELECTIONS/.test(CROSS_NOTES.absence),
      "the payload states in words that these lists are selections rather than the market");
+  ok(/exchange-traded-fund/.test(CROSS_NOTES.absence),
+     "and names the exclusion the vendor documents — the open-interest list carries no index " +
+     "or fund contracts, so a fund's absence from it is a fact about the list's construction " +
+     "and not a reading of the fund");
   ok(/06:45/.test(CROSS_NOTES.timing) && /05:15/.test(CROSS_NOTES.timing),
      "and names both clocks, which is the whole of the timing trap");
   ok(/population/.test(CROSS_NOTES.rank),

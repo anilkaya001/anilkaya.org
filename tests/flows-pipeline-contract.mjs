@@ -1565,7 +1565,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
          single card would look wrong. */
       for (const c of withPanel) {
         const f = c.panels.marketRank.feeds[feed];
-        eq(f.coverage.in, published.in,
+        eq(c.panels.marketRank.coverage[feed].in, published.in,
            `${c.ticker}: every card reports the same ${feed} coverage, because the run ` +
            "indexes the cross-section once — fifty cards each re-reading a hundred rows " +
            "could disagree about the ordering or the unit with no single card looking wrong");

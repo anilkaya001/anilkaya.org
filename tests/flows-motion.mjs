@@ -109,6 +109,47 @@ try {
     return { ...state, errors };
   }
 
+  /* ---------- the breakpoint ladder has no double-matching step ----------
+
+     base.css states the convention in prose: "A MIN AND A MAX AT THE SAME STEP
+     are written `min-width: 60rem` and `max-width: 59.99rem`. That is one tier,
+     not two." Prose does not enforce itself, and when that note was written the
+     file it heads already broke it twice.
+
+     A pair written 60/60 BOTH match at exactly 60rem, so the page spends one
+     whole tier applying two mutually exclusive layouts and the winner is
+     whichever rule happens to sit later. It shipped: at exactly 960px the rail
+     had become a 13rem column and the overview was collapsed to one column
+     beside it, and at exactly 92rem `.flows-main` was off its 78rem leash and
+     the overview was folded on the argument that there was no width to spend.
+     Neither is a width anyone would have thought to look at, which is why this
+     is a test rather than a review note.
+
+     Read off the STYLESHEETS, not off a list — a list would have to be edited
+     twice and this is exactly the class of defect that survives that. */
+  {
+    const fs = await import("node:fs");
+    const mins = new Map(), maxes = new Map();
+    let queries = 0;
+    for (const file of ["assets/css/base.css", "assets/css/flows.css"]) {
+      const css = fs.readFileSync(new URL("../" + file, import.meta.url), "utf8");
+      for (const m of css.matchAll(/@media\s*\(\s*(min|max)-width:\s*([\d.]+)rem\s*\)/g)) {
+        queries++;
+        (m[1] === "min" ? mins : maxes).set(m[2], file);
+      }
+    }
+    /* THE COUNTER IS THE POINT OF THIS LINE. A regex that stopped matching —
+       a reformat, a rename, a move to a third stylesheet — would leave both
+       maps empty and the assertion below would pass on nothing at all. */
+    ok(queries > 15,
+       `the width-query scan actually read the stylesheets (found ${queries})`);
+    const both = [...maxes.keys()].filter((w) => mins.has(w));
+    assert.deepEqual(both, [],
+      "no width is written as both a min and a max: a 60/60 pair matches at " +
+      "exactly 60rem and applies two tiers at once (write the max as X.99)");
+    checks++;
+  }
+
   /* ---------- motion declined ---------- */
   {
     const s = await probe("reduce");
@@ -294,15 +335,83 @@ try {
        `a table cell is leaded at ${ratio.toFixed(2)}, not at the body's ` +
        `${(parseFloat(leading.bodyLh) / parseFloat(leading.bodyFs)).toFixed(2)}`);
 
-    /* ---------- the ticker header stays on screen ----------
-       21 panels and 5,729px of page; the one element naming the stock used to
-       leave the viewport for good on the first scroll. */
+    /* ---------- the ticker header stays on screen, AND BELOW THE NAV ----------
+
+       21 panels and 5,729px of page, and the one element naming the stock has
+       to survive a scroll. It already did: flows-ticker.js re-parents #ftHead
+       into `.ft-bar`, which is sticky at the site's 4.4rem topbar clearance.
+       What was never covered is the SERVED shape — the header as a plain child
+       of .flows-main, which is what a reader has between first paint and the
+       frame the controller builds the bar, and permanently if that script
+       throws.
+
+       THIS IS MEASURED, NOT READ OFF A COMPUTED STYLE. The version of this
+       block that shipped for one commit asked getComputedStyle for `position`
+       and `top` on `.ft-head` while the element was `display: none` — with no
+       ?t= and no card this route is the picker, so the header is hidden and a
+       computed style answers for it anyway. It asserted `top: 0px` and passed,
+       and `top: 0` was the defect: `.topbar` is `position: fixed` at z-index
+       100, so a header pinned at 0 lands INSIDE it. Measured on that build at
+       1280px, the whole 51.8px header sat inside the topbar's 63.7px band.
+
+       So both shapes are pinned for real, scrolled for real, and compared
+       against the topbar's own measured bottom edge. A header that scrolled
+       away fails this (its top goes negative); a header pinned at 0 fails it
+       too. */
     await page.goto(url("/flows/ticker/?t=AAA"), { waitUntil: "load" });
-    const head = await page.evaluate(() => {
+    await page.waitForSelector(".ft-bar", { state: "attached", timeout: 15000 });
+    const head = await page.evaluate(async () => {
       const el = document.querySelector(".ft-head");
       if (!el) return null;
       const cs = getComputedStyle(el);
-      return { position: cs.position, top: cs.top, bg: cs.backgroundColor };
+      const out = { position: cs.position, top: cs.top };
+
+      const bar = el.closest(".ft-bar");
+      const grid = document.getElementById("ftGrid");
+      out.inBar = !!bar;
+      if (!bar || !grid) return out;
+
+      /* `behavior: "instant"` because base.css sets `scroll-behavior: smooth`
+         on <html>: a plain scrollTo animates, and a measurement taken a frame
+         later reads the start of the animation rather than its end. */
+      const measure = async () => {
+        window.scrollTo({ top: 900, behavior: "instant" });
+        await new Promise((r) => setTimeout(r, 250));
+        const nav = document.querySelector(".topbar").getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        window.scrollTo({ top: 0, behavior: "instant" });
+        await new Promise((r) => setTimeout(r, 250));
+        return { headTop: box.top, height: box.height, navBottom: nav.bottom };
+      };
+
+      /* THE GROUND BELONGS TO WHATEVER IS ACTUALLY PINNED, which is the bar in
+         one shape and the header itself in the other. Reading it off .ft-head
+         unconditionally would have failed the composed case for the right
+         reason and the wrong element: inside the bar the header deliberately
+         has no ground of its own, because two stacked opaque layers is not
+         more opaque, and the bar is the box the panels scroll under. */
+      const ground = (node) => getComputedStyle(node).backgroundColor;
+
+      /* Enough page under the header for a sticky element to have somewhere to
+         travel: sticky is bounded by its CONTAINING BLOCK, not by the document,
+         so a 4000px body under a 200px .flows-main pins nothing. */
+      grid.style.minHeight = "3000px";
+      grid.hidden = false;
+
+      /* (a) THE COMPOSED SHAPE — the header inside the bar the controller
+         builds, which is what a reader with working JavaScript sees. */
+      el.hidden = false;
+      bar.hidden = false;
+      out.composed = await measure();
+      out.composed.bg = ground(bar);
+
+      /* (b) THE SERVED SHAPE — the header where the HTML actually puts it,
+         with the bar out of the way. This is the one that was uncovered. */
+      grid.parentNode.insertBefore(el, grid);
+      bar.hidden = true;
+      out.served = await measure();
+      out.served.bg = ground(el);
+      return out;
     });
     /* AND `hidden` HIDES. `[hidden] { display: none }` is a USER-AGENT rule and
        any author `display` beats it on cascade origin, so every element this
@@ -322,9 +431,28 @@ try {
 
     ok(head, "the ticker page emits its identity block");
     eq(head.position, "sticky", "and it is pinned rather than scrolled away");
-    eq(head.top, "0px", "at the top of the viewport");
-    ok(!/rgba\(0, 0, 0, 0\)/.test(head.bg),
-       `on an OPAQUE ground, or a chart's ink reads through it (got ${head.bg})`);
+    ok(head.inBar, "the controller re-parents it into the sticky bar");
+    ok(!/rgba\(0, 0, 0, 0\)/.test(head.composed.bg),
+       `[composed] the pinned box has an OPAQUE ground, or a chart's ink reads ` +
+       `through it (got ${head.composed.bg})`);
+    ok(!/rgba\(0, 0, 0, 0\)/.test(head.served.bg),
+       `[served] and so does the header when it is the pinned box itself ` +
+       `(got ${head.served.bg})`);
+    /* Sticky at all: 900px down the page the header is still in the viewport
+       rather than 800px above it. */
+    ok(head.composed.headTop >= 0 && head.composed.headTop < 400,
+       `[composed] the header is still on screen 900px down (top ${head.composed.headTop})`);
+    ok(head.served.headTop >= 0 && head.served.headTop < 400,
+       `[served] and so is the header the HTML ships, before the bar exists ` +
+       `(top ${head.served.headTop})`);
+    /* And BELOW the fixed topbar, in both shapes. `top: 0` fails this by the
+       full height of the nav — which is what shipped for one commit. */
+    ok(head.composed.headTop >= head.composed.navBottom - 1,
+       `[composed] and it clears the fixed topbar (head ${head.composed.headTop} ` +
+       `vs nav bottom ${head.composed.navBottom})`);
+    ok(head.served.headTop >= head.served.navBottom - 1,
+       `[served] and so does the served shape — a sticky offset on this site is ` +
+       `never 0 (head ${head.served.headTop} vs nav bottom ${head.served.navBottom})`);
 
     await context.close();
   }
@@ -366,6 +494,20 @@ try {
     eq(railStats.hidden, true, "hidden until a controller fills it");
     eq(railStats.text, "", "and empty, so it cannot render a frame of dashes");
 
+    /* AND `hidden` HIDES AT DESK WIDTH TOO, which the 320px sweep above cannot
+       say. `.rail-stats` is `display: none` on its own below 60rem, so the rail
+       block's dependence on the `[hidden]` reset only binds where the rail is a
+       column — and at 60rem and up its own `display: block` would beat the
+       user-agent `[hidden]` rule on cascade origin. Without the reset in
+       base.css this route renders an empty bordered stat block in the rail at
+       every desk width, and the 320px sweep stays green. */
+    const leakedWide = await page.evaluate(() => [...document.querySelectorAll("[hidden]")]
+      .filter((n) => getComputedStyle(n).display !== "none")
+      .map((n) => (n.id || n.className || n.tagName) + " \u2192 " + getComputedStyle(n).display));
+    assert.deepEqual(leakedWide, [],
+      "[1280px] every element marked hidden is actually not laid out");
+    checks++;
+
     await page.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
     eq(await page.evaluate(() => !!document.querySelector("#ftRail")), false,
        "and nowhere else: a name block on a route with no name is chrome for nothing");
@@ -402,8 +544,11 @@ try {
     `overflow at 320px on all twelve gated routes (regression.mjs covers the public pages ` +
     `and no Flows route), four visually distinct silences that stay distinct with every ` +
     `colour removed, table cells leaded for figures rather than for prose, a ticker header ` +
-    `that survives a scroll, and a footer that no longer asserts a hit rate it does not ` +
-    `measure`);
+    `measured against the fixed topbar in both the shape the controller builds and the ` +
+    `shape the HTML ships, \`hidden\` proven to hide at BOTH a phone and a desk width ` +
+    `(the rail's stat block leaks only at the desk one), a breakpoint ladder with no width ` +
+    `written as both a min and a max, and a footer that no longer asserts a hit rate it ` +
+    `does not measure`);
 } finally {
   await browser.close();
   await server.stop();

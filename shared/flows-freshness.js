@@ -33,6 +33,53 @@ const CLOSE_MINUTES = 16 * 60 + 15;
  * midnight. Exposed for the contract suite, which feeds it fixed
  * instants on both sides of a DST change.
  */
+/**
+ * THE EASTERN CALENDAR DAY OF AN INSTANT, which is not the first ten
+ * characters of its ISO string.
+ *
+ * An off-exchange print executed at 19:10 ET on a January Tuesday carries
+ * `executed_at` "…T00:10:00Z" — the NEXT UTC day. Slicing the ISO date out of
+ * it dates that print to a session that had not started yet, and comparing
+ * the result against a sessionDate resolved in America/New_York then reports
+ * a feed as belonging to another session when every row is inside this one.
+ *
+ * This repository has paid for the same confusion twice: daysToEarnings says
+ * MEASURED FROM A DATE, NOT FROM AN INSTANT, and a dry-run fixture that used
+ * Date.now() against a gate counting from easternNow().date silently changed
+ * every result across midnight. A date and an instant are different kinds,
+ * and the conversion between them needs a zone.
+ *
+ * Returns null rather than a coerced today when the input is not a readable
+ * instant — an undated row is not a row dated now.
+ */
+export function easternDay(at) {
+  /* ABSENCE REFUSED BEFORE COERCION, and `new Date()` is why this cannot be
+     left to the NaN check below. `new Date(null)` is not an invalid date — it
+     is the EPOCH, so a row with no timestamp would have been dated 1969-12-31
+     and published as a session. The same is true of 0 and of a bare number.
+
+     THE SHAPE IS CHECKED BEFORE THE PARSE for the second reason flows-ui.js
+     checks it: Date.parse is lenient enough to be dangerous. "2026-09" comes
+     back FINITE and means midnight UTC on the first — whose EASTERN day is
+     the 31st of August, a day the caller never sent. And this function
+     converts an INSTANT, so a bare "2026-01-05" is not merely lenient but
+     wrong: midnight UTC is the previous evening in New York. A timestamp
+     needs a time. */
+  const INSTANT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+  const usable = at instanceof Date ||
+    (typeof at === "string" && INSTANT.test(at.trim()));
+  if (!usable) return null;
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(d).map((x) => [x.type, x.value]));
+  return parts.year && parts.month && parts.day
+    ? `${parts.year}-${parts.month}-${parts.day}` : null;
+}
+
 export function easternClock(date) {
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return null;

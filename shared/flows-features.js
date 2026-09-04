@@ -149,13 +149,25 @@ function clampTo(x, c) {
  * ones, because a faster answer that is a different answer is not an
  * optimisation, it is a second spelling of the score.
  *
+ * THAT CONTRACT HAS ALREADY BEEN BROKEN ONCE, by this function, and the way it
+ * broke is the reason to distrust every "obviously equivalent" step below. The
+ * first version did not filter non-finite deviations out of the MAD, because
+ * the argument "a median only sees the multiset, so order cannot matter" is
+ * true and answers the wrong question: median() filters as well as sorts, so
+ * the two paths were taking a median of two different POPULATIONS. It published
+ * exactly half the right z on the column named in the MAD comment below, and
+ * every fixture in the suite agreed anyway. Equivalence here is a measurement,
+ * never a reading.
+ *
  * THE ONE MEASURED EXCEPTION, stated rather than glossed: the SIGN OF A ZERO.
  * A typed sort orders -0 ahead of +0 while a comparator sort leaves equal
  * values where it found them, so an even-length median can come out -0 here and
- * +0 there. Over 92,821 elements of differential fuzz across 3,000 random
- * columns, 39 differed that way and nothing else differed at all. -0 === 0 in JavaScript, and every consumer of a
- * z-score compares it, scales it or renders it — none can tell the two apart.
- * If a caller ever needs Object.is on a score, this note is where to start.
+ * +0 there, and a name sitting exactly on the centre then reads -0 instead of
+ * +0. On a fuzz built to provoke it — 150,510 elements over columns packed with
+ * both zeros and heavy ties — 4,463 elements differed that way and NOT ONE
+ * differed numerically. -0 === 0 in JavaScript, and every consumer of a z-score
+ * compares it, scales it or renders it, so none can tell the two apart. If a
+ * caller ever needs Object.is or 1/z on a score, this note is where to start.
  *
  * WHY IT EXISTS. The composed form is expensive in a way that is invisible at
  * the call site. winsorize sorts the column twice, once per quantile. robustZ
@@ -234,15 +246,20 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
      which an interpolation between two enormous opposite-signed entries can
      genuinely produce. Reproduce that rather than clipping to Infinity.
 
-     STRUCTURAL, NOT BEHAVIOURAL, and worth saying so plainly: a bound can only
-     go non-finite when two ADJACENT sorted entries differ by more than
-     MAX_VALUE, and such a column also overflows the MAD and the stdev, so both
-     the composed form and this one already return the neutral vote for every
-     name. Removing this guard was checked against every such column that can be
-     constructed and the answers were identical. It stays because it keeps the
-     two functions saying the same thing in the same place: if winsorize's
-     refusal ever changes, the divergence should be a diff here, not a silently
-     different score. */
+     THIS GUARD IS BEHAVIOURAL, and an earlier comment here claimed the
+     opposite — that a bound can only go non-finite on a column that also
+     overflows the MAD and the stdev, so both paths return the neutral vote
+     either way and the guard is mere symmetry with winsorize. That was wrong,
+     and it was wrong in the direction that gets a guard deleted. A bound goes
+     non-finite when two ADJACENT sorted entries differ by more than MAX_VALUE,
+     which says nothing about the OTHER end of the column: on
+     [-MAX_VALUE, -1.7e308, 1e308] the lower bound is finite and the upper one
+     overflows, so winsorize refuses the clip entirely while a guard-less
+     version clips the bottom entry up to a finite floor and scores it
+     differently. Replacing the test with a constant `true` was measured against
+     the composed form over every column of length 2, 3 and 4 drawable from
+     twelve extreme magnitudes at four winsor levels: 92 of 7,228 diverge. The
+     suite carries one of them. */
   const clipping = Number.isFinite(wlo) && Number.isFinite(whi);
   if (clipping) {
     /* Math.min(Math.max(x, lo), hi), not a two-armed comparison: when a caller
@@ -261,11 +278,54 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
 
   /* The MAD's deviations are taken over the clipped values. Their ORDER is
      irrelevant — a median only sees the multiset — so they are read out of
-     buf and sorted once. */
+     buf and sorted once. Their POPULATION is not irrelevant, and reading only
+     the sentence above is how this function shipped wrong; the next paragraph
+     is the part that matters.
+
+     THE NON-FINITE DEVIATIONS ARE DROPPED, and that line is the whole reason
+     this block is not two lines shorter. mad() hands its deviation array to
+     median(), and median() opens with finite() — it FILTERS before it sorts.
+     A deviation is non-finite only by overflow (|x - m| above MAX_VALUE on a
+     column whose entries straddle zero at ~1e308), but when one does overflow
+     the composed form takes the median of the SURVIVORS while a version that
+     kept the Infinities takes the median of a larger population, at a
+     different index. That is not an ulp and not the sign of a zero: on
+     [-1.797e308, -1.7e308, 1e307] the deviations are [9.7e306, 0, Infinity],
+     the composed MAD is the mean of the two finite ones (4.85e306) and the
+     unfiltered one is the middle of three (9.7e306) — exactly double, so the
+     published z came out exactly HALF (-0.674 against -1.349).
+
+     The first version of this function did not filter. Every fixture in the
+     suite agreed anyway, including the three written specifically for
+     overflow, because they all overflow the winsor BOUND — which makes the
+     clip refuse and lands both paths on the neutral vote — and none of them
+     produced a finite bound with an overflowing deviation underneath it. The
+     suite now carries that column. `dn` is the survivor count and it is what
+     the median indexes; when nothing survives it is 0, madScale is NaN, and
+     Math.max propagates the NaN into the mean/stdev fallback, which is
+     precisely what median([]) === NaN does to mad() in the composed form.
+
+     THE `dn === 0` ARM IS AN EQUIVALENT MUTANT and is written down as one
+     rather than defended: an out-of-range read on a typed array is `undefined`,
+     so `(undefined + undefined) / 2` is already NaN and deleting the arm keeps
+     every answer. It stays because "no deviation survived" is a state worth
+     naming where a reader can see it, not because a fixture can tell. The
+     column that reaches it — two entries of 1.7e308, whose even-length median
+     overflows before it is halved, so the centre is Infinity and nothing is a
+     finite distance from it — is in the suite regardless, because the STATE has
+     to be reachable even where the branch is not observable. */
   const devs = new Float64Array(n);
-  for (let i = 0; i < n; i++) devs[i] = Math.abs(buf[i] - m);
-  devs.sort();
-  const madScale = 1.4826 * (n % 2 ? devs[mid] : (devs[mid - 1] + devs[mid]) / 2);
+  let dn = 0;
+  for (let i = 0; i < n; i++) {
+    const d = Math.abs(buf[i] - m);
+    if (Number.isFinite(d)) devs[dn++] = d;
+  }
+  const dv = devs.subarray(0, dn);
+  dv.sort();
+  const dmid = dn >> 1;
+  const madScale = dn === 0
+    ? NaN
+    : 1.4826 * (dn % 2 ? dv[dmid] : (dv[dmid - 1] + dv[dmid]) / 2);
 
   const span = (lo, hi, c) => {
     const v = (qs(hi) - qs(lo)) / c;
@@ -486,25 +546,54 @@ function solveSymmetric(A, b) {
  * and is here so a caller can say "measured over N rows" rather than implying a
  * measurement it did not make.
  *
+ * `rows === 0` IS NOT A SILENCE ON ITS OWN, and an earlier version of this
+ * comment said it was ("absence at the TOTAL level is rows === 0"). It is two
+ * different silences wearing one number: a tape that was published and had no
+ * prints in it, and a tape that was never published or came back unreadable.
+ * This file's house rule gives those separate prose and separate data-empty
+ * tags, so the record carries `silence` beside the count:
+ *
+ *     null          — prints were measured; rows is that count
+ *     "quiet"       — an array arrived and it was empty
+ *     "unavailable" — no array arrived at all (null, undefined, a bad shape)
+ *
+ * A caller that renders a totals record can map that field straight onto
+ * data-empty and write the sentence that names which payload was missing. It
+ * exists BEFORE a consumer needs it precisely so the first consumer does not
+ * have to invent a generic "no data" out of a zero.
+ *
  * num() floors an unparseable field at 0 rather than NaN, which is correct
  * here and only here: this is a SUM over a tape, and one unreadable row must
  * not poison the total. Absence at the ROW level is the vendor's silence about
- * one print; absence at the TOTAL level is `rows === 0`, and both callers test
- * their denominator before dividing rather than trusting a zero.
+ * one print; both callers test their denominator before dividing rather than
+ * trusting a zero.
  *
- * PASS THE RECORD IN WHEN YOU CALL BOTH. flowPurity needs three of these five
- * sums and positioningQuality needs all five, so a caller that lets each build
- * its own record pays for FIVE sums twice instead of three plus five. Measured
- * over 400 greek-flow rows: two separate loops 0.343 ms, each-builds-its-own
- * 0.457 ms (+33%), one shared record 0.230 ms (-33%) — 29 ms of swing across a
- * 128-name board. Both entry points therefore take a precomputed `totals`, and
- * a caller that wants both measures should build the record once and hand it to
- * each. The correctness argument above stands either way; this note is here so
- * the cheap call is also the obvious one.
+ * PASS THE RECORD IN WHEN YOU CALL BOTH, and the reason is arithmetic rather
+ * than a benchmark. flowPurity needs three of these five sums and
+ * positioningQuality needs all five. Before this function there were two loops
+ * costing 3 + 5 accumulator updates per row; a caller that lets each function
+ * build its own record now pays 5 + 5, which is SLOWER than what it replaced;
+ * a caller that builds the record once and hands it to both pays 5. Those
+ * counts are the durable claim. A benchmark over 400 rows on one machine
+ * reproduced the direction — unshared about a quarter slower than the old pair,
+ * shared about forty per cent faster — but an earlier draft of this comment
+ * quoted the absolute milliseconds too, and they were six times the figure the
+ * same benchmark gives on other hardware. Ratios of accumulator counts travel;
+ * millisecond readings do not, so they are not written down here.
+ *
+ * Both entry points therefore take a precomputed `totals`. The correctness
+ * argument above stands either way; this note is here so the cheap call is also
+ * the obvious one. In absolute terms every one of these numbers is noise
+ * against a pipeline run measured in hundreds of seconds — the point is that
+ * the unshared spelling is the wrong DIRECTION, not that it is expensive.
  */
 export function greekFlowTotals(greekFlowRows) {
+  /* Tested BEFORE the loop, not inferred from the count after it: `|| []`
+     below makes a missing tape and an empty one iterate identically, which is
+     the whole reason the count alone cannot tell them apart. */
+  const published = Array.isArray(greekFlowRows);
   let dirNet = 0, dirAbs = 0, otmAbs = 0, vegaAbs = 0, totalAbs = 0, rows = 0;
-  for (const r of greekFlowRows || []) {
+  for (const r of published ? greekFlowRows : []) {
     const d = num(r.dir_delta_flow);
     dirNet += d;
     dirAbs += Math.abs(d);
@@ -513,7 +602,36 @@ export function greekFlowTotals(greekFlowRows) {
     totalAbs += Math.abs(num(r.total_delta_flow));
     rows++;
   }
-  return { dirNet, dirAbs, otmAbs, vegaAbs, totalAbs, rows };
+  return {
+    dirNet, dirAbs, otmAbs, vegaAbs, totalAbs, rows,
+    silence: rows > 0 ? null : published ? "quiet" : "unavailable",
+  };
+}
+
+/**
+ * The one place that decides whether a caller's `totals` argument is a totals
+ * record. Both measures below take one, and both must refuse the same things.
+ *
+ * WHY THIS IS NOT `totals || greekFlowTotals(rows)`. That form tests
+ * TRUTHINESS, and every object is truthy — including the option bag
+ * positioningQuality takes. `flowPurity(rows, { totals: t })` is exactly the
+ * mistake a reader makes after seeing `positioningQuality(rows, { totals: t })`
+ * on the line below it, and under a truthiness test it does not throw and does
+ * not warn: `t.totalAbs` is undefined, `undefined <= 0` is false, the guard
+ * falls through, and every ratio comes out NaN. NaN serialises to null, so the
+ * page would then print "unmeasured" over a tape it had measured perfectly —
+ * this repository's oldest defect (absence coerced instead of tested) reappearing
+ * one level up, in a function argument instead of a vendor field.
+ *
+ * So the field the callers actually divide by is tested for presence FIRST, the
+ * sibling's option-bag spelling is accepted as well, and anything else is
+ * recomputed from the rows. Recomputing is always the right answer and only
+ * ever costs one pass; a NaN would have been the wrong answer forever.
+ */
+function resolveTotals(greekFlowRows, given) {
+  if (given && Number.isFinite(given.totalAbs)) return given;
+  if (given && given.totals && Number.isFinite(given.totals.totalAbs)) return given.totals;
+  return greekFlowTotals(greekFlowRows);
 }
 
 /**
@@ -528,7 +646,9 @@ export function greekFlowTotals(greekFlowRows) {
  * 1 = clean directional conviction. 0 = the premium headline is hedging.
  */
 export function flowPurity(greekFlowRows, totals = null) {
-  const t = totals || greekFlowTotals(greekFlowRows);
+  /* `totals` accepts the record itself or its sibling's `{ totals }` bag — see
+     resolveTotals for why a bare truthiness test was not safe here. */
+  const t = resolveTotals(greekFlowRows, totals);
   if (t.totalAbs <= 0) {
     return { purity: null, dirDelta: 0, dirAbs: 0, dirShare: null, totalAbs: 0 };
   }
@@ -1146,7 +1266,7 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
  * flow is "no directional view", never infinite vol conviction.
  */
 export function positioningQuality(greekFlowRows, { floor = 1e-6, totals = null } = {}) {
-  const t = totals || greekFlowTotals(greekFlowRows);
+  const t = resolveTotals(greekFlowRows, totals);
   /* GROSS over GROSS, for the same reason as flowPurity. The old form divided
      SUM(otm_dir) by |SUM(dir)| — two different cancellations — so the ratio
      had no bounded distribution and Math.min(1, ...) was the operative clamp

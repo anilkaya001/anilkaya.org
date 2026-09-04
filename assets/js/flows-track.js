@@ -325,7 +325,21 @@
          tells the reader nothing, which is worse than not offering it: the
          reader concludes the pool is flat. */
       has: {
+        /* `now` — some row states WHICH session it was scored on, so the
+           As-of column has something to date. */
         now: rows.some((r) => r.lastAt !== null),
+        /* `nowScore` — some row was scored in the LATEST session, so the
+           default ordering has something to rank. These came apart on a
+           payload where every carried name was stale: `lastAt` was published
+           on all of them, so the page opened on an ordering in which every
+           row's key was null, and the whole list fell through to the
+           tie-break under a caption promising "strongest score in the latest
+           session first". That is precisely the failure the comment above
+           this block describes — an ordering offered over a field nobody can
+           answer sorts every row into one bucket — and the page was
+           committing it against its own rule. The As-of column still draws
+           in that state, and is at its most useful there. */
+        nowScore: rows.some((r) => r.now !== null),
         move: rows.some((r) => r.d1 !== null),
         run: rows.some((r) => r.run !== null),
         ext: rows.some((r) => r.extGap !== null),
@@ -458,10 +472,10 @@
        whose own lede promises a name drifting toward a board is visible
        before the morning it arrives. */
     const options = [];
-    if (ctx.has.now) {
+    if (ctx.has.nowScore) {
       options.push({ value: "now", label: "Latest session, strongest first", selected: true });
     }
-    options.push({ value: "abs", label: "Last measured score, strongest", selected: !ctx.has.now });
+    options.push({ value: "abs", label: "Last measured score, strongest", selected: !ctx.has.nowScore });
     options.push({ value: "last", label: "Last measured score, high to low" });
     if (ctx.has.move) {
       options.push({ value: "move", label: "Biggest move, with its span" });
@@ -612,6 +626,39 @@
      to the fallback and every mark landed under the wrong date. */
   const MIN_STRIP = 100;
 
+  /**
+   * THE LARGEST WHOLE PIXEL THAT FITS INSIDE A HOST'S CONTENT BOX.
+   *
+   * `clientWidth` is the obvious measurement and it is the wrong one, by up to
+   * a pixel, in the only direction that matters: it ROUNDS, and it rounds UP.
+   * The strip column's content box measures 336.828px at 1280 and reports
+   * clientWidth 337, so every strip and the axis above them went out with
+   * width="337" over a 337-unit viewBox into a 336.828px box — a drawing
+   * wider than the cell holding it, held in only by the stylesheet's
+   * max-width, with one viewBox unit worth 0.99949 CSS pixels. Nothing on the
+   * page could ever have shown that, which is exactly why the invariant is
+   * stated as an equality rather than left to the eye. Measured across
+   * 320/390/768/1024/1280/1440 the width attribute now equals the rendered
+   * box at every one of them.
+   *
+   * Measured two ways and the smaller taken. getBoundingClientRect() is the
+   * BORDER box, so it is the truthful reading only while the host carries no
+   * padding and no border — `.st-axis` carries neither today. Should a
+   * stylesheet give it either, that reading grows past the content box and
+   * the clientWidth reading wins instead, which is what this did before. The
+   * floor costs at most one pixel of drawing and buys an attribute that is a
+   * true bound rather than an approximate one.
+   */
+  function contentPx(host) {
+    if (!host) return 0;
+    const rect = Math.floor(host.getBoundingClientRect().width);
+    const client = Math.floor(host.clientWidth);
+    if (!(rect > 0) && !(client > 0)) return 0;
+    if (!(rect > 0)) return client;
+    if (!(client > 0)) return rect;
+    return Math.min(rect, client);
+  }
+
   function stripWidth() {
     if (panelEl) panelEl.hidden = false;
     /* The inline width is cleared BEFORE measuring, every time: a floor
@@ -619,7 +666,7 @@
        unnecessary, and a floor left in place is what turns a laptop's
        comfortable table into one that scrolls sideways by twenty pixels. */
     if (stripHead) stripHead.style.width = "";
-    let w = Math.round((axisHost && axisHost.clientWidth) || 0);
+    let w = contentPx(axisHost);
     if (stripHead && w < MIN_STRIP) {
       /* THE FLOOR IS A CONTENT WIDTH AND `width` IS A BORDER-BOX ONE —
          base.css sets box-sizing:border-box globally — so setting it to the
@@ -628,10 +675,10 @@
          guessed at from here: a hard-coded 16 would be a second copy of a
          number that lives in flows.css. */
       stripHead.style.width = MIN_STRIP + "px";
-      let got = Math.round(axisHost.clientWidth) || 0;
+      let got = contentPx(axisHost);
       if (got < MIN_STRIP) {
         stripHead.style.width = (2 * MIN_STRIP - got) + "px";
-        got = Math.round(axisHost.clientWidth) || MIN_STRIP;
+        got = contentPx(axisHost) || MIN_STRIP;
       }
       w = got;
     }
@@ -1020,6 +1067,9 @@
   /** How many of the rows on this payload are not about the latest session. */
   function staleSaid() {
     if (!ctx.has.now || !ctx.sessions.length) return null;
+    /* NOT SCORED IN THE LATEST SESSION, over the rows this payload carries.
+       The whole-pool figure is the change block's; this one is about what is
+       drawn below, which is the number a reader can check by eye. */
     let old = 0, unknown = 0;
     for (const r of ctx.rows) {
       if (r.staleBy === null) unknown++;
@@ -1032,7 +1082,13 @@
         plural(old, "was", "were") + " not scored in the latest session. " +
         "Their Last and their move are real readings of an older session, the " +
         "As-of column dates each one, and the default ordering sorts them last " +
-        "rather than promoting a stale reading over a measured one.");
+        "rather than promoting a stale reading over a measured one." +
+        /* THE STATE WHERE THE DEFAULT ORDERING HAS NOTHING TO RANK, named
+           rather than left for the reader to infer from a caption that
+           changed wording. */
+        (ctx.has.nowScore ? "" : " No carried name was scored in the latest " +
+          "session at all, so that ordering is not offered here and the page " +
+          "opens on the last measured score instead."));
     }
     if (unknown) {
       said.push(unknown + " " + plural(unknown, "name carries", "names carry") +
@@ -1102,10 +1158,37 @@
         ", so the counts below are printed without the sentence that belongs to it.");
     }
 
-    said.push((moved === null ? "Some" : moved) + " of the " +
-      (comparable === null ? "" : comparable + " ") + "names with two scored sessions " +
-      "moved" + span +
-      (held === null ? "" : "; " + held + " held their score") + ".");
+    /* A COUNT AND ITS POPULATION ARE ONE READING, AND EITHER ONE MISSING
+       CHANGES THE SENTENCE — it does not get filled in with a word.
+
+       The first version printed `(moved ?? "Some") + " of the " + (comparable
+       ?? "") + "names with two scored sessions moved"`, which produced two
+       defective sentences from two different absences. Without `comparable`
+       it read "4 of the names with two scored sessions moved" — a numerator
+       with its denominator quietly deleted, which is the exact shape this
+       product bans, and worse than printing nothing because the "of the"
+       still promises a share. Without `moved` it read "Some of the names …
+       moved", a claim about the session assembled out of a field the payload
+       did not publish. */
+    if (moved === null && comparable === null) {
+      said.push("This track's change block published neither how many names moved" +
+        span + " nor how many had two scored sessions to move out of, so nothing " +
+        "here can be stated as a share of a population.");
+    } else if (moved === null) {
+      said.push(comparable + plural(comparable, " name has", " names have") +
+        " two scored sessions to compare" + span + ", and this track did not " +
+        "publish how many of them moved.");
+    } else if (comparable === null) {
+      said.push(moved + plural(moved, " name moved", " names moved") + span +
+        ", and this track did not publish how many names had two scored sessions " +
+        "to move out of — so that count has no population and is not a share.");
+    } else {
+      said.push(moved + " of the " + comparable + " names with two scored sessions " +
+        "moved" + span +
+        /* "1 held their score" shipped. A count of one takes its own verb. */
+        (held === null ? "" : "; " + held + plural(held, " held its score", " held theirs")) +
+        ".");
+    }
     if (current !== null) {
       said.push("The session itself scored " + current +
         plural(current, " name", " names") + ".");
@@ -1140,6 +1223,18 @@
       said.push(left + plural(left, " name was", " names were") +
         " scored on the prior session and not on this one.");
     }
+    /* THE COUNTS ABOVE ARE THE POOL'S; THE COLUMNS BELOW ARE THIS PAYLOAD'S,
+       and when they disagree the page has to say so. A change block can count
+       moves in names the size cap then sheds, leaving a paragraph that reports
+       moves above a table with no Δ column at all — and the code comment on
+       `colSet` claims this paragraph "says which fields were missing", which
+       it did not. */
+    if (!ctx.has.move) {
+      said.push("No name carried on this payload states a move of its own, so the " +
+        "Event and \u0394 columns are not drawn below. The counts above are the " +
+        "session's; the rows below are the ones that fit on the wire.");
+    }
+
     if (ctx.shedBy && ctx.shed) {
       said.push(ctx.shed + plural(ctx.shed, " name is", " names are") +
         " counted in those totals but not carried on this payload — the " +
@@ -1306,7 +1401,11 @@
     const names = Array.isArray(payload.names) ? payload.names : [];
     const windowSessions = isNum(payload.windowSessions);
     const namesSeen = isNum(payload.namesSeen);
-    const namesShed = isNum(payload.namesShed) ?? 0;
+    /* NOT `isNum(...) ?? 0`. The coalesce was harmless HERE — it only fed a
+       `> 0` guard — but it is the idiom that produced every confident zero
+       this file has had to unpick, and leaving one specimen alive beside the
+       ones that were killed is how the next reader concludes it is allowed. */
+    const namesShed = isNum(payload.namesShed);
     const sources = (payload.sources && typeof payload.sources === "object")
       ? payload.sources : null;
     const archive = (payload.archive && typeof payload.archive === "object")
@@ -1321,7 +1420,7 @@
     /* The shed, beside the count it qualifies: a capped list that does not
        say so invites reading the cap as the population. */
     parts.push(names.length + " " + plural(names.length, "name", "names") +
-      (namesShed > 0 && namesSeen !== null
+      (namesShed !== null && namesShed > 0 && namesSeen !== null
         ? " — the most-observed " + names.length + " of " + namesSeen + " seen; " +
           namesShed + " shed"
         : ""));
@@ -1352,23 +1451,43 @@
 
     if (archive) {
       const probed = isNum(archive.probed);
-      const failed = isNum(archive.failed) ?? 0;
+      /* THE CONFIDENT ZERO WITH THE MOST TO LOSE ON THIS PAGE, and it sat
+         three lines below one that was fixed. It read `isNum(archive.failed)
+         ?? 0`, so a payload that published `probed` and no `failed` — any
+         blob written before the archive counters existed — fell through to
+         the else branch and printed "all 180 probed archive keys were read":
+         a clean bill of health for a walk nobody measured, in the one
+         sentence that tells a reader whether a thin trace is a quiet market
+         or a store that refused. An absent count is now its own third
+         answer, and it makes no claim in either direction. */
+      const failed = isNum(archive.failed);
       const abandoned = archive.abandoned === true;
-      if (failed > 0 || abandoned) {
+      if (failed === null && !abandoned) {
+        parts.push(probed === null
+          ? "this payload carried an archive block with no counts in it, so " +
+            "whether the walk read everything it probed is not stated"
+          : "this payload probed " + probed + " archive " + plural(probed, "key", "keys") +
+            " and did not state how many were read, so whether any session is " +
+            "missing from this window is not stated");
+      } else if ((failed !== null && failed > 0) || abandoned) {
         /* A FACT ABOUT THE STORE, NOT THE MARKET. A walk that lost keys
            leaves columns missing here that exist in the archive, and a
            page that stayed quiet about it would present the loss as a
            quiet stretch of sessions. */
         parts.push("the archive could not be fully read: " +
-          (failed > 0
+          (failed !== null && failed > 0
             ? failed + " of " + (probed === null ? "the" : probed) + " probed " +
               plural(failed, "key", "keys") + " failed"
             : "") +
-          (failed > 0 && abandoned ? " and " : "") +
+          (failed !== null && failed > 0 && abandoned ? " and " : "") +
           (abandoned ? "the walk was abandoned partway" : "") +
           " — sessions may be missing from this window that exist in the store");
       } else if (probed !== null) {
-        parts.push("all " + probed + " probed archive keys were read");
+        /* Reached only when `failed` was PUBLISHED and is zero — a measured
+           zero, which is the one thing that earns this sentence. */
+        parts.push(probed === 1
+          ? "the one probed archive key was read"
+          : "all " + probed + " probed archive keys were read");
       }
     }
 
@@ -1393,17 +1512,54 @@
     }
   }
 
-  function renderStale(updatedAt) {
-    if (!staleEl || !updatedAt) return;
-    const ageHours = (Date.now() - updatedAt) / 3600000;
-    if (ageHours <= 30) return;
-    /* THE SAME STALENESS RULE THE BOARD AND THE CALENDAR USE. It matters
-       here because a stale track does not look stale — it looks like a
-       week in which every trace simply stopped moving. */
+  /**
+   * THE STALENESS TEST IS UI.staleness()'s, NOT THIS FILE'S — and that is the
+   * fix, not a refactor. This page had grown its own copy, and every way in
+   * which the copy differed was a way it was worse:
+   *
+   *   - It tested the WRITE age and nothing else, so the second outage — a
+   *     pipeline that runs on schedule against an input that stopped
+   *     advancing — reported this track as current. Those are two different
+   *     faults with two different remedies (the Actions tab; upstream), which
+   *     is why flows-ui.js returns them as two kinds with two sentences.
+   *   - It printed `Math.round(ageHours / 24)`, so a payload 36 hours old was
+   *     announced as "2 day(s)" — a staleness overstated by most of a day, in
+   *     the one banner a reader is meant to act on. The shared copy floors,
+   *     and carries the hour branch for a threshold below a day.
+   *   - It printed the literal string "day(s)", which is a placeholder, not
+   *     prose.
+   *   - It was a second copy of the 30-hour constant. Two routes wording one
+   *     outage differently is how a reader concludes there are two outages.
+   *
+   * The shared sentence names the fault; the clause appended here names what
+   * it costs THIS drawing, which the shared copy cannot know. `unknown` — a
+   * payload carrying no readable date at all — makes no claim in either
+   * direction rather than reading as fresh.
+   */
+  function renderStale(payload) {
+    if (!staleEl) return;
+    if (typeof UI.staleness !== "function") {
+      /* A FRESHNESS CHECK THAT QUIETLY STOPS RUNNING is indistinguishable
+         from a pipeline that is fine, which is the one failure this banner
+         must never present as health. */
+      staleEl.hidden = false;
+      staleEl.dataset.stale = "unavailable";
+      staleEl.textContent = "The freshness check could not run: this page's shared " +
+        "UI module does not carry it, so nothing below is confirmed to be today's.";
+      return;
+    }
+    const verdict = UI.staleness(payload, Date.now(), { subject: "This track" });
+    if (!verdict || !verdict.message) {
+      staleEl.hidden = true;
+      staleEl.textContent = "";
+      delete staleEl.dataset.stale;
+      return;
+    }
     staleEl.hidden = false;
-    staleEl.textContent = "This track was last written " + Math.round(ageHours / 24) +
-      " day(s) ago. The pipeline has not published since, so the right-hand edge " +
-      "of every strip is that run's session and not today's.";
+    staleEl.dataset.stale = verdict.kind;
+    staleEl.textContent = verdict.message + " The right-hand edge of every strip " +
+      "is that run's session and not today's, so a trace that stops moving here " +
+      "is this page not being refreshed rather than a name going quiet.";
   }
 
   /* ---------- states -----------------------------------------------
@@ -1463,7 +1619,7 @@
       return;
     }
 
-    renderStale(payload.__updatedAt);
+    renderStale(payload);
 
     const sessionsOk = Array.isArray(payload.sessions) && payload.sessions.length > 0;
     const namesOk = Array.isArray(payload.names);
@@ -1504,7 +1660,7 @@
        — the newest score anywhere in the window — so a name last scored
        thirty sessions ago at +45 sat above a name scored this morning at
        +30, under a header the reader read as "yesterday". */
-    state.sort = ctx.has.now ? "now" : "abs";
+    state.sort = ctx.has.nowScore ? "now" : "abs";
     renderTrack();
     renderBasis(payload);
   }).catch((error) => {

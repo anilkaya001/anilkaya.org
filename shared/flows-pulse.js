@@ -161,14 +161,35 @@ export function shapeOiChange(raw, { cap = PULSE_CAPS.oiChange } = {}) {
     const oc = str(r.option_symbol);
     const parsed = oc ? parseOptionSymbol(oc) : null;
     const t = str(r.underlying_symbol) || (parsed ? parsed.ticker : null);
-    const change = num(r.oi_change);
-    if (!t || change === null) continue;
+    /* TWO READINGS, TWO NAMES, BECAUSE THE VENDOR'S ONE NAME IS NOT WHAT IT
+       LOOKS LIKE. `oi_change` reads like a difference and is a RATIO. The
+       vendor's own example settles it twice over (docs/uw-openapi.yaml):
+
+         curr_oi 35207, last_oi 2119  -> oi_change 15.6149..., oi_diff_plain 33088
+         curr_oi 33253, last_oi 27361 -> oi_change  0.2153..., oi_diff_plain  5892
+
+       (35207-2119)/2119 = 15.6149 and (33253-27361)/27361 = 0.2153, so
+       oi_change is (curr-last)/last and oi_diff_plain is the difference in
+       contracts.
+
+       This shaper published oi_change as `change`, and both renderers drew it
+       as a signed integer under a contracts header. A contract whose open
+       interest went 2119 to 35207 printed "+16"; one that grew 21.5% printed
+       "+0" — a measured rise rendered as no change at all.
+
+       THE COUNT IS NOT DERIVED WHEN THE VENDOR OMITS IT. curr-last would give
+       the same number, but then one field would carry two provenances, which
+       is exactly the confusion being fixed. Absent stays absent and the column
+       says so. */
+    const ratio = num(r.oi_change);
+    const diff = num(r.oi_diff_plain);
+    if (!t || (ratio === null && diff === null)) continue;
     rows.push({
       t, oc,
       cp: parsed ? parsed.type : null,
       k: parsed ? parsed.strike : null,
       exp: parsed ? parsed.expiry : null,
-      change,
+      ratio, diff,
       currOi: num(r.curr_oi), prevOi: num(r.last_oi),
       vol: num(r.volume), trades: num(r.trades),
       avgPx: num(r.avg_price),

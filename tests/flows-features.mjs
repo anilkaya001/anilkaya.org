@@ -368,6 +368,31 @@ const near = (a, b, tol, msg) => {
   eq(greekFlowTotals(null).rows, 0, "and a missing tape is the same zero rows, never a throw");
   near(greekFlowTotals(null).totalAbs, 0, 0, "with every sum at its identity");
 
+  /* AND THE COUNT ALONE CANNOT SAY WHICH SILENCE IT IS. Both lines above give
+     rows === 0, and this file's law gives "measured and empty" and "never
+     published" different prose and different data-empty tags. An earlier
+     docstring called rows === 0 the absence marker; it is two absences sharing
+     a number, so the record names which. */
+  eq(greekFlowTotals([]).silence, "quiet",
+     "an array that arrived with no prints in it is QUIET — measured, and empty");
+  eq(greekFlowTotals(null).silence, "unavailable",
+     "a tape that never arrived is UNAVAILABLE — a different sentence and a different tag");
+  eq(greekFlowTotals(undefined).silence, "unavailable", "and so is an absent argument");
+  /* AN ARRAY-LIKE THAT IS NOT AN ARRAY. The guard is `Array.isArray`, not a
+     truthiness test, and this is the fixture that separates them: `{length: 3}`
+     is truthy, so a truthy guard calls it published, hands it to `for...of` and
+     throws TypeError on a shaper that is documented never to throw. The
+     assertion below names the silence; the one above it names the refusal to
+     crash, because those are two different promises. */
+  ok(greekFlowTotals({ length: 3 }).rows === 0,
+     "a non-array shape is refused rather than iterated — this shaper does not throw on a bad payload");
+  eq(greekFlowTotals({ length: 3 }).silence, "unavailable",
+     "and so is a shape that is not an array at all, rather than being iterated into a silent zero");
+  eq(greekFlowTotals(TAPE).silence, null,
+     "while a tape with prints in it is not silent, so the field is null and a renderer has nothing to say");
+  ok(greekFlowTotals([]).silence !== greekFlowTotals(null).silence,
+     "the two silences are distinguishable — which is the whole assertion, and it fails the moment they collapse");
+
   /* THE POINT OF THE REFACTOR, asserted rather than asserted-in-a-comment:
      flowPurity's published denominator IS positioningQuality's. */
   const purity = flowPurity(TAPE);
@@ -398,6 +423,35 @@ const near = (a, b, tol, msg) => {
   eq(JSON.stringify(positioningQuality(TAPE, { floor: 1e5, totals: t })),
      JSON.stringify(positioningQuality(TAPE, { floor: 1e5 })),
      "and the floor still applies when a record is threaded — the option bag is not swallowed");
+
+  /* THE TWO ENTRY POINTS TAKE THE RECORD DIFFERENTLY — flowPurity positionally,
+     positioningQuality inside its option bag — and the pipeline calls them one
+     line apart. So `flowPurity(rows, { totals: t })` is the mistake a reader
+     makes after copying the line below it, and under a bare `totals || ...`
+     truthiness test it did not throw: an option bag is an object, `.totalAbs`
+     is undefined, `undefined <= 0` is false, the guard falls through and every
+     ratio comes out NaN — which serialises to null, so the page prints
+     "unmeasured" over a tape it measured perfectly. Absence coerced instead of
+     tested, one level up, in a function argument instead of a vendor field.
+
+     Both spellings are now accepted, and anything that is not a totals record
+     is recomputed from the rows rather than trusted. */
+  eq(JSON.stringify(flowPurity(TAPE, { totals: t })), JSON.stringify(flowPurity(TAPE)),
+     "flowPurity accepts its sibling's { totals } spelling too — the pipeline writes both, one line apart");
+  for (const [bad, label] of [[{}, "an empty option bag"], [{ floor: 1e5 }, "an option bag with no totals in it"],
+                              [{ totalAbs: null }, "a record whose denominator is null"],
+                              [true, "a stray boolean"]]) {
+    const got = flowPurity(TAPE, bad);
+    near(got.totalAbs, 2000, 1e-9, `flowPurity RECOMPUTES from the rows when handed ${label}`);
+    ok(Number.isFinite(got.purity), `and publishes a measured purity, never the NaN a truthiness test produced (${label})`);
+    const pq = positioningQuality(TAPE, { totals: bad === true ? undefined : bad });
+    ok(Number.isFinite(pq.vegaTilt), `positioningQuality does the same with ${label}`);
+  }
+  /* AND THE GUARD CAN FAIL: a genuinely valid record still short-circuits, so
+     these assertions are not passing merely because everything recomputes. */
+  const spy = { ...t, totalAbs: 4000 };
+  near(flowPurity(TAPE, spy).totalAbs, 4000, 0,
+       "a record carrying a finite totalAbs IS trusted — the recompute is a fallback, not the only path");
   ok(positioningQuality(TAPE, { floor: 1e5 }).otmShare === null,
      "a floor above the tape's own gross reports UNMEASURED — the branch the line above compares");
 
@@ -897,24 +951,130 @@ const near = (a, b, tol, msg) => {
   agree([-1e308, -1e308, 1e308], { winsor: 0.02 }, "only the upper bound overflows");
   agree([-1e308, 1e308, 1e308], { winsor: 0.02 }, "only the lower bound overflows");
 
-  /* TWO THINGS THIS SUITE DELIBERATELY DOES NOT ASSERT, recorded so the next
-     reader does not spend the afternoon finding out the same way:
+  /* THE COLUMN THAT CAUGHT THE FUSED FORM PUBLISHING HALF THE RIGHT ANSWER.
+     Everything above overflows a winsor BOUND, which makes the clip refuse and
+     lands both paths on the neutral vote — agreement by collapse. This column
+     overflows nothing at the bound and one DEVIATION underneath it: the median
+     is -1.7e308, the deviations are [9.7e306, 0, Infinity], and mad() hands
+     them to median(), which opens with finite(). The composed form therefore
+     takes the median of the two SURVIVORS (4.85e306) while a fused form that
+     kept the Infinity takes the middle of three (9.7e306) — exactly double the
+     scale, so exactly half the z, -0.674 against -1.349. Not an ulp, not the
+     sign of a zero: the published number, halved.
 
-       * reading the MAD's deviations out of the sorted buffer instead of the
-         original-order one is EQUIVALENT — a median only ever sees the
-         multiset — so no fixture can distinguish it, and none pretends to;
-       * dropping the non-finite-bound guard is equivalent TOO, because a bound
-         can only overflow on a column that also overflows the MAD and the
-         stdev, and both paths then return the neutral vote for everyone. The
-         four fixtures above reach that branch and agree either way. The guard
-         exists so the fused form and winsorize refuse in the same place, not
-         because a divergence is currently reachable.
+     Every fixture above passed against that version. It was found by a
+     differential search over extreme magnitudes, not by reading the code, and
+     it is here so the next reader who is sure that "a median only sees the
+     multiset" remembers that median() also decides what the multiset IS. */
+  const madOverflow = [-1.797e308, -1.7e308, 1e307];
+  agree(madOverflow, { winsor: 0.02 }, "a finite winsor bound over an OVERFLOWING MAD deviation");
+  {
+    /* PROVE THE FIXTURE REACHES THE BRANCH IT CERTIFIES rather than trusting
+       the arithmetic above — a fixture that cannot reach its branch is this
+       repo's most repeated mistake, and the four fixtures above are exactly
+       that mistake for this defect. Three claims, each independently checkable:
+       the clip really happens (both bounds finite), a deviation really
+       overflows, and dropping it really changes the median. */
+    const w = winsorize(madOverflow, 0.02);
+    ok(w.every((x) => Number.isFinite(x)),
+       "the clip is NOT refused here: both winsor bounds are finite, unlike every overflow fixture above");
+    const m = median(w);
+    const devs = w.map((x) => Math.abs(x - m));
+    eq(devs.filter((d) => !Number.isFinite(d)).length, 1,
+       "and exactly one deviation overflows to Infinity — the branch this fixture exists for");
+    ok(median(devs) * 2 === devs.slice().sort((a, b) => a - b)[1],
+       "and dropping it HALVES the scale: the filtered median is half the unfiltered middle entry");
+    ok(Math.abs(robustZFused(madOverflow, { winsor: 0.02 })[0]) > 1,
+       "so the fused z is the full -1.349 and not the -0.674 the unfiltered version published");
+  }
 
-     Both were established by mutating the implementation and re-running this
-     file. Three other mutations of the same kind — skipping the clip before the
-     quantiles, taking the median through the quantile formula, and folding the
-     fallback's sum over the sorted copy — are NOT equivalent, and the fixtures
-     above kill all three. */
+  /* EVERY DEVIATION OVERFLOWS, which is the `dn === 0` arm of the filter above
+     and the only way the survivor count reaches zero. Two entries of 1.7e308:
+     the winsor bounds are finite so the clip happens, but the even-length
+     median sums the pair before halving it, so the CENTRE is Infinity and every
+     |x - centre| overflows with it. median([]) is NaN in the composed form and
+     mad() multiplies it into a NaN scale; the fused form must reach the same
+     NaN from an empty survivor set. Both then fall to the mean/stdev branch,
+     which also overflows, and both return the neutral vote.
+
+     HONEST ABOUT WHAT THIS FIXTURE CAN AND CANNOT DO: it proves the STATE is
+     reachable, not that the explicit `dn === 0` arm is load-bearing. Deleting
+     that arm was mutated and the suite stayed green, because an out-of-range
+     read on a typed array is undefined and `(undefined + undefined) / 2` is
+     NaN already. Recorded here so the next reader does not go looking for the
+     assertion that kills it — there is not one, and the implementation says so
+     in the same words. */
+  const allDevOverflow = [1.7e308, 1.7e308];
+  agree(allDevOverflow, { winsor: 0.02 }, "a column whose centre overflows, so EVERY deviation does");
+  {
+    const m = median(winsorize(allDevOverflow, 0.02));
+    ok(!Number.isFinite(m),
+       "the centre really is non-finite here — this is the fixture for the empty-survivor arm, not a near miss");
+    ok(winsorize(allDevOverflow, 0.02).every((x) => !Number.isFinite(Math.abs(x - m))),
+       "and not one deviation survives the finiteness filter, so the survivor count is zero");
+    ok(robustZFused(allDevOverflow, { winsor: 0.02 }).every((v) => v === 0),
+       "which is the neutral vote for everyone — never NaN, never undefined out of an empty buffer");
+  }
+
+  /* THE NON-FINITE-BOUND GUARD IS BEHAVIOURAL, and this is the column that
+     says so. An earlier comment in both files claimed the guard was mere
+     symmetry with winsorize — that a bound can only overflow on a column which
+     also overflows the MAD and the stdev, so both paths return the neutral
+     vote either way. The three fixtures above were offered as evidence and
+     cannot see it: on each of them the finite bound sits at or below the
+     smallest entry, so clipping and not clipping are the same operation.
+
+     Here the LOWER bound is finite and strictly above the smallest entry while
+     the UPPER one overflows. winsorize refuses the whole clip when either
+     bound is non-finite, so the bottom name keeps its raw value; a version
+     that clipped anyway would raise it to the finite floor and score it
+     differently. Replacing the guard with `true` diverges on 92 of 7,228
+     columns measured, and on this one. */
+  const guardCol = [-Number.MAX_VALUE, -1.7e308, 1e308];
+  agree(guardCol, { winsor: 0.02 }, "a finite lower bound and an overflowing upper one — the clip is refused whole");
+  {
+    ok(!Number.isFinite(quantile(guardCol, 0.98)),
+       "the upper winsor bound really does overflow, which is what makes winsorize refuse");
+    const loBound = quantile(guardCol, 0.02);
+    ok(Number.isFinite(loBound) && loBound > Math.min(...guardCol),
+       "while the lower bound is finite AND strictly above the smallest entry — so clipping is observable here, " +
+       "which is precisely what the three fixtures above could not do");
+    deepEq(winsorize(guardCol, 0.02), guardCol,
+       "and winsorize returns the column untouched, which the fused form must reproduce rather than clip to the floor");
+  }
+
+  /* ONE THING THIS SUITE DELIBERATELY DOES NOT ASSERT, and one that used to be
+     on this list and should never have been.
+
+     STILL NOT ASSERTED, because it is genuinely unobservable: reading the MAD's
+     deviations out of the sorted buffer instead of the original-order one. A
+     median only ever sees the multiset, and the finiteness filter is per
+     element, so no fixture can distinguish the two. Measured rather than
+     reasoned this time: that mutant agrees with the composed form on all 7,228
+     extreme-magnitude columns of the search that produced the two fixtures
+     above. No fixture here pretends to cover it.
+
+     REMOVED FROM THIS LIST, because it was false: "dropping the non-finite
+     bound guard is equivalent too". The argument was that a bound can only
+     overflow on a column that also overflows the MAD and the stdev, so both
+     paths return the neutral vote either way. A bound overflows when two
+     ADJACENT sorted entries are more than MAX_VALUE apart, which constrains
+     nothing about the other end of the column — and the guardCol fixture above
+     is a column with a finite lower bound, an overflowing upper one, and a
+     bottom entry that a guard-less clip would move. 92 of those 7,228 columns
+     diverge. The claim was believed because the three overflow fixtures agreed
+     under the mutant, and they agreed because on every one of them the finite
+     bound sits at or below the smallest entry, so clipping is a no-op. A
+     fixture that agrees under a mutant is not evidence of equivalence; it is a
+     fixture that cannot see the branch.
+
+     The same mistake, made with the same words ("a median only sees the
+     multiset"), is what let the MAD's missing finiteness filter ship. Both are
+     now assertions rather than paragraphs. Four other mutations of this kind —
+     skipping the clip before the quantiles, taking the median through the
+     quantile formula, folding the fallback's sum over the sorted copy, and
+     dropping the deviation filter — are NOT equivalent, and the fixtures above
+     kill all four. */
 
   /* AND A DIFFERENTIAL FUZZ, so the agreement is a property rather than a list
      of cases someone thought of. Deterministic seed: a failure is reproducible. */
