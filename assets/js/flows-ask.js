@@ -160,9 +160,45 @@
      fallback is the payload's own stamp and the wording says "built" — the
      moment the run wrote the key, which is the only moment either side of
      this wire actually measured. */
+  /* THE HEADLINE FIGURE, READ FROM `n` AND NEVER FROM THE SENTENCE.
+     flows-brief.js attaches `lead` — a label and the KEYS of the numbers
+     that lead — because it is the module that built the sentence and so
+     the only one that knows which of its numerals is the reading. A regex
+     over `say` would lift "53" out of "SYN053 fell 15 places" exactly as
+     willingly as out of "53 lean bearish", and a headline taken from a
+     ticker is a confident wrong number set in the largest type on the page.
+
+     AN ABSENT VALUE IS AN EM DASH, NOT A ZERO, and this is where it
+     matters most: the figure is the biggest thing in the region and the
+     one a reader carries away. isNum RETURNS the reading, so it is
+     compared `=== null` — a measured 0 is a real headline and is often
+     the interesting one, as "0 names climbed" was this session. */
+  function leadFigure(fact) {
+    var spec = fact && fact.lead;
+    if (!spec || !Array.isArray(spec.keys) || !spec.keys.length) return null;
+    var n = fact.n && typeof fact.n === "object" ? fact.n : {};
+    var box = el("div", "ak-fig");
+    if (spec.label) box.append(el("p", "ak-fig-l", spec.label));
+    var row = el("p", "ak-fig-v");
+    for (var i = 0; i < spec.keys.length; i++) {
+      if (i) row.append(el("span", "ak-fig-sep", "/"));
+      var v = isNum(n[spec.keys[i]]);
+      row.append(el("span", "ak-fig-n" + (v === null ? " is-absent" : ""),
+        v === null ? "\u2014" : String(v)));
+    }
+    if (spec.unit) row.append(el("span", "ak-fig-u", spec.unit));
+    box.append(row);
+    return box;
+  }
+
   function factItem(fact, fallbackSource, fallbackAt, lead) {
     var li = el("li", "ak-fact" + (lead ? " is-lead" : ""));
     var say = fact && typeof fact.say === "string" ? fact.say : "";
+    /* THE FIGURE IS DRAWN ABOVE THE SENTENCE AND NEVER INSTEAD OF IT. On
+       its own it has lost its units, its denominator and every
+       qualification the sentence carries. */
+    var fig = leadFigure(fact);
+    if (fig) li.append(fig);
     /* A FACT THAT ARRIVED WITHOUT ITS SENTENCE IS NAMED, NOT DRAWN BLANK —
        the treatment silenceLine() already gives a silence that lost its
        wording, for the reason it gives there. An empty paragraph still

@@ -6515,3 +6515,66 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-dock-panel { transition: transform 160ms var(--ease, ease); }
   .ak-dock:not(.is-open) .ak-dock-panel { transform: translateX(100%); }
 }
+
+/* THE HEADLINE FIGURE. The reading is a number, and a desk product should
+   let the eye land on it before it lands on words. The label is mono and
+   small so it reads as a field name; the figure is large; the sentence
+   sits beneath at body size and is never omitted.
+
+   AN ABSENT FIGURE IS DIMMED AS WELL AS DASHED, so the em dash is not
+   mistaken at a glance for a minus sign in the same weight as a real
+   reading. It is the only place on this page where a value's absence is
+   set at headline size, which is exactly why it may not look like one. */
+.ak-fig { margin: 0 0 0.35rem; }
+.ak-fig-l {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.ak-fig-v {
+  margin: 0.1rem 0 0.25rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.ak-fig-n { font-size: var(--fs-mark); line-height: 1.05; }
+.ak-fig-n.is-absent { color: var(--ink-faint); }
+.ak-fig-sep { font-size: var(--fs-lead); color: var(--ink-faint); }
+.ak-fig-u {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.ak-fact.is-lead .ak-fig-n { font-size: calc(var(--fs-mark) * 1.35); }
+
+/* THE THREE SESSIONS SIT SIDE BY SIDE, WHICH IS WHAT MAKES THE FIGURE PAY.
+   Lifting a headline number out of each region costs vertical space and
+   buys nothing while the regions are stacked — measured: 2516px to 2745px,
+   worse than before. The figure earns its height only when the three
+   regions become three columns, because then the page is as tall as its
+   TALLEST region rather than the sum of all three, and the whole briefing
+   lands in about one screen.
+
+   YESTERDAY, TODAY, NEXT — LEFT TO RIGHT, and the order is chronological
+   rather than by importance on purpose: a reader scanning three columns
+   reads them as a sequence, and a sequence out of order is a harder thing
+   to hold than three paragraphs out of order.
+
+   76rem, WHICH IS A TIER THIS FILE ALREADY HAS. 92rem was the first
+   choice and it never fired where it was needed: a 1440px viewport is
+   90rem, so the layout this was written for was invisible on the width
+   most readers have. 76rem is 1216px, it is already a breakpoint here, and
+   it has no max-width partner — so reusing it neither invents an eleventh
+   width nor risks the 60/60 collision flows-motion.mjs caught. */
+@media (min-width: 76rem) {
+  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+  .ak-brief .ak-warns { grid-column: 1 / -1; }
+  .ak-region .ak-facts { grid-template-columns: 1fr; }
+  .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
+}

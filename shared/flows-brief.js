@@ -107,9 +107,36 @@ export function silenceOf(payload, what, list) {
   return null;
 }
 
-/* A fact carries its numbers separately from its sentence. `say` is
-   what a page prints; `n` is what may not be changed. */
-const fact = (id, say, n) => ({ id, say, n: n || {} });
+/**
+ * A fact, its numbers kept apart from its sentence, and optionally which
+ * of those numbers is the headline. `say` is what a page prints; `n` is
+ * what may not be changed.
+ *
+ * `lead` NAMES KEYS IN `n`; IT NEVER CARRIES A VALUE OF ITS OWN. A
+ * renderer that wants to set a figure large — a terminal-style label over
+ * a number over its sentence — needs to know WHICH number leads, and the
+ * only module that knows is this one, which built the sentence. The
+ * alternative a mockup reached for was parsing the figure back out of
+ * `say` with a regex, and that is the whole defect in miniature: it would
+ * lift "53" out of "SYN053 fell 15 places" as readily as out of "53 lean
+ * bearish", and a headline figure taken from a ticker is a confident
+ * wrong number set in the largest type on the page.
+ *
+ * So `lead` is { label, keys, unit } where `keys` index `n`. The renderer
+ * reads n[key] and draws em dashes for any that are absent — the same
+ * absence rule as everywhere else, because a headline is exactly where a
+ * missing reading must not become a zero. The SENTENCE IS ALWAYS DRAWN
+ * BENEATH IT: the figure is a way in, never a replacement, and a number
+ * without its sentence has lost its units and its qualification.
+ */
+const fact = (id, say, n, lead) => {
+  const f = { id, say, n: n || {} };
+  if (lead && typeof lead === "object" && Array.isArray(lead.keys) && lead.keys.length) {
+    f.lead = { label: String(lead.label || ""), keys: lead.keys.slice(),
+      unit: lead.unit === undefined ? null : String(lead.unit) };
+  }
+  return f;
+};
 
 const plural = (k, one, many) => (k === 1 ? one : many);
 
@@ -196,7 +223,8 @@ export function briefToday(store) {
       (bear === null ? "—" : bear) + " lean bearish" +
       (scored === null ? "" : " out of " + scored + " scored") +
       (neutral === null ? "" : ", with " + neutral + " inside the dead band") + ".",
-      { bullish: bull, bearish: bear, scored, neutral, session }));
+      { bullish: bull, bearish: bear, scored, neutral, session },
+      { label: "lean bull / bear", keys: ["bullish", "bearish"], unit: "names" }));
   }
 
   /* THE LOUDEST NAME EACH SIDE, with the score that made it loudest.
@@ -333,7 +361,8 @@ export function briefYesterday(store) {
   facts.push(fact("entered",
     fresh.length + " " + plural(fresh.length, "name is", "names are") +
     " new to a side since the " + prior + " board.",
-    { entered: fresh.length, prior }));
+    { entered: fresh.length, prior },
+    { label: "new to a side", keys: ["entered"], unit: "names" }));
 
   if (held.length) {
     facts.push(fact("incumbents",
@@ -452,7 +481,8 @@ export function briefNext(store, options) {
       facts.push(fact("reporting",
         beforeNext.length + " " + plural(beforeNext.length, "name reports", "names report") +
         " before the next session: " + beforeNext.map((r) => r.t).join(", ") + ".",
-        { count: beforeNext.length, tickers: beforeNext.map((r) => r.t), origin }));
+        { count: beforeNext.length, tickers: beforeNext.map((r) => r.t), origin },
+        { label: "report before next session", keys: ["count"], unit: "names" }));
     } else {
       /* THE ANSWER IS "NONE", AND IT IS PRINTED. Withholding it leaves
          a reader unable to tell a clear calendar from a section that
