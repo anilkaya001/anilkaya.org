@@ -399,7 +399,22 @@
   function feedRow(row, ctx) {
     const tr = document.createElement("tr");
     const ticker = String(row.t === null || row.t === undefined ? "" : row.t);
-    tr.append(nameCell(row, ctx.covered.has(ticker), isNum(row.p) === 1));
+    const name = nameCell(row, ctx.covered.has(ticker), isNum(row.p) === 1);
+    /* THE CORROBORATION, MARKED WHERE THE READER IS ALREADY LOOKING. This
+       contract cleared this page's own floors AND the vendor's rules flagged a
+       window on it — two independent selections agreeing, which is the single
+       strongest reading this page can produce and was, until now, available
+       only by scanning one table against the other by hand. */
+    const key = joinKey(row.t, row.cp, row.k, row.expiry);
+    if (key && alertKeys && alertKeys.has(key)) {
+      const a = alertKeys.get(key);
+      name.append(bothBadge(key,
+        "The vendor's rules also flagged a window on this exact contract" +
+        (a.rule ? ", under the rule \u201c" + a.rule + "\u201d" : "") +
+        (isNum(a.prem) === null ? "" : ", carrying " + money(a.prem) + " of premium") +
+        ". Two independent selections, the vendor's and this page's floors, on one line."));
+    }
+    tr.append(name);
 
     tr.append(cell(fixed(row.k, 2), "c-num",
       isNum(row.k) === null ? "The strike could not be read from the contract symbol." : ""));
@@ -473,92 +488,287 @@
      <abbr> that explains what the column means — move INTO the button, so
      being able to sort a column never costs the reader its explanation. */
 
-  const feedSort = { key: null, dir: "desc" };
+  /**
+   * One sortable table's controller, closing over its own state.
+   *
+   * THIS USED TO BE FIVE MODULE-LEVEL BINDINGS SERVING ONE TABLE. The counter
+   * feed had columns, a comparator, a click cycle and the aria-sort discipline
+   * below; the alerts table above it — newer data, on the same page, from the
+   * vendor's own selection — had none of it, because wireHeads opened with
+   * `if (!feedTable) return;` and every helper named the feed's own globals.
+   * A reader could rank the stale feed by seven columns and could not rank the
+   * fresh one by any.
+   *
+   * The controller is per-table, so a second table costs a column descriptor
+   * and one call. It belongs in a shared module beside scoreStrip eventually;
+   * it is here for now because assets/js/flows-ui.js is not this file.
+   */
+  function sortableTable(table, cols, repaint) {
+    const sort = { key: null, dir: "desc" };
+    let heads = [];
+
+    /* Click through: the column's natural direction, then its reverse, then
+       back to the rank the pipeline published. THE PUBLISHED RANK MUST BE
+       RECOVERABLE — it is the one ordering the page exists to show, and a
+       table that can be ranked away from it with no way back has thrown away
+       its own answer. */
+    function toggle(key) {
+      const col = cols.find((c) => c.key === key);
+      if (!col) return;
+      if (sort.key !== key) { sort.key = key; sort.dir = col.first; }
+      else if (sort.dir === col.first) { sort.dir = col.first === "desc" ? "asc" : "desc"; }
+      else { sort.key = null; sort.dir = "desc"; }
+      sync();
+      repaint();
+    }
+
+    /**
+     * aria-sort on every header, every time.
+     *
+     * It is the only thing that tells a screen reader the table re-ranked. The
+     * glyph is decoration; the attribute is the state. Every header that is not
+     * the current one is explicitly set back to "none" rather than left as it
+     * was, because a stale attribute announces two sorted columns and there is
+     * only ever one.
+     */
+    function sync() {
+      heads.forEach((th, i) => {
+        const col = cols[i];
+        const button = th.querySelector(".fb-sort");
+        if (!col || !button) { th.removeAttribute("aria-sort"); return; }
+        const on = sort.key === col.key;
+        th.setAttribute("aria-sort",
+          on ? (sort.dir === "asc" ? "ascending" : "descending") : "none");
+        const ind = button.querySelector(".fb-sort-ind");
+        if (ind) ind.textContent = on ? (sort.dir === "asc" ? UP : DOWN) : "";
+        /* THE ACCESSIBLE NAME IS SPELLED OUT rather than scraped from the
+           header: "Vol/OI: activate to sort" names nothing a reader can act
+           on, and half these headings are abbreviations. */
+        button.setAttribute("aria-label", col.name + ": " + (on
+          ? "ranked " + (sort.dir === "asc" ? "ascending" : "descending") +
+            ", activate to " + (sort.dir === col.first
+              ? "reverse" : "return to the published rank")
+          : "activate to rank by this column"));
+      });
+    }
+
+    function wire() {
+      if (!table) return;
+      heads = Array.from(table.querySelectorAll("thead th"));
+      if (heads.length !== cols.length) return;   // markup moved; leave it unsorted
+      heads.forEach((th, i) => {
+        const col = cols[i];
+        /* IDEMPOTENT. There is one fetch and one paint today, but a header
+           wrapped twice nests its own <abbr> inside a second button and loses
+           the click handler on the outer one — a failure that would look like
+           "sorting stopped working" and be traced anywhere but here. */
+        if (!col || th.querySelector(".fb-sort")) return;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "fb-sort";
+        while (th.firstChild) button.append(th.firstChild);
+        const ind = el("span", "fb-sort-ind");
+        ind.setAttribute("aria-hidden", "true");
+        button.append(ind);
+        button.addEventListener("click", () => toggle(col.key));
+        th.append(button);
+      });
+      sync();
+    }
+
+    /** The rows in the current order. Entries are {r, i} with i the published rank. */
+    function view(rows) {
+      const col = sort.key ? cols.find((c) => c.key === sort.key) : null;
+      return col ? rows.slice().sort((a, b) => compare(a, b, col, sort.dir)) : rows;
+    }
+
+    return { sort, toggle, sync, wire, view };
+  }
+
+  /* ================================================================
+     THE TWO FEEDS, JOINED — AND THE FILTER BOTH OF THEM HONOUR.
+
+     This page carries two populations of the same object. The alerts table
+     above is the windows the VENDOR'S RULES flagged; the counter feed below is
+     contracts that cleared this desk's own volume and open-interest floors on
+     chains the pipeline had already read. Each row of each carries the same
+     four-tuple — name, call or put, strike, expiry — parsed by the same
+     parseOptionSymbol, and until now the only way to find a contract in BOTH
+     was to read sixty rows against fifty by hand.
+
+     A contract that the vendor's rules flagged AND that clears the floors with
+     a high volume-over-open-interest is the strongest reading this page can
+     produce, because the two selections are independent: one is the vendor's
+     model of what is worth flagging, the other is arithmetic on a chain.
+
+     NO SHARED FATE. The two fetches stay independent — either can fail without
+     the other — so the marking is gated on both having RESOLVED rather than on
+     both succeeding. `alertKeys` and `feedKeys` are null until their fetch has
+     produced readable rows; a null means "not resolved yet" and nothing is
+     marked, which is a different state from an empty set, and only the empty
+     set is a statement that nothing matched.
+     ================================================================ */
+
+  /** name|call-or-put|strike|expiry, or null when the row cannot be identified. */
+  function joinKey(t, cp, k, expiry) {
+    const strike = isNum(k);
+    if (!t || !cp || strike === null || !expiry) return null;
+    return String(t) + "|" + String(cp) + "|" + strike + "|" + String(expiry);
+  }
+
+  let alertKeys = null;      // Map key -> the alert row, or null until resolved
+  let feedKeys = null;       // Set of keys, or null until resolved
+  /* Declared HERE rather than beside the alerts painter three hundred lines
+     down, because the filter note and the join both read it and a `let` is in
+     its temporal dead zone until its own declaration runs. */
+  let alertRows = [];        // [{ r, i }] in the vendor's published order
+
+  /* The filter both tables honour. `side` is "all" | "C" | "P"; `both` narrows
+     to contracts present in BOTH feeds. Held here rather than in either
+     table's controller because a filter that applied to one table and not the
+     other would produce two counts of one population. */
+  const filter = { side: "all", both: false };
+
+  function passesFilter(row, expiryKey) {
+    if (filter.side !== "all" && row.cp !== filter.side) return false;
+    if (filter.both) {
+      const key = joinKey(row.t, row.cp, row.k, row[expiryKey]);
+      if (!key) return false;
+      /* AN UNRESOLVED FEED CANNOT SATISFY "IN BOTH". Treating a pending fetch
+         as a match would show rows the join has not been made for. */
+      if (alertKeys === null || feedKeys === null) return false;
+      if (!alertKeys.has(key) || !feedKeys.has(key)) return false;
+    }
+    return true;
+  }
+
+  /** The "also in the other feed" badge, or null. A WORD, not a glyph: the
+      mono subset carries no dagger, and a word survives greyscale, a printout
+      and a screen reader without a legend. */
+  function bothBadge(key, title) {
+    if (!key) return null;
+    const sup = el("sup", "ua-both", "both");
+    sup.title = title;
+    return sup;
+  }
+
+  /* When the second fetch lands, the first table's rows were drawn without a
+     join to test against. Repainting is cheap — sixty rows — and is the only
+     way the mark can appear on whichever table drew first. */
+  function joinResolved() {
+    if (alertKeys !== null && feedRows.length) paintFeedRows();
+    if (feedKeys !== null && alertRows.length) paintAlertRows();
+  }
+
+  /* ---------- the filter group, built here because the markup half
+     predates it. `.flows-controls` exists on this page and holds only the
+     lede; the board page already ships the `.flows-views` aria-pressed idiom,
+     and this reuses it rather than inventing a second one. */
+  function buildControls() {
+    const host = document.querySelector(".flows-controls");
+    if (!host || document.getElementById("uaFilters")) return;
+    const group = el("div", "flows-views");
+    group.id = "uaFilters";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Narrow both tables");
+    /* WRAPPED HERE RATHER THAN IN THE SHARED RULE. `.flows-views` is a
+       non-wrapping flex row, which is correct for the board's three short
+       pills and overflows at 320px with this group's four. Zero horizontal
+       overflow at 320px is a tested invariant of this site, and widening a
+       rule three other pages depend on to satisfy one of them is the change
+       that breaks the other two. */
+    group.style.flexWrap = "wrap";
+
+    const buttons = [];
+    /* BOTH THE STATE AND ITS STYLING, exactly as the board sets them: the
+       attribute is what a screen reader announces and the class is what the
+       stylesheet tints, and setting one without the other produces a control
+       that looks pressed to one reader and unpressed to another. */
+    function press(button, on) {
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    function repaint() {
+      paintFeedRows();
+      paintAlertRows();
+      syncFilterNote();
+    }
+    [["all", "All"], ["C", "Calls"], ["P", "Puts"]].forEach(([value, label]) => {
+      const b = el("button", "flows-view", label);
+      b.type = "button";
+      press(b, filter.side === value);
+      b.addEventListener("click", () => {
+        filter.side = value;
+        buttons.forEach(([bb, vv]) => press(bb, filter.side === vv));
+        repaint();
+      });
+      buttons.push([b, value]);
+      group.append(b);
+    });
+    const both = el("button", "flows-view", "Both feeds");
+    both.type = "button";
+    press(both, false);
+    both.title = "Contracts the vendor's rules flagged AND that cleared this page's own " +
+      "floors — the same name, side, strike and expiry in both tables.";
+    both.addEventListener("click", () => {
+      filter.both = !filter.both;
+      press(both, filter.both);
+      repaint();
+    });
+    group.append(both);
+    host.append(group);
+
+    const note = el("p", "fc-note");
+    note.id = "uaFilterNote";
+    host.append(note);
+    syncFilterNote();
+  }
+
+  /* WHAT THE FILTER IS DOING, IN WORDS, so a narrowed table is never mistaken
+     for a thin market. The counts are of rows actually drawn against rows
+     published, which is the only pair a reader can check by eye. */
+  function syncFilterNote() {
+    const note = document.getElementById("uaFilterNote");
+    if (!note) return;
+    if (filter.side === "all" && !filter.both) {
+      note.textContent = "Both tables show every row published. Narrowing them is a filter " +
+        "on what is drawn and never a second read of the market.";
+      return;
+    }
+    const feedShown = feedRows.filter((e) => passesFilter(e.r, "expiry")).length;
+    const alertShown = alertRows.filter((e) => passesFilter(e.r, "exp")).length;
+    const bits = [];
+    if (filter.side !== "all") bits.push(filter.side === "C" ? "calls only" : "puts only");
+    if (filter.both) {
+      bits.push(alertKeys === null || feedKeys === null
+        ? "contracts in both feeds, which cannot be resolved until both payloads have loaded"
+        : "contracts in both feeds");
+    }
+    note.textContent = "Filtered to " + bits.join(" and ") + ": " +
+      count(alertShown) + " of " + count(alertRows.length) + " flagged windows and " +
+      count(feedShown) + " of " + count(feedRows.length) + " contracts are drawn. " +
+      "The rest are published and hidden, not absent from the read.";
+  }
+
   let feedRows = [];                 // [{ r, i }] in the published rank
   let feedCtx = null;
-  let headCells = [];
+  const feedSorter = sortableTable(feedTable, FEED_COLS, () => paintFeedRows());
 
   function paintFeedRows() {
-    const col = feedSort.key ? FEED_COLS.find((c) => c.key === feedSort.key) : null;
-    const view = col
-      ? feedRows.slice().sort((a, b) => compare(a, b, col, feedSort.dir))
-      : feedRows;
+    const view = feedSorter.view(feedRows).filter((e) => passesFilter(e.r, "expiry"));
     feedBody.textContent = "";
+    if (!view.length && feedRows.length) {
+      /* THE FILTER EMPTIED THE TABLE, WHICH IS NOT THE SAME FACT AS A QUIET
+         CHAIN. Saying "no contract cleared the floors" here would blame the
+         market for a control the reader is holding. */
+      emptyRow(feedBody, FEED_COLUMNS,
+        "No contract in this feed matches the filter above. " + count(feedRows.length) +
+        " rows are published; the filter is hiding all of them.");
+      return;
+    }
     const frag = document.createDocumentFragment();
     for (const entry of view) frag.append(feedRow(entry.r, feedCtx));
     feedBody.append(frag);
-  }
-
-  /**
-   * aria-sort on every header, every time.
-   *
-   * It is the only thing that tells a screen reader the table re-ranked. The
-   * glyph is decoration; the attribute is the state. Every header that is not
-   * the current one is explicitly set back to "none" rather than left as it
-   * was, because a stale attribute announces two sorted columns and there is
-   * only ever one.
-   */
-  function syncHeads() {
-    headCells.forEach((th, i) => {
-      const col = FEED_COLS[i];
-      const button = th.querySelector(".fb-sort");
-      if (!col || !button) { th.removeAttribute("aria-sort"); return; }
-      const on = feedSort.key === col.key;
-      th.setAttribute("aria-sort", on ? (feedSort.dir === "asc" ? "ascending" : "descending") : "none");
-      const ind = button.querySelector(".fb-sort-ind");
-      if (ind) ind.textContent = on ? (feedSort.dir === "asc" ? UP : DOWN) : "";
-      /* THE ACCESSIBLE NAME IS SPELLED OUT rather than scraped from the
-         header: "Vol/OI: activate to sort" names nothing a reader can act on,
-         and half these headings are abbreviations. */
-      button.setAttribute("aria-label", col.name + ": " + (on
-        ? "ranked " + (feedSort.dir === "asc" ? "ascending" : "descending") +
-          ", activate to " + (feedSort.dir === col.first
-            ? "reverse" : "return to the published rank")
-        : "activate to rank by this column"));
-    });
-  }
-
-  /**
-   * Click through: the column's natural direction, then its reverse, then
-   * back to the rank the pipeline published.
-   *
-   * THE PUBLISHED RANK MUST BE RECOVERABLE. It is the one ordering this page
-   * exists to show — vol/oi, stated as a choice in the basis panel — and a
-   * table that can be ranked away from it with no way back has thrown away
-   * its own answer.
-   */
-  function toggleSort(key) {
-    const col = FEED_COLS.find((c) => c.key === key);
-    if (!col) return;
-    if (feedSort.key !== key) { feedSort.key = key; feedSort.dir = col.first; }
-    else if (feedSort.dir === col.first) { feedSort.dir = col.first === "desc" ? "asc" : "desc"; }
-    else { feedSort.key = null; feedSort.dir = "desc"; }
-    syncHeads();
-    paintFeedRows();
-  }
-
-  function wireHeads() {
-    if (!feedTable) return;
-    headCells = Array.from(feedTable.querySelectorAll("thead th"));
-    if (headCells.length !== FEED_COLUMNS) return;   // markup moved; leave it unsorted
-    headCells.forEach((th, i) => {
-      const col = FEED_COLS[i];
-      /* IDEMPOTENT. There is one fetch and one paint today, but a header
-         wrapped twice nests its own <abbr> inside a second button and loses
-         the click handler on the outer one — a failure that would look like
-         "sorting stopped working" and be traced anywhere but here. */
-      if (!col || th.querySelector(".fb-sort")) return;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "fb-sort";
-      while (th.firstChild) button.append(th.firstChild);
-      const ind = el("span", "fb-sort-ind");
-      ind.setAttribute("aria-hidden", "true");
-      button.append(ind);
-      button.addEventListener("click", () => toggleSort(col.key));
-      th.append(button);
-    });
-    syncHeads();
   }
 
   /* ---------- the name panel --------------------------------------- */
@@ -938,10 +1148,22 @@
         "as a number with no bar behind it: on a live chain it spans several powers of " +
         "ten and any fixed scale would flatten most of the column into nothing. " +
         "Ranking by a heading re-ranks the list; a third activation returns it to the " +
-        "rank the pipeline published.";
+        "rank the pipeline published. A row marked \u201cboth\u201d is a contract the " +
+        "vendor's rules also flagged a window on, matched on name, side, strike and " +
+        "expiry — two independent selections agreeing, and the only corroboration this " +
+        "page can offer. An unmarked row is not a contradiction: the two feeds are read " +
+        "at different times from different endpoints, and absence from one says nothing " +
+        "about the other.";
     }
 
     feedRows = rows.map((r, i) => ({ r, i }));
+    /* Resolved, even when empty — see the alerts side for why an empty set and
+       a null are different states. */
+    feedKeys = new Set();
+    for (const r of rows) {
+      const key = joinKey(r.t, r.cp, r.k, r.expiry);
+      if (key) feedKeys.add(key);
+    }
     if (!rows.length) {
       emptyRow(feedBody, FEED_COLUMNS,
         payload.status === "quiet"
@@ -949,9 +1171,11 @@
             "statement about this run's chains, not about the market."
           : "This payload carried no contract rows.");
     } else {
-      wireHeads();
+      feedSorter.wire();
       paintFeedRows();
     }
+    joinResolved();
+    syncFilterNote();
     if (feedPanel) feedPanel.hidden = false;
 
     /* ---- the name panel ---- */
@@ -1050,10 +1274,68 @@
      into the other's blob is exactly the drift it exists to catch. */
 
   const alertsPanel = document.getElementById("uaAlertsPanel");
+  const alertsTable = document.getElementById("uaAlerts");
   const alertsBody = document.getElementById("uaAlertsBody");
   const alertsCap = document.getElementById("uaAlertsCap");
   const alertsNote = document.getElementById("uaAlertsNote");
   const ALERT_COLUMNS = 10;
+
+  /* THE ALERTS TABLE'S COLUMNS, in the <thead>'s order in flows-pages.js —
+     the same contract the counter feed's FEED_COLS keeps, for the same reason:
+     a column that moves in the markup moves here and nowhere else.
+
+     This table was the newer, richer and fresher of the two on this page and
+     was the one a reader could not rank at all. Every value below is read
+     through isNum or String so an unmeasured cell sorts to the BOTTOM in both
+     directions, which is what compare() enforces. */
+  const ALERT_COLS = [
+    { key: "t", name: "Name", first: "asc",
+      val: (r) => (r.t === null || r.t === undefined ? null : String(r.t)) },
+    /* THE CONTRACT SORTS BY EXPIRY, then by nothing else: it is a compound
+       cell and any single key it could sort on is a choice. Expiry is the one
+       a reader scanning for a horizon actually wants, and the header's own
+       accessible name says so rather than leaving it to be discovered. */
+    { key: "exp", name: "Contract, by expiry", first: "asc",
+      val: (r) => (r.exp ? String(r.exp) : null) },
+    { key: "prem", name: "Premium", first: "desc", val: (r) => isNum(r.prem) },
+    { key: "askPrem", name: "Ask-side premium", first: "desc", val: (r) => isNum(r.askPrem) },
+    { key: "bidPrem", name: "Bid-side premium", first: "desc", val: (r) => isNum(r.bidPrem) },
+    { key: "size", name: "Contracts in the window", first: "desc", val: (r) => isNum(r.size) },
+    { key: "trades", name: "Executions in the window", first: "desc", val: (r) => isNum(r.trades) },
+    /* HOW MANY FLAGS THE VENDOR SET, and null when it carried none of them —
+       "no flags set" and "no flags reported" are the pair this page exists to
+       keep apart, so they must not share a sort position either. */
+    { key: "flags", name: "Vendor flags set", first: "desc", val: (r) => {
+      const flags = [r.sweep, r.floor, r.single, r.opening];
+      if (!flags.some((v) => v === true || v === false)) return null;
+      return flags.filter((v) => v === true).length;
+    } },
+    { key: "spanStart", name: "Window start", first: "asc",
+      val: (r) => (r.spanStart ? String(r.spanStart) : null) },
+    { key: "st", name: "Stage in the board's funnel", first: "asc",
+      val: (r) => (r.st ? String(r.st) : null) },
+  ];
+  const alertsSorter = sortableTable(alertsTable, ALERT_COLS, () => paintAlertRows());
+
+  /* The rows in the current order and under the current filter. Separated from
+     paintAlerts so a later resolution of the OTHER feed can repaint this one
+     without re-reading the payload. */
+  function paintAlertRows() {
+    if (!alertsBody) return;
+    const view = alertsSorter.view(alertRows).filter((e) => passesFilter(e.r, "exp"));
+    alertsBody.textContent = "";
+    if (!view.length && alertRows.length) {
+      /* A FILTER EMPTIED IT, which is a fact about the control the reader is
+         holding and not about the vendor's selection. */
+      emptyRow(alertsBody, ALERT_COLUMNS,
+        "No flagged window matches the filter above. " + count(alertRows.length) +
+        " are published; the filter is hiding all of them.");
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const entry of view) frag.append(alertRowEl(entry.r));
+    alertsBody.append(frag);
+  }
 
   /* A vendor flag has three states and the cell keeps all three: yes, no,
      and "the vendor did not carry the flag on this row" — which is not no. */
@@ -1086,6 +1368,15 @@
     name.scope = "row";
     name.textContent = r.t || DASH;
     if (r.rule) name.title = "Flagged by the vendor's rule \u201c" + r.rule + "\u201d.";
+    /* THE RECIPROCAL MARK. The counter feed below cleared its own volume and
+       open-interest floors on this exact contract, from a chain read for a
+       different reason entirely. */
+    const key = joinKey(r.t, r.cp, r.k, r.exp);
+    if (key && feedKeys && feedKeys.has(key)) {
+      name.append(bothBadge(key,
+        "This exact contract also clears the counter feed's own volume and " +
+        "open-interest floors below — two independent selections on one line."));
+    }
     tr.append(name);
     tr.append(cell(
       r.cp ? (r.cp === "C" ? "C " : "P ") + (isNum(r.k) === null ? "" : count(r.k)) +
@@ -1154,6 +1445,16 @@
     }
 
     alertsBody.textContent = "";
+    alertRows = rows.map((r, i) => ({ r, i }));
+    /* THE JOIN'S HALF OF THE BARGAIN, SET EVEN WHEN THE LIST IS EMPTY. An
+       empty Map means "resolved, and nothing was flagged"; the null it
+       replaces means "not resolved yet". Only the first of those is a
+       statement the counter feed may draw a conclusion from. */
+    alertKeys = new Map();
+    for (const r of rows) {
+      const key = joinKey(r.t, r.cp, r.k, r.exp);
+      if (key) alertKeys.set(key, r);
+    }
     if (!rows.length) {
       emptyRow(alertsBody, ALERT_COLUMNS,
         "The vendor's rules flagged nothing in this read. The read is stamped " +
@@ -1161,8 +1462,11 @@
         "be thin — and absence from the vendor's selection is not evidence of " +
         "a quiet market.");
     } else {
-      for (const r of rows) alertsBody.append(alertRowEl(r));
+      alertsSorter.wire();
+      paintAlertRows();
     }
+    joinResolved();
+    syncFilterNote();
 
     const seen = isNum(alerts.seen);
     const shed = isNum(alerts.shed) ?? 0;
@@ -1207,6 +1511,10 @@
 
     alertsPanel.hidden = false;
   }
+
+  /* Built before either fetch, so the group is on the page while the tables are
+     still loading rather than appearing under the reader's cursor after them. */
+  buildControls();
 
   fetch("/api/flows/flowalerts", {
     credentials: "same-origin",

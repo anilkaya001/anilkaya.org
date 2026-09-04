@@ -5949,6 +5949,21 @@ async function main() {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
       readAt: new Date().toISOString(),
+      /* WHICH DISCLOSED NAMES HAVE A CARD TO OPEN, so the page can link the
+         ones that do and leave the rest as plain text.
+
+         Congress discloses across the whole market; this run builds a card for
+         the fifty names the board went deep on. Linking every ticker would send
+         most readers to a key the pipeline never wrote — a 404 rendered as a
+         broken reader, for a reason no visitor could infer. It is the same flag
+         the board rows carry as `dp`, from the same set, published here as a
+         list because the political payload has no row per board name to hang it
+         on.
+
+         The renderer reads this and the payload-shape suite pins the pair: a
+         renderer read with no publisher write is exactly the mismatch that once
+         let /flows/market/ report eleven measured sectors as none measured. */
+      carded: [...deepSet].sort(),
       window: { from, to: sessionDate || null, days: POLITICAL_WINDOW_DAYS },
       /* HOW THE POPULATION WAS OBTAINED, published rather than logged. A
          ranking is only as wide as what was read, and a reader who cannot see

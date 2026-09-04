@@ -193,9 +193,17 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
 
   /* Fewer than two measured entries is not a thin cross-section, it is no
      cross-section: robustZ refuses to invent a scale from one point and emits
-     the neutral vote for every name. This is also the path winsorize takes
-     when it cannot form a quantile at all (zero finite entries), so both of
-     robustZ's early exits collapse into this one. */
+     the neutral vote for every name. This is also the path winsorize takes when
+     it cannot form a quantile at all (zero finite entries), so both of robustZ's
+     early exits collapse into this one.
+
+     Honest about what this line is: a FAST PATH and a statement of intent, not
+     a correctness gate. A single point has no spread, so the arithmetic below
+     would collapse every estimator, fall through the mean/stdev branch with a
+     variance of zero, and return the same all-zeros array by a longer road.
+     Mutating the bound to `n < 1` was checked and the suite stayed green,
+     because the two really are the same answer. It stays because "one name is
+     not a cross-section" is a claim worth making where a reader can see it. */
   if (n < 2) return new Array(N).fill(0);
 
   const sorted = buf.slice(0, n);

@@ -783,6 +783,28 @@ const near = (a, b, tol, msg) => {
   ok(flatZ[0] < 0 && flatZ[62] > 0,
      "and the body sits BELOW the mean while the live names sit above it — the centre moved");
 
+  /* THE FALLBACK'S SUM IS ORDER-SENSITIVE, and the fused form folds it over the
+     ORIGINAL row order because robustZ does. It would be natural to accumulate
+     over the sorted buffer instead — it is right there, already built — and on
+     ordinary data nobody would ever notice. This fixture notices. 101 entries:
+     ten at -1e16, ten at +1e16, eighty-one at exactly 1, INTERLEAVED. Every
+     decile lands inside the flat body so all three robust estimators collapse
+     and the fallback runs; the extremes are large enough that adding 1 to them
+     is a no-op, so the sum is 72 in the interleaved order and exactly 0 in
+     sorted order. A different mean is a different z for every name.
+
+     Without this case the suite passed a version that summed the sorted copy.
+     It was found by mutation, not by reading. */
+  const orderSensitive = [];
+  for (let i = 0; i < 10; i++) orderSensitive.push(-1e16, 1e16, 1);
+  while (orderSensitive.length < 101) orderSensitive.push(1);
+  agree(orderSensitive, { winsor: 0.02 }, "an order-sensitive mean/stdev fallback");
+  ok(orderSensitive.reduce((a, b) => a + b, 0) !==
+     orderSensitive.slice().sort((a, b) => a - b).reduce((a, b) => a + b, 0),
+     "and the fixture really is order-sensitive: its sum differs between row order and sorted order");
+  ok(new Set(robustZFused(orderSensitive, { winsor: 0.02 }).map((v) => v.toFixed(12))).size === 3,
+     "three distinct z values — the two extremes and the flat body, which is NOT at zero");
+
   /* Zero interquartile span with a LIVE 10-90 span: the third estimator is the
      only one carrying the scale, so this fixture is the only thing in the suite
      that would notice if the fused form dropped it. 15 low, 70 flat, 15 high:
