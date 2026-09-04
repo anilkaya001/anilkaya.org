@@ -6343,6 +6343,18 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    screen away from the field it submits — a target the eye has to hunt
    for after typing. A question here is a sentence, so the field is sized
    for a sentence and the button stays beside it. */
+/* THE KEY HINT, INSIDE THE LABEL AND QUIETER THAN IT. Smaller and dimmer
+   because it is an instruction for the hands and not a reading; still in
+   the flow rather than absolutely positioned, so it cannot collide with a
+   long label at a narrow width. */
+.ak-ask-hint {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  font-weight: 400;
+  margin-top: 0.15rem;
+}
+
 .ak-ask-row {
   display: flex;
   gap: 0.75rem;
@@ -6398,6 +6410,55 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    whom two of our accents are the same colour. The mark sits in a fixed
    column so the two states are told apart by shape and alignment before
    any colour is read. */
+/* ---------- the model budget -------------------------------------------
+
+   THE BAR IS THE SECOND CHANNEL AND NEVER THE ONLY ONE. Its width is drawn
+   from the same two numbers the sentence beside it states, and it carries
+   aria-hidden — so a reader on a screen reader, a greyscale display or a
+   printout loses nothing but the glance. That is the same rule this file
+   states at :880 for the four silence marks and that flows-political.js
+   states for its freshness glyph: hue and length are for speed, never for
+   meaning.
+
+   THE TRACK IS DRAWN EVEN AT ZERO REMAINING, which is why the fill is a
+   child rather than a background gradient on the track. An empty gauge that
+   renders as no gauge is indistinguishable from a gauge that failed to
+   draw, and those are the two states this box most needs to keep apart. */
+.ak-meter { margin: 0 0 1rem; }
+.ak-meter-bar {
+  height: 0.375rem;
+  border-radius: var(--radius-1);
+  background: var(--bg-deep);
+  border: var(--hairline) solid var(--panel-border);
+  overflow: hidden;
+  max-width: 62rem;
+}
+.ak-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--gold-harvest);
+  /* NO TRANSITION. The width is set once per paint from a measurement, and
+     an animated budget would show a reader a sequence of widths that were
+     never true. flows-motion.mjs holds this section to one moving surface
+     and this is not it. */
+}
+.ak-meter-say {
+  margin: 0.4rem 0 0;
+  font-size: var(--fs-note);
+  color: var(--ink-dim);
+  max-width: var(--measure);
+}
+/* THE FIGURE IS PROMOTED, THE CONDITION IS NOT DEMOTED. `--fs-data` and the
+   mono face mark it as a reading rather than prose; the words after it stay
+   at the surrounding size because they are the number's units, not a
+   footnote to it, and shrinking them would be the fold this page refuses. */
+.ak-meter-n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-data);
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .ak-prov { margin: 0.75rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); display: flex; gap: 0.5rem; }
 .ak-prov-mark { flex: 0 0 1em; font-family: var(--font-mono); }
 
@@ -6509,6 +6570,11 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .ak-dock .ak-ask-in { flex: 1 1 100%; }
 .ak-dock .ak-ask-go { flex: 1 1 100%; }
 .ak-dock .ak-panel { padding: 0; border: 0; background: transparent; }
+/* THE RAIL IS NARROWER THAN THE PAGE'S PROSE CAP, so the meter's 62rem
+   ceiling — which exists to stop a bar stretching across a 2560px canvas —
+   would otherwise leave the gauge stopping short of the rail it sits in. */
+.ak-dock .ak-meter-bar { max-width: none; }
+.ak-dock .ak-meter-say { max-width: none; }
 .ak-dock .fc-panel-h { display: none; }
 
 @media (prefers-reduced-motion: no-preference) {

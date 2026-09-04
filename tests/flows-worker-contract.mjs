@@ -506,6 +506,70 @@ try {
         { method: "DELETE", redirect: "manual", headers: auth });
       eq(methodDenied.status, 405, "and only POST is allowed");
 
+      /* THE MODEL BUDGET, ON ITS OWN GET ROUTE. It is not a published key
+         and so it is not under the passthrough convention every other path
+         here follows — it is computed from D1 and named for what it
+         reports, so a reader of worker.js is not sent looking for an
+         `ai-usage` payload the pipeline never publishes. It exists at all
+         because the answer route is a POST that costs a model call to
+         reach, and a budget a reader can only see AFTER spending from it
+         is a receipt rather than a budget. */
+      eq((await get("/api/flows/ai-usage")).status, 401,
+         "the meter is behind the same gate as everything else here: what this site spends " +
+         "is not a fact for an anonymous reader");
+      const usage = await get("/api/flows/ai-usage", { headers: auth });
+      eq(usage.status, 200, "and an authenticated reader is served it on a GET, before any " +
+         "question has been asked — which is the whole point of it having its own route");
+      const spend = (await usage.json()).spend;
+      ok(spend && typeof spend === "object", "carrying the meter as one object rather than " +
+         "as loose fields, so a page cannot read half of it");
+      eq(spend.calls, 0,
+         "with a MEASURED zero: this table is written only by a model call, so a day with no " +
+         "row is a day on which this site made none. That is a reading, and it is the one " +
+         "place on this route where no row is allowed to mean zero — a failed READ returns " +
+         "null instead, so the two never collapse");
+      eq(spend.allowanceNeurons, 10000,
+         "the allowance is stated, so the figure beside it has a denominator");
+      /* A MEASURED ZERO, AND IT IS ONLY MEASURED BECAUSE THE RATE IS
+         CONFIGURED. This worker reads the real wrangler.toml, where
+         FLOWS_ASK_NEURONS sits beside FLOWS_ASK_MODEL — so the arithmetic
+         is available and 0 tokens really do cost 0 credits, leaving the
+         allowance whole. That is a reading rather than a gap, and this
+         asserts the derivable path end to end: the rate reaches the Worker
+         from configuration, and the subtraction runs.
+
+         THE OTHER BRANCH — no rate, so the spend is UNKNOWN and `remaining`
+         must be null rather than 10000 — is the dangerous one, because
+         Number(null) === 0 reaching the subtraction would render a full
+         allowance on a day this route may have emptied it. It cannot be
+         reached from here without a second Worker on a different
+         configuration, so it is asserted in tests/flows-ask-render.mjs
+         against the shape this route sends, where its CONTROL sits beside
+         it: the fresh-morning case below, which must still print 10,000 of
+         10,000. Asserting only the withholding would pass just as well
+         against a renderer that never printed an allowance at all. */
+      eq(spend.neurons, 0,
+         "the spend is a measured zero — no question has been asked, so no tokens were " +
+         "billed, and the rate configured beside the model id is what makes that derivable " +
+         "rather than merely absent");
+      eq(spend.remaining, 10000,
+         "leaving the whole allowance, which is the subtraction actually running rather than " +
+         "a field echoed back: allowance minus a spend of zero is the allowance");
+      eq(spend.assumesSoleSpender, true,
+         "and the condition travels WITH the number rather than beside it, because the " +
+         "allowance is the account's: a remaining balance separated from the fact that it " +
+         "counts only this site's own calls is the confident unmeasured figure again");
+      eq((await fetch(url("/api/flows/ai-usage"),
+        { method: "POST", redirect: "manual", headers: auth })).status, 405,
+         "and it is a read: only the question route takes a POST under /api/flows");
+
+      const answeredSpend = await (await ask({ question: "what is the lean?" }, auth)).json();
+      ok(Object.prototype.hasOwnProperty.call(answeredSpend, "spend"),
+         "every branch of the answer route carries the meter, including this one where no " +
+         "model is configured and none was called — a reader told the allowance is spent is " +
+         "the reader who needs the gauge most, and a gauge that appears only on success is " +
+         "absent exactly when it is being asked about");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();

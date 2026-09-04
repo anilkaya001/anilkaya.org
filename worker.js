@@ -144,6 +144,15 @@ const MARKET_SNAPSHOT_SCHEMA_SQL =
 const FLOWS_SCHEMA_SQL = [
   "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0))",
   "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))",
+  /* WHAT THIS SITE SPENT ON THE MODEL, BY UTC DAY, WHICH IS THE DAY THE
+     ALLOWANCE RESETS ON. Keyed on the date string rather than a rolling
+     window because Cloudflare's own reset is a calendar boundary at 00:00
+     UTC, and a meter whose period differs from the limit's period reports
+     a fraction of the wrong thing. Tokens are stored because tokens are
+     what the model MEASURED; the neuron figure is derived from them at
+     read time, so a change in the published rate corrects the history
+     rather than leaving it stamped at yesterday's arithmetic. */
+  "CREATE TABLE IF NOT EXISTS flows_ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0))",
 ];
 
 const MARKET_STALE_MS = 45 * 60 * 1000;
@@ -1308,6 +1317,151 @@ function askFailure(error) {
   }
 }
 
+/* THE FREE ALLOWANCE, AND THE TWO RATES THAT TURN TOKENS INTO NEURONS.
+   Published by Cloudflare: 10,000 Neurons per day, account-wide, reset at
+   00:00 UTC. The rates are the model's own price card and they live beside
+   the model id in wrangler.toml, because a rate belonging to a DIFFERENT
+   model than the one configured is a meter that reads plausibly and is
+   wrong — the same failure as a size in a comment that stopped being true.
+   Absent or unparseable, this route reports tokens and calls and withholds
+   the neuron figure rather than deriving one from a guess. */
+const AI_DAILY_NEURONS = 10000;
+
+function neuronRates(env) {
+  const raw = env && typeof env.FLOWS_ASK_NEURONS === "string" ? env.FLOWS_ASK_NEURONS : "";
+  const parts = raw.split(",").map((x) => Number(x.trim()));
+  if (parts.length !== 2 || !parts.every((x) => Number.isFinite(x) && x >= 0)) return null;
+  return { inPerM: parts[0], outPerM: parts[1] };
+}
+
+/**
+ * What this site has spent on the model today, and what that leaves.
+ *
+ * IT SUBTRACTS, AND THE SUBTRAHEND IS THE PART THAT NEEDS STATING. The
+ * 10,000-neuron allowance belongs to the Cloudflare ACCOUNT, not to this
+ * route: another Worker, a dashboard experiment, a second site would draw
+ * from the same pool and be invisible here. So `remaining` is a real
+ * subtraction from a real allowance, but it is only the truth about the
+ * account under one assumption — that nothing else on it spent today.
+ *
+ * I first built this to refuse the subtraction outright, on the grounds
+ * that a figure it cannot fully see is a figure it should not print. That
+ * was the wrong call. The assumption is not hidden and it is not
+ * unknowable: it belongs to whoever owns the account, wrangler.toml already
+ * records that nothing else spends on this one, and a reader who is told
+ * both the number AND what it assumes can check it. Withholding it instead
+ * gave a reader a spend with no denominator, which is the failure this
+ * codebase names most often.
+ *
+ * `assumesSoleSpender` travels WITH the number so the two cannot be
+ * separated on the way to a page. A remaining balance rendered without it
+ * is the confident unmeasured figure; rendered with it, it is a measurement
+ * and its condition.
+ *
+ * CLOUDFLARE IS STILL THE AUTHORITY, and the disagreement is informative.
+ * Error 3036 means the day's allocation is gone. If it arrives while this
+ * gauge still shows headroom, the assumption above was false — something
+ * else on the account spent — and that is worth saying to a reader plainly
+ * rather than letting two of this site's own numbers quietly contradict
+ * each other. This is a gauge, not a gate: nothing here refuses a call.
+ */
+/* THE UTC DAY, WHICH IS THE ONLY DAY THIS MEASUREMENT HAS. A clock is read
+   here on purpose, and it is not the thing `assess()` refuses: the warnings
+   must not consult one because an age measured against the wall clock makes
+   the same store produce different warnings in the pipeline, the Worker and
+   a test. Here the calendar day IS the quantity — Cloudflare resets the
+   allowance at 00:00 UTC — so a meter that did not know today's date would
+   be measuring an interval nobody is billed on. */
+function aiDay() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/* THE SHAPE, BUILT FROM COUNTS THAT ARE ALREADY MEASURED. Kept separate
+   from the read so the post-write path can hand it the row the write just
+   returned rather than reading the same day back a second time. */
+function spendShape(env, day, calls, tokensIn, tokensOut) {
+  const rates = neuronRates(env);
+  /* ROUNDED UP, because a gauge that rounds a spend DOWN reports less spent
+     than was spent, and the direction a meter errs in is a choice. Rounding
+     up also makes `remaining` err downward, which is the safe side of a
+     budget. */
+  const neurons = rates === null ? null
+    : Math.ceil((tokensIn * rates.inPerM + tokensOut * rates.outPerM) / 1e6);
+  return {
+    day, calls, tokensIn, tokensOut,
+    allowanceNeurons: AI_DAILY_NEURONS,
+    neurons,
+    /* NULL WHEN THE SPEND IS NULL, never 10000. No rate configured means the
+       spend is unknown, and an unknown spend subtracted from the allowance
+       would render as a full tank on a day this route may have emptied it —
+       Number(null) === 0 arriving at a subtraction instead of at a
+       renderer. Floored at 0 rather than going negative: a spend past the
+       allowance means Cloudflare stopped serving, not that a reader is owed
+       credits. */
+    remaining: neurons === null ? null : Math.max(0, AI_DAILY_NEURONS - neurons),
+    assumesSoleSpender: true,
+  };
+}
+
+async function askSpend(env) {
+  if (!env.DB) return null;
+  await ensureFlowsTables(env);
+  const day = aiDay();
+  const row = await env.DB.prepare(
+    "SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?"
+  ).bind(day).first().catch(() => null);
+  /* NO ROW IS A MEASURED ZERO HERE, and that is the one place on this route
+     where it is. Every other absence in this codebase is withheld rather
+     than zeroed, but this table is written ONLY by a model call: a day with
+     no row is a day on which this site made none, which is a reading and
+     not a gap. A failed READ is different and returns null above, so the
+     two never collapse. */
+  const calls = row ? Number(row.calls) || 0 : 0;
+  const tokensIn = row ? Number(row.tokens_in) || 0 : 0;
+  const tokensOut = row ? Number(row.tokens_out) || 0 : 0;
+  return spendShape(env, day, calls, tokensIn, tokensOut);
+}
+
+/**
+ * Record one model call, and hand back the meter INCLUDING it.
+ *
+ * THE WRITE IS NOT ALLOWED TO FAIL THE ANSWER. A reader who asked a question
+ * and got one has been served; losing the meter's increment costs an
+ * accurate gauge and nothing else, and throwing here would trade the answer
+ * for the accounting. On any failure this returns null and the caller keeps
+ * the pre-call reading it already has.
+ *
+ * IT RETURNS THE NEW TOTALS RATHER THAN READING THEM BACK. The caller reads
+ * the meter BEFORE the model call so that every failure branch carries one —
+ * a reader told the allowance is spent needs the gauge most. But that
+ * pre-call reading is stale by exactly one call on the path where the model
+ * ANSWERED, and a budget that does not move when you spend from it is a
+ * budget nobody believes. RETURNING gets the post-write row out of the same
+ * statement, so the fix costs no second query.
+ */
+async function askRecordSpend(env, usage) {
+  if (!env.DB || !usage) return null;
+  const day = aiDay();
+  /* THE COUNTS ARE FLOORED AT 0 BEFORE THEY ARE STORED. Number(undefined) is
+     NaN and Number(null) is 0; a vendor that changes the shape of `usage`
+     would otherwise write NaN into a column whose CHECK is >= 0, failing the
+     whole statement and losing the call count along with the tokens. A call
+     that reported no usable token counts is still a call that happened. */
+  const inTok = Math.max(0, Math.round(Number(usage.prompt_tokens) || 0));
+  const outTok = Math.max(0, Math.round(Number(usage.completion_tokens) || 0));
+  try {
+    const row = await env.DB.prepare(
+      "INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 1, ?, ?) " +
+      "ON CONFLICT(day) DO UPDATE SET calls = calls + 1, " +
+      "tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out " +
+      "RETURNING calls, tokens_in, tokens_out"
+    ).bind(day, inTok, outTok).first();
+    if (!row) return null;
+    return spendShape(env, day,
+      Number(row.calls) || 0, Number(row.tokens_in) || 0, Number(row.tokens_out) || 0);
+  } catch { return null; /* the answer stands; only the gauge is poorer */ }
+}
+
 /**
  * What the caller asked, or a 400 saying which way they got it wrong.
  *
@@ -1338,10 +1492,15 @@ async function askAnswer(question, env, index, updatedAt) {
      without one. A fallback assembled only inside a catch is a
      fallback nobody runs until the morning it is needed. */
   const plain = FLOWS_ASK.renderFactsPlain(picked, question);
+  /* READ BEFORE THE CALL, so every branch below carries it — including the
+     ones that never reach a model. A reader told the allowance is spent
+     needs the gauge most, and a gauge that only appears on success is
+     absent exactly when it is being asked about. */
+  const spend = await askSpend(env);
   const base = {
     answer: plain, llm: false, guard: null, why, capped,
     facts: picked, silences: index.silences || null,
-    briefUpdatedAt: updatedAt || null, model: null, note: null,
+    briefUpdatedAt: updatedAt || null, model: null, note: null, spend,
   };
 
   const model = askModel(env);
@@ -1353,6 +1512,10 @@ async function askAnswer(question, env, index, updatedAt) {
 
   const { system, user } = FLOWS_ASK.promptFor(picked, question);
   let generated = null;
+  /* The meter as it stands AFTER the model call, or null if no call was
+     recorded. Declared out here because it is set inside the try and read
+     by every branch below it. */
+  let afterCall = null;
   try {
     const out = await env.AI.run(model, {
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
@@ -1365,13 +1528,41 @@ async function askAnswer(question, env, index, updatedAt) {
       temperature: 0.2,
     });
     generated = out && typeof out.response === "string" ? out.response.trim() : null;
+    /* MEASURED, NOT ESTIMATED. The response carries its own token counts,
+       so the gauge counts what the model actually billed rather than what
+       a length heuristic guessed it would.
+
+       THE POST-CALL METER REPLACES THE PRE-CALL ONE FROM HERE DOWN, and
+       falls back to it rather than to nothing: a failed write leaves the
+       reader a meter that is one call stale, which is worth more than no
+       meter at all and is why this is `||` and not an assignment. */
+    afterCall = await askRecordSpend(env, out && out.usage);
   } catch (error) {
     const failed = askFailure(error);
-    return json({ ...base, note: failed.say, model, llmFailure: failed.why });
+    /* WHEN CLOUDFLARE AND THE GAUGE DISAGREE, THE DISAGREEMENT IS THE
+       READING. Error 3036 is the account's allocation being gone. If it
+       arrives while `remaining` still shows headroom, then the one
+       assumption the gauge rests on — that nothing else on this account
+       spent today — was false, and the two numbers on this page contradict
+       each other. Saying which one is authoritative costs a sentence and
+       stops a reader trusting the wrong one; letting it pass silently would
+       leave the gauge reading "8,900 left" beside "the allowance is spent",
+       and a reader would have to guess. `> 0` rather than truthiness: a
+       measured 0 remaining is the gauge AGREEING, which is not this case. */
+    const disagrees = failed.why === "allowance"
+      && spend !== null && typeof spend.remaining === "number" && spend.remaining > 0;
+    const say = disagrees
+      ? failed.say + " The meter on this page still showed " + spend.remaining +
+        " of " + spend.allowanceNeurons + " neurons unspent, which means something " +
+        "other than this site drew on the same account today. Cloudflare is the " +
+        "authority and the meter is not: it can only ever see this site's own calls."
+      : failed.say;
+    return json({ ...base, note: say, model, llmFailure: failed.why,
+      spendDisagrees: disagrees });
   }
 
   if (!generated) {
-    return json({ ...base, model,
+    return json({ ...base, spend: afterCall || base.spend, model,
       note: "The model answered with no text, so the reading below is the pipeline's " +
         "own wording. Every figure in it was measured." });
   }
@@ -1381,7 +1572,7 @@ async function askAnswer(question, env, index, updatedAt) {
     /* THE REJECTED WORDING IS NOT RETURNED. A page that showed it
        beside the real answer would be publishing the invented figure
        with a caption, and a caption is not what a reader remembers. */
-    return json({ ...base, model, guard,
+    return json({ ...base, spend: afterCall || base.spend, model, guard,
       /* THE READER'S SENTENCE IS NOT guard.reason. That string ends by
          naming the `rejected` field, which is the right thing to tell a
          developer reading the JSON and the wrong thing to print on a
@@ -1398,7 +1589,8 @@ async function askAnswer(question, env, index, updatedAt) {
             "which means it was computed rather than quoted.") +
         " What follows is the pipeline's own wording, and every figure in it was measured." });
   }
-  return json({ ...base, answer: generated, llm: true, model, guard });
+  return json({ ...base, spend: afterCall || base.spend,
+    answer: generated, llm: true, model, guard });
 }
 
 /* =============================================================
@@ -3398,6 +3590,25 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
+    if (path === "/api/flows/ai-usage") {
+      /* THE METER, ON ITS OWN ROUTE AND READABLE BEFORE A QUESTION IS ASKED.
+         A budget a reader can only see AFTER spending from it is not a
+         budget, it is a receipt — so the assistant needs this on load, and
+         the answer route cannot serve it because it is a POST that costs a
+         model call to reach.
+
+         IT IS NOT A PUBLISHED KEY AND SO IT IS NOT UNDER THE PASSTHROUGH
+         CONVENTION. Every other path here is /api/flows/<key> streaming
+         <key> verbatim; this one is computed from D1 and named for what it
+         reports rather than for a key that does not exist, so a reader of
+         this file is not sent looking for a `ai-usage` payload the pipeline
+         never publishes.
+
+         Cheap enough to sit on page load: one indexed read of a
+         single-row-per-day table, no parse, no vendor call, no model call. */
+      return json({ spend: await askSpend(env) });
+    }
+
     if (path === "/api/flows/brief") {
       /* THE BRIEFING, STREAMED LIKE EVERY OTHER KEY. It is one blob the
          pipeline already computed, so it goes down the same path they all
@@ -3436,7 +3647,7 @@ async function route(request, env, url, ctx) {
 
       if (stored === null) {
         return json({ status: "pending", question: asked, answer: null, llm: false,
-          facts: [], guard: null, model: null,
+          facts: [], guard: null, model: null, spend: await askSpend(env),
           note: "The briefing has not been published for this session yet, so there is " +
             "nothing measured to answer from. Nothing is claimed about the market by that." });
       }

@@ -215,7 +215,26 @@ const CEILING_KIB = {
      approaches its ceiling — move work into shared/flows-ask.js, which the
      Worker bundles and the browser never pays for — not shorten what the
      page says. That is the shed to make; it is not this change. */
-  askPage: 84,
+  /* 84 -> 97 on 2026-09-04, and this is the SECOND consecutive raise, which
+     is the pattern the entry above said to watch for. What the route gained
+     is the model budget — a gauge drawn above the field rather than under
+     the answer, because a budget you can only see after spending from it is
+     a receipt — and Enter-to-send with its input-method guard.
+
+     I TRIMMED MY OWN COMMENTS RATHER THAN THE PAGE'S PROSE, and the
+     distinction is the one this file keeps making. The change first
+     measured 95k: +12k, of which +6.8k was comment and +5.2k code. Comments
+     I had just written are mine to edit and 2.2k of restatement came out;
+     the page's sentences are the deliverable and none of them did.
+
+     THE SHED IS NOW OWED. The entry above named it — move work into
+     shared/flows-ask.js, which the Worker bundles and the browser never
+     pays for — and deferred it once. Deferring it twice is how a ceiling
+     becomes a ratchet, so it is filed as its own task rather than as a
+     third comment promising it. 97 against a 93k measurement leaves 4k,
+     which is room for a fix and not room for a feature: the next thing
+     that wants space here should find the shed already done. */
+  askPage: 97,
   strategyPage: 120,
   trackPage: 118,
   /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
