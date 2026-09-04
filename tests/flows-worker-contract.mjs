@@ -418,6 +418,91 @@ try {
         "believe a per-ticker news route exists here"); checks++;
       eq((await get("/api/flows/news")).status, 401, "the tape refuses an anonymous reader");
 
+      /* THE QUESTION BOX. It is the one route under /api/flows that PARSES
+         what it serves, so it is also the one whose input had to be made
+         small: the pipeline publishes a fact index of about sixteen
+         kilobytes and this reads that, never the seventeen surfaces it was
+         built from.
+
+         THE SUITE RUNS WITH NO MODEL, ON PURPOSE. Local Wrangler inference
+         bills the same account-wide free allowance as production, so a
+         suite that reached one would spend a shared budget on every CI run
+         and would make its own result depend on a quota. Empty is a
+         supported configuration, so what is exercised here is a branch a
+         reader can really land in and not a stub. */
+      const askGet = await get("/api/flows/ask", { headers: { Cookie: "flows_session=" + token } });
+      eq(askGet.status, 200, "GET serves the briefing on its own, which is what the page draws " +
+         "before anyone types");
+      const brief = await askGet.json();
+      ok("today" in brief && "facts" in brief,
+         "carrying both shapes from one key — the three sections the page draws and the flat " +
+         "index the question box selects from, so the two can never answer out of different " +
+         "sessions");
+      eq((await get("/api/flows/ask")).status, 401, "and it refuses an anonymous reader");
+
+      const ask = (body, headers) => fetch(url("/api/flows/ask"), {
+        method: "POST", redirect: "manual",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
+      eq((await ask({ question: "what happened today" })).status, 401,
+         "an anonymous question is refused before any work is done");
+
+      const auth = { Cookie: "flows_session=" + token };
+      eq((await ask("{not json", auth)).status, 400, "a body that is not JSON is a 400");
+      eq((await ask({ question: "anything" }, auth)).status, 200,
+         "and before any briefing is published a question is answered with `pending` — a " +
+         "statement about this site, not about the market");
+      const beforePublish = await (await ask({ question: "anything" }, auth)).json();
+      eq(beforePublish.status, "pending",
+         "which is named rather than left to be inferred from a null answer");
+
+      /* PUBLISHED THROUGH THE REAL DOOR. `brief` has to be in the ingest
+         allowlist or this 400s — which is exactly how the key was found
+         missing from it, and the pipeline's publish is non-fatal by design,
+         so a live run would have swallowed the failure into one warning
+         line and served a briefing that never arrived. */
+      const briefIngest = await fetch(url("/api/flows/ingest?key=brief"), {
+        method: "POST", redirect: "manual",
+        headers: { Authorization: "Bearer " + INGEST_TOKEN, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generatedAt: "2026-09-04T08:00:00.000Z", sessionDate: "2026-09-03",
+          today: { facts: [], silences: [] },
+          yesterday: { facts: [], silences: [] },
+          next: { facts: [], silences: [], isForecast: false },
+          facts: [{ id: "t/tilt", topic: ["today", "lean"], source: "brief",
+                    at: "2026-09-04T08:00:00.000Z",
+                    say: "44 names lean bullish and 53 lean bearish out of 100 scored.",
+                    n: { bullish: 44, bearish: 53, scored: 100 } }],
+          silences: { pending: [], unreadable: [], quiet: [] },
+        }),
+      });
+      eq(briefIngest.status, 200, "the briefing key is accepted at the ingest door");
+      eq((await ask({ question: "   " }, auth)).status, 400,
+         "and so is a question of nothing but spaces — an empty prompt is a mistake to name, " +
+         "not a question to answer badly");
+
+      const answered = await ask({ question: "what is the session leaning?" }, auth);
+      eq(answered.status, 200, "a real question is answered");
+      const ans = await answered.json();
+      eq(ans.llm, false,
+         "with `llm` FALSE, because no model is configured here — a page told nothing would " +
+         "present the deterministic wording as the model's");
+      ok(typeof ans.note === "string" && /no model is configured/i.test(ans.note),
+         "and the reason is stated in words rather than left for the reader to infer from a " +
+         "missing field");
+      ok(typeof ans.answer === "string" && ans.answer.length > 0,
+         "an answer is served anyway: the figures were never the model's, so a reader who " +
+         "lands here has lost the phrasing and nothing else");
+      eq(ans.model, null, "no model is named, because none was asked");
+      ok(Array.isArray(ans.facts), "the facts it answered from travel with the answer");
+      eq((await ask({ question: "x" }, auth)).status, 200,
+         "a question that matches nothing still answers, rather than returning empty while " +
+         "the index holds readings");
+      const methodDenied = await fetch(url("/api/flows/ask"),
+        { method: "DELETE", redirect: "manual", headers: auth });
+      eq(methodDenied.status, 405, "and only GET and POST are allowed");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();

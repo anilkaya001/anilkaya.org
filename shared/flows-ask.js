@@ -75,8 +75,27 @@ import { buildBrief, briefStoreFrom, silenceOf, num } from "./flows-brief.js";
    {status:"pending"}, and the pipeline's own briefing call maps
    absent to the same shape, so this reads identically to both. */
 function served(store, key) {
-  const v = store && typeof store === "object" ? store[key] : undefined;
-  return v === null || v === undefined ? { status: "pending" } : v;
+  if (!store || typeof store !== "object" || !Object.hasOwn(store, key)) {
+    return { status: "pending" };
+  }
+  /* AND A KEY HELD AS undefined WAS NEVER WRITTEN EITHER. Object.hasOwn
+     answers yes for one, but a store assembled by spreading another or
+     by reading fields off a parse writes every key it did not find that
+     way, and there is nothing in `{market: undefined}` that a page could
+     have failed to read. Sending that down the null branch below told a
+     reader a fault happened here, on a surface nothing had yet tried to
+     publish, and sent them looking for a breakage that does not exist. */
+  if (store[key] === undefined) return { status: "pending" };
+  /* NULL IS NOT PENDING, AND COLLAPSING THEM WOULD MERGE TWO OF THE
+     THREE SILENCES AT THE ONE PLACE THEY ENTER THIS MODULE. Absent
+     means the key was never written — nothing was measured, nothing is
+     claimed. Null is what readFlowsPayload returns when the read ITSELF
+     failed, which is a fault here; calling that "not published yet"
+     tells a reader a job has not run when the truth is that this page
+     could not read what the job wrote. Harmless while the only caller
+     is the pipeline, whose store never holds null — and a live trap the
+     first time anything else builds an index. */
+  return store[key] === null ? null : store[key];
 }
 
 const answered = (p) => (p && typeof p === "object" && p.status !== "pending" ? p : null);
@@ -627,19 +646,21 @@ export function buildFactIndex(store) {
 
   /* ---- the three-session briefing ---- */
   const briefStore = briefStoreFrom(s);
-  /* A SLOT HELD AS null IS PENDING TOO, and this loop is what keeps
-     one index from answering in two voices. briefStoreFrom fills in a
-     key the store never carried; a key the store DOES carry holding
-     null is the same fact from where a reader stands — nothing
-     arrived — and every other surface below already answers that with
-     pending. Without this, one half of one index would call an absent
-     market "not published for this session yet" while the other
-     called an absent board a fault on the page, and a reader would
+  /* A SLOT HELD AS undefined IS PENDING; A SLOT HELD AS null IS NOT,
+     and this loop is what keeps one index from answering in two voices.
+     briefStoreFrom fills in a key the store never carried, but it reads
+     Object.hasOwn, so a key written as undefined arrives here as
+     undefined and buildBrief would call it unreadable — a fault on this
+     page for a board nothing had tried to publish. Null is the other
+     fact and it is not this one: it is what readFlowsPayload returns
+     when the read ITSELF failed, and served() answers that with
+     unreadable for every surface below. Coercing it to pending here
+     would have one index tell a reader a job has not run while, from
+     the same store, it told them a read broke — and a reader would
      have to know which half they were reading to know which sentence
      to believe. */
   for (const slot of Object.keys(briefStore)) {
-    const held = briefStore[slot];
-    if (held === null || held === undefined) briefStore[slot] = { status: "pending" };
+    if (briefStore[slot] === undefined) briefStore[slot] = { status: "pending" };
   }
   const brief = buildBrief(briefStore);
   const briefAt = atOf(briefStore.long) || atOf(briefStore.short) || atOf(briefStore.events);
@@ -648,9 +669,39 @@ export function buildFactIndex(store) {
      of the key, which is the right test when a payload arrived and
      the wrong one when none did — and the index is the only place
      that still knows the difference, because it built the store. */
-  const pendingSlot = (slot) => briefStore[slot].status === "pending";
-  const bothBoardsPending = pendingSlot("long") && pendingSlot("short");
-  const nextInputsPending = bothBoardsPending && pendingSlot("watch") && pendingSlot("events");
+  /* A NULL SLOT HAS NO STATUS TO READ, and reading one would throw
+     where no reader could ever see it: the pipeline builds this index
+     inside a try/catch that only warns, so a TypeError here would drop
+     the whole brief key and the page would report a briefing that was
+     never published. A failed read is not pending, which is the answer
+     this asks for in any case. */
+  const pendingSlot = (slot) => {
+    const held = briefStore[slot];
+    return held !== null && typeof held === "object" && held.status === "pending";
+  };
+  /* AND WHICH OF THEM WERE MEASURED AT ALL, which is the wider
+     question and the one an emptiness has to answer. A slot that is
+     absent, that failed to read, or that carries the pending marker
+     measured nothing, and a section assembled from nothing may not
+     call its own silence a reading. */
+  const unmeasuredSlot = (slot) => {
+    const held = briefStore[slot];
+    return held === null || typeof held !== "object" || held.status === "pending";
+  };
+  /* EVERY INPUT THE SECTION READS, NOT ONLY THE ONES IT SHARES WITH
+     ANOTHER. The next-session section draws on both boards, the watch
+     board and the calendar, and its emptiness is a measurement only
+     when ALL FOUR were measured — so the test below is "any of them
+     was not", never "all of them were not". Requiring all four to be
+     missing was the wrong quantifier and it let the strongest claim
+     through on the thinnest evidence: a store holding a measured-empty
+     calendar and nothing else published "no name sits on a threshold
+     this session" as a measured emptiness, on a morning when the three
+     surfaces a threshold is read from had not been published at all.
+     The boards below are counted for the same reason, one at a time. */
+  const NEXT_SLOTS = ["long", "short", "watch", "events"];
+  const boardsPending = ["long", "short"].filter(pendingSlot);
+  const nextUnmeasured = NEXT_SLOTS.filter(unmeasuredSlot);
 
   const SECTIONS = [
     ["today", brief.today, ["today", "session", "now"]],
@@ -680,17 +731,40 @@ export function buildFactIndex(store) {
          Every other silence in the briefing is decided by silenceOf
          against the key itself, sees the pending marker directly, and
          passes through untouched. */
-      if (name === "yesterday" && q.kind === "unreadable" && bothBoardsPending) {
+      if (name === "yesterday" && q.kind === "unreadable" && boardsPending.length) {
         record("pending", q.what,
-          "Neither board has been published for this session yet, so nothing has been " +
-          "measured and nothing is claimed about what changed.", "brief", null);
+          boardsPending.length === 2
+            ? "Neither board has been published for this session yet, so nothing has " +
+              "been measured and nothing is claimed about what changed."
+            /* ONE BOARD SHORT IS STILL NOT A FAULT ON THIS PAGE. The
+               briefing reaches "neither board could be read" the moment
+               neither side yields rows, and one side never published is
+               enough for that — so a half-finished morning read as a
+               breakage. A board that did arrive and could not be read
+               keeps its own unreadable sentence beside this one; this
+               one says only why the comparison is absent. */
+            : "One of the two boards has not been published for this session yet, so " +
+              "there is nothing to measure this session against the previous one with, " +
+              "and nothing is claimed about what changed.",
+          "brief", null);
         continue;
       }
-      if (name === "next" && q.kind === "quiet" && nextInputsPending) {
-        record("pending", q.what,
-          "None of the surfaces the next session is read from has been published yet, " +
-          "so nothing is stated about it. Nothing has been measured, so nothing is " +
-          "claimed — least of all that the calendar is empty.", "brief", null);
+      if (name === "next" && q.kind === "quiet" && nextUnmeasured.length) {
+        /* WHICH SILENCE THE UNMEASURED INPUTS ADD UP TO, rather than
+           one word for both of them. Inputs still unpublished are a job
+           that has not run; an input that arrived and could not be read
+           is a fault here, and a reader told to wait for a run waits
+           while the fault stays where it is. */
+        const allPending = nextUnmeasured.every(pendingSlot);
+        record(allPending ? "pending" : "unreadable", q.what,
+          allPending
+            ? "The surfaces the next session is read from have not all been published " +
+              "for this session yet, so nothing is stated about it. Nothing has been " +
+              "measured, so nothing is claimed — least of all that the calendar is empty."
+            : "At least one of the surfaces the next session is read from could not be " +
+              "read, so nothing is stated about it. That is a fault on this page rather " +
+              "than an empty calendar.",
+          "brief", null);
         continue;
       }
       record(q.kind, q.what, q.say, "brief", null);
@@ -708,7 +782,14 @@ export function buildFactIndex(store) {
        on nearly every key — sector:premium keeps eleven baskets under
        `sectors`, pulse keeps seven feeds under their own names — so
        that judgement is made below, from what the build produced. */
-    if (state && (state.kind === "pending" || typeof p !== "object")) {
+    /* `p === null` IS TESTED SEPARATELY BECAUSE typeof null IS "object".
+       This condition means "there is nothing here worth trying to read",
+       and a null read — the shape readFlowsPayload returns when the read
+       itself failed — passed straight through it into the builders
+       below, which then found no fields and reported the surface as
+       having nothing to say. A failed read would have rendered as a
+       quiet market. */
+    if (state && (state.kind === "pending" || p === null || typeof p !== "object")) {
       record(state.kind, state.what, state.say, surface.key, null);
       continue;
     }
@@ -860,16 +941,25 @@ export function selectFacts(index, question, options) {
   /* THE POPULATION IS KNOWN AND IS SAID, because a list that
      truncates without saying so reads as a population — and here the
      cap is ours, so the total is exactly reportable rather than a
-     lower bound. */
-  const of = picked.length + " of " + facts.length + " facts";
+     lower bound.
+
+     AND IT IS THE POPULATION THE CAP WAS APPLIED TO. Naming the wrong
+     one is the same defect a step quieter: the cap cuts the facts that
+     MATCHED, so "3 of 40 facts, and the list was cut at the cap" told a
+     reader the cap had dropped thirty-seven when it had dropped six and
+     the other thirty-one had simply not matched the question. Both
+     totals are ours and both are exactly countable, so each sentence
+     states the one it is about. */
   const why = matched.length
-    ? "Picked " + of + ": " + (tickerHits
+    ? "Picked " + picked.length + " of the " + matched.length +
+      " facts that matched: " + (tickerHits
         ? tickerHits + " matched a ticker named in the question and the rest matched " +
           "topic words"
         : "matched on topic words, no ticker in the question matched one") +
       (capped ? ", and the list was cut at the cap." : ".")
     : "Nothing in the question matched a ticker or a topic word in the index, so these " +
-      "are the session's headline readings in the order the briefing states them: " + of +
+      "are the session's headline readings in the order the briefing states them: " +
+      picked.length + " of " + facts.length + " facts" +
       (capped ? ", cut at the cap." : ".");
 
   return { picked, capped, why };
@@ -887,6 +977,18 @@ export function selectFacts(index, question, options) {
    than buried in the scan, and ZERO IS NOT IN IT: zero is the one
    integer this product refuses to let anything but a measurement
    produce. */
+
+/* AND A ZERO SPELLED OUT IS STILL A ZERO. The scan reads numerals, so
+   "0 names cleared" was refused and "zero names cleared" was not —
+   and the word is how a model actually writes a count, which left the
+   one integer this file refuses reachable by spelling it. It is held
+   to the same test as every numeral: it has to be in the text the
+   model was handed, as the digit or as the word. The word matters
+   because a fact reading "the median IV rank is 0.31 on a zero-to-one
+   scale" hands the model the word and no bare 0, and refusing it
+   there would be the guard firing on a faithful restatement. */
+const ZERO_WORD = /\bzero\b/i;
+
 function whitelisted(token, allowSmall) {
   if (/^\d{4}$/.test(token)) {
     const y = Number(token);
@@ -921,7 +1023,7 @@ export function guardAnswer(answer, picked, options) {
   const facts = Array.isArray(picked) ? picked : [];
 
   if (text.trim() === "") {
-    return { ok: false, rejected: [], numerals: [],
+    return { ok: false, rejected: [], numerals: [], invented: false, forecast: false,
       reason: "The model returned no text, so there is nothing to check and nothing " +
         "to show." };
   }
@@ -936,12 +1038,19 @@ export function guardAnswer(answer, picked, options) {
     if (whitelisted(token, allowSmall)) continue;
     rejected.push(token);
   }
+  if (ZERO_WORD.test(text) &&
+      !allowed.has("0") &&
+      !facts.some((f) => ZERO_WORD.test(f && typeof f.say === "string" ? f.say : ""))) {
+    rejected.push("zero");
+  }
   const invented = rejected.length;
 
   const verbs = text.match(new RegExp(FORECAST.source, "gi")) || [];
   for (const v of verbs) rejected.push(v);
 
-  if (!rejected.length) return { ok: true, rejected: [], reason: null, numerals };
+  if (!rejected.length) {
+    return { ok: true, rejected: [], reason: null, numerals, invented: false, forecast: false };
+  }
 
   /* THE REASON CARRIES NO FIGURES OF ITS OWN. A caller printing it
      under a deterministic answer would otherwise put an unquoted
@@ -957,7 +1066,15 @@ export function guardAnswer(answer, picked, options) {
     parts.push("The answer claimed the future, and this product states what was " +
       "measured and what is already on the calendar");
   }
+  /* WHICH FAILURE IT WAS, REPORTED SEPARATELY. A caller handed only
+     `rejected` cannot tell an invented figure from a claim about the
+     future, and those are not the same fault: one says the model did
+     arithmetic nobody asked for, the other says it predicted a market.
+     Flattening them would throw away the only interesting thing this
+     function learned, and the page that has to explain itself to a
+     reader is exactly where that distinction is worth most. */
   return { ok: false, rejected, numerals,
+    invented: invented > 0, forecast: verbs.length > 0,
     reason: parts.join(". ") + ". The refused tokens are listed in `rejected`, and the " +
       "deterministic reading is served in its place." };
 }
@@ -985,9 +1102,21 @@ export function guardAnswer(answer, picked, options) {
 export function renderFactsPlain(picked, question) {
   const facts = Array.isArray(picked) ? picked : [];
   if (!facts.length) {
-    return "Nothing has been published that speaks to this question, so there is no " +
-      "reading to give. That is a statement about what has been measured, not about " +
-      "the market.";
+    /* WHICH SILENCE THIS IS, THIS FUNCTION CANNOT KNOW, so it names
+       all three and asserts none. It is handed facts and never the
+       store, and an empty list looks the same from here on a morning
+       before the run, on a morning when every payload arrived and none
+       of it could be read, and on a session that really was measured
+       and empty. The old wording chose one of the three — "nothing has
+       been published" — and on the second of those mornings it told a
+       reader the pipeline had not run when the truth was that it had
+       run and this page could not read a word of it. */
+    return "No reading this index holds speaks to this question, so there is nothing to " +
+      "quote. Whether nothing has been published for this session, whether what was " +
+      "published could not be read, or whether what was measured was empty are three " +
+      "different facts, and this sentence is not where they are told apart — the " +
+      "silences beside it name each surface one at a time. None of the three is a " +
+      "statement about the market.";
   }
 
   const words = questionWords(question);

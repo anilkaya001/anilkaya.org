@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "105";
+export const ASSET_VERSION = "106";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -88,6 +88,14 @@ const rail = (active) => {
   };
   return `
 <nav class="flows-rail" aria-label="Flows">
+  <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
+       question a reader already knew to ask; this one answers the question
+       they arrive with. A rail that buried it under twelve destinations
+       would be a table of contents for a book nobody opened. -->
+  <p class="rail-group" id="railBrief">Briefing</p>
+  <div class="rail-items" role="group" aria-labelledby="railBrief">
+    ${item("/flows/ask/", "Ask the data", "ask")}
+  </div>
   <p class="rail-group" id="railSession">Session</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
     ${item("/flows/", "Overview", "overview")}
@@ -1634,6 +1642,51 @@ ${shell("Political Disclosures", "Options-flow intelligence", "political", usern
  * reads as an oversight. One that says which readings it will not invent, and
  * why, is making an argument — and that argument is this product.
  */
+/**
+ * /flows/ask — the briefing, and a question box over it.
+ *
+ * THE FRONT DOOR, AND THAT IS WHY THE RAIL LISTS IT FIRST. Every other
+ * route answers a question a reader already knew to ask. This one answers
+ * the question they arrive with — what happened, what is happening, what
+ * is already scheduled — before they type anything, and only then offers
+ * the box.
+ *
+ * THE SHELL IS ONE ELEMENT ON PURPOSE. assets/js/flows-ask.js:32 states
+ * the contract: `#askApp` is the container, `#askStatus` and `#askFoot`
+ * are filled if present and created if not. Rendering a frame of headings
+ * here that the script then re-fills would put the same structure in two
+ * files, and the pair drift apart the first time one is edited — which is
+ * the argument every other page in this file already makes for its own
+ * skeleton. The lede is prose the script never touches, so it stays.
+ *
+ * NO SKELETON ROWS. A page that painted em dashes while the fetch is in
+ * flight would be showing a set of readings that came back blank, which
+ * is a different and false claim from "this has not loaded yet".
+ */
+export function askPage({ username = "" } = {}) {
+  const lede = "What the session says, what changed to get here, and what is " +
+    "already on the calendar before the next one — assembled from the same " +
+    "published readings every other page here draws. Ask a question and the " +
+    "wording may be a model's; the figures never are. Anything it writes that " +
+    "is not already in the measurements it was handed is refused, and the " +
+    "measured reading is served instead.";
+  return `${head("Flows — Ask", lede)}
+${shell("Ask", "Options-flow intelligence", "ask", username, `
+  <div class="flows-status" id="askStatus" role="status">Reading the session’s briefing…</div>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <div id="askApp"></div>
+  <div id="askFoot"></div>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-ask.js")}" defer></script>
+</body>
+</html>`;
+}
+
 export function strategyPage({ username = "" } = {}) {
   const lede = "Pick a name, build a position out of the contracts that are " +
     "actually listed, and see what it pays at expiry. Every quote is the " +
@@ -1889,5 +1942,5 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };

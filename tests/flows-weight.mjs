@@ -165,6 +165,16 @@ const CEILING_KIB = {
      120 rather than 105: the proportion of room this file's own rule asks for,
      and the same the desk and the track pages were given, so ordinary work on
      the engine is not a budget negotiation on every commit. */
+  /* MEASURED AT 57k, CEILING 70k. The page's own HTML is a lede and one
+     empty container — the renderer builds everything else — so nearly all
+     of this is assets/js/flows-ask.js, and the headroom is for the
+     briefing's regions rather than for the shell. It is the ONLY route
+     here whose weight buys a reader a whole session's readings without a
+     second page load, which is why it sits above the market page and
+     below the ticker. If it approaches the ceiling, the answer is to move
+     work into shared/flows-ask.js — which is bundled into the Worker and
+     costs the browser nothing — not to shorten what the page says. */
+  askPage: 70,
   strategyPage: 120,
   trackPage: 115,
   marketPage: 95,

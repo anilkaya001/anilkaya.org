@@ -28,6 +28,23 @@ database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 migrations_dir = "migrations"
 
+# Workers AI, for the question box at /flows/ask. It is included in the Workers
+# FREE plan: 10,000 Neurons per day, account-wide, reset at 00:00 UTC. Nothing
+# else on this account spends them today, and the route is built so that
+# running out costs a reader the phrasing and not the answer — every figure it
+# prints was measured by the pipeline and is served whether or not a model
+# ever replies.
+#
+# THE ALLOWANCE IS THE ACCOUNT'S, NOT THIS ROUTE'S, so nothing here tries to
+# predict it. A counter in the Worker could only ever say what this route
+# spent, and reporting that as a remaining balance would be exactly the
+# confident unmeasured number the rest of this codebase refuses. Cloudflare
+# reports exhaustion itself, and distinguishes error 3036 (the day's free
+# allocation is spent) from 3040 (no capacity right now) — both HTTP 429, and
+# two different sentences for a reader.
+[ai]
+binding = "AI"
+
 # Refresh the landing-page market snapshot every 15 minutes. The scheduled()
 # handler fetches index quotes and upserts one D1 row; /api/markets serves it.
 [triggers]
@@ -43,6 +60,13 @@ crons = ["*/15 * * * *"]
 # "2": the 2026-08-31 credential rotation — every cookie minted under the
 # previous credential set dies on deploy.
 FLOWS_SESSION_EPOCH = "2"
+# Which Workers AI model /api/flows/ask asks for wording. Free-tier membership
+# is a moving target — the 2026-07-28 catalogue change moved three models to
+# Paid — so this is a variable rather than a constant in worker.js, and setting
+# it EMPTY is a supported state meaning "no model": the route then serves the
+# deterministic reading and says so. Nothing about the answer's figures depends
+# on it; only the phrasing does.
+FLOWS_ASK_MODEL = "@cf/zai-org/glm-4.7-flash"
 
 # Secrets are NOT stored here. Set them in the Worker dashboard
 # (Settings → Variables and Secrets) or via `wrangler secret put`:

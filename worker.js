@@ -10,6 +10,7 @@ import {
   isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES } from "./shared/flows-pages.js";
+import * as FLOWS_ASK from "./shared/flows-ask.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1230,6 +1231,174 @@ function passthrough(stored) {
       "X-Payload-Updated": String(stored.updatedAt || 0),
     },
   });
+}
+
+/* =============================================================
+   THE QUESTION BOX
+
+   A language model is allowed to choose words here and nothing else.
+   Every figure in every answer was measured by the pipeline, written
+   into a fact's sentence, and is checked back out of the model's
+   reply before a reader sees it: guardAnswer() rejects any numeral
+   that does not already appear in the facts the model was handed.
+   A rejected answer is not an error page — the deterministic reading
+   is served in its place, because the numbers were never the model's
+   to begin with and the reader loses only the phrasing.
+
+   THE MODEL IS OPTIONAL AND THE PAGE IS NOT. Every branch below ends
+   with an answer. The only thing that varies is whether prose was
+   generated and, when it was not, which of four honest reasons is
+   printed.
+   ============================================================= */
+
+/* THE MODEL IS CONFIGURATION, NOT A CONSTANT, and the reason is that
+   free-tier membership is a moving target. The 2026-07-28 catalogue
+   change moved kimi-k2.6, kimi-k2.7-code and glm-5.2 to Paid;
+   @cf/zai-org/glm-4.7-flash stayed. The next such change should cost a
+   variable edit rather than a deploy of code, and an unset variable
+   must mean "no model configured" — which this route already answers
+   with the deterministic reading and a sentence saying so.
+
+   THAT IS ALSO WHAT KEEPS CI OFF THE METER. Local Wrangler inference
+   bills the SAME account-wide 10,000-neuron allowance as production, so
+   a suite that reached a model would spend a shared budget on every run
+   and make its own result depend on a quota. tests/worker-server.mjs
+   passes this empty on purpose, and every no-model branch below is
+   exercised there. */
+const askModel = (env) => {
+  const m = env && typeof env.FLOWS_ASK_MODEL === "string" ? env.FLOWS_ASK_MODEL.trim() : "";
+  return m === "" ? null : m;
+};
+
+/* The question is a prompt, not a payload. A long one buys nothing —
+   selection is by ticker and keyword — and spends neurons from an
+   allowance shared with everyone on the account. */
+const ASK_QUESTION_MAX = 400;
+
+/**
+ * Which Workers AI refusal this is.
+ *
+ * 3036 AND 3040 ARE BOTH HTTP 429 AND THEY ARE NOT THE SAME FACT. One
+ * means the account's 10,000-neuron daily free allowance is spent and
+ * the reader should come back after 00:00 UTC; the other means no data
+ * centre had capacity for this request and the reader should ask again
+ * now. Branching on the status would merge them and send half the
+ * readers away for a day over a transient. So this reads the numeric
+ * code out of the error and treats an unreadable one as its own third
+ * answer — "the model could not be reached, and it did not say why" —
+ * rather than guessing which of the two it was.
+ */
+function askFailure(error) {
+  const text = error && error.message ? String(error.message) : "";
+  const code = /\b(3036|3040|5035|5006)\b/.exec(text);
+  switch (code && code[1]) {
+    case "3036": return { why: "allowance",
+      say: "The free daily allowance for the model is spent for today. It resets at " +
+        "00:00 UTC. The readings below were measured by the pipeline and are unaffected." };
+    case "3040": return { why: "capacity",
+      say: "The model had no capacity for this question just now — nothing was spent, " +
+        "and asking again shortly may work. The readings below are unaffected." };
+    case "5035": return { why: "plan",
+      say: "The model this site uses is no longer available on its plan, which is a " +
+        "configuration fault here rather than a limit you reached. The readings below " +
+        "were measured by the pipeline and are unaffected." };
+    default: return { why: "unreachable",
+      say: "The model could not be reached, and it did not say why. The readings below " +
+        "were measured by the pipeline and are unaffected." };
+  }
+}
+
+/**
+ * What the caller asked, or a 400 saying which way they got it wrong.
+ *
+ * SEPARATE FROM askAnswer BECAUSE IT RUNS BEFORE THE STORE IS READ. A
+ * malformed body is malformed whether or not this morning's pipeline ran,
+ * and validating it second meant a broken request got the pending
+ * envelope's 200 — the caller's own mistake dressed up as our silence.
+ */
+async function askQuestion(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    throw new HttpError(400, "bad_json", "Send a JSON object with a `question` field.");
+  }
+  const raw = body && typeof body.question === "string" ? body.question.trim() : "";
+  if (raw === "") {
+    throw new HttpError(400, "no_question", "Ask a question in the `question` field.");
+  }
+  return raw.slice(0, ASK_QUESTION_MAX);
+}
+
+async function askAnswer(question, env, index, updatedAt) {
+  const { picked, why, capped } = FLOWS_ASK.selectFacts(index, question);
+  /* THE DETERMINISTIC ANSWER IS BUILT FIRST, ALWAYS. It is what ships
+     when the model is refused, unreachable, or caught inventing — and
+     building it up front means no branch below can reach a reader
+     without one. A fallback assembled only inside a catch is a
+     fallback nobody runs until the morning it is needed. */
+  const plain = FLOWS_ASK.renderFactsPlain(picked, question);
+  const base = {
+    answer: plain, llm: false, guard: null, why, capped,
+    facts: picked, silences: index.silences || null,
+    briefUpdatedAt: updatedAt || null, model: null, note: null,
+  };
+
+  const model = askModel(env);
+  if (!env.AI || model === null) {
+    return json({ ...base,
+      note: "No model is configured for this site, so the reading below is the " +
+        "pipeline's own wording. Every figure in it was measured." });
+  }
+
+  const { system, user } = FLOWS_ASK.promptFor(picked, question);
+  let generated = null;
+  try {
+    const out = await env.AI.run(model, {
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      /* SHORT ON PURPOSE, and not only to spend fewer neurons: the
+         answer is two or three sentences of prose over facts that are
+         already written, so a long generation is a model with room to
+         start reasoning — which is where an unquoted number comes
+         from. The cap and the guard are the same argument. */
+      max_tokens: 320,
+      temperature: 0.2,
+    });
+    generated = out && typeof out.response === "string" ? out.response.trim() : null;
+  } catch (error) {
+    const failed = askFailure(error);
+    return json({ ...base, note: failed.say, model, llmFailure: failed.why });
+  }
+
+  if (!generated) {
+    return json({ ...base, model,
+      note: "The model answered with no text, so the reading below is the pipeline's " +
+        "own wording. Every figure in it was measured." });
+  }
+
+  const guard = FLOWS_ASK.guardAnswer(generated, picked);
+  if (!guard.ok) {
+    /* THE REJECTED WORDING IS NOT RETURNED. A page that showed it
+       beside the real answer would be publishing the invented figure
+       with a caption, and a caption is not what a reader remembers. */
+    return json({ ...base, model, guard,
+      /* THE READER'S SENTENCE IS NOT guard.reason. That string ends by
+         naming the `rejected` field, which is the right thing to tell a
+         developer reading the JSON and the wrong thing to print on a
+         page — an implementation detail in the one sentence whose job
+         is to keep a reader's trust. The cause is still distinguished,
+         because "it invented a figure" and "it claimed the future" are
+         different failures and flattening them would waste the only
+         interesting thing the guard learned. */
+      note: "The generated wording was discarded: " +
+        (guard.forecast
+          ? "it claimed what the market is going to do, and this page states what was " +
+            "measured and what is already on the calendar."
+          : "it stated a figure that appears in none of the measurements it was given, " +
+            "which means it was computed rather than quoted.") +
+        " What follows is the pipeline's own wording, and every figure in it was measured." });
+  }
+  return json({ ...base, answer: generated, llm: true, model, guard });
 }
 
 /* =============================================================
@@ -2844,6 +3013,7 @@ async function route(request, env, url, ctx) {
        metered vendor key on the request path. Every other route in this table
        streams a blob the pipeline computed hours ago. */
     "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
+    "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
     /* Query parameter, never a path segment: dispatch here is
        Object.hasOwn(FLOWS_ROUTES, path), so /flows/ticker/NVDA would have to
        introduce a prefix match into a table whose exactness is the reason a
@@ -2883,7 +3053,7 @@ async function route(request, env, url, ctx) {
       || path === "/flows/market" || path === "/flows/ticker"
       || path === "/flows/unusual" || path === "/flows/events"
       || path === "/flows/track" || path === "/flows/political"
-      || path === "/flows/strategy") {
+      || path === "/flows/strategy" || path === "/flows/ask") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2935,8 +3105,16 @@ async function route(request, env, url, ctx) {
 
          `news` is the market-wide headlines tape. It is a stream published by
          a once-a-day job, so its payload carries `readAt` and the window its
-         rows cover; this door only decides that the key exists. */
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^meta$/.test(key);
+         rows cover; this door only decides that the key exists.
+
+         `brief` is the one key assembled FROM the others. The pipeline builds
+         it last, out of what it has just published, and it carries both the
+         three-session briefing a page draws and the flat fact index the
+         question box selects from. It is here for the ordinary reason every
+         other name is: a key absent from this list is refused at the door
+         with a 400, and the publish would have failed on the first live run
+         with the pipeline's own non-fatal warning swallowing it. */
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -3048,7 +3226,19 @@ async function route(request, env, url, ctx) {
   }
 
   if (path.startsWith("/api/flows/")) {
-    requireMethod(request, ["GET"]);
+    /* EVERY ROUTE UNDER HERE IS A READ EXCEPT ONE. This guard said GET and
+       nothing else, which was exactly right while the whole surface was
+       "stream a blob the pipeline already computed". /api/flows/ask takes
+       a question, so it takes a POST — and the gate stays one gate rather
+       than the route hoisting itself above the shared authentication
+       check, which is how an endpoint ends up the only one nobody
+       remembered to protect.
+
+       THE ORDER IS DELIBERATE: an allowed method with no session gets 401
+       and a disallowed method gets 405, so a caller learns which of the
+       two things they got wrong rather than being told "not allowed" for
+       a request that was merely unauthenticated. */
+    requireMethod(request, path === "/api/flows/ask" ? ["GET", "POST"] : ["GET"]);
     const session = await currentFlowsUser(request, env);
     if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
 
@@ -3206,6 +3396,60 @@ async function route(request, env, url, ctx) {
       const stored = await readFlowsPayload(env, "news");
       if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
+    }
+
+    if (path === "/api/flows/ask") {
+      /* THE ONE ROUTE UNDER /api/flows THAT PARSES WHAT IT SERVES.
+
+         Every other key here is streamed by passthrough() without being
+         looked inside, because parsing is the cost this design exists to
+         avoid: CPU is metered and a board is hundreds of kilobytes. This
+         route has to read its input, so the input was made small — the
+         pipeline assembles the fact index where CPU is free and publishes
+         it as one key of roughly sixteen kilobytes. Parsing that is
+         affordable; parsing the seventeen surfaces it was built from,
+         here, on every question, would not be.
+
+         GET serves the briefing alone, which is what the page draws before
+         anyone types. POST answers a question. They are one route because
+         they read one key and a second route would be a second chance for
+         the two to answer out of different sessions. */
+      const stored = await readFlowsPayload(env, "brief");
+      if (request.method === "GET") {
+        if (stored === null) {
+          return json({ status: "pending", today: null, yesterday: null, next: null,
+            facts: [], silences: { pending: [], unreadable: [], quiet: [] } });
+        }
+        return passthrough(stored);
+      }
+
+      /* THE QUESTION IS VALIDATED BEFORE THE STORE IS CONSULTED, and the
+         order is the whole point. Answering the pending envelope first
+         meant a POST carrying a broken body got a cheerful 200 on any
+         morning the pipeline had not run — the caller's mistake hidden
+         behind the site's own silence, and no way for them to tell a bad
+         request from an empty one. What the caller sent is wrong or right
+         regardless of what has been published. */
+      const asked = await askQuestion(request);
+
+      if (stored === null) {
+        return json({ status: "pending", question: asked, answer: null, llm: false,
+          facts: [], guard: null, model: null,
+          note: "The briefing has not been published for this session yet, so there is " +
+            "nothing measured to answer from. Nothing is claimed about the market by that." });
+      }
+      let index;
+      try {
+        index = JSON.parse(stored.payload);
+      } catch {
+        /* THE KEY EXISTS AND DOES NOT PARSE. That is this page's fault and
+           it is said as one, rather than answered with an empty briefing
+           that would read as a session in which nothing happened. */
+        throw new HttpError(500, "brief_unreadable",
+          "The briefing was published and could not be read, so no answer is offered. " +
+          "That is a fault on this site rather than a fact about the session.");
+      }
+      return askAnswer(asked, env, index, stored.updatedAt);
     }
 
     if (path === "/api/flows/record") {

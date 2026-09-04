@@ -418,9 +418,9 @@
          and this page draws all of it, so the sentences in hand ARE the
          section. Nothing here is truncated, and nothing here claims to be a
          selection. */
-      section.append(el("p", "ak-sub fc-note",
-        facts.length + " reading" + (facts.length === 1 ? "" : "s") +
-        " published for this region, all of them drawn."));
+      section.append(el("p", "ak-sub fc-note", facts.length === 1
+        ? "1 reading was published for this region, and it is drawn."
+        : facts.length + " readings were published for this region, and all of them are drawn."));
       section.append(factList(facts, "brief",
         brief && typeof brief.generatedAt === "string" ? brief.generatedAt : null));
     }
@@ -861,10 +861,16 @@
     }
 
     if (facts.length) {
-      answerHost.append(el("p", "ak-sub fc-note",
-        facts.length + " fact" + (facts.length === 1 ? "" : "s") +
-        " were handed to the answer above, each with the key it came from and the run that " +
-        "built it."));
+      /* THE VERB AGREES WITH THE COUNT, and it is written as two whole
+         sentences rather than as one with a bolted-on "s". A line reading
+         "1 fact were handed" is a small thing that tells a reader the prose
+         on this page is assembled rather than written, which is exactly the
+         impression a page carrying a model's output cannot afford. */
+      answerHost.append(el("p", "ak-sub fc-note", facts.length === 1
+        ? "1 fact was handed to the answer above, with the key it came from and the run that " +
+          "built it."
+        : facts.length + " facts were handed to the answer above, each with the key it came " +
+          "from and the run that built it."));
       answerHost.append(factList(facts, null, null));
     }
 

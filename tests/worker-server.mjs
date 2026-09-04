@@ -114,6 +114,15 @@ export async function startWorker({ extraVars = [] } = {}) {
        self-signed sessions stay valid across bumps. Epoch mismatch behavior
        has its own contracts in flows-auth and flows-worker. */
     "--var", "FLOWS_SESSION_EPOCH:1",
+    /* NO MODEL, DELIBERATELY. Local Wrangler inference bills the SAME
+       account-wide 10,000-neuron-per-day Workers AI allowance as
+       production, so a suite that reached a model would spend a shared
+       budget every time CI ran and would make its own result depend on a
+       quota that another process could exhaust. Empty is a supported
+       configuration — /api/flows/ask answers with the deterministic
+       reading and a sentence saying no model is configured — so this
+       exercises a real branch rather than stubbing one out. */
+    "--var", "FLOWS_ASK_MODEL:",
     ...extraVars.flatMap((v) => ["--var", v]),
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {

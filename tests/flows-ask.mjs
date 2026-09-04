@@ -280,13 +280,24 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
 {
   /* Three failures of three different kinds in one store: a key the
      reader does not have, a key published and measured empty, and a
-     key that arrived in a shape nothing can read. */
-  const torn = buildFactIndex({
+     key that arrived in a shape nothing can read.
+
+     THE FIRST ONE IS ABSENT, NOT NULL, AND THE DIFFERENCE IS REAL.
+     This fixture used to write `political: null` under a comment
+     calling it "a key the reader does not have" — but null is what
+     readFlowsPayload returns when the READ ITSELF failed, which is a
+     fault on our side, while an absent key was simply never written.
+     Collapsing them merges two of the three silences at the one place
+     they enter this module, and the merged answer is the wrong one in
+     both directions: it would tell a reader a job had not run when a
+     read had failed. Both are asserted below, separately. */
+  const tornStore = {
     ...STORE,
-    political: null,
     news: { status: "quiet", generatedAt: STAMP, rows: [], returned: 0, kept: 0 },
     market: "not an object at all",
-  });
+  };
+  delete tornStore.political;
+  const torn = buildFactIndex(tornStore);
 
   const pending = torn.silences.pending.find((q) => q.source === "political");
   const quiet = torn.silences.quiet.find((q) => q.source === "news");
@@ -302,6 +313,18 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "an absent key is never reported as unreadable: 'could not be read' says a fault " +
      "happened here, and nothing failed when a key was simply never written");
 
+  /* AND THE OTHER HALF OF THE SPLIT. An explicit null is what
+     readFlowsPayload returns when the read FAILED — the key may well
+     have been published. Reporting that as "not published yet" would
+     blame the pipeline for a fault on the serving side, and a reader
+     told a job has not run waits for it rather than reloading. */
+  const nulledRead = buildFactIndex({ ...STORE, political: null });
+  ok(nulledRead.silences.unreadable.some((q) => q.source === "political"),
+     "a key whose read returned null is UNREADABLE — published or not, what failed was " +
+     "the reading of it, and that is a fault on this side");
+  ok(!nulledRead.silences.pending.some((q) => q.source === "political"),
+     "and it is never also called pending, because a failed read is not an unwritten key");
+
   const sentences = new Set([pending.say, quiet.say, unreadable.say]);
   eq(sentences.size, 3,
      "the three carry three different sentences — two outages worded alike is how a " +
@@ -315,16 +338,43 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
     }
   }
 
-  /* A SLOT THE STORE HOLDS AS null IS PENDING TOO, and it must be
-     the same answer on both halves of the index: the briefing's six
-     surfaces are filled in by their own module, everything else by
-     this one, and a reader should not have to know which half they
-     are reading to know whether a missing board is a fault. */
-  const nulled = buildFactIndex({ "board:long": null, "board:short": null });
-  ok(nulled.silences.pending.some((q) => q.what === "bullish board"),
-     "a board held as null reads as unpublished, exactly as an absent key does");
-  ok(!nulled.silences.unreadable.some((q) => q.what === "bullish board"),
-     "and never as a page that failed to read it");
+  /* THE SPLIT HOLDS ON BOTH HALVES OF THE INDEX, and that is the
+     assertion, not the classification of any one key. The briefing's
+     six surfaces are filled in by their own module and everything else
+     by this one, so a store carrying one null of each kind is answered
+     twice — and a reader should not have to know which half they are
+     reading to know whether a board that is not there is a fault or a
+     job that has not run.
+
+     It read both ways once. A null board was called "not published for
+     this session yet" while a null market on the same store was called
+     a fault on this page: one store, one index, two opposite
+     diagnoses, and the sentence a reader got decided whether they
+     waited for the pipeline or went looking for the breakage. */
+  const nulled = buildFactIndex({ "board:long": null, "board:short": null, market: null });
+  ok(nulled.silences.unreadable.some((q) => q.what === "bullish board"),
+     "a board whose read returned null is UNREADABLE — null is what readFlowsPayload " +
+     "hands back when the read itself failed, and that is a fault on this side");
+  ok(!nulled.silences.pending.some((q) => q.what === "bullish board"),
+     "and never pending: a reader told the job has not run waits for a job that already " +
+     "ran");
+  ok(nulled.silences.unreadable.some((q) => q.source === "market"),
+     "and the other half of the index says the same thing about the same kind of null");
+
+  /* AND undefined IS THE OTHER DIRECTION, on both halves too. A store
+     built by spreading a parse writes every key it did not find as
+     undefined, and there is nothing in that a page could have failed
+     to read. */
+  const blank = buildFactIndex({ "board:long": undefined, market: undefined });
+  ok(blank.silences.pending.some((q) => q.what === "bullish board"),
+     "a board key written as undefined is PENDING — nothing was measured and nothing " +
+     "is claimed");
+  ok(blank.silences.pending.some((q) => q.source === "market"),
+     "and a surface key written as undefined is pending as well, rather than a fault " +
+     "reported on a surface nothing had tried to publish");
+  eq(blank.silences.unreadable.length, 0,
+     "with no fault claimed anywhere on that store: an absent key is not a failed read " +
+     "on either half of this index");
 
   /* A STORE WITH NOTHING IN IT is the ordinary state before the
      morning run, and NONE of it is a fault. Two of the briefing's
@@ -403,6 +453,30 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "but ZERO is not whitelisted with the other small integers — it is the one figure " +
      "this product refuses to let anything except a measurement produce");
   ok(zero.rejected.includes("0"), "and it is named as the reason");
+
+  /* AND THE SPELLED-OUT ZERO IS THE SAME FIGURE. The scan reads
+     numerals, so the line above was caught and this one was not —
+     while the word is how a model actually writes a count, which left
+     the one integer this file refuses reachable by spelling it. */
+  const worded = guardAnswer("Nothing cleared: zero names.",
+    [{ id: "x", say: "Two names cleared the band.", n: {} }]);
+  eq(worded.ok, false,
+     "a zero written as a word is refused exactly as the digit is — a fabricated zero " +
+     "is the defect whichever way it is spelled");
+  ok(worded.rejected.includes("zero"), "and the word is named among the refused tokens");
+  eq(worded.invented, true,
+     "and it is filed as an invented figure rather than as a claim about the future, " +
+     "because a caller branches on which of the two failures it was");
+
+  /* THE OTHER HALF OF THAT RULE, AND IT IS WHY THE TEST IS THE WORD
+     RATHER THAN A BAN. market/vol says the IV rank is on a
+     "zero-to-one scale" and carries no bare 0, so a model restating
+     it writes the word from the text it was handed. */
+  const scale = guardAnswer("The median IV rank sits on a zero-to-one scale.",
+    [byId("market/vol")]);
+  ok(scale.ok,
+     "a zero the facts themselves put in front of the model passes, because the guard " +
+     "asks whether a figure was handed over and not whether it is a zero");
 
   const empty = guardAnswer("   ", picked);
   eq(empty.ok, false,
