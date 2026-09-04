@@ -2851,8 +2851,11 @@ body.is-stale .flows-tablewrap {
 /* IT SCROLLED AWAY AND NEVER CAME BACK. This page is 5,729px tall at its
    widest measured tier (see the note above the 108rem rule), and the one
    element that says WHICH NAME you are reading sat at the top of it in normal
-   flow. A reader who has scrolled to the gamma surface on a twenty-one panel
-   page has nothing on screen that names the stock.
+   flow. A reader who has scrolled to the gamma surface on a page this tall has
+   nothing on screen that names the stock. (It said "a twenty-one panel page"
+   until a twenty-second panel landed — a count restated in prose is a count
+   that goes stale silently, and the measured height above is the fact this
+   sentence actually rests on.)
 
    Sticky, and it costs no layout: `top: 0` against the page scroll, an OPAQUE
    ground (a translucent one lets a chart's ink read through the header and
@@ -4533,6 +4536,49 @@ body.is-stale .flows-tablewrap {
 .fvc-rank-u { font-size: var(--fs-data); color: var(--ink-dim); }
 .fvc-rank-d { font-size: var(--fs-fine); color: var(--ink-faint); }
 .fvc-count { font-variant-numeric: tabular-nums; }
+
+/* --- marketRank: where this name places against the market ------------ */
+/* TWO READINGS IN ONE PANEL, and they must stay visibly two: the
+   open-interest cross-section and the off-exchange one carry different
+   populations, different orderings and — the reason the separation is
+   structural rather than cosmetic — different SESSIONS. A reader who runs
+   the two together will carry one feed's date onto the other's rank.
+
+   NO TABLE HERE, AND THAT IS A 320px DECISION. The other two feed panels on
+   this page are tables inside a scrolling wrapper; this one is two or three
+   statistics and their prose, so at a phone width it wraps instead of
+   offering a sideways scroll for a reading that has no columns to line up. */
+.fmr-block { margin-top: var(--space-3); }
+.fmr-block:first-of-type { margin-top: 0.6rem; }
+.fmr-h {
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-fine);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.fmr-empty { margin: 0.35rem 0 0; }
+/* Hue is DECORATION on the open-interest reading: tcSignedInt has already
+   put the sign in the glyph (+ / U+2212, and nothing at all at zero), so
+   the panel survives greyscale and a printout with the reading intact. */
+.fmr-val.is-up { color: var(--flow-up); }
+.fmr-val.is-down { color: var(--flow-down); }
+.fmr-val.is-flat { color: var(--flow-flat); }
+.fmr-val.is-unknown { color: var(--ink-faint); }
+.fmr-when,
+.fmr-cut,
+.fmr-cover,
+.fmr-said,
+.fmr-nounit { margin-top: 0.4rem; }
+/* The coverage of the whole join is the sentence that sizes every other
+   sentence in the panel, so it is set apart rather than left as the fourth
+   note in a stack of four. */
+.fmr-cover {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--panel-border);
+  color: var(--ink-faint);
+}
 
 /* ==============================================================
    THE COMMAND CENTER — /flows/

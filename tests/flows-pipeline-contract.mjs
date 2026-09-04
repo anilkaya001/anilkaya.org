@@ -22,7 +22,7 @@ import {
   readBoardMemory, fakePriorBoard,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
-  DEEP_NAMES, deepNames, publishRetryDelay,
+  DEEP_NAMES, deepNames, publishRetryDelay, MARKET_CROSS_LIMIT,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -1518,6 +1518,87 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the rule that chose them is published in words, not left to be inferred from which rows are clickable");
   }
 
+  /* ---------- the market-wide join: coverage that is a MEASUREMENT ------
+
+     The two feeds this joins are market-wide reads the pulse leg already
+     makes once a run, so the join costs no vendor call. What it can cost a
+     reader is a wrong impression, and the wrong impression has a shape: a
+     join that reaches three of fifty names leaves forty-seven cards each
+     saying "not in this feed", which reads as forty-seven findings and is
+     one thin join.
+
+     THE COVERAGE COUNT IS THEREFORE CHECKED AGAINST THE CARDS THEMSELVES —
+     two independently-derived numbers, the way the deep-set equality above
+     is. A coverage number computed from a different population than the one
+     the cards were built for would be a plausible integer on every card and
+     nothing would look wrong. */
+  {
+    const cardFiles = fs.readdirSync(path.dirname(prefix))
+      .filter((f) => /-card-.+\.json$/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+    ok(cardFiles.length > 0, `the dry run emitted ${cardFiles.length} cards to check the join on`);
+
+    for (const feed of ["oiChange", "darkpool"]) {
+      const withPanel = cardFiles.filter((c) => c.panels && c.panels.marketRank);
+      eq(withPanel.length, cardFiles.length,
+         `every emitted card carries the marketRank panel (${feed} pass)`);
+      const placed = withPanel.filter((c) =>
+        c.panels.marketRank.status === "ok" &&
+        c.panels.marketRank.feeds[feed].status === "ok").length;
+      const published = withPanel[0].panels.marketRank.coverage[feed];
+      eq(published.of, cardFiles.length,
+         `the ${feed} join states the population it was measured over, and it is the set of ` +
+         "names that actually got a card");
+      eq(published.in, placed,
+         `and the count it publishes (${published.in}) is the number of cards that really ` +
+         `place in that feed (${placed}) — a coverage figure computed over a different ` +
+         "population would be a plausible integer on every card with nothing looking wrong");
+      /* THE PANEL MUST BE ABLE TO SAY BOTH THINGS, or half of it is untested
+         wiring: at least one card in the feed and at least one outside it. */
+      ok(placed > 0 && placed < cardFiles.length,
+         `and the corpus exercises both arms: ${placed} of ${cardFiles.length} names place ` +
+         "in this feed, so neither the reading nor the measured absence is checked against " +
+         "an empty set");
+      /* Every card agrees about the cross-section, because there is exactly
+         one: the index is built once for the run. Fifty cards each indexing
+         a hundred rows could disagree about the ordering or the unit and no
+         single card would look wrong. */
+      for (const c of withPanel) {
+        const f = c.panels.marketRank.feeds[feed];
+        eq(f.coverage.in, published.in,
+           `${c.ticker}: every card reports the same ${feed} coverage, because the run ` +
+           "indexes the cross-section once — fifty cards each re-reading a hundred rows " +
+           "could disagree about the ordering or the unit with no single card looking wrong");
+        eq(f.population, withPanel[0].panels.marketRank.feeds[feed].population,
+           `${c.ticker}: and the same population, which is the denominator every rank on ` +
+           "every card is quoted against");
+      }
+    }
+
+    /* THE RANK IS FROM ANOTHER SESSION, AND THE RUN SAYS SO OUT LOUD. The
+       vendor updates /market/oi-change at about 06:45 ET and the cron fires
+       at 05:15 ET, so this is the ordinary case rather than an edge one. */
+    ok(/cross oiChange: \d+ of \d+ deep name/.test(runLog),
+       "the run reports the join's own reach once, rather than leaving it to be counted " +
+       "off fifty cards");
+    ok(/NOT this run's session/.test(runLog),
+       "and reports that the market-wide ranking it joined is from a different session than " +
+       "the per-name data it joined it onto — the log line that makes the timing trap " +
+       "visible in a job log rather than only on a card");
+
+    /* THE REQUESTED LIMIT IS THE PUBLISHED ONE. A card that says "14 of 100"
+       while the run asked for 40 is a fabricated denominator. */
+    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+    for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
+      ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
+         `${route} is fetched at the same constant the cards publish as \`requested\` — two ` +
+         "numbers for one limit is a denominator that will one day be wrong");
+    }
+    const anyFeed = cardFiles[0].panels.marketRank.feeds.oiChange;
+    eq(anyFeed.requested, MARKET_CROSS_LIMIT,
+       "and the card publishes that constant rather than restating it");
+  }
+
 
   /* THE POPULATION INVARIANT. Every name the movers band was handed is either
      ranked or explicitly counted as unrankable, and the total is the same
@@ -3008,4 +3089,4 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, and a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them`);
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself`);

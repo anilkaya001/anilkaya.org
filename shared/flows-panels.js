@@ -237,6 +237,23 @@ export const TICKER_PANELS = Object.freeze([
   { key: "congress", id: "ftCongress", span: 1, group: "context", tier: "table",
     title: "Disclosed congressional transactions",
     question: "Has anyone in Congress disclosed a trade in this name?" },
+  /* THE CROSS-SECTION THE PER-NAME FEEDS CANNOT CARRY, off two market-wide
+     reads this run already makes once for the market pulse.
+
+     It sits in CONTEXT rather than in TAPE, and the two feeds it joins are
+     tape feeds, so the placement is an argument. What this panel reports is
+     not what traded — the darkpool and oiDeltas panels above already report
+     that for this name, from per-name requests — it is whether the name
+     PLACED against every other name, which is the same kind of question as
+     "where does today sit in this name's own year". A rank has no meaning
+     without the population beside it, and the population here is the market.
+
+     span 1 AND tier "reading": it is two short readings and their prose, not
+     a table and not a drawing, and at 320px it must not carry a row of
+     columns that can only be reached by scrolling sideways. */
+  { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "reading",
+    title: "Market-wide standing",
+    question: "Does this name place in the market’s own two lists, and from which session?" },
   /* NOT A PANEL KEY. The score derivation is drawn from the card's TOP-LEVEL
      fields (score, fam, weights, conv, quality), not from card.panels — so it
      is deliberately spelled with a sentinel that can never collide with a
@@ -272,8 +289,9 @@ export const TICKER_GROUPS = Object.freeze([
     blurb: "What actually traded: the lifted strikes, the largest lines, the " +
       "session path and the off-exchange prints." },
   { key: "context", label: "Context", hash: "ftg-context",
-    blurb: "Where this session sits in the name’s own year, and who has " +
-      "disclosed a trade in it." },
+    blurb: "Where this session sits in the name’s own year, who has " +
+      "disclosed a trade in it, and whether it places against the rest of " +
+      "the market." },
 ]);
 
 /** The legal `tier` values. A tier with no stylesheet rule is a box with no chrome. */

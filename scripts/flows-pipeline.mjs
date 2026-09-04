@@ -30,7 +30,9 @@ import {
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
   boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
 } from "../shared/flows-features.js";
-import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
+import {
+  buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
+} from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
@@ -273,6 +275,22 @@ export const SCREENER_PAGE_ROWS = 50;
  * the row says so rather than linking to a page that will not load.
  */
 export const DEEP_NAMES = 50;
+
+/**
+ * How many rows this run asks the two market-wide feeds for.
+ *
+ * ONE CONSTANT BECAUSE THE NUMBER IS PUBLISHED. The cards state the
+ * population a rank sits inside, and they state what this run REQUESTED
+ * beside it — a feed that answers 63 rows to a request for 100 is a fact
+ * about the feed, and a card that could not tell those apart would report a
+ * rank of 14 "out of 100" when the hundred never arrived.
+ *
+ * 100 is the vendor's own documented default on both routes (max 200), and
+ * raising it would not buy coverage where it is short: a name missing from
+ * the market's top hundred by open-interest change is missing because the
+ * market had a hundred larger ones, not because the page was too small.
+ */
+export const MARKET_CROSS_LIMIT = 100;
 
 /** The rule, in the words the board publishes it in. */
 export const DEEP_RULE =
@@ -4562,14 +4580,46 @@ function fakePulseRaws(tickers) {
     put_premium: String(Math.round(rnd() * 2.5e10)),
     put_volume: Math.round(rnd() * 2.5e7),
   })) };
+  /* THE OPEN-INTEREST FIXTURE OBEYS ITS OWN ARITHMETIC, AND ITS OWN CLOCK.
+
+     It used to draw curr_oi, last_oi and oi_change as three independent
+     randoms, so a "change" of +11,204 sat beside snapshots differing by
+     −38,116 — three numbers that cannot all be about the same contract. That
+     was harmless while nothing read more than one of them, and stopped being
+     harmless the moment the cards began reconciling the change field against
+     the two snapshots to decide what UNIT it is in (the vendor's own example
+     carries oi_change as a RATIO beside an oi_diff_plain in contracts; this
+     fixture has always carried it as a count). A fixture that reconciles to
+     neither certifies only the branch that gives up.
+
+     IT DATES ITSELF TO THE PREVIOUS SESSION, WHICH IS THE REAL SHAPE. The
+     vendor states this feed updates about 06:45 ET and this job runs at
+     05:15 ET, so a live run joins a PRIOR session's cross-section onto
+     today's per-name data. Dating the fixture to the session date would make
+     the corpus exercise only the reassuring branch of exactly the trap the
+     cards exist to disclose.
+
+     AND IT IS ORDERED, because the vendor documents this route as returning
+     the highest OI change "default: descending" and the cards measure that
+     order rather than assuming it. An unordered fixture can only ever
+     certify "the order could not be measured", which is the answer that
+     makes a cut-off value unpublishable. */
   const oiChange = { data: Array.from({ length: 40 }, (_, i) => {
     const t = pick();
+    /* last_oi is floored well above the largest possible decrease so that
+       curr_oi = last_oi + change never needs clamping — a clamp would break
+       the arithmetic this fixture exists to hold. */
+    const lastOi = 20000 + Math.round(rnd() * 60000);
+    const change = Math.round((rnd() - 0.3) * 40000);
     const row = {
       option_symbol: `${t}260918${rnd() > 0.5 ? "C" : "P"}${String(Math.round(40 + rnd() * 300) * 1000).padStart(8, "0")}`,
       underlying_symbol: t,
-      oi_change: String(Math.round((rnd() - 0.3) * 40000)),
-      curr_oi: Math.round(rnd() * 90000),
-      last_oi: Math.round(rnd() * 80000),
+      oi_change: String(change),
+      oi_diff_plain: change,
+      curr_oi: lastOi + change,
+      last_oi: lastOi,
+      curr_date: "2026-08-21",
+      last_date: "2026-08-20",
       volume: Math.round(rnd() * 50000),
       rnk: i,
     };
@@ -4577,7 +4627,7 @@ function fakePulseRaws(tickers) {
     if (i % 5 !== 4) row.avg_price = (rnd() * 40).toFixed(2);
     if (i % 6 !== 5) row.percentage_of_total = (rnd() * 0.2).toFixed(4);
     return row;
-  }) };
+  }).sort((a, b) => Number(b.oi_change) - Number(a.oi_change)) };
   const netImpact = Array.from({ length: 30 }, () => ({
     ticker: pick(), net_premium: Math.round((rnd() - 0.45) * 2e8),
   }));
@@ -4587,12 +4637,25 @@ function fakePulseRaws(tickers) {
     purchases_notional: String(Math.round(rnd() * 4e8)),
     sells_notional: String(Math.round(rnd() * 9e8)),
   })) };
+  /* THE PRINT FIXTURE RUNS NEWEST FIRST, because the route is documented as
+     "returns the latest darkpool trades" and the cards MEASURE that order to
+     decide what a rank inside it means. Under recency the cut-off is a TIME —
+     how far back the market-wide window reaches — not a dollar size, and the
+     old fixture's `10:00, 11:01, … 15:05, 10:06` cycle was monotone in
+     neither, so the whole recency reading was unreachable from the corpus.
+
+     One print per minute walking backwards from 15:59 on the PREVIOUS
+     session, for the same reason the open-interest rows carry the previous
+     session's date: a 05:15 ET run has no prints from the session it is
+     about to open. */
   const darkpool = { data: Array.from({ length: 45 }, (_, i) => {
     const px = 20 + rnd() * 400;
     const size = Math.round(1e4 + rnd() * 2e6);
+    const minute = 959 - i;
     const row = {
       ticker: pick(),
-      executed_at: `2026-08-24T${String(10 + (i % 6))}:0${i % 10}:00Z`,
+      executed_at: `2026-08-21T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
+        `${String(minute % 60).padStart(2, "0")}:00Z`,
       price: px.toFixed(2), size,
       premium: String(Math.round(px * size)),
       volume: Math.round(rnd() * 8e7),
@@ -6500,6 +6563,22 @@ async function main() {
       "and are unaffected");
   }
 
+  /* THE TWO MARKET-WIDE FEEDS, HELD FOR THE CARDS.
+
+     Declared out here rather than inside the pulse leg's `try` because the
+     card loop four hundred lines below joins them onto every deep name, and
+     a `const` inside that block would be out of scope by the time the join
+     needs it. Null until the leg assigns, which is exactly the state the
+     panel reports as an unavailability: a pulse leg that never ran left no
+     cross-section behind, and that is not the same fact as a name being
+     absent from one.
+
+     THE FEEDS ARE ALREADY PAID FOR. /api/market/oi-change and
+     /api/darkpool/recent are fetched once each below for the pulse. Holding
+     the two responses costs nothing and buys the cards the one thing a
+     per-name request can never carry: the rest of the market. */
+  let crossRaws = null;
+
   /* 7g. THE MARKET PULSE — seven market-wide feeds, one call each, pooled
      under one key.
 
@@ -6522,10 +6601,10 @@ async function main() {
     const PULSE_FETCHES = {
       tide: ["/api/market/market-tide", { interval_5m: "true" }],
       totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
-      oiChange: ["/api/market/oi-change", { limit: 100 }],
+      oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
       netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
       insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: 100 }],
+      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
       seasonality: ["/api/seasonality/market", {}],
     };
     const raws = {};
@@ -6540,6 +6619,12 @@ async function main() {
         }
       }
     }
+    /* CAPTURED BEFORE THE SHAPERS RUN, and that is deliberate: buildPulse
+       caps oiChange at 20 rows and darkpool at 30 for the pulse PANEL, while
+       this run asked the vendor for 100 of each. The join wants the whole
+       hundred — a rank of 74 inside a hundred is a reading, and the same
+       contract dropped by a display cap would read as an absence. */
+    crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool };
     const pulse = buildPulse(raws);
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
@@ -7007,6 +7092,56 @@ async function main() {
     }
   }
 
+  /* THE MARKET-WIDE JOIN, INDEXED ONCE FOR THE WHOLE LOOP.
+
+     Both responses are market-wide: one per run, not one per name. Indexing
+     them here rather than inside buildCard means the hundred rows are read
+     once instead of fifty times, and — the reason that matters — the
+     cross-section every card is placed against is provably the SAME one,
+     measured once. The ordering check and the unit reconciliation inside
+     indexMarketCross are exactly the kind of measurement that must not be
+     able to come out differently on card 3 and card 47.
+
+     The coverage line below is the one that decides whether this panel is
+     worth reading at all. If two of fifty names appear, forty-eight cards
+     will each say "did not make the cut" — true of every one of them, and
+     collectively not a finding. The number is logged here and published on
+     every card so neither a reader nor the next run has to infer it. */
+  const marketCross = indexMarketCross({
+    oiChange: crossRaws ? crossRaws.oiChange : null,
+    darkpool: crossRaws ? crossRaws.darkpool : null,
+    limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
+    tickers: [...onBoard.keys()],
+    sessionDate,
+  });
+  for (const feed of CROSS_FEEDS) {
+    const f = marketCross[feed];
+    if (f.status !== "ok") {
+      console.warn(`  cross ${feed}: ${f.status} — ${f.reason}`);
+      continue;
+    }
+    console.log(
+      `  cross ${feed}: ${f.coverage.in} of ${f.coverage.of} deep name(s) appear in ` +
+      `${f.population} row(s) of ${f.requested} requested, covering ${f.names} name(s)` +
+      /* THE SESSION THE RANKING IS FROM, on the same line as the ranking.
+         /api/market/oi-change updates around 06:45 ET and this job runs at
+         05:15 ET, so the market-wide ranking is usually the PREVIOUS
+         session's while the per-name legs carry today's. A log line that
+         omitted this would make the two look like one session. */
+      (f.asOf
+        ? `; the feed dates itself ${f.asOf}` +
+          (f.sameSession === false ? ` — NOT this run's session (${sessionDate})` : "") +
+          (f.asOfSessions > 1 ? ` and spans ${f.asOfSessions} sessions` : "")
+        : "; the feed states no date of its own") +
+      `; order ${f.ordered ? f.ordered + " by " + f.orderedBy : "not measurable from the rows"}`);
+    if (f.coverage.of && f.coverage.in * 5 < f.coverage.of) {
+      console.warn(
+        `  cross ${feed}: this join reaches ${f.coverage.in} of ${f.coverage.of} deep names. ` +
+        "The other cards will say they did not make a market-wide selection, which is true " +
+        "of each of them and is not a finding about any of them.");
+    }
+  }
+
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
   const gammaProfiles = [];
   // The surface shape is reported once per run, not once per card.
@@ -7135,6 +7270,8 @@ async function main() {
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
         darkpool: dpRaw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankRaw,
+        /* The run's one cross-section, shared by every card. */
+        marketCross,
       });
 
       /* A CARD THAT WILL NOT FIT SHEDS ITS CHEAPEST PANELS IN A STATED
@@ -7163,6 +7300,13 @@ async function main() {
         ["darkpool", "dropped to fit the payload cap"],
         ["oiDeltas", "dropped to fit the payload cap"],
         ["volContext", "dropped to fit the payload cap"],
+        /* LAST, AND NOT BECAUSE IT MATTERS LEAST. It is the smallest panel
+           on the card — two readings and their prose — so shedding it buys
+           the fewest kilobytes of any entry here, which makes it the worst
+           trade to make first. A ladder is ordered by what it BUYS as much
+           as by what it costs the reader. */
+        ["marketRank", "dropped to fit the payload cap — the market-wide feeds it joins are " +
+          "published whole on the market pulse page"],
       ];
       let body = JSON.stringify(card);
       const dropped = [];

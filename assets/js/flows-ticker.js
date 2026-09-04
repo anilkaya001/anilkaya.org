@@ -3446,8 +3446,19 @@
   const PREDATES_STOCK =
     "this card was built before the per-name deep feeds shipped, so this " +
     "panel was never in it.";
+  /* A THIRD WAVE, AND IT GETS ITS OWN SENTENCE FOR THE SAME REASON THE
+     SECOND DID. A card built before the market-wide join shipped carries no
+     marketRank key at all, and telling that reader "this card predates the
+     per-name deep feeds" would be a confident wrong fact about which card
+     they are looking at — the deep feeds have been on every card for weeks. */
+  const PREDATES_CROSS =
+    "this card was built before the market-wide join shipped, so this panel " +
+    "was never in it.";
   const STOCK_KEYS = new Set(["darkpool", "oiDeltas", "volContext"]);
-  const predatesSentence = (key) => (STOCK_KEYS.has(key) ? PREDATES_STOCK : PREDATES_CHAIN);
+  const CROSS_KEYS = new Set(["marketRank"]);
+  const predatesSentence = (key) => (CROSS_KEYS.has(key)
+    ? PREDATES_CROSS
+    : STOCK_KEYS.has(key) ? PREDATES_STOCK : PREDATES_CHAIN);
 
   /**
    * The quiet arm: heading, ONE sentence, and the machine-readable kind.
@@ -4025,6 +4036,285 @@
      suite asserts these two key sets are equal in both directions: a drawer
      with no registry entry never mounts, and a registry entry with no drawer
      is a visible dead panel rather than a blank one. */
+
+  /* ===== marketRank: the market-wide standing ===== */
+  /* =============================================================
+     drawMarketRank — panels.marketRank, built by
+     indexMarketCross/buildMarketCross in shared/flows-card.js off
+     the two market-wide feeds the pulse leg already fetches once a
+     run.
+
+     WHAT IT MUST NOT LET A READER BELIEVE, and each of these has a
+     line of code holding it:
+
+     1. THAT ABSENCE IS QUIET. Both feeds are SELECTIONS. A name
+        that is not in one did not make a market-wide list; it is
+        not a name with no open-interest change and no off-exchange
+        prints. So a missing name gets the quiet arm — never the
+        Unavailable banner — and the sentence carries the feed's
+        own population and, when the feed actually filled the
+        request, the value the last place held, so "just missed"
+        and "nowhere near" are different readings on the page.
+
+     2. THAT THE RANKING IS TODAY'S. The vendor states its
+        market-wide open-interest feed updates about 06:45 Eastern;
+        this pipeline runs at 05:15 Eastern. The session line under
+        each reading is therefore not decoration — it is the whole
+        difference between "ranks 14th across the market today" and
+        "ranked 14th across the market yesterday, joined onto
+        today's card". A feed that states no date says so; it never
+        borrows the card's.
+
+     3. THAT A RANK IS A NUMBER ON ITS OWN. Every rank is printed
+        as "14 of 40" and never as "14". The population is the
+        payload's, and where the feed returned fewer rows than this
+        run asked for, the caption says the list was not cut by the
+        request at all.
+
+     4. THAT COVERAGE IS FINE. If three of fifty board names appear
+        in a feed, forty-seven cards will each say they are not in
+        it. That is one thin join, not forty-seven findings, and
+        the coverage line says which it is on every card.
+
+     SIGN NEVER RIDES ON HUE. The open-interest reading is signed
+     and the sign is in the glyph (tcSignedInt: + / U+2212, and
+     nothing at all at zero). The tone class on top is decoration
+     and the panel reads identically in greyscale.
+     ============================================================= */
+
+  /** The feeds, in the order the panel reads them, with their headings. */
+  const FMR_FEEDS = [
+    ["oiChange", "Open-interest change",
+      "The vendor's market-wide ranking of option contracts by open-interest change. " +
+      "It compares two clearing snapshots, so it is a settled fact a day late by " +
+      "construction and never today's tape."],
+    ["darkpool", "Off-exchange prints",
+      "The market-wide feed of the most recent off-exchange equity prints. These are " +
+      "executions, reported with delay, attributing no side and no participant."],
+  ];
+
+  /** One silence, with the machine-readable kind on it. Never a blank box. */
+  function fmrSilence(host, kind, sentence) {
+    const { el } = window.FlowsPanels;
+    const p = el("p", kind === "quiet" ? "ft-quiet fmr-empty" : "fc-dead fmr-empty");
+    p.setAttribute("data-empty", kind);
+    if (kind !== "quiet") p.append(el("strong", null, "Unavailable. "));
+    p.append(document.createTextNode(sentence));
+    host.append(p);
+  }
+
+  /**
+   * The unit that agrees in number with the value it follows.
+   *
+   * TWO LENGTHS, ONE UNIT. `unitOf` completes the phrase — "% OF THE PREVIOUS
+   * SESSION'S OPEN INTEREST" — and belongs in a sentence, not in an 8.5rem
+   * statistic cell where it would wrap to four lines under a number. So the
+   * short form goes beside the figure and the long form goes in the prose,
+   * and neither is the unit being dropped.
+   */
+  function fmrUnit(n, f, long) {
+    if (!f.unit) return "";
+    const one = Math.abs(n) === 1;
+    return " " + (one ? (f.unitOne || f.unit) : f.unit) +
+      (long && f.unitOf ? " " + f.unitOf : "");
+  }
+
+  /**
+   * A value in the unit its own feed reported it in.
+   *
+   * THREE KINDS AND NO DEFAULT. A dollar size, a signed contract count and a
+   * ratio of the previous snapshot are three different quantities, and the
+   * publisher reconciles which one the vendor actually sent rather than
+   * assuming. When it could not, `kind` is null and this returns null so the
+   * caller prints the refusal in words — a bare figure under a heading a
+   * reader will read as contracts is exactly the confident wrong reading the
+   * reconciliation exists to prevent.
+   */
+  function fmrValue(v, f, long) {
+    const { isNum, money, MINUS } = window.FlowsPanels;
+    const n = isNum(v);
+    if (n === null) return null;
+    if (f.kind === "money") return money(n);
+    if (f.kind === "count") return tcSignedInt(n) + fmrUnit(n, f, long);
+    if (f.kind === "ratio") {
+      const p = n * 100;
+      const body = Math.abs(p).toFixed(1);
+      /* THREE ARMS ON THE SIGN, and the middle one is the point: a ratio of
+         exactly zero is a measured no-change and must not wear a + . */
+      return (p < 0 ? MINUS : p > 0 ? "+" : "") + body + fmrUnit(p, f, long);
+    }
+    return null;
+  }
+
+  /** HH:MM off the stamp's own digits, with its date — never through Date. */
+  function fmrStamp(at) {
+    const s = String(at == null ? "" : at);
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(s);
+    return m ? m[1] + " " + m[2] + ":" + m[3] + " UTC" : null;
+  }
+
+  /**
+   * The session the FEED describes, against the session the CARD describes.
+   *
+   * NULL IS NOT FALSE. `sameSession` is null when the feed stated no date of
+   * its own, and that sentence must not read as "a different session" — it is
+   * "nobody said". Three outcomes, three sentences.
+   */
+  function fmrSessionLine(f, cardDate) {
+    const { el } = window.FlowsPanels;
+    let text;
+    if (!f.asOfStated || !f.asOf) {
+      text = "This feed states no session of its own, so which session the ranking is " +
+        "from is unknown — it is not assumed to be this card's.";
+    } else if (f.sameSession === true) {
+      text = "The feed dates itself " + f.asOf + ", the same session this card describes.";
+    } else if (f.sameSession === false) {
+      text = "The feed dates itself " + f.asOf + ", which is NOT the session this card " +
+        "describes" + (cardDate ? " (" + cardDate + ")" : "") + ". This ranking is from " +
+        "another session and the per-name readings on this page are not.";
+    } else {
+      text = "The feed dates itself " + f.asOf + "; this card names no session to compare " +
+        "it against.";
+    }
+    if (f.asOfSessions > 1) {
+      text += " Its rows span " + f.asOfSessions + " sessions, so the date above is the " +
+        "newest of them rather than the whole feed's.";
+    }
+    const p = el("p", "fc-note fmr-when", text);
+    p.title = "This pipeline runs at 05:15 Eastern and the vendor states its market-wide " +
+      "open-interest feed updates at about 06:45 Eastern, so a market-wide ranking read " +
+      "here is usually the previous session's.";
+    return p;
+  }
+
+  /** The cut a name outside the feed did not clear, in words the feed earns. */
+  function fmrCutLine(f) {
+    const { el } = window.FlowsPanels;
+    if (!f.ordered) {
+      return el("p", "fc-note fmr-cut",
+        "The rows came back in no order this run could measure, so there is no cut-off " +
+        "value to compare against: position in this feed is the vendor's arrangement, " +
+        "not a threshold.");
+    }
+    if (f.cutAt) {
+      const stamp = fmrStamp(f.cutAt);
+      return el("p", "fc-note fmr-cut",
+        "Ordered by " + f.orderedBy + ". The window reaches back to " +
+        (stamp || "an unreadable stamp") + " — a name whose last off-exchange print is " +
+        "older than that cannot be in this list at any size.");
+    }
+    const cut = fmrValue(f.cut, f, true);
+    if (cut === null) {
+      return el("p", "fc-note fmr-cut",
+        "Ordered by " + f.orderedBy + ", but the value at the last place could not be " +
+        "put in a unit this run could name, so it is not printed as a threshold.");
+    }
+    return el("p", "fc-note fmr-cut",
+      "Ordered by " + f.orderedBy + ". The last place in the feed held " + cut +
+      (f.capped
+        ? ", so that is the cut this name is measured against."
+        : ", and the feed returned fewer rows than this run asked for — nothing was cut " +
+          "off by our own limit."));
+  }
+
+  /** "19 of 50 board names" — the join's own reach, on every card. */
+  function fmrCoverageLine(f) {
+    const { el } = window.FlowsPanels;
+    const c = f.coverage;
+    if (!c || typeof c.of !== "number" || typeof c.in !== "number" || !c.of) return null;
+    const p = el("p", "fc-note fmr-cover",
+      c.in + " of " + c.of + " name" + (c.of === 1 ? "" : "s") + " carrying a card today " +
+      "appear" + (c.in === 1 ? "s" : "") + " in this feed" +
+      (c.in * 5 < c.of
+        ? ". At that reach most cards will say they are not in it, which is one thin join " +
+          "rather than a finding about any one name."
+        : "."));
+    p.title = "Measured across the names this run built a card for, not across the whole " +
+      "board and not across the market.";
+    return p;
+  }
+
+  function drawMarketRank(host, panel, card, question, mount) {
+    const { el, isNum, deadPanel, panelHead, statList, DASH } = window.FlowsPanels;
+
+    const q = question || "Does this name place in the market’s own two lists, and from which session?";
+
+    if (panel === undefined || panel === null) return deadPanel(host, q, PREDATES_CROSS);
+    if (panel.status === "quiet") return ftQuiet(host, q, panel.reason || "");
+    if (panel.status !== "ok") return deadPanel(host, q, panel.reason);
+
+    panelHead(host, q);
+
+    const feeds = panel.feeds || {};
+    for (const [key, heading, blurb] of FMR_FEEDS) {
+      const f = feeds[key];
+      const block = el("section", "fmr-block");
+      const h = el("h4", "fmr-h", heading);
+      h.title = blurb;
+      block.append(h);
+
+      if (!f || f.status === "unavailable") {
+        fmrSilence(block, "unavailable",
+          (f && f.reason) || "this feed was not carried into the card build this run.");
+        host.append(block);
+        continue;
+      }
+
+      if (f.status === "ok") {
+        const value = fmrValue(f.value, f);
+        const rank = isNum(f.rank);
+        const pop = isNum(f.population);
+        const count = isNum(f.count);
+        /* THE RANK AND ITS POPULATION IN ONE CELL, because they are one
+           reading. "14" alone is the number this panel exists to refuse. */
+        const pairs = [
+          ["Rank",
+            rank === null || pop === null ? DASH : tcInt(rank) + " of " + tcInt(pop),
+            "fmr-rank"],
+          ["Value", value === null ? DASH : value,
+            "fmr-val " + (f.kind === "count"
+              ? (isNum(f.value) === null ? "is-unknown"
+                : f.value > 0 ? "is-up" : f.value < 0 ? "is-down" : "is-flat")
+              : "")],
+        ];
+        if (count !== null && count > 1) {
+          pairs.push(["Rows", tcInt(count) + (key === "oiChange" ? " contracts" : " prints"),
+            "fmr-rows"]);
+        }
+        if (f.at) pairs.push(["Printed", fmrStamp(f.at) || DASH, "fmr-at"]);
+        block.append(statList(pairs));
+
+        if (value === null && isNum(f.value) !== null) {
+          block.append(el("p", "fc-note fmr-nounit",
+            "This run could not reconcile the vendor's own change field against the two " +
+            "clearing snapshots it publishes beside it, so the value is not printed: a " +
+            "number whose unit is unknown reads as contracts and might be a ratio."));
+        }
+        block.append(el("p", "fc-note fmr-said",
+          "This name places " +
+          (rank === null || pop === null ? "in this feed" : tcInt(rank) + " of " + tcInt(pop)) +
+          " in a market-wide list this run reads once for the whole board. That is a " +
+          "cross-section the per-name feeds on this page cannot report, because a request " +
+          "for one name carries no other names in it."));
+      } else {
+        /* MEASURED, AND NOT IN IT. The publisher's own sentence, verbatim —
+           it is the sentence that separates a selection from a silence, and
+           paraphrasing it here would put that distinction in two places. */
+        fmrSilence(block, "quiet", f.reason || "this name is not in this feed this run.");
+      }
+
+      block.append(fmrCutLine(f));
+      block.append(fmrSessionLine(f, card && card.sessionDate));
+      const cov = fmrCoverageLine(f);
+      if (cov) block.append(cov);
+      host.append(block);
+    }
+
+    const notes = panel.notes || {};
+    appendNotes(host, [notes.what, notes.absence, notes.rank, notes.timing, notes.units],
+                "About this market-wide join");
+  }
+
   const DRAW = {
     gamma: P.gamma,
     aggressor: drawAggressor,
@@ -4039,6 +4329,7 @@
     path: P.path,
     context: P.context,
     congress: P.congress,
+    marketRank: drawMarketRank,
     darkpool: drawDarkpool,
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
@@ -4434,8 +4725,9 @@
       blurb: "What actually traded: the lifted strikes, the largest lines, " +
         "the session path and the off-exchange prints." },
     { key: "context", label: "Context", hash: "ftg-context",
-      blurb: "Where this session sits in the name’s own year, and who " +
-        "has disclosed a trade in it." },
+      blurb: "Where this session sits in the name’s own year, who has " +
+        "disclosed a trade in it, and whether it places against the rest " +
+        "of the market." },
   ];
 
   const PANEL_CHROME = {
@@ -4460,6 +4752,7 @@
     oiDeltas: { group: "tape", tier: "table" },
     context: { group: "context", tier: "lead" },
     congress: { group: "context", tier: "table" },
+    marketRank: { group: "context", tier: "reading" },
   };
 
   /* THE CHROME'S RULES ARE IN assets/css/flows.css, under "the workspace

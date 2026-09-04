@@ -18,6 +18,8 @@ import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
   buildCalendar, buildDisplacement, buildPricedMove, buildContext, buildSurface,
   buildCohort, COHORT_ROWS, COHORT_NOTES,
+  indexMarketCross, indexCrossFeed, readCrossFeed, buildMarketCross,
+  measureOrder, measureOiBasis, CROSS_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
@@ -1079,4 +1081,250 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c.notes, COHORT_NOTES, "the notes ride on the panel rather than on the renderer");
 }
 
-console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, and a cohort panel that finally names the cross-section the score was neutralised against`);
+
+/* ---------- the market-wide join: rank, cut, session, coverage ------
+
+   WHAT THIS PANEL IS FOR, and why the tests below are shaped the way they
+   are. The card already spends a per-name dark-pool call and a per-name
+   open-interest call on every deep name, and neither can answer "compared
+   with what" — a request for one name carries no other names in it. The
+   pulse leg fetches the two MARKET-WIDE feeds once a run for the market
+   page, and joining those onto the cards costs nothing and supplies exactly
+   the missing cross-section.
+
+   The three things that would make the panel worse than nothing, each with
+   its own block below:
+
+     an absence read as a silence — the feeds are SELECTIONS, and a name
+     that is not in one still had open interest and still had prints;
+
+     a rank read as today's — the vendor updates the market-wide
+     open-interest feed at about 06:45 ET and this pipeline runs at 05:15,
+     so the ranking is usually the PREVIOUS session's;
+
+     a cut-off asserted over a list that is not ordered, or over a list that
+     the request never truncated at all. */
+{
+  const oiRow = (t, change, i) => ({
+    option_symbol: `${t}260918C0015${i}000`,
+    underlying_symbol: t,
+    oi_change: String(change),
+    last_oi: 40000,
+    curr_oi: 40000 + change,
+    curr_date: "2026-08-21", last_date: "2026-08-20",
+  });
+  /* Descending, as the vendor documents this route to be, so the ordering
+     is measurable and the last row is a real threshold. */
+  const oiRaw = { data: [
+    oiRow("AAA", 9000, 1), oiRow("BBB", 5000, 2), oiRow("AAA", 4000, 3),
+    oiRow("CCC", 1000, 4), oiRow("DDD", -2000, 5),
+  ] };
+  const dpRaw = { data: [
+    { ticker: "BBB", premium: "8000000", executed_at: "2026-08-21T19:59:00Z", price: "10", size: 800000 },
+    { ticker: "AAA", premium: "3000000", executed_at: "2026-08-21T19:40:00Z", price: "10", size: 300000 },
+    { ticker: "EEE", premium: "9000000", executed_at: "2026-08-21T19:02:00Z", price: "10", size: 900000 },
+  ] };
+  const names = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"];
+  const idx = indexMarketCross({
+    oiChange: oiRaw, darkpool: dpRaw,
+    limits: { oiChange: 5, darkpool: 100 },
+    tickers: names, sessionDate: "2026-08-24",
+  });
+
+  /* ---- the ordering is MEASURED, never taken from the documentation ---- */
+  eq(measureOrder([9, 5, 4, 1, -2]), "descending", "a falling list is descending");
+  eq(measureOrder([1, 2, 3]), "ascending", "and a rising one ascending");
+  eq(measureOrder([1, 3, 2]), null, "a list that turns is neither, and says so");
+  eq(measureOrder([4, 4, 4]), null,
+     "a list of identical values is reported as UNORDERED rather than as descending — it " +
+     "satisfies both tests, and the reading that claims least is the honest one");
+  eq(measureOrder([9, null, 4]), null,
+     "one gap makes the sequence unjudgeable: an ordering measured across a hole is a " +
+     "claim about rows nobody read");
+  eq(measureOrder([7]), null, "one row is not an order");
+
+  /* ---- and so is the UNIT, against the vendor's own two snapshots ------ */
+  eq(measureOiBasis([{ oi_change: "500", curr_oi: 1500, last_oi: 1000 }]).basis, "contracts",
+     "a change that reconciles with curr_oi minus last_oi is a CONTRACT COUNT");
+  /* The vendor's own published example, verbatim from docs/uw-openapi.yaml:
+     oi_change 15.6149… beside curr_oi 35207 and last_oi 2119, which is
+     (35207 − 2119) / 2119 — a RATIO, not a count, and 33088 contracts is
+     carried separately as oi_diff_plain. Rendering that 15.61 as "+16
+     contracts" would be a confident wrong reading of a correct number. */
+  eq(measureOiBasis([
+    { oi_change: "15.6149126946672959", curr_oi: 35207, last_oi: 2119 },
+    { oi_change: "0.21534300646906180330", curr_oi: 33253, last_oi: 27361 },
+  ]).basis, "ratio",
+     "and the vendor's own documented example reconciles as a RATIO of the previous " +
+     "snapshot — the two forms are what this reconciliation exists to tell apart");
+  eq(measureOiBasis([{ oi_change: "9", curr_oi: 500, last_oi: 100 }]).basis, null,
+     "a change that reconciles as neither resolves to no basis at all, rather than to the " +
+     "more plausible-looking of two guesses");
+  eq(measureOiBasis([{ oi_change: "5" }]).checked, 0,
+     "rows without both snapshots are not checked, and an unchecked row votes for nothing");
+
+  /* ---- the name that placed ------------------------------------------- */
+  const a = readCrossFeed(idx.oiChange, "AAA");
+  eq(a.status, "ok", "a name inside the feed reads ok");
+  eq(a.present, true, "and says so as data");
+  eq(a.rank, 1, "its rank is the BEST position it holds, not its last");
+  eq(a.population, 5, "and the rank travels with the population it sits inside");
+  eq(a.count, 2, "with the number of its own rows in the feed, so one line and a whole book " +
+     "are not the same reading");
+  eq(a.value, 9000, "the value it ranked on is published");
+  eq(a.unit, "contracts", "with its unit");
+  eq(a.unitOne, "contract", "and the singular that agrees with a value of one");
+  eq(a.kind, "count", "and the kind a renderer needs to format it at all");
+
+  /* ---- the name that did not, which is a MEASURED absence ------------- */
+  const f = readCrossFeed(idx.oiChange, "FFF");
+  eq(f.status, "quiet",
+     "a name the feed was READ without finding is QUIET, not unavailable: the request " +
+     "succeeded and the market answered, and only the third silence is a fact about the market");
+  eq(f.present, false, "and it is present:false rather than a missing key");
+  eq(f.population, 5, "the absence still carries the population it was measured against");
+  eq(f.cut, -2000, "and the value the last place actually held, so a near miss and a name " +
+     "nowhere near it are different readings on the page");
+  eq(f.ordered, "descending", "which is only a cut-off because the ordering was measured");
+  eq(f.capped, true,
+     "and the feed FILLED the five rows this call asked for, so the name really was below a cut");
+  ok(/did not/.test(f.reason) === false && /is not in/.test(f.reason),
+     "the sentence states the absence without claiming the name was quiet");
+  ok(/selection, not about this name's own/.test(f.reason),
+     "and says outright that this is a fact about a market-wide selection rather than " +
+     "about the name — the reading that turns 'not extreme today' into 'nothing happened' " +
+     "is the one this panel exists to prevent");
+  ok(!("rank" in f) && !("value" in f),
+     "a name outside the feed carries NO rank and NO value: a rank of zero or a value of " +
+     "zero would be the confident-zero defect wearing a cross-section's clothes");
+
+  /* ---- a list nothing was cut from is not a cut ------------------------ */
+  const loose = indexMarketCross({
+    oiChange: oiRaw, darkpool: dpRaw,
+    limits: { oiChange: 100, darkpool: 100 },
+    tickers: names, sessionDate: "2026-08-24",
+  });
+  eq(loose.oiChange.capped, false,
+     "five rows against a request for a hundred is a feed that was not truncated by this run");
+  ok(/fewer rows than the 100 requested/.test(readCrossFeed(loose.oiChange, "FFF").reason),
+     "and the absence says so, because 'below the cut' would assert a threshold this run " +
+     "never imposed");
+
+  /* ---- the recency feed's cut is a TIME, not a size ------------------- */
+  const dp = readCrossFeed(idx.darkpool, "AAA");
+  eq(dp.ordered, "descending", "the print feed came back newest first");
+  eq(dp.orderedBy, "execution time, newest first",
+     "and the ordering is named, because a rank inside a recency list means something " +
+     "entirely different from a rank inside a size list");
+  eq(dp.cut, null, "so there is no dollar cut-off to quote");
+  eq(dp.cutAt, "2026-08-21T19:02:00Z",
+     "and the cut is the TIME the market-wide window reaches back to — the fact that " +
+     "actually decides whether a name could have been in it");
+  eq(dp.kind, "money", "the print's size is money");
+  eq(dp.at, "2026-08-21T19:40:00Z", "and its own print carries the stamp it was ranked at");
+
+  /* ---- the timing trap, in all three of its states ------------------- */
+  eq(idx.oiChange.asOf, "2026-08-21", "the feed publishes the session ITS OWN ROWS describe");
+  eq(idx.oiChange.asOfStated, true, "and says that it stated one");
+  eq(idx.oiChange.sameSession, false,
+     "which is NOT the session the cards describe — the vendor updates this feed at about " +
+     "06:45 ET and this pipeline runs at 05:15, so a live join is normally a prior " +
+     "session's cross-section laid onto today's per-name data");
+  const sameDay = indexMarketCross({
+    oiChange: oiRaw, darkpool: dpRaw, limits: { oiChange: 5 },
+    tickers: names, sessionDate: "2026-08-21",
+  });
+  eq(sameDay.oiChange.sameSession, true, "a feed dated to the card's own session says so");
+  const undated = indexMarketCross({
+    oiChange: { data: oiRaw.data.map((r) => ({ ...r, curr_date: undefined })) },
+    darkpool: dpRaw, limits: { oiChange: 5 },
+    tickers: names, sessionDate: "2026-08-24",
+  });
+  eq(undated.oiChange.asOfStated, false, "a feed that states no date of its own says THAT");
+  eq(undated.oiChange.sameSession, null,
+     "and sameSession is NULL, never false: 'this ranking is from another session' and " +
+     "'nobody said which session this ranking is from' are different facts, and the " +
+     "second must not render as the first");
+  eq(readCrossFeed(undated.oiChange, "AAA").asOf, null,
+     "the per-name reading carries the refusal too, rather than borrowing the card's date");
+
+  /* ---- the three silences, at the feed level -------------------------- */
+  eq(indexCrossFeed("oiChange", undefined, { tickers: names }).status, "unavailable",
+     "a feed the run never carried in is unavailable");
+  eq(indexCrossFeed("oiChange", { __failed: "HTTP 500" }, { tickers: names }).status, "unavailable",
+     "and so is one whose fetch threw");
+  ok(/HTTP 500/.test(indexCrossFeed("oiChange", { __failed: "HTTP 500" }, {}).reason),
+     "with the vendor's own reason carried through rather than paraphrased");
+  const emptyFeed = indexCrossFeed("darkpool", { data: [] },
+    { limit: 100, tickers: names, sessionDate: "2026-08-24" });
+  eq(emptyFeed.status, "quiet",
+     "a feed that ANSWERED and held nothing is quiet — the request worked and the market " +
+     "was silent, which is the one arm of the three that is a reading");
+  eq(emptyFeed.coverage.in, 0, "its coverage is a measured zero rather than an absent count");
+  ok(/none missed it/.test(readCrossFeed(emptyFeed, "AAA").reason),
+     "and a name's reading against an empty feed says nobody made it and nobody missed it, " +
+     "which is not the same sentence as missing a cut");
+
+  /* ---- never a confident zero at the row level ------------------------ */
+  const gappy = indexCrossFeed("oiChange", { data: [
+    { underlying_symbol: "AAA", oi_change: null, curr_oi: 10, last_oi: 5 },
+    { underlying_symbol: "BBB", oi_change: "300", curr_oi: 305, last_oi: 5 },
+  ] }, { limit: 100, tickers: ["AAA", "BBB"] });
+  eq(gappy.population, 1,
+     "a row whose change the vendor did not publish is counted OUT of the population, not " +
+     "carried at zero — Number(null) is 0 and a zero here would rank a name on a reading " +
+     "nobody took");
+  eq(readCrossFeed(gappy, "AAA").present, false,
+     "so the name with the unpublished change reads as not in the feed rather than as a " +
+     "contract change of nothing");
+
+  /* ---- the panel, and its own three arms ------------------------------ */
+  const panel = buildMarketCross(idx, "AAA", { asOf: "2026-08-24" });
+  eq(panel.status, "ok", "the panel is ok when at least one feed was measured");
+  eq(panel.asOf, "2026-08-24", "and carries the session the CARD describes");
+  eq(panel.feeds.oiChange.rank, 1, "with each feed's own reading under its own key");
+  eq(panel.coverage.oiChange.of, 10, "and the coverage of the join across the deep names");
+  eq(panel.coverage.oiChange.in, 4,
+     "measured, not asserted: four of the ten names carded appear in this feed");
+  eq(panel.coverage.darkpool.in, 3, "and three of them in the print feed");
+  eq(panel.notes, CROSS_NOTES, "the prose rides on the payload, since shared/ never reaches a browser");
+
+  eq(buildMarketCross(null, "AAA").status, "unavailable",
+     "no index at all is an unavailability, not an absence of market activity");
+  const bothDown = buildMarketCross({
+    oiChange: indexCrossFeed("oiChange", { __failed: "timeout" }, {}),
+    darkpool: indexCrossFeed("darkpool", null, {}),
+  }, "AAA");
+  eq(bothDown.status, "unavailable", "and so is a run where neither feed could be read");
+  const halfDown = buildMarketCross({
+    oiChange: idx.oiChange,
+    darkpool: indexCrossFeed("darkpool", { __failed: "timeout" }, {}),
+  }, "AAA");
+  eq(halfDown.status, "ok",
+     "but ONE feed down and one read is an ordinary run, and the reader gets the half " +
+     "that exists rather than a blank panel");
+  eq(halfDown.feeds.darkpool.status, "unavailable", "with the dead half saying which it is");
+
+  /* ---- and it is on the card the pipeline builds --------------------- */
+  /* The thinnest card that can be built: this block is about the panel
+     reaching card.panels at all, and every other input is already exercised
+     by the source-ablation sweep above. */
+  const bare = { ticker: "AAA", row: { close: "100" }, features: {}, sessionDate: "2026-08-24" };
+  eq(buildCard({ ...bare, marketCross: idx }).panels.marketRank.status, "ok",
+     "buildCard mounts the join as a panel of its own");
+  eq(buildCard({ ...bare, marketCross: idx }).panels.marketRank.feeds.oiChange.rank, 1,
+     "carrying this name's own reading rather than the whole index");
+  eq(buildCard(bare).panels.marketRank.status, "unavailable",
+     "and a card built without the index says so rather than omitting the key, which is " +
+     "what lets a renderer tell a failed run from a card that predates the join");
+
+  /* ---- the notes carry the refusals, in the payload's own words ------- */
+  ok(/SELECTIONS/.test(CROSS_NOTES.absence),
+     "the payload states in words that these lists are selections rather than the market");
+  ok(/06:45/.test(CROSS_NOTES.timing) && /05:15/.test(CROSS_NOTES.timing),
+     "and names both clocks, which is the whole of the timing trap");
+  ok(/population/.test(CROSS_NOTES.rank),
+     "and says a rank is meaningless without the population beside it");
+}
+
+console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, a cohort panel that finally names the cross-section the score was neutralised against, and a market-wide join whose ordering and unit are MEASURED rather than assumed, whose absences are quiet with the cut they missed, and whose rank never claims the session it was not read in`);

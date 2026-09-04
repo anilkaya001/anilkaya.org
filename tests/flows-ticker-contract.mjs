@@ -866,6 +866,219 @@ try {
     await page.close();
   }
 
+
+  /* ---------- 6c'. the market-wide standing: three arms, one date ------
+
+     THE PANEL THIS SUITE CARES MOST ABOUT GETTING WRONG. Every other panel
+     on the page reports a measurement of ONE name; this one reports where
+     that name sits among all the others, and there are exactly three ways to
+     turn that into a lie a reader would act on:
+
+       reading an absence as a silence — the two feeds are SELECTIONS, and a
+       name outside one still had open interest and still had prints;
+
+       reading yesterday's cross-section as today's — the vendor updates its
+       market-wide open-interest feed at about 06:45 ET and this pipeline
+       runs at 05:15, so the ranking is normally the PREVIOUS session's;
+
+       reading a rank without its population — "14th" is not a reading, "14th
+       of 40" is.
+
+     Each has an assertion below, taken off the rendered DOM rather than off
+     the payload, because the payload has been right and the page wrong
+     before. */
+  {
+    const base = withChain.find((c) =>
+      c.panels.marketRank &&
+      c.panels.marketRank.status === "ok" &&
+      c.panels.marketRank.feeds.oiChange.status === "ok" &&
+      c.panels.marketRank.feeds.darkpool.status === "ok");
+    ok(base, "an emitted card places in both market-wide feeds");
+    const card = JSON.parse(JSON.stringify(base));
+    /* A NEGATIVE OPEN-INTEREST CHANGE, STAGED. The emitted corpus ranks
+       descending, so its top rows are positive and the sign glyph on the
+       negative side would never be drawn by a card that ranks at all. */
+    card.panels.marketRank.feeds.oiChange.value = -4200;
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker });
+
+    const got = await page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
+      const blocks = [...host.querySelectorAll(".fmr-block")];
+      const textOf = (n) => (n ? n.textContent : null);
+      return {
+        blocks: blocks.length,
+        heads: blocks.map((b) => textOf(b.querySelector(".fmr-h"))),
+        ranks: blocks.map((b) => textOf(b.querySelector(".fmr-rank"))),
+        vals: blocks.map((b) => textOf(b.querySelector(".fmr-val"))),
+        valClasses: blocks.map((b) => (b.querySelector(".fmr-val") || { className: "" }).className),
+        when: blocks.map((b) => textOf(b.querySelector(".fmr-when"))),
+        cut: blocks.map((b) => textOf(b.querySelector(".fmr-cut"))),
+        cover: blocks.map((b) => textOf(b.querySelector(".fmr-cover"))),
+        empties: [...host.querySelectorAll("[data-empty]")].map((n) => n.getAttribute("data-empty")),
+        all: host.textContent,
+      };
+    });
+
+    eq(got.blocks, 2, "both market-wide feeds get their own block, because they carry " +
+       "different populations, different orderings and different sessions");
+    ok(/Open-interest/.test(got.heads[0]) && /Off-exchange/.test(got.heads[1]),
+       "each under its own heading");
+
+    /* A RANK IS NEVER PRINTED ALONE. */
+    for (let i = 0; i < 2; i++) {
+      ok(/\d+ of \d+/.test(got.ranks[i] || ""),
+         `${got.heads[i]}: the rank is printed with the population it sits inside ` +
+         `("${got.ranks[i]}") — a bare ordinal is a number a reader cannot size`);
+    }
+
+    /* SIGN IN THE GLYPH, and the tone class only decorates it. */
+    ok(got.vals[0].startsWith("−"),
+       `a negative open-interest change leads with U+2212 ("${got.vals[0]}"), so the reading ` +
+       "survives greyscale and a printout");
+    ok(/is-down/.test(got.valClasses[0]),
+       "with the tone class as decoration on top of a sign that is already in the text");
+    ok(/contract/.test(got.vals[0]),
+       `and the unit travels with the number ("${got.vals[0]}")`);
+
+    /* THE SESSION THE RANKING IS FROM. The emitted corpus reproduces the
+       05:15-against-06:45 gap, so this is the branch a live run takes. */
+    ok(/NOT the session this card describes/.test(got.when[0]),
+       `the panel says outright that the ranking is from another session ("${got.when[0]}")`);
+    ok(new RegExp(card.panels.marketRank.feeds.oiChange.asOf).test(got.when[0]),
+       "naming the feed's own date rather than the card's");
+
+    /* THE CUT, IN THE UNITS EACH FEED EARNS: a value for the ranked-by-size
+       feed and a TIME for the ranked-by-recency one. */
+    ok(/last place in the feed held/.test(got.cut[0]),
+       `the open-interest block quotes the value at the last place ("${got.cut[0]}")`);
+    ok(/reaches back to/.test(got.cut[1]),
+       `and the print block quotes the time the window reaches back to, which is the fact ` +
+       `that decides whether a name could have been in a recency list ("${got.cut[1]}")`);
+
+    /* THE COVERAGE OF THE JOIN, ON THE CARD. */
+    for (let i = 0; i < 2; i++) {
+      ok(/\d+ of \d+ names? carrying a card/.test(got.cover[i] || ""),
+         `${got.heads[i]}: the panel states how much of the board this join reached ` +
+         `("${got.cover[i]}")`);
+    }
+
+    /* NO CLAIM THIS PANEL CANNOT MAKE. */
+    ok(!/\bbullish\b|\bbearish\b|\bbuying\b|\bselling\b/i.test(got.all),
+       "and it never attributes a side or an intent: membership in a market-wide list is " +
+       "not a direction");
+    eq(errors.length, 0, "the panel draws without throwing");
+    await page.close();
+  }
+
+  {
+    /* THE OTHER TWO ARMS, STAGED BY NAME. A measured absence is `quiet` and
+       must not wear the Unavailable banner; a feed that could not be read is
+       `unavailable` and must; a card from before the join shipped carries no
+       key at all and gets ITS OWN wave's sentence rather than the deep
+       feeds'. Three silences, three sentences, three tags. */
+    const card = JSON.parse(JSON.stringify(withChain[0]));
+    const quiet = withChain
+      .map((c) => c.panels.marketRank && c.panels.marketRank.feeds.oiChange)
+      .find((f) => f && f.status === "quiet");
+    ok(quiet, "the emitted corpus contains a name that is in no market-wide list");
+    card.panels.marketRank.feeds.oiChange = JSON.parse(JSON.stringify(quiet));
+    card.panels.marketRank.feeds.darkpool = {
+      status: "unavailable", present: null, feed: "darkpool",
+      label: "the market-wide off-exchange print feed",
+      reason: "the market-wide off-exchange print feed did not come back this run (timeout)",
+    };
+
+    const legacy = JSON.parse(JSON.stringify(withChain[0]));
+    delete legacy.panels.marketRank;
+
+    const page = await browser.newPage({ viewport: { width: 320, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker });
+
+    const got = await page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
+      const blocks = [...host.querySelectorAll(".fmr-block")];
+      return {
+        tags: blocks.map((b) => {
+          const n = b.querySelector("[data-empty]");
+          return n ? n.getAttribute("data-empty") : null;
+        }),
+        texts: blocks.map((b) => b.textContent),
+        /* THE PANEL MUST NOT TAKE THE PAGE SIDEWAYS AT 320px, and this
+           panel is the one at risk: it is the only reading on the page whose
+           values are prose-length strings — a unit phrase, a UTC stamp, a
+           whole absence sentence — rather than a table inside a scrolling
+           wrapper.
+
+           MEASURED AS A SPILL, NOT AS scrollWidth. Every .ft-panel on this
+           page reports the same 15px of scrollWidth over clientWidth from
+           its own chrome, so a scrollWidth test would fail identically on all
+           twenty-two and would be measuring the box rather than the content.
+           What matters is whether any descendant's right edge passes the
+           panel's own — and, one level up, whether the DOCUMENT scrolls
+           sideways at all. */
+        spill: (() => {
+          const s = document.querySelector('.ft-panel[data-panel="marketRank"]');
+          const right = s.getBoundingClientRect().right;
+          let worst = 0;
+          const walk = (n) => {
+            for (const c of n.children) {
+              worst = Math.max(worst, c.getBoundingClientRect().right - right);
+              walk(c);
+            }
+          };
+          walk(s);
+          return Math.round(worst);
+        })(),
+        pageSideways: document.documentElement.scrollWidth -
+                      document.documentElement.clientWidth,
+      };
+    });
+
+    eq(got.tags[0], "quiet",
+       "a name the feed was READ without finding is tagged quiet — the request succeeded and " +
+       "the market answered, and only the third silence is a fact about the market");
+    ok(!/Unavailable\./.test(got.texts[0]),
+       "and it never wears the Unavailable banner");
+    ok(/is not in the market-wide open-interest change feed/.test(got.texts[0]),
+       `carrying the publisher's own sentence ("${got.texts[0].slice(0, 90)}")`);
+    ok(/rows covering/.test(got.texts[0]),
+       "which still reports the population the absence was measured against");
+    ok(/last place in the feed held|fewer rows than/.test(got.texts[0]),
+       "and the cut it did not clear, so a near miss and a name nowhere near it read " +
+       "differently");
+
+    eq(got.tags[1], "unavailable", "a feed that did not come back is tagged unavailable");
+    ok(/Unavailable\./.test(got.texts[1]), "and does wear the banner");
+    ok(/timeout/.test(got.texts[1]), "with the reason it was given, verbatim");
+
+    ok(got.spill <= 0,
+       `at 320px nothing in the panel reaches past the panel's own edge (${got.spill}px)`);
+    ok(got.pageSideways <= 0,
+       `and the page itself does not scroll sideways with it mounted (${got.pageSideways}px)`);
+    await page.close();
+
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    page2.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page2, legacy, { ticker: legacy.ticker });
+    const said = await page2.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
+      const n = host.querySelector("[data-empty]");
+      return { tag: n ? n.getAttribute("data-empty") : null, text: host.textContent };
+    });
+    eq(said.tag, "unavailable", "a card built before the join shipped is an unavailability");
+    ok(/before the market-wide join shipped/.test(said.text),
+       "dated by ITS OWN wave — telling this reader the card predates the per-name deep " +
+       "feeds would be a confident wrong fact about which card they are looking at");
+    eq(errors.length, 0, "neither silence throws");
+    await page2.close();
+  }
+
   /* ---------- 6d. the open-interest basis note --------------------
 
      THE CAPTION USED TO MAKE A CLAIM THE PAYLOAD HAD ALREADY REFUTED.
@@ -2258,10 +2471,12 @@ console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup,
   `and cannot shrink the panels it exists for, absent and unavailable told apart, the ` +
   `three stock panels rendering the payload's own numbers and notes with quiet, ` +
   `unavailable and pre-wave absence held apart, a rank that is never rescaled and ` +
-  `a strip that never bridges a gap, twenty-one panels grouped into five contiguous ` +
+  `a strip that never bridges a gap, twenty-two panels grouped into five contiguous ` +
   `sections with one lead each and an index that links to every one of them, a page ` +
   `that opens on the overnight move with its gap and its dead-band crossing rather ` +
   `than on a snapshot — with a measured zero told from an unmeasured session in both ` +
   `directions — deep links that survive a hidden grid and a hostile hash, and a gated ` +
   `name that is finally told the gate removed it instead of being pointed at a watch ` +
-  `list it cannot be on`);
+  `list it cannot be on, and a market-wide standing whose rank never appears without the ` +
+  `population it sits inside, whose absence is quiet and carries the cut it missed, and ` +
+  `which says on the page that the cross-section it ranks in is a prior session's`);
