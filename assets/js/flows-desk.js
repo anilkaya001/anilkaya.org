@@ -193,17 +193,25 @@
     return base + Math.max(0, (Date.now() - at) / 1000);
   }
 
-  /** The oldest quote on the table right now, or null if nothing is priced. */
-  function oldestQuoteAge() {
-    let oldest = null;
+  /** The age of the oldest quote on the table, and how many priced symbols
+   *  could not state one: { oldest, unaged }.
+   *
+   *  TWO SILENCES, KEPT APART. `oldest` is null both when nothing is priced and
+   *  when everything priced arrived without an age, and those are not the same
+   *  reading — the first is a desk with no table, the second is a table whose
+   *  freshness the route did not publish. Returning one null for both is how
+   *  the status line came to say nothing at all in the second case, which is
+   *  indistinguishable from a fresh desk. */
+  function quoteAge() {
+    let oldest = null, unaged = 0;
     for (const symbol of selectedSymbols()) {
       const state = book.get(symbol);
-      if (!state || state.state !== "ok") continue;
+      if (!state || state.state !== "ok" || !state.payload) continue;
       const age = ageOf(state.payload);
-      if (age === null) continue;
+      if (age === null) { unaged++; continue; }
       if (oldest === null || age > oldest) oldest = age;
     }
-    return oldest;
+    return { oldest, unaged };
   }
 
   /* ---------- buying power ----------------------------------------
@@ -352,8 +360,18 @@
     parts.push((priced !== null && shown < priced
       ? fmtInt(shown) + " of " + fmtInt(priced)
       : fmtInt(priced)) + " sellable" + (p.truncated ? " of a partial chain" : ""));
-    const age = fmtAge(ageOf(p));
-    if (age) parts.push(age);
+    /* AN AGE, OR THE SENTENCE THAT THERE ISN'T ONE — never neither. The chip
+       used to append the age only when it had one, so a payload whose response
+       carried no X-Chain-Age rendered exactly like a fresh one: no age, no
+       claim, nothing to notice. On a page whose header promises that every
+       number says how old it is, an omitted age reads as "this table does not
+       need one". It is a different silence from "measured, and it is nought
+       seconds", and only the second is a freshness claim. */
+    const seconds = ageOf(p);
+    /* Terse here and a full sentence in the status line, because this element
+       is clipped at 14rem with an ellipsis: a clause long enough to be cut in
+       half would report the silence by disappearing into it. */
+    parts.push(seconds === null ? "age not stated" : fmtAge(seconds));
     return parts.join(" · ");
   }
 
@@ -436,29 +454,50 @@
 
   /* ---------- fetching -------------------------------------------- */
 
+  /* WHICH KEY THE ROUTE IS ASKED FOR, given the key the select holds.
+
+     THE SERVER RANKS TO DECIDE WHAT TO TRUNCATE, not to decide what the reader
+     sees — the merged table is re-sorted here. That distinction only matters
+     for one key. "Premium collectible" is contracts x premium, and contracts
+     depends on a balance the Worker deliberately never learns, so it cannot be
+     a server rank at all.
+
+     Its proxy is yield on collateral, and the substitution is exact enough to
+     name: collectible = floor(bp/C)*P, and since floor(x) > x-1 that sits in
+     (bp*P/C - P, bp*P/C]. Ranking by P/C therefore orders the same rows, except
+     where two lines' bp*yield differ by less than a single contract's premium.
+     So the 120 rows the Worker keeps are the right 120 to keep.
+
+     THIS IS A FUNCTION RATHER THAN AN EXPRESSION INSIDE fetchOne because the
+     re-rank handler has to ask the same question — "would the route rank this
+     differently?" — and a second copy of the mapping is how the two answers
+     drift. Five options in the select, four keys on the wire. */
+  function serverRank(key) {
+    return key === "collectible" ? "yieldOnCollateral" : key;
+  }
+
   async function fetchOne(symbol, { refresh = false } = {}) {
     const state = book.get(symbol);
     if (!state) return;
     state.state = "loading";
     state.error = null;
+    /* WHICH REQUEST FOR THIS SYMBOL THIS IS. Changing the ranking now sends the
+       cut names back to the chain, and a <select> fires `change` on every arrow
+       key, so three requests for one symbol can be in flight under three
+       different keys at once. They do not come back in the order they were
+       sent — the browser is free to hand the second one over before the first —
+       and the last writer won, which left the table holding a slice the select
+       no longer names under a footnote naming an ordering nobody chose. A
+       superseded response is dropped rather than rendered: it is not bad data,
+       it is the answer to a question the reader has already moved on from. */
+    const seq = (state.seq || 0) + 1;
+    state.seq = seq;
     renderList();
 
-    /* THE SERVER RANKS TO DECIDE WHAT TO TRUNCATE, not to decide what the
-       reader sees — the merged table is re-sorted here. That distinction only
-       matters for one key. "Premium collectible" is contracts x premium, and
-       contracts depends on a balance the Worker deliberately never learns, so
-       it cannot be a server rank at all.
-
-       Its proxy is yield on collateral, and the substitution is exact enough
-       to name: collectible = floor(bp/C)*P, and since floor(x) > x-1 that sits
-       in (bp*P/C - P, bp*P/C]. Ranking by P/C therefore orders the same rows,
-       except where two lines' bp*yield differ by less than a single contract's
-       premium. So the 120 rows the Worker keeps are the right 120 to keep. */
-    const wanted = rankSel ? rankSel.value : "annualized";
     const params = new URLSearchParams({
       t: symbol,
       strategy: strategySel ? strategySel.value : "both",
-      rank: wanted === "collectible" ? "yieldOnCollateral" : wanted,
+      rank: serverRank(rankSel ? rankSel.value : "annualized"),
     });
     if (refresh) params.set("refresh", "1");
 
@@ -473,24 +512,53 @@
         location.replace("/flows/");
         return;
       }
-      const age = Number(response.headers.get("X-Chain-Age"));
+      /* THE AGE HEADER, TESTED FOR ABSENCE BEFORE IT IS COERCED. `headers.get`
+         answers null for a header that was not sent and Number(null) is 0 and
+         Number.isFinite(0) is true, so the previous line published an ABSENT
+         age as an age of nought: a body of unknown vintage rendered as "just
+         now". That is this repository's oldest scar wearing a header for a
+         disguise, and it is worse here than usual because zero is also a real
+         reading — the route sends X-Chain-Age: 0 on a cache miss and means
+         measured-fresh. isNum() keeps those two apart; nothing else does. */
+      const age = isNum(response.headers.get("X-Chain-Age"));
       const body = await response.json().catch(() => null);
+      /* A NEWER REQUEST FOR THIS SYMBOL HAS BEEN SENT while this one was in the
+         air. Writing here would overwrite it, or be overwritten by it, at the
+         mercy of the network. Neither is rendered. */
+      if (state.seq !== seq) return;
       if (!response.ok) {
         state.state = "error";
         state.error = messageFor(response.status, body);
+        state.payload = null;
+      } else if (!body) {
+        /* A 200 THAT DID NOT PARSE IS NOT A PRICE. This landed in the "ok"
+           branch with a null payload, which rendered a chip carrying a
+           checkbox and no note at all, contributed no rows, and was still
+           counted by the status line among the symbols priced — a desk
+           claiming a table it does not have. The three silences are three
+           different sentences and this is the second of them: the response
+           arrived and could not be read. Nothing on the page said so. */
+        state.state = "error";
+        state.error = "unreadable response";
         state.payload = null;
       } else {
         state.state = "ok";
         state.payload = body;
         /* THE HEADER'S AGE AND THE INSTANT IT WAS TRUE, together. Storing the
            first without the second is what froze the desk's clock: the number
-           is only an age when something says what it is an age FROM. */
-        if (body) {
-          body.__age = Number.isFinite(age) ? age : undefined;
-          body.__at = Number.isFinite(age) ? Date.now() : undefined;
-        }
+           is only an age when something says what it is an age FROM.
+
+           No `if (body)` around this any more: an unparsed body is an error
+           branch above, so reaching here means there is one to stamp. The
+           guard survived the branch it was guarding against, which is how a
+           condition becomes a claim nobody checks. */
+        body.__age = age === null ? undefined : age;
+        body.__at = age === null ? undefined : Date.now();
       }
     } catch {
+      /* Superseded here too: a failed older request must not stamp an error
+         over a newer one that is still on its way. */
+      if (state.seq !== seq) return;
       state.state = "error";
       state.error = "network error";
       state.payload = null;
@@ -539,27 +607,53 @@
   function render() {
     const chosen = selectedSymbols();
     const rows = [];
-    let screened = 0, priced = 0, shown = 0;
+    let screened = 0, priced = 0;
     const gatedTotals = Object.create(null);
     /* PER-SYMBOL SLICE EVIDENCE. A merged table cannot state one cut, because
        each symbol is sliced against its own chain: naming them separately is
        the only version of the sentence that reconciles. */
     const slices = [];
+    /* AND THE SYMBOLS WHOSE COUNTS THE PAYLOAD DID NOT STATE. See below: they
+       are named rather than added as nought. */
+    const uncounted = [];
 
     for (const symbol of chosen) {
       const state = book.get(symbol);
       if (!state || state.state !== "ok" || !state.payload) continue;
       const p = state.payload;
-      screened += isNum(p.screened) || 0;
-      priced += isNum(p.priced) || 0;
       const kept = (p.rows || []).length;
-      shown += kept;
+      const screenedN = isNum(p.screened);
       const sellable = isNum(p.priced);
+      /* A PAYLOAD THAT DOES NOT STATE ITS OWN COUNTS IS NAMED, NOT ADDED AS
+         ZERO. This was `screened += isNum(p.screened) || 0`, which turns a
+         missing count into a nought and folds it into a published total —
+         Number(null) is 0, this repository's oldest scar, and an accumulator is
+         where it hides best because the total still looks like a number. A
+         desk holding a chain whose counts went missing then announced "130 of
+         130 quoted contracts are sellable" over a table that also carried two
+         rows from a chain neither number counted.
+
+         BOTH OR NEITHER, because the two are a PAIR in the sentence they feed
+         ("N of M are sellable"). A symbol that can supply only one of them
+         would tilt the ratio, which is a subtler wrong number than a missing
+         one. A payload can lose a field for a dull reason — a body cached by
+         an earlier deploy, a shape that changed — and the honest answer is to
+         say which symbol is outside the totals. */
+      if (screenedN === null || sellable === null) uncounted.push(symbol);
+      else {
+        screened += screenedN;
+        priced += sellable;
+        /* THE GATE COUNTS BELONG TO THE SAME RECONCILIATION. The footnote's
+           standing claim is that excluded plus sellable equals screened, so a
+           symbol held out of those two totals has to be held out of this one
+           too — otherwise the partition below counts exclusions from a chain
+           whose screened total it just declined to count. */
+        for (const [reason, n] of Object.entries(p.gated || {})) {
+          gatedTotals[reason] = (gatedTotals[reason] || 0) + (isNum(n) || 0);
+        }
+      }
       if (sellable !== null && kept < sellable) {
         slices.push({ symbol, kept, sellable, rankedBy: p.rankedBy || null });
-      }
-      for (const [reason, n] of Object.entries(p.gated || {})) {
-        gatedTotals[reason] = (gatedTotals[reason] || 0) + (isNum(n) || 0);
       }
       for (const r of p.rows || []) rows.push({ ...r, __spot: p.spot });
     }
@@ -651,6 +745,14 @@
     const universe = cut.length
       ? priced + " of at least " + screened + " quoted contracts are sellable"
       : priced + " of " + screened + " quoted contracts are sellable";
+    /* Stated immediately after the totals it is missing from, because a reader
+       who has already moved on has read the pair as covering the whole table. */
+    const uncountedNote = uncounted.length
+      ? " " + uncounted.join(", ") + " " + (uncounted.length === 1 ? "is" : "are") +
+        " outside those two numbers: " + (uncounted.length === 1 ? "that payload" : "those payloads") +
+        " did not say how many contracts were screened or how many are sellable, and a count " +
+        "this page never received is not a count of nought."
+      : "";
     /* THE CUT, STATED. Until this sentence existed the footnote said "412 of
        1,940 quoted contracts are sellable" above a table holding 120 of them,
        and nothing on the page said a slice had been taken — which reads as
@@ -658,12 +760,25 @@
        needed: how many are here, how many there were, and the ordering that
        chose between them, because a top-120 by annualised yield and a top-120
        by premium are different hundred and twenty rows. */
+    /* THE SHORTFALL IS THE SUM OF THE CUTS THIS SENTENCE JUST ENUMERATED, and
+       it was `priced - shown`: two totals accumulated over EVERY selected
+       symbol, cut or not. Those agree only while every payload carries a
+       numeric `priced` — and `priced` is accumulated through `|| 0`, so a
+       payload that does not (a body cached by an earlier deploy, a shape that
+       loses the field) contributes nought to the total while its rows still
+       count toward what is shown. The published difference then under-states
+       the cut, and with enough such rows goes NEGATIVE: "−15 lines below the
+       cut are not on this table", printed with a hyphen where this file spells
+       minus U+2212. Summing the per-symbol evidence cannot do that: every term
+       is a measured `sellable` minus a counted `kept`, both of which the
+       sentence has already named out loud. */
+    const belowCut = slices.reduce((total, c) => total + (c.sellable - c.kept), 0);
     const sliceNote = slices.length
       ? " This table is a slice: " +
         slices.map((c) => c.symbol + " shows its top " + fmtInt(c.kept) + " of " +
           fmtInt(c.sellable) + " sellable lines, ranked by " + rankWord(c.rankedBy)).join("; ") +
-        " — " + fmtInt(priced - shown) + (priced - shown === 1 ? " line" : " lines") +
-        " below the cut " + (priced - shown === 1 ? "is" : "are") + " not on this table, " +
+        " — " + fmtInt(belowCut) + (belowCut === 1 ? " line" : " lines") +
+        " below the cut " + (belowCut === 1 ? "is" : "are") + " not on this table, " +
         "and re-sorting the ones that are cannot bring them back — so changing the " +
         "ranking refetches " +
         (slices.length === 1 ? "this name" : "these names") + " rather than reordering " +
@@ -674,6 +789,7 @@
         ? ". The rest fail a gate: " + dropped.join(", ") +
           " — each counted once, under the first gate it failed."
         : ".") +
+      uncountedNote +
       sliceNote +
       (cut.length
         ? " " + cut.join(", ") + " " + (cut.length === 1 ? "has" : "have") +
@@ -1706,8 +1822,16 @@
        is also redrawn by the age tick, which has no render pass to inherit an
        age from — and an age passed down a call chain is an age that goes stale
        the moment the chain is entered from somewhere else. */
-    const oldestAge = oldestQuoteAge();
+    const { oldest: oldestAge, unaged } = quoteAge();
     const age = oldestAge === null ? "" : " · quotes " + fmtAge(oldestAge);
+    /* NAMED, NOT OMITTED. A priced symbol whose response carried no age is a
+       symbol this desk cannot vouch for the freshness of, and saying nothing
+       about it leaves it looking like the ones it can. */
+    const unagedNote = unaged
+      ? " · " + (unaged === 1
+        ? "one symbol's quote age was not stated by the route"
+        : unaged + " symbols' quote ages were not stated by the route")
+      : "";
     /* AND THE POINT WHERE IT STOPS BEING A QUOTE. "42m ago" is honest and
        still easy to skim past; the desk says out loud that the table is no
        longer a price, and what to press. */
@@ -1762,7 +1886,7 @@
       ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " +
         failed.join(", ") + " unavailable"
       : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") +
-      session + age + staleQuotes + staleNote + earnNote;
+      session + age + staleQuotes + unagedNote + staleNote + earnNote;
   }
 
   function showEmpty(text) {
@@ -1978,9 +2102,20 @@
      of the controls, which scroll off the top of the page exactly when a
      reader deep in a long table wants to change the ranking.
 
-     ONE HELPER, THREE APPLICATIONS. The pattern is: pin it, give it a layer
-     above what slides underneath, and give it an opaque ground, because a
-     transparent sticky element shows the rows passing through it.
+     THE SAME THREE-PART PATTERN IN BOTH PLACES, WRITTEN OUT TWICE RATHER THAN
+     FACTORED, because the two applications share no argument beyond it: the
+     header pins to its own scroller and the controls pin to the page, so a
+     common helper would take an offset, an axis, a layer and a ground and
+     would be longer than either caller. The pattern is: pin it, give it a
+     layer above whatever slides underneath, and give it an opaque ground,
+     because a transparent sticky element shows the rows passing through it.
+
+     ONLY THE CONTROLS ARE GIVEN THEIR GROUND HERE. The header cells already
+     have one — `.flows-table thead th` paints var(--bg-deep) — so setting a
+     second from JavaScript would be a duplicate that survives the stylesheet
+     changing its mind. If that rule ever loses its background, this block is
+     where the header's bleed-through will be diagnosed, not where it is
+     caused.
 
      WHY THIS IS INLINE STYLE AND NOT A CLASS. The stylesheet is not this
      file's to change. An inline declaration is the strongest one there is,
@@ -2198,9 +2333,13 @@
     if (!sel) continue;
     sel.addEventListener("change", () => {
       writeURL();
-      /* Strategy changes what the API returns, so it must refetch. Rank is a
-         property of the merged table and is applied locally — refetching for
-         a sort would spend a vendor call to reorder rows already in hand. */
+      /* Strategy changes what the API returns, so it must refetch every
+         symbol. Rank is answered locally WHERE IT CAN BE — see the block
+         below, which sends back only the names whose chain was cut, because
+         for those the key did not merely order the rows, it chose them. This
+         comment used to end "refetching for a sort would spend a vendor call
+         to reorder rows already in hand", which was true of the rows in hand
+         and silently false about the rows that were not. */
       if (sel === strategySel) {
         for (const e of book.values()) { e.state = "idle"; e.payload = null; }
         renderList();
@@ -2235,10 +2374,28 @@
            any ordering, and spending a metered vendor call to reorder rows
            that are already in hand is exactly what the comment above forbids.
            `priced > rows.length` is the condition, read off the payload. */
+        const want = serverRank(sel.value);
         const recut = selectedSymbols().filter((sym) => {
           const p = (book.get(sym) || {}).payload;
-          const sellable = p ? isNum(p.priced) : null;
-          return sellable !== null && (p.rows || []).length < sellable;
+          if (!p) return false;
+          const sellable = isNum(p.priced);
+          if (sellable === null || (p.rows || []).length >= sellable) return false;
+          /* AND ONLY WHERE THE ROUTE WOULD ACTUALLY SLICE IT DIFFERENTLY. Five
+             options in this select map to four keys on the wire: "premium
+             collectible" needs a balance the Worker never learns, so it is
+             fetched as yield on collateral and sorted here. They are ADJACENT
+             options, so a reader arrowing between them sent every cut symbol
+             back to the route for a byte-identical slice — absorbed by the
+             route's cache while it is warm, since that cache is keyed by rank
+             and the key here does not change, and a metered vendor call once
+             it is not. Either way it is the waste the paragraph above says
+             this branch exists to avoid, committed by the branch itself.
+
+             `rankedBy` is the payload's own statement of the ordering it was
+             cut under. A payload that does not carry one is refetched: not
+             knowing which slice is in hand is not the same as knowing it is
+             the right one, and the safe direction is the vendor call. */
+          return p.rankedBy !== want;
         });
         render();
         /* NOT ANNOUNCED IN THE STATUS LINE. runPool() writes "Pricing N

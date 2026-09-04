@@ -1413,6 +1413,224 @@ try {
     await page.setViewportSize({ width: 390, height: 900 });
   }
 
+  /* ---------- five options in the select, four keys on the wire ----
+
+     "Premium collectible" is contracts x premium, and contracts need a balance
+     the Worker deliberately never learns, so it is fetched as yield on
+     collateral and sorted here. The two are ADJACENT options. The re-rank
+     refetch landed without noticing that, so arrowing one step between them
+     sent every cut symbol back to the route for a slice that cannot differ by
+     so much as a byte — the exact waste the refetch branch was written to
+     avoid, committed by the branch itself.
+
+     MEASURED AT THE BROWSER, NOT AT THE STUB UPSTREAM. The route's cache is
+     keyed by rank, and this pair shares a rank, so a wasted refetch is a cache
+     HIT: upstreamCalls never moves and cannot see the defect. What is spent is
+     the round trip, which only the page's own request log records. */
+  {
+    const twin = await context.newPage();
+    twin.on("pageerror", (e) => pageErrors.push(String(e)));
+    const asked = [];
+    twin.on("request", (req) => {
+      if (req.url().includes("/api/flows/chain")) {
+        asked.push(new URL(req.url()).searchParams.get("rank"));
+      }
+    });
+    await twin.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=yieldOnCollateral&bp=50000",
+      { waitUntil: "domcontentloaded" });
+    await twin.waitForFunction(
+      () => document.querySelectorAll("#deskBody tr").length === 120, null, { timeout: 20000 });
+    eq(asked.length, 1, `the first load asks the route once (${asked.join(",")})`);
+
+    const askedBefore = asked.length;
+    await twin.selectOption("#deskRank", "collectible");
+    /* Long enough for a refetch to have been issued if one was going to be:
+       the request goes out synchronously inside the change handler. */
+    await twin.waitForTimeout(500);
+    eq(asked.length, askedBefore,
+       `switching to the key that maps to the same server rank sends nothing (${asked.join(",")})`);
+    eq(await twin.locator("#deskBody tr").count(), 120,
+       "and the table is still the slice it already had");
+    ok(/ranked by yield on collateral/.test(await twin.locator("#deskFoot").textContent()),
+       "the footnote still names the ordering that CHOSE the slice, which is the payload's, not the select's");
+
+    /* THE OTHER HALF OF THE CONDITION, so the assertion above is not passing
+       on a page that has simply stopped refetching. One step further down the
+       same select is a different server key, and that one does go back. */
+    await twin.selectOption("#deskRank", "cushionSigmas");
+    await twin.waitForFunction(
+      () => /ranked by cushion/.test(document.getElementById("deskFoot").textContent),
+      null, { timeout: 20000 });
+    eq(asked.length, askedBefore + 1,
+       `a key the route ranks differently does go back to it (${asked.join(",")})`);
+    eq(asked[asked.length - 1], "cushionSigmas", "under the key the reader now wants");
+    await twin.close();
+  }
+
+  /* ---------- a slower answer to a question already withdrawn -----
+
+     A <select> fires `change` on every arrow key, and a change on a cut symbol
+     now issues a fetch, so three requests for one symbol can be in the air
+     under three different keys. They do not come back in the order they were
+     sent. Before the sequence guard the last one to ARRIVE won, which is not
+     the last one the reader asked for: the table then held a slice the select
+     no longer named, under a footnote naming an ordering nobody chose.
+
+     The premium request is held for a second and a half at the browser's
+     routing layer so the ordering is decided by this test rather than by the
+     loopback's mood. */
+  {
+    const racer = await context.newPage();
+    racer.on("pageerror", (e) => pageErrors.push(String(e)));
+    await racer.route("**/api/flows/chain**", async (route) => {
+      const rank = new URL(route.request().url()).searchParams.get("rank");
+      if (rank === "premium") await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await racer.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized",
+      { waitUntil: "domcontentloaded" });
+    await racer.waitForFunction(
+      () => document.querySelectorAll("#deskBody tr").length === 120, null, { timeout: 20000 });
+
+    await racer.selectOption("#deskRank", "premium");
+    await racer.selectOption("#deskRank", "cushionSigmas");
+    await racer.waitForFunction(
+      () => /ranked by cushion/.test(document.getElementById("deskFoot").textContent),
+      null, { timeout: 20000 });
+    /* Past the held request's arrival, which is the whole point: the assertion
+       is about what happens AFTER the superseded answer comes back. */
+    await racer.waitForTimeout(2500);
+    const foot = await racer.locator("#deskFoot").textContent();
+    ok(/ranked by cushion/.test(foot),
+       `the superseded premium slice does not overwrite the one the reader asked for (${foot.slice(0, 160)})`);
+    ok(!/ranked by premium/.test(foot), "and the footnote names no ordering the select has moved off");
+    eq(await racer.locator("#deskRank").inputValue(), "cushionSigmas",
+       "the select and the table agree about which question was answered");
+    await racer.close();
+  }
+
+  /* ---------- a response with no age header is not an age of zero --
+
+     `response.headers.get("X-Chain-Age")` answers null when the header is not
+     there, and Number(null) is 0, and Number.isFinite(0) is true — so a body
+     of entirely unknown vintage was stored as an age of nought and rendered as
+     "just now". This repository's oldest scar, wearing a header for a disguise,
+     and worse than usual here because zero is ALSO a real reading: the route
+     sends X-Chain-Age: 0 on a cache miss and means measured-fresh.
+
+     The route always sends the header today, so the branch is unreachable from
+     the stub — the header is stripped at the browser to reach it, which is
+     also exactly what a proxy or a future error path would do. */
+  {
+    const bare = await context.newPage();
+    bare.on("pageerror", (e) => pageErrors.push(String(e)));
+    await bare.route("**/api/flows/chain**", async (route) => {
+      const res = await route.fetch();
+      const headers = Object.fromEntries(Object.entries(res.headers())
+        .filter(([k]) => !["x-chain-age", "content-length"].includes(k.toLowerCase())));
+      await route.fulfill({ status: res.status(), headers, body: await res.body() });
+    });
+    await bare.goto(server.baseURL + "/flows/desk/?t=AAA", { waitUntil: "domcontentloaded" });
+    await bare.waitForFunction(
+      () => /sellable/.test(document.querySelector(".desk-chip__note")?.textContent || ""),
+      null, { timeout: 20000 });
+
+    const note = await bare.locator(".desk-chip__note").first().textContent();
+    ok(!/just now/.test(note), `an unstated age is not reported as a fresh one (${note})`);
+    ok(/age not stated/.test(note),
+       `and it is not reported as nothing either — the silence is named (${note})`);
+    const status = await bare.locator("#deskStatus").textContent();
+    ok(/quote age was not stated by the route/.test(status),
+       `the status line says which silence it is too (${status})`);
+    ok(!/quotes just now/.test(status), "and does not claim a freshness it never received");
+    await bare.close();
+  }
+
+  /* ---------- a 200 that did not parse is not a price -------------
+
+     The second of the three silences. An unreadable body landed in the "ok"
+     branch with a null payload: the chip drew a checkbox and NO note, the
+     table gained no rows, and the status line counted the symbol among those
+     priced. Nothing anywhere said the response could not be read, so the desk
+     read as a name that simply has nothing to sell — which is the third
+     silence, and a completely different statement. */
+  {
+    const junk = await context.newPage();
+    junk.on("pageerror", (e) => pageErrors.push(String(e)));
+    await junk.route("**/api/flows/chain**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8", "x-chain-age": "0" },
+        body: "<!doctype html><title>a captive portal, with a 200 on it</title>",
+      });
+    });
+    await junk.goto(server.baseURL + "/flows/desk/?t=AAA", { waitUntil: "domcontentloaded" });
+    /* Swallowed so the assertion below reports what the chip actually said.
+       The defect this block exists to catch leaves the note EMPTY forever, and
+       a bare wait for it to fill would report only a timeout — which is the
+       one thing the reader of a failing suite already knows. */
+    await junk.waitForFunction(
+      () => {
+        const t = document.querySelector(".desk-chip__note")?.textContent || "";
+        return t !== "" && !/loading/.test(t);
+      }, null, { timeout: 15000 }).catch(() => {});
+
+    const note = await junk.locator(".desk-chip__note").first().textContent();
+    eq(note, "unreadable response", `the chip says which silence this is (${note})`);
+    const status = await junk.locator("#deskStatus").textContent();
+    ok(/AAA unavailable/.test(status),
+       `and the desk does not count it among the symbols it priced (${status})`);
+    ok(!/1 symbol priced/.test(status), "which is what it used to do");
+    await junk.close();
+  }
+
+  /* ---------- a payload that cannot state its own counts ----------
+
+     The footnote's totals were accumulated with `isNum(p.screened) || 0`, which
+     reads a MISSING count as a count of nought and folds it into a published
+     sentence. A payload can lose a field for a dull reason — a body cached by
+     an earlier deploy, a shape that moved — and the desk then announced "130 of
+     130 quoted contracts are sellable" over a table that also carried two rows
+     from a chain neither number counted.
+
+     It also decided the slice's shortfall, which was `priced - shown`: a total
+     over every symbol minus a count over every symbol, which agree only while
+     every payload states its `priced`. With AAA's counts gone the old
+     arithmetic reports EIGHT lines below the cut where the enumerated evidence
+     in the same sentence says ten, and with enough uncounted rows it goes
+     negative — a count printed with a hyphen on a page that spells minus
+     U+2212. The shortfall is now the sum of the per-symbol cuts the sentence
+     has just named out loud, which cannot disagree with itself. */
+  {
+    const thin = await context.newPage();
+    thin.on("pageerror", (e) => pageErrors.push(String(e)));
+    await thin.route("**/api/flows/chain**", async (route) => {
+      const url = new URL(route.request().url());
+      const res = await route.fetch();
+      if (url.searchParams.get("t") !== "AAA") { await route.fulfill({ response: res }); return; }
+      const body = await res.json();
+      delete body.priced;
+      delete body.screened;
+      const headers = Object.fromEntries(Object.entries(res.headers())
+        .filter(([k]) => k.toLowerCase() !== "content-length"));
+      await route.fulfill({ status: res.status(), headers, body: JSON.stringify(body) });
+    });
+    await thin.goto(server.baseURL + "/flows/desk/?t=FFF,AAA&strategy=csp",
+      { waitUntil: "domcontentloaded" });
+    await thin.waitForFunction(
+      () => document.querySelectorAll("#deskBody tr").length === 121, null, { timeout: 20000 });
+
+    const foot = await thin.locator("#deskFoot").textContent();
+    ok(/10 lines below the cut are not on this table/.test(foot),
+       `the shortfall is the sum of the cuts the sentence names, not a difference of two whole-desk totals (${foot})`);
+    ok(/AAA is outside those two numbers/.test(foot),
+       `and the symbol whose counts never arrived is named rather than added as nought (${foot})`);
+    ok(/not a count of nought/.test(foot), "in the sentence that says why");
+    ok(/130 of 130 quoted contracts are sellable/.test(foot),
+       "the totals themselves stay the ones that were actually stated");
+    await thin.close();
+  }
+
   /* ---------- the quote age is a function of NOW ------------------
 
      The file header's oldest promise is that every number says how old it is,
@@ -1491,8 +1709,12 @@ try {
     `smile, term structure, stale prints and unit convention are each read out of the DOM, ` +
     `a top-120 slice that names its cut and refetches rather than re-sorting it, rows that ` +
     `state their collateral and their distance from spot without a balance or a hover, ` +
-    `a header and a control bar that stay put while the rows scroll, and a quote age ` +
-    `driven off a faked clock to prove it advances on its own`);
+    `a header and a control bar that stay put while the rows scroll, a quote age ` +
+    `driven off a faked clock to prove it advances on its own, two select options that ` +
+    `share one key on the wire and cost one round trip between them, a superseded slice ` +
+    `that loses to the one the reader actually asked for, and three payloads a stub ` +
+    `cannot produce — no age header, no counts, no readable body — each answered with ` +
+    `the sentence that says which silence it is`);
 } finally {
   await browser.close();
   await server.stop();
