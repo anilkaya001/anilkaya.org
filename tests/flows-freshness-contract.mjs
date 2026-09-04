@@ -8,7 +8,7 @@
    a gate tested once. */
 
 import assert from "node:assert/strict";
-import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES } from "../shared/flows-freshness.js";
+import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay} from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -51,6 +51,43 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!isRefreshWindow(new Date("garbage")), "an invalid date refuses rather than throwing");
 }
 
+/* ---------- an instant's Eastern DAY, which is not its ISO prefix ----
+
+   A DATE AND AN INSTANT ARE DIFFERENT KINDS. Off-exchange prints are
+   reported to 20:00 ET, so a print executed at 19:10 ET on a winter evening
+   carries an `executed_at` whose UTC date is the NEXT day. Slicing ten
+   characters off that stamp dates the print to a session that had not begun,
+   and comparing the result against a sessionDate resolved in America/New_York
+   then reports a feed as belonging to another session when every row is
+   inside this one.
+
+   This is the third time this repository has paid for the same confusion —
+   daysToEarnings carries the warning, a dry-run fixture measured from
+   Date.now() against a gate counting from an Eastern date, and the
+   cross-section join dated its whole dark-pool feed to tomorrow. */
+{
+  eq(easternDay("2026-01-06T00:10:00Z"), "2026-01-05",
+    "19:10 ET on 2026-01-05 under EST is the FIFTH's session, though its UTC stamp " +
+    "reads the sixth — the ISO prefix of that instant is the wrong day");
+  eq(easternDay("2026-07-07T00:10:00Z"), "2026-07-06",
+    "and 20:10 ET on 2026-07-06 under EDT is the sixth's, so the answer is read " +
+    "through the zone rather than a fixed offset");
+  eq(easternDay("2026-01-05T14:30:00Z"), "2026-01-05",
+    "a mid-session instant is its own day, which is the case that made the bug " +
+    "invisible until the feed ran late");
+  eq(easternDay(new Date("2026-01-06T00:10:00Z")), "2026-01-05",
+    "a Date object answers the same as its ISO string");
+
+  /* ABSENCE REFUSED BEFORE COERCION. `new Date(null)` is not an invalid date,
+     it is the EPOCH — so a row with no timestamp would be dated 1969-12-31
+     and published as a session. The NaN check alone does not catch it. */
+  for (const v of [null, undefined, 0, "", "   ", false, "Thursday", "2026-09", NaN]) {
+    eq(easternDay(v), null,
+      `an unusable instant (${JSON.stringify(v)}) is null, never a coerced day — ` +
+      `new Date(null) is the epoch and would have dated it 1969-12-31`);
+  }
+}
+
 /* ---------- the published cadence ------------------------------- */
 {
   eq(REFRESH_CADENCE_MINUTES, 15,
@@ -61,4 +98,5 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock read through the IANA ` +
   `zone rather than an offset table, a window inclusive at both stated edges, the same UTC ` +
   `instant inside in July and outside in January, dead weekends, and a cadence constant the ` +
-  `pages can quote without lying`);
+  `pages can quote without lying, and an instant's EASTERN day told from the first ten ` +
+  `characters of its ISO stamp — with the epoch refused rather than published as 1969`);

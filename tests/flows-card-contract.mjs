@@ -1248,6 +1248,66 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(readCrossFeed(undated.oiChange, "AAA").asOf, null,
      "the per-name reading carries the refusal too, rather than borrowing the card's date");
 
+  /* ---- A PRINT'S SESSION IS ITS EASTERN DAY, NOT ITS UTC ONE ---------
+
+     Off-exchange prints are reported to 20:00 ET. Under EST every print after
+     19:00 ET carries a UTC date one day AHEAD of its own Eastern session —
+     and /darkpool/recent at a 05:15 ET run returns exactly those newest rows.
+     This took isoDay(executed_at), the first ten characters of the instant,
+     and compared it against a sessionDate resolved in America/New_York: the
+     feed dated itself to TOMORROW and every card said "this ranking is from
+     another session" about prints from its own. */
+  const lateEve = indexCrossFeed("darkpool", { data: [
+    { ticker: "AAA", premium: 900000, executed_at: "2026-01-06T00:10:00Z" },  // 19:10 ET Jan 5
+    { ticker: "BBB", premium: 800000, executed_at: "2026-01-06T00:45:00Z" },  // 19:45 ET Jan 5
+  ] }, { limit: 2, tickers: ["AAA", "BBB"], sessionDate: "2026-01-05" });
+  eq(lateEve.asOf, "2026-01-05",
+     "a print executed 19:10 ET belongs to that evening's session, though its UTC stamp " +
+     "reads the next day — the ISO prefix of an instant is not its Eastern day");
+  eq(lateEve.sameSession, true,
+     "so a feed made entirely of late prints IS this card's session, and the page no " +
+     "longer disowns rows that are its own");
+  eq(lateEve.asOfSessions, 1,
+     "and they span ONE session, not two — the count that would have printed " +
+     "'its rows span 2 sessions' over a feed inside a single evening");
+  /* The summer half, because a fixed offset would pass the winter case alone. */
+  const summerEve = indexCrossFeed("darkpool", { data: [
+    { ticker: "AAA", premium: 900000, executed_at: "2026-07-07T00:10:00Z" },  // 20:10 ET Jul 6
+  ] }, { limit: 1, tickers: ["AAA"], sessionDate: "2026-07-06" });
+  eq(summerEve.asOf, "2026-07-06",
+     "and the same holds under EDT, so the answer is read through the zone rather than " +
+     "an offset that is right for half the year");
+
+  /* ---- THE CUT IS THE FLOOR IN BOTH DIRECTIONS ------------------------
+
+     measureOrder tells ascending from descending so a threshold is claimed
+     only where one exists, and both branches then took the LAST row of the
+     array regardless. On an ascending feed the last row is the MAXIMUM, so
+     the largest value in the feed was published as the floor everything else
+     cleared. /api/market/oi-change takes an `order` parameter, so this is a
+     shape the endpoint can actually return. */
+  const mkOi = (v) => ({ underlying_symbol: "AAA", option_symbol: "AAA260918C00150000",
+                         oi_change: String(v), oi_diff_plain: v, curr_oi: 100 + v,
+                         last_oi: 100, curr_date: "2026-08-21" });
+  const desc = indexCrossFeed("oiChange",
+    { data: [199, 196, 193, 190].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  const asc = indexCrossFeed("oiChange",
+    { data: [190, 193, 196, 199].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  eq(desc.ordered, "descending", "a feed running downwards is measured as such");
+  eq(asc.ordered, "ascending", "and one running upwards as such — the reason to measure");
+  eq(desc.cut, 190, "the cut is the last-included value in ranked order");
+  eq(asc.cut, 190,
+     "which on an ASCENDING feed is the first row, not the last: publishing 199 there " +
+     "would announce the feed's own maximum as the floor everything cleared");
+  const noOrder = indexCrossFeed("oiChange",
+    { data: [190, 199, 193, 196].map(mkOi) },
+    { limit: 4, tickers: ["AAA"], sessionDate: "2026-08-21" });
+  eq(noOrder.ordered, null, "a feed in no measurable order says so");
+  eq(noOrder.cut, null,
+     "and publishes NO cut, because a value from an arbitrary position is not a threshold");
+
   /* ---- the three silences, at the feed level -------------------------- */
   eq(indexCrossFeed("oiChange", undefined, { tickers: names }).status, "unavailable",
      "a feed the run never carried in is unavailable");
