@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   num, median, quantile, mad, winsorize, robustZ, invNorm, vanDerWaerden,
   neutralize, flowPurity, aggressorGamma, gammaFlip, bookDisplacement,
+  robustZFused, greekFlowTotals,
   pathSignature, gammaDecayCalendar, positioningQuality,
   greekTermStructure, legPresent, GREEK_UNITS,
   callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg, callDeltaLeg, putDeltaLeg,
@@ -334,6 +335,61 @@ const near = (a, b, tol, msg) => {
   ok(!none.hasDirectionalView, "zero delta flow reports no directional view");
 }
 
+/* ---------- one tape, one set of totals -------------------------- */
+{
+  /* WHAT THIS GUARDS. flowPurity used to accumulate a local called `tot` and
+     positioningQuality a local called `delta`, in two separate loops over the
+     same rows. They were the same quantity — Sigma|total_delta_flow| — under
+     two names, so a change to one could not be seen from the other. Both now
+     read one record, and these assertions are what would notice if they ever
+     stopped: the two ratios must share a denominator BY CONSTRUCTION. */
+  const TAPE = [
+    { dir_delta_flow: "600", otm_dir_delta_flow: "150", total_vega_flow: "40", total_delta_flow: "1000" },
+    { dir_delta_flow: "-200", otm_dir_delta_flow: "-50", total_vega_flow: "10", total_delta_flow: "400" },
+    { dir_delta_flow: "0", otm_dir_delta_flow: "0", total_vega_flow: "5", total_delta_flow: "100" },
+  ];
+  const t = greekFlowTotals(TAPE);
+  near(t.dirNet, 400, 1e-9, "dirNet is the one SIGNED accumulator — it answers which way");
+  near(t.dirAbs, 800, 1e-9, "dirAbs is gross, so two cancelling prints still count as flow");
+  near(t.otmAbs, 200, 1e-9, "otmAbs is gross too");
+  near(t.vegaAbs, 55, 1e-9, "vegaAbs is gross");
+  near(t.totalAbs, 1500, 1e-9, "totalAbs is Sigma|total_delta_flow| — the ONE denominator");
+  eq(t.rows, 3, "rows is a COUNT of measured prints, not a ratio");
+
+  eq(greekFlowTotals([]).rows, 0, "an empty tape measured zero rows");
+  eq(greekFlowTotals(null).rows, 0, "and a missing tape is the same zero rows, never a throw");
+  near(greekFlowTotals(null).totalAbs, 0, 0, "with every sum at its identity");
+
+  /* THE POINT OF THE REFACTOR, asserted rather than asserted-in-a-comment:
+     flowPurity's published denominator IS positioningQuality's. */
+  const purity = flowPurity(TAPE);
+  near(purity.totalAbs, t.totalAbs, 0,
+       "flowPurity divides by exactly the totals record's totalAbs, not its own copy");
+  near(purity.dirDelta, t.dirNet, 0, "and publishes the same signed net");
+  near(purity.dirAbs, t.dirAbs, 0, "and the same gross");
+  near(positioningQuality(TAPE).vegaTilt, t.vegaAbs / t.totalAbs, 1e-12,
+       "positioningQuality's vegaTilt divides by that same totalAbs");
+
+  /* THREADING A PRECOMPUTED RECORD MUST CHANGE NOTHING. The pipeline calls both
+     measures on one array back to back; handing them one record is a ~33%
+     saving on that pair, and is worth nothing if it is also a different answer. */
+  eq(JSON.stringify(flowPurity(TAPE, t)), JSON.stringify(flowPurity(TAPE)),
+     "flowPurity is identical whether it builds the totals or is handed them");
+  eq(JSON.stringify(positioningQuality(TAPE, { totals: t })), JSON.stringify(positioningQuality(TAPE)),
+     "positioningQuality is identical whether it builds the totals or is handed them");
+  eq(JSON.stringify(positioningQuality(TAPE, { floor: 1e5, totals: t })),
+     JSON.stringify(positioningQuality(TAPE, { floor: 1e5 })),
+     "and the floor still applies when a record is threaded — the option bag is not swallowed");
+  ok(positioningQuality(TAPE, { floor: 1e5 }).otmShare === null,
+     "a floor above the tape's own gross reports UNMEASURED — the branch the line above compares");
+
+  /* THE ZERO-TAPE GUARD IS STILL THE OLD ONE. A tape whose every print carries
+     no total delta is not "purity zero" — zero is a real reading here. */
+  const dead = flowPurity([{ dir_delta_flow: "5", total_delta_flow: "0" }]);
+  ok(dead.purity === null, "a tape with no total delta is UNMEASURED purity, not zero");
+  near(dead.totalAbs, 0, 0, "and reports the zero denominator it actually measured");
+}
+
 /* ---------- gamma decay calendar -------------------------------- */
 {
   const cal = gammaDecayCalendar([
@@ -646,6 +702,191 @@ const near = (a, b, tol, msg) => {
      "a smooth column has nothing at the clamp");
   ok(Math.max(...zs.map(Math.abs)) > 0.5,
      "and still has real dispersion — the floor shrinks z, it does not flatten it");
+}
+
+/* ---------- the fused hot path must be the SAME answer ----------- */
+{
+  /* THE DELIVERABLE OF THE FUSION IS THIS BLOCK, not the speedup.
+     robustZ(winsorize(col, p)) issues EIGHT full sorts of one column — two in
+     winsorize, one for the median, four across the two spans, one for the MAD's
+     deviations — and scoreBoard asks for seven columns per board. robustZFused
+     does it in two typed sorts. A faster answer that is a different answer is
+     not an optimisation, it is a second spelling of the score, so every fixture
+     below is checked ELEMENTWISE against the composed form.
+
+     THE STATED TOLERANCE IS ZERO. Not "small": the absolute difference must be
+     exactly 0 on every element of every fixture. The one representational
+     difference that does occur is the SIGN OF A ZERO — a typed sort orders -0
+     before +0 while a comparator sort leaves equal values where it found them,
+     so an even-length median can come out -0 in one path and +0 in the other.
+     -0 === 0 in JavaScript, every consumer of a z-score compares, scales or
+     renders it, and none of those can tell the two apart. `agree` therefore
+     requires exact numeric equality and tolerates only that. */
+  const agree = (col, opts, label) => {
+    const composed = robustZ(winsorize(col, opts.winsor ?? 0.02), { clamp: opts.clamp ?? 3 });
+    const fused = robustZFused(col, opts);
+    eq(fused.length, composed.length, `${label}: fused returns one z per input row`);
+    let worst = 0;
+    for (let i = 0; i < composed.length; i++) worst = Math.max(worst, Math.abs(composed[i] - fused[i]));
+    ok(worst === 0, `${label}: fused equals robustZ(winsorize(...)) exactly (worst |diff| ${worst})`);
+    ok(Array.isArray(fused), `${label}: and returns a plain Array, as robustZ does`);
+  };
+
+  /* An ordinary board-shaped column: signed, with holes where a name was not
+     measured. This is the case the pipeline actually runs. */
+  const board = Array.from({ length: 128 }, (_, i) =>
+    (i % 8 === 3 ? null : Math.sin(i * 2.399) * 1.7 + (i % 17 === 0 ? 9 : 0)));
+  agree(board, { winsor: 0.02 }, "a 128-name board column with holes");
+
+  /* THE DEGENERATE CASES. Each of these reaches a DIFFERENT branch, and the
+     comment beside each says which — a fixture that cannot reach the branch it
+     certifies is this repo's most repeated mistake. */
+
+  // n = 0 finite: winsorize cannot form a quantile and returns the column
+  // unclipped; robustZ then sees fewer than two finite entries.
+  agree([], {}, "an empty column");
+  agree([NaN, NaN, NaN, NaN], {}, "an ALL-NaN column — nothing was ever measured");
+  agree([null, undefined, "", "abc"], {}, "a column of nulls, undefineds and unparseable strings");
+
+  // n = 1 finite: winsorize clips a single value to itself; robustZ still
+  // refuses to invent a scale from one point.
+  agree([5], {}, "a single element");
+  agree([null, 7, NaN], {}, "a single measured element among the silences");
+
+  // n = 2: the smallest column that gets a real scale at all.
+  agree([1, 2], {}, "n = 2, the smallest scored column");
+
+  // MAD zero AND IQR zero AND stdev zero: every estimator collapses, and both
+  // paths must fall all the way through to the all-zeros return.
+  agree(new Array(40).fill(7), {}, "an ALL-EQUAL column — MAD, both spans and the stdev all collapse");
+  const allEqual = robustZFused(new Array(40).fill(7), {});
+  ok(allEqual.every((v) => v === 0),
+     "and the all-equal column really does reach the final all-zeros exit, not merely agree by luck");
+
+  /* MAD zero AND both spans zero, but the mean/stdev fallback DOES fire — a
+     branch the all-equal fixture cannot reach, and one that is easy to write a
+     fixture for and miss: 62 twos and a single 9 does NOT reach it, because
+     winsorize at 0.02 clips the lone 9 back down to 2 and the column becomes
+     all-equal after all. Two survivors are needed for the 0.98 quantile to
+     land above the flat body. */
+  const nearlyFlat = [...new Array(61).fill(2), 9, 9];
+  agree(nearlyFlat, {}, "a near-constant column with two live values — the mean/stdev fallback");
+  const flatZ = robustZFused(nearlyFlat, {});
+  ok(flatZ.some((v) => v !== 0),
+     "and that fallback really fires: the live values are not flattened to the neutral vote");
+  /* THE FALLBACK ALSO MOVES THE CENTRE, from the median to the mean, so the
+     flat body no longer sits at exactly zero. That is robustZ's own behaviour
+     and the fused form reproduces it; the assertion is here so a future reader
+     does not "fix" a body that is meant to be slightly off zero. */
+  ok(new Set(flatZ.map((v) => v.toFixed(12))).size === 2,
+     "two distinct z values: the flat body and the two live names");
+  ok(flatZ[0] < 0 && flatZ[62] > 0,
+     "and the body sits BELOW the mean while the live names sit above it — the centre moved");
+
+  /* Zero interquartile span with a LIVE 10-90 span: the third estimator is the
+     only one carrying the scale, so this fixture is the only thing in the suite
+     that would notice if the fused form dropped it. 15 low, 70 flat, 15 high:
+     the quartiles both land inside the flat body and the deciles do not. */
+  const wideOnly = [...new Array(15).fill(-5), ...new Array(70).fill(0), ...new Array(15).fill(5)];
+  agree(wideOnly, {}, "a column whose interquartile span is zero but whose 10-90 span is not");
+  const wideZ = robustZFused(wideOnly, {});
+  near(wideZ[0], -5 / ((5 - -5) / 2.563), 1e-12,
+       "the 10-90 estimator is what scaled it: z is the raw value over (span/2.563)");
+  ok(Math.abs(wideZ[0]) < 3, "and nothing saturated the clamp, which is the whole point of the third span");
+  ok(wideZ[20] === 0, "while the flat body sits at exactly the median");
+
+  // The sparse-signal trap this file opens by naming.
+  agree([...new Array(90).fill(0), 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], {}, "the sparse-signal MAD trap");
+
+  // Bimodal by sign — the family-D failure the robustZ comment records.
+  const bimodal2 = (pos, neg) => [
+    ...Array.from({ length: pos }, (_, i) => 0.5 + (i % 5) * 0.01),
+    ...Array.from({ length: neg }, (_, i) => -(0.5 + (i % 5) * 0.01)),
+  ];
+  for (const [a, b] of [[14, 10], [18, 6], [20, 4], [12, 12]]) {
+    agree(bimodal2(a, b), { winsor: 0.02 }, `a ${a}/${b} sign split`);
+  }
+
+  /* THE SHORTCUT THIS FUNCTION REFUSES. It is tempting to skip the clip for
+     every quantile except the MAD's, on the argument that winsorizing at 0.02
+     only rewrites the sorted ends while 0.10..0.90 sits inside them. That is
+     true at n = 128 and FALSE at n = 5, where the 0.02 quantile interpolates
+     between the first two sorted entries and the 0.10 quantile reads those same
+     two. This fixture is the one that would catch that shortcut. */
+  agree([1, 2, 3, 4, 5], { winsor: 0.02 }, "n = 5, where the clip moves the 10th percentile");
+  agree([-100, 1, 2, 3, 4, 5, 900], { winsor: 0.02 }, "n = 7 with both tails live");
+
+  // A winsor wide enough to invert the bounds: lo > hi collapses the whole
+  // column onto hi in the composed form, and the fused form must do the same
+  // odd thing rather than the sensible thing.
+  for (const p of [0, 0.01, 0.25, 0.49, 0.5, 0.6]) {
+    agree([-100, 1, 2, 3, 4, 5, 900], { winsor: p }, `winsor = ${p}`);
+  }
+  for (const c of [0.5, 1, 3, 10]) agree([-100, 1, 2, 3, 4, 5, 900], { clamp: c }, `clamp = ${c}`);
+
+  /* HUGE OPPOSITE-SIGNED EXTREMES. At n = 7 the 0.02 quantile still lands
+     between two ordinary entries, so the bounds are finite and the clip happens
+     normally — this fixture is NOT the overflow case, and saying so is the
+     point: it was written believing it was. */
+  agree([-1e308, 1e308, 0, 5, -5, 2, -2], { winsor: 0.02 }, "huge opposite-signed extremes, bounds still finite");
+
+  /* THE ACTUAL OVERFLOW. At n = 2 the quantile interpolates directly between
+     the two extremes, sorted[1] - sorted[0] overflows to Infinity, and the
+     bound comes back non-finite. winsorize responds by returning the column
+     UNCLIPPED, and the fused form has to refuse in the same place rather than
+     clamping every name to Infinity. The same fixture then overflows the MAD
+     (the even-length median sums the pair before halving it) and the stdev
+     after it, so it also lands on the final all-zeros exit — the one reached
+     when even the mean/stdev fallback cannot produce a usable scale. */
+  const overflow = [-1e308, 1e308];
+  agree(overflow, { winsor: 0.02 }, "bounds that overflow to Infinity — the clip is refused");
+  ok(robustZFused(overflow, { winsor: 0.02 }).every((v) => v === 0),
+     "and an unusable scale is the neutral vote for everyone, never Infinity and never NaN");
+
+  /* AND A DIFFERENTIAL FUZZ, so the agreement is a property rather than a list
+     of cases someone thought of. Deterministic seed: a failure is reproducible. */
+  let seed = 20260904;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  let worstFuzz = 0, elements = 0;
+  for (let trial = 0; trial < 600; trial++) {
+    const n = 1 + Math.floor(rnd() * 60);
+    const col = [];
+    for (let i = 0; i < n; i++) {
+      const r = rnd();
+      if (r < 0.12) col.push(null);
+      else if (r < 0.18) col.push(NaN);
+      else if (r < 0.22) col.push(undefined);
+      else if (r < 0.30) col.push(Math.round((rnd() - 0.5) * 4));       // ties, on purpose
+      else col.push((rnd() - 0.5) * Math.pow(10, Math.floor(rnd() * 8) - 2));
+    }
+    const opts = { winsor: [0, 0.01, 0.02, 0.1, 0.3][Math.floor(rnd() * 5)],
+                   clamp: [1, 3, 5][Math.floor(rnd() * 3)] };
+    const composed = robustZ(winsorize(col, opts.winsor), { clamp: opts.clamp });
+    const fused = robustZFused(col, opts);
+    for (let i = 0; i < composed.length; i++) {
+      elements++;
+      worstFuzz = Math.max(worstFuzz, Math.abs(composed[i] - fused[i]));
+    }
+  }
+  ok(elements > 15000, `the fuzz actually exercised the paths (${elements} elements compared)`);
+  ok(worstFuzz === 0,
+     `600 random columns agree exactly, ties and silences included (worst |diff| ${worstFuzz})`);
+
+  /* THE SORT CENSUS. The whole reason this function exists is the sort count,
+     so assert it rather than trusting the comment: eight for the composed form,
+     two for the fused one. If a future edit reintroduces a sort, this fails. */
+  const countSorts = (fn) => {
+    let sorts = 0;
+    const realArray = Array.prototype.sort, realTyped = Float64Array.prototype.sort;
+    Array.prototype.sort = function (...a) { sorts++; return realArray.apply(this, a); };
+    Float64Array.prototype.sort = function (...a) { sorts++; return realTyped.apply(this, a); };
+    try { fn(); } finally { Array.prototype.sort = realArray; Float64Array.prototype.sort = realTyped; }
+    return sorts;
+  };
+  eq(countSorts(() => robustZ(winsorize(board, 0.02))), 8,
+     "the composed form issues eight full sorts of one column — the defect being fixed");
+  eq(countSorts(() => robustZFused(board, { winsor: 0.02 })), 2,
+     "the fused form issues two: one for the column, one for the MAD's deviations");
 }
 
 /* ---------- rank hysteresis ------------------------------------- */
