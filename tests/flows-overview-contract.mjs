@@ -1264,18 +1264,95 @@ try {
     eq(counts.watch?.text, "2", "and the dead band's, which this page also has in hand");
     eq(counts.long?.hidden, false, "and reveals them once there is a real number");
 
-    /* THE SLOT THAT WAS NEVER RENDERED. flows-events.js has filled
-       [data-rail-count="events"] since the calendar shipped, and the rail
-       emitted the slot for three keys and not that one — so the query
-       matched nothing and the badge could never appear, silently. */
+    /* THE SLOT THAT WAS NEVER RENDERED, AND THEN NEVER FILLED FROM HERE.
+       flows-events.js has filled [data-rail-count="events"] since the
+       calendar shipped, and the rail emitted the slot for three keys and not
+       that one — so the query matched nothing and the badge could never
+       appear, silently. The slot exists now, and this page held the events
+       payload while filling three of the four badges it had in hand: the
+       count appeared on /flows/events/ and vanished on /flows/, which a
+       reader takes for "nothing reports this week" rather than "this page
+       did not say".
+
+       THIS PHASE IS THE WITHHOLDING ARM, and it is a different fact from
+       either of those. The calendar key is deliberately unpublished until
+       the earnings join below, so the page holds a pending envelope — not a
+       measurement — and a pending envelope has no population to badge. The
+       filled arm is asserted twice below, once on a calendar the region
+       shows whole and once on one it caps. */
     ok("events" in counts, "the events slot exists to be filled at all");
     eq(counts.events?.hidden, true,
-       "and stays hidden here, because this page has no count for it");
+       "and withholds while the calendar key is unpublished — a pending envelope is not a " +
+       "count, and the rows this page would have drawn from one are not its population");
 
     const sub = await page.locator("#ccBullSub").textContent();
     ok(/all 5/.test(sub), `the region header says how many the side actually holds (${sub})`);
     eq(await page.locator("#ccBullSub").getAttribute("href"), "/flows/long/",
        "and is the way to the full side, which is a page rather than a state");
+
+    /* THE FIVE AND THE FOUR ABOVE ARE ALSO THE FALLBACK ARM. Neither fixture
+       board publishes `cleared`, so those badges came from `rowCount` — which
+       is the right answer for a board written before that field existed and
+       the WRONG one for every board since. Only a payload whose pool exceeds
+       its published rows can tell the two sources apart, and this file had
+       none. */
+    await post("board:long", board("long", bullRows, SESSION,
+      { deep: 4, cleared: 12, shed: 7 }));
+    await post("board:short", board("short", bearRows, SESSION,
+      { deep: 4, cleared: 9, shed: 5 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    const pooled = await page.evaluate(() => {
+      const out = {};
+      for (const el of document.querySelectorAll("[data-rail-count]")) {
+        out[el.dataset.railCount] = el.textContent.trim();
+      }
+      out.__bullRows = document.querySelectorAll(".cc-bull tbody tr").length;
+      return out;
+    });
+    eq(pooled.__bullRows, 5,
+       "the page still draws the five names the bullish board published, so it really is an " +
+       "excerpt of the twelve that payload says cleared the band");
+    eq(pooled.long, "12",
+       "and the rail badges TWELVE, the side's whole pool, rather than the five rows the " +
+       "publisher's length cap left on the wire. The badge is the size of the SECTION its link " +
+       "opens, and a badge that silently means “as many as we chose to publish” is the " +
+       "truncation defect one element wide");
+    eq(pooled.short, "9", "and nine on the bearish side, out of four published rows");
+    eq(pooled.watch, "2",
+       "while the watch badge is unchanged at its two rows: board:watch publishes `neutral` and " +
+       "no `cleared` at all (flows-pipeline.mjs:5824), and flows-watch.js:434 fills this same " +
+       "slot from its own rows.length, so moving this one alone would open the split the two " +
+       "board badges just closed");
+
+    /* THE ASSERTION THE WHOLE FIX IS FOR: ONE SLOT, TWO ROUTES, ONE NUMBER.
+       Each half of this pair passed on its own while the two disagreed — the
+       overview badged 5 and /flows/long/ badged 5 out of a pool of 12, and a
+       reader moving between them saw one badge change under one label. The
+       cross-route reading is the only one that can fail when they drift, so
+       the number is carried from this page to that one rather than compared
+       to a literal in each file. */
+    await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    const onBoard = await page.evaluate(() => {
+      const el = document.querySelector('[data-rail-count="long"]');
+      return {
+        badge: el ? el.textContent.trim() : null,
+        status: document.getElementById("flowsStatus").textContent,
+      };
+    });
+    eq(onBoard.badge, pooled.long,
+       "/flows/long/ fills the same slot with the same number /flows/ did. Two routes wording " +
+       "one quantity differently is how a reader concludes there are two quantities, and these " +
+       "two are the pair the rail puts a link between");
+    ok(/\(5 of 12 shown\)/.test(onBoard.status),
+       `and the board's own status line reconciles that pool against the rows it drew ` +
+       `(${onBoard.status})`);
+
+    await post("board:long", board("long", bullRows, SESSION, { deep: 4 }));
+    await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
   }
 
   /* ---------- nothing overflows a phone -------------------------- */
@@ -1415,6 +1492,20 @@ try {
     eq(evRows[1][4], "—",
        "a gated name has no score, and an em dash is not a zero");
     eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
+
+    /* AND THE FOURTH BADGE FILLS, NOW THAT THERE IS A CALENDAR TO BADGE.
+       This is the arm the phase above could not reach: the same page, the
+       same payload, one publish later. The quantity is `inWindow` — the
+       names reporting — which is the quantity flows-events.js writes into
+       this identical slot on /flows/events/, so a reader crossing between
+       the two routes reads one number rather than two. */
+    const evBadge = await page.evaluate(() => {
+      const el = document.querySelector('[data-rail-count="events"]');
+      return { text: el.textContent.trim(), hidden: el.hidden };
+    });
+    eq(evBadge.hidden, false, "the rail badges the calendar once a population has arrived");
+    eq(evBadge.text, String(eventsPayload.inWindow),
+       `with the ${eventsPayload.inWindow} names the payload says report inside the window`);
   }
 
   /* ---------- the calendar names its numerator too --------------- */
@@ -1437,6 +1528,19 @@ try {
        "a calendar longer than the cap is listed eight deep");
     eq((await page.locator("#ccEventsSub").textContent()).trim(), "8 of 30 in the window",
        "and the subtitle names the eight it drew as well as the thirty it did not");
+    /* THE BADGE IS THE POPULATION, AND THIS IS THE FIXTURE THAT PROVES IT.
+       Three integers are in reach here — thirty reporting, ten rows on the
+       wire, eight drawn in the region — and only one of them is the number
+       the rail's link opens onto. `rowCount`, which fills the three badges
+       beside it, would have published the ten; the region's own cap would
+       have published the eight. Either would have put a different number
+       under the same word on /flows/ than /flows/events/ prints from the
+       same payload, which is a reader discovering two quantities where the
+       pipeline measured one. */
+    eq(await page.evaluate(
+       () => document.querySelector('[data-rail-count="events"]').textContent.trim()), "30",
+       "the rail badges the thirty names reporting, not the ten rows published or the " +
+       "eight this page drew from them");
     await post("events", eventsPayload);
   }
 
@@ -2021,8 +2125,12 @@ try {
     `a board that does not answer contained to its own region instead of blanking the six ` +
     `that did, a pole that has not published never chosen over one that has, every capped ` +
     `region stating what it is showing out of what it holds rather than calling eight of ` +
-    `twelve "all 12", the read instant on a 24-hour clock that names its zone, and a ranked ` +
-    `price change that no longer shares a word with the score move seated above it`);
+    `twelve "all 12", the read instant on a 24-hour clock that names its zone, a ranked ` +
+    `price change that no longer shares a word with the score move seated above it, and a ` +
+    `fourth rail badge filled from the calendar's own population rather than the rows this ` +
+    `page drew from it, so /flows/ and /flows/events/ badge one quantity and not two — and the ` +
+    `two board badges filled from the side's whole pool for the same reason, read back off ` +
+    `/flows/long/ so the two routes cannot drift apart under one label`);
 } finally {
   await browser.close();
   await server.stop();

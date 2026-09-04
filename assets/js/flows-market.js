@@ -24,8 +24,24 @@
   var MINUS = "−";           // U+2212, not a hyphen
   var DASH = "—";
 
+  /* A NUMBER, OR THE VENDOR'S QUOTED NUMBER, AND NOTHING ELSE. Two wrong
+     versions preceded this one. `typeof v === "number"` alone rejected the
+     quoted fields the vendor really sends, printing an em dash over a measured
+     reading (flows-panels.js:56-70). Widening to `v !== ""` then let Number()
+     invent: Number(" "), Number(false) and Number([]) are all 0, so a blank
+     rendered "$0".
+
+     IT RETURNS THE READING, so `!isNum(x)` and `isNum(x) ?` are bugs, not
+     idioms — a measured 0 is falsy. Ask `=== null`; format what comes back.
+
+     Aligned with flows-ui.js:65 rather than importing it: that module is 24k
+     and takes this route from 91k to 115k against a 95k weight ceiling. */
   function isNum(v) {
-    return typeof v === "number" && isFinite(v) ? v : null;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    if (v.trim() === "") return null;
+    var n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -33,16 +49,14 @@
     if (text !== undefined && text !== null) n.textContent = String(text);
     return n;
   }
-  /* ZERO PRINTS UNSIGNED, BECAUSE IT IS A MEASUREMENT AND NOT A LEAN.
-
-     Every signed formatter in this file used to test `n >= 0 ? "+" : MINUS`,
-     which stamps a plus on a reading that came back exactly level. "The
-     dollars were balanced" and "the dollars leaned a hair positive" then
-     rendered identically — the same family of defect as Number(null) === 0,
-     one step further down the pipe: a real measured zero dressed as a
-     positive. flows-ui.js states the rule and the board, the events page and
-     the watch list all obey it; this file now does too, in all three of its
-     signed formatters and in the bar classes they sit beside. */
+  /* ZERO PRINTS UNSIGNED, BECAUSE IT IS A MEASUREMENT AND NOT A LEAN. Every
+     signed formatter here used to test `n >= 0 ? "+" : MINUS`, stamping a plus
+     on a reading that came back exactly level: "the dollars were balanced" and
+     "they leaned a hair positive" then rendered identically — the measured-zero
+     defect one step further down the pipe than Number(null) === 0. flows-ui.js
+     states the rule and the board, the events page and the watch list obey it;
+     so now do all three signed formatters here and the bar classes beside
+     them. */
   function signGlyph(n) {
     return n < 0 ? MINUS : (n > 0 ? "+" : "");
   }
@@ -193,6 +207,9 @@
   // check: the pipeline does not run at all on a Saturday.
   var STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   var STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  // Mirrored from flows-ui.js:147 — the shape the publisher validates on the
+  // way out, and the gate the parse below sits behind.
+  var ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   function assessAge(payload) {
     var now = Date.now();
@@ -201,10 +218,18 @@
     /* THE MISSING-VALUE TEST BEFORE THE COERCION, and it matters more here
        than almost anywhere: Number(null) is 0, 0 is a finite millisecond
        stamp — the epoch — and a payload with no write header would be
-       reported as fifty-six years stale. A non-positive stamp is absent for
-       the same reason. */
-    var written = isNum(payload.__updatedAt);
-    if (written !== null && written > 0 && now - written > STALE_WRITE_MS) {
+       reported as fifty-six years stale.
+
+       A NON-POSITIVE STAMP IS AN ABSENT ONE, turned into one here once rather
+       than tested at each use. This carried the `> 0` inside the stale branch
+       and asked `written === null` at the bottom — the shape flows-ui.js:203
+       documents fixing, where a stamp of 0 skips the branch as "not old" and
+       falls through to "fresh". Unreachable today, since shared/flows-market.js
+       normalises 0 to null upstream; but a second line of defence that works
+       only while the first holds is not one. */
+    var stamped = isNum(payload.__updatedAt);
+    var written = stamped !== null && stamped > 0 ? stamped : null;
+    if (written !== null && now - written > STALE_WRITE_MS) {
       var hours = Math.floor((now - written) / 3600000);
       var days = Math.floor(hours / 24);
       /* The hour branch cannot fire while the threshold is 30 hours — every
@@ -221,20 +246,38 @@
       };
     }
 
-    if (payload.sessionDate) {
-      /* 21:00Z is after every US close, so a session date is aged from the
-         end of its own session rather than from its midnight. */
-      var session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
-      if (isFinite(session) && now - session > STALE_SESSION_MS) {
-        return {
-          kind: "session",
-          message: "These numbers describe the " + payload.sessionDate + " session, " +
-            "which is more than four days old. The pipeline is running but its " +
-            "data is not advancing.",
-        };
-      }
+    /* 21:00Z is after every US close, so a session date is aged from the end
+       of its own session rather than from its midnight.
+
+       THE SHAPE IS CHECKED BEFORE THE PARSE, because Date.parse is lenient
+       enough to be dangerous: "2026-09" + "T21:00:00Z" comes back FINITE in
+       V8 and dates a session to a day nobody published — raising a stale
+       banner over a current level, on the one route with no other freshness
+       signal to contradict it.
+
+       AND THE PARSE RESULT IS KEPT, not just tested. This asked
+       `!payload.sessionDate`, the PRESENCE of the key, so a date of pure
+       garbage ("Thursday") still reported "fresh". What did not parse belongs
+       with the silences. Both fixes are flows-ui.js:229-249 reaching the
+       mirror that claimed to hold them. */
+    var session = null;
+    if (ISO_DAY.test(String(payload.sessionDate || ""))) {
+      var parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
+      if (isFinite(parsed)) session = parsed;
     }
-    if (written === null && !payload.sessionDate) return { kind: "unknown", message: null };
+    if (session !== null && now - session > STALE_SESSION_MS) {
+      return {
+        kind: "session",
+        message: "These numbers describe the " + payload.sessionDate + " session, " +
+          "which is more than four days old. The pipeline is running but its " +
+          "data is not advancing.",
+      };
+    }
+
+    /* NOTHING DATABLE AT ALL IS NOT A PASS. "unknown" says no claim was made;
+       "fresh" says a claim was made and it held. Only a payload that carried
+       at least one READABLE date gets the second. */
+    if (written === null && session === null) return { kind: "unknown", message: null };
     return { kind: "fresh", message: null };
   }
 
@@ -298,12 +341,10 @@
     var breadth = m.breadth || {};
     var premium = m.premium || {};
 
-    /* NEVER A CONFIDENT ZERO IN A POPULATION. This line read
-       `isNum(breadth.bull) || 0`, which is Number(null) === 0 wearing newer
-       syntax: a count the payload never published printed as "0 bought", and
-       a session in which nothing was bought became indistinguishable from a
-       field that was never written. The em dash is this file's mark for "not
-       measured" and it belongs in a count as much as in a price. */
+    /* NEVER A CONFIDENT ZERO IN A POPULATION. This read `isNum(breadth.bull)
+       || 0`: a count the payload never published printed as "0 bought", and a
+       session in which nothing WAS bought became indistinguishable from a
+       field never written. count() prints the em dash for exactly that. */
     host.append(tiltRow(
       "Breadth tilt — counting names",
       breadth.tilt,
@@ -434,10 +475,12 @@
             ? "More than half the total is five names: read the aggregate as those names, not as the universe."
             : "The total is spread across the universe rather than owned by a handful of prints."));
       }
-      if (isNum(b.unpriced) !== null) {
-        parts.push(b.unpriced + " of " + count(m.n) + " screened names quoted no usable " +
+      // A zero one-legged count drops the clause on purpose: it adds nothing.
+      var unpriced = isNum(b.unpriced), oneLeg = isNum(p.oneLegged);
+      if (unpriced !== null) {
+        parts.push(unpriced + " of " + count(m.n) + " screened names quoted no usable " +
           "net premium and are excluded from every total above rather than counted as level" +
-          (isNum(p.oneLegged) && p.oneLegged ? " — " + p.oneLegged + " of them quoted one leg only." : "."));
+          (oneLeg ? " — " + oneLeg + " of them quoted one leg only." : "."));
       }
       note.textContent = parts.join(" ");
     }
@@ -451,10 +494,18 @@
     body.textContent = "";
 
     var p = m.premium || {}, pcr = m.pcr || {}, ag = m.aggressor || {}, vol = m.vol || {};
+    /* THE COERCED VALUE IS THE ONE THAT GETS FORMATTED — at these two rows,
+       and at the breadth note and status line they were once named apart from.
+       Formatting the RAW field was harmless while isNum rejected strings and a
+       CRASH once it was widened: a quoted ratio passes the test and calls
+       .toFixed on a String. The list is built entirely before a row is
+       appended, so that costs the whole table, panel.hidden is never cleared,
+       and the TypeError escapes as a REJECTION window.onerror never sees. */
+    var pcrVol = isNum(pcr.volume), pcrPrem = isNum(pcr.premium);
     var rows = [
       ["Net premium, signed", usd(p.net), p.priced, toneClass(p.net)],
-      ["Put contracts per call", isNum(pcr.volume) === null ? DASH : pcr.volume.toFixed(3), pcr.quotedVolume, ""],
-      ["Put premium per call", isNum(pcr.premium) === null ? DASH : pcr.premium.toFixed(3), pcr.quotedPremium, ""],
+      ["Put contracts per call", pcrVol === null ? DASH : pcrVol.toFixed(3), pcr.quotedVolume, ""],
+      ["Put premium per call", pcrPrem === null ? DASH : pcrPrem.toFixed(3), pcr.quotedPremium, ""],
       ["Calls lifted at the offer", pct(ag.callLift), ag.quoted, ""],
       ["Puts lifted at the offer", pct(ag.putLift), ag.quoted, ""],
       ["Median 30-day implied vol", pct(vol.iv30dMedian), vol.iv30dQuoted, ""],
@@ -1925,7 +1976,9 @@
        a client-side annotation, not a claim the pipeline publishes it. */
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
 
-    if (m.status === "pending" || !isNum(m.n)) {
+    // `!isNum(m.n)` sent an ok payload with `n: 0` down the pending branch.
+    var n = isNum(m.n);
+    if (m.status === "pending" || n === null) {
       /* THE ORDINARY STATE BEFORE THE FIRST RUN, stated as a fact about the
          store rather than as an error. */
       if (status) {
@@ -1948,8 +2001,10 @@
     paintPulse(all[3]);
 
     if (status) {
-      status.textContent = m.n + " screened names" +
-        (isNum(m.screened) ? " of " + m.screened + " returned by the ladder" : "") +
+      // `isNum(m.screened) ?` lost the denominator on a ladder that returned 0.
+      var screened = isNum(m.screened);
+      status.textContent = n + " screened names" +
+        (screened === null ? "" : " of " + screened + " returned by the ladder") +
         " · session " + (m.sessionDate || "unknown") +
         (m.generatedAt ? " · built " + new Date(m.generatedAt).toLocaleString() : "");
     }

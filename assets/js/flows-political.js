@@ -49,8 +49,37 @@
     return String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
   }
 
+  /* THE CANONICAL FORM, WHICH ADMITS A NUMERIC STRING. This read
+     `typeof v === "number" && isFinite(v)`, which is safe against the
+     confident zero — Number(null) never runs — but is STRICTER than the
+     contract every other surface in this product holds, and the harm runs the
+     other way: the vendor quotes several fields, so a present reading rendered
+     as an em dash. flows-panels.js already diagnosed this exact divergence
+     after it shipped: "one payload field rendered as a value on the board and
+     as an em dash in the card panel, for the same card, in the same session."
+     The payload side agrees — shared/flows-market.js numOrNull coerces the
+     same way.
+
+     ALIGNED RATHER THAN DELETED, and that is a measurement rather than a
+     shortcut. The obvious move is to drop the local copy for flows-ui.js's
+     `UI.isNum`, but the library is 24k of parse and tests/flows-weight ceilings
+     both routes that carry this copy: market goes 91k to 115k against a 95k
+     ceiling, political 49k to 73k against 55k. Both trip. So the body matches
+     the canonical one and the duplication stays until those routes can afford
+     the module. */
+  /* A NUMBER, OR THE VENDOR'S QUOTED NUMBER, AND NOTHING ELSE. The previous
+     form excluded only the literal "", and `Number(" ")`, `Number(false)` and
+     `Number([])` are all 0 — so a field the vendor sent as a blank space
+     became a measured zero and printed "$0", a disclosed sale invented out of
+     whitespace. Byte-for-byte the body in assets/js/flows-ui.js:65 and
+     assets/js/flows-market.js:43; the three copies exist because
+     tests/flows-weight ceilings this route, and they must not drift. */
   function isNum(v) {
-    return typeof v === "number" && isFinite(v) ? v : null;
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    if (v.trim() === "") return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
   }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -976,9 +1005,26 @@
          newest filing in the window is several days old and saying "today"
          would be false on exactly the days it matters. */
       var freshCount = isNum(p.freshFilings);
+      /* BOUND ONCE, THEN USED FOR THE NUMBER AND FOR THE PLURAL. This read
+         `(isNum(p.filings) || 0)` for the count and `p.filings === 1` for the
+         plural — tested coerced, compared raw — so a vendor-quoted "1" printed
+         the number 1 and then took the plural arm, because "1" === 1 is false:
+         "1 disclosures". The same shape the market tape carried until
+         flows-market.js:519 bound `pcrVol` once.
+
+         AND AN ABSENT COUNT NO LONGER PRINTS AS ZERO. `|| 0` turned a filings
+         key that never arrived into "0 disclosures filed between May and
+         August" — a measured emptiness asserted about a window nobody counted,
+         in the lead clause of the status line. The window is still stated,
+         because the dates ARE known; only the count is withheld, which is the
+         convention every other clause in this array already follows by
+         dropping itself when its value is absent. */
+      var filings = isNum(p.filings);
+      var filedWhen = w.from ? " filed between " + w.from + " and " + (w.to || "today") : "";
       status.textContent = [
-        (isNum(p.filings) || 0) + " disclosure" + (p.filings === 1 ? "" : "s") +
-          (w.from ? " filed between " + w.from + " and " + (w.to || "today") : ""),
+        filings === null
+          ? (filedWhen ? "Disclosures" + filedWhen : "")
+          : filings + " disclosure" + (filings === 1 ? "" : "s") + filedWhen,
         freshCount !== null && p.latestFiled
           ? freshCount + " of them on " + p.latestFiled + ", the newest filing date here"
           : "",

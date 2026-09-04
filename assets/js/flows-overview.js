@@ -1649,9 +1649,60 @@
         " on this page. Refresh to try again."
       : "");
 
-    setRailCount("long", bullN);
-    setRailCount("short", bearN);
+    /* THE TWO BOARD BADGES ARE THE POPULATION, WHICH IS WHAT /flows/long/
+       BADGES. These filled from `rowCount`, the published rows — and the
+       publisher caps each side, publishing `cleared` (the side's whole pool)
+       and `shed` (what did not fit) beside them for exactly that reason
+       (flows-pipeline.mjs:5687). So this page wrote 93 into the slot that
+       flows-board.js:1842 fills with 97, on the route the badge links to. Two
+       routes wording one quantity differently is how a reader concludes there
+       are two quantities; the badge states the size of the SECTION, not this
+       page's excerpt of it, which is the rule flows-events.js:1126 already
+       settled for the fourth slot below.
+
+       THE SAME RULE AS THE BOARD, WRITTEN ONCE: prefer `cleared`, fall back to
+       the row count only for a board published before that field existed, and
+       let `rowCount`'s null carry the two silences through untouched — a
+       pending or unreadable board has no population to claim and setRailCount
+       withholds on null. A measured-quiet side still badges its 0, because
+       `cleared` is 0 there rather than absent.
+
+       THE WATCH BADGE STAYS ON `rowCount`, checked rather than assumed:
+       `board:watch` publishes `neutral` and NO `cleared` at all
+       (flows-pipeline.mjs:5824), and flows-watch.js:434 fills this same slot
+       from its own rows.length — so the two routes already agree. `neutral` is
+       the in-band population and would be the field to move to, but it would
+       have to move on both routes at once, which is a separate decision from
+       this one.
+
+       WHAT IS STILL UNRECONCILED HERE, stated rather than left to be found:
+       the status line above opens "93 bullish · 88 bearish" from the published
+       rows, and this page carries no clause pairing that with the pool the
+       badge now shows. /flows/long/ does — "4 more cleared the band and did
+       not fit (93 of 97 shown)" at flows-board.js:1960 — so there the two
+       numbers are explained where they sit together. Giving this line the same
+       clause is a copy change on a live page for two sides at once, and it is
+       left as one. */
+    const population = (payload, rows) =>
+      rows === null ? null : (isNum(payload.cleared) ?? rows);
+    setRailCount("long", population(lng, bullN));
+    setRailCount("short", population(sht, bearN));
     setRailCount("watch", rowCount(watch));
+    /* THE FOURTH SLOT WAS EMITTED AND NEVER FILLED FROM HERE. The nav renders
+       a badge for four keys (shared/flows-pages.js:84) and this page held the
+       events payload — it is fetched at :1453 and read at :1571 — while
+       filling three. So the rail's events count appeared on /flows/events/
+       and vanished on /flows/, which reads as "nothing reports this week"
+       rather than "this page did not say".
+
+       AND IT IS THE POPULATION, the same quantity flows-events.js:1142 now
+       writes. `rowCount` would have been the published rows — capped at 200
+       on the wire and at eight in the region above — so the two routes would
+       have filled one badge with two different numbers, which is the defect
+       this fix exists to close, not the fix. `inWindow` is null on a pending
+       envelope and setRailCount withholds on null. */
+    setRailCount("events", events && events.status !== "pending"
+      ? isNum(events.inWindow) : null);
   }).catch(() => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again.";
   });

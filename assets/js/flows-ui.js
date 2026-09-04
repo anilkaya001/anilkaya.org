@@ -55,10 +55,18 @@
   /* THE MISSING-VALUE TEST COMES BEFORE THE COERCION. Number(null) is 0
      and 0 is finite, so the naive shape turns an absent reading into a
      confident zero — the mistake this repo has shipped five times, which
-     is why the idiom lives here now instead of being re-derived. */
+     is why the idiom lives here now instead of being re-derived.
+
+     AND THE COERCION ADMITS ONLY TWO SHAPES, because Number() is generous
+     in exactly the directions that manufacture a reading: Number(" ") and
+     Number(false) and Number([]) are all 0, and the old guard excluded
+     only the literal "". A field the vendor sent as a blank string then
+     printed "$0" — a measured sum invented out of whitespace. */
   const isNum = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const n = typeof v === "number" ? v : Number(v);
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    if (v.trim() === "") return null;
+    const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
 

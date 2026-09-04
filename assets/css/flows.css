@@ -501,6 +501,178 @@
   opacity: 0.55;
 }
 
+/* ---------- the board's marks ----------------------------------
+   
+   EMITTED SINCE THE MEMORY SHIPPED, STYLED NEVER. `markNode`
+   (assets/js/flows-board.js:452) builds every one of these as a <span> with a
+   class, an aria-label and a title, and not one of the classes resolved to a
+   rule in any stylesheet. So the marks inherited the cell: same size, same
+   weight, same colour, and — because a <span> appended to a cell that already
+   holds text has no gap — butted straight against the value. The rank column
+   read "1NEW" and "44▼15"; the ticker column read "SYN087↗earnings in 13d",
+   which is a name and an event fused into one token.
+   
+   The tokens for this already existed and named themselves: base.css:168
+   `--fs-fine` is commented "dense cells, chips, marks", base.css:107
+   `--radius-1` is "chips, cells, inline marks". The type scale was designed
+   for these marks a long time before the rules were written.
+   
+   TWO CATEGORIES, DELIBERATELY UNALIKE. A rank move says where the name went
+   since the last board; a tenure mark says why the row may not be here
+   tomorrow. Reading them as one class of thing is how "▲7" and "incumbent"
+   end up looking like the same kind of statement about a name. The moves stay
+   numeric and inline; the tenure marks take a bordered chip.
+   
+   HUE IS THE LAST CHANNEL, NEVER THE ONLY ONE. `is-up` and `is-down` already
+   carry ▲ and ▼ in the glyph itself, so colour here is redundant confirmation
+   and the mark survives being read in greyscale — which is the house rule,
+   not an exception to it. `is-same` is "=", and it is deliberately the
+   quietest of the three: a held rank is a measurement and must be visible,
+   but it is not news. */
+.fb-mem,
+.fb-hold,
+.fb-earn {
+  margin-left: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  white-space: nowrap;
+}
+
+/* The rank move. Tabular figures so "▲7" and "▼15" occupy the same advance
+   and the column does not shiver between rows. */
+.fb-mem {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.fb-mem.is-up { color: var(--flow-up); }
+.fb-mem.is-down { color: var(--flow-down); }
+.fb-mem.is-same { color: var(--ink-faint); opacity: 0.7; }
+
+/* NEW has no arrow to carry it, so it is a word, and a word among numbers
+   needs the chip to stop reading as a value. */
+.fb-mem.is-new {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 45%, transparent);
+  border-radius: var(--radius-1);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+/* The two tenure marks. Same chip, because they answer the same question —
+   why this row leaves — and a reader should not have to learn two shapes for
+   one idea. Uppercase is not applied to `.fb-earn`: it carries a unit ("13d")
+   and units are not shouted. */
+.fb-hold,
+.fb-earn {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 35%, transparent);
+  border-radius: var(--radius-1);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+.fb-hold { letter-spacing: 0.05em; }
+
+/* A row on incumbency, marked on the row as well as in the cell. A hairline
+   on the leading edge rather than a wash across the row: the row's own
+   readings must keep their colours, and a tinted background would change what
+   every number in it looks like. */
+.flows-table tbody tr.is-holdover > *:first-child {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ink-faint) 50%, transparent);
+}
+
+/* The note under the deck that says which comparison did not happen. It rides
+   on `.flows-empty` for its type; this adds only the span and the gap, because
+   the deck is a grid and an explanation must cross it rather than sit in one
+   card's column. */
+.fb-memnote {
+  grid-column: 1 / -1;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.fb-memnote.is-caveat { color: var(--ink-dim); }
+
+/* ---------- the deck's own rows --------------------------------
+   
+   The deck is the default view and the phone view, and three of its rows were
+   as unstyled as the marks above. `.fd-mem` holds the same mark nodes the
+   table uses, so it clears their leading margin and spaces them itself: a
+   margin on the first child of a line is a ragged left edge. */
+.fd-mem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+}
+.fd-mem > .fb-mem,
+.fd-mem > .fb-hold,
+.fd-mem > .fb-earn { margin-left: 0; }
+
+/* The evidence row: the family glyph on the left, the one scalar that says how
+   much money was behind the reading on the right. Baseline-aligned rather than
+   centred, so the glyph's zero line and the digits sit on one line. */
+.fd-ev {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+}
+.fd-prem {
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- the ΔOI basis verdict ------------------------------
+   
+   THREE VERDICTS, ONE APPEARANCE. assets/js/flows-ticker.js:2521-2578 emits
+   `is-falsified`, `is-inconclusive` and `is-untested` on the note that says
+   whether ΔOI and the volume beside it describe the same span — the check
+   that decides whether a whole column of this page may be read at all. None
+   of the three had a rule, so a measured contradiction, a result that proves
+   nothing, and a check that could not run were sixty words of identical grey
+   prose, distinguishable only by reading them.
+   
+   THE EDGE, NOT THE FILL. A tinted background would change what every number
+   inside the panel looks like, and these notes sit beside readings whose own
+   colour is load-bearing. A left edge marks the paragraph without touching
+   it.
+   
+   AND THE EDGE IS A SHAPE BEFORE IT IS A COLOUR. `is-untested` is DASHED —
+   the same idiom `.fb-fam i.is-null::before` and `.bd-gap` already use for
+   "not measured" — so the difference between "we checked and it failed" and
+   "we could not check" survives greyscale, a mono display and a reader who
+   does not know the palette. Hue is the redundant channel here, never the
+   carrier. */
+.ftt-oibasis {
+  padding-left: var(--space-2);
+  border-left: 3px solid transparent;
+}
+
+/* A measured contradiction: more contracts opened than traded, which cannot
+   happen across one settlement. The loudest of the three because it is the
+   only one that says a reading on this page is unsafe. */
+.ftt-oibasis.is-falsified {
+  border-left-color: var(--flow-down);
+  color: var(--ink);
+}
+
+/* Consistent with the pair being aligned, and equally consistent with an
+   intraday-updated open interest. Solid, because something WAS measured; and
+   neutral, because what was measured settles nothing. */
+.ftt-oibasis.is-inconclusive {
+  border-left-color: var(--ink-faint);
+}
+
+/* The check did not run. Dashed for the same reason a null bar is hollow:
+   an absent measurement must not borrow the appearance of a taken one. */
+.ftt-oibasis.is-untested {
+  border-left-style: dashed;
+  border-left-color: color-mix(in srgb, var(--ink-faint) 60%, transparent);
+}
+
 /* Styled for both renderers: a <td> inside the table and a <p> inside the deck
    grid, which is the default view and where these messages were invisible. */
 .fb-empty {

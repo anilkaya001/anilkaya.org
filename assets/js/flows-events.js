@@ -1123,8 +1123,23 @@
       (go ? ", the run's own Eastern date and the origin the earnings gate used" : ""));
     statusEl.textContent = parts.join(" " + MID + " ") + ".";
 
+    /* THE BADGE COUNTS THE POPULATION, NOT THE PAGE. It filled from `shown`,
+       which is post-cap: the same clause four lines above says "the cap holds
+       the list to 200", so with 240 names reporting the rail said 200 and the
+       sentence beside it said 240 of them existed. A number in the nav that
+       silently means "as many as we chose to draw" is the truncation defect
+       one element wide, and /flows/ fills this same slot from the same
+       payload — two routes wording one quantity differently is how a reader
+       concludes there are two quantities.
+
+       A ZERO HERE IS A MEASUREMENT AND IS PRINTED. renderStatus does not run
+       on a pending payload — that branch returns at :1212 before reaching
+       this line — and the empty-calendar branch at :1231 calls it
+       deliberately, as "a measured emptiness". What is withheld instead is an
+       inWindow that never arrived: no population was published, so no
+       population is claimed. */
     const slot = document.querySelector('[data-rail-count="events"]');
-    if (slot && shown) { slot.textContent = String(shown); slot.hidden = false; }
+    if (slot && inWindow !== null) { slot.textContent = String(inWindow); slot.hidden = false; }
 
     if (footEl) {
       const foot = [];
