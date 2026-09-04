@@ -6578,3 +6578,13 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-region .ak-facts { grid-template-columns: 1fr; }
   .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
 }
+
+/* THE DENOMINATOR UNDER THE PAIR — small, but never absent while the pair
+   is present. A figure this loud carries its own denominator or it does
+   not carry a pair. */
+.ak-fig-d {
+  margin: 0 0 0.15rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+}

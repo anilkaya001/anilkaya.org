@@ -122,18 +122,35 @@ export function silenceOf(payload, what, list) {
  * bearish", and a headline figure taken from a ticker is a confident
  * wrong number set in the largest type on the page.
  *
- * So `lead` is { label, keys, unit } where `keys` index `n`. The renderer
- * reads n[key] and draws em dashes for any that are absent — the same
- * absence rule as everywhere else, because a headline is exactly where a
- * missing reading must not become a zero. The SENTENCE IS ALWAYS DRAWN
- * BENEATH IT: the figure is a way in, never a replacement, and a number
- * without its sentence has lost its units and its qualification.
+ * So `lead` is { label, keys, unit, den } where `keys` and `den.key` index
+ * `n`. The renderer reads n[key] and draws em dashes for any that are
+ * absent — the same absence rule as everywhere else, because a headline is
+ * exactly where a missing reading must not become a zero. The SENTENCE IS
+ * ALWAYS DRAWN BENEATH IT: the figure is a way in, never a replacement, and
+ * a number without its sentence has lost its units and its qualification.
+ *
+ * `den` IS THE DENOMINATOR AND IT TRAVELS WITH THE PAIR. "44 / 53 NAMES"
+ * set large, with "out of 100 scored" only in the sentence below it, is a
+ * pair a reader can take for the whole population — and this file already
+ * argues that case for the sector lean, where saying "across 8 baskets"
+ * while eleven were asked for invites exactly that misreading. A figure
+ * this loud carries its own denominator or it does not carry a pair.
+ *
+ * AND A FIGURE THAT IS A FLOOR MAY NOT BE SET AS A HEADLINE AT ALL. The
+ * alerts count is deliberately given no `lead`: it is capped by the
+ * vendor's own ceiling, the warning engine says so, and a floor set in the
+ * largest type on the page is a ceiling reading as a total. If a count can
+ * be truncated, it stays in prose where its qualification is a clause away
+ * rather than a slot away.
  */
 const fact = (id, say, n, lead) => {
   const f = { id, say, n: n || {} };
   if (lead && typeof lead === "object" && Array.isArray(lead.keys) && lead.keys.length) {
     f.lead = { label: String(lead.label || ""), keys: lead.keys.slice(),
       unit: lead.unit === undefined ? null : String(lead.unit) };
+    if (lead.den && typeof lead.den === "object" && lead.den.key) {
+      f.lead.den = { key: String(lead.den.key), word: String(lead.den.word || "") };
+    }
   }
   return f;
 };
@@ -224,7 +241,8 @@ export function briefToday(store) {
       (scored === null ? "" : " out of " + scored + " scored") +
       (neutral === null ? "" : ", with " + neutral + " inside the dead band") + ".",
       { bullish: bull, bearish: bear, scored, neutral, session },
-      { label: "lean bull / bear", keys: ["bullish", "bearish"], unit: "names" }));
+      { label: "lean bull / bear", keys: ["bullish", "bearish"], unit: "names",
+        den: { key: "scored", word: "scored" } }));
   }
 
   /* THE LOUDEST NAME EACH SIDE, with the score that made it loudest.

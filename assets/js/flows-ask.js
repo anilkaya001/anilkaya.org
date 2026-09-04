@@ -188,6 +188,19 @@
     }
     if (spec.unit) row.append(el("span", "ak-fig-u", spec.unit));
     box.append(row);
+    /* THE DENOMINATOR TRAVELS WITH THE PAIR. "44 / 53 NAMES" set large,
+       with "out of 100 scored" only in the sentence below, is a pair a
+       reader can take for the whole population — the same misreading
+       flows-brief.js refuses for the sector lean, where naming the baskets
+       that read without the baskets returned would report 8 of 8. Absent,
+       it says so rather than dropping the line, because a pair printed
+       with no denominator at all is the very state this exists to prevent. */
+    if (spec.den && spec.den.key) {
+      var d = isNum(n[spec.den.key]);
+      box.append(el("p", "ak-fig-d", d === null
+        ? "of an unpublished total"
+        : "of " + d + (spec.den.word ? " " + spec.den.word : "")));
+    }
     return box;
   }
 
