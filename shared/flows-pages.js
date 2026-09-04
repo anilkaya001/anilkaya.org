@@ -1704,13 +1704,26 @@ ${shell("Political Disclosures", "Options-flow intelligence", "political", usern
  * is a different and false claim from "this has not loaded yet".
  */
 export function askPage({ username = "" } = {}) {
-  const lede = "What the session says, what changed to get here, and what is " +
+  /* TWO LEDES, AND ONLY THE SHORT ONE IS PRINTED. `head()` needs a
+     description for the document and for anything that quotes the page;
+     the reader in front of it needs one line and then the readings. The
+     long form said in six lines what the short one says in one, and it
+     stood between every visit and the first number on the page — which is
+     what the owner meant by too much text.
+
+     NOTHING IS LOST: the guarantee the long form spelled out is stated
+     where it can be acted on, in the question panel's own note, beside
+     the box it constrains. A promise about a model belongs next to the
+     model, not in a preamble a reader scrolls past to reach the data. */
+  const summary = "What the session says, what changed to get here, and what is " +
     "already on the calendar before the next one — assembled from the same " +
     "published readings every other page here draws. Ask a question and the " +
     "wording may be a model's; the figures never are. Anything it writes that " +
     "is not already in the measurements it was handed is refused, and the " +
     "measured reading is served instead.";
-  return `${head("Flows — Ask", lede)}
+  const lede = "Yesterday, today, and what is already scheduled — from the readings " +
+    "this site has published.";
+  return `${head("Flows — Ask", summary)}
 ${shell("Ask", "Options-flow intelligence", "ask", username, `
   <div class="flows-status" id="askStatus" role="status">Reading the session’s briefing…</div>
 

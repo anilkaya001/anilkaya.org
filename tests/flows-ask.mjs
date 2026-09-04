@@ -942,6 +942,315 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and pins no figure it does not have");
 }
 
+/* =============================================================
+   THE RENDERER, DRIVEN THROUGH ITS OWN TWO FETCHES.
+
+   Everything above pins shared/flows-ask.js, which the Worker
+   imports. assets/js/flows-ask.js is the other half of the same
+   contract and had no suite at all: it is the file that decides
+   which of the three silences a reader is shown, whether a refused
+   answer announces itself, and whether the route's stated reason
+   for a missing model survives the trip to the page. Every defect
+   these assertions pin was a wrong SENTENCE rather than a thrown
+   error, so nothing here would have gone red on its own.
+
+   NO BROWSER, AND THAT IS AFFORDABLE HERE. The renderer touches
+   `document`, `fetch` and `location` and nothing else — no
+   window, no timers, no storage — so it runs under a fifty-line
+   node stub, in-process, in milliseconds. tests/flows-board-render
+   .mjs stands a real Worker behind Playwright because it is testing
+   a SCRIPT TAG that was never served; what is under test here is
+   the wording this file chooses over a payload, which is the same
+   question whether or not a browser laid it out.
+   ============================================================= */
+import { readFile } from "node:fs/promises";
+{
+  const SRC = await readFile(new URL("../assets/js/flows-ask.js", import.meta.url), "utf8");
+
+  class TextNode {
+    constructor(s) { this.data = String(s); }
+    get textContent() { return this.data; }
+  }
+  class El {
+    constructor(tag) {
+      this.tagName = tag; this.children = []; this.attrs = new Map();
+      this.className = ""; this.own = "";
+    }
+    append(...kids) { for (const k of kids) this.children.push(k); }
+    setAttribute(k, v) { this.attrs.set(k, String(v)); }
+    getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
+    removeAttribute(k) { this.attrs.delete(k); }
+    addEventListener(type, fn) { submits.push({ type, fn }); }
+    focus() {}
+    get textContent() {
+      return this.own + this.children.map((c) => c.textContent).join("");
+    }
+    set textContent(v) { this.children = []; this.own = String(v); }
+  }
+
+  const submits = [];
+  const byId = new Map();
+  const doc = {
+    createElement: (t) => new El(t),
+    createTextNode: (s) => new TextNode(s),
+    getElementById: (id) => byId.get(id) || null,
+  };
+  const loc = { replace() {} };
+
+  let briefBody = null;
+  let askBody = null;
+  const fetchStub = (path, init) => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve(init && init.method === "POST" ? askBody : briefBody),
+  });
+
+  const run = new Function("document", "fetch", "location", SRC);
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  const walk = (node, out = []) => {
+    for (const c of node.children || []) {
+      if (c instanceof El) { out.push(c); walk(c, out); }
+    }
+    return out;
+  };
+  const hasClass = (n, cls) => String(n.className).split(/\s+/).includes(cls);
+  const byClass = (root, cls) => walk(root).find((n) => hasClass(n, cls));
+  const allClass = (root, cls) => walk(root).filter((n) => hasClass(n, cls));
+  const marks = (root) => walk(root)
+    .map((n) => n.getAttribute("data-empty")).filter((v) => v !== null);
+
+  const mount = () => {
+    submits.length = 0; byId.clear();
+    const app = new El("div");
+    byId.set("askApp", app);
+    run(doc, fetchStub, loc);
+    return app;
+  };
+
+  /* The submit handler is invoked directly rather than through a
+     synthesised event: what is under test is the wording paintAnswer
+     chooses, and a stub that also had to model event dispatch would be
+     a second thing that could be wrong. */
+  const ask = async (app, payload, question) => {
+    askBody = payload;
+    byClass(app, "ak-ask-in").value = question;
+    submits[submits.length - 1].fn({ preventDefault() {} });
+    await tick(); await tick();
+    return byClass(app, "ak-answer");
+  };
+
+  const STAMP2 = "2026-09-04T08:10:00.000Z";
+
+  /* ---------- pending is not a fault on this page ------------------
+
+     THE EXACT ENVELOPE worker.js RETURNS when `brief` has not been
+     published for the session. It is the ordinary state every morning
+     before the first pipeline run, and it reached a branch that called
+     it a fault on this page's side of the wire — twice — over a
+     provenance line claiming a reading had been assembled from
+     published facts that do not exist yet. Three sentences, none of
+     them true, for the most common state this route has. */
+  {
+    const app = mount(); await tick();
+    const host = await ask(app, {
+      status: "pending", question: "what changed on the short board?", answer: null,
+      llm: false, facts: [], guard: null, model: null,
+      note: "The briefing has not been published for this session yet, so there is " +
+        "nothing measured to answer from. Nothing is claimed about the market by that.",
+    }, "what changed on the short board?");
+
+    same(marks(host), ["pending"],
+       "a question asked before the session's first pipeline run is answered with the " +
+       "PENDING mark and nothing else: the key has not been written, which is not the " +
+       "same fact as a payload this page could not read");
+    ok(/has not been published for this session yet/.test(host.textContent),
+       "and it is the route's own sentence that is printed, because the route is where " +
+       "the state was established");
+    ok(!/fault on this page/.test(host.textContent),
+       "a pipeline that has not run yet is never reported as a fault on this page — the " +
+       "reader would go looking for a break in the one case where nothing is broken");
+    ok(!/quoted from a payload/.test(host.textContent),
+       "and nothing claims a reading was assembled from published facts, because on this " +
+       "envelope there are none: facts is empty and answer is null");
+  }
+
+  /* ---------- the guard's verdict is `ok`, not the length of a list -
+
+     shared/flows-ask.js refuses an empty generation with
+     {ok:false, rejected:[]} — a real refusal that names no token,
+     because there was no text to find one in. Counting the list first
+     read that empty array as a clean pass. */
+  {
+    const app = mount(); await tick();
+    const host = await ask(app, {
+      answer: "The long board cleared 44 names.", llm: true, capped: false, facts: [],
+      silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash", note: null,
+      guard: { ok: false, rejected: [], numerals: [], invented: false, forecast: false,
+        reason: "The model returned no text, so there is nothing to check and nothing " +
+          "to show." },
+    }, "what cleared?");
+
+    ok(/discarded before it reached this page/.test(host.textContent),
+       "a guard verdict of ok:false is a refusal even when it names no token, and the " +
+       "page says so: an empty `rejected` counts how many tokens were refused, and a " +
+       "measured 0 is a reading rather than a verdict");
+    ok(!/came back from a language model/.test(host.textContent),
+       "so the answer is never introduced as the model's wording over a verdict that " +
+       "threw that wording away — llm:true reports only that a model was ASKED");
+    ok(!/found every one of them already written/.test(host.textContent),
+       "and the audit trail does not report a clean scan inside the answer the guard " +
+       "refused, which is the same empty list read as a pass one paragraph lower");
+  }
+
+  /* ---------- llm:false does not mean no model was asked ----------- */
+  {
+    const app = mount(); await tick();
+    const host = await ask(app, {
+      answer: "The long board cleared 44 names.", llm: false, capped: false, facts: [],
+      silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash",
+      guard: { ok: false, rejected: ["1200000"], numerals: ["1200000"], invented: true,
+        forecast: false, reason: "The answer stated a figure that appears in none of the " +
+          "facts it was given. The refused tokens are listed in `rejected`." },
+      note: "The generated wording was discarded: it stated a figure that appears in " +
+        "none of the measurements it was given, which means it was computed rather " +
+        "than quoted. What follows is the pipeline's own wording, and every figure in " +
+        "it was measured.",
+    }, "what cleared?");
+
+    ok(!/No model wrote any part of it/.test(host.textContent),
+       "the route sets llm:false on a refusal to say whose wording is being SERVED, and " +
+       "reading it as 'no model was asked' printed that denial directly above the " +
+       "qualifier explaining that the model's wording had been discarded");
+    ok(/what it wrote was refused before it reached this page/.test(host.textContent),
+       "a fired guard is itself the proof a model wrote something, so that is what the " +
+       "provenance line says");
+    ok(!/listed in `rejected`/.test(host.textContent),
+       "and the discard sentence is the route's `note`, never guard.reason, which ends " +
+       "by naming a JSON field — right for a developer and wrong for a page");
+  }
+
+  /* ---------- the reason the route stated is the reason printed ----
+
+     askFailure() words four outcomes onto `note` and names the cause
+     on `llmFailure`. This block read `llmReason` and `llmCode`, which
+     nothing has ever sent, so all four arrived as absent fields and
+     left as "the route did not state why" — the brief's THIRD honest
+     answer, printed over a reason that had been named. */
+  {
+    const app = mount(); await tick();
+    const noModel = {
+      answer: "The long board cleared 44 names.", llm: false, guard: null, capped: false,
+      facts: [], silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash", note: null,
+    };
+
+    /* THE SHAPE askFailure() ACTUALLY RETURNS: the sentence on `note` and
+       the cause on `llmFailure`, together. */
+    const spent = await ask(app, { ...noModel, llmFailure: "allowance",
+      note: "The free daily allowance for the model is spent for today. It resets at " +
+        "00:00 UTC. The readings below were measured by the pipeline and are unaffected.",
+    }, "what cleared?");
+    ok(/resets at 00:00 UTC/.test(spent.textContent),
+       "a spent allowance is reported as a spent allowance, with the reset the reader " +
+       "needs in order to know when to come back");
+    ok(!/did not state why/.test(spent.textContent),
+       "and never as the unreachable-for-an-unstated-reason answer, which is a different " +
+       "fact: one says come back tomorrow, the other says nobody knows");
+
+    /* AND THE TWO HALVES ARE PINNED APART, because together they hid each
+       other: with both read, deleting either one still left the other to
+       word the sentence, and a test that cannot fail on half a fix is not
+       holding that half. */
+    const unconfigured = await ask(app, { ...noModel,
+      note: "No model is configured for this site, so the reading below is the " +
+        "pipeline's own wording. Every figure in it was measured.",
+    }, "what cleared?");
+    ok(/No model is configured for this site/.test(unconfigured.textContent),
+       "the route's own sentence is printed on the branch that carries `note` and no " +
+       "cause word at all — which is the branch a site with no AI binding takes on " +
+       "every question it is ever asked");
+    ok(!/did not state why/.test(unconfigured.textContent),
+       "so the most permanent no-model state this route has is never reported as an " +
+       "unexplained one");
+
+    const noCapacity = await ask(app, { ...noModel, llmFailure: "capacity" },
+      "what cleared?");
+    ok(/no capacity for this question just now/.test(noCapacity.textContent),
+       "and the cause word alone is enough, which is what LLM_REASONS is for: a route " +
+       "that sends the code without a sentence still reaches the reader with the " +
+       "distinction the brief insists on — 3040 means ask again now, 3036 means " +
+       "come back tomorrow, and nothing of the allowance went on this one");
+    ok(!/did not state why/.test(noCapacity.textContent),
+       "rather than falling through to the third answer, which is reserved for a model " +
+       "that was unreachable for a reason nobody can read");
+  }
+
+  /* ---------- a fact that arrived without its sentence ------------- */
+  {
+    const app = mount(); await tick();
+    const host = await ask(app, {
+      answer: "A reading.", llm: false, guard: null, capped: false, silences: null,
+      why: "", model: null, note: null,
+      facts: [{ id: "board/long/tilt", n: { cleared: 44 }, source: "board:long", at: STAMP2 }],
+    }, "what cleared?");
+
+    ok(/1 fact was handed to the answer above/.test(host.textContent),
+       "the count line states one fact was handed to the answer");
+    ok(marks(host).includes("unreadable"),
+       "and a fact carrying no `say` is drawn as a NAMED gap rather than as an empty " +
+       "paragraph, because the count above it is confident and white space beneath a " +
+       "confident count reads as a rendering fault rather than as a payload that lost a " +
+       "field");
+    ok(/without the sentence that states it/.test(host.textContent),
+       "worded as the gap it is — silenceLine() has always refused to drop a silence " +
+       "that lost its wording, and a reading is not owed less");
+  }
+
+  /* ---------- a silence is the list it was filed under ------------- */
+  {
+    const app = mount(); await tick();
+    const host = await ask(app, {
+      answer: "A reading.", llm: false, guard: null, capped: false, facts: [],
+      why: "", model: null, note: null,
+      silences: { quiet: [{ kind: "pending", what: "sector premium",
+        say: "The sector premium key was measured and held no rows." }] },
+    }, "what about the sector premium?");
+
+    same(marks(host), ["quiet"],
+       "a silence filed under `quiet` is drawn QUIET even when its own `kind` field says " +
+       "pending: the publisher's filing is the publisher's answer, and trusting the " +
+       "field let a measured, empty market wear the mark of a job that never ran");
+  }
+
+  /* ---------- the warnings box ------------------------------------- */
+  {
+    briefBody = {
+      generatedAt: STAMP2, sessionDate: "2026-09-04", warningsChecked: 9,
+      today: null, yesterday: null, next: null,
+      warnings: [
+        { severity: "blocking", sources: ["board:long", "board:short"] },
+        { severity: "critical", say: "Two surfaces disagree about the session date." },
+      ],
+    };
+    const app = mount(); await tick();
+    const brief = byClass(app, "ak-brief");
+
+    same(allClass(brief, "ak-warn-sev").map((n) => n.textContent), ["blocking", "critical"],
+       "a severity this page has no mark for keeps the word its publisher chose. The " +
+       "lookup was a truth test over the mark table, so an unknown level was relabelled " +
+       "`note` — the least severe of the three, asserted on the publisher's behalf, on " +
+       "the one surface whose job is to say how much a thing matters");
+    same(allClass(brief, "ak-warn-mark").map((n) => n.textContent), ["!!", "?"],
+       "and is marked as unknown rather than given the mark of a level it was not");
+    ok(/without the sentence that states it/.test(brief.textContent),
+       "a warning that lost its `say` is named as a gap: the heading above counts it as " +
+       "a thing to know before reading the rest, so drawing it blank told the reader " +
+       "there was something to know and then showed them nothing");
+    ok(/2 things to know before reading the rest/.test(brief.textContent),
+       "while the heading keeps counting both, because a warning that arrived is a " +
+       "warning that arrived");
+  }
+}
+
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +
   `published payload, three silences that stay three from the store all the way into the ` +
   `answer, deterministic selection that caps truthfully and never returns nothing while it ` +

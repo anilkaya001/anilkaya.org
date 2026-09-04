@@ -119,11 +119,18 @@
     return box;
   }
 
-  function panel(id, extraClass, heading, asks) {
+  /* THE HEADING IS THE QUESTION, SO THE QUESTION IS NOT PRINTED TWICE.
+     Each region used to carry a heading and, under it in italics, a
+     restatement: "Since the prior session" followed by "What is different
+     from the last session this pipeline measured?". The second line taught
+     a reader nothing the first had not, and three of them cost three lines
+     of a page whose owner had to say out loud that it held too much text.
+     `asks` survives as the fold's summary, where it is doing work: it tells
+     a reader what opening the disclosure will explain. */
+  function panel(id, extraClass, heading) {
     var section = el("section", "fc-panel ak-panel " + extraClass);
     section.id = id;
     section.append(el("h2", "fc-panel-h", heading));
-    if (asks) section.append(el("p", "fc-q", asks));
     return section;
   }
 
@@ -156,7 +163,21 @@
   function factItem(fact, fallbackSource, fallbackAt, lead) {
     var li = el("li", "ak-fact" + (lead ? " is-lead" : ""));
     var say = fact && typeof fact.say === "string" ? fact.say : "";
-    li.append(el("p", "ak-fact-say fc-reading" + (lead ? " is-lead" : ""), say));
+    /* A FACT THAT ARRIVED WITHOUT ITS SENTENCE IS NAMED, NOT DRAWN BLANK —
+       the treatment silenceLine() already gives a silence that lost its
+       wording, for the reason it gives there. An empty paragraph still
+       counted toward the "N readings were published for this region, and all
+       of them are drawn" line above it, so the region stated a count and
+       showed the reader white space: a gap in the payload wearing the
+       appearance of a rendering fault, and named as neither. */
+    if (say.trim() === "") {
+      li.append(emptyLine("unreadable",
+        "A reading was published for this region without the sentence that states it, so " +
+        "this page has nothing to show for it. That is a gap in the payload rather than a " +
+        "fact about the session."));
+    } else {
+      li.append(el("p", "ak-fact-say fc-reading" + (lead ? " is-lead" : ""), say));
+    }
 
     var key = fact && typeof fact.source === "string" && fact.source ? fact.source : fallbackSource;
     var at = fact && typeof fact.at === "string" && fact.at ? fact.at : fallbackAt;
@@ -226,11 +247,16 @@
       for (j = 0; j < bucket.length; j++) {
         var q = bucket[j];
         if (!q || typeof q !== "object") continue;
-        /* The list a silence was filed under is the kind, and the object's
-           own `kind` agrees with it today. Reading the list rather than
-           trusting the field means a payload that grows a mislabelled entry
-           still lands under the heading its own publisher chose. */
-        out.push({ kind: q.kind || SILENCE_ORDER[i], what: q.what, say: q.say,
+        /* THE LIST A SILENCE WAS FILED UNDER IS THE KIND, and the entry's own
+           field is not consulted. `q.kind || SILENCE_ORDER[i]` said the
+           opposite of this comment: it trusted the field and fell back to the
+           list, so a reading filed under `quiet` carrying kind:"pending" was
+           drawn with the mark for a job that has not run. That is the three
+           silences swapping identities — a measured, empty market reported as
+           a pipeline that never ran — which is the one confusion this page
+           exists to prevent. The publisher's filing is the publisher's
+           answer. */
+        out.push({ kind: SILENCE_ORDER[i], what: q.what, say: q.say,
           source: q.source, reason: q.reason });
       }
     }
@@ -386,10 +412,23 @@
            returns a literal false on this field. A payload that does not
            carry it came from something else, and claiming otherwise would be
            this page asserting a guarantee it never received. */
+        /* THE REASSURANCE FOLDS; THE WITHHOLDING NEVER DOES, and the
+           asymmetry is the whole rule. "This section is declared measured
+           rather than projected" tells a reader that what they are looking
+           at is what they already assume it is — useful, and safe to put
+           one click away. "This payload does not declare it, so this page
+           withholds that claim" changes how every line above should be
+           read, and a caveat folded is a caveat unread.
+
+           Marked with a trailing `fold` flag rather than by matching the
+           text, because a sentence is edited far more often than a flag
+           is, and a fold that keyed on wording would silently start
+           hiding the wrong arm the first time someone rephrased it. */
         said.push(section.isForecast === false
-          ? "This section is declared measured rather than projected: every line in it is " +
-            "either an entry already on a published calendar or a distance between two " +
-            "numbers measured today. Nothing here is a claim about a future price."
+          ? { say: "This section is declared measured rather than projected: every line in " +
+              "it is either an entry already on a published calendar or a distance between " +
+              "two numbers measured today. Nothing here is a claim about a future price.",
+              fold: true }
           : "This payload does not declare the section measured rather than projected, so " +
             "this page withholds that claim. Read the lines above as what they say and " +
             "nothing further.");
@@ -407,7 +446,8 @@
   ];
 
   function paintRegion(cfg, brief) {
-    var section = panel(cfg.id, "ak-region", cfg.heading, cfg.asks);
+    var section = panel(cfg.id, "ak-region", cfg.heading);
+    var regionMeta = null;
     var payload = brief && typeof brief === "object" ? brief[cfg.slot] : null;
 
     if (!payload || typeof payload !== "object") {
@@ -438,20 +478,41 @@
          briefing whose readings had no stated origin would be the one thing
          this product will not ship. Said once and read; said twelve times
          and skipped. */
+      /* THE COUNT AND THE STAMP MOVE INTO THE FOLD, and this is the one
+         reduction on this page that needed an argument rather than a
+         measurement. What it says is true and worth having: how many
+         readings were published, that all of them are drawn, which key
+         they came from and when it was built. But every word of it is
+         about the PAGE, not about the market — and three regions of it,
+         at three lines each, stood between a reader and the first number
+         on every visit.
+
+         IT IS FOLDED AND NOT DELETED, and the test is the one this file
+         uses everywhere: does it change what a visible number MEANS? It
+         does not. It qualifies the SET — and the set is complete, which
+         is exactly why it is safe to fold. A truncated set could not go
+         in here; a complete one has nothing to warn about. Any sentence
+         whose own origin differs still draws its provenance in the open,
+         under itself, because that one does change a reading. */
       var regionAt = brief && typeof brief.generatedAt === "string" ? brief.generatedAt : null;
       var regionSaid = stampSaid(regionAt);
-      section.append(el("p", "ak-sub fc-note", (facts.length === 1
+      regionMeta = (facts.length === 1
         ? "1 reading was published for this region, and it is drawn."
         : facts.length + " readings were published for this region, and all of them are drawn.") +
         (regionSaid === null
           ? " They come from the brief key, which published no build stamp."
           : " All of them come from the brief key, built " + regionSaid + "; any sentence " +
-            "below that came from somewhere else says so under itself.")));
+            "below that came from somewhere else says so under itself.");
       section.append(factList(facts, "brief", regionAt));
     }
 
     var said = typeof cfg.qualify === "function" ? cfg.qualify(payload) : [];
-    for (var i = 0; i < said.length; i++) section.append(qualifier(said[i]));
+    var folded = [];
+    for (var i = 0; i < said.length; i++) {
+      var q = said[i];
+      if (q && typeof q === "object" && q.fold) { folded.push(q.say); continue; }
+      section.append(qualifier(typeof q === "string" ? q : (q && q.say) || ""));
+    }
 
     var drawn = paintSilences(section, silences);
 
@@ -468,7 +529,13 @@
         "rather than a fact about the session."));
     }
 
-    section.append(howBox("How this region was derived", cfg.how));
+    /* THE FOLD'S SUMMARY IS THE QUESTION THE REGION ANSWERS, which is
+       where `asks` went when it stopped being printed twice: as a summary
+       it tells a reader what opening this will explain, which is more use
+       than restating the heading above it. The region's own count and
+       stamp lead the folded lines, before the derivation. */
+    section.append(howBox(cfg.asks || "How this region was derived",
+      (regionMeta ? [regionMeta] : []).concat(folded).concat(cfg.how)));
     return section;
   }
 
@@ -509,13 +576,28 @@
     else if (obj && typeof obj.used === "boolean") used = obj.used;
     else if (obj && typeof obj.llm === "boolean") used = obj.llm;
 
+    /* THE ROUTE'S OWN SENTENCE IS LOOKED FOR, AND IT IS CALLED `note`.
+       worker.js words all four no-model outcomes there — the spent allowance
+       and its 00:00 UTC reset, the capacity miss that spent nothing, the plan
+       fault, the model that could not be reached — and this block read
+       `llmReason`, which nothing on this wire has ever sent. Every one of
+       those four arrived as an absent field and left as "the route did not
+       state why", which is the brief's THIRD honest answer: a reader was told
+       the cause was unknown in the one case where it had been named. */
     var published = null;
     if (obj && typeof obj.reason === "string" && obj.reason.trim() !== "") published = obj.reason;
     else if (typeof payload.llmReason === "string" && payload.llmReason.trim() !== "") {
       published = payload.llmReason;
+    } else if (typeof payload.note === "string" && payload.note.trim() !== "") {
+      published = payload.note;
     }
+    /* `llmFailure` CARRIES THE CAUSE AS A WORD, and the four words the route
+       uses for it are four of the keys in LLM_REASONS above. It is read after
+       the numeric codes so a route that later sends one loses nothing. */
     var code = obj && obj.code !== undefined && obj.code !== null ? String(obj.code)
-      : (payload.llmCode !== undefined && payload.llmCode !== null ? String(payload.llmCode) : null);
+      : (payload.llmCode !== undefined && payload.llmCode !== null ? String(payload.llmCode)
+        : (typeof payload.llmFailure === "string" && payload.llmFailure.trim() !== ""
+          ? payload.llmFailure.trim() : null));
 
     /* THE COUNT IS LOOKED FOR IN BOTH PLACES RATHER THAN IN WHICHEVER ONE
        HAPPENED TO EXIST. A block that carries the flag and not the count is a
@@ -540,12 +622,17 @@
        The guard is read first because it is the later fact. */
     if (fired) {
       line.append(el("span", "ak-prov-mark", MARK_PLAIN));
+      /* A FIRED GUARD IS ITSELF THE PROOF THAT A MODEL WROTE SOMETHING, so
+         the flag is not consulted on this branch. `llm` reports whose wording
+         is being SERVED, and on a refusal the served wording is always the
+         pipeline's — the route returns the refusal with llm false. Read as
+         "was a model asked", that false printed "No model wrote any part of
+         it" directly above the qualifier explaining that the model's wording
+         had been discarded, and left the reader two of this page's own
+         sentences to choose between. */
       line.append(text(" The wording above was assembled here from the published facts, in a " +
-        "fixed order. " + (block.used === true
-          ? "A model was asked this question and what it wrote was refused before it reached " +
-            "this page."
-          : "No model wrote any part of it.") +
-        " Every figure in it is quoted from a payload."));
+        "fixed order. A model was asked this question and what it wrote was refused before " +
+        "it reached this page. Every figure in it is quoted from a payload."));
       return line;
     }
     if (block.used === true) {
@@ -587,9 +674,17 @@
      that RETURNS something is compared, never asked for its truthiness. */
   function guardFired(guard) {
     if (!guard || typeof guard !== "object") return false;
+    /* `ok` IS THE VERDICT AND IT IS ASKED FIRST. shared/flows-ask.js refuses
+       an empty generation with {ok:false, rejected:[]} — a real refusal
+       carrying no tokens, because there was no text to find one in. Counting
+       `rejected` before consulting `ok` reads that empty array as a pass and
+       prints "every figure it wrote was checked" over an answer the guard
+       threw away. The length of `rejected` is a measurement of how many
+       tokens were refused and a measured 0 is a real reading; it is not the
+       verdict, and that is the same rule this file states for isNum. */
+    if (typeof guard.ok === "boolean") return !guard.ok;
     if (typeof guard.rejected === "boolean") return guard.rejected;
     if (Array.isArray(guard.rejected)) return guard.rejected.length > 0;
-    if (typeof guard.ok === "boolean") return !guard.ok;
     return false;
   }
 
@@ -778,15 +873,41 @@
 
     var ul = el("ul", "ak-warns-list");
     for (var i = 0; i < list.length; i++) {
-      var w = list[i] || {};
-      var sev = typeof w.severity === "string" && WARN_MARK[w.severity] ? w.severity : "note";
+      var w = list[i] && typeof list[i] === "object" ? list[i] : {};
+      /* AN UNRECOGNISED SEVERITY KEEPS THE WORD ITS PUBLISHER CHOSE. The
+         lookup was a truth test over WARN_MARK, so a severity this page has
+         no mark for — a level flows-warnings.js grows later, or a typo on the
+         wire — became "note", and the least severe of the three was then
+         printed as though the publisher had asked for it. silenceLine() above
+         maps an unknown kind to a FOURTH value rather than into one of its
+         three, for exactly this reason. Membership is asked with
+         hasOwnProperty because a severity of "constructor" or "toString"
+         otherwise answers the truth test with a function off the prototype
+         and prints it as the mark. */
+      var severity = typeof w.severity === "string" && w.severity.trim() !== ""
+        ? w.severity.trim() : null;
+      var known = severity !== null &&
+        Object.prototype.hasOwnProperty.call(WARN_MARK, severity);
+      var sev = known ? severity : "unknown";
       var li = el("li", "ak-warn is-" + sev);
-      li.append(el("span", "ak-warn-mark", WARN_MARK[sev]));
+      li.append(el("span", "ak-warn-mark", known ? WARN_MARK[severity] : "?"));
       var body = el("div", "ak-warn-body");
-      body.append(el("p", "ak-warn-say", typeof w.say === "string" ? w.say : ""));
+      /* A WARNING IS COUNTED IN THE HEADING ABOVE WHETHER OR NOT IT CARRIES
+         ITS SENTENCE, so drawing a sentence-less one as an empty paragraph
+         told a reader there was something to know before reading the rest and
+         then showed them nothing. */
+      var wsaid = typeof w.say === "string" && w.say.trim() !== "" ? w.say : null;
+      if (wsaid === null) {
+        body.append(emptyLine("unreadable",
+          "A warning was published without the sentence that states it, so this page cannot " +
+          "say what it found. That is a gap in the payload rather than a clean surface."));
+      } else {
+        body.append(el("p", "ak-warn-say", wsaid));
+      }
       var src = Array.isArray(w.sources) ? w.sources.filter(function (x) { return typeof x === "string" && x; }) : [];
       var line = el("p", "ak-warn-src");
-      line.append(el("span", "ak-warn-sev", sev));
+      line.append(el("span", "ak-warn-sev",
+        severity === null ? "no severity published" : severity));
       if (src.length) {
         line.append(text(" \u00b7 "));
         line.append(el("span", "ak-src-key", src.join(", ")));
@@ -923,6 +1044,26 @@
       return;
     }
 
+    /* PENDING REACHES THIS ROUTE TOO, AND IT IS NOT A FAULT ON THIS PAGE.
+       The briefing route and this one answer the same store, so the state
+       before the session's first pipeline run arrives here as well — the
+       route returns {status:"pending", answer:null, facts:[]} with its own
+       sentence on `note`. Read without this branch that envelope tripped the
+       "carried no text" line AND the "neither an answer, a fact nor a
+       silence" line, so the ordinary morning before the run was reported
+       twice as a fault on this page's side of the wire, and the provenance
+       line between them claimed a reading had been assembled from published
+       facts that do not yet exist. paintBrief() has always told the three
+       apart; this half of the page did not. */
+    if (payload.status === "pending") {
+      answerHost.append(emptyLine("pending",
+        typeof payload.note === "string" && payload.note.trim() !== ""
+          ? payload.note.trim()
+          : "The briefing has not been published for this session yet, so there is nothing " +
+            "measured to answer from. Nothing is claimed about the market by that."));
+      return;
+    }
+
     var block = llmBlock(payload);
     var guard = payload.guard && typeof payload.guard === "object" ? payload.guard : null;
     var fired = guardFired(guard);
@@ -950,8 +1091,17 @@
        design, so that this sentence cannot put an unquoted number back on the
        page in the course of explaining why one was refused. */
     if (fired) {
-      var why = guard && typeof guard.reason === "string" && guard.reason.trim() !== ""
-        ? guard.reason : null;
+      /* THE ROUTE'S SENTENCE, NOT THE GUARD'S. `guard.reason` ends by naming
+         the `rejected` field — the right thing to hand a developer reading
+         the JSON and the wrong thing to print on a page, which is why the
+         route words its own `note` for this branch and tells an invented
+         figure from a claim about the future while it is there. The guard's
+         string is kept only as the fallback for a route that sends no
+         sentence of its own. */
+      var why = typeof payload.note === "string" && payload.note.trim() !== ""
+        ? payload.note.trim()
+        : (guard && typeof guard.reason === "string" && guard.reason.trim() !== ""
+          ? guard.reason : null);
       answerHost.append(qualifier("The generated wording was discarded before it reached this " +
         "page and what you are reading is the measured facts in a fixed order. " +
         (why === null
@@ -1002,6 +1152,7 @@
      which model was asked and how many times this site has asked it today. */
   function answerHow(payload, block, guard) {
     var lines = [];
+    var fired = guardFired(guard);
 
     if (typeof payload.why === "string" && payload.why.trim() !== "") lines.push(payload.why);
     lines.push("Selection is deterministic and carries no model: the same question over the " +
@@ -1017,7 +1168,12 @@
          open would meet a number no payload published. */
       lines.push("The tokens the guard refused, listed as data rather than as readings: " +
         tokens.join(", ") + ". None of them appears in any fact the answer was given.");
-    } else if (guard && typeof guard.numerals !== "undefined" && Array.isArray(guard.numerals)) {
+    } else if (!fired && guard && Array.isArray(guard.numerals)) {
+      /* AND ONLY WHERE THE GUARD PASSED. An empty `rejected` is reached both
+         by an answer that was clean and by a refusal that found no token to
+         name, so without the verdict this sentence reported "found every one
+         of them already written in the facts it was given" inside the audit
+         trail of an answer the guard had just thrown away. */
       lines.push("The guard scanned " + guard.numerals.length + " figure" +
         (guard.numerals.length === 1 ? "" : "s") + " in the answer above and found every one " +
         "of them already written in the facts it was given.");

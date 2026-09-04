@@ -187,7 +187,14 @@ const CEILING_KIB = {
      below the ticker. If it approaches the ceiling, the answer is to move
      work into shared/flows-ask.js — which is bundled into the Worker and
      costs the browser nothing — not to shorten what the page says. */
-  askPage: 70,
+  /* 70 -> 78. The dock's 5k is on this route too — /flows/ask does not
+     draw the rail, but flows-ask.js is the file the rail loads, so the
+     route and the rail have grown together. The rest is the density pass:
+     folding a region's meta into its disclosure and splitting the
+     forecast qualifier into an arm that folds and an arm that never does
+     cost bytes to SAVE a reader lines, which is the trade this page was
+     asked to make. */
+  askPage: 78,
   strategyPage: 120,
   trackPage: 118,
   /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
