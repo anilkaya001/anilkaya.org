@@ -165,8 +165,25 @@ export function ivConvention(rawValues) {
  *
  * Returns null when the contract cannot be priced from quotes alone.
  */
-export function priceSale(row, { spot, asOf, ivDivisor = 1 } = {}) {
-  const parsed = parseOptionSymbol(row && row.option_symbol);
+export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null } = {}) {
+  /* THE PARSE MAY ARRIVE ALREADY DONE, and only from a caller that parsed
+     THIS row.
+
+     buildChainPanels walks one chain five times — the root filter, this, the
+     top-contract tape, the aggressor ladder and the unusual feed — and every
+     one of them used to run OPTION_SYMBOL_RE over the same string, each parse
+     costing a trim, an upper-case copy and a regex execution. At 500 rows a
+     chain and 50 deep names that is 125,000 regex runs where 25,000 will do.
+
+     The pairing is what keeps it safe: the caller hands down {p, row} tuples
+     built in one pass, so a parse can never drift onto a neighbouring row the
+     way a parallel array indexed by position can. Anything that does not look
+     like a parse is ignored and this parses for itself, so the single-argument
+     entry point — the desk route, the tests, every caller outside this
+     module — behaves exactly as before. */
+  const parsed = given && typeof given === "object" && typeof given.expiry === "string"
+    ? given
+    : parseOptionSymbol(row && row.option_symbol);
   if (!parsed) return null;
   if (!(spot > 0)) return null;
 

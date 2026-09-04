@@ -44,7 +44,7 @@ import {
   unusualNameRow, rankUnusualNames,
   describeFlowAlerts, describeOiBasis, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
-import { buildChainPanels } from "../shared/flows-chain.js";
+import { buildChainPanels, buildTopContracts, buildAggressor } from "../shared/flows-chain.js";
 import { daysToExpiry, SHARES_PER_CONTRACT } from "../shared/flows-premium.js";
 import { fakeChain, screenerTilt } from "../scripts/flows-pipeline.mjs";
 
@@ -990,6 +990,89 @@ const rebuild = (em) => {
   /* And the diagnostic is computed in the same scope, on the same rows. */
   ok(panel.oiBasis && typeof panel.oiBasis.verdict === "string",
      "the open-interest basis check rides along on the same root-filtered rows");
+}
+
+/* ---------- §14b one chain, one parse of every symbol ------------ */
+
+/* THE COST THIS PINS IS REAL AND WAS MEASURED, not guessed at.
+
+   buildChainPanels has five consumers of the same contract symbols — the root
+   filter, priceSale, the top-contract tape, the aggressor ladder and this feed
+   — and each of them used to run OPTION_SYMBOL_RE over the same string, each
+   parse paying a trim and an upper-case copy before the regex. At a full page
+   of 500 contracts across the deep set that is 125,000 regex executions where
+   25,000 do the same work.
+
+   Counting is done by making `option_symbol` a GETTER, which is the only
+   honest way to measure it from outside: every parse must read the property
+   exactly once, so the read count IS the parse count and no instrumentation of
+   the module under test is required.
+
+   THE EXPECTED NUMBER IS EXACT, not a bound. One parse for every row the
+   vendor sent, plus one further read per PRICED row — priceSale echoes the
+   symbol back onto the sale it returns, which is a copy and not a parse. A
+   bound like "fewer than five passes" would still pass if a sixth consumer
+   were added and two were removed; the equality fails the moment anyone parses
+   twice. */
+{
+  let reads = 0;
+  const counted = CHAIN.map((row) => {
+    const sym = row.option_symbol;
+    const o = {};
+    for (const k of Object.keys(row)) if (k !== "option_symbol") o[k] = row[k];
+    Object.defineProperty(o, "option_symbol", {
+      get() { reads++; return sym; }, enumerable: true,
+    });
+    return o;
+  });
+  const opts = { spot: SPOT, asOf: "2026-08-24", ticker: "SYN001" };
+
+  reads = 0;
+  const panel = buildChainPanels(counted, opts);
+  const panelReads = reads;
+  eq(panel.status, "ok", "the counted chain still builds a panel");
+  eq(panelReads, CHAIN.length + panel.pricedRows,
+     `every symbol is parsed ONCE (${CHAIN.length} rows) and read once more only where ` +
+     `priceSale copies it onto a sale (${panel.pricedRows} priced) — ${panelReads} reads in ` +
+     "total, against the five passes the five consumers used to take");
+
+  /* THE FIXTURE CAN TELL THE TWO APART. A single consumer parsing for itself
+     costs one pass, so five of them cost five: the assertion above is only
+     meaningful because that baseline is far above it and is measured here
+     rather than asserted from memory. */
+  reads = 0;
+  buildUnusualRows(counted, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24" });
+  const soloReads = reads;
+  eq(soloReads, CHAIN.length,
+     "one standalone consumer parses every row exactly once, which is the unit the " +
+     "count above is expressed in");
+  ok(panelReads < soloReads * 3,
+     `and the whole panel now costs ${panelReads} reads where the five consumers alone ` +
+     `would cost about ${soloReads * 5}`);
+
+  /* AND THE ANSWER DID NOT CHANGE. Threading a parse down is worth nothing if
+     it moves a number, so the panel's three tape surfaces are compared against
+     the same builders parsing for themselves over the same root-filtered rows.
+     Deep equality, not a spot check: a strike shifted onto a neighbouring row
+     is exactly the failure a parallel array would produce, and it would leave
+     every count identical. */
+  const rooted = CHAIN.filter((r) => /^SYN001\d{6}[PC]\d{8}$/.test(r.option_symbol));
+  const bare = buildChainPanels(CHAIN, opts);
+  assert.deepEqual(
+    bare.unusualRows,
+    buildUnusualRows(rooted, {
+      ticker: "SYN001", spot: SPOT, ivDivisor: bare.ivDivisor,
+      sessionDate: "2026-08-24", truncated: false,
+    }),
+    "the threaded feed is row-for-row what the standalone builder answers"); checks++;
+  assert.deepEqual(
+    bare.topContracts,
+    buildTopContracts(rooted, { spot: SPOT, ivDivisor: bare.ivDivisor }),
+    "and so is the top-contract tape"); checks++;
+  assert.deepEqual(
+    bare.aggressor,
+    buildAggressor(rooted, { spot: SPOT }),
+    "and the aggressor ladder"); checks++;
 }
 
 /* ---------- §15 the root filter is UPSTREAM of the x100 ---------- */

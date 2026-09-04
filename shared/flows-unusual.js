@@ -112,13 +112,24 @@ export function perNameCap(namesSeen, { rows = UA_ROWS, min = UA_PER_NAME_MIN, m
 export function buildUnusualRows(rows, {
   ticker = null, spot = null, ivDivisor = 1, sessionDate = null, truncated = false,
   minVolume = UA_MIN_VOLUME, minOi = UA_MIN_OI,
+  /* ALREADY-PARSED {p, row} TUPLES from buildChainPanels, which has walked
+     this same chain to build them. The feed used to re-run the option-symbol
+     regex over every contract a fourth time; the tuple carries the parse with
+     its own row so there is no index to misalign. Absent, this parses for
+     itself, which is what every direct caller and every fixture does. */
+  parsed = null,
 } = {}) {
   const out = [];
   const s = numOrNull(spot);
   const div = numOrNull(ivDivisor) || 1;
 
-  for (const raw of Array.isArray(rows) ? rows : []) {
-    const sym = parseOptionSymbol(raw && raw.option_symbol);
+  const pairs = Array.isArray(parsed)
+    ? parsed
+    : (Array.isArray(rows) ? rows : []).map((row) => ({
+      p: parseOptionSymbol(row && row.option_symbol), row,
+    }));
+
+  for (const { p: sym, row: raw } of pairs) {
     if (!sym) continue;
 
     const vol = numOrNull(raw.volume);
