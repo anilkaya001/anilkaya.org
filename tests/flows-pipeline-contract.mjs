@@ -18,7 +18,7 @@ import {
   describeTickFields, TICK_FIELDS_READ, republishWithChain,
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
-  unusualContractId, markNewContracts,
+  unusualContractId, markNewContracts, priorNote,
   readBoardMemory, fakePriorBoard,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
@@ -2506,6 +2506,24 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "a rate exactly at the halt rung is not halted");
   eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 1000 * POOL_REFUSAL_EASE }).width,
      POOL_MAX_WIDTH, "and a rate exactly at the ease rung takes full width");
+
+  /* ---- A METER WITH NO REFUSAL COUNTER IS NOT A CLEAN RUN ----
+
+     `Number(undefined) || 0` stood in this divisor and turned a counter that
+     had gone missing into a measured 0% refusal rate — which took the widest
+     branch and leaned HARDER on a vendor nobody was metering. It is the same
+     confident zero the payloads refuse, sitting in a control decision instead
+     of a display, and absence must take the conservative branch rather than
+     the optimistic one. */
+  const unmetered = poolWidth(POOL_MAX_WIDTH, { calls: 1000 });
+  eq(unmetered.width, 1,
+     "a meter that counted calls but carries no refusal counter runs ONE wide — an unmeasured " +
+     "run is not a healthy one");
+  eq(unmetered.rate, null, "and reports no rate rather than 0%");
+  eq(poolWidth(POOL_MAX_WIDTH, {}).width, 1, "and neither is an empty meter evidence of anything");
+  eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 0 }).width, POOL_MAX_WIDTH,
+     "while a counter PRESENT and zero is a measured zero and still takes full width — the " +
+     "guard above distinguishes absence from measurement rather than banning zero");
 }
 
 /* ---------- the floor verdict, at every rung it can reach ----------
@@ -2551,6 +2569,26 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/nothing queued/.test(unqueued),
      "a run that never waited for a turn says so rather than publishing a ratio over zero");
 
+  /* ---- AND NO VERDICT AT ALL OFF A METER THAT LOST ITS REFUSAL COUNT ----
+
+     This describer's output is a written recommendation about a published
+     constant. Read as `Number(undefined) || 0` it said "0.0% refused, the
+     floor is CONSERVATIVE, it can come down" about a run whose refusals were
+     never counted — the confident zero, aimed at the one number this file
+     refuses to move on intuition. */
+  eq(describeFloorVerdict({ calls: 1000, permitWaitMs: 700_000, rateLimitWaitMs: 0 }), null,
+     "a meter with calls but NO refusal counter produces no verdict at all, rather than the " +
+     "cheerful one that reads an absence as zero refusals");
+  const untimed = describeFloorVerdict({ calls: 1000, rateLimited: 10 });
+  ok(/no wait meters/.test(untimed),
+     "and a meter with no wait counters reports the rate it does have while saying the " +
+     "queueing-against-backoff split was not measured");
+  ok(!/0\.0s/.test(untimed),
+     "never printing 0.0s of queueing, which would read as a run that never waited for a turn");
+  ok(/floor is CONSERVATIVE/.test(untimed),
+     "the rate it CAN read still reaches its rung — an unread wait meter withholds the split, " +
+     "not the verdict");
+
   /* THE VERDICT AND THE THROTTLE READ THE SAME RUNGS. Two constants would be
      two opinions about what "being refused" means, and they would diverge on
      the first morning somebody tuned one of them. */
@@ -2584,6 +2622,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   const priorBody = (rows, readAt = "2026-08-21T09:20:00.000Z", sessionDate = "2026-08-21") =>
     ({ readAt, sessionDate, contracts: { rows } });
+  /* THE SESSION THE RUN IS PUBLISHING, later than every priorBody above, and
+     passed at every call below. It is the third argument because this key
+     holds whatever the LAST run wrote rather than whatever YESTERDAY's run
+     wrote — see the same-session block at the end. */
+  const RUN = "2026-08-24";
 
   /* ---- the ordinary comparison ---- */
   {
@@ -2595,7 +2638,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const mark = markNewContracts(today, priorBody([
       row("AAPL", 200, "2026-09-18", "C"),
       row("NVDA", 900, "2026-09-18", "C"),
-    ]));
+    ]), RUN);
     eq(mark.status, "ok", "a prior feed that named contracts is a comparison that happened");
     assert.deepEqual(today.map((r) => r.nw), [0, 1, 1],
       "the carried-over line is 0 and the two absent from the prior feed are 1");
@@ -2615,7 +2658,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      down. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
-    const mark = markNewContracts(today, null);
+    const mark = markNewContracts(today, null, RUN);
     eq(mark.status, "unavailable", "no prior payload is UNAVAILABLE, not an empty comparison");
     ok(today.every((r) => r.nw === null),
        "and NOT ONE row claims to be new when there was nothing to compare against");
@@ -2626,7 +2669,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   /* ---- a prior that was read and named nothing is a THIRD answer ---- */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C")];
-    const mark = markNewContracts(today, priorBody([]));
+    const mark = markNewContracts(today, priorBody([]), RUN);
     eq(mark.status, "quiet", "a prior feed read with no contracts in it is QUIET, not unavailable");
     eq(today[0].nw, null,
        "and still marks nothing new: `new` against a list that named nothing is not a reading");
@@ -2642,7 +2685,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      case, arrived at by a different road. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C")];
-    const mark = markNewContracts(today, priorBody([{ symbol: "AAPL260918C00200000" }]));
+    const mark = markNewContracts(today, priorBody([{ symbol: "AAPL260918C00200000" }]), RUN);
     eq(mark.status, "quiet",
        "a prior feed whose rows yield no identity is treated as no comparison, not as a clean sweep");
     eq(today[0].nw, null, "so no row claims to be new off it");
@@ -2651,7 +2694,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   /* ---- a row TODAY that cannot be identified ---- */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), { t: "MSFT", cp: "P" }];
-    markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")]));
+    markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")]), RUN);
     eq(today[0].nw, 0, "the identifiable row is compared");
     eq(today[1].nw, null,
        "and the row this run could not build a key for is NULL — \"I cannot identify you\" " +
@@ -2660,9 +2703,104 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   /* ---- the empty feed ---- */
   {
-    const mark = markNewContracts([], priorBody([row("AAPL", 200, "2026-09-18", "C")]));
+    const mark = markNewContracts([], priorBody([row("AAPL", 200, "2026-09-18", "C")]), RUN);
     eq(mark.status, "ok", "an empty feed still records that the comparison was possible");
     eq(mark.fresh, 0, "and reports zero new contracts, which here is a measurement");
+  }
+
+  /* ---- THE RE-RUN, WHICH IS THE OTHER WAY THIS FIELD CAN LIE ----
+
+     The `unusual` key holds whatever the LAST run wrote, not what YESTERDAY's
+     run wrote. On a market holiday, an early close, a manual re-run or a cron
+     that fires twice, the second run reads its own output: every contract is
+     trivially its own incumbent, every `nw` comes back 0, and the page whose
+     entire subject is what is new publishes "nothing is" as though it had
+     been measured. The board's memory has carried this guard since the
+     holiday that produced it; the counter feed shipped without one.
+
+     THE FAILURE IS THE MIRROR OF THE UNAVAILABLE CASE. That one marks
+     everything new off a comparison against nothing; this one marks nothing
+     new off a comparison against itself. Both are confident readings with no
+     yesterday behind them. */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
+    /* The prior feed carries a DIFFERENT contract from today's, so a run that
+       skipped the guard would mark both rows new — the assertion below cannot
+       pass by the rows happening to match. */
+    const mark = markNewContracts(today, priorBody([row("NVDA", 900, "2026-09-18", "C")], undefined, RUN), RUN);
+    eq(mark.status, "same-session",
+       "a stored feed stamped with the session this run is publishing is this run's own " +
+       "output, and is named as such rather than used as yesterday");
+    ok(today.every((r) => r.nw === null),
+       "THE FIX: not one row claims anything, where the unguarded read would have marked " +
+       "both of these new against a feed that is really this morning's own");
+    eq(mark.fresh, null, "and `fresh` is null rather than 2 — no comparison was made");
+    eq(mark.contracts, 1,
+       "while still saying how many the stored feed named: 1 named and nothing claimed is " +
+       "legible as a refusal, where a bare null would look like an unreadable store");
+
+    /* AND FROM AHEAD OF THIS RUN, which is a re-run against a stale tape. */
+    const ahead = markNewContracts(
+      [row("AAPL", 200, "2026-09-18", "C")],
+      priorBody([row("NVDA", 900, "2026-09-18", "C")], undefined, "2026-08-25"), RUN);
+    eq(ahead.status, "ahead", "a feed stamped for a LATER session is refused and named");
+    eq(ahead.fresh, null, "and marks nothing either");
+    ok(priorNote(ahead, RUN, 1) !== priorNote(mark, RUN, 2),
+       "the two refusals do not share a sentence — a reader has to be able to tell a holiday " +
+       "re-run from a stale tape");
+  }
+
+  /* ---- AN UNSTAMPED FEED IS NOT A MATCHING ONE ----
+
+     The opposite mistake, and this file has shipped it too: discarding a real
+     earlier session over a missing stamp reports a cold feed on a morning that
+     had a good yesterday. The comparison is made and the payload says it could
+     not be checked, which is exactly what readBoardMemory does with this gap. */
+  {
+    const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
+    const mark = markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")], undefined, null), RUN);
+    eq(mark.status, "undated", "a stored feed with no session date cannot be checked, and says so");
+    assert.deepEqual(today.map((r) => r.nw), [0, 1],
+      "but the comparison still happens — a missing stamp is not a missing yesterday");
+    checks++;
+    eq(mark.fresh, 1, "and the count is real");
+    const noRun = markNewContracts([row("AAPL", 200, "2026-09-18", "C")],
+      priorBody([row("AAPL", 200, "2026-09-18", "C")]), null);
+    eq(noRun.status, "undated",
+       "and a run that could not resolve its OWN session date is the same answer from the " +
+       "other side — the check needs both stamps");
+  }
+
+  /* ---- THE SENTENCE, WHICH IS THE PART THE PAGE ACTUALLY SHOWS ----
+
+     The four refusals leave the identical mark on the rows — `nw` null
+     everywhere — and `undated` marks the rows while being unable to prove what
+     it compared against. If any two shared a sentence the payload would be
+     publishing one silence where there are several, which is the defect the
+     three-silences rule exists to stop. shared/ is not served to the browser,
+     so the sentence travels on the payload or it does not travel at all. */
+  {
+    const cases = ["ok", "undated", "same-session", "ahead", "quiet", "unavailable"];
+    const notes = cases.map((status) => priorNote(
+      { status, contracts: status === "unavailable" ? null : 3, fresh: status === "ok" || status === "undated" ? 1 : null,
+        readAt: "2026-08-21T09:20:00.000Z", sessionDate: status === "unavailable" ? null : "2026-08-21" },
+      RUN, 9));
+    eq(new Set(notes).size, cases.length,
+       `all ${cases.length} answers get their OWN sentence (${new Set(notes).size} distinct), never ` +
+       "one generic line standing in for the several different reasons a column can be empty");
+    ok(notes.every((n) => n.length > 140),
+       "and each is a sentence naming what was compared and why, not a label");
+    ok(/2026-08-21/.test(notes[0]) && /9/.test(notes[0]),
+       "the comparison's sentence carries the session it was against and the population it " +
+       "counted over — a count with no denominator is the thing this feed refuses");
+    ok(!/\b0 contracts?\b/.test(notes[5]) && /none has ever been published/.test(notes[5]),
+       "and the unreadable case names its two causes without printing a count of 0, which " +
+       "would be a measurement of a store that answered nothing");
+    /* REFUSAL 1 REACHES THIS PROSE TOO. The vocabulary ban in
+       flows-unusual-contract.mjs scans basis and the coverage strings; this
+       sentence is new and is held to the same words. */
+    ok(!/\b(print|trade|block|sweep|order|bought|sold|paid|whale)\b/i.test(notes.join(" ")),
+       "and none of the six says a word Refusal 1 bans on a page whose subject is a counter");
   }
 }
 

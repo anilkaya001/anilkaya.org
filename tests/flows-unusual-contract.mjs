@@ -1311,8 +1311,10 @@ const rebuild = (em) => {
     }));
     deep(puts.feed, ["BBB"], "filtering to puts narrows the counter feed");
     deep(puts.alerts, ["ZZZ"], "and the alerts table, from the same control");
-    ok(/1 of 2 flagged windows and 1 of 2 contracts/.test(puts.note),
-       `and the note states both drawn counts against both published ones — got: ${puts.note}`);
+    ok(/1 of 2 flagged windows are drawn/.test(puts.note)
+       && /1 of 2 contracts are drawn/.test(puts.note),
+       `and the note states both drawn counts against both published ones, each table's ` +
+       `count in its own clause so a silent one can replace its own — got: ${puts.note}`);
     ok(/published and hidden, not absent from the read/.test(puts.note),
        "SO A NARROWED TABLE IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
        "risk a filter introduces to a page that reports what a vendor did not send");
@@ -1365,6 +1367,47 @@ const rebuild = (em) => {
     deep(restored.order, ["AAA", "ZZZ"], "the third activation restores the published order");
     eq(restored.aria, "none", "and reports no ranking at all");
     eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
+    await page.close();
+
+    /* ---- THE COUNTS BELONG TO A TABLE THAT ANSWERED ------------------
+       The filter note reported "0 of 0 flagged windows are drawn" whenever the
+       alerts payload had not resolved — a displayed zero standing in for "not
+       sent", in the one sentence on this page whose entire job is to stop a
+       narrowed table from reading as a thin market. And the "Both feeds" pill
+       went on promising resolution "until both payloads have loaded" after a
+       payload that had already come back and could not be read.
+
+       An alerts payload with no rows array reaches that state deliberately:
+       it is the second of this page's three silences, and it is a state the
+       fixture can produce rather than one that needs a network failure. */
+    await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
+    const broken = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    await broken.context().addCookies([{
+      name: "flows_session", value: session, url: server.baseURL,
+    }]);
+    await broken.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+    await broken.waitForSelector("#uaFeedBody tr");
+    await broken.click("#uaFilters button:nth-child(2)");
+    const unread = await broken.evaluate(() =>
+      document.getElementById("uaFilterNote").textContent);
+    ok(/flagged windows could not be read/.test(unread),
+       `an unreadable alerts payload is SAID, not counted — got: ${unread}`);
+    ok(!/of 0 flagged windows/.test(unread),
+       "and specifically not reported as '0 of 0', which is a measurement of nothing " +
+       "printed as a measurement of the market");
+    ok(/1 of 2 contracts are drawn/.test(unread),
+       "while the feed that DID answer still states its own two counts — one silence " +
+       "does not swallow the other table's measurement");
+
+    await broken.click("#uaFilters button:nth-child(4)");
+    const joinDead = await broken.evaluate(() =>
+      document.getElementById("uaFilterNote").textContent);
+    ok(/cannot be resolved at all/.test(joinDead),
+       `the join says it will never resolve rather than promising a load — got: ${joinDead}`);
+    ok(!/until both payloads have loaded/.test(joinDead),
+       "which is what it used to promise, indefinitely, about a payload that had already " +
+       "come back broken");
+    await broken.close();
   } finally {
     /* THE WORKER IS A CHILD PROCESS AND IT MUST BE STOPPED. Without this the
        suite prints its success line and then hangs forever holding a wrangler
@@ -1388,4 +1431,5 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `browser at 320px — two payloads joined on the four-tuple they share with a mark that ` +
   `fires on exactly the one contract both selections chose, a filter group both tables ` +
   `honour whose note keeps a narrowed table from reading as a thin market, and an alerts ` +
-  `table that finally ranks, announces its ranking, and gives the vendor's order back`);
+  `table that finally ranks, announces its ranking, and gives the vendor's order back, ` +
+  `and a filter note that says which table could not be read rather than counting it as zero`);

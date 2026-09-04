@@ -721,6 +721,25 @@ const POOL_REFUSAL_HALT = 0.10;
 const POOL_REFUSAL_EASE = 0.05;
 
 /**
+ * One counter off the run's meter, or null.
+ *
+ * BOTH DECISIONS BELOW USED TO READ THEIR COUNTERS AS `Number(x) || 0`, and
+ * that is the confident zero standing in the one place it can do most damage:
+ * a meter carrying no `rateLimited` key read as a run that had been refused
+ * nothing, which handed the widest pool width — and a written recommendation
+ * to lower RATE.floorCeilingMs — to a run whose refusals nobody had counted.
+ * A missing counter is `null` here, and each caller has to say out loud what
+ * it does about that. A counter present and 0 is a measured zero and stays 0.
+ */
+const meterRead = (meter, key) => {
+  if (!meter) return null;
+  const v = meter[key];
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
  * How wide this run has EARNED the right to be, from its own 429 meter.
  *
  * THE METER IS A PARAMETER so this decision can be tested at every rung. It
@@ -731,17 +750,32 @@ const POOL_REFUSAL_EASE = 0.05;
  * here is the one that REFUSES to widen, which by definition never fires on a
  * healthy run.
  *
- * @returns {{width:number, rate:number|null, seen:number, why:string}}
+ * @returns {{width:number, rate:number|null, seen:number|null, why:string}}
+ *          `seen` and `rate` are null when the meter could not supply them —
+ *          an absent counter is not a measured zero.
  */
 function poolWidth(max = POOL_MAX_WIDTH, meter = stats) {
-  const seen = Number(meter && meter.calls) || 0;
+  const seen = meterRead(meter, "calls");
+  const refused = meterRead(meter, "rateLimited");
   /* NULL, NOT ZERO, FOR "NOT MEASURED YET". A run that has made four calls has
      not observed a 0% refusal rate; it has observed nothing, and treating the
-     two the same is how a confident zero gets into a control decision. */
+     two the same is how a confident zero gets into a control decision. A meter
+     with no call counter at all is the same answer for a stronger reason. */
+  if (seen === null) {
+    return { width: 1, rate: null, seen: null,
+      why: "no call counter to read, so this run has measured no refusal rate" };
+  }
   if (seen < POOL_EVIDENCE_MIN) {
     return { width: 1, rate: null, seen, why: `only ${seen} call(s) so far, which is not evidence` };
   }
-  const rate = (Number(meter && meter.rateLimited) || 0) / seen;
+  /* A METER THAT COUNTED CALLS BUT NOT REFUSALS IS NOT A HEALTHY RUN, it is an
+     unmeasured one, and the two must not take the same branch: leaning harder
+     on the vendor is the one decision that must never be made on an absence. */
+  if (refused === null) {
+    return { width: 1, rate: null, seen,
+      why: `${seen} call(s) counted and no refusal counter beside them` };
+  }
+  const rate = refused / seen;
   if (rate > POOL_REFUSAL_HALT) {
     return { width: 1, rate, seen, why: `${(rate * 100).toFixed(1)}% of calls refused so far` };
   }
@@ -816,18 +850,29 @@ async function runPooled(items, work, { width = 1, stopEarly = null } = {}) {
  * @param {{calls:number, rateLimited:number, permitWaitMs:number, rateLimitWaitMs:number}} meter
  */
 function describeFloorVerdict(meter) {
-  const calls = Number(meter && meter.calls) || 0;
+  const calls = meterRead(meter, "calls");
+  /* NO CALLS, OR NO COUNTER AT ALL — one branch, because the verdict is the
+     same in both: this run has nothing to say about the floor. */
   if (!calls) return null;
-  const refused = Number(meter && meter.rateLimited) || 0;
-  const queuedMs = Number(meter && meter.permitWaitMs) || 0;
-  const backoffMs = Number(meter && meter.rateLimitWaitMs) || 0;
+  const refused = meterRead(meter, "rateLimited");
+  /* AND NO VERDICT WITHOUT A REFUSAL COUNT. `Number(undefined) || 0` used to
+     stand here, so a meter that had lost this counter produced "0.0% refused,
+     the floor is CONSERVATIVE, it can come down" — a written recommendation to
+     move a published constant, off a number nobody had measured. */
+  if (refused === null) return null;
+  const queuedMs = meterRead(meter, "permitWaitMs");
+  const backoffMs = meterRead(meter, "rateLimitWaitMs");
   const rate = refused / calls;
   /* REFUSED AGAINST QUEUED IS THE WHOLE TRADE. `queued` is what the floor
      charges every call for its turn; `backoff` is what the refusals cost. A
      floor that is too slow shows a large queued and a negligible backoff; a
      floor that is too fast shows the reverse. Null rather than 0 when nothing
-     queued: a ratio against a zero denominator is not a small ratio. */
-  const share = queuedMs > 0 ? backoffMs / queuedMs : null;
+     queued: a ratio against a zero denominator is not a small ratio, and an
+     UNREAD wait meter is a third thing again — it gets its own clause below
+     rather than being printed as 0.0s, which would read as a run that never
+     waited for a turn. */
+  const timed = queuedMs !== null && backoffMs !== null;
+  const share = timed && queuedMs > 0 ? backoffMs / queuedMs : null;
   /* The RATE, not the raw count: 170 refusals in 1022 calls and 170 in 10,000
      are different findings. It is the same quantity poolWidth() reads mid-run
      to decide whether a leg may widen, against the same two rungs, so the
@@ -835,10 +880,13 @@ function describeFloorVerdict(meter) {
      means. */
   const head =
     `floor verdict: ${refused} of ${calls} calls refused (${(rate * 100).toFixed(1)}%), ` +
-    `backoff ${(backoffMs / 1000).toFixed(1)}s against ${(queuedMs / 1000).toFixed(1)}s of queueing` +
-    (share === null
-      ? " — nothing queued, so the floor was never the binding cost this run. "
-      : ` (${(share * 100).toFixed(0)}% as large). `);
+    (!timed
+      ? "and this run carries no wait meters, so what the floor charged and what the " +
+        "refusals cost were not measured — read the rate alone. "
+      : `backoff ${(backoffMs / 1000).toFixed(1)}s against ${(queuedMs / 1000).toFixed(1)}s of queueing` +
+        (share === null
+          ? " — nothing queued, so the floor was never the binding cost this run. "
+          : ` (${(share * 100).toFixed(0)}% as large). `));
   if (rate > POOL_REFUSAL_HALT) {
     return head +
       "THE CEILING IS DOING ITS JOB and must not move up: the controller asked to go slower " +
@@ -2960,18 +3008,33 @@ function toWatchRows(pool, screenerByTicker, tiltByTicker, { cap = WATCH_ROWS } 
    pipeline itself wrote, on the same paced path the boards' memory already
    uses.
 
-   THREE ANSWERS, NOT TWO — the same three silences the rest of the product
-   is held to:
+   SIX ANSWERS, NOT TWO, and they are the six readBoardMemory already gives
+   about the same store — because it is the same question asked of the same
+   kind of key, and one question with two vocabularies is a renderer that has
+   to learn both:
 
-     - the prior key could not be read, or was never written  -> nw null
-     - the prior key was read and named no contracts          -> nw null
-     - the prior key named contracts                          -> nw 1 or 0
+     - the prior key could not be read, or was never written  -> unavailable
+     - the prior key was read and named no contracts          -> quiet
+     - it named rows, but none this run can identify          -> quiet
+     - it is stamped with the session THIS run is publishing  -> same-session
+     - it is stamped with a LATER session than this run's     -> ahead
+     - one of the two stamps is missing                       -> undated
+     - anything else                                          -> ok
 
-   The second is the one that is easy to get wrong. A prior payload whose
-   contract list is empty makes EVERY line today look new, which is a
-   confident claim built on a comparison against nothing. "New" is only
-   meaningful against a list that named something, so an empty prior is
-   reported as no comparison rather than as a clean sweep. */
+   FOUR OF THE SIX ARE REFUSALS — unavailable, quiet, same-session and ahead —
+   and under every one of them `nw` is null on every row and nothing is
+   claimed. `undated` is not a refusal: the comparison IS made and the payload
+   says it could not be checked, because discarding a real prior session over a
+   missing stamp would report a cold feed on a morning that had a good
+   yesterday.
+
+   TWO OF THESE ARE EASY TO GET WRONG AND BOTH HAVE SHIPPED HERE BEFORE. A
+   prior payload whose contract list is empty makes EVERY line today look new
+   — a confident claim built on a comparison against nothing. And a prior
+   payload stamped with THIS session is this run's own output: it makes every
+   line look carried-over, so the page whose subject is what is new publishes
+   "nothing is" with a denominator that is its own reflection. The first
+   over-claims, the second under-claims, and neither is a measurement. */
 
 /**
  * One contract's identity across sessions.
@@ -3007,26 +3070,44 @@ function unusualContractId(row) {
  * add one integer per row would leave two arrays that a later edit could let
  * drift apart.
  *
+ * WHOSE SESSION THE PRIOR FEED CAME FROM IS CHECKED, and it is the same check
+ * readBoardMemory runs against the same store for the same reason. This key
+ * holds whatever the LAST run wrote, not what YESTERDAY's run wrote. Run the
+ * pipeline twice against one session — a market holiday, an early close, a
+ * manual re-run, a cron that fires twice — and the second run reads its own
+ * output as the prior feed: every contract is trivially its own incumbent,
+ * every `nw` comes back 0, and the page whose whole subject is what is new
+ * publishes "nothing is" as though it had been measured. That is a stability
+ * manufactured by the re-read, and it is the reason the board's memory carries
+ * this guard already. Six statuses, deliberately the same six words
+ * readBoardMemory uses: one question gets one vocabulary, or a renderer has to
+ * learn two.
+ *
  * @param {Array}  rows        today's ranked contract rows
  * @param {object} priorBody   the previously published `unusual` payload, or null
- * @returns {{status:"ok"|"quiet"|"unavailable", contracts:number|null,
- *            fresh:number|null, readAt:string|null, sessionDate:string|null}}
+ * @param {string|null} runSessionDate  the sessionDate THIS run is about to stamp
+ * @returns {{status:"ok"|"undated"|"same-session"|"ahead"|"quiet"|"unavailable",
+ *            contracts:number|null, fresh:number|null,
+ *            readAt:string|null, sessionDate:string|null}}
  */
-function markNewContracts(rows, priorBody) {
+function markNewContracts(rows, priorBody, runSessionDate = null) {
   const list = Array.isArray(rows) ? rows : [];
   const priorRows = priorBody && priorBody.contracts && Array.isArray(priorBody.contracts.rows)
     ? priorBody.contracts.rows : null;
   const readAt = priorBody && typeof priorBody.readAt === "string" ? priorBody.readAt : null;
   const sessionDate = priorBody && typeof priorBody.sessionDate === "string"
     ? priorBody.sessionDate : null;
+  /* EVERY REFUSAL LEAVES THE SAME MARK: null on every row. `contracts` still
+     reports how many the prior feed named where that is known, so a refusal is
+     legible as a pair of numbers — "38 named, nothing claimed" — rather than
+     only as prose, which is the shape the board's memory publishes too. */
+  const noComparison = (status, contracts) => {
+    for (const row of list) row.nw = null;
+    return { status, contracts, fresh: null, readAt, sessionDate };
+  };
 
   if (!priorRows || !priorRows.length) {
-    for (const row of list) row.nw = null;
-    return {
-      status: priorRows ? "quiet" : "unavailable",
-      contracts: priorRows ? 0 : null,
-      fresh: null, readAt, sessionDate,
-    };
+    return noComparison(priorRows ? "quiet" : "unavailable", priorRows ? 0 : null);
   }
 
   const seen = new Set();
@@ -3039,11 +3120,32 @@ function markNewContracts(rows, priorBody) {
      exactly what a payload written before this shipped would look like if the
      row shape ever changed underneath it. Marking fifty contracts new against
      a set of zero keys would be the confident sweep this whole block refuses. */
-  if (!seen.size) {
-    for (const row of list) row.nw = null;
-    return { status: "quiet", contracts: 0, fresh: null, readAt, sessionDate };
+  if (!seen.size) return noComparison("quiet", 0);
+
+  /* THE STAMPS, TESTED FOR ABSENCE BEFORE THEY ARE COMPARED. `String(x || "")`
+     would turn a missing session date into "", which sorts below every real
+     date and would report "an earlier session" about a payload that named no
+     session at all. Two published dates compared as strings, no clock read
+     here: daysToEarnings carries that lesson in capitals, and a guard that
+     read Date.now() would change its answer across midnight while the payload
+     it is checking did not. */
+  const stamp = (v) => (typeof v === "string" && ARCHIVE_DATE_RE.test(v) ? v : null);
+  const prior = stamp(sessionDate);
+  const run = stamp(runSessionDate);
+  if (prior !== null && run !== null) {
+    if (prior === run) return noComparison("same-session", seen.size);
+    /* A FEED FROM AHEAD OF THIS RUN IS NOT THIS RUN'S YESTERDAY EITHER — a
+       re-run pointed at an older tape than the one already published. Marking
+       against it runs the same manufactured stability backwards. */
+    if (prior > run) return noComparison("ahead", seen.size);
   }
 
+  /* AN UNSTAMPED FEED IS NOT A MATCHING ONE. Discarding a real prior session
+     over a missing stamp would report "nothing could be compared" on a morning
+     that had a perfectly good yesterday — the confident-zero move wearing the
+     opposite sign. The comparison is made and the payload says it could not be
+     checked, which is exactly what readBoardMemory does with the same gap. */
+  const status = prior === null || run === null ? "undated" : "ok";
   let fresh = 0;
   for (const row of list) {
     const id = unusualContractId(row);
@@ -3054,7 +3156,76 @@ function markNewContracts(rows, priorBody) {
     row.nw = isNew ? 1 : 0;
     if (isNew) fresh++;
   }
-  return { status: "ok", contracts: seen.size, fresh, readAt, sessionDate };
+  return { status, contracts: seen.size, fresh, readAt, sessionDate };
+}
+
+/**
+ * The published sentence for whichever of the six answers happened.
+ *
+ * ON THE PAYLOAD, NOT IN THE RENDERER, for the same reason the board's memory
+ * note is: the four refusals leave the IDENTICAL mark — `nw` null on every
+ * row — and only the publisher knows which of them it was. A page that wrote
+ * its own sentence would have to write six and would be wrong on five the day
+ * it wrote one, which is the state assets/js/flows-board.js is in today with
+ * the board's memory note sitting unread beside its one hard-coded cold
+ * sentence.
+ *
+ * @param {{status:string, contracts:number|null, fresh:number|null,
+ *          readAt:string|null, sessionDate:string|null}} mark
+ * @param {string|null} runSessionDate  the session this run is publishing
+ * @param {number} shown  how many contract rows this feed published today
+ */
+function priorNote(mark, runSessionDate, shown) {
+  const when = mark.readAt ? `read at ${mark.readAt}` : "with no read time on it";
+  /* THE COUNT, PLURALISED HERE RATHER THAN BORROWED FROM nameCount AND PATCHED.
+     A `.replace("name", "contract")` over that helper's output would break the
+     morning somebody rewords it, and these are contracts, not names. Null —
+     "the prior feed could not be read at all" — never prints as 0: the caller
+     reaching this line with a null count is the `unavailable` branch, whose
+     sentence names no count. */
+  const named = mark.contracts === null || mark.contracts === undefined
+    ? "no countable contracts"
+    : `${mark.contracts} contract${mark.contracts === 1 ? "" : "s"}`;
+  switch (mark.status) {
+    case "ok":
+      return `The counter feed published for ${mark.sessionDate}, ${when}, named ` +
+        `${named} this run can identify. ${mark.fresh} of today's ${shown} were absent from ` +
+        "it and are marked as first appearances; the rest were in it and are marked as " +
+        "carried over. A first appearance is a statement about this ranked list, not about " +
+        "the strike: a contract can be absent from the earlier feed because it was quiet, or " +
+        "because it sat below that morning's per-name cap.";
+    case "undated":
+      return "The counter feed this run read carries no session date, or this run could not " +
+        `resolve its own, so it could not be checked that the ${named} compared against came ` +
+        "from an EARLIER session rather than from this run's own output. The comparison was " +
+        "made anyway: discarding a real earlier session over a missing stamp would report a " +
+        "cold feed on a morning that had a good yesterday. Read the marks as unverified " +
+        "rather than as a comparison against a named session.";
+    case "same-session":
+      return `The counter feed this run read is stamped ${mark.sessionDate}, the same session ` +
+        "this run is publishing, so it is this run's own output rather than an earlier " +
+        `session. Its ${named} were discarded and no row here claims to be a first ` +
+        "appearance. Comparing a feed against itself marks every line carried over, and " +
+        "publishing that would report a session in which nothing was newly crowded when what " +
+        "really happened is that this pipeline ran twice against one session.";
+    case "ahead":
+      return `The counter feed this run read is stamped ${mark.sessionDate}, a LATER session ` +
+        `than the ${runSessionDate || "unresolved session"} this run is publishing, so it ` +
+        `cannot be this run's yesterday. Its ${named} were discarded and no row here claims ` +
+        "to be a first appearance. A run publishing an earlier session than the feed already " +
+        "live usually means a re-run against a stale tape, and that is worth understanding " +
+        "before these marks are read as a comparison.";
+    case "quiet":
+      return "The counter feed was read and named no contract this run can identify, so there " +
+        "was no list to compare against and no row here claims to be a first appearance. A " +
+        "feed that named nothing is not a session in which nothing was crowded — it is a " +
+        "payload with nothing in it to match on, which is a fact about that payload.";
+    default:
+      return "No counter feed could be read on this run — either none has ever been published " +
+        "under this key, or the read did not complete — so there is no earlier session to " +
+        "compare against and no row here claims to be a first appearance. The comparison " +
+        "begins on the next run that finds a feed to read.";
+  }
 }
 
 const SECTOR_ETFS = [
@@ -4335,6 +4506,15 @@ function fakeCongress(ticker) {
  * appear today are added, because a real prior session names lines that have
  * since gone quiet and a fixture whose prior is a strict subset of today
  * would never exercise the set lookup missing.
+ *
+ * IT IS STAMPED WITH AN EARLIER SESSION ON PURPOSE, so the corpus reaches the
+ * `ok` branch of the session guard. The board's fixture can reach BOTH sides
+ * of the same guard because a board has two of them and one can be stamped
+ * with this run's own session; there is one counter feed, so its refusals —
+ * same-session, ahead, undated, quiet, unavailable — are certified in
+ * tests/flows-pipeline-contract.mjs over markNewContracts directly. If this
+ * fixture is ever restamped to today's session the corpus will stop reaching
+ * the comparison at all, and the suite asserts that it does.
  */
 function fakePriorUnusual(rows, sessionDate) {
   const list = Array.isArray(rows) ? rows : [];
@@ -5388,6 +5568,20 @@ async function main() {
      committed, which is the earliest point at which their failure can cost
      the reader nothing.
 
+     WHAT THEY DO CONTEND WITH IS THIS RUN'S OWN PUBLISHES, and that is worth
+     stating rather than discovering. All three speak to the ingest route, and
+     the route's documented failure is burst rate: publish()'s own comment
+     records 37 POSTs in eleven seconds tripping a Cloudflare challenge, which
+     is why every write is followed by PUBLISH_SPACING_MS. That spacing is
+     per-leg, not global, so while these two are in the air the route sees the
+     sum of up to three paced streams rather than one. In practice they finish
+     inside the first minute — the walk in ~30s and the sweep in a handful of
+     seconds against 18 keys — long before the fifty card writes, so the
+     overlap is with the dated copies, the watch list and the movers band: a
+     handful of writes, not a burst. If a run ever does start reporting edge
+     403s in this window, that is the thing to look at first, and the answer is
+     one shared lane for ingest traffic rather than re-serialising these two.
+
      THE `.catch` IS ATTACHED AT CREATION, not at the await. A detached promise
      that rejects before anyone awaits it is an unhandled rejection, which in
      this runtime is a process-level event and not a caught leg failure — the
@@ -5625,7 +5819,15 @@ async function main() {
      would draw the window early and classify every name against a gate that
      never ran — and a fixture built the same way would agree with it. */
   try {
-    const gateOrigin = easternNow().date;
+    /* THE RUN'S ONE READING OF THE EASTERN DATE, not a second one. This line
+       was `easternNow().date` and the comment three lines below already
+       asserted "`today` here IS `gateOrigin` — the same easternNow().date",
+       which was true of the value and not of the code: two readings of a clock
+       are one quantity with two sources, and they disagree for the run that
+       crosses midnight between them. It matters more now that the boards
+       publish `gateOrigin` too — two surfaces stamping one gate with two
+       different days is exactly the drift this file hunts. */
+    const gateOrigin = today;
     const stageByTicker = new Map();
     for (const { row } of withTilt) if (row && row.ticker) stageByTicker.set(row.ticker, "screened");
     for (const { row } of tilted) if (row && row.ticker) stageByTicker.set(row.ticker, "eligible");
@@ -5982,10 +6184,17 @@ async function main() {
      away, which is the correct degradation order — it feeds panels a reader
      can live without and a history that can be gappy and say so.
 
-     SEQUENTIALLY, never Promise.all, for the reason the sector leg states at
-     length: fifty concurrent calls all sleep the same delay and then arrive
-     together, which is exactly the burst shape that earns a 429 and
-     permanently raises the floor for the rest of the run.
+     THROUGH A BOUNDED POOL, NEVER Promise.all OVER THE NAME LIST, and the
+     distinction is the whole argument. Promise.all here would put fifty
+     requests in flight at once; what runPooled puts in flight is at most
+     `width` WORKERS, each of which still takes its turn from `permits` one
+     request at a time, so departures stay exactly delayMs apart however many
+     workers there are. Until this paragraph was rewritten it said the leg ran
+     SEQUENTIALLY, which stopped being true the run the pool landed — and it
+     justified that with the old sleep-then-fetch limiter, under which N
+     callers slept the same delay concurrently and arrived as one volley. That
+     limiter is gone; the reason survives only as the reason not to fire the
+     whole list at once, which this leg still does not do.
 
      TWO GUARDS, NOT ONE. The leg-level check refuses to start past the
      deadline; the per-name check stops partway rather than eating the card
@@ -6373,7 +6582,12 @@ async function main() {
     const priorUnusual = DRY_RUN
       ? fakePriorUnusual(contracts.rows, sessionDate)
       : await fetchStoredPayload("unusual");
-    const priorMark = markNewContracts(contracts.rows, priorUnusual);
+    /* THE SESSION THIS RUN IS PUBLISHING GOES IN, because this key holds
+       whatever the LAST run wrote and a second run against one session would
+       otherwise read its own output as yesterday and report every line as
+       carried over. Same guard, same six statuses, same store as the board's
+       memory. */
+    const priorMark = markNewContracts(contracts.rows, priorUnusual, sessionDate);
 
     await publish("unusual", {
       v: BOARD_SCHEMA_VERSION,
@@ -6399,17 +6613,28 @@ async function main() {
          the claim is checkable rather than asserted. `readAt` and
          `sessionDate` are the PRIOR payload's own stamps, so a page can say
          "not in the feed read at 09:20 on the 21st" instead of "new", which
-         is a word with no denominator. `status` is the three silences: "ok"
-         is a comparison that happened, "quiet" is a prior payload that named
-         no contracts, "unavailable" is a prior payload that could not be
-         read. Under the last two every `nw` is null and no row claims
-         anything. */
+         is a word with no denominator.
+
+         `status` is the six answers markNewContracts can give, which are the
+         six readBoardMemory gives about the same store: "ok" and "undated"
+         are comparisons that happened (the second unable to prove the prior
+         feed was an earlier session), and "quiet", "unavailable",
+         "same-session" and "ahead" are four different refusals under which
+         every `nw` is null.
+
+         `note` IS THE SENTENCE, and it is on the payload because only the
+         publisher knows which of the six happened and shared/ is not served
+         to the browser. A renderer that wrote its own would have to write six,
+         and would be wrong on five the day it wrote three — which is exactly
+         the state assets/js/flows-board.js is in today with the board's own
+         memory. */
       prior: {
         status: priorMark.status,
         readAt: priorMark.readAt,
         sessionDate: priorMark.sessionDate,
         contracts: priorMark.contracts,
         fresh: priorMark.fresh,
+        note: priorNote(priorMark, sessionDate, contracts.rows.length),
       },
       coverage,
       contracts,
@@ -6442,12 +6667,15 @@ async function main() {
            this is still a counter and a first appearance in a ranked list is
            not an event on the tape. */
         new: "`nw` is 1 when this contract was absent from the previously published " +
-          "counter feed, 0 when it was present in it, and null when there was no readable " +
-          "prior feed to compare against — see `prior` for which of the three happened, " +
-          "and for the session and read time the comparison was made against. It is a " +
-          "statement about this list, not about the strike: a contract can be absent " +
-          "from the prior feed because it was quiet, or because it sat below the per-name " +
-          "cap that morning.",
+          "counter feed, 0 when it was present in it, and null when NO comparison was " +
+          "made — the earlier feed could not be read, or named nothing this run can " +
+          "identify, or turned out to be this run's own output from a second run against " +
+          "one session, which would have marked every line carried over. `prior.status` " +
+          "says which of the six happened, `prior.note` says it in a sentence, and " +
+          "`prior.sessionDate` and `prior.readAt` name the session and the read time the " +
+          "comparison was made against. It is a statement about this list, not about the " +
+          "strike: a contract can be absent from the earlier feed because it was quiet, or " +
+          "because it sat below the per-name cap that morning.",
         lift: UNUSUAL_NOTES.lift,
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
@@ -6465,14 +6693,34 @@ async function main() {
       (divisors.size > 1 ? `; ${divisors.size} IV conventions in one table` : ""));
     /* WHAT THE MEMORY SAW, IN THE LOG, for the same reason the board's memory
        line exists: a feed that quietly reports nothing new every morning is
-       indistinguishable from a store read that has been failing for a week. */
-    console.log("  unusual memory: " + (DRY_RUN ? "[dry-run] " : "") + (
-      priorMark.status === "ok"
+       indistinguishable from a store read that has been failing for a week.
+
+       THE STATUS LEADS, so a month of job logs can be grepped for the morning
+       the comparison stopped happening — the same shape the board's memory
+       line takes. Four refusals, four sentences: one "no comparison" for all
+       of them would hide a store that has been failing for a week behind the
+       same words as a holiday re-run, which is the pair an operator most needs
+       to tell apart. */
+    console.log("  unusual memory: " + (DRY_RUN ? "[dry-run] " : "") + priorMark.status + " — " + (
+      priorMark.status === "ok" || priorMark.status === "undated"
         ? `${priorMark.fresh} of ${contracts.rows.length} contract(s) absent from the ` +
-          `${priorMark.contracts}-contract feed published for ${priorMark.sessionDate || "an unstamped session"}`
-        : priorMark.status === "quiet"
-          ? "the prior feed was read and named no contracts, so no row claims to be new"
-          : "no prior feed could be read, so no row claims to be new"));
+          `${priorMark.contracts}-contract feed published for ` +
+          `${priorMark.sessionDate || "an unstamped session"}` +
+          (priorMark.status === "undated"
+            ? " — which this run could NOT check was an earlier session than its own"
+            : "")
+        : priorMark.status === "same-session"
+          ? `the prior feed is stamped ${priorMark.sessionDate}, the session this run is ` +
+            `publishing, so it is this run's own output rather than a prior session: its ` +
+            `${priorMark.contracts} contract(s) were discarded and no row claims to be new`
+          : priorMark.status === "ahead"
+            ? `the prior feed is stamped ${priorMark.sessionDate}, a LATER session than the ` +
+              `${sessionDate} this run is publishing, so it cannot be this run's yesterday: ` +
+              `its ${priorMark.contracts} contract(s) were discarded and no row claims to be new`
+            : priorMark.status === "quiet"
+              ? "the prior feed was read and named no contracts this run can identify, so no " +
+                "row claims to be new"
+              : "no prior feed could be read, so no row claims to be new"));
 
     /* THE OPEN-INTEREST BASIS DIAGNOSTIC. Costs nothing, run on the first
        chain that produced feed rows, and its zero branch reports itself as
@@ -7475,7 +7723,7 @@ export {
   describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
-  unusualContractId, markNewContracts, fakePriorUnusual,
+  unusualContractId, markNewContracts, priorNote, fakePriorUnusual,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

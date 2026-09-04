@@ -67,15 +67,27 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
  * made it a defect rather than a limit. The cap now publishes `capBound` and
  * `lastShownDate` so a page can say which of the two bound it.
  *
- * WHY 200 AND NOT MORE, WITH THE ARITHMETIC RATHER THAN A ROUND NUMBER. The
- * published key is budgeted at 128KB. Live rows measured 229 bytes each before
- * this layer added the flow group; the synthetic corpus, where every field is
- * populated with four-decimal values and nothing is null, measures 312 — a
- * worst case rather than a typical one. At 200 seats that is about 59KB live
- * and 62KB worst case, both inside half the ceiling with the header and the
- * notes on top. 250 seats would have been 78KB worst case, and a per-key
- * budget spent past its own halfway mark on one table is how the NEXT field
- * added here becomes a truncation nobody predicted.
+ * WHY 200 AND NOT MORE, WITH THE ARITHMETIC MEASURED RATHER THAN GUESSED. The
+ * published key is budgeted at 128KB (worker.js, FLOWS_MAX_PAYLOAD_BYTES =
+ * 131072 bytes). Rows were 229 bytes each BEFORE the flow group below; with
+ * it they measure 304 bytes on a screener-only name — no realized vol, no IV
+ * strip — and 323 on the worst case, every field populated with four-decimal
+ * values and a long sector string. Serialised whole, with the header, the
+ * announce block and the ~4.9KB of notes on top:
+ *
+ *     200 seats, screener-only rows   67.4KB   51% of the key
+ *     200 seats, worst-case rows      71.2KB   54% of the key
+ *
+ * The earlier revision of this comment did the sum with the pre-flow-group
+ * row and concluded "both inside half the ceiling", which was wrong in the
+ * same pass that made it wrong: the fields that broke the arithmetic were
+ * added twenty lines below it. The honest reading is that 200 seats spends
+ * slightly over half the key and leaves ~60KB of headroom.
+ *
+ * 250 seats would be ~85KB, two thirds of the budget, and a per-key budget
+ * spent two thirds of the way down on one table is how the NEXT field added
+ * here becomes a truncation nobody predicted. Anything added to a row from
+ * here costs 200x its own bytes; re-measure before adding one.
  */
 export const EVENT_ROWS = 200;
 

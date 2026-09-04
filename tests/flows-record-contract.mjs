@@ -624,5 +624,5 @@ console.log(`✓ flows-record: ${checks} assertions — a calendar that skips wh
   `the evidence table, over a fixture where pooling reads the strongest feature as noise — a ` +
   `sample dispersion whose divisor the fixture can tell apart from the population one and which ` +
   `is null at n=1 and a measured 0 at n=2, a hit rate pooled over names rather than averaged ` +
-  `over session rates, and an IC measured at four horizons and ordered by evidence rather than ` +
-  `by the alphabet`);
+  `over session rates, and an IC measured across a horizon set and ordered by evidence ` +
+  `rather than by the alphabet`);

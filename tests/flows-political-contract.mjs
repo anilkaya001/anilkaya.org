@@ -305,6 +305,50 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(bond.freshBuys, 0,
     "and one who did not reports a MEASURED zero — the date itself is published, so " +
     "zero here means 'nothing that day' rather than 'not asked'");
+
+  /* AND WITH NO DATE TO MEASURE AGAINST, THE COUNTER IS NULL AND NOT ZERO.
+
+     Every row's freshBuys used to come back 0 on a window whose filings
+     carried no filing date, and on any caller that did not state one — the
+     same 0 the assertion above certifies as a measurement, meaning "nothing
+     that day" on one payload and "no day was compared" on the next. A reader
+     cannot tell those apart and neither could the renderer. */
+  const undatedWindow = rows.map((r) => ({ ...r, filedDate: null }));
+  eq(newestFiled(undatedWindow), null, "a window whose filings carry no date has no newest");
+  const undatedBuyers = rankBuyers(undatedWindow, { latestFiled: newestFiled(undatedWindow) });
+  const undatedAssets = rankAssets(undatedWindow, { latestFiled: null });
+  /* THE LOOPS BELOW MUST HAVE SOMETHING TO WALK. A `for` over an empty array
+     is a test block that prints its success line having asserted nothing,
+     which is this repository's most repeated instrument failure. */
+  ok(undatedBuyers.rows.length > 0 && undatedAssets.rows.length > 0,
+    "both rankings returned rows, so the assertions below are over a population");
+  for (const row of undatedBuyers.rows) {
+    eq(row.freshBuys, null,
+      "so no filer reports a fresh-purchase count at all — null, never the 0 that would " +
+      "read as 'this filer disclosed nothing that day'");
+  }
+  for (const row of undatedAssets.rows) {
+    eq(row.freshBuys, null, "and the assets ranking answers the same way, not a second rule");
+  }
+  ok(rankBuyers(rows).rows.every((r) => r.freshBuys === null),
+    "a caller that states no newest date gets nulls too: the counter is only a reading " +
+    "when something was compared");
+  ok(rankBuyers(rows, { latestFiled: "2026-08-02" }).rows.some((r) => r.freshBuys === 0),
+    "while the measured zero is still reachable — the two branches are both live, which " +
+    "is what makes the distinction testable rather than decorative");
+
+  /* THE WHOLE PAYLOAD ANSWERS THE SAME WAY, through buildPolitical's own
+     wiring rather than through a hand-passed option. */
+  const undatedPayload = buildPolitical({
+    trades: { data: undatedWindow.map((r) => ({
+      name: r.who, politician_id: r.id, ticker: r.t, txn_type: "Purchase",
+      amounts: "$1,001 - $15,000",
+    })) },
+  });
+  eq(undatedPayload.latestFiled, null, "the payload states no newest filing date");
+  eq(undatedPayload.freshFilings, null, "and no count of filings carrying one");
+  ok(undatedPayload.buyers.rows.every((r) => r.freshBuys === null),
+    "and every ranked row's fresh counter is null all the way through the build");
 }
 
 /* ---------- §5c breadth, which size buries ----------------------- */
@@ -477,4 +521,4 @@ console.log(`✓ flows-political: ${checks} assertions — an open-ended band wi
   `zero, a listed/other split that makes the two panels reconcile exactly, the self-filed ` +
   `share the attribution note has always promised, a breadth ordering whose fixture puts ` +
   `the five-filer name third by dollars, an unknown lag that cannot win a recency ` +
-  `tiebreak, and prose that needs no allow-list`);
+  `tiebreak, a fresh-purchase counter that is null rather than zero when no filing date was there to compare against, and prose that needs no allow-list`);

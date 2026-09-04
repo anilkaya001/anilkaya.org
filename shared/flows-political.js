@@ -323,6 +323,9 @@ const median = (xs) => {
  * about buying.
  */
 export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers, latestFiled = null } = {}) {
+  /* WHETHER "NEW" CAN BE MEASURED AT ALL ON THIS WINDOW. Decided once, here,
+     so every row of one response answers the same way. */
+  const freshKnown = typeof latestFiled === "string" && latestFiled !== "";
   const by = new Map();
   for (const r of rows) {
     if (!r || !r.who) continue;
@@ -431,10 +434,18 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers, latestFiled = nu
          stated. Null when it stated none: unknown is not "all their own". */
       ownerKnown: a.ownerKnown,
       selfFiled: a.ownerKnown ? a.selfFiled : null,
-      /* Purchases disclosed on the newest filing date in this window. Zero is
-         a measurement here — this filer disclosed nothing that day — because
-         the date itself is known and published beside it. */
-      freshBuys: a.freshBuys,
+      /* Purchases disclosed on the newest filing date in this window.
+
+         A ZERO HERE IS ONLY A MEASUREMENT WHEN THERE IS A DATE TO MEASURE
+         AGAINST. With a `latestFiled` in hand, 0 says "this filer disclosed
+         nothing that day" — a reading, and the date is published beside it so
+         the reader can check what day that was. With none — a window whose
+         filings carried no filing date at all, or a caller that did not state
+         one — every row's counter is 0 for the same reason nothing was
+         compared, and publishing that as a measured zero is the confident zero
+         this file already refuses one line above on `names`. Null instead, and
+         the renderer draws no mark either way. */
+      freshBuys: freshKnown ? a.freshBuys : null,
     });
   }
   /* Total order: size, then name, so one response publishes one byte string. */
@@ -451,6 +462,7 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers, latestFiled = nu
 /* ---------- what: ranked by disclosed purchase size -------------- */
 
 export function rankAssets(rows, { cap = POLITICAL_CAPS.assets, latestFiled = null } = {}) {
+  const freshKnown = typeof latestFiled === "string" && latestFiled !== "";
   const by = new Map();
   for (const r of rows) {
     if (!r || !r.t) continue;
@@ -501,7 +513,11 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets, latestFiled = nu
       openBands: a.openBands, openFloor: a.openFloor,
       ownerKnown: a.ownerKnown,
       selfFiled: a.ownerKnown ? a.selfFiled : null,
-      freshBuys: a.freshBuys,
+      /* Null rather than a confident 0 when no newest date was stated — see
+         rankBuyers for the argument; the two rankings answer it identically
+         so a reader cannot learn one rule on one panel and the other on the
+         next. */
+      freshBuys: freshKnown ? a.freshBuys : null,
     });
   }
   out.sort((x, y) => (y.bought - x.bought) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));

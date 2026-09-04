@@ -643,6 +643,24 @@
      its temporal dead zone until its own declaration runs. */
   let alertRows = [];        // [{ r, i }] in the vendor's published order
 
+  /* WHY THE JOIN'S NULL IS NOT ENOUGH FOR THE FILTER NOTE.
+
+     `alertKeys === null` answers "may this row be marked", and null is the
+     right answer for a fetch that has not returned AND for one that failed —
+     neither can corroborate anything. But the NOTE has to say which of those
+     two it is, and it cannot say either from a null: a table whose payload
+     never arrived was reporting "0 of 0 contracts are drawn", which is a
+     displayed zero standing in for "not sent" — the oldest defect in this
+     repository, in the one sentence on the page whose whole job is to keep a
+     narrowed table from reading as a thin market. Worse, the "Both feeds"
+     pill went on promising resolution "until both payloads have loaded" after
+     a failure that will never load one.
+
+     So resolution is tracked in its own tri-state, per feed, and only the
+     "ok" state licenses a count. */
+  let alertsState = "pending";       // "pending" | "ok" | "failed"
+  let feedState = "pending";
+
   /* The filter both tables honour. `side` is "all" | "C" | "P"; `both` narrows
      to contracts present in BOTH feeds. Held here rather than in either
      table's controller because a filter that applied to one table and not the
@@ -674,10 +692,16 @@
 
   /* When the second fetch lands, the first table's rows were drawn without a
      join to test against. Repainting is cheap — sixty rows — and is the only
-     way the mark can appear on whichever table drew first. */
-  function joinResolved() {
-    if (alertKeys !== null && feedRows.length) paintFeedRows();
-    if (feedKeys !== null && alertRows.length) paintAlertRows();
+     way the mark can appear on whichever table drew first.
+
+     THE ARGUMENT NAMES WHICH SIDE JUST RESOLVED, and only the OTHER table is
+     repainted. Repainting both meant the table that had just finished
+     painting itself two statements earlier was rebuilt row by row for no
+     reason on every single load — sixty rows of DOM created and discarded to
+     re-derive marks that were already on them. */
+  function joinResolved(side) {
+    if (side !== "feed" && alertKeys !== null && feedRows.length) paintFeedRows();
+    if (side !== "alerts" && feedKeys !== null && alertRows.length) paintAlertRows();
   }
 
   /* ---------- the filter group, built here because the markup half
@@ -755,19 +779,32 @@
         "on what is drawn and never a second read of the market.";
       return;
     }
-    const feedShown = feedRows.filter((e) => passesFilter(e.r, "expiry")).length;
-    const alertShown = alertRows.filter((e) => passesFilter(e.r, "exp")).length;
     const bits = [];
     if (filter.side !== "all") bits.push(filter.side === "C" ? "calls only" : "puts only");
     if (filter.both) {
-      bits.push(alertKeys === null || feedKeys === null
-        ? "contracts in both feeds, which cannot be resolved until both payloads have loaded"
-        : "contracts in both feeds");
+      /* THREE STATES, THREE CLAUSES. "Not yet" and "not at all" are different
+         facts about the join and only one of them is going to change. */
+      bits.push(alertsState === "ok" && feedState === "ok"
+        ? "contracts in both feeds"
+        : (alertsState === "failed" || feedState === "failed"
+          ? "contracts in both feeds — which cannot be resolved at all, because one of " +
+            "the two payloads could not be read"
+          : "contracts in both feeds, which cannot be resolved until both payloads " +
+            "have loaded"));
     }
+    /* A COUNT ONLY FROM A TABLE THAT ANSWERED. "0 of 0 are drawn" from a feed
+       that never returned is a measurement of nothing, printed as a
+       measurement of the market. */
+    const tally = (state, rows, expiryKey, plural) => {
+      if (state === "pending") return "the " + plural + " have not been read yet";
+      if (state === "failed") return "the " + plural + " could not be read";
+      const shown = rows.filter((e) => passesFilter(e.r, expiryKey)).length;
+      return count(shown) + " of " + count(rows.length) + " " + plural + " are drawn";
+    };
     note.textContent = "Filtered to " + bits.join(" and ") + ": " +
-      count(alertShown) + " of " + count(alertRows.length) + " flagged windows and " +
-      count(feedShown) + " of " + count(feedRows.length) + " contracts are drawn. " +
-      "The rest are published and hidden, not absent from the read.";
+      tally(alertsState, alertRows, "exp", "flagged windows") + " and " +
+      tally(feedState, feedRows, "expiry", "contracts") + ". " +
+      "Anything hidden is published and hidden, not absent from the read.";
   }
 
   let feedRows = [];                 // [{ r, i }] in the published rank
@@ -1194,7 +1231,8 @@
       feedSorter.wire();
       paintFeedRows();
     }
-    joinResolved();
+    feedState = "ok";
+    joinResolved("feed");
     syncFilterNote();
     if (feedPanel) feedPanel.hidden = false;
 
@@ -1460,6 +1498,12 @@
       emptyRow(alertsBody, ALERT_COLUMNS,
         "This payload could not be read as an alerts feed: it carries no rows " +
         "array. That is a gap in the payload, not a quiet market.");
+      /* AN UNREADABLE PAYLOAD IS ANSWERED-AND-UNUSABLE, not still-loading. The
+         filter note's three states are the page's three silences and this is
+         the second of them; leaving it as "pending" would have the note
+         promise a table that has already come back broken. */
+      alertsState = "failed";
+      syncFilterNote();
       alertsPanel.hidden = false;
       return;
     }
@@ -1485,7 +1529,8 @@
       alertsSorter.wire();
       paintAlertRows();
     }
-    joinResolved();
+    alertsState = "ok";
+    joinResolved("alerts");
     syncFilterNote();
 
     const seen = isNum(alerts.seen);
@@ -1547,6 +1592,12 @@
     if (!alerts || typeof alerts !== "object") return;
     paintAlerts(alerts);
   }).catch((error) => {
+    /* THE JOIN STAYS NULL — a feed that did not arrive corroborates nothing —
+       but the filter note must stop promising that it will. Set before the
+       early return, so a page without the alerts markup still tells the truth
+       about the feed in the sentence that counts rows. */
+    alertsState = "failed";
+    syncFilterNote();
     if (!alertsPanel || !alertsBody) return;
     emptyRow(alertsBody, ALERT_COLUMNS,
       "The alerts feed could not be loaded (" + (error && error.message
@@ -1600,8 +1651,10 @@
       }
     }
   }).catch((error) => {
+    feedState = "failed";
     failEverywhere("The feed could not be loaded (" + (error && error.message
       ? error.message : "no message") + "). Nothing on this page was measured; refresh " +
       "to try again.");
+    syncFilterNote();
   });
 })();

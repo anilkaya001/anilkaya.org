@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "95";
+export const ASSET_VERSION = "96";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 

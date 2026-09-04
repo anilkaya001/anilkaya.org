@@ -291,8 +291,17 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
          is a share of the names this session actually measured, which is
          `names` minus `lost` — arithmetic a reader should not have to do to
          know whether a 0.75 is three of four or a hundred and fifty of two
-         hundred. It is also what makes the pooled rate on the horizon rows
-         reproducible from the table beneath it. */
+         hundred.
+
+         IT IS THE DENOMINATOR, NOT A RECONSTRUCTION KIT, and the first draft
+         of this comment claimed the second: `hit` is rounded to two places
+         for the column that draws it, so hit x measured recovers the hit
+         COUNT exactly only while measured stays under a hundred — and a full
+         two-sided board measures up to two hundred names. The pooled rate on
+         the horizon rows is summed from the unrounded counts inside
+         meanOver, never from this column; what this column supports is a
+         reader checking a session's rate against its own width, which is the
+         question the number was missing. */
       measured: s.measured,
       lost: s.lost,
       names: s.names,
