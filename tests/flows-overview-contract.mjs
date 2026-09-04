@@ -2,7 +2,7 @@
    flows-overview-contract.mjs — the Session Overview, in a browser.
 
    THIS IS THE PAGE THE SECTION OPENS ON, and it is now a command center:
-   seven regions drawn from seven endpoints that already existed. The
+   nine regions drawn from nine endpoints that already existed. The
    version it replaced fetched both FULL board payloads and rendered six
    tiles from them — three a side — discarding every other ranked name, and
    left the level, the flagged windows, the calendar, the watch board and
@@ -43,6 +43,19 @@
    beside today's bears, and both halves render perfectly. Nothing in the
    payload forces them to agree, so the page has to check.
 
+   AND THE LAST TWO REGIONS EXIST BECAUSE THE DATA DID AND THE PAGE DID NOT
+   ASK. worker.js has served /api/flows/sector-premium and /api/flows/news
+   since the wave that published them, and this page's fetch list — the only
+   place the landing page asks for anything — asked for neither: eleven
+   sector premium leans and sixty headlines, live, paid for and invisible.
+   The sector fixture below is built so the two candidate orderings DISAGREE
+   (a 62% lean on $62K against a 2% lean on $400M), because "ranked on the
+   ratio" is unprovable against a fixture where ranking on dollars produces
+   the same list. The news fixture is built from OFFSETS against the clock
+   rather than from fixed stamps, because a fixed stamp ages with the
+   repository and the age this region exists to state would drift out from
+   under the assertion that reads it.
+
    AND A BOARD IS NOW FAILED THE WAY A REGION ALREADY WAS. loadBoard threw
    on any status that was neither 401 nor OK and had no catch for a network
    failure, so one 500 on one pole rejected the Promise.all and skipped the
@@ -61,6 +74,7 @@
    are served here for exactly that reason.
    ============================================================= */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { startWorker, FLOWS_PASSWORD, FLOWS_TEST_USER } from "./worker-server.mjs";
 import { buildScoreTrack } from "../shared/flows-scores.js";
@@ -2109,6 +2123,623 @@ try {
     await ctx.close();
   }
 
+
+  /* ---------- the two keys that were published and drawn nowhere ----
+
+     worker.js:2721 has served /api/flows/sector-premium and :2738
+     /api/flows/news since the wave that added them, and the overview's
+     fetch list did not ask for either: the data was live, paid for, and
+     invisible. Everything below is about the two regions that now ask.
+
+     BOTH ARE UNPUBLISHED UNTIL THIS BLOCK POSTS THEM, which is what makes
+     the first assertion a live example rather than a mock: the worker
+     answers an unpublished key with {status:"pending"}, and a region that
+     wrote "nothing leaned" over that would be asserting a fact about the
+     market out of a key the pipeline has never written. */
+  {
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccLean .cc-quiet", { timeout: 15000 });
+    const pending = await page.evaluate(() => {
+      const read = (id) => {
+        const p = document.querySelector("#" + id + " .cc-quiet");
+        return { kind: p && p.dataset.empty, text: p ? p.textContent.trim() : "" };
+      };
+      return { lean: read("ccLean"), news: read("ccNews") };
+    });
+    eq(pending.lean.kind, "pending",
+       "an unpublished sector-premium key is PENDING on this page, not empty");
+    eq(pending.news.kind, "pending", "and so is an unpublished news key");
+    for (const [what, said] of [["sector", pending.lean.text], ["news", pending.news.text]]) {
+      ok(/has not been published/.test(said),
+         `the ${what} region says the key has not been published (${said})`);
+      ok(/nothing is being claimed/.test(said),
+         `and that nothing is being claimed about the session (${said})`);
+    }
+  }
+
+  /* ---------- eleven sectors, ranked on the RATIO ------------------
+
+     THE FIXTURE IS BUILT SO THE TWO CANDIDATE ORDERINGS DISAGREE, which is
+     the only way "ranked on leanRatio" means anything. XLK carries $400M of
+     net premium on a 2% lean and XLB carries $62K on a 62% lean, so a
+     renderer ranking on the DOLLAR difference heads the panel with XLK and
+     one ranking on the ratio heads it with XLB. That is exactly the choice
+     flows-pipeline.mjs:3722 argues and publishes as `lean.rank`, and a
+     panel that quietly re-decided it would look entirely reasonable.
+
+     AND IT CARRIES ALL FOUR ROW STATES AT ONCE, because they are four
+     different sentences and a fixture holding one of them can only prove
+     one: a measured lean, a MEASURED ZERO lean (XLC: gross traded, net came
+     out exactly 0), a quiet basket (XLU: both sums measured at zero, so the
+     ratio is 0/0 and undefined), and two unreadable ones. */
+  const SECTORS = [
+    /* Deliberately NOT in render order, and not in the payload's own
+       SECTOR_ETFS order either: array order is not a contract and a renderer
+       that takes the rows as they arrive must fail here. */
+    { sector: "Energy", etf: "XLE", read: "ok", leanRatio: -0.55,
+      netPremiumUsd: -5500000, grossPremiumUsd: 10000000,
+      bullishPremiumUsd: 2250000, bearishPremiumUsd: 7750000, reason: null },
+    { sector: "Information Technology", etf: "XLK", read: "ok", leanRatio: 0.02,
+      netPremiumUsd: 400000000, grossPremiumUsd: 20000000000,
+      bullishPremiumUsd: 10200000000, bearishPremiumUsd: 9800000000, reason: null },
+    { sector: "Utilities", etf: "XLU", read: "quiet", leanRatio: null,
+      netPremiumUsd: 0, grossPremiumUsd: 0,
+      bullishPremiumUsd: 0, bearishPremiumUsd: 0,
+      reason: "XLU was read and both premium sums were zero — measured and empty, not missing" },
+    { sector: "Materials", etf: "XLB", read: "ok", leanRatio: 0.62,
+      netPremiumUsd: 62000, grossPremiumUsd: 100000,
+      bullishPremiumUsd: 81000, bearishPremiumUsd: 19000, reason: null },
+    { sector: "Real Estate", etf: "XLRE", read: "unreadable", leanRatio: null,
+      netPremiumUsd: null, grossPremiumUsd: null,
+      bullishPremiumUsd: null, bearishPremiumUsd: null,
+      reason: "no XLRE row in the sector-etfs response" },
+    { sector: "Communication Services", etf: "XLC", read: "ok", leanRatio: 0,
+      netPremiumUsd: 0, grossPremiumUsd: 50000000,
+      bullishPremiumUsd: 25000000, bearishPremiumUsd: 25000000, reason: null },
+    { sector: "Health Care", etf: "XLV", read: "ok", leanRatio: -0.09,
+      netPremiumUsd: -900000, grossPremiumUsd: 10000000,
+      bullishPremiumUsd: 4550000, bearishPremiumUsd: 5450000, reason: null },
+    { sector: "Consumer Discretionary", etf: "XLY", read: "ok", leanRatio: 0.31,
+      netPremiumUsd: 6200000, grossPremiumUsd: 20000000,
+      bullishPremiumUsd: 13100000, bearishPremiumUsd: 6900000, reason: null },
+    { sector: "Consumer Staples", etf: "XLP", read: "unreadable", leanRatio: null,
+      netPremiumUsd: null, grossPremiumUsd: null,
+      bullishPremiumUsd: 55391, bearishPremiumUsd: null,
+      reason: "XLP carried bullish_premium but not the other side, and a lean needs both terms" },
+    { sector: "Industrials", etf: "XLI", read: "ok", leanRatio: 0.14,
+      netPremiumUsd: 1400000, grossPremiumUsd: 10000000,
+      bullishPremiumUsd: 5700000, bearishPremiumUsd: 4300000, reason: null },
+    { sector: "Financials", etf: "XLF", read: "ok", leanRatio: -0.22,
+      netPremiumUsd: -4400000, grossPremiumUsd: 20000000,
+      bullishPremiumUsd: 7800000, bearishPremiumUsd: 12200000, reason: null },
+  ];
+
+  /* THE ENVELOPE IS THE PUBLISHER'S, FIELD FOR FIELD. `lean.rejected` and
+     `notSameAs` are long sentences the pipeline writes precisely so a page
+     can carry them instead of paraphrasing, and this fixture proves the
+     page carries THOSE rather than a copy that would drift from them. */
+  const sectorLean = (extra = {}) => ({
+    v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+    readAt: "2026-08-25T09:20:00.000Z", refreshed: "nightly", vendorDated: false,
+    basis: "SPDR Select Sector ETFs, not GICS index levels",
+    units: { netPremiumUsd: "usd", grossPremiumUsd: "usd", leanRatio: "ratio" },
+    lean: {
+      rank: "leanRatio", choice: true,
+      relation: "netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd",
+      rejected: "ranking the eleven on netPremiumUsd, which ranks them by sector size",
+      undefinedAtZero: "leanRatio is null when grossPremiumUsd is 0",
+    },
+    notSameAs: "sector:trix — that key is TRIX on daily closes and contains no option data",
+    sectors: SECTORS, returned: 11, measured: 8, quiet: 1, unreadable: 2,
+    ...extra,
+  });
+
+  await post("sector:premium", sectorLean());
+
+  {
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccLean tbody tr", { timeout: 15000 });
+
+    const rows = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccLean tbody tr"), (tr) => ({
+        read: tr.dataset.read,
+        /* The fund ticker rides inside the sector cell rather than in a
+           column of its own, so it is read from the span that holds it —
+           slicing the cell's text would take the sector label with it. */
+        etf: tr.querySelector(".cc-etf").textContent.trim(),
+        cells: Array.from(tr.children, (td) => td.textContent.trim()),
+        bar: !!tr.querySelector(".cc-ln-bar"),
+        flat: !!tr.querySelector(".cc-ln-flat"),
+        none: !!tr.querySelector(".cc-ln-none"),
+        left: (tr.querySelector(".cc-ln-fill") || {}).style
+          ? tr.querySelector(".cc-ln-fill").style.left : null,
+        width: tr.querySelector(".cc-ln-fill")
+          ? tr.querySelector(".cc-ln-fill").style.width : null,
+      })));
+
+    eq(rows.length, 11, "all eleven baskets are drawn, including the ones that said nothing");
+    /* A PANEL THAT QUIETLY SHRINKS FROM ELEVEN TO EIGHT is how a vendor
+       outage goes unnoticed for a week, which is why the publisher returns
+       every basket whatever happens and why this count is asserted first. */
+
+    const order = rows.map((r) => r.etf);
+    deep(order, ["XLB", "XLY", "XLI", "XLK", "XLC", "XLV", "XLF", "XLE", "XLU", "XLRE", "XLP"],
+      "the eleven are ranked on leanRatio, the field the publisher ranks on and says so on " +
+      "the payload — not on the dollar difference, which ranks by basket size");
+    ok(order[0] === "XLB" && order.indexOf("XLK") === 3,
+       `the 62% lean on $62K outranks the 2% lean on $400M (${order.join(" ")})`);
+
+    /* THE TAIL IS NOT SORTED AS ZERO. A basket with no ratio cannot be
+       placed on this ordering at all: seating XLU between XLK and XLV — the
+       two rows either side of 0.0 — is the confident zero wearing a
+       comparator, and it is what an `?? 0` in the sort would do. */
+    ok(order.indexOf("XLU") > order.indexOf("XLE"),
+       `the quiet basket sorts past every measured lean rather than into the middle at 0 ` +
+       `(${order.join(" ")})`);
+    ok(order.indexOf("XLU") < order.indexOf("XLRE"),
+       "and ahead of the unreadable ones, because measured-and-empty is a reading and " +
+       "unreadable is not");
+
+    const by = Object.fromEntries(rows.map((r) => [r.etf, r]));
+
+    /* ---- the three numbers, each with its own unit ---- */
+    deep(by.XLB.cells.slice(2), ["+62.0%", "$62K", "$100K"],
+      "a measured basket prints its share of premium, its signed dollars and its gross");
+    deep(by.XLE.cells.slice(2), ["−55.0%", "−$5.5M", "$10.0M"],
+      "and a bearish one carries U+2212 on both signed columns, not a hyphen");
+    deep(by.XLK.cells.slice(2), ["+2.0%", "$400.0M", "$20.00B"],
+      "the dollars are shown beside the ratio, because a ratio cannot say whether a lean " +
+      "is $62K or $400M");
+
+    /* ---- A MEASURED ZERO IS NOT AN ABSENCE, AND THERE ARE TWO OF THEM ----
+
+       XLC traded $50M of premium and came out EXACTLY even: the ratio is a
+       measured 0.0% and the net is a measured $0, and both must be visible.
+       XLU traded nothing at all: its net and gross are measured zeros and
+       its ratio is 0/0, which is undefined rather than neutral. The two are
+       different facts and neither is the em dash. */
+    deep(by.XLC.cells.slice(2), ["0.0%", "$0", "$50.0M"],
+      "an exactly-even basket prints an unsigned measured zero on both, never an em dash");
+    ok(by.XLC.bar && by.XLC.width === "0%",
+       `and is still drawn ON the axis, at the rule (${by.XLC.width}) — the stylesheet's ` +
+       "min-width is what keeps a measured zero visible rather than a zero-width nothing");
+
+    eq(by.XLU.read, "quiet", "the basket with both sums at zero is marked quiet on the row");
+    eq(by.XLU.cells[2], "—", "its ratio is the em dash, because 0/0 is undefined and not 0");
+    eq(by.XLU.cells[3], "$0", "but its NET is the measured zero it is, and stays visible");
+    eq(by.XLU.cells[4], "$0", "and so is its gross");
+    ok(by.XLU.flat && !by.XLU.bar,
+       "and it is not placed on the axis at all: a mark at the centre would say " +
+       "\"measured, and neutral\", which is the one thing it is not");
+
+    eq(by.XLRE.read, "unreadable", "the basket that could not be read is marked unreadable");
+    deep(by.XLRE.cells.slice(2), ["—", "—", "—"],
+      "and every one of its numbers is the em dash");
+    ok(by.XLRE.none && !by.XLRE.flat && !by.XLRE.bar,
+       "with the em dash in the lean column too, so it cannot be mistaken for the quiet row");
+
+    /* THE TWO SILENCES ARE DISTINGUISHABLE WITHOUT READING THE PROSE, which
+       is the whole assertion: a reader glancing down the Net column sees $0
+       against XLU and — against XLRE. A renderer that printed usd(null) as
+       "$0" would make one row of these two. */
+    ok(by.XLU.cells[3] !== by.XLRE.cells[3],
+       `a measured zero and an absent reading are not the same glyph ` +
+       `(${by.XLU.cells[3]} vs ${by.XLRE.cells[3]})`);
+
+    /* ---- sign by POSITION, and the axis is fixed ---- */
+    eq(by.XLB.left, "50%", "a bullish lean starts at the centre rule and runs right");
+    eq(by.XLB.width, "31%", "its width is its share of the fixed ±100% axis, not of the day");
+    eq(by.XLE.left, "22.5%", "a bearish lean is drawn LEFT of the rule — position carries it");
+    eq(by.XLE.width, "27.5%", "and the same fixed axis scales it");
+
+    /* ---- the units are in the headers, and none of them is bp ---- */
+    const heads = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccLean thead th"), (th) => th.textContent.trim()));
+    deep(heads, ["Sector", "Lean", "Lean · % of premium", "Net · $", "Gross · $"],
+      "every numeric column carries its unit in its own header: a ratio and a dollar sum " +
+      "never share a name");
+
+    const region = (await page.locator("#ccLean").textContent()).trim();
+    ok(!/\bbp\b/.test(region),
+       "and the word `bp` appears nowhere in this region — that is the OTHER sector panel's " +
+       "unit, and the two quantities must not be confusable");
+
+    /* ---- and it says outright which of the two sector panels it is ---- */
+    const note = (await page.locator("#ccLean .cc-ln-note").textContent()).trim();
+    ok(/sector:trix/.test(note),
+       `the note names the other key by name (${note.slice(0, 90)}…)`);
+    ok(/\/flows\/market\//.test(note),
+       "and the route that draws it, so a reader who has seen the other panel is told which " +
+       "one they are looking at rather than left to infer it");
+    ok(/option/i.test(note) && /premium/i.test(note),
+       "while naming the quantity this one is made of");
+    /* THE DERIVATION IS THE PAYLOAD'S, printed in the open rather than in a
+       column title only a mouse can reach. `lean.relation` is the publisher's
+       exact statement of how the three numbers are made of the two raw sums,
+       so a reader who disagrees with either derivation can redo it — and a
+       hand-written tooltip saying the same thing could drift from it. */
+    ok(/Derived: netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd/.test(note),
+       `the note carries the publisher's own relation between the three numbers ` +
+       `(${note.slice(0, 120)}…)`);
+    ok(/ranks them by sector size/.test(note),
+       `and carries the publisher's own rejected alternative rather than a paraphrase of it ` +
+       `(${note.slice(0, 60)}…)`);
+    ok(/0\/0 is undefined/.test(note),
+       "and states why the quiet basket has no ratio, on the panel rather than only in a title");
+    ok(/POSITION/.test(note),
+       "and that the sign is carried by position, which is what survives greyscale");
+
+    eq((await page.locator("#ccLeanSub").textContent()).trim(), "8 of 11 leaned",
+       "the subtitle counts the baskets that produced a lean against the eleven asked about");
+  }
+
+  /* ---------- the whole key, silent in two different ways ----------
+
+     THE PUBLISHER RETURNS ELEVEN ROWS WHATEVER HAPPENS, so a leg-level
+     failure arrives as eleven rows all reading "unreadable" — and drawing
+     them would present ONE outage as eleven separate sector findings. The
+     status on the envelope is the only thing that can tell those apart, and
+     `quiet` (the vendor answered with nothing) and `unreadable` (rows
+     arrived and none of them shaped) are not the same failure either. */
+  {
+    const blind = SECTORS.map((s) => ({
+      ...s, read: "unreadable", leanRatio: null,
+      netPremiumUsd: null, grossPremiumUsd: null,
+      reason: "no " + s.etf + " row in the sector-etfs response",
+    }));
+
+    await post("sector:premium", sectorLean({
+      status: "quiet", sectors: blind, returned: 0, measured: 0, quiet: 0, unreadable: 11 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccLean .cc-quiet", { timeout: 15000 });
+    const quietLeg = await page.evaluate(() => {
+      const p = document.querySelector("#ccLean .cc-quiet");
+      return { kind: p.dataset.empty, text: p.textContent.trim(),
+               rows: document.querySelectorAll("#ccLean tbody tr").length };
+    });
+    eq(quietLeg.rows, 0,
+       "a leg the vendor answered with nothing draws no rows at all, rather than eleven " +
+       "identical unreadable ones that would read as eleven findings");
+    eq(quietLeg.kind, "empty", "and it is the measured silence: the feed was read");
+    ok(/returned no rows/.test(quietLeg.text),
+       `saying so in its own sentence (${quietLeg.text})`);
+
+    await post("sector:premium", sectorLean({
+      status: "unreadable", sectors: blind, returned: 9, measured: 0, quiet: 0, unreadable: 11 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccLean .cc-quiet", { timeout: 15000 });
+    const badLeg = await page.evaluate(() => {
+      const p = document.querySelector("#ccLean .cc-quiet");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(badLeg.kind, "unreadable", "rows that arrived and did not shape are UNREADABLE");
+    ok(/returned rows/.test(badLeg.text) && /parted company/.test(badLeg.text),
+       `and the sentence says the field names disagree rather than that the market was quiet ` +
+       `(${badLeg.text})`);
+    ok(badLeg.text !== quietLeg.text,
+       "and the two silences do not share a sentence, which is the only way a reader can " +
+       "tell an empty feed from a broken one");
+
+    await post("sector:premium", sectorLean());
+  }
+
+  /* ---------- the headline tape, and its age -----------------------
+
+     A NEWS REGION THAT LOOKS LIVE AND IS SIX HOURS OLD IS WORSE THAN NO
+     NEWS REGION. The pipeline reads this feed once on a weekday-morning
+     cron, so every fixture below is built from an OFFSET against the clock
+     the page will read — a hard-coded ISO stamp would age with the
+     repository and the suite would assert a freshness that drifts. */
+  const H = 3600000, M = 60000;
+  const now = Date.now();
+  const NEWS_ROWS_FIXTURE = [
+    { headline: "Fed holds rates steady as the tape thins into the close",
+      source: "Reuters", createdAt: new Date(now - (6 * H + 30 * M)).toISOString(),
+      createdAtMs: now - (6 * H + 30 * M), major: true, sentiment: "neutral",
+      tickers: ["ORCL", "CAT", "SNAP", "MU", "PFE"], tags: ["federal-reserve"] },
+    /* A HEADLINE IS FREE TEXT FROM AN EXTERNAL SOURCE. This one carries
+       markup because the only way to prove a renderer builds nodes and sets
+       textContent — rather than assembling a string — is to hand it a
+       string that would become elements if it did not. */
+    { headline: "Sirius XM <b>surges</b> on <script>alert(1)</script> upgrade",
+      source: "BusinessWire", createdAt: new Date(now - (2 * H + 15 * M)).toISOString(),
+      createdAtMs: now - (2 * H + 15 * M), major: false, sentiment: "positive",
+      tickers: ["SIRI"], tags: ["upgrade"] },
+    /* THE VENDOR SENT NO FLAG AT ALL, which is not the same sentence as
+       "not flagged major" — so this row gets no mark and is counted in the
+       note instead. */
+    { headline: "Oil steadies after inventory draw", source: "MarketNews",
+      createdAt: new Date(now - (45 * M)).toISOString(), createdAtMs: now - (45 * M),
+      major: null, sentiment: "negative", tickers: ["XOM"], tags: ["energy"] },
+    { headline: "Chip orders slip in the September survey", source: "MarketNews",
+      createdAt: new Date(now - (7 * H)).toISOString(), createdAtMs: now - (7 * H),
+      major: false, sentiment: null, tickers: [], tags: [] },
+    /* UNDATED, AND IT SORTS LAST RATHER THAN BEING DATED TO NOW. */
+    { headline: "An item the vendor sent with no timestamp", source: null,
+      createdAt: null, createdAtMs: null, major: null, sentiment: null,
+      tickers: [], tags: [] },
+  ];
+  /* THREE FILLERS, NOT FOUR, AND THE COUNT IS LOAD-BEARING. The region lists
+     eight, and the undated row sorts LAST by the shaper's own rule — so a
+     ninth row would push the one branch that proves an undated row is not
+     dated to now off the bottom of the list this file can see. */
+  for (let i = 0; i < 3; i += 1) {
+    NEWS_ROWS_FIXTURE.splice(4, 0, {
+      headline: "Filler headline " + (i + 1), source: "Wire",
+      createdAt: new Date(now - (8 * H + i * M)).toISOString(),
+      createdAtMs: now - (8 * H + i * M), major: false, sentiment: "neutral",
+      tickers: [], tags: [],
+    });
+  }
+
+  const newsPayload = (extra = {}) => ({
+    v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+    readAt: new Date(now - (3 * H + 20 * M)).toISOString(), refreshed: "nightly",
+    cadence: "once per weekday morning at 05:15 America/New_York", staleBy: "the close",
+    scope: "market-wide", rows: NEWS_ROWS_FIXTURE,
+    requested: 100, returned: 10, kept: 8, cap: 60, capped: false, shed: 0,
+    atVendorLimit: false, unusable: 2, undatedKept: 1, undatedSeen: 1,
+    newest: new Date(now - (45 * M)).toISOString(),
+    oldest: new Date(now - (9 * H + 20 * M)).toISOString(),
+    ordered: true, orderedBy: "createdAt", orderedDesc: true, reason: null,
+    ...extra,
+  });
+
+  await post("news", newsPayload());
+
+  {
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-nw-row", { timeout: 15000 });
+
+    /* ---- THE AGE IS STATED, AND IT IS STATED FIRST ---- */
+    const seat = await page.evaluate(() => {
+      const body = document.getElementById("ccNews");
+      return {
+        first: body.firstElementChild && body.firstElementChild.className,
+        note: body.querySelector(".cc-nw-note").textContent.trim(),
+        sub: document.getElementById("ccNewsSub").textContent.trim(),
+      };
+    });
+    ok(/cc-nw-note/.test(seat.first),
+       `the age note is the FIRST node in the region (${seat.first}) — under the last ` +
+       "headline it is a footnote, and a reader who reaches a headline without having read " +
+       "the age reads it as news");
+    ok(/^Fetched at \d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
+       `it states when the feed was fetched AND how long ago, on a 24-hour clock that names ` +
+       `its zone (${seat.note.slice(0, 60)}…)`);
+    ok(/once per weekday morning at 05:15 America\/New_York/.test(seat.note),
+       "and the cadence the payload publishes, so the age is not read as bad luck");
+    ok(/stale by the close/.test(seat.note),
+       "and how stale it is allowed to get, stated rather than implied");
+    ok(/never a live tape/.test(seat.note),
+       `so nothing here implies a stream (${seat.note.slice(0, 40)}…)`);
+    ok(/oldest of the 8 stored rows is 9h \d+m old/.test(seat.note),
+       `and bounds the whole stored window rather than only the newest row (${seat.note})`);
+
+    eq(await page.locator("#ccNews .cc-nw-row").count(), 8, "every stored row is listed");
+    ok(/^all 8 · fetched 3h \d+m ago$/.test(seat.sub),
+       `and the heading says how many it holds and how old the read is (${seat.sub})`);
+
+    /* ---- EVERY ROW CARRIES ITS OWN AGE, FROM THE VENDOR'S STAMP ---- */
+    const rows = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccNews .cc-nw-row"), (li) => ({
+        headline: li.querySelector(".cc-nw-h").textContent,
+        html: li.querySelector(".cc-nw-h").innerHTML,
+        age: li.querySelector(".cc-nw-age").textContent.trim(),
+        ageTitle: li.querySelector(".cc-nw-age").title,
+        src: (li.querySelector(".cc-nw-src") || {}).textContent || null,
+        sent: li.querySelector(".cc-nw-sent")
+          ? { text: li.querySelector(".cc-nw-sent").textContent,
+              cls: li.querySelector(".cc-nw-sent").className } : null,
+        major: !!li.querySelector(".cc-nw-major"),
+        opens: Array.from(li.querySelectorAll(".cc-open"), (b) => b.dataset.t),
+        plain: Array.from(li.querySelectorAll(".cc-nw-tk"), (s) => s.textContent),
+        more: (li.querySelector(".cc-nw-more") || {}).textContent || null,
+        tags: Array.from(li.querySelectorAll("script, b, i.injected"), (n) => n.tagName),
+      })));
+
+    ok(/^6h \d+m ago$/.test(rows[0].age),
+       `the newest headline states its own age from the vendor's stamp (${rows[0].age})`);
+    ok(/^2h \d+m ago$/.test(rows[1].age), `and so does the next (${rows[1].age})`);
+    ok(/^\d+ min ago$/.test(rows[2].age),
+       `an item under the hour is stated in minutes rather than "0h" (${rows[2].age})`);
+    ok(/1 stored row carries no timestamp/.test(seat.note),
+       `and the note counts the rows that cannot be aged at all (${seat.note.slice(-140)})`);
+    ok(/The vendor's own stamp, verbatim: /.test(rows[0].ageTitle),
+       `with the vendor's own stamp behind it, carried rather than reformatted ` +
+       `(${rows[0].ageTitle.slice(0, 50)}…)`);
+
+    const undated = rows.find((r) => /no timestamp/.test(r.ageTitle));
+    ok(undated, "the row the vendor sent with no timestamp is on the page");
+    eq(undated.age, "undated",
+       "and it says so rather than being dated to now, which would be the confident zero in " +
+       "the one dimension where it is invisible");
+
+    /* ---- THE HEADLINE IS TEXT, AND IT STAYS TEXT ---- */
+    const marked = rows.find((r) => /Sirius/.test(r.headline));
+    eq(marked.headline, "Sirius XM <b>surges</b> on <script>alert(1)</script> upgrade",
+       "a headline carrying markup is printed as the characters the vendor sent");
+    deep(marked.tags, [],
+       "and none of it became an element: the renderer builds nodes and sets textContent, " +
+       "which is how every vendor string enters a page in this section");
+    ok(!/<b>/.test(marked.html) && /&lt;b&gt;/.test(marked.html),
+       `the angle brackets are escaped in the DOM rather than parsed (${marked.html.slice(0, 40)}…)`);
+
+    /* ---- A TICKER LINKS ONLY WHERE THERE IS SOMETHING BEHIND IT ---- */
+    deep(rows[0].opens, ["ORCL", "MU"],
+      "only the names this session built a detail card for are minted as openers");
+    ok(rows[0].plain.includes("CAT"),
+       `a board name with no card is printed plain (${rows[0].plain.join(" ")}) — the mention ` +
+       "is still the join between a headline and a ranked name, and a dead button is not");
+    ok(rows[0].plain.includes("SNAP"),
+       "and so is a name this session never screened at all");
+    eq(rows[0].more, "+1 more",
+       "and a headline naming more tickers than the row shows says how many, because a list " +
+       "that truncates in silence reads as a population");
+
+    /* ---- THE VENDOR'S LABEL IS CARRIED, NOT SCORED ---- */
+    eq(marked.sent.text, "positive", "the vendor's sentiment word is carried verbatim");
+    ok(!/is-pos|is-neg/.test(marked.sent.cls),
+       `and is NOT tinted with this page's own polarity classes (${marked.sent.cls}) — green ` +
+       "and red here mean the direction of OUR readings, and adding a vendor's label to them " +
+       "would invite a reader to add two different claims together");
+
+    ok(rows[0].major, "a row the vendor flagged major carries the mark");
+    const unflagged = rows.find((r) => /Oil steadies/.test(r.headline));
+    ok(!unflagged.major,
+       "a row the vendor sent no flag on carries none — absence is not `false`");
+    ok(/2 of the stored rows carried no major\/minor flag at all/.test(seat.note),
+       `and their number is stated once in the note instead (${seat.note.slice(-120)})`);
+  }
+
+  /* ---------- two ceilings, two sentences --------------------------
+
+     `atVendorLimit` AND `capped` ARE NOT THE SAME FACT AND MAY NOT SHARE A
+     WORD. The first says the VENDOR'S own ceiling was hit, so the true
+     population is unknown and at least that large. The second says OUR cap
+     dropped rows we did see, so their number is known exactly. A region
+     that said "truncated" for both would leave a reader unable to tell an
+     unknown population from a known one. */
+  {
+    await post("news", newsPayload({
+      kept: 60, capped: true, shed: 38, atVendorLimit: true, returned: 100 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-nw-row", { timeout: 15000 });
+    const both = (await page.locator("#ccNews .cc-nw-note").textContent()).trim();
+    ok(/vendor returned 100 rows against the 100 asked for, which is its documented ceiling/
+      .test(both), `the vendor ceiling is named with the number that was hit (${both})`);
+    ok(/true population is UNKNOWN and at least that large/.test(both),
+       "and says the population is unknown, which is the whole content of that fact");
+    ok(/60-row cap then shed 38 rows/.test(both),
+       `while OUR cap is a separate sentence naming a separate number (${both})`);
+    ok(/these rows arrived and were dropped here, so their number is known/.test(both),
+       "and says the opposite thing about knowing the population, which is why they cannot " +
+       "be one sentence");
+    eq((await page.locator("#ccNewsSub").textContent()).trim().split(" · ")[0], "8 of 60",
+       "and the subtitle counts against the payload's own kept, not the rows in hand");
+
+    /* OUR CAP WITHOUT THE VENDOR'S. The two travel together on a full
+       vendor page and separately on a short one, so a renderer that printed
+       the vendor sentence whenever it printed the cap sentence would pass a
+       fixture where both are true and lie on every other session. */
+    await post("news", newsPayload({
+      kept: 60, capped: true, shed: 12, atVendorLimit: false, returned: 72 }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-nw-row", { timeout: 15000 });
+    const ours = (await page.locator("#ccNews .cc-nw-note").textContent()).trim();
+    ok(/60-row cap then shed 12 rows/.test(ours),
+       `our cap is still stated (${ours.slice(0, 120)}…)`);
+    ok(!/documented ceiling/.test(ours) && !/UNKNOWN/.test(ours),
+       "and the vendor-ceiling claim is absent, because it was not true this run");
+
+    await post("news", newsPayload());
+  }
+
+  /* ---------- the news key, silent in three ways -------------------- */
+  {
+    await post("news", newsPayload({ status: "quiet", rows: [], kept: 0, returned: 0,
+      reason: "the headlines feed was read and returned no rows" }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-quiet", { timeout: 15000 });
+    const empty = await page.evaluate(() => {
+      const p = document.querySelector("#ccNews .cc-quiet");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(empty.kind, "empty", "a feed that was read and had nothing in it is the MEASURED silence");
+    ok(/the tape was checked and was empty/.test(empty.text),
+       `and says which of the three it is (${empty.text})`);
+
+    await post("news", newsPayload({ status: "unreadable", rows: [], kept: 0, returned: 40,
+      reason: "the headlines feed returned 40 row(s) and none carried a headline" }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-quiet", { timeout: 15000 });
+    const broke = await page.evaluate(() => {
+      const p = document.querySelector("#ccNews .cc-quiet");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(broke.kind, "unreadable", "rows that arrived and carried no headline are UNREADABLE");
+    ok(/not a quiet news day/.test(broke.text),
+       `and the sentence refuses the reading the other silence would have given (${broke.text})`);
+    ok(broke.text !== empty.text, "the three silences are three sentences, still");
+
+    /* AND THE ONE BRANCH THAT MUST NOT GUESS: no read stamp at all. */
+    const undatedRead = newsPayload();
+    delete undatedRead.readAt;
+    await post("news", undatedRead);
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccNews .cc-nw-row", { timeout: 15000 });
+    const noStamp = await page.evaluate(() => ({
+      note: document.querySelector("#ccNews .cc-nw-note").textContent.trim(),
+      sub: document.getElementById("ccNewsSub").textContent.trim(),
+    }));
+    ok(/states no read time/.test(noStamp.note),
+       `a payload with no readAt says so rather than implying freshness (${noStamp.note})`);
+    ok(/unknown age rather than as something that just happened/.test(noStamp.note),
+       "and tells the reader what to do with rows it cannot date");
+    ok(!/fetched /.test(noStamp.sub),
+       `and the subtitle claims no age either (${noStamp.sub})`);
+
+    await post("news", newsPayload());
+  }
+
+  /* ---------- every class these two regions emit has a rule ---------
+
+     A CLASS WITH NO RULE IS NOT NEUTRAL, IT IS INVISIBLE — and on these two
+     regions the risk is specific rather than theoretical: `.cc-ln-fill`
+     carries the bar's entire visible body, and `.cc-nw-note` is the
+     freshness warning that the whole news region exists to make
+     unmissable. Either one silently unstyled leaves a page that renders,
+     throws nothing and says less than it claims to.
+
+     THE CLASS LIST IS READ OFF THE BUILT DOM, never typed here, for the
+     reason tests/flows-ticker-contract.mjs gives at the same assertion: a
+     typed list goes stale the moment a cell is added, and it goes stale
+     silently. Scoped to the two new regions because the rest of this page
+     predates the sweep and carries classes of its own. */
+  {
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccLean tbody tr", { timeout: 15000 });
+    const classes = await page.evaluate(() => {
+      const set = new Set();
+      for (const root of [document.querySelector(".cc-lean"),
+                          document.querySelector(".cc-news")]) {
+        if (!root) continue;
+        for (const n of [root, ...root.querySelectorAll("*")]) {
+          for (const c of n.classList) set.add(c);
+        }
+      }
+      return [...set].sort();
+    });
+
+    /* Comments stripped first, for the same reason flows-sign.mjs strips
+       them: a file DESCRIBING a class must not be mistaken for a file
+       styling it, and both of these regions are documented in prose that
+       names their own selectors. */
+    const CSS_TEXT = readFileSync(new URL("../assets/css/flows.css", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    ok(classes.length >= 14,
+       `the two regions emit ${classes.length} classes to check, read off the built DOM so a ` +
+       "cell added tomorrow is checked tomorrow");
+    for (const c of classes) {
+      const rule = new RegExp("\\." + c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\w-])");
+      ok(rule.test(CSS_TEXT),
+         `.${c} resolves to a rule in assets/css/flows.css — an unstyled class here is not a ` +
+         "neutral one, it is an invisible one");
+    }
+
+    /* AND THE PAGE STILL DOES NOT WIDEN. Two regions were added to a
+       twelve-column grid; the one thing that can go wrong at 320px is the
+       document itself scrolling sideways, which no overflow container
+       catches. */
+    for (const width of [320, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const over = await page.evaluate(() =>
+        document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      ok(over <= 1, `no horizontal overflow at ${width}px with both new regions (${over}px)`);
+    }
+    await page.setViewportSize({ width: 1280, height: 1000 });
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
   console.log(`✓ flows-overview: ${checks} assertions — a page that leads on CHANGE: ` +
@@ -2130,7 +2761,16 @@ try {
     `fourth rail badge filled from the calendar's own population rather than the rows this ` +
     `page drew from it, so /flows/ and /flows/events/ badge one quantity and not two — and the ` +
     `two board badges filled from the side's whole pool for the same reason, read back off ` +
-    `/flows/long/ so the two routes cannot drift apart under one label`);
+    `/flows/long/ so the two routes cannot drift apart under one label. Plus the two keys ` +
+    `that were published, served and drawn nowhere: eleven sector baskets ranked on the ratio ` +
+    `the publisher ranks on rather than on the dollars that would rank them by basket size, ` +
+    `with a measured zero lean drawn ON the axis, a quiet basket printing the $0 it measured ` +
+    `and left OFF the axis because 0/0 is undefined, and an unreadable one printing the em ` +
+    `dash on all three — three states no reader can confuse; and a headline tape that states ` +
+    `the age of the fetch above the first headline and the age of every row beside it, keeps ` +
+    `the vendor's ceiling and our own cap in two sentences that say opposite things about ` +
+    `knowing the population, sets every vendor string with textContent so markup stays ` +
+    `characters, and mints an opener only for a name this session actually built a card for`);
 } finally {
   await browser.close();
   await server.stop();

@@ -5035,6 +5035,13 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-alerts { grid-column: span 5; }
 .cc-ev     { grid-column: span 4; }
 .cc-watch  { grid-column: span 3; }
+/* THE TWO TOP-DOWN REGIONS SHARE THE ROW UNDER THE THREE INDEXES. The sector
+   lean is a six-column table with a drawing in one of them and takes the
+   larger half; the headline tape is a list of sentences and reads better
+   narrow than wide — a headline set across seven columns of a 132rem canvas
+   is one line of forty words, which is the shape nobody reads. */
+.cc-lean   { grid-column: span 7; }
+.cc-news   { grid-column: span 5; }
 .cc-spine  { grid-column: 1 / -1; }
 .cc-spine > .spine { padding: 0.6rem 0.85rem; margin: 0.4rem 0 0; }
 
@@ -5060,8 +5067,12 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .cc-alerts { grid-column: span 7; }
   .cc-ev { grid-column: span 5; }
   .cc-watch { grid-column: span 12; }
+  /* Both go full width here rather than 7/5 of a pinned main: at this tier the
+     lean table's six columns and the tape's meta line each need the whole
+     width more than they need to sit side by side. */
+  .cc-lean, .cc-news { grid-column: span 12; }
 }
-/* One column. A phone gets the same seven regions in the same order, not a
+/* One column. A phone gets the same nine regions in the same order, not a
    shrunken twelve-column desk.
 
    59.99rem AND NOT 60rem, which is what it said. base.css states the rule — a
@@ -5195,6 +5206,151 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-dot.is-pos { fill: var(--flow-up); }
 .cc-dot.is-neg { fill: var(--flow-down); }
 .cc-wash { fill: color-mix(in srgb, var(--ink-faint) 7%, transparent); }
+
+/* ---------- the sector premium lean ----------
+   A DIFFERENT DRAWING FROM .mk-sector ON PURPOSE. That list is TRIX momentum
+   in basis points; this is option premium as a share of itself, and the two
+   are told apart by the heading, the units in every column header and the
+   shape of the row — a table with the dollars beside the bar, rather than a
+   bare bar-and-value list. A reader who has seen one must not mistake it for
+   the other, and matching the styling would have been the surest way to make
+   them do so. */
+.cc-ln-c { width: 128px; }
+.cc-ln-bar {
+  position: relative;
+  display: block;
+  width: 112px;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ink-faint) 9%, transparent);
+}
+/* THE ZERO RULE, DRAWN ALWAYS. Position is what carries the sign here, and a
+   position means nothing without the mark it is left or right OF. */
+.cc-ln-mid {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--panel-border);
+}
+/* MIN-WIDTH IS LOAD-BEARING, NOT COSMETIC. A basket whose two premium sums
+   are equal has a MEASURED lean of exactly zero, and a zero-width fill draws
+   nothing — so the one row on the panel that says "this was measured and it
+   landed on the rule" would have been the row with nothing on it. Two pixels
+   on the rule is that measurement, visible. */
+.cc-ln-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  min-width: 2px;
+  border-radius: 1px;
+  background: var(--flow-mag);
+}
+.cc-ln-fill.is-pos { background: var(--flow-up); }
+.cc-ln-fill.is-neg { background: var(--flow-down); }
+/* THE TWO NON-DRAWINGS, AND THEY MAY NOT LOOK ALIKE. A basket read with both
+   premium sums at zero has no two-sided premium for a lean to be a share of,
+   which is a finding and gets a word; a basket that could not be read gets the
+   em dash every absent reading on this page gets. Neither is a bar, and
+   neither is the other. */
+.cc-ln-flat {
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  font-style: italic;
+  cursor: help;
+}
+.cc-ln-none { color: var(--ink-faint); cursor: help; }
+/* The read state, beside the name it is about. Uppercase and letterspaced so
+   it reads as chrome rather than as part of the sector's label. */
+.cc-ln-tag {
+  margin-left: 0.45rem;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: help;
+}
+.cc-etf {
+  display: inline-block;
+  min-width: 3.2rem;
+  letter-spacing: 0.04em;
+}
+/* ONE LINE PER BASKET. "Consumer Discretionary" wrapping turns an eleven-row
+   panel into a seventeen-line one and pushes the three numeric columns further
+   out of a phone's first screenful; the row scrolls inside .cc-wrap either way,
+   and a predictable row height is what makes the bars comparable down the
+   column, which is the whole reason they are on one axis. */
+.cc-ln-name { white-space: nowrap; }
+.cc-ln-note { border-bottom: 1px solid var(--panel-border); }
+
+/* ---------- the headline tape ----------
+   THE AGE IS THE FIRST THING IN THE REGION AND IT IS STYLED AS A WARNING
+   RATHER THAN AS A CAPTION. These rows are read once on a morning cron, so by
+   the close they are hours old; a note set in the same faint grey as every
+   other caption gets skimmed, and a skimmed freshness note is the same as no
+   freshness note. */
+.cc-nw-note {
+  border-left: 3px solid var(--gold-mystic);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head);
+}
+.cc-nw { list-style: none; margin: 0; padding: 0.2rem 0.85rem 0; }
+.cc-nw-row {
+  padding: 0.42rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+}
+.cc-nw-row:last-child { border-bottom: 0; }
+/* THE HEADLINE IS PROSE AND IS SET AS PROSE. Everything else in this region is
+   mono chrome; the vendor's sentence is the one thing on the row a reader
+   actually reads, and a headline in a tabular face reads as a data cell. */
+.cc-nw-h {
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-data);
+  line-height: 1.35;
+  color: var(--ink);
+}
+.cc-nw-m {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.55rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+}
+/* THE AGE LEADS THE META LINE AND IS THE ONE TOKEN ON IT WITH THE BODY INK.
+   It is the fact the region exists to state; the source and the vendor's
+   labels are context around it. */
+.cc-nw-age { color: var(--ink-dim); cursor: help; }
+.cc-nw-src { color: var(--ink-faint); }
+/* CARRIED, NOT SCORED — AND SO NOT TINTED. This page spends green and red on
+   the direction of its OWN readings; a vendor's sentiment label is a different
+   claim by a different party, and giving it the same two colours would invite
+   a reader to add the two together. */
+.cc-nw-sent { color: var(--ink-faint); font-style: italic; cursor: help; }
+.cc-nw-major {
+  padding: 0 0.3rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 2px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+  cursor: help;
+}
+.cc-nw-tks { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; }
+/* A NAME THIS SESSION BUILT NO CARD FOR. Not a button — the dialog would open
+   and apologise — but the mention is still the join between a headline and a
+   name this product ranks, so it is printed rather than dropped.
+
+   AND IT IS THE FAINTER OF THE TWO, which it was not: .cc-open inherits the
+   meta line's --ink-faint while this carried --ink-dim, so on the first render
+   of this region the tickers a reader COULD open were dimmer than the ones they
+   could not. Affordance has to run the same direction as the ink. */
+.cc-nw-tk { color: var(--ink-faint); letter-spacing: 0.04em; cursor: help; }
+.cc-nw-tks .cc-open { color: var(--ink); }
+.cc-nw-more { color: var(--ink-faint); }
 
 /* ---------- political disclosures -------------------------------- */
 

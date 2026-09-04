@@ -13,6 +13,13 @@
    Nothing new is fetched to do that — every region is drawn from an endpoint
    that already existed.
 
+   AND TWO TOP-DOWN REGIONS NOW SIT UNDER THE BOTTOM-UP ONES. Everything
+   above them is a residual WITHIN the day's cross-section, with sector
+   neutralised out of it; `sector:premium` says which of the eleven baskets
+   the option premium leaned into, and `news` says what was on the tape while
+   it did. Both keys were published and served and drawn nowhere until this
+   page asked for them.
+
    AND THE CHANGE ARITHMETIC IS NO LONGER THIS FILE'S. The version this
    replaces did, in the browser:
 
@@ -29,7 +36,7 @@
    denominator: d1.v, d1.gap, d1.cross, lastAt, run. This file reads those
    and does no delta arithmetic of its own.
 
-   SEVEN REGIONS, AND EACH ONE IS ALLOWED TO SAY NOTHING. A region with an
+   NINE REGIONS, AND EACH ONE IS ALLOWED TO SAY NOTHING. A region with an
    unpublished key, a region whose request never came back, a region whose
    payload predates the field it needs, and a region the pipeline measured
    and found empty are FOUR DIFFERENT FACTS, and this file words them as
@@ -1054,6 +1061,512 @@
     into.append(list);
   }
 
+  /* ---------- the eleven sectors, by OPTION PREMIUM -----------------
+
+     NOT THE SECTOR PANEL ON /flows/market/. That one is `sector:trix` — TRIX on
+     daily log closes, in basis points, with not one option in it; this is
+     `sector:premium`, today's bullish minus bearish OPTION premium over the
+     same eleven SPDR baskets. worker.js:2721 split the routes for that reason.
+     The four ways a reader is kept from confusing the two are argued over the
+     region shell in shared/flows-pages.js, which is Worker-side and therefore
+     free of this route's JavaScript budget.
+
+     NOTHING IS LIFTED FROM flows-market.js: its numeric helpers live in a file
+     this change does not own, and a lift-and-adapt would put a second copy of
+     four of them in a second file — which is how this repo came to hold six
+     copies of isNum. `pct`, `usd` and `tone` above are what this panel needs. */
+
+  /* THE ORDER IS THE PUBLISHER'S CHOICE, RESTATED RATHER THAN INVENTED.
+     `lean.rank` says "leanRatio" and flows-pipeline.mjs:3722 argues why: XLK
+     clears hundreds of millions of premium on an ordinary day and XLB tens of
+     thousands, so ranking the eleven by DOLLAR difference ranks them by BASKET
+     SIZE with a faint conviction signal on top. The ratio is the share of each
+     basket's OWN two-sided premium that leaned one way, comparable across
+     baskets three orders of magnitude apart.
+
+     A BASKET WITH NO RATIO CANNOT BE PLACED ON THAT ORDERING AT ALL, and that
+     is the quiet case entire: gross is a measured 0, so the ratio is 0/0 —
+     undefined, not neutral — and sorting it as 0.0 would seat a basket where
+     nothing traded among ten where something did. That is the confident zero
+     this file refuses everywhere else, wearing a comparator. Such a basket goes
+     to the tail with its measured zeros still printed, AHEAD of the ones that
+     could not be read at all: "measured and empty" is a reading, "unreadable"
+     is not. */
+  const LEAN_TAIL = { quiet: 1, unreadable: 2 };
+  function leanOrder(rows) {
+    return rows.slice().sort((a, b) => {
+      const av = isNum(a && a.leanRatio), bv = isNum(b && b.leanRatio);
+      if (av !== null && bv !== null) return bv - av;
+      if (av !== null) return -1;
+      if (bv !== null) return 1;
+      return (LEAN_TAIL[a && a.read] || 3) - (LEAN_TAIL[b && b.read] || 3);
+    });
+  }
+
+  /**
+   * The lean cell: a fixed ±100% axis, sign carried by POSITION.
+   *
+   * TWO ABSENCES, TWO MARKS, AND THEY MAY NOT LOOK ALIKE. A quiet basket was
+   * READ and both premium sums came back zero, so there is no two-sided premium
+   * for a lean to be a share of — a finding, not a gap — and it gets a word
+   * while the dollar columns print its measured $0. An unreadable basket gets
+   * the em dash this page gives every absent reading. A mark at the CENTRE
+   * would be wrong for both: it says "measured, and neutral", the one thing
+   * neither of them is.
+   */
+  function leanCell(row, read) {
+    const td = el("td", "cc-ln-c");
+    const r = isNum(row && row.leanRatio);
+    if (r === null) {
+      if (read === "quiet") {
+        const flat = el("span", "cc-ln-flat", "no premium");
+        flat.title = "Both premium sums were measured at zero: 0/0 is undefined, not " +
+          "neutral, so this basket is not placed on the axis. Its measured $0 is beside it.";
+        td.append(flat);
+        return td;
+      }
+      const none = el("span", "cc-ln-none", DASH);
+      none.title = typeof row.reason === "string" && row.reason ? row.reason
+        : "This basket's lean could not be read, so nothing is drawn for it.";
+      td.append(none);
+      return td;
+    }
+
+    const bar = el("span", "cc-ln-bar");
+    bar.setAttribute("role", "img");
+    bar.setAttribute("aria-label",
+      (row.sector || row.etf || "This basket") + " leaned " + pct(r, 1) +
+      " of its two-sided option premium, " +
+      (r < 0 ? "left of" : r > 0 ? "right of" : "exactly on") + " the zero rule.");
+    bar.append(el("i", "cc-ln-mid"));
+    /* THE CLAMP CANNOT BIND: leanRatio is bounded to [−1, +1] by construction,
+       so it guards a malformed payload rather than making a scaling choice. */
+    const frac = Math.min(Math.abs(r), 1);
+    const fill = el("i", "cc-ln-fill" + tone(r));
+    fill.style.width = (frac * 50) + "%";
+    fill.style.left = r < 0 ? (50 - frac * 50) + "%" : "50%";
+    bar.append(fill);
+    td.append(bar);
+    return td;
+  }
+
+  /**
+   * Eleven sectors on one axis: where the option premium leaned today.
+   */
+  function paintLean(into, payload) {
+    const sub = host("ccLeanSub");
+    const saySub = (said) => { if (sub) sub.textContent = said; };
+    saySub("options premium, not price momentum");
+    if (silent(into, payload, "sector premium lean")) return;
+
+    /* THE LEG'S OWN SILENCES, BEFORE ANY ROW IS DRAWN. The publisher returns
+       all eleven baskets whatever happens — a panel that quietly shrinks from
+       eleven bars to nine is how a vendor outage goes unnoticed for a week —
+       so on a leg-level failure the array is ELEVEN rows all reading
+       "unreadable", and drawing them would present one outage as eleven
+       separate sector findings. */
+    if (payload.status === "quiet") {
+      quiet(into, "empty",
+        "The sector feed was read and the vendor returned no rows at all, so not one of the " +
+        "eleven baskets could be placed. That is a measurement of the feed, not of the market.");
+      return;
+    }
+    if (payload.status === "unreadable") {
+      quiet(into, "unreadable",
+        "The sector feed returned rows and not one of the eleven baskets carried a readable " +
+        "pair of premium sums. Nothing here is a reading about the session: the field names " +
+        "on the wire and the ones this pipeline expects have parted company.");
+      return;
+    }
+
+    const sectors = Array.isArray(payload.sectors) ? payload.sectors : [];
+    if (!sectors.length) {
+      quiet(into, "unavailable",
+        "This payload carried no sector rows, so the page cannot say where any basket " +
+        "leaned. A gap in the payload rather than a fact about the market.");
+      return;
+    }
+
+    /* COUNTED FROM THE ROWS, AND THIS IS THE ONE LIST ON THIS PAGE WHERE THAT
+       IS THE POPULATION RATHER THAN A CEILING. Every other region states a
+       published denominator because its rows were capped on the wire; this
+       payload publishes every basket every run and this panel draws all of
+       them, so the rows in hand ARE the eleven. */
+    const ordered = leanOrder(sectors);
+    const leaned = ordered.filter((s) => isNum(s && s.leanRatio) !== null).length;
+    const quietN = ordered.filter((s) => s && s.read === "quiet").length;
+    const badN = ordered.length - leaned - quietN;
+    saySub(leaned + " of " + ordered.length + " leaned");
+
+    const lean = payload.lean && typeof payload.lean === "object" ? payload.lean : null;
+    const said = [];
+    said.push("Bullish minus bearish OPTION premium on the eleven SPDR sector baskets, " +
+      "today only.");
+    /* THE PUBLISHER'S OWN ARGUMENT FOR THE RANKING, CARRIED RATHER THAN
+       PARAPHRASED: a paraphrase is a second copy of a claim that lives on the
+       payload, and the two drift the first time the publisher revises it. */
+    if (lean && typeof lean.relation === "string" && lean.relation) {
+      said.push("Derived: " + lean.relation + ".");
+    }
+    said.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
+      "that leaned one way — because that is what the publisher ranks on" +
+      (lean && typeof lean.rejected === "string" && lean.rejected
+        ? ", having rejected " + lean.rejected : "") + ".");
+    said.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
+      "premium and +90% on $300M are not the same fact.");
+    said.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
+      "and by the glyph on every number, so the panel survives greyscale.");
+    if (quietN) {
+      said.push(quietN + (quietN === 1 ? " basket was" : " baskets were") +
+        " read with both premium sums at zero: measured and empty, printed as the $0 they " +
+        "are rather than dropped, and left off the axis because 0/0 is undefined and not a " +
+        "neutral lean.");
+    }
+    if (badN) {
+      said.push(badN + (badN === 1 ? " basket" : " baskets") + " could not be read at all " +
+        "and print the em dash instead; the publisher's reason is on the row.");
+    }
+    if (typeof payload.basis === "string" && payload.basis) said.push("Basis: " + payload.basis + ".");
+    if (typeof payload.notSameAs === "string" && payload.notSameAs) {
+      said.push("This is not " + payload.notSameAs + " — that is the key the sector panel " +
+        "on /flows/market/ draws, in basis points per session.");
+    }
+
+    /* THE READING LEADS, THE DERIVATION FOLLOWS. The first draft put ~1,100
+       characters of method above the table — the shape this product's own
+       prose audit named (the method paragraph 87 times, the finding four),
+       reproduced in a new region on the day it was diagnosed.
+
+       Built from the rows the table draws, through the same pct() the cells
+       use, so lead and column cannot disagree. And only when something
+       leaned: `ordered` keeps the quiet and unreadable baskets at its tail,
+       so the ends of the array are not the ends of the readings. */
+    const leaners = ordered.filter((r) => isNum(r && r.leanRatio) !== null);
+    if (leaners.length) {
+      const hi = leaners[0], lo = leaners[leaners.length - 1];
+      const finding = leaners.length === 1
+        ? hi.t + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
+          " of its own premium."
+        : hi.t + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
+          lo.t + " most bearish at " + pct(lo.leanRatio, 1) + ".";
+      into.append(el("p", "fc-reading", finding));
+    } else {
+      into.append(el("p", "cc-quiet",
+        "No basket carried a readable lean this session, so none is named."));
+    }
+
+    const wrap = tableWrap("Sector option-premium lean, most bullish first");
+    const table = el("table", "cc-tbl");
+    /* UNITS TRAVEL WITH NUMBERS, AND A RATIO AND A DOLLAR SUM NEVER SHARE A
+       NAME — so the unit is in the header rather than in a title only a mouse
+       can reach. The three quantities' exact derivation rides in the note
+       above, out of the payload's own `lean.relation`, which is a more precise
+       statement than a hand-written tooltip and cannot drift from it. */
+    table.append(headRow([
+      ["Sector", null], ["Lean", "cc-ln-c"], ["Lean · % of premium", "c-num"],
+      ["Net · $", "c-num"], ["Gross · $", "c-num"],
+    ]));
+
+    const body = el("tbody");
+    for (const row of ordered) {
+      const tr = el("tr");
+      /* THE READ STATE ON THE ROW, so the three cases are told apart without
+         parsing prose — the same reason `kind` lands on data-empty above. */
+      const read = typeof row.read === "string" ? row.read : "unreadable";
+      tr.dataset.read = read;
+
+      /* THE FUND AND THE LABEL IN ONE CELL. The vendor names XLC
+         "Communication Services" and SECTOR_ETFS does too, but the two are our
+         label beside theirs and the publisher carries both; the TICKER is the
+         thing a reader can look up, so it leads. */
+      const name = el("td", "cc-ln-name");
+      name.append(el("span", "cc-t cc-etf", row.etf || DASH));
+      name.append(document.createTextNode(row.sector || row.fullName || DASH));
+      if (read !== "ok") {
+        const tag = el("span", "cc-dim cc-ln-tag", read);
+        tag.title = typeof row.reason === "string" && row.reason ? row.reason
+          : (read === "quiet"
+            ? "Read, and both premium sums were zero: measured and empty."
+            : "This basket's premium could not be read from the response.");
+        name.append(tag);
+      }
+      tr.append(name);
+
+      tr.append(leanCell(row, read));
+
+      /* EVERY CELL FORMATS THE VALUE THE READER HANDED BACK, never the raw
+         field: pct() and usd() ask isNum first and print the em dash for null,
+         so a quiet basket's measured 0 prints "$0" — visible, because it was
+         measured — while an unreadable one prints the dash. */
+      tr.append(el("td", "c-num" + tone(row.leanRatio), pct(row.leanRatio, 1)));
+      tr.append(el("td", "c-num" + tone(row.netPremiumUsd), usd(row.netPremiumUsd)));
+      tr.append(el("td", "c-num", usd(row.grossPremiumUsd)));
+      body.append(tr);
+    }
+    table.append(body);
+    wrap.append(table);
+    into.append(wrap);
+
+    /* THE DERIVATION KEEPS EVERY WORD, below the numbers it explains: moved,
+       not trimmed. `.ft-how` and `.ft-how-s` are already in flows.css and not
+       route-scoped (:3434-3442, :3763), so this reuses the disclosure
+       vocabulary rather than inventing one, and adds no CSS — which matters
+       on a route this close to its ceiling. <summary> is natively focusable,
+       so the method is reachable by keyboard and touch. */
+    const how = el("details", "ft-how");
+    how.append(el("summary", "ft-how-s", "How this lean was derived"));
+    how.append(el("p", "cc-quiet cc-ln-note", said.join(" ")));
+    into.append(how);
+  }
+
+  /* ---------- the headline tape, with its age on it -----------------
+
+     FRESHNESS IS THE HONEST PROBLEM AND THIS REGION CANNOT FIX IT, SO IT STATES
+     IT — argued in full over the region shell in shared/flows-pages.js, which is
+     Worker-side and costs this route no bytes. What matters while editing the
+     code below:
+
+       - THE AGE LEADS. The note is appended BEFORE the list, because a reader
+         who reaches a headline without having read the age reads it as news.
+       - TWO POPULATION FACTS, TWO SENTENCES. `atVendorLimit` means the VENDOR'S
+         ceiling was hit and the true population is unknown and at least that
+         large; `capped`/`shed` means OUR cap dropped rows we did see and their
+         number is known exactly. One word for both destroys that difference.
+       - flows-pipeline.mjs:3878 publishes the two stamps this needs: the
+         vendor's `created_at` per row, and `readAt` for when WE looked. */
+
+  /* AN AGE, NOT A TIMESTAMP — and the clock beside it, because they answer
+     two questions. The clock says WHEN, the age says HOW LONG AGO, and only
+     the second is a number a reader can act on without doing zone arithmetic. */
+  function agoSaid(fromMs, now) {
+    const d = now - fromMs;
+    /* A STAMP AHEAD OF THIS CLOCK IS NOT AN AGE. The vendor's stamp and the
+       reader's clock are set by different parties, so this is reachable
+       without anything being wrong — and "−3 min ago" is not a sentence.
+       Null, and the caller words it. */
+    if (d < 0) return null;
+    const mins = Math.floor(d / 60000);
+    if (mins < 1) return "under a minute ago";
+    if (mins < 60) return mins + " min ago";
+    const hours = Math.floor(mins / 60);
+    /* "7h 0m ago" is arithmetic showing through. A whole hour is a whole
+       hour, and the minutes appear only when there are some. */
+    if (hours < 24) return hours + "h" + (mins % 60 ? " " + (mins % 60) + "m" : "") + " ago";
+    const days = Math.floor(hours / 24);
+    return days + (days === 1 ? " day ago" : " days ago");
+  }
+
+  /* THE INSTANT, WITH A ZONE ON IT AND NO SECONDS, in one place. A bare
+     toLocaleTimeString follows the viewer's 12/24-hour locale, prints a seconds
+     field neither feed can support, and names no zone. The flagged-windows
+     subtitle had exactly this inline; a second copy for the headline tape is
+     how two lines about two read times start disagreeing about the form. */
+  const clockSaid = (ms) => new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
+  });
+
+  const NEWS_TICKERS = 4;   // tickers listed per headline before the row says how many more
+
+  function paintNews(into, payload, cards, now) {
+    const sub = host("ccNewsSub");
+    if (sub) sub.textContent = "";
+    if (silent(into, payload, "headlines feed")) return;
+
+    if (payload.status === "quiet") {
+      quiet(into, "empty",
+        "The headlines feed was read and the vendor returned no rows: a measurement — the " +
+        "tape was checked and was empty — and not a request that failed.");
+      return;
+    }
+    if (payload.status === "unreadable") {
+      quiet(into, "unreadable",
+        "The headlines feed returned rows and not one carried a headline, so nothing here " +
+        "is publishable. A fault on the wire between the vendor and this pipeline, not a " +
+        "quiet news day.");
+      return;
+    }
+
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!rows.length) {
+      quiet(into, "unavailable",
+        "This payload carried no headline rows: the key published, and the list this region " +
+        "is made of is not on it.");
+      return;
+    }
+
+    const stamp = typeof payload.readAt === "string" ? Date.parse(payload.readAt) : NaN;
+    const readMs = Number.isFinite(stamp) ? stamp : null;
+    const readAge = readMs === null ? null : agoSaid(readMs, now);
+
+    const said = [];
+    if (readMs === null) {
+      /* THE ONE BRANCH THAT MUST NOT GUESS: with no read stamp the age of every
+         row below is unknown, and rows printed under nothing read as news. */
+      said.push("This payload states no read time, so how long ago these headlines were " +
+        "fetched cannot be said. Treat every row below as being of unknown age rather " +
+        "than as something that just happened.");
+    } else {
+      said.push("Fetched at " + clockSaid(readMs) +
+        (readAge === null
+          ? ", which is ahead of this browser's clock, so no age can be stated"
+          : ", " + readAge) + ".");
+    }
+    if (typeof payload.cadence === "string" && payload.cadence) {
+      said.push("This feed is fetched " + payload.cadence +
+        (typeof payload.staleBy === "string" && payload.staleBy
+          ? " and is stale by " + payload.staleBy : "") +
+        ", so it is a morning read and never a live tape.");
+    }
+
+    const kept = isNum(payload.kept);
+    const oldestAt = typeof payload.oldest === "string" ? Date.parse(payload.oldest) : NaN;
+    if (Number.isFinite(oldestAt)) {
+      const oldAge = agoSaid(oldestAt, now);
+      /* THE BOUND ON THE ROWS THE READER CANNOT SEE: eight of sixty are drawn
+         and the publisher's window is the only way to say how old the rest are. */
+      if (oldAge) {
+        said.push("The oldest of the " + (kept === null ? "stored" : kept + " stored") +
+          " rows is " + oldAge.replace(/ ago$/, " old") + ".");
+      }
+    }
+
+    const requested = isNum(payload.requested), returned = isNum(payload.returned);
+    const cap = isNum(payload.cap), shed = isNum(payload.shed);
+    if (payload.atVendorLimit === true) {
+      said.push("The vendor returned " +
+        (returned === null ? "its own maximum number of rows" : returned + " rows") +
+        (requested === null ? "" : " against the " + requested + " asked for") +
+        ", which is its documented ceiling — so the true population is UNKNOWN and at " +
+        "least that large.");
+    }
+    if (payload.capped === true && shed !== null && shed > 0) {
+      said.push("Our own " + (cap === null ? "row cap" : cap + "-row cap") + " then shed " +
+        shed + " row" + (shed === 1 ? "" : "s") + ", newest kept. That is a different fact " +
+        "from the ceiling: these rows arrived and were dropped here, so their number is known.");
+    }
+    const unusable = isNum(payload.unusable);
+    if (unusable !== null && unusable > 0) {
+      said.push(unusable + (unusable === 1 ? " row" : " rows") +
+        " arrived with no headline at all and went unpublished: counted, not rendered blank.");
+    }
+    const undatedKept = isNum(payload.undatedKept);
+    const undatedSeen = isNum(payload.undatedSeen);
+    if (undatedKept !== null && undatedKept > 0) {
+      said.push(undatedKept +
+        (undatedKept === 1 ? " stored row carries" : " of the stored rows carry") +
+        " no timestamp and cannot be aged; " +
+        (undatedKept === 1 ? "it sorts" : "they sort") + " last rather than being dated to now.");
+    } else if (undatedSeen !== null && undatedSeen > 0) {
+      said.push(undatedSeen + " undated " + (undatedSeen === 1 ? "row" : "rows") +
+        " arrived on the wire and the cap shed " + (undatedSeen === 1 ? "it" : "them") +
+        " before this list, so every row below can be aged.");
+    }
+    /* A FLAG THE VENDOR DID NOT SEND IS NOT FALSE, so a row carrying no
+       `is_major` gets no mark — and their count is stated here rather than
+       drawn as an absence on each row, which would read as "not major". */
+    const unflagged = rows.filter((r) => r && (r.major === null || r.major === undefined)).length;
+    if (unflagged) {
+      said.push(unflagged +
+        (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
+        " no major/minor flag at all, which is not the same as having been flagged not-major.");
+    }
+    into.append(el("p", "cc-quiet cc-nw-note", said.join(" ")));
+
+    const list = el("ul", "cc-nw");
+    for (const row of rows.slice(0, LIST_MAX)) {
+      const li = el("li", "cc-nw-row");
+
+      /* A HEADLINE IS FREE TEXT FROM AN EXTERNAL SOURCE AND IT REACHES THIS
+         DOM AS TEXT. el() sets textContent (flows-ui.js:73-79), which is how
+         everything vendor-authored enters a page here: there is no innerHTML on
+         vendor data anywhere in Flows, and a headline is not going to be the
+         string that introduces it. */
+      li.append(el("p", "cc-nw-h",
+        typeof row.headline === "string" && row.headline ? row.headline : DASH));
+
+      const meta = el("p", "cc-nw-m");
+
+      /* THE AGE, PER ROW, FROM THE VENDOR'S OWN STAMP. An undated row says so
+         and is not dated to now — the confident zero in the time dimension,
+         which is the dimension where it is invisible. */
+      const at = isNum(row && row.createdAtMs);
+      const age = at === null ? null : agoSaid(at, now);
+      const ageNode = el("span", "cc-nw-age",
+        at === null ? "undated" : (age === null ? "stamped ahead of this clock" : age));
+      ageNode.title = at === null
+        ? "This row carried no timestamp, so its age is not known and none is claimed."
+        : "The vendor's own stamp, verbatim: " +
+          (typeof row.createdAt === "string" ? row.createdAt : String(at));
+      meta.append(ageNode);
+
+      if (typeof row.source === "string" && row.source) {
+        meta.append(el("span", "cc-nw-src", row.source));
+      }
+
+      /* THE VENDOR'S OWN WORD, CARRIED, AND DELIBERATELY NOT TINTED. This page
+         spends green and red on ONE quantity — the direction of our own score
+         and premium readings — and a vendor's sentiment label is not it.
+         Tinting "negative" the same red as a −62 score invites a reader to add
+         the two together, a claim neither payload makes. The word carries it. */
+      if (typeof row.sentiment === "string" && row.sentiment) {
+        const sent = el("span", "cc-nw-sent", row.sentiment);
+        sent.title = "The vendor's own sentiment label, verbatim and never mapped onto a " +
+          "number. It is not this product's score and does not enter it.";
+        meta.append(sent);
+      }
+
+      if (row && row.major === true) {
+        const mark = el("span", "cc-nw-major", "major");
+        mark.title = "The vendor flagged this headline as major.";
+        meta.append(mark);
+      }
+
+      const tickers = Array.isArray(row && row.tickers) ? row.tickers : [];
+      const named = [];
+      for (const raw of tickers) {
+        const t = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+        if (t) named.push(t);
+      }
+      if (named.length) {
+        const box = el("span", "cc-nw-tks");
+        for (const t of named.slice(0, NEWS_TICKERS)) {
+          /* AN OPENER ONLY WHERE THERE IS SOMETHING BEHIND IT. `cards` is the
+             set of names this session built a detail card for, so a button
+             minted for anything else opens a dialog that has to apologise. The
+             rest print plain: the MENTION is still information — the join
+             between a headline and a name this product ranks — a dead button
+             is not. */
+          if (cards.has(t)) { box.append(nameNode(t, true)); continue; }
+          const flat = el("span", "cc-nw-tk", t);
+          flat.title = "Named by the vendor on this headline. This session built no card for " +
+            "it, so there is nothing here to open.";
+          box.append(flat);
+        }
+        /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION, and
+           a headline naming twelve tickers is where that bites: four shown
+           would read as "this is about four names". */
+        if (named.length > NEWS_TICKERS) {
+          box.append(el("span", "cc-nw-more", "+" + (named.length - NEWS_TICKERS) + " more"));
+        }
+        meta.append(box);
+      }
+
+      li.append(meta);
+      list.append(li);
+    }
+    into.append(list);
+
+    if (sub) {
+      /* THE PUBLISHED POPULATION, NOT THE ROWS IN HAND, so this subtitle says
+         the same thing as the paragraph above it. And the read AGE rides here
+         because the heading is where a reader looks first when the question is
+         "is this current". */
+      const shown = Math.min(rows.length, LIST_MAX);
+      sub.textContent = capSaid(shown, kept === null ? rows.length : kept) +
+        (readAge === null ? "" : " · fetched " + readAge);
+    }
+  }
+
   /* ---------- the spine --------------------------------------------
 
      A fixed −100..+100 axis with the dead band hatched onto it. FIXED, not
@@ -1452,7 +1965,13 @@
     loadRegion("/api/flows/flowalerts"),
     loadRegion("/api/flows/events"),
     loadRegion("/api/flows/scoretrack"),
-  ]).then(([lng, sht, watch, market, alerts, events, track]) => {
+    /* TWO KEYS THAT WERE PUBLISHED AND SERVED AND DRAWN NOWHERE. worker.js:2721
+       and :2738 have answered these routes since the wave that added them, and
+       this list — the only place the landing page asks for anything — did not
+       ask. Live data, invisible. */
+    loadRegion("/api/flows/sector-premium"),
+    loadRegion("/api/flows/news"),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news]) => {
     /* ONLY the redirect stops the render. Two boards that both failed to
        read still leave five regions with something true to say, and the
        version of this guard that tested `!lng && !sht` could not tell a
@@ -1549,11 +2068,7 @@
          show the same number for the same instant; the zone is stated so the
          number means something. */
       const read = alerts && typeof alerts.readAt === "string" ? Date.parse(alerts.readAt) : NaN;
-      if (Number.isFinite(read)) {
-        said.push("read " + new Date(read).toLocaleTimeString([], {
-          hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
-        }));
-      }
+      if (Number.isFinite(read)) said.push("read " + clockSaid(read));
       alrSub.textContent = said.join(" · ");
     }
 
@@ -1573,6 +2088,17 @@
         : capSaid(Math.min(evRows.length, LIST_MAX),
             inWindow === null ? evRows.length : inWindow) + " in the window";
     }
+
+    /* ---- the two regions this wave exists for ----
+
+       ONE INSTANT FOR THE WHOLE PAGE. The headline ages are measured against a
+       clock read once here rather than once per row: two rows stamped
+       identically must not print different ages. */
+    const drawnAt = Date.now();
+    const lea = host("ccLean");
+    if (lea) { lea.replaceChildren(); paintLean(lea, lean); }
+    const nws = host("ccNews");
+    if (nws) { nws.replaceChildren(); paintNews(nws, news, cards, drawnAt); }
 
     const wtc = host("ccWatch");
     if (wtc) { wtc.replaceChildren(); paintWatch(wtc, watch); }
