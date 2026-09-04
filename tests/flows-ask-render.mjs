@@ -153,6 +153,43 @@ ok(/No inconsistency was found across the published surfaces, from 4 checks that
    "count that earns it — the finding is withheld for want of a measurement, never because " +
    "the sentence was removed");
 
+/* ---------- 1b. the numerator that read as the whole set --------- */
+
+/* shared/flows-warnings.js:865 returns `questions` beside `checked` and says
+   why in as many words: "a numerator printed alone reads as the whole set.
+   Nothing in a bare `checked: 7` says whether seven is every question this
+   module carries or seven of thirteen". assess({}) reports questions: 13, so
+   a clean bill drawn from four is a clean bill over under a third of the
+   sweep — and the page printed the four alone, which is the truncation that
+   does not say it truncated in the panel whose whole job is to say so. */
+ok(/not the share of the sweep|does not publish/i.test(four),
+   "a clean bill counted from a `warningsChecked` the briefing publishes WITHOUT its " +
+   "denominator says the denominator is missing: `assess()` carries thirteen questions and " +
+   "four is the count that ran, so a bare 'from 4 checks that could run' lets a reader take " +
+   "four for every question there was and read a third of a sweep as all of it");
+
+/* THE DENOMINATOR PUBLISHED. The pipeline now sends `questions` beside
+   `checked`, and where it is on the wire the page states the share and names
+   what could not be asked, rather than leaving a reader to assume a total. */
+const four13 = await warnsText([], { warningsChecked: 4, warningsQuestions: 13 });
+ok(/This briefing carries 13/.test(four13) && /9 of them could not be asked/.test(four13),
+   "and where the briefing DOES publish how many checks it carries, the clean bill states " +
+   "the total and names the nine questions that could not be asked at all — four of " +
+   "thirteen is a different fact from four of four, and only one of them is a swept surface");
+ok(/unanswered rather than clear/i.test(four13),
+   "and says what the nine are: unanswered, not clear. A check that could not run has found " +
+   "nothing and cleared nothing, and folding it into a clean bill is the confident zero " +
+   "wearing the one sign this page draws above everything else");
+
+/* THE CONTROL ON THE CONTROL. A sweep where every question could be asked
+   must still be able to say so plainly, or the fix has traded a false clean
+   bill for a page that can never report a complete one. */
+const all13 = await warnsText([], { warningsChecked: 13, warningsQuestions: 13 });
+ok(/every check this briefing carries, so the sweep was complete/.test(all13),
+   "while a briefing where all thirteen questions could be asked says the sweep was " +
+   "complete — the qualification is withheld when it is not earned, exactly as the clean " +
+   "bill is");
+
 /* AND THE FIELD ABSENT IS A THIRD STATE, not the zero and not the four. A
    briefing published before `warningsChecked` existed carries an empty list
    and no count, and an empty list alone cannot tell an unasked question from
@@ -221,6 +258,57 @@ ok(/scanned 1 figure in the answer above and found every one of them already wri
    "while an answer carrying one figure keeps the sentence saying that figure was found " +
    "already written in the facts — the count is a measurement and it is reported whenever " +
    "there was something to count");
+
+/* ---------- 2b. the same empty scan, in the line readers meet ---- */
+
+/* THE FOLD WAS FIXED AND THE PROVENANCE LINE WAS NOT. `.ak-prov` sits in the
+   open directly under the answer and is the sentence a reader meets without
+   opening anything; it claimed "every figure it wrote was checked against
+   those same facts" over the identical payload whose audit trail correctly
+   refuses to call that a verification. Two of this page's own sentences
+   disagreeing, with the false one in front. It is also the answer where the
+   claim matters most: prose carrying no numeral is prose the guard cannot
+   touch at all, so the reader is being reassured about exactly the answer
+   nothing was checked in. */
+ok(!/Every figure it wrote was checked/.test(noFigures),
+   "an answer stating no figure gets no claim in its PROVENANCE line that its figures were " +
+   "checked either: 'every figure it wrote was checked against those same facts' is " +
+   "vacuously true over an empty set, and it sits in the open above the fold that has just " +
+   "refused to call the same empty scan a verification");
+ok(/none for the guard to check/i.test(noFigures),
+   "and the open line says what the fold says — there was no figure to check — so a reader " +
+   "who never opens the disclosure is told the same thing as one who does");
+ok(/Every figure it wrote was checked against those same facts/.test(withFigure),
+   "while the answer that DID state a figure keeps the sentence in the open, because for " +
+   "that answer the check was performed and the reader is entitled to hear so without " +
+   "opening anything");
+
+/* ---------- 2c. `n` is not the set of figures in the prose ------- */
+
+/* CORRECTION 2 IN THE BRIEF: the guard's allowed set is numeralsIn(fact.say),
+   not the values of `n`, because `n` is an OBJECT of named measured fields
+   and a sentence carries numerals that are not measurements. LEAD is the
+   proof and it is this suite's own fixture: say "The short board's leading
+   name is SYN35 at 58." yields the numerals 35 and 58 — the 35 belongs to
+   the ticker — while n is {score: 58}. The audit paragraph closed by
+   asserting every figure in the prose was one of these values, which is
+   false for that fact and for every fact naming a ticker or a date. */
+ok(!/Every figure in the prose above is one of these values/.test(withFigure),
+   "the fact-pin paragraph does not claim `n` holds every figure in the prose: SYN35 puts " +
+   "the numeral 35 in a sentence whose n is {score:58}, so a reader auditing the answer " +
+   "against the pinned values finds a figure missing from them and concludes the guard let " +
+   "one through — the audit trail accusing the check it exists to evidence");
+ok(/not the whole set of figures written in them/i.test(withFigure),
+   "and says which set it is: the measured fields behind the sentences, with the digits in " +
+   "a ticker or a date named as the reason the two differ");
+ok(/checks the answer against those sentences rather than against these values/i
+   .test(withFigure),
+   "and states the rule the guard actually applies — the scan is against `say`, which the " +
+   "method note one paragraph above already said, and the two now agree instead of " +
+   "describing two different guards");
+ok(/score=58/.test(withFigure),
+   "while the pinned fields themselves are still printed, unreformatted and named — the " +
+   "anti-tamper record is corrected in what it claims, not withdrawn");
 
 /* ---------- 3. whose failure a 500 was --------------------------- */
 
