@@ -250,6 +250,29 @@ body {
 img, svg, video, canvas { display: block; max-width: 100%; }
 input, button, textarea, select { font: inherit; color: inherit; }
 
+/* `hidden` MUST ACTUALLY HIDE.
+
+   `[hidden] { display: none }` lives in the USER-AGENT stylesheet, and an
+   author `display` on the same element beats it — that is cascade ORIGIN, not
+   specificity, so no amount of class-level care avoids it. Every element this
+   codebase toggles with `el.hidden` that also carries a layout rule here was
+   therefore never hidden at all, silently, and only on the routes where the
+   toggle mattered.
+
+   Measured with a real browser across all twelve gated routes: four elements,
+   all on /flows/ticker/, and two of them are not cosmetic. With no ?t= that
+   page is the NAME PICKER — and under it, `#ftGrid` rendered its twenty-one
+   panel shells anyway, an empty bordered box per panel, plus an empty
+   identity header above them. The page has shipped like that.
+
+   `!important` is the point rather than a shortcut: this rule exists
+   specifically to outrank the layout declarations that caused the bug, and a
+   plain declaration would lose to any later `display` in flows.css — which is
+   exactly the failure being fixed. It closes the class, not the four
+   instances, because the next `display: grid` on a toggled element would
+   reopen it. */
+[hidden] { display: none !important; }
+
 a {
   color: var(--gold-harvest);
   text-decoration-color: color-mix(in srgb, var(--gold-harvest) 45%, transparent);
