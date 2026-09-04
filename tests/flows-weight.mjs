@@ -125,7 +125,22 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
    inside it, and the ceiling was left behind by work that already shipped. */
 const CEILING_KIB = {
   tickerPage: 470,
-  overviewPage: 300,
+  /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
+     overrun. The route gained two regions a reader asked for: the eleven-
+     basket sector premium lean and the news feed, ~27k of renderer between
+     them. It came to 300.00 KiB against a 300 KiB ceiling — four bytes over —
+     and the four bytes were briefly bought back by shortening comments, which
+     is bookkeeping rather than engineering: it degrades the one thing this
+     codebase is strictest about to satisfy a number.
+
+     THE STRUCTURAL FIGURE IS NOT THE RENDERER, IT IS THE SHARED BUNDLE.
+     flows-overview.js is 111k of this route; flows-panels.js is 148k — half
+     the weight — and the overview loads it for the card dialog alone. The
+     honest fix is not a bigger number here, it is that the overview should
+     not parse the whole panel library to open one dialog. Until that is done,
+     12k of headroom is what the two new regions need to be maintainable
+     rather than golfed. */
+  overviewPage: 312,
   sidePage: 300,
   watchPage: 240,
   deskPage: 135,

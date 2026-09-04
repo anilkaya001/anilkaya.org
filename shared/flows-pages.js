@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "103";
+export const ASSET_VERSION = "104";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -278,12 +278,14 @@ const cardDialog = () => `
  * from them, three a side. Everything else the session knows sat on four
  * other routes, so the first question anyone asks cost five page loads.
  *
- * SEVEN REGIONS NOW, FROM SEVEN ENDPOINTS THAT ALREADY EXISTED. A verdict
+ * NINE REGIONS NOW, FROM NINE ENDPOINTS THAT ALREADY EXISTED. A verdict
  * bar, both ranked sides ten deep with a score strip per row, what moved
  * since the prior session, the freshest flagged windows, what reports next,
- * what is a hair outside the band, and the spine. No new vendor call, no
- * pipeline change: the difference is that the page stopped discarding what
- * was already in its hands.
+ * what is a hair outside the band, where the eleven sector baskets leaned in
+ * OPTION premium, the headline tape with its age on it, and the spine. No new
+ * vendor call, no pipeline change: the difference is that the page stopped
+ * discarding what was already in its hands — the last two keys had been
+ * published and served for a whole wave with nothing anywhere drawing them.
  *
  * THE REGION SHELLS ARE EMITTED HERE, THE CONTENTS IN THE BROWSER — the same
  * split marketPage() uses for its .fc-panel skeletons. A heading is prose and
@@ -382,6 +384,88 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
         <a class="cc-h-s" href="/flows/watch/" id="ccWatchSub">inside the dead band</a>
       </div>
       <div class="cc-body" id="ccWatch"></div>
+    </section>
+
+    <!-- WHERE THE ELEVEN SECTORS LEAN, IN OPTION PREMIUM.
+
+         DELIBERATELY NOT THE SECTOR PANEL ON /flows/market/, AND THE WHOLE
+         DESIGN OF THIS ONE IS ABOUT KEEPING THE TWO APART. That panel draws
+         sector:trix — TRIX on each sector ETF's daily log closes, quoted in
+         basis points per session, containing not one option. This draws
+         sector:premium: today's bullish minus bearish OPTION premium over the
+         same eleven SPDR baskets. worker.js:2721 gave them separate routes for
+         exactly that reason: "the two can disagree for weeks without either
+         being wrong, and a reader who asked for one must never be handed the
+         other".
+
+         SO A READER WHO HAS SEEN THE OTHER PANEL IS TOLD APART FROM IT FOUR
+         WAYS, AND NONE OF THEM IS THE COLOUR:
+
+           1. THE HEADING NAMES THE QUANTITY. "options premium", never
+              "momentum" — in the one place a reader looks first.
+           2. EVERY NUMERIC COLUMN CARRIES ITS UNIT. "% of premium" and "$".
+              The word "bp" — that panel's unit — appears nowhere in this
+              region, and the suite asserts that it does not.
+           3. THE NOTE NAMES THE OTHER KEY OUTRIGHT, out of the publisher's own
+              notSameAs field, and names the route that draws it. Carried
+              rather than paraphrased, so the two cannot drift.
+           4. THE DRAWING IS A DIFFERENT SHAPE. A table with the dollars beside
+              the bar, rather than that page's bare bar-and-value list —
+              because a ratio with no magnitude cannot tell a reader whether a
+              strong lean is $62K or $400M.
+
+         AND THE ORDER IS THE PUBLISHER'S. lean.rank says leanRatio and says
+         why: XLK clears hundreds of millions of premium on an ordinary day and
+         XLB tens of thousands, so ranking eleven baskets on the DOLLAR
+         difference ranks them by basket size with a faint conviction signal on
+         top. -->
+    <section class="cc-region cc-lean" aria-labelledby="ccLeanH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccLeanH">Sector lean · options premium</h2>
+        <!-- A SLOT WITH A TRUE DEFAULT. Before the payload lands the only
+             honest thing this can say is what the panel is made of; the count
+             of baskets that actually leaned is a measurement and is written
+             by flows-overview.js. -->
+        <span class="cc-h-s" id="ccLeanSub">options premium, not price momentum</span>
+      </div>
+      <div class="cc-body" id="ccLean"></div>
+    </section>
+
+    <!-- THE HEADLINE TAPE, AND THE REASON IT IS NOT CALLED "LATEST".
+
+         FRESHNESS IS THE HONEST PROBLEM HERE. The pipeline reads this feed once
+         on a weekday-morning cron — 05:15 America/New_York — and news is a
+         stream: a headline fetched at 09:15 and read at 15:00 is six hours old.
+         A news region that LOOKS live and is six hours old is worse than no
+         news region at all, because a reader acts on it.
+
+         SO THE PAGE STATES THE AGE RATHER THAN IMPLYING FRESHNESS, and it
+         states it in the order that matters: the age of the fetch is the FIRST
+         node in the region, above the first headline, because a footnote under
+         the last one is read after the damage is done. Every row then carries
+         its own age from the vendor's own created_at stamp, and a row the
+         vendor sent undated says "undated" rather than being dated to now —
+         which would be the confident zero in the one dimension where it is
+         invisible.
+
+         TWO CEILINGS, TWO SENTENCES, AND THEY SAY OPPOSITE THINGS.
+         atVendorLimit means the VENDOR'S own maximum was returned, so the
+         true population is unknown and at least that large. capped/shed
+         means OUR row cap dropped rows we did see, so their number is known
+         exactly. A single word — "truncated" — for both would leave a reader
+         unable to tell an unknown population from a known one.
+
+         AND A TICKER LINKS ONLY WHERE THERE IS SOMETHING BEHIND IT. Every row
+         carries the vendor's tickers array, which is a genuine join between a
+         headline and a name this product ranks — but the card dialog only
+         exists for the names the run went deep on, so the rest are printed
+         plain. An opener that usually opens nothing is worse than no opener. -->
+    <section class="cc-region cc-news" aria-labelledby="ccNewsH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccNewsH">Headlines</h2>
+        <span class="cc-h-s" id="ccNewsSub"></span>
+      </div>
+      <div class="cc-body" id="ccNews"></div>
     </section>
 
     <!-- THE SPINE, re-seated rather than replaced. A fixed -100..+100 axis with

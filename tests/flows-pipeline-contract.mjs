@@ -2451,13 +2451,37 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      made the SLOWEST so that with any width above one it finishes last; if
      results were collected in completion order the array would come back
      rotated and every percentile tie downstream would move. */
-  const delays = [40, 5, 5, 5, 5, 5, 5, 5];
-  const items = delays.map((ms, i) => ({ i, ms }));
+  /* OUT-OF-ORDER COMPLETION IS FORCED, NOT TIMED. This read
+     `delays = [40, 5, 5, 5, 5, 5, 5, 5]` and trusted a 40ms timer to outlast
+     seven 5ms ones. That is a race, and on 2026-09-04 it lost: on a machine
+     busy with parallel work the short timers fired late enough that item 0
+     was not last, and the guard-on-the-guard below failed a suite that had
+     passed minutes earlier and twice on CI. A test that fails on a loaded
+     machine teaches the next reader to re-run rather than to look, which is
+     how a real defect eventually gets waved through.
+
+     Item 0 now holds a gate that only the LAST of the other seven opens, so
+     it finishes last by construction at any width above one. Nothing here
+     depends on how fast a timer fires — the 1ms sleep exists only to yield
+     the microtask queue so the pool can actually overlap, and no assertion
+     rests on its duration.
+
+     THIS DEPENDS ON width > 1, which the call below fixes at 4. At width 1
+     item 0 would hold the only slot and the gate would never open — worth
+     knowing before anyone parameterises this block. */
+  const items = Array.from({ length: 8 }, (_, i) => ({ i }));
   const seen = [];
-  let live = 0, peak = 0;
+  let live = 0, peak = 0, finishedOthers = 0, openGate = null;
+  const gate = new Promise((resolve) => { openGate = resolve; });
   const pooled = await runPooled(items, async (item) => {
     live++; if (live > peak) peak = live;
-    await new Promise((r) => setTimeout(r, item.ms));
+    if (item.i === 0) {
+      await gate;
+    } else {
+      await new Promise((r) => setTimeout(r, 1));
+      finishedOthers++;
+      if (finishedOthers === items.length - 1) openGate();
+    }
     live--;
     seen.push(item.i);
     return item.i * 10;
