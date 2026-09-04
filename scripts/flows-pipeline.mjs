@@ -626,7 +626,24 @@ const PUBLISH_SPACING_MS = 150;
    spent ON THE WIRE, and what it spent BEING REFUSED. */
 const stats = {
   calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
-  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0,
+  /* THREE OF THESE ARE PER-CALLER SUMS AND ONE IS NOT, and mixing them is how
+     a meter starts lying about its own run.
+
+     permitWaitMs, networkMs and rateLimitWaitMs accumulate what each CALLER
+     experienced. With four permits outstanding, four callers wait at once, so
+     these sums can exceed the run's wall clock — legitimately, because they
+     are caller-seconds and not run-seconds. Their RATIOS to each other survive
+     that (concurrency inflates all three about equally), which is why
+     describeFloorVerdict compares backoff against queueing and not against
+     elapsed.
+
+     rateLimitQueueMs is the odd one: it is what the permit QUEUE was pushed
+     back by, summed once per refusal that actually moved it, so it IS in
+     run-seconds. It exists because a coalesced volley of refusals costs the
+     run one wall and costs the callers N. Both are true; neither is derivable
+     from the other; so they travel under separate names. Do not put this one
+     into a ratio with the three above. */
+  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
 };
 let delayMs = RATE.startDelayMs;
 
@@ -661,6 +678,45 @@ const permits = makePermitQueue({
   now: () => Date.now(),
   sleep,
   maxInFlight: 6,
+});
+
+/* ---------- the ingest write lane --------------------------------
+
+   ONE SHARED LANE FOR EVERY WRITE TO THE INGEST ROUTE, which is the answer
+   this file already wrote down for itself before anything needed it: "the
+   answer is one shared lane for ingest traffic rather than re-serialising
+   these two."
+
+   PUBLISH_SPACING_MS WAS PER-LEG AND THE ROUTE'S FAILURE IS GLOBAL. Every
+   writer slept 150ms after its own POST, so one leg at a time saw ~6.7
+   writes/s — comfortably under the ~3.4/s that tripped Cloudflare's rate
+   challenge on the first live run (publish()'s own comment: 37 POSTs in
+   eleven seconds). But the spacing never knew about the other legs. Three
+   paced streams in the air at once present the SUM, and a per-writer sleep
+   cannot see that.
+
+   IT IS ALSO WHAT THE CARDS LEG NEEDS BEFORE IT CAN BE POOLED. Fifty card
+   writes spaced 150ms apart is 7.5s serially; at four workers each still
+   sleeping its own 150ms it is ~26 POSTs/s, which is not a speed-up, it is
+   the documented 403. A lane fixes that by construction: the departures stay
+   150ms apart no matter how many workers are producing, exactly as the vendor
+   lane keeps the vendor's rate while letting the round trips overlap.
+
+   WRITES ONLY, AND THAT IS EVIDENCE-LED RATHER THAN CAUTIOUS. The incident on
+   record is 37 POSTs; the archive walk's 270 reads pace themselves at
+   ARCHIVE_READ_PACE_MS=40 and have never been implicated. Putting reads in a
+   150ms lane would quadruple that walk to serve a limit nothing has observed
+   on reads. If edge 403s ever appear on the read path, this is where the two
+   would merge — one lane, one constant, one place. */
+const ingestWrites = makePermitQueue({
+  delayMs: () => PUBLISH_SPACING_MS,
+  now: () => Date.now(),
+  sleep,
+  /* Two, not six. The vendor lane exists to overlap round trips; this one
+     exists to bound a burst, and the ingest route has already shown it counts
+     arrivals. Two lets a slow write stop being the critical path without ever
+     presenting the route more than two open sockets. */
+  maxInFlight: 2,
 });
 
 /* ---------- the bounded worker pool -------------------------------
@@ -968,7 +1024,15 @@ async function uw(path, params = {}) {
          that distinction did not exist — there was only ever one caller in
          flight. With permits outstanding, letting the others walk into the
          same wall is how one 429 becomes six. */
-      permits.defer(wait);
+      /* TWO CHARGES FOR ONE REFUSAL, because they are two different questions.
+         `rateLimitWaitMs` is what THIS CALLER lost and is summed across every
+         caller; `rateLimitQueueMs` is what the QUEUE was pushed back by, which
+         defer() returns as 0 when another caller already moved the wall
+         further out than this one asked for. Six callers refused inside one
+         window cost six caller-waits and one run-wait, and a meter that
+         reports only the first makes a coalesced volley look six times as
+         expensive as it was. */
+      stats.rateLimitQueueMs += permits.defer(wait);
       stats.rateLimitWaitMs += wait;
       await sleep(wait);
       continue;
@@ -2284,9 +2348,10 @@ const candleDate = (c) => {
 
 /**
  * Every dated board still in the store, walked newest-first over the
- * retention window. ~180 sequential worker reads on a full archive
- * (126 days x 5/7 weekdays x 2 sides), documented in DEPLOY.md beside the
- * shared D1 budget. In a dry run there is no store, so the current boards
+ * retention window. ~270 sequential worker reads on a full archive
+ * (126 days x 5/7 weekdays x 3 KEYS — scores, long and short), documented in
+ * DEPLOY.md beside the shared D1 budget. In a dry run there is no store, so
+ * the current boards
  * are replayed at prior candle dates — synthetic sessions over synthetic
  * closes, exercising every joint in the scorer with numbers a contract
  * test can recompute.
@@ -2517,10 +2582,13 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
     for (const what of ["scores", "long", "short"]) {
       probed++;
 
-      /* PACED. This walk is up to 180 reads against a route that sits behind
+      /* PACED. This walk is up to 270 reads against a route that sits behind
          Cloudflare, and the run has already seen it answer a WRITE with 403
          under burst. Unpaced it finished 180 requests in thirteen seconds —
-         about fourteen a second, which is the shape a rate rule bites. The
+         about fourteen a second, which is the shape a rate rule bites. (That
+         measurement was taken on a 180-key walk, before `scores:` joined it;
+         the RATE it establishes is what matters here and that does not change
+         with the key count.) The
          delay costs seconds on a leg that spends no vendor call and sits
          outside the deadline calculus, so it is the cheapest thing here. */
       if (probed > 1) await sleep(ARCHIVE_READ_PACE_MS);
@@ -2579,7 +2647,7 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
      fetchStoredPayload() returns null for an absent key and null for a failed
      read — the two are indistinguishable from here, and no amount of care at
      this call site changes that. What CAN be stated is the denominator: a
-     `retained: 0` that probed 180 keys is a cold archive, and a `retained: 0`
+     `retained: 0` that probed 270 keys is a cold archive, and a `retained: 0`
      that probed 0 is a broken date. Without this the page can only say "zero",
      which is the one thing a reader already knows by looking at it. */
   return { boards, scoreDays, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
@@ -3699,9 +3767,20 @@ function summarize(payload) {
    more would not fix that. The point of the window is to make the claim
    MEASURABLE and its uncertainty STATEABLE, not to ratify the footer.
 
-   Steady-state cost: 90 x 2 = 180 rows, and two writes a day. The keys are
-   dated by CALENDAR date, so the retention window is expressed in calendar
-   days; this constant is the one place the two units meet. */
+   Steady-state cost: 90 weekdays x 3 keys = 270 rows, and three writes a day.
+
+   IT SAID 90 x 2 = 180 UNTIL THIS COMMIT, and the arithmetic was right when it
+   was written: the archive held the two boards. `scores:<date>` joined it
+   later (published at the scorer, swept by pruneArchive, and walked by
+   collectDatedBoards alongside the two sides) and neither multiplication here
+   nor the two in DEPLOY.md was re-run. Same shape as the EVENT_ROWS comment
+   corrected one commit ago: every figure true when written, invalidated by a
+   field added elsewhere, and then read INSTEAD of being re-measured — against
+   a row budget shared with the live learning app, where a third of the real
+   cost going unstated is the part that matters.
+
+   The keys are dated by CALENDAR date, so the retention window is expressed in
+   calendar days; this constant is the one place the two units meet. */
 const ARCHIVE_RETENTION_DAYS = 126;
 
 /* How far past the retention edge one run sweeps.
@@ -3784,6 +3863,14 @@ async function retire(key) {
     return { ok: true, status: 0 };
   }
   try {
+    /* THE SAME LANE AS publish(). A DELETE is a write to the same route and
+       counts against the same burst the challenge measures, so the sweep and
+       the publish phase share one clock rather than each keeping their own
+       150ms and presenting the route the sum. The prune runs early and the
+       card writes run late, so in practice they rarely meet — but "rarely
+       meet" was the reasoning that left the spacing per-leg, and it is a
+       property of the current schedule rather than of the route. */
+    await ingestWrites.acquire();
     const response = await fetch(
       ingestURL() + "?key=" + encodeURIComponent(key),
       {
@@ -3792,7 +3879,6 @@ async function retire(key) {
         headers: ingestHeaders(),
       },
     );
-    await sleep(PUBLISH_SPACING_MS);
     return { ok: response.ok, status: response.status };
   } catch (error) {
     return { ok: false, status: 0, message: error.message };
@@ -3916,6 +4002,11 @@ async function publish(key, payload) {
   }
   let response, lastDetail = "";
   for (let attempt = 0; ; attempt++) {
+  /* THE LANE, CLAIMED BEFORE THE WRITE RATHER THAN SLEPT AFTER IT. Spacing
+     that runs after a POST is spacing only that writer observes; a permit
+     taken before it is spacing the ROUTE observes, whichever leg or worker
+     the writer belongs to. Same departure rate, one shared clock. */
+  await ingestWrites.acquire();
   response = await fetch(
     ingestURL() + "?key=" + encodeURIComponent(key),
     {
@@ -3934,12 +4025,12 @@ async function publish(key, payload) {
       body,
     },
   );
-  // Space the writes. 37 POSTs inside eleven seconds from one datacenter
-  // address is what tripped Cloudflare's rate challenge on the first live run;
-  // the boards and every card had already landed, so the challenge was purely
-  // a function of burst rate. 150ms puts the whole publish phase near six
-  // seconds and well under the threshold, against a job budgeted in minutes.
-  await sleep(PUBLISH_SPACING_MS);
+  // The spacing is the lane's, claimed above. 37 POSTs inside eleven seconds
+  // from one datacenter address is what tripped Cloudflare's rate challenge on
+  // the first live run; the boards and every card had already landed, so the
+  // challenge was purely a function of burst rate. It used to be a sleep here,
+  // which spaced each WRITER at 150ms and left the ROUTE seeing the sum of
+  // however many legs were in the air.
 
   /* THE EDGE SAYS "LATER", SO WAIT AND ASK AGAIN — up to three times, backing
      off hard. 1s, then 4s, then 9s: quadratic rather than doubling, because
@@ -3959,6 +4050,13 @@ async function publish(key, payload) {
       `(retry ${attempt + 1} of ${PUBLISH_RETRIES}; ` +
       `${Math.round(publishRetrySpentMs / 1000)}s of the run's ` +
       `${PUBLISH_RETRY_BUDGET_MS / 1000}s retry budget spent)`);
+    /* EVERY WRITER BACKS OFF, NOT JUST THIS ONE. The edge refused because of
+       the rate it is seeing, which is the whole lane's rate — so letting the
+       other writers keep their slots is how one challenge becomes several.
+       Same argument as the vendor 429 deferring the vendor lane, and the
+       reason the spacing had to become a lane before this could be said at
+       all: a sleep can only ever back off the caller that runs it. */
+    ingestWrites.defer(wait);
     await sleep(wait);
     continue;
   }
@@ -5552,7 +5650,10 @@ async function main() {
      Neither of these spends a vendor call. `collectDatedBoards` walks up to
      126 calendar days x 3 keys against the Cloudflare Worker at
      ARCHIVE_READ_PACE_MS plus round trip — the file's own measurement is 180
-     unpaced requests in thirteen seconds, so paced it is ~30s. `pruneArchive`
+     unpaced requests in thirteen seconds, i.e. about 14/s, and 270 keys at
+     ARCHIVE_READ_PACE_MS=40 is ~11s of pacing plus 270 round trips. The ~30s
+     this line used to state came from the 180-key walk; the walk is 270 keys
+     now and the estimate moved with it. `pruneArchive`
      names 90 dated keys and pays PUBLISH_SPACING_MS after each DELETE, of
      which in steady state exactly three match anything — ~20s, most of it
      spent being told 404 by a route that was never going to have the row.
@@ -7688,16 +7789,43 @@ async function main() {
      `refused` is small against `queued`, the floor is too conservative and can
      come down; if it rivals `queued`, the ceiling is doing its job and must
      not move. Those are numbers, not intuitions, which was the whole ask. */
-  const pct = (ms) => `${(ms / 1000).toFixed(1)}s (${(100 * ms / Math.max(elapsed * 1000, 1)).toFixed(0)}% of the run)`;
-  console.log(
-    `wall clock: queued ${pct(stats.permitWaitMs)}` +
-    ` | wire ${pct(stats.networkMs)}` +
-    ` | refused ${pct(stats.rateLimitWaitMs)}` +
-    ` | peak in flight ${permits.stats().peakInFlight}` +
-    (stats.calls
-      ? ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
-        `${Math.round(stats.networkMs / stats.calls)}ms wire`
-      : ""));
+  /* A PER-CALLER SUM DIVIDED BY WALL CLOCK IS NOT A SHARE OF THE RUN, and
+     this line printed it as one. Each of these three accumulates per CALLER;
+     with four permits outstanding four callers wait simultaneously, so the sum
+     counts four seconds for one second of run. At peak width the total could
+     read "340% of the run" — a percentage of elapsed time that exceeds elapsed
+     time, which is not a quantity. It was correct exactly while the pipeline
+     was serial, and the permit queue is what stopped it being correct.
+
+     So: absolute caller-seconds, labelled as caller-seconds, plus the per-call
+     means — which ARE well defined at any width because both numerator and
+     denominator are per call. The one number in run-seconds is `queue`, and it
+     is printed beside `refused` precisely so the gap between them is visible:
+     that gap is the concurrency the pool bought back. */
+  const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
+  if (!stats.calls) {
+    /* THE THREE SILENCES, ON THE RUN'S OWN METER. A run that made no vendor
+       call did not measure a queue of zero, a wire of zero and a backoff of
+       zero — it measured nothing at all, and printing three 0.0s says the
+       opposite. This is the dry run's ordinary shape, and it is the reading
+       poolWidth() and describeFloorVerdict() both already refuse to draw a
+       conclusion from. */
+    console.log(
+      "wall clock: no vendor call was made, so queueing, wire time and backoff were not " +
+      "measured this run — these are absent readings rather than zero ones, and nothing " +
+      "about the floor can be concluded from them.");
+  } else {
+    console.log(
+      `wall clock over ${secs(elapsed * 1000)} elapsed, summed per caller: ` +
+      `queued ${secs(stats.permitWaitMs)}` +
+      ` | wire ${secs(stats.networkMs)}` +
+      ` | refused ${secs(stats.rateLimitWaitMs)}` +
+      ` (the queue itself was pushed back ${secs(stats.rateLimitQueueMs)}, which is the ` +
+      `run-seconds the refusals actually cost)` +
+      ` | peak in flight ${permits.stats().peakInFlight}` +
+      ` | per call: ${Math.round(stats.permitWaitMs / stats.calls)}ms queued, ` +
+      `${Math.round(stats.networkMs / stats.calls)}ms wire`);
+  }
   if (stats.networkMs > 0 && permits.stats().peakInFlight <= 1) {
     console.log(
       "  peak in flight was 1, so no round trip ever overlapped another: the vendor answers " +

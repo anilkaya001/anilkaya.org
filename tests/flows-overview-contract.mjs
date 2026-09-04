@@ -42,6 +42,23 @@
    existed for: a pipeline that failed between them puts yesterday's bulls
    beside today's bears, and both halves render perfectly. Nothing in the
    payload forces them to agree, so the page has to check.
+
+   AND A BOARD IS NOW FAILED THE WAY A REGION ALREADY WAS. loadBoard threw
+   on any status that was neither 401 nor OK and had no catch for a network
+   failure, so one 500 on one pole rejected the Promise.all and skipped the
+   whole render: seven labelled shells, five of them holding payloads that
+   had come back fine and were parsed and thrown away. Every board this file
+   had ever routed was fulfilled with a valid payload, so the suite passed
+   against the defect and against the fix alike, which is how it arrived.
+
+   THE FIXTURE ALSO BREAKS A CAPPED LIST NOW. The poles were deliberately
+   given five and four names so a renderer that quietly caps at three fails
+   here; the narrow regions were given two watch rows and three alerts, both
+   under the cap of eight, so no phase could reach the truncation at all —
+   and the watch anchor read "all 12" over eight names, which is a false
+   statement in a link to the one route where a reader could count. Twelve
+   watch rows, ten flagged windows, ten calendar rows and fourteen movers
+   are served here for exactly that reason.
    ============================================================= */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -224,6 +241,23 @@ const watch = {
   ],
 };
 
+/* THE CALENDAR, held rather than written inline at its one call site: a
+   later phase caps it deliberately and has to be able to put this back. It
+   stays UNPUBLISHED until the earnings-join phase posts it, so the regions
+   above still get their live example of the pending silence. */
+const eventsPayload = {
+  v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+  windowDays: 21, inWindow: 2, gateOrigin: SESSION,
+  rows: [
+    { t: "ORCL", d: "2026-08-27", dte: 3, sdte: 3, im: 0.0642, s: 88, st: "ranked" },
+    /* A GATED NAME REACHED THE CALENDAR WITH NO SCORE AT ALL. The board was
+       forbidden from holding an opinion on it, which is not the same as
+       holding a neutral one — so this row must print an em dash and never a
+       confident 0. */
+    { t: "PFE", d: "2026-09-04", dte: 11, sdte: 8, im: 0.0310, s: null, st: "gated" },
+  ],
+};
+
 await post("board:long", board("long", bullRows, SESSION, { deep: 4 }));
 await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
 await post("board:watch", watch);
@@ -355,6 +389,37 @@ try {
     });
     deep(orcl.slice(0, 6), ["1", "ORCL", "+88", "81", "+1.92%", "$36.7M"],
       "a row carries rank, score, conviction, session change and net premium");
+  }
+
+  /* ---------- two changes, twelve pixels apart, two units -------- */
+  {
+    /* THE COLLISION IS NEW AND IT ARRIVED WITH THE REDESIGN. This table's
+       change column is a session PRICE return — close over the prior close —
+       and the region now seated directly above it carries a column of SCORE
+       moves, in score points. The ranked header was the bare word "Chg" with
+       no unit and no title, on a page whose whole argument is that a delta
+       means nothing without them. headRow's own contract says a column
+       header carries the UNIT of a numeric column; this one carried
+       neither. */
+    const heads = await page.evaluate(() => Array.from(
+      document.querySelectorAll(".cc-bull table thead th"),
+      (th) => ({ text: th.textContent.trim(), title: th.getAttribute("title") })));
+    const px = heads.find((h) => /chg/i.test(h.text));
+    ok(px, `the ranked table has a change column at all (${heads.map((h) => h.text).join("|")})`);
+    eq(px.text, "Px chg",
+       "and its header names the quantity rather than the bare word both columns share");
+    ok(/price return/.test(px.title || ""),
+       `spelling out what is divided by what (${px.title})`);
+    ok(/score/i.test(px.title || ""),
+       `and naming the other change on the same screen, so the two cannot be read as one (${px.title})`);
+
+    /* THE OTHER ONE, FOR CONTRAST. It was already spelled in full and its
+       title is the publisher's own prose rather than a caption written in
+       the renderer. */
+    const chg = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccChg table thead th"), (th) => th.textContent.trim()));
+    ok(chg.includes("\u0394 score"),
+       `the lead region's move column is in score points and says so (${chg.join(" | ")})`);
   }
 
   /* ---------- the ticker is a button, not a navigation ----------- */
@@ -694,7 +759,148 @@ try {
     /* A row whose trace could not be read shows the em dash, not a zero. */
     eq(await page.locator(".cc-bull tbody .cc-trk svg").count(), 0,
        "with no strip drawn from a payload that never arrived");
+    /* AND THE HEADER OVER IT COUNTS NOTHING IT WAS NEVER GIVEN. The
+       region's subtitle is a slot now, and a payload that never arrived
+       fills it with the sentence the shell ships rather than a count. */
+    eq((await page.locator("#ccChgSub").textContent()).trim(),
+       "since each name's prior scored session",
+       "and the region header states no count out of a payload it never read");
     await page.unroute("**/api/flows/scoretrack*");
+    allowFetchFailure = false;
+  }
+
+  /* ---------- a board that does not answer is ONE silence -------- */
+  {
+    /* THE HIGHEST-SEVERITY FAILURE THIS PAGE HAD, and the only one that
+       produced a page of empty labelled shells. loadBoard THREW on any
+       status that was neither 401 nor OK, and had no catch at all for a
+       network failure — so one 500 on one pole rejected the Promise.all and
+       skipped the entire render. The five region payloads that HAD come back
+       were parsed and thrown away, and seven regions came up blank with not
+       one of the four silences in any of them: the fetch-then-discard
+       pattern this page exists to end, surviving in the failure path.
+
+       The page's own doctrine forbids exactly this — "an events calendar
+       that does not answer must not blank the five regions that did" — and
+       the two boards were never exempt from it. The suite could not see it:
+       the phase above 500s a REGION, and every board this file ever routed
+       was fulfilled with a valid payload. */
+    allowFetchFailure = true;
+    await page.route("**/api/flows/board?side=long", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+
+    const bull = await page.evaluate(() => {
+      const p = document.querySelector("#ccBull [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(bull.kind, "unreadable", "a pole that answered 500 is marked unreadable");
+    ok(/could not be read/.test(bull.text) && /not a fact about the session/.test(bull.text),
+       `and says the fault is this page's (${bull.text})`);
+    ok(!/No name leaned/.test(bull.text),
+       "in words that are not the empty-side reading, which is a claim about the market");
+
+    /* THE SIX REGIONS THAT ANSWERED ARE STILL DRAWN. Every one of these
+       counts is zero against the loadBoard this phase exists to delete,
+       because on that version none of them was painted at all. */
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
+       "the verdict bar still states its seven readings");
+    eq(await page.locator(".cc-bear tbody tr").count(), 4,
+       "the pole that DID answer still draws its whole side");
+    eq(await page.locator("#ccChg tbody tr").count(), 7,
+       "what changed still draws, out of a payload that came back fine");
+    eq(await page.locator("#ccAlerts tbody tr").count(), 3,
+       "the flagged windows still draw");
+    eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
+       "the dead band's residents still draw");
+    eq(await page.locator("#ccEvents [data-empty]").count(), 1,
+       "and the never-published calendar still says which silence IT is in");
+    eq(await page.locator("#spinePlot svg").count(), 1, "the spine is still drawn");
+
+    /* AN EM DASH, NEVER A 0 — and the session date comes off the half that
+       answered, because neither half is the page's session: they are two
+       writes of one, and the mismatch warning already fires when they
+       disagree. */
+    const tiles = await page.evaluate(() => Object.fromEntries(
+      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
+        t.querySelector(".cc-tile-k")?.textContent.trim(),
+        t.querySelector(".cc-tile-v")?.textContent.trim()])));
+    eq(tiles["Both sides"], "\u2014 / 4", "the unreadable side is an em dash, never a 0");
+    eq(tiles.Session, SESSION, "and the session is taken off the half that answered");
+
+    /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
+       em dash above is the right glyph for "not known" and it is the same
+       glyph five other absences print, so on its own it cannot tell a
+       reader that a fetch failed. */
+    const status = await page.evaluate(
+      () => document.getElementById("flowsStatus").textContent.trim());
+    ok(/bullish board could not be read/.test(status),
+       `the status line names the board that did not answer, by side (${status})`);
+    ok(!/^Loading/.test(status),
+       `rather than the loading sentence it used to be left holding (${status})`);
+    ok(await page.locator('[data-rail-count="long"]').evaluate((el) => el.hidden),
+       "and the rail badges nothing for it rather than badging 0");
+    await page.unroute("**/api/flows/board?side=long");
+
+    /* A NETWORK FAILURE IS THE SECOND WAY IN. fetch REJECTS here rather than
+       resolving with a status, which the old function had no catch for at
+       all — offline, DNS, TLS — so it reached the same blank page by a
+       different door. */
+    await page.route("**/api/flows/board?side=short", (route) => route.abort("failed"));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBear [data-empty]", { timeout: 15000 });
+    const bear = await page.evaluate(() => {
+      const p = document.querySelector("#ccBear [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(bear.kind, "unreadable", "a board whose request never came back is unreadable too");
+    ok(/could not be read/.test(bear.text),
+       `and is worded as this page's fault (${bear.text})`);
+    eq(await page.locator(".cc-bull tbody tr").count(), 5,
+       "while the other pole is untouched by it");
+    eq(await page.locator("#ccChg tbody tr").count(), 7,
+       "and so is every region that answered");
+    const netStatus = await page.evaluate(
+      () => document.getElementById("flowsStatus").textContent.trim());
+    ok(/bearish board could not be read/.test(netStatus),
+       `named on the status line by side (${netStatus})`);
+    await page.unroute("**/api/flows/board?side=short");
+
+    /* AND BOTH POLES AT ONCE, which is the case the render guard used to
+       swallow. That guard tested `!lng && !sht` — two nulls — and a 401
+       returns null too, so containing a failed board made "two boards that
+       could not be read" indistinguishable from "the session is gone and we
+       are already navigating to the gate". Only the redirect may stop the
+       render: five regions still have something true to say. */
+    for (const side of ["long", "short"]) {
+      await page.route("**/api/flows/board?side=" + side, (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+    }
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    eq(await page.locator("#ccChg tbody tr").count(), 7,
+       "with both poles unreadable the lead region still draws every mover it read");
+    eq(await page.locator("#ccAlerts tbody tr").count(), 3,
+       "the flagged windows still draw");
+    eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
+       "the dead band's residents still draw");
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
+       "and the verdict bar still states seven readings, every count of them an em dash");
+    const both = await page.evaluate(() => ({
+      bull: document.querySelector("#ccBull [data-empty]")?.dataset.empty || null,
+      bear: document.querySelector("#ccBear [data-empty]")?.dataset.empty || null,
+      status: document.getElementById("flowsStatus").textContent.trim(),
+    }));
+    eq(both.bull, "unreadable", "both poles say which silence they are in");
+    eq(both.bear, "unreadable", "each in its own region");
+    ok(/bullish and bearish boards could not be read/.test(both.status),
+       `and the status line names them both, once (${both.status})`);
+    ok(!/^Loading/.test(both.status),
+       `rather than being left holding the loading sentence (${both.status})`);
+    for (const side of ["long", "short"]) {
+      await page.unroute("**/api/flows/board?side=" + side);
+    }
     allowFetchFailure = false;
   }
 
@@ -724,6 +930,149 @@ try {
     eq(await page.locator("#ccWatchSub").textContent(), "inside the dead band",
        "and the region header counts nothing it was never given");
     await page.unroute("**/api/flows/board?side=watch");
+  }
+
+  /* ---------- a capped list says that it is capped --------------- */
+  {
+    /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION, and
+       the watch anchor did worse than that. `rowCount` is the WHOLE
+       published board — the publisher caps it at eighty — and this region
+       lists eight of it, so twelve rows on the wire produced the words
+       "all 12" over eight names. Not an omission: a false statement, in a
+       link to /flows/watch/, which is the one route where a reader would
+       have gone to count.
+
+       THE SUITE WAS STRUCTURALLY BLIND TO IT. Its own header says the poles
+       were deliberately given five and four names "so a renderer that
+       quietly caps at three fails here"; the narrow regions were given two
+       watch rows and three alerts, both under the cap of eight, so no phase
+       could reach the truncation at all. */
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccWatch .cc-moves li", { timeout: 15000 });
+    eq((await page.locator("#ccWatchSub").textContent()).trim(), "all 2",
+       "a watch board shorter than the cap is stated whole, which is the word that has to survive");
+
+    const watchMany = Array.from({ length: 12 }, (_, i) => ({
+      t: "W" + String(i + 1).padStart(2, "0"), r: i + 1, s: 18 - i,
+      cnv: 40, px: 10 + i, resid: 0.0200 - i * 0.0011,
+    }));
+    await post("board:watch", { ...watch, rows: watchMany });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccWatch .cc-moves li", { timeout: 15000 });
+    eq(await page.locator("#ccWatch .cc-moves li").count(), 8,
+       "twelve published rows are listed eight deep");
+    eq((await page.locator("#ccWatchSub").textContent()).trim(), "8 of 12",
+       "and the anchor says eight of twelve rather than \"all 12\" over eight names");
+    eq(await page.evaluate(
+       () => document.querySelector('[data-rail-count="watch"]').textContent.trim()), "12",
+       "while the rail still badges the whole board, which is what its link opens");
+    await post("board:watch", watch);
+
+    /* THE FLAGGED WINDOWS PUBLISH THEIR OWN POPULATION and the verdict tile
+       beside this region already prints it, so "Flagged windows 44" sat
+       above eight rows with nothing anywhere saying eight. */
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    const stamp = (await page.locator("#ccAlertsSub").textContent()).trim();
+    ok(/^3 of 7 · read /.test(stamp),
+       `the flagged-window subtitle counts its rows against the read's own seen (${stamp})`);
+    ok(!/\d{2}:\d{2}:\d{2}/.test(stamp),
+       `with no seconds field, which this feed cannot support (${stamp})`);
+    ok(/read \d{2}:\d{2} \S/.test(stamp),
+       `on a 24-hour clock that names the zone it is in (${stamp})`);
+
+    /* THE ZONE, PROVEN BY MOVING THE READER. A bare toLocaleTimeString
+       renders the viewer's own wall clock, follows their 12/24-hour locale
+       and names no zone at all — on a subtitle whose entire subject is WHEN
+       the read was taken. Its own browser context, because a timezone is a
+       context-level fact; its own cookie jar, because the gate is the
+       product. */
+    const tzCtx = await browser.newContext({
+      viewport: { width: 1280, height: 1000 }, timezoneId: "America/New_York" });
+    const tzPage = await tzCtx.newPage();
+    tzPage.on("pageerror", (e) => errors.push("tz: " + e.message));
+    await tzPage.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await tzPage.fill("#u", FLOWS_TEST_USER);
+    await tzPage.fill("#p", FLOWS_PASSWORD);
+    await Promise.all([
+      tzPage.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      tzPage.click(".flows-submit"),
+    ]);
+    await tzPage.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    const tzSaid = (await tzPage.locator("#ccAlertsSub").textContent()).trim();
+    /* 10:28:20Z is 06:28 in New York, and the hour is the assertion: a
+       stamp that ignored the reader's zone would print 10:28 here, and one
+       that named no zone would leave 06:28 meaning nothing in particular. */
+    ok(/read 06:28 \S/.test(tzSaid),
+       `the instant is the reader's own wall clock with its zone stated beside it (${tzSaid})`);
+    ok(!/10:28/.test(tzSaid), `rather than another zone's hour under no label (${tzSaid})`);
+    await tzCtx.close();
+
+    const alertMany = Array.from({ length: 10 }, (_, i) => ({
+      t: "A" + String(i + 1).padStart(2, "0"), cp: "C", k: 100 + i,
+      exp: "2026-09-18", prem: 2000000 - i * 1000, rule: "RepeatedHits",
+    }));
+    await post("flowalerts", { ...alerts, seen: 44, rows: alertMany });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    eq(await page.locator("#ccAlerts tbody tr").count(), 8,
+       "a feed longer than the cap is listed eight deep");
+    const capped = (await page.locator("#ccAlertsSub").textContent()).trim();
+    ok(/^8 of 44 · read /.test(capped),
+       `and the subtitle states the read's whole population beside the eight it drew (${capped})`);
+    const flagged = await page.evaluate(() => {
+      const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
+        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
+      return { v: tile.querySelector(".cc-tile-v").textContent.trim(),
+               s: tile.querySelector(".cc-tile-s").textContent.trim() };
+    });
+    eq(flagged.v, "44",
+       "which is the same number the verdict tile has always printed twelve pixels away");
+
+    /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. Both
+       current writers set `refreshed`; the else-branch printed "nightly
+       read" for everything that was not explicitly intraday, so a payload
+       predating the field asserted a provenance nobody published — the
+       confident default wearing a ternary. */
+    const noCadence = { ...alerts };
+    delete noCadence.refreshed;
+    await post("flowalerts", noCadence);
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    const said = await page.evaluate(() => {
+      const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
+        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
+      return tile.querySelector(".cc-tile-s").textContent.trim();
+    });
+    ok(!/nightly/.test(said),
+       `a payload that published no cadence is not reported as a nightly read (${said})`);
+    ok(!/intraday/.test(said), `nor as an intraday one (${said})`);
+    ok(/not published/.test(said),
+       `and names the field that is missing instead (${said})`);
+    await post("flowalerts", alerts);
+
+    /* THE LEAD REGION CAPS AT TWELVE and its subtitle was a static span
+       with no slot in it, so a session in which thirty-four names moved
+       showed twelve rows under a sentence naming no count at all. */
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    eq((await page.locator("#ccChgSub").textContent()).trim(),
+       "all 7 · since each name's prior scored session",
+       "the change region counts the movers it drew and keeps the sentence saying what a move is measured against");
+
+    const manyMovers = ["2026-08-21", SESSION].map((d, i) => ({
+      d, source: "scores",
+      rows: Array.from({ length: 14 }, (_, k) => ({ t: "N" + k, s: 30 + k + (i ? k + 1 : 0) })),
+    }));
+    await post("scoretrack", scoretrack(manyMovers));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    eq(await page.locator("#ccChg tbody tr").count(), 12,
+       "fourteen movers are drawn twelve deep");
+    const chgCap = (await page.locator("#ccChgSub").textContent()).trim();
+    ok(/^12 of 14 · /.test(chgCap),
+       `and the header says so rather than presenting an index as the population (${chgCap})`);
+    await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
   /* ---------- a measured emptiness IS a reading ------------------ */
@@ -1026,18 +1375,7 @@ try {
       r.t === "ORCL" ? { ...r, ed: "2026-08-27", edte: 3 }
       : r.t === "CAT" ? { ...r, ed: "2026-09-08", edte: 15 } : r), SESSION, { deep: 4 }));
     await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
-    await post("events", {
-      v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
-      windowDays: 21, inWindow: 2, gateOrigin: SESSION,
-      rows: [
-        { t: "ORCL", d: "2026-08-27", dte: 3, sdte: 3, im: 0.0642, s: 88, st: "ranked" },
-        /* A GATED NAME REACHED THE CALENDAR WITH NO SCORE AT ALL. The board
-           was forbidden from holding an opinion on it, which is not the same
-           as holding a neutral one — so this row must print an em dash and
-           never a confident 0. */
-        { t: "PFE", d: "2026-09-04", dte: 11, sdte: 8, im: 0.0310, s: null, st: "gated" },
-      ],
-    });
+    await post("events", eventsPayload);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccEvents tbody tr", { timeout: 15000 });
 
@@ -1079,6 +1417,29 @@ try {
     eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
   }
 
+  /* ---------- the calendar names its numerator too --------------- */
+  {
+    /* `inWindow` NAMED THE DENOMINATOR AND NOTHING NAMED THE NUMERATOR.
+       "24 in the window" over eight rows is the watch anchor's omission one
+       clause shorter, and shared/flows-events.js says the window "runs into
+       the hundreds". */
+    eq((await page.locator("#ccEventsSub").textContent()).trim(), "all 2 in the window",
+       "a calendar shorter than the cap is stated whole");
+
+    const evMany = Array.from({ length: 10 }, (_, i) => ({
+      t: "E" + String(i + 1).padStart(2, "0"), d: "2026-09-0" + ((i % 9) + 1),
+      dte: i + 1, sdte: i + 1, im: 0.02, s: 10 + i, st: "ranked",
+    }));
+    await post("events", { ...eventsPayload, inWindow: 30, rows: evMany });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccEvents tbody tr", { timeout: 15000 });
+    eq(await page.locator("#ccEvents tbody tr").count(), 8,
+       "a calendar longer than the cap is listed eight deep");
+    eq((await page.locator("#ccEventsSub").textContent()).trim(), "8 of 30 in the window",
+       "and the subtitle names the eight it drew as well as the thirty it did not");
+    await post("events", eventsPayload);
+  }
+
   /* ---------- the two tilts, when they disagree ------------------ */
   {
     /* THE DISAGREEMENT IS THE READING. breadth.tilt counts names and
@@ -1108,6 +1469,55 @@ try {
     eq(tiles["Tilt · dollars"]?.s, "the two weightings disagree in sign",
        "on both tiles, because either one alone would be the misleading half");
     await post("market", market);
+  }
+
+  /* ---------- a pending pole does not hide a published one ------- */
+  {
+    /* THE WORKER'S UNPUBLISHED ANSWER IS A TRUTHY OBJECT —
+       {status:"pending", rows: []} — and the spine took its metadata from
+       `lng || sht`, so an unpublished long board was chosen over a live
+       short one. The axis then labelled itself "no dead band published for
+       this session" while the payload three lines away in the same closure
+       carried the band, the scored count and the neutral count; the status
+       line lost its session date and its band clause the same way.
+       Degrading toward silence is the right direction — discarding a
+       published number to get there is not, and this file's own pending
+       phase pends only board:watch, never a pole. */
+    await page.route("**/api/flows/board?side=long", (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ side: "long", rows: [], generatedAt: null, status: "pending" }),
+    }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+    eq(await page.evaluate(() => document.querySelector("#ccBull [data-empty]").dataset.empty),
+       "pending", "an unpublished pole is pending, which is its own silence");
+
+    const drawn = await page.evaluate(() => {
+      const svg = document.querySelector("#spinePlot svg");
+      return {
+        band: svg.querySelectorAll(".sp-band").length,
+        label: svg.querySelector(".sp-bandlabel").textContent.trim(),
+        dots: svg.querySelectorAll(".sp-dot").length,
+      };
+    });
+    eq(drawn.band, 1, "the band is still hatched, off the board that published one");
+    ok(/15 of 24 inside ±20/.test(drawn.label),
+       `and the axis states the counts that payload carries (${drawn.label})`);
+    ok(!/no dead band published/.test(drawn.label),
+       `rather than the sentence reserved for a session that published none (${drawn.label})`);
+    eq(drawn.dots, 4, "with the published side's names still on it");
+
+    const status = await page.evaluate(
+      () => document.getElementById("flowsStatus").textContent.trim());
+    ok(new RegExp("session " + SESSION).test(status),
+       `and the status line still names the session it is describing (${status})`);
+    ok(/15 of 24 inside the band/.test(status),
+       `and still states how much of the pool the band held (${status})`);
+    ok(/\u2014 bullish · 4 bearish/.test(status),
+       `while counting the unpublished side as nothing known rather than as 0 (${status})`);
+    ok(!/could not be read/.test(status),
+       `and a key that has not published is not reported as a failed fetch (${status})`);
+    await page.unroute("**/api/flows/board?side=long");
   }
 
   /* ---------- one viewBox unit is one CSS pixel ------------------ */
@@ -1607,7 +2017,12 @@ try {
     `between them, four silences in four sentences, a spine at one viewBox unit per CSS ` +
     `pixel that repaints on resize and trails only the moves the two payloads agree are ` +
     `this session's, a staleness guard that is flows-ui.js's one test rather than a second ` +
-    `copy of it, and two halves that refuse to be presented as one session when they are not`);
+    `copy of it, two halves that refuse to be presented as one session when they are not, ` +
+    `a board that does not answer contained to its own region instead of blanking the six ` +
+    `that did, a pole that has not published never chosen over one that has, every capped ` +
+    `region stating what it is showing out of what it holds rather than calling eight of ` +
+    `twelve "all 12", the read instant on a 24-hour clock that names its zone, and a ranked ` +
+    `price change that no longer shares a word with the score move seated above it`);
 } finally {
   await browser.close();
   await server.stop();

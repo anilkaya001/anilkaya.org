@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "96";
+export const ASSET_VERSION = "98";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -344,7 +344,13 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
     <section class="cc-region cc-chg" aria-labelledby="ccChgH">
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccChgH">What changed</h2>
-        <span class="cc-h-s">since each name&#39;s prior scored session</span>
+        <!-- A SLOT, and its default text is the whole truth when nothing
+             fills it. The region caps at twelve rows and this span said no
+             count at all, so a session in which thirty-four names moved
+             showed twelve under a subtitle a reader takes for the whole
+             list. flows-overview.js prefixes the count it drew, and only on
+             the branch that drew rows. -->
+        <span class="cc-h-s" id="ccChgSub">since each name&#39;s prior scored session</span>
       </div>
       <div class="cc-body" id="ccChg"></div>
     </section>
@@ -517,6 +523,31 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
 `)}
 ${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
+<!-- flows-ui.js BEFORE flows-board.js, for the reason the overview states at
+     its own tag: two deferred scripts execute in document order and the board
+     reads window.FlowsUI at module scope (flows-board.js:36).
+
+     WITHOUT THIS TAG THE BOARD'S CONTROL BAR DID NOT EXIST. buildControls()
+     opens "if (!host || !UI …) return;" — so on a page where the library was
+     never served it returned on its first statement, and the ticker filter,
+     the eight-way order select and the "8 of 63 names match" denominator were
+     ~130 lines of finished, commented, argued code that never entered the DOM
+     on the two busiest routes in the section. Nothing failed. The guard is
+     correct — a page that cannot build the controls should not throw — and a
+     correct guard over an absent dependency is silence, which is why this
+     survived: the page looked finished because the missing part was the part
+     that would have drawn itself.
+
+     NOT ADDED TO THE OTHER NINE ROUTES, and that is a measurement rather than
+     an oversight. The library is 24k of uncompressed parse; tests/flows-weight
+     measures each route's JavaScript against a stated ceiling, and serving it
+     everywhere trips five of them at once (desk 141/135, market 115/95,
+     unusual 104/85, political 73/55, history 68/45) while leaving events 1k
+     and ticker 6k. flows-weight.mjs:92 already says where that cost comes
+     from — "THE SHARED BUNDLE IS WHERE THE COST COMPOUNDS" — so the library
+     goes where something on the page actually calls it. Here, 267k to 291k
+     against a 300k ceiling, and it buys back a whole control bar. -->
+<script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 <script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-card.js")}" defer></script>
