@@ -291,10 +291,15 @@ try {
        "the equal-weight tilt is a share of names, with its unit");
     eq(by["Tilt · dollars"]?.v, "−2.1%",
        "and the dollar-weight tilt is a share of premium, on the same tile row");
-    eq(by["Tilt · names"]?.s, "of names, bull − bear",
-       "each tile says what it is a share OF");
-    eq(by["Tilt · dollars"]?.s, "of gross premium, calls − puts",
-       "and the two subtitles are not the same sentence");
+    /* AND IT NAMES THE POPULATION IT IS A SHARE OF. breadth.tilt divides by
+       bull + bear, not by the 264 in the Screened tile beside it, and
+       premium.tilt is a share of gross NET premium — which shared/
+       flows-market.js says explicitly is not call premium and not put
+       premium. Both subtitles used to name the wrong denominator. */
+    eq(by["Tilt · names"]?.s, "of the names that leaned, bull − bear",
+       "each tile says what it is a share OF, in the denominator the shaper used");
+    eq(by["Tilt · dollars"]?.s, "of gross net premium, bought − sold",
+       "and the two subtitles are not the same sentence, nor two vendor columns this is not made of");
     ok(/is-neg/.test(by["Tilt · names"]?.cls || "") &&
        /is-neg/.test(by["Tilt · dollars"]?.cls || ""),
        `and a sold tape is toned as one on both (${by["Tilt · names"]?.cls})`);
@@ -523,6 +528,16 @@ try {
        and the integers alone cannot be told apart. Filtering the nulls out
        before subtracting — which is what this page used to do — discards
        exactly this. */
+    /* AND THE COLUMN HEADERS SAY WHICH SESSION EACH NUMBER IS ABOUT. The
+       score column used to be headed "Now", which on the rows this region
+       deliberately keeps — readings that are real and are not about today —
+       contradicted the "As of" cell two columns along. */
+    const heads = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccChg thead th"), (th) => th.textContent.trim()));
+    deep(heads, ["Event", "Name", "Δ score", "Over", "Ended at", "Δ resid ×10⁴",
+                 "Run · sessions", "As of"],
+      "every column is headed with what it measures and, where it has one, its unit");
+
     const by = Object.fromEntries(rows.map((r) => [r[1], r]));
     eq(by.MU[3], "2 sessions", "a move across a gap says how many sessions it spans");
     eq(by.PFE[3], "1 session", "and an overnight move says that it is one");
@@ -585,6 +600,26 @@ try {
     /* AVGO is in the trace and on neither board, so no card exists for it
        and none is claimed. */
     eq(cells.AVGO?.tag, "SPAN", "and a name on no board opens nothing either");
+
+    /* THE CROSSING IS ALSO ON THE RANKED ROW, which is where a reader
+       working down the list actually is. Without it the ten ranked opinions
+       are indistinguishable in age: a name that cleared the band this
+       morning and one that has sat outside it for a month print the same
+       row. The tag is a WORD, so it survives greyscale, and it carries the
+       payload's own prose as its title. */
+    const tags = await page.evaluate(() => {
+      const out = {};
+      for (const td of document.querySelectorAll(".cc-bull tbody .cc-t, .cc-bear tbody .cc-t")) {
+        const tag = td.querySelector(".cc-cross");
+        out[td.querySelector(".cc-open, .cc-flat").textContent.trim()] =
+          tag ? tag.textContent.trim() : null;
+      }
+      return out;
+    });
+    eq(tags.CAT, "flipped", "a ranked name that changed sides says so on its own row");
+    eq(tags.MU, "cleared", "and one that came out of the band this session says that");
+    eq(tags.PFE, null, "while the largest drift on the page carries no crossing tag");
+    eq(tags.DE, null, "and neither does a name that has not moved at all");
 
     /* AND IT REALLY OPENS. The delegation in flows-card.js matches
        .cc-open[data-t] anywhere on the document, so the proof that this
@@ -1134,7 +1169,17 @@ try {
         dashed: !!l.getAttribute("stroke-dasharray"),
         x1: Number(l.getAttribute("x1")), x2: Number(l.getAttribute("x2")),
       })));
-    ok(trails.length >= 5, `the published names trail their moves (${trails.length})`);
+    /* FOUR OF THE NINE MARKS, AND THE COUNT IS THE ASSERTION. ORCL, CAT, PFE
+       and MU moved and their track reading is this board row. DE and ADBE
+       held their score, KLA and XOM have nothing to subtract from, and BAC's
+       newest reading is on the PRIOR session — the trail is a claim about
+       this session's movement and BAC's move is not one, so it may not be
+       drawn. `>= 5` was the assertion here, which passed while BAC was
+       trailed from an origin neither payload contains. */
+    eq(trails.length, 4,
+       `only the names whose track reading IS this board row trail their move (${trails.length})`);
+    deep(trails.map((l) => l.t.split(" ")[0]).sort(), ["CAT", "MU", "ORCL", "PFE"],
+      "and they are the four that moved this session");
     const orcl = trails.find((l) => /^ORCL/.test(l.t));
     ok(orcl && /over 1 session/.test(orcl.t),
        `and each trail states its span in the title (${orcl && orcl.t})`);
@@ -1156,9 +1201,234 @@ try {
       document.querySelectorAll("#spinePlot .sp-cross"), (c) => c.getAttribute("class")));
     deep(ringed.map((c) => c.replace("sp-cross ", "")).sort(), ["is-cleared", "is-flipped"],
       "each ring says which category change it marks");
+    /* AND IT SAYS IT IN A WORD TOO. The ring is a shape, so THAT a crossing
+       happened survives greyscale; WHICH one was carried by the class alone,
+       which is a hue to a sighted reader and nothing at all to a screen
+       reader. The mark's accessible name carries the word. */
+    const muDot = await page.evaluate(() => (document.querySelector(
+      '#spinePlot .sp-dot[data-t="MU"] title') || {}).textContent || "");
+    ok(/· cleared$/.test(muDot), `a ringed mark names its crossing in words (${muDot})`);
+    const deDot = await page.evaluate(() => (document.querySelector(
+      '#spinePlot .sp-dot[data-t="DE"] title') || {}).textContent || "");
+    ok(!/cleared|faded|flipped/.test(deDot),
+       `and a mark that crossed nothing claims none (${deDot})`);
     eq(await page.locator('#spinePlot .sp-dot[data-t="NKE"]').count(), 0,
        "and the faded name is on no board, so the spine cannot show it at all");
+
+    /* THE MARK WHOSE MOVE IS NOT ABOUT TODAY. BAC is on the bear board at
+       −62 and its newest track reading is 2026-08-21, so the −7 it carries
+       happened before this session. The dot is drawn — the LEVEL is today's,
+       from the board — but nothing is trailed from it, because the origin
+       would be the board's score minus a move measured on another session:
+       a third number, neither payload's, drawn as a measurement. Its title
+       says when it was last scored instead. */
+    const bac = await page.evaluate(() => {
+      const dot = document.querySelector('#spinePlot .sp-dot[data-t="BAC"]');
+      return dot && {
+        title: (dot.querySelector("title") || {}).textContent || "",
+        trailed: Array.from(document.querySelectorAll("#spinePlot .sp-move"))
+          .some((l) => /^BAC/.test((l.querySelector("title") || {}).textContent || "")),
+      };
+    });
+    ok(bac, "a name whose reading is not about today is still marked at its published level");
+    eq(bac.trailed, false, "but its move is not drawn from an origin neither payload holds");
+    ok(/last scored 2026-08-21/.test(bac.title),
+       `and the mark says when the track last saw it (${bac && bac.title})`);
+    ok(!/over/.test(bac.title),
+       "rather than restating a delta the change region has already dated");
     await page.setViewportSize({ width: 1280, height: 1000 });
+  }
+
+  /* ---------- a track whose newest session is not the board's ----- */
+  {
+    /* THE ORDINARY OUTAGE ON A PAGE THAT LEADS ON CHANGE. The board and the
+       score track are two keys written by two legs of one run, and nothing
+       forces the track's newest column to be the session the board is
+       publishing: the archive can lag by a session, and a name can be out of
+       the screener for a day and carry a real move measured last week.
+
+       Every change reading on the page has to survive that, and before this
+       phase two of them did not. The ranked row stamped "flipped" onto CAT
+       from a reading a session old, and the spine trailed each mark from
+       `board score − published move` — which is the previous observation
+       only when the two payloads agree about where the name is NOW, and is
+       otherwise a third number that neither of them contains.
+
+       Served here by publishing one more session that holds only ORCL, at a
+       score the board does not carry: every other name's newest reading is
+       now a session behind, and ORCL's is current but at 92 against the
+       board's 88. */
+    await post("scoretrack", scoretrack(TRACK_DAYS.concat([{
+      d: "2026-08-25", source: "scores", rows: [{ t: "ORCL", s: 92, q: 2600 }],
+    }])));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
+
+    const stale = await page.evaluate(() => ({
+      tags: document.querySelectorAll(".cc-bull .cc-cross, .cc-bear .cc-cross").length,
+      trails: document.querySelectorAll("#spinePlot .sp-move").length,
+      rings: document.querySelectorAll("#spinePlot .sp-cross").length,
+      dots: document.querySelectorAll("#spinePlot .sp-dot").length,
+      orcl: (document.querySelector('#spinePlot .sp-dot[data-t="ORCL"] title') || {}).textContent || "",
+      /* THE NAME NODE, NOT THE CELL: by this point in the file the name cell
+         also carries the earnings marker, and reading the cell whole keys
+         this map on "ORCL⚠3s". */
+      asOf: Array.from(document.querySelectorAll("#ccChg tbody tr"),
+        (tr) => [tr.children[1].querySelector(".cc-open, .cc-flat").textContent.trim(),
+                 tr.children[7].textContent.trim()]),
+      aria: document.querySelector("#spinePlot svg").getAttribute("aria-label") || "",
+    }));
+    eq(stale.tags, 0,
+       "no ranked row claims a crossing once the track's newest reading is not this session's");
+    eq(stale.trails, 0,
+       "and the spine trails nothing rather than drawing an origin from two payloads that disagree");
+    eq(stale.rings, 0, "and rings no crossing onto a session it did not happen on");
+    eq(stale.dots, 9, "while every published name is still marked at the level the BOARD published");
+    ok(/last scored 2026-08-25/.test(stale.orcl),
+       `a mark whose track score is not the board's says when the track last saw it (${stale.orcl})`);
+    ok(!/trail the move/.test(stale.aria),
+       "and the accessible description does not promise trails that are not drawn");
+
+    /* The change region still reports every one of those moves — dated. The
+       reading is real; it is simply not about today, and that distinction is
+       this region's whole job. */
+    const byName = Object.fromEntries(stale.asOf);
+    eq(byName.ORCL, "this session", "the one name scored in the newest session says so");
+    ok(/2026-08-24 · 1 session back/.test(byName.CAT || ""),
+       `and the rest are dated rather than dropped (CAT: ${byName.CAT})`);
+
+    await post("scoretrack", scoretrack(TRACK_DAYS));
+  }
+
+  /* ---------- the fourth change sentence, and the missing layer --- */
+  {
+    /* FOUR STATUSES, FOUR SENTENCES was the claim; three of them had a
+       fixture. "single-session" is the archive on its first day: one column,
+       nothing to compare it against, and a page that worded it like "cold"
+       would tell a reader the pool held nothing comparable when the truth is
+       that there is only one session to compare. */
+    await post("scoretrack", scoretrack([{
+      d: SESSION, source: "scores",
+      rows: [...bullRows, ...bearRows].map((r) => ({ t: r.t, s: r.s })),
+    }]));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
+    const one = await page.evaluate(() => {
+      const p = document.querySelector("#ccChg [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(one.kind, "unavailable",
+       "an archive one session long cannot report change, and that is not a quiet market");
+    ok(/holds a single session/.test(one.text) && new RegExp(SESSION).test(one.text),
+       `it says so and names the session (${one.text})`);
+    ok(/once a second session is archived/.test(one.text),
+       `and what would make it answerable (${one.text})`);
+    ok(!/held its score/.test(one.text) && !/No name in the pool/.test(one.text),
+       "in words that are neither of the other two absences");
+
+    /* AND THE PAYLOAD THAT PREDATES THE LAYER ENTIRELY: readable, populated,
+       and carrying no d1 and no change block. This is the branch that
+       refuses to fall back to subtracting two scores in the browser — the
+       arithmetic this region was rebuilt to delete — because a difference
+       with no session span attached is not a reading. */
+    await post("scoretrack", {
+      v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+      windowSessions: 2, deadBand: 20,
+      sessions: [{ d: "2026-08-21", source: "scores", names: 2, preEpoch: false },
+                 { d: SESSION, source: "scores", names: 2, preEpoch: false }],
+      names: [{ t: "ORCL", s: [80, 88], n: 2 }, { t: "PFE", s: [-60, -91], n: 2 }],
+    });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
+    const old = await page.evaluate(() => {
+      const p = document.querySelector("#ccChg [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim(),
+               rows: document.querySelectorAll("#ccChg tbody tr").length };
+    });
+    eq(old.kind, "unavailable",
+       "a track published before the change layer is a missing field, not a still market");
+    eq(old.rows, 0, "and nothing is tabulated from it");
+    ok(/no name carries a d1 move/.test(old.text),
+       `it names the field that is missing (${old.text})`);
+    ok(/will not subtract two scores itself/.test(old.text),
+       `and refuses the arithmetic that has no span attached (${old.text})`);
+    /* The strips still draw from the same series: the SERIES is published,
+       only the derived layer is not, and the two are different absences. */
+    ok(await page.locator(".cc-bull tbody .cc-trk svg").count() > 0,
+       "while the series it does carry is still drawn");
+
+    await post("scoretrack", scoretrack(TRACK_DAYS));
+  }
+
+  /* ---------- the count with no rows behind it -------------------- */
+  {
+    /* THE FOURTH WAY THIS REGION CAN HAVE NOTHING TO TABULATE, and the one
+       that must not be worded as a quiet market: the pool moved, the change
+       block counts it, and the payload's row ceiling shed every name that
+       did. Saying "nothing moved" here would contradict the sentence printed
+       directly above it.
+
+       Hand-written rather than built by the shaper, because the shaper caps
+       at 500 names and this state needs a shed that took every mover — a
+       payload shape the wire can carry and this fixture cannot otherwise
+       reach. */
+    await post("scoretrack", {
+      v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+      windowSessions: 2, deadBand: 20, namesShed: 40, shedBy: "names", namesSeen: 41,
+      sessions: [{ d: "2026-08-21", source: "scores", names: 41, preEpoch: false },
+                 { d: SESSION, source: "scores", names: 41, preEpoch: false }],
+      /* One surviving row, and it has no prior observation — so it carries no
+         d1 and there is nothing for the table to draw. */
+      names: [{ t: "KLA", s: [null, 41], n: 1, last: 41, lastAt: 1, d1: null, run: 1 }],
+      change: {
+        session: SESSION, prior: "2026-08-21", comparable: 40, consecutive: 38,
+        moved: 8, held: 32, current: 41, entered: 1, left: 0, band: 20,
+        crossings: { cleared: 2, faded: 1, flipped: 0 }, status: "ok",
+      },
+    });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
+    const shed = await page.evaluate(() => {
+      const p = document.querySelector("#ccChg [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(shed.kind, "unavailable",
+       "a session whose movers were all shed is a payload limit, not a still market");
+    ok(/8 of 40 names/.test(shed.text),
+       `the count is still stated, because it is still true (${shed.text})`);
+    ok(/row ceiling shed them/.test(shed.text),
+       `and says which ceiling took the rows (${shed.text})`);
+    ok(/no rows behind it/.test(shed.text),
+       `and that the list below is not the answer to the count above (${shed.text})`);
+    ok(!/held its score/.test(shed.text),
+       "in words that are not the every-name-compared sentence");
+    await post("scoretrack", scoretrack(TRACK_DAYS));
+  }
+
+  /* ---------- a comparison across the selection epoch ------------- */
+  {
+    /* THE OTHER SPARSE-COLUMN CAVEAT, which had a renderer branch and no
+       fixture that could reach it: the suite's epoch sat after every session
+       in the window, so `preEpoch` was true on both ends of every comparison
+       and the marking could never fire. Scores either side of the epoch come
+       from different pools under different selection rules, which is two
+       experiments wearing one line. */
+    await post("scoretrack", { ...scoretrack(TRACK_DAYS),
+      ...buildScoreTrack(TRACK_DAYS, { deadBand: 20, epoch: "2026-08-20" }) });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    const spans = await page.evaluate(() => Object.fromEntries(Array.from(
+      document.querySelectorAll("#ccChg tbody tr"),
+      (tr) => [tr.children[1].querySelector(".cc-open, .cc-flat").textContent.trim(),
+               { text: tr.children[3].textContent.trim(),
+                 title: (tr.children[3].querySelector("span[title]") || {}).title || "" }])));
+    ok(/across the epoch/.test(spans.MU?.text || ""),
+       `a comparison straddling the epoch is marked (${spans.MU?.text})`);
+    ok(/different pools/.test(spans.MU?.title || ""),
+       `carrying the payload's own note rather than a caption written here (${spans.MU?.title})`);
+    ok(!/across the epoch/.test(spans.ORCL?.text || ""),
+       `and one entirely on this side of it is not (${spans.ORCL?.text})`);
+    await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
   /* ---------- the staleness guard -------------------------------- */
@@ -1230,6 +1500,62 @@ try {
        `naming the session the numbers actually describe (${s.text})`);
   }
 
+  /* ---------- the freshness check that could not run -------------- */
+  {
+    /* THE GUARD'S OWN ABSENCE IS A SENTENCE, NOT A SILENCE. This page used
+       to carry a private copy of the two staleness tests with its own two
+       constants and its own wording, behind a comment saying the shared one
+       did not exist yet — so one outage was worded two ways on two routes of
+       one product, and the thresholds could be tuned in one place and not
+       the other. The copy is gone and flows-ui.js's `staleness` is the only
+       test. What must NOT follow is a page that silently stops checking when
+       an older module is served from a cache: a freshness check that quietly
+       stops running looks exactly like a pipeline that is fine.
+
+       Served by intercepting the library assignment in a page of its own, so
+       the module really is missing the function rather than the test merely
+       asserting that it would be handled. */
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const shadow = await ctx.newPage();
+    shadow.on("pageerror", (e) => errors.push("shadow: " + e.message));
+    await shadow.addInitScript(() => {
+      let held;
+      Object.defineProperty(window, "FlowsUI", {
+        configurable: true,
+        get: () => held,
+        set: (lib) => {
+          const copy = Object.assign({}, lib);
+          delete copy.staleness;
+          held = Object.freeze(copy);
+        },
+      });
+    });
+    await shadow.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    /* Its own context, so its own cookie jar: the gate is the product. */
+    await shadow.fill("#u", FLOWS_TEST_USER);
+    await shadow.fill("#p", FLOWS_PASSWORD);
+    await Promise.all([
+      shadow.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      shadow.click(".flows-submit"),
+    ]);
+    await shadow.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
+    const said = await shadow.evaluate(() => ({
+      has: typeof window.FlowsUI.staleness,
+      text: document.getElementById("flowsStale").textContent.trim(),
+      stale: document.body.classList.contains("is-stale"),
+      rows: document.querySelectorAll(".cc-bull tbody tr").length,
+    }));
+    eq(said.has, "undefined", "the shared check really is absent from this page's module");
+    ok(/could not run/.test(said.text),
+       `and the page says the check could not run (${said.text})`);
+    ok(/flows-ui/.test(said.text), "naming the module that is too old to carry it");
+    ok(!/more than four days old/.test(said.text) && !/last written/.test(said.text),
+       "and does not answer the question anyway out of a second copy of the arithmetic");
+    eq(said.stale, true, "the document is marked, because nothing here is confirmed to be today's");
+    ok(said.rows > 0, "while every reading the page DOES have is still drawn");
+    await ctx.close();
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
   console.log(`✓ flows-overview: ${checks} assertions — a page that leads on CHANGE: ` +
@@ -1240,9 +1566,9 @@ try {
     `joined onto the ranked names in the events payload's own unit and the score joined ` +
     `back onto the calendar, both weightings of the tilt rather than a silent choice ` +
     `between them, four silences in four sentences, a spine at one viewBox unit per CSS ` +
-    `pixel that repaints on resize and trails each name's move, a staleness guard driven ` +
-    `by the write header, and two halves that refuse to be presented as one session when ` +
-    `they are not`);
+    `pixel that repaints on resize and trails only the moves the two payloads agree are ` +
+    `this session's, a staleness guard that is flows-ui.js's one test rather than a second ` +
+    `copy of it, and two halves that refuse to be presented as one session when they are not`);
 } finally {
   await browser.close();
   await server.stop();
