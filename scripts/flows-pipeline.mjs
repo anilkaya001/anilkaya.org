@@ -3361,6 +3361,9 @@ function mulberry(seed) {
 const SECTORS = ["Technology", "Healthcare", "Energy", "Financials", "Consumer Cyclical", "Industrials"];
 
 function fakeScreener(count) {
+  /* THE ORIGIN THE EARNINGS GATE WILL COUNT FROM, read once here so the
+     fixture and the gate cannot disagree about what "today" is. */
+  const gateOrigin = easternNow().date;
   const rnd = mulberry(20260825);
   const rows = [];
   for (let i = 0; i < count; i++) {
@@ -3464,8 +3467,26 @@ function fakeScreener(count) {
          page is built from exactly those — and the rest land on the boards
          where `edte` is the column that says a top-ranked name is about to be
          removed for a reason that has nothing to do with its signal. */
+      /* MEASURED FROM THE GATE'S OWN DATE, NOT FROM AN INSTANT — which is the
+         defect this file already documents at daysToEarnings, reintroduced
+         here by me and caught by a suite six hours later.
+
+         This read `Date.now()`. The gate counts from `easternNow().date`. The
+         two agree for most of the day and disagree between UTC midnight and
+         Eastern midnight, when the fixture's base has rolled over and the
+         gate's origin has not: every generated `dte` shifts by one, and the
+         names sitting exactly on the twelve-day boundary cross it. Measured:
+         the long and short pools went from 44/53 to 47/50, the short board
+         stopped shedding, and `shed > 0` — an assertion whose whole purpose
+         is to prove the fixture reaches the shedding branch — failed on a
+         corpus that had changed underneath it while no code did.
+
+         Anchored to the same date the gate uses, the offset is exactly the
+         number of days drawn, every run, at every hour. The corpus stops
+         being a function of when the suite happened to run. */
       next_earnings_date: rnd() > 0.5
-        ? new Date(Date.now() + Math.floor(rnd() * 46) * 86400000).toISOString().slice(0, 10)
+        ? new Date(Date.parse(gateOrigin + "T00:00:00Z") + Math.floor(rnd() * 46) * 86400000)
+          .toISOString().slice(0, 10)
         : null,
     });
   }
