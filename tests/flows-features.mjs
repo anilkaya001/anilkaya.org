@@ -864,6 +864,27 @@ const near = (a, b, tol, msg) => {
   agree(overflow, { winsor: 0.02 }, "bounds that overflow to Infinity — the clip is refused");
   ok(robustZFused(overflow, { winsor: 0.02 }).every((v) => v === 0),
      "and an unusable scale is the neutral vote for everyone, never Infinity and never NaN");
+  agree([-1e308, -1e308, 1e308], { winsor: 0.02 }, "only the upper bound overflows");
+  agree([-1e308, 1e308, 1e308], { winsor: 0.02 }, "only the lower bound overflows");
+
+  /* TWO THINGS THIS SUITE DELIBERATELY DOES NOT ASSERT, recorded so the next
+     reader does not spend the afternoon finding out the same way:
+
+       * reading the MAD's deviations out of the sorted buffer instead of the
+         original-order one is EQUIVALENT — a median only ever sees the
+         multiset — so no fixture can distinguish it, and none pretends to;
+       * dropping the non-finite-bound guard is equivalent TOO, because a bound
+         can only overflow on a column that also overflows the MAD and the
+         stdev, and both paths then return the neutral vote for everyone. The
+         four fixtures above reach that branch and agree either way. The guard
+         exists so the fused form and winsorize refuse in the same place, not
+         because a divergence is currently reachable.
+
+     Both were established by mutating the implementation and re-running this
+     file. Three other mutations of the same kind — skipping the clip before the
+     quantiles, taking the median through the quantile formula, and folding the
+     fallback's sum over the sorted copy — are NOT equivalent, and the fixtures
+     above kill all three. */
 
   /* AND A DIFFERENTIAL FUZZ, so the agreement is a property rather than a list
      of cases someone thought of. Deterministic seed: a failure is reproducible. */

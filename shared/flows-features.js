@@ -224,7 +224,17 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
   const whi = qs(1 - winsor);
   /* winsorize returns the column UNCLIPPED when either bound is non-finite,
      which an interpolation between two enormous opposite-signed entries can
-     genuinely produce. Reproduce that rather than clipping to Infinity. */
+     genuinely produce. Reproduce that rather than clipping to Infinity.
+
+     STRUCTURAL, NOT BEHAVIOURAL, and worth saying so plainly: a bound can only
+     go non-finite when two ADJACENT sorted entries differ by more than
+     MAX_VALUE, and such a column also overflows the MAD and the stdev, so both
+     the composed form and this one already return the neutral vote for every
+     name. Removing this guard was checked against every such column that can be
+     constructed and the answers were identical. It stays because it keeps the
+     two functions saying the same thing in the same place: if winsorize's
+     refusal ever changes, the divergence should be a diff here, not a silently
+     different score. */
   const clipping = Number.isFinite(wlo) && Number.isFinite(whi);
   if (clipping) {
     /* Math.min(Math.max(x, lo), hi), not a two-armed comparison: when a caller
