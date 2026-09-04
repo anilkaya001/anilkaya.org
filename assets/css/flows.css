@@ -3076,16 +3076,16 @@ body.is-stale .flows-tablewrap {
    while it is written AFTER them. Moved any higher, a lead panel would gain
    the hover lift it does not have today.
 
-   SEVEN SIZES HERE ARE NOT ON THE TYPE LADDER: 0.84 and 0.76 on .ft-id, 1rem
-   on .ft-group, 1.02 on .ft-chg-lead, 0.7 on .ft-chg-e, 1.25 on the phone
-   .ft-chg-v and 1.15 on the phone .ft-head h2. Every size that IS a ladder
-   step is written as its token; these seven are carried over verbatim,
-   because this is a MOVE. Snapping 1.02 to --fs-lead or 0.7 to --fs-label
-   changes what a reader sees, and the phone sizes were set against a MEASURED
-   bar height (the 46rem note at the foot of this section) — a relocation that
-   quietly redesigns four blocks is not a relocation. They are named here so
-   the next typographic pass decides them against a measurement instead of
-   discovering them.                                                       */
+   SEVEN SIZES HERE ARE NOT ON THE TYPE LADDER, across six selectors: 0.84
+   and 0.76 on .ft-id, 1rem on .ft-group, 1.02 on .ft-chg-lead, 0.7 on
+   .ft-chg-e, 1.25 on the phone .ft-chg-v and 1.15 on the phone
+   .ft-bar .ft-head h2. Every size that IS a ladder step is written as its
+   token; these seven are carried over verbatim, because this is a MOVE.
+   Snapping 1.02 to --fs-lead or 0.7 to --fs-label changes what a reader sees,
+   and the two phone sizes were set against a MEASURED bar height (the 46rem
+   note at the foot of this section) — a relocation that quietly redesigns six
+   selectors is not a relocation. They are named here so the next typographic
+   pass decides them against a measurement instead of discovering them.     */
 
 .ft-bar {
   position: sticky;

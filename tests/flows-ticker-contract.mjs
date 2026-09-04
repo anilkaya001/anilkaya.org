@@ -1534,6 +1534,92 @@ try {
     await touch.close();
   }
 
+  /* ---------- 6j. the chrome's rules ship in the stylesheet ----------
+
+     THEY USED TO BE INJECTED. assets/js/flows-ticker.js carried a 236-line
+     CSS template literal and appended it to document.head on first paint,
+     which is integration debt with three costs a test can state:
+
+       - AN INJECTED SHEET IS NEVER FETCHED, so no ?v= reaches it. A reader
+         holding a cached bundle got old rules under new markup, and one
+         holding a cached flows.css got the reverse. (That the pages ask for
+         the stylesheet WITH a version at all is asserted in
+         tests/flows-features.mjs; this is the other half — that the rules are
+         in the file being versioned.)
+       - NO CSS SUITE COULD READ IT. tests/flows-sign.mjs asserts that every
+         polarity class a renderer emits resolves to a rule in flows.css; the
+         change block's four states were exempt purely by living somewhere
+         that suite does not read. A neutral class with no rule is not
+         neutral, it is invisible.
+       - IT WAS JAVASCRIPT BYTES on the route tests/flows-weight.mjs weighs.
+
+     ASSERTED IN BOTH DIRECTIONS, because either half alone lets the debt
+     regenerate: the controller must inject nothing, AND every class the
+     chrome actually emits must resolve to a rule in the file the page links.
+
+     THE CLASS LIST IS READ OFF THE BUILT DOM, never typed here. A list would
+     go stale the moment a chip was added, and it would go stale silently —
+     which is the exact failure mode the injected sheet had. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+
+    const sheets = await page.evaluate(() => ({
+      styles: document.querySelectorAll("style").length,
+      injected: !!document.getElementById("ftWorkspaceCSS"),
+      /* Every class on the bar, the change block and the group headings —
+         the three regions that exist ONLY because this controller built
+         them, and therefore the three whose rules had no other home. */
+      classes: (() => {
+        const set = new Set();
+        const roots = [document.querySelector(".ft-bar"),
+                       document.querySelector(".ft-change"),
+                       ...document.querySelectorAll(".ft-group")];
+        for (const root of roots) {
+          if (!root) continue;
+          for (const n of [root, ...root.querySelectorAll("*")]) {
+            for (const c of n.classList) set.add(c);
+          }
+        }
+        return [...set].sort();
+      })(),
+    }));
+
+    ok(!sheets.injected,
+       "the controller installs no stylesheet of its own — #ftWorkspaceCSS is gone, and with " +
+       "it the sheet no cache-busting query string could ever reach");
+    eq(sheets.styles, 2,
+       `the document carries exactly the two stylesheets this harness added (${sheets.styles}) ` +
+       "— base.css and flows.css. A third is a renderer writing CSS at runtime, which is the " +
+       "debt this section exists to keep paid off");
+
+    const src = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+    ok(!/createElement\(\s*["']style["']\s*\)/.test(src),
+       "and the source builds no <style> element, so the assertion above cannot pass merely " +
+       "because a fixture never reached the code path that injects one");
+    ok(!/adoptedStyleSheets|insertRule\(/.test(src),
+       "nor reaches the CSSOM by the other two doors — adoptedStyleSheets and insertRule are " +
+       "the same debt written differently, and both are equally invisible to a CSS suite");
+
+    /* A rule, not merely a mention: the class has to appear as a SELECTOR.
+       `\.name` followed by anything that is not a class-name character is
+       what distinguishes `.ft-chg-v` the selector from `ft-chg-value` the
+       word in a comment — comments are stripped first for the same reason
+       tests/flows-sign.mjs strips them. */
+    const CSS_TEXT = fs.readFileSync(path.join(ROOT, "assets/css/flows.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    ok(sheets.classes.length >= 20,
+       `the chrome emits ${sheets.classes.length} classes to check — read off the built DOM, ` +
+       "so a chip added tomorrow is checked tomorrow rather than whenever this list is edited");
+    for (const c of sheets.classes) {
+      const rule = new RegExp("\\." + c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\w-])");
+      ok(rule.test(CSS_TEXT),
+         `.${c} resolves to a rule in assets/css/flows.css — the chrome's own classes are in ` +
+         "the versioned stylesheet now, not in a string the browser never asked for");
+    }
+    await page.close();
+  }
+
   /* ---------- 6k. the page leads on CHANGE ----------------------------
 
      THE PRODUCT IS READ AS AN EARLY WARNING AND THE PAGE OPENED ON A
