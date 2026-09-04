@@ -19,7 +19,6 @@
    ============================================================= */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { buildBrief, briefToday, briefYesterday, briefNext, silenceOf, num }
   from "../shared/flows-brief.js";
 
@@ -27,18 +26,89 @@ let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 
-const emit = (f) =>
-  JSON.parse(readFileSync(new URL("./.shots-emit/" + f, import.meta.url), "utf8"));
+/* ---------- the corpus, inline and self-contained ----------------
 
-/* The real emitted payloads, so the shapes are the pipeline's own
-   rather than a fixture author's idea of them. */
-const REAL = {
-  long: emit("d-board-long.json"),
-  short: emit("d-board-short.json"),
-  watch: emit("d-board-watch.json"),
-  events: emit("d-events.json"),
-  alerts: emit("d-flowalerts.json"),
+   THE FIRST VERSION OF THIS FILE READ tests/.shots-emit/, AND CI
+   CAUGHT IT. That directory is where `flows-pipeline.mjs --dry-run
+   --emit` drops real payloads, so the shapes below were taken from
+   the publisher rather than invented — but .gitignore:47 ignores
+   every dotted directory under tests/, so those files exist on a
+   developer's disk and nowhere else. (The ignore pattern is not
+   quoted here on purpose: it ends in a star-slash, which would close
+   this comment — which is its own small lesson about writing a
+   pattern into prose.) The suite passed locally and died with ENOENT
+   before its first assertion: a test that cannot run is worth less
+   than no test, because it reports green from the one machine that
+   was never going to catch anything.
+
+   Every other suite in this repo feeds inline fixtures. This one is
+   no longer the exception. The shapes are still the publisher's —
+   they were read off emitted payloads — and PUBLISHER/RENDERER
+   AGREEMENT IS NOT THIS FILE'S JOB ANYWAY: tests/flows-payload-shape
+   exists precisely so a reader cannot read a field the pipeline does
+   not write, and it runs against the pipeline itself.
+
+   Each fixture below carries a property an assertion depends on, and
+   the comments say which, so a future edit that "tidies" a number
+   can see what it would break. */
+
+/* `cleared` (53) deliberately exceeds rows.length (2 here) — the
+   population/page distinction the rail badge got wrong. */
+const SHORT = {
+  status: "ok", side: "short", sessionDate: "2026-08-24",
+  gateOrigin: "2026-09-04", gateDays: 7,
+  scored: 100, neutral: 3, cleared: 53, shed: 3,
+  memory: { sessionDate: "2026-08-21" },
+  rows: [
+    { t: "SYN192", r: 1, s: -37, cnv: 91, dr: -4, r0: 1, nw: false, hy: false,
+      edte: 0, ed: "2026-09-04", gFlipDist: -0.9 },
+    { t: "SYN300", r: 2, s: -35, cnv: 78, dr: -15, r0: 2, nw: false, hy: true,
+      edte: 12, gFlipDist: 2.4 },
+  ],
 };
+
+/* A one-sided session: every published `dr` is negative, so the
+   "0 climbed" arm is exercised rather than assumed. */
+const LONG = {
+  status: "ok", side: "long", sessionDate: "2026-08-24",
+  gateOrigin: "2026-09-04", gateDays: 7,
+  scored: 100, neutral: 3, cleared: 44, shed: 0,
+  memory: { sessionDate: "2026-08-21" },
+  rows: [
+    { t: "SYN046", r: 1, s: 59, cnv: 96, dr: null, r0: null, nw: true, hy: false,
+      edte: 1, ed: "2026-09-05", gFlipDist: 0.1224 },
+    { t: "SYN351", r: 2, s: 58, cnv: 81, dr: -1, r0: 1, nw: false, hy: false,
+      edte: 43, gFlipDist: 5.1 },
+    { t: "SYN037", r: 3, s: 43, cnv: 96, dr: -1, r0: 2, nw: false, hy: false,
+      gFlipDist: -3.3 },
+  ],
+};
+
+/* Every integer score is 0 because the band is ±1 — the trap that
+   made the first draft rank on a field with no resolution. `resid`
+   orders them and `r` is the publisher's own ranking. */
+const WATCH = {
+  status: "ok", side: "watch", sessionDate: "2026-08-24",
+  scored: 100, neutral: 3, deadBand: 1,
+  rows: [
+    { t: "SYN243", r: 1, s: 0, cnv: 60, resid: -0.008 },
+    { t: "SYN250", r: 2, s: 0, cnv: 80, resid: -0.0058 },
+    { t: "SYN200", r: 3, s: 0, cnv: 61, resid: -0.0002 },
+  ],
+};
+
+const ALERTS = {
+  status: "ok", readAt: "2026-09-04T08:33:58.572Z",
+  rows: [{ t: "SYN351" }, { t: "SYN231" }],
+};
+
+const EVENTS = {
+  status: "ok", sessionDate: "2026-08-24", gateOrigin: "2026-09-04",
+  gateDays: 7, inWindow: 87, shown: 8, cap: 200,
+  rows: [{ t: "SYN151", d: "2026-09-04", dte: 0 }],
+};
+
+const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: ALERTS };
 
 /* ---------- 1. the coercion refuses what it cannot read ---------- */
 {
