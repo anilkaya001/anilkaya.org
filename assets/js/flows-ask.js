@@ -863,14 +863,12 @@
     var checked = brief && typeof brief.warningsChecked === "number" ? brief.warningsChecked : null;
     /* THE DENOMINATOR, BECAUSE A NUMERATOR PRINTED ALONE READS AS THE WHOLE
        SET. shared/flows-warnings.js:865 returns `questions` beside `checked`
-       for this exact reason and states it in those words: nothing in a bare
-       `checked: 4` says whether four is every question the module carries or
-       four of thirteen, so a store holding two keys renders the same clean
-       bill as a complete one. This page held only the numerator and printed
-       it as though it were both, which is the truncation that does not say it
-       truncated — in the panel drawn first because it changes how every
-       region below it is read. Where the total is absent the sentence says
-       the total is absent, rather than letting the count stand for it. */
+       and says why in those words: nothing in a bare `checked: 4` tells four
+       of four from four of thirteen, so a store holding two keys renders the
+       same clean bill as a complete one. This page held only the numerator —
+       the truncation that does not say it truncated, in the panel drawn first
+       because it changes how every region below it reads. Where the total is
+       absent the sentence says so rather than letting the count stand in. */
     var questions = brief && typeof brief.warningsQuestions === "number"
       ? brief.warningsQuestions : null;
 
@@ -939,11 +937,11 @@
       ? "1 thing to know before reading the rest"
       : list.length + " things to know before reading the rest"));
     /* "N OF THESE CHECKS" NAMED A FRACTION AND SUPPLIED NO DENOMINATOR. The
-       only enumerated set above this line is the warnings themselves, so
-       "4 of these checks had the inputs to run" sat under a heading counting
-       one warning and invited a reader to divide two numbers that share no
-       population. The count of checks that ran is stated as the count it is,
-       and the total is named only where the briefing published one. */
+       only enumerated set above this line is the warnings, so "4 of these
+       checks had the inputs to run" sat under a heading counting one warning
+       and invited a reader to divide two numbers sharing no population. The
+       count is stated as the count it is; the total is named only where the
+       briefing published one. */
     box.append(el("p", "ak-sub fc-note", checked === null
       ? "Each was found by comparing two published surfaces against each other."
       : "Found by comparing published surfaces against each other. " + (questions === null

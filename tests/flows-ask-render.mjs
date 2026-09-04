@@ -365,6 +365,8 @@ await browser.close();
 await server.stop();
 
 console.log(`✓ flows-ask-render: ${checks} assertions — a consistency report that states no ` +
-  `clean bill it did not measure, a guard that reports an empty scan as an empty scan ` +
-  `rather than as a verification passed, and a failed route quoted in its own words so a ` +
-  `broken payload is never reported as a broken connection`);
+  `clean bill it did not measure and never prints its numerator as the whole sweep, a ` +
+  `guard that reports an empty scan as an empty scan in the open as well as in the fold, ` +
+  `an anti-tamper record that does not claim to hold every figure in the prose, and a ` +
+  `failed route quoted in its own words so a broken payload is never reported as a broken ` +
+  `connection`);
