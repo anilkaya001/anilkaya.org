@@ -27,18 +27,21 @@ tests/.tmp-*
 tests/probe-*.mjs
 tests/cardshot-*.mjs
 
-# Emitted-payload scratch directories. Several suites run the pipeline's own
+# Scratch directories under tests/. Several suites run the pipeline's own
 # emitter into tests/ and clean up in a `finally` — which does not run when a
 # suite is killed mid-assertion, and leaves a directory of JSON that `git add
-# -A` then offers to commit. The dot prefix is the convention those suites
-# already use; ignoring the shape rather than the names is the same argument
-# the underscore rule above makes.
-tests/.*-emit/
-tests/.*-probe/
-
-# Screenshot output directories. The design shots are megabytes of PNG that
-# regenerate from `_shots-ab.mjs` in two minutes, and every one of them is a
-# picture of a state the payloads already describe — so committing them stores
-# a stale copy of something reproducible. The precedent is the Phase-0
-# candidate sets: shot into a throwaway dir, shared out-of-band, never tracked.
-tests/.shots-*/
+# -A` then offers to commit. The design shots are megabytes of PNG that
+# regenerate in two minutes and are pictures of states the payloads already
+# describe, so committing them stores a stale copy of something reproducible.
+#
+# THIS WAS THREE ENUMERATED PATTERNS AND IT MISSED THE FOURTH NAME. `-emit/`,
+# `-probe/` and `.shots-*/` did not match `.scratch-track/`, a directory of
+# five ad-hoc probe scripts that `git add -A` was ready to commit to a PUBLIC
+# repository — which is precisely the failure the underscore rule above was
+# written about, recurring one section later in the same file.
+#
+# So this ignores the SHAPE: a dot-prefixed directory under tests/. No tracked
+# path in the repository is one (`git ls-files 'tests/.*'` is empty), the
+# suites that create them already use the dot prefix by convention, and a
+# future probe directory is caught without this file being updated again.
+tests/.*/
