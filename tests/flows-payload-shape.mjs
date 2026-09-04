@@ -538,6 +538,201 @@ assert.deepEqual(missingReport, [],
      "plural with an s assumed off it");
 }
 
+/* ---------- the two market-wide keys with no renderer yet ------------
+
+   REGISTERED BEFORE A RENDERER EXISTS, WHICH IS THE ONLY TIME IT IS CHEAP.
+
+   Every other entry in this file was written after a renderer had already
+   drifted from its publisher. These two keys are published by this wave and
+   drawn by the next one, so the field vocabulary can be pinned while it is
+   still free to fix. When the renderers land they join SURFACES above and the
+   generic scan takes over; until then these blocks are what stops a field
+   from being quietly renamed in the gap between the two waves.
+
+   THE SCANS ABOVE CANNOT COVER THEM. That machinery extracts a renderer's
+   reads from its source and holds them against the payload; with no renderer
+   there is nothing to extract, and adding a SURFACES entry pointing at a file
+   that does not draw the key would fail on the anti-vacuity guard rather than
+   check anything. So these assert the publisher's side directly. */
+{
+  /* ---- the sector OPTIONS lean, which is not the sector momentum ---- */
+  const p = emitted("sector:premium");
+  ok(p && typeof p === "object",
+     "the pipeline emits a sector:premium payload — the eleven sector option leans");
+  ok(Array.isArray(p.sectors) && p.sectors.length === 11,
+     `it publishes all eleven baskets under \`sectors\` (${p.sectors && p.sectors.length}), ` +
+     "present whatever the vendor answered — a panel that quietly shrinks from eleven bars " +
+     "to nine is how an outage goes unnoticed for a week");
+  ok(!("rows" in p),
+     "and NOT under `rows` — the name the sector renderer read for that panel's whole life " +
+     "while the publisher wrote `sectors`, which is the regression this suite is named for");
+
+  /* THE TWO SECTOR KEYS KEEP DISJOINT VOCABULARIES, AND THAT IS THE WHOLE
+     POINT OF PUBLISHING TWO. sector:trix carries a triple-smoothed oscillator
+     on daily closes; sector:premium carries today's option premium lean. They
+     describe the same eleven baskets and may disagree for weeks. If one row
+     shape ever carried both, a renderer could read `trix` off a premium row —
+     or worse, a future edit could "unify" them and a momentum reading would
+     start being drawn on a premium axis. The only fields they may share are
+     the identity of the basket and its absence note. */
+  const trix = emitted("sector:trix");
+  const trixFields = new Set(Object.keys(trix.sectors[0]));
+  const leanFields = new Set(Object.keys(p.sectors[0]));
+  const shared = [...leanFields].filter((f) => trixFields.has(f)).sort();
+  assert.deepEqual(shared, ["etf", "reason", "sector"],
+    "the two sector row shapes share only the basket's identity and its absence note " +
+    `(they share: ${shared.join(", ")})`); checks++;
+  ok(!leanFields.has("trix") && !leanFields.has("trixBp"),
+     "no momentum field rides on a premium row");
+  ok(!trixFields.has("leanRatio") && !trixFields.has("netPremiumUsd"),
+     "and no premium field rides on a momentum row");
+
+  /* UNITS TRAVEL WITH THE NUMBERS. A ratio and a dollar difference must not
+     share a field name, and here they cannot: the names carry the units and
+     the payload restates them so a renderer never has to infer. */
+  ok(leanFields.has("netPremiumUsd") && leanFields.has("leanRatio"),
+     "the dollar difference and the dimensionless lean are two separate fields");
+  eq(p.units.netPremiumUsd, "usd", "the payload states that netPremiumUsd is dollars");
+  eq(p.units.leanRatio, "ratio", "and that leanRatio is dimensionless");
+  ok(typeof p.lean.relation === "string" &&
+     /leanRatio = netPremiumUsd \/ grossPremiumUsd/.test(p.lean.relation),
+     "and publishes the relation, so a reader who disagrees can redo it from the two raw sums");
+
+  /* THREE READINGS, THREE ARMS, ALL REACHED BY THE CORPUS. A dry run in which
+     every sector succeeds certifies only the arm that never breaks. */
+  const arm = (r) => p.sectors.filter((s) => s.read === r);
+  ok(arm("ok").length > 0, "the corpus reaches a sector that leaned");
+  ok(arm("quiet").length > 0, "a sector that was MEASURED and empty");
+  ok(arm("unreadable").length > 0, "and a sector whose premium sums could not be read");
+
+  /* THE MEASURED ZERO, WHICH IS THE HOUSE DEFECT IN ITS PUREST FORM. */
+  const quiet = arm("quiet")[0];
+  eq(quiet.netPremiumUsd, 0,
+     "a sector where both premium sums were zero keeps a VISIBLE measured 0 for the dollar " +
+     "difference — it traded nothing, which is a reading, not an absence");
+  eq(quiet.leanRatio, null,
+     "and a null ratio, because 0/0 is undefined rather than neutral: publishing 0 here would " +
+     "put a sector where nothing traded on the same footing as one where a hundred million " +
+     "dollars traded evenly on both sides");
+  ok(typeof quiet.reason === "string" && /measured and empty/.test(quiet.reason),
+     "and it says which silence it is in words, not only in a status");
+
+  /* HALF A SUBTRACTION IS NOT A LEAN. */
+  const half = arm("unreadable").find((s) =>
+    (s.bullishPremiumUsd === null) !== (s.bearishPremiumUsd === null));
+  ok(half, "the corpus reaches a sector that sent one premium sum and not the other");
+  eq(half.netPremiumUsd, null, "the difference stays null when only one side arrived");
+  eq(half.leanRatio, null, "and so does the ratio");
+  ok(half.bullishPremiumUsd !== null || half.bearishPremiumUsd !== null,
+     "while the side that DID arrive is still published — it was measured");
+
+  /* EVERY ROW ANSWERS, WHATEVER HAPPENED. A renderer iterating eleven rows
+     must never meet an undefined field. */
+  for (const row of p.sectors) {
+    for (const field of ["sector", "etf", "fullName", "bullishPremiumUsd", "bearishPremiumUsd",
+                         "grossPremiumUsd", "netPremiumUsd", "leanRatio", "read", "reason"]) {
+      ok(Object.hasOwn(row, field),
+         `${row.etf}'s row carries \`${field}\` on every arm of the union`);
+    }
+    ok(["ok", "quiet", "unreadable"].includes(row.read),
+       `${row.etf}'s read is one of the three the publisher defines (got ${row.read})`);
+  }
+
+  /* THE READ IS OURS, THE SESSION IS THE VENDOR'S. This route takes no date
+     parameter at all, so a reader must be able to see that "today" here is
+     the vendor's determination and not one the pipeline pinned. */
+  ok(typeof p.readAt === "string" && !Number.isNaN(Date.parse(p.readAt)),
+     "the payload says when WE read it");
+  eq(p.vendorDated, false,
+     "and says the vendor dated it, not us — /api/market/sector-etfs accepts no date parameter");
+  ok(typeof p.notSameAs === "string" && /sector:trix/.test(p.notSameAs),
+     "and names the key it must not be confused with, on the payload rather than only in a " +
+     "comment no renderer reads");
+
+  /* THE VENDOR MAY SEND MORE BASKETS THAN WE MAP. The response leads with SPY,
+     which is not one of the eleven, so `returned` is deliberately not the
+     sector count and the payload keeps both numbers. */
+  /* THE LEG'S OWN STATUS USES THE THREE SILENCES TOO, not sector:trix's
+     ok/unavailable pair — "the vendor answered with nothing" and "the vendor
+     answered with rows we could not read" are the two states whose difference
+     decides whether the market was quiet or our field names are wrong. */
+  ok(["ok", "quiet", "unreadable"].includes(p.status),
+     `the leg's status is one of the three silences (got ${p.status})`);
+  eq(p.status, "ok", "and the corpus reaches the measured one");
+
+  ok(p.returned >= p.sectors.length,
+     `the wire row count (${p.returned}) is published beside the eleven sectors, because the ` +
+     "vendor's response leads with SPY and a reader comparing the two would otherwise think " +
+     "a basket had gone missing");
+}
+
+{
+  /* ---- the news tape ---- */
+  const n = emitted("news");
+  ok(n && Array.isArray(n.rows), "the pipeline emits a news payload with a `rows` array");
+
+  /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION — so four
+     counts, each answering a different question, and the corpus reaches the
+     case where they disagree. */
+  for (const field of ["requested", "returned", "kept", "cap", "capped", "shed",
+                       "atVendorLimit", "unusable", "undatedKept", "undatedSeen"]) {
+    ok(Object.hasOwn(n, field),
+       `the payload carries \`${field}\` — without it a capped list reads as the population`);
+  }
+  eq(n.kept, n.rows.length, "`kept` is the length of what was actually published");
+  ok(n.capped === true && n.shed > 0,
+     `the corpus really exercises truncation (${n.shed} shed by the ${n.cap}-row cap) — a ` +
+     "fixture that fitted inside the cap would leave the disclosure certified by nothing");
+  eq(n.atVendorLimit, true,
+     "and the vendor's own ceiling too: a full page means the true population is unknown and " +
+     "at least that large, which is a DIFFERENT fact from our cap having shed rows we saw");
+  ok(n.returned > n.kept, `and the two counts differ (${n.returned} returned, ${n.kept} kept)`);
+
+  /* FRESHNESS: THE VENDOR'S STAMP ON EVERY ROW, OUR READ ON THE ENVELOPE. */
+  ok(typeof n.readAt === "string" && !Number.isNaN(Date.parse(n.readAt)),
+     "the payload says when WE read the tape, which is the load-bearing field on a stream " +
+     "published by a once-a-day job");
+  eq(n.refreshed, "nightly",
+     "and says it is NOT intraday-refreshed, so a renderer states the age rather than " +
+     "implying the headline just arrived");
+  ok(typeof n.cadence === "string" && /05:15/.test(n.cadence),
+     "and names the cadence behind that word");
+  ok(typeof n.newest === "string" && typeof n.oldest === "string" && n.oldest <= n.newest,
+     `the window the published rows cover is bounded from their own stamps ` +
+     `(${n.oldest} .. ${n.newest})`);
+  for (const row of n.rows) {
+    ok(Object.hasOwn(row, "createdAt") && Object.hasOwn(row, "createdAtMs"),
+       "every published row carries the vendor's own timestamp verbatim and our parse of it");
+    ok(Object.hasOwn(row, "tickers") && Array.isArray(row.tickers),
+       "and the ticker array that makes a per-name join a filter rather than a vendor call");
+    ok(row.headline && typeof row.headline === "string",
+       "and a headline, which is the row");
+  }
+
+  /* ORDERING IS OURS AND IS STATED. The cap is applied AFTER the sort, so
+     `kept` means the newest sixty rather than the first sixty the vendor sent.
+     The fixture hands them over shuffled precisely so this can fail. */
+  eq(n.ordered, true, "the payload states that it ordered the rows");
+  eq(n.orderedBy, "createdAt", "and by which field");
+  eq(n.orderedDesc, true, "and in which direction");
+  const dated = n.rows.map((r) => r.createdAtMs).filter((ms) => ms !== null);
+  ok(dated.every((ms, i) => i === 0 || dated[i - 1] >= ms),
+     "and the published rows really are newest-first — the cap is applied after the sort, so " +
+     "`kept` is the newest sixty and not the first sixty the vendor happened to send");
+
+  /* THE ONE THING NO PER-NAME LOOP MAY EVER BE WRITTEN FOR. */
+  ok(typeof n.scope === "string" && /filter/.test(n.scope),
+     "the payload says the route is market-wide and that `ticker` on it is a filter — the " +
+     "warning that stops the next reader spending +50 calls on rows this one call returned");
+
+  /* SIZE, AGAINST THE DOOR IT HAS TO FIT THROUGH. */
+  const bytes = Buffer.byteLength(JSON.stringify(n));
+  ok(bytes < 40 * 1024,
+     `the capped tape is ${(bytes / 1024).toFixed(1)}KB, well inside the 128KB ` +
+     "FLOWS_MAX_PAYLOAD_BYTES the ingest route accepts (worker.js) — the cap is a budget, " +
+     "not a taste");
+}
+
 rmSync(dir, { recursive: true, force: true });
 
 console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and the renderers ` +
@@ -548,4 +743,9 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `against the panel the pipeline emits, on BOTH arms of its union, with the coverage of the ` +
   `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
   `whole rather than half of it: the score index, the seven verdict tiles, the spine and the ` +
-  `closure that writes the region subtitles all read against the payloads they are handed`);
+  `closure that writes the region subtitles all read against the payloads they are handed — ` +
+  `and the two market-wide keys whose renderers have not been written yet pinned on the ` +
+  `publisher's side while that is still free to fix: the sector option lean's three reads ` +
+  `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
+  `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
+  `vendor stamp on every row beside the instant we read them`);

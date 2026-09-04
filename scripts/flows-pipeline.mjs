@@ -208,13 +208,24 @@ export const RATE = {
    + 1  flow alerts, market-wide
    + 7  market pulse     (tide, totals, oi-change, net impact, insiders,
         dark pool, seasonality — one market-wide call each)
+   + 1  sector premium   (/api/market/sector-etfs — ONE market-wide call for
+        all eleven baskets, which is what makes a top-down options-lean layer
+        affordable where a per-sector one would not be. It is not the eleven
+        candle calls above: that leg measures TRIX on closes and contains no
+        option data, and the two are published under two keys.)
+   + 1  news headlines   (/api/news/headlines, market-wide. `ticker` on that
+        route is a FILTER on the same path, so the per-name join is done in
+        memory; looping it per board name would have cost +50, or +128 across
+        the enriched pool, for rows this one call already returns.)
    + 1  shorts probe     (the one wave-B scout still open: volume-and-ratio
         answered ok with ZERO rows on 2026-08-31, so it re-probes with a
         dated param until it shows a row shape or proves empty by design;
         the five confirmed probes retired into the sections they scouted)
-   = 1077 modelled. (This line read 1076 while the thirteen terms above it
+   = 1079 modelled. (This line read 1076 while the thirteen terms above it
    summed to 1077 — an off-by-one in a total nobody re-added after a term was
-   revised. It is the number every budget argument in this file starts from.)
+   revised. It is the number every budget argument in this file starts from,
+   so re-add the column rather than adjusting the total. The two market-wide
+   terms added above take it from 1077 to 1079, still 171 under CALL_BUDGET.)
 
    MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
    170 were 429s that were then retried — so ~852 attempts carried a distinct
@@ -238,8 +249,8 @@ export const CALL_BUDGET = 1250;
    percentileRank, neutralize, effectiveBreadth — is ~1.5ms, ONCE. Total CPU
    for the whole cross-section: about 0.6 seconds.
 
-   Against it, 1077 modelled calls at the floor the run actually pinned at
-   (RATE.floorCeilingMs = 750ms) is 807 seconds of scheduled waiting inside a
+   Against it, 1079 modelled calls at the floor the run actually pinned at
+   (RATE.floorCeilingMs = 750ms) is 809 seconds of scheduled waiting inside a
    DEADLINE_MS of 2160. CPU is under a tenth of a percent of the sleep.
 
    So the levers on this file's wall clock are, in order: the number of calls
@@ -3652,6 +3663,379 @@ function sectorTrix(candlesByEtf, { span = TRIX_SPAN, series = TRIX_SERIES, warm
   });
 }
 
+/* ---------- the sector OPTIONS LEAN, which is not the momentum ---
+
+   ONE CALL, ELEVEN SECTORS, AND A DIFFERENT QUANTITY FROM THE ONE ABOVE.
+
+   sectorTrix() measures a triple-smoothed oscillator on daily CLOSES: there
+   is not one option in it. /api/market/sector-etfs returns the current
+   trading day's statistics for the same eleven SPDR baskets and carries
+   `bullish_premium` and `bearish_premium` — dollar sums of option premium
+   attributed by side. So the two legs answer two questions that happen to
+   share eleven tickers: "which sectors have been trending" and "where is
+   option premium leaning today".
+
+   THEY MAY DISAGREE FOR WEEKS AND THAT IS NOT AN ERROR. A sector can grind
+   higher on the tape while every day's premium leans to puts, and that
+   divergence is a reading rather than a fault in either leg. They are
+   therefore published under two keys and never merged into one field: a
+   momentum number and a premium lean sharing a name is precisely the drift
+   this repository keeps paying for. tests/flows-payload-shape.mjs pins the
+   two field vocabularies apart.
+
+   THE CALL TAKES NO PARAMETERS AT ALL (docs/uw-openapi.yaml:18429 declares
+   `parameters: []`), so there is no date to pin and no page to walk: the
+   response is whatever the vendor calls "today", and the payload says so
+   rather than letting `sessionDate` imply the two agree. */
+
+/**
+ * A vendor number, or null — with the whitespace hole closed.
+ *
+ * num() from shared/flows-features.js:31 is the house reader and it is right
+ * about the two cases that matter most: `num(null, null)` and `num("", null)`
+ * are both null rather than 0. It has one gap. A string that is only
+ * whitespace is neither `null` nor `""`, so it reaches `Number("  ")`, which
+ * is 0 and finite — a confident zero manufactured out of a field the vendor
+ * effectively left blank. This leg reads dollar sums where 0 is a REAL and
+ * meaningful answer ("nothing traded in this sector today"), so it cannot
+ * afford a second, fake way of producing one.
+ *
+ * Trim first, then delegate, so there is still exactly one coercion rule.
+ */
+export function vendorNum(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? null : num(trimmed, null);
+  }
+  return num(value, null);
+}
+
+/**
+ * THE LEAN, DERIVED DELIBERATELY, WITH ITS UNITS IN ITS NAME.
+ *
+ * bullish_premium and bearish_premium are DOLLAR sums (the spec types both as
+ * strings — see `Market General Bullish Premium`, which the vendor defines as
+ * call premium on the ask plus put premium on the bid). There are two honest
+ * ways to turn a pair of dollar sums into a lean and they are different
+ * quantities, so both are published and NEITHER is called "lean":
+ *
+ *   netPremiumUsd   = bullish - bearish            (signed DOLLARS)
+ *   leanRatio       = (bullish - bearish) / (bullish + bearish)   (dimensionless, [-1, +1])
+ *
+ * THE RATIO IS THE ONE TO RANK ON, and that is a choice worth stating. XLK
+ * clears hundreds of millions of premium on an ordinary day while XLB clears
+ * tens of thousands; ranking the eleven by dollar difference ranks them by
+ * SECTOR SIZE with a faint conviction signal on top. The ratio is the share of
+ * the day's two-sided premium that leaned one way, which is comparable across
+ * eleven baskets three orders of magnitude apart. The dollars ride along as
+ * the SIZE of that lean, because a +0.9 ratio on $30k of premium and a +0.9 on
+ * $300M are not the same fact, and both raw sums ride along too so a reader
+ * who disagrees with either derivation can recompute both from the payload.
+ *
+ * FOUR CASES, THREE OF THEM SILENCES THAT MUST NOT SHARE A SENTENCE:
+ *
+ *   both sums present, gross > 0   -> read "ok": every field measured.
+ *   both present and both zero     -> read "quiet": MEASURED and empty. The
+ *                                     net is a real 0 and stays visible; the
+ *                                     ratio is 0/0, which is undefined rather
+ *                                     than neutral, so it is null. A sector
+ *                                     where nothing traded is a finding.
+ *   one sum absent                 -> read "unreadable": a difference needs
+ *                                     both terms. Publishing the one that
+ *                                     arrived as though it were the lean is
+ *                                     the confident-zero defect wearing a
+ *                                     different hat.
+ *   both absent                    -> read "unreadable", with the reason
+ *                                     naming that neither side arrived.
+ *
+ * ("pending" — the third silence — is not this function's to emit. It is what
+ * the Worker answers for a key the pipeline has not written yet.)
+ *
+ * Every row is returned whatever happens, in SECTOR_ETFS order, for the same
+ * reason sectorTrix() keeps all eleven: a panel that quietly shrinks from
+ * eleven bars to nine is how a vendor outage goes unnoticed for a week.
+ */
+export function sectorLean(rows) {
+  const byTicker = new Map();
+  for (const row of unwrapVendorRows(rows)) {
+    const ticker = row && typeof row.ticker === "string" ? row.ticker.trim().toUpperCase() : "";
+    /* FIRST OCCURRENCE WINS rather than last. The route is documented as one
+       row per ETF, so a duplicate is the vendor contradicting itself; taking
+       the first keeps the choice deterministic and the count below reports
+       that more rows arrived than tickers were matched. */
+    if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, row);
+  }
+
+  return SECTOR_ETFS.map(({ sector, etf }) => {
+    const base = {
+      sector, etf,
+      /* The vendor's own label for the basket, carried rather than derived:
+         SECTOR_ETFS names XLC "Communication Services" and the vendor's
+         `full_name` for SPY is "S&P 500 Index". Two names for one row is not
+         a contradiction, it is our label beside theirs, and a renderer that
+         wants to print the vendor's should not have to guess it. */
+      fullName: null,
+      bullishPremiumUsd: null, bearishPremiumUsd: null,
+      grossPremiumUsd: null, netPremiumUsd: null, leanRatio: null,
+      callPremiumUsd: null, putPremiumUsd: null,
+      callVolume: null, putVolume: null,
+      lastUsd: null, prevCloseUsd: null, changeRatio: null,
+      stockVolume: null,
+      read: "unreadable", reason: null,
+    };
+
+    const row = byTicker.get(etf);
+    if (!row || typeof row !== "object") {
+      return { ...base, reason: `no ${etf} row in the sector-etfs response` };
+    }
+
+    const fullName = typeof row.full_name === "string" && row.full_name.trim()
+      ? row.full_name.trim() : null;
+
+    /* The context columns, read the same defensive way and never used in the
+       lean. They are here so a renderer can size a lean against the day's
+       move without a second call; each is independently nullable because the
+       spec's own example disagrees with its properties block about which
+       fields exist (`week52_high` in the example, `week_52_high` in the
+       schema, and `close` declared but never once shown). */
+    const last = vendorNum(row.last);
+    const prevClose = vendorNum(row.prev_close);
+    const context = {
+      fullName,
+      callPremiumUsd: vendorNum(row.call_premium),
+      putPremiumUsd: vendorNum(row.put_premium),
+      callVolume: vendorNum(row.call_volume),
+      putVolume: vendorNum(row.put_volume),
+      lastUsd: last, prevCloseUsd: prevClose,
+      /* A RATIO, SAID SO IN THE NAME, and null rather than 0 when the divisor
+         is absent or zero — a session with no previous close is not a session
+         that did not move. */
+      changeRatio: last !== null && prevClose !== null && prevClose !== 0
+        ? Number(((last - prevClose) / prevClose).toFixed(6)) : null,
+      stockVolume: vendorNum(row.volume),
+    };
+
+    const bullish = vendorNum(row.bullish_premium);
+    const bearish = vendorNum(row.bearish_premium);
+
+    /* ABSENCE TESTED BEFORE ANY ARITHMETIC. `=== null`, never `!bullish` —
+       a measured 0 is falsy and this is exactly the branch where 0 is real. */
+    if (bullish === null && bearish === null) {
+      return { ...base, ...context,
+        reason: `${etf} carried neither bullish_premium nor bearish_premium` };
+    }
+    if (bullish === null || bearish === null) {
+      return { ...base, ...context,
+        /* The side that DID arrive is still published — it was measured —
+           but the difference and the ratio stay null, because half a
+           subtraction is not a lean. */
+        bullishPremiumUsd: bullish, bearishPremiumUsd: bearish,
+        reason: `${etf} carried ${bullish === null ? "bearish_premium" : "bullish_premium"} ` +
+          "but not the other side, and a lean needs both terms" };
+    }
+
+    const gross = bullish + bearish;
+    const net = bullish - bearish;
+    return { ...base, ...context,
+      bullishPremiumUsd: bullish, bearishPremiumUsd: bearish,
+      grossPremiumUsd: gross,
+      netPremiumUsd: net,
+      /* 0/0 IS UNDEFINED, NOT NEUTRAL. Publishing 0 here would put a sector
+         where nothing traded on the same footing as a sector where a hundred
+         million dollars traded evenly on both sides. */
+      leanRatio: gross === 0 ? null : Number((net / gross).toFixed(6)),
+      read: gross === 0 ? "quiet" : "ok",
+      reason: gross === 0
+        ? `${etf} was read and both premium sums were zero — measured and empty, ` +
+          "not missing"
+        : null,
+    };
+  });
+}
+
+/* ---------- the news tape ----------------------------------------
+
+   ONE MARKET-WIDE CALL, AND THE TRAP IS THE OTHER WAY ROUND.
+
+   THERE IS NO PER-TICKER NEWS ENDPOINT. `ticker` on /api/news/headlines
+   (docs/uw-openapi.yaml:18714) is a query FILTER on this same market-wide
+   path — the spec's own `News Ticker` schema calls it "filter news headlines
+   to only those mentioning the specified ticker symbol". So a per-board-name
+   loop looks natural, compiles, and costs +50 calls at the board size or +128
+   at the enriched pool, to obtain rows this ONE unfiltered call already
+   returns with a `tickers` array on each row. Do not write that loop. Filter
+   the rows in memory instead; the join key is already on every row.
+
+   FRESHNESS IS THE HONEST PROBLEM HERE AND IT IS NOT SOLVED BY THIS LEG.
+   This pipeline runs on a weekday-morning cron (.github/workflows/flows-
+   pipeline.yml:26-27 — 05:15 America/New_York) and news is a stream: a
+   headline fetched at 05:15 and read at 15:00 is nearly ten hours old. The
+   Worker DOES have an intraday refresh path — worker.js refreshFlowsIntraday
+   re-reads the market tide and the vendor's flow alerts on the fifteen-minute
+   cron in wrangler.toml:34, gated to the Eastern session by flows-freshness.js
+   — and this key would ride it happily: it is one market-wide call, the same
+   shape as the alerts feed, and the refresh-never-seed rule applies unchanged.
+
+   IT DOES NOT RIDE IT YET, AND THE REASON IS STRUCTURAL RATHER THAN A
+   PREFERENCE. That cron is a SECOND WRITER of the key, and this codebase's
+   rule for a second writer is that it must share the publisher's shaper
+   rather than carry its own copy — worker.js imports shapeTide from
+   shared/flows-pulse.js for exactly that reason. shapeNews() lives in this
+   file, which the Worker cannot import (it is a Node job with a rate
+   controller and a process.env-driven fetch loop; bundling it into the Worker
+   is not a thing to do to fix a staleness problem). Moving it to shared/ is
+   the correct next step and is a separate change.
+
+   SO THE PAYLOAD REFUSES TO IMPLY FRESHNESS INSTEAD. Every row carries the
+   vendor's own `created_at` verbatim, the payload carries `readAt` (when WE
+   read it) and `refreshed: "nightly"`, and `newest`/`oldest` bound the window
+   the rows actually cover. A renderer can therefore state the age rather than
+   printing a headline as though it just arrived. */
+
+/** What we ask the vendor for. 100 is this route's documented maximum
+    (`Default 50 Max 100 Min 1`), so a full response is a CEILING and the
+    payload has to say so rather than let a reader treat 100 as a population. */
+export const NEWS_VENDOR_LIMIT = 100;
+
+/**
+ * How many rows are stored.
+ *
+ * A BUDGET, NOT A TASTE. Each shaped row is a headline (observed 60-160
+ * chars), a source, a sentiment, up to a handful of tickers and tags, and an
+ * ISO timestamp — call it 400 bytes with the JSON punctuation. Sixty rows is
+ * ~24KB against the ingest route's FLOWS_MAX_PAYLOAD_BYTES of 128KB
+ * (worker.js:963), which leaves the margin this repository keeps for a row
+ * shape that grows. It is also about a session's worth of market-wide
+ * headlines, so the cap rarely binds at all — and when it does, `returned`
+ * beside `kept` says so on the payload, because a list that truncates in
+ * silence reads as a population.
+ */
+export const NEWS_ROWS = 60;
+
+/**
+ * The published rows, newest first, with every silence separated.
+ *
+ * ORDERING IS ASSERTED BY US, NOT ASSUMED OF THE VENDOR. The route documents
+ * "the latest news headlines" and orders them itself, but a cap applied to an
+ * order nobody verified is a cap that can drop the newest rows. Sorting here
+ * makes `kept` mean "the newest sixty" rather than "the first sixty the
+ * vendor happened to send", and the payload states the ordering it applied.
+ *
+ * AN UNDATED ROW SORTS LAST AND IS COUNTED. created_at is `required` in the
+ * spec, and this repository has found the spec wrong six times. A row that
+ * cannot say when it happened cannot be placed on a time axis, so it goes to
+ * the end and `undated` reports how many there were — dropping them silently
+ * would shrink the population without saying so, and dating them "now" would
+ * be the confident-zero defect in the time dimension.
+ */
+export function shapeNews(raw, { cap = NEWS_ROWS, requested = NEWS_VENDOR_LIMIT } = {}) {
+  const wire = unwrapVendorRows(raw);
+
+  let unusable = 0, undatedSeen = 0;
+  const shaped = [];
+  for (const row of wire) {
+    if (!row || typeof row !== "object") { unusable++; continue; }
+    const headline = typeof row.headline === "string" && row.headline.trim()
+      ? row.headline.trim() : null;
+    /* A HEADLINE IS THE ROW. Without it there is nothing to publish and the
+       row is counted as unusable rather than rendered as an empty line. */
+    if (headline === null) { unusable++; continue; }
+
+    /* THE VENDOR'S OWN STAMP, CARRIED VERBATIM AS THE STRING THEY SENT.
+       Reformatting it would make the payload's timestamp OURS, and the whole
+       point of this field is that it is theirs. `createdAtMs` beside it is
+       ours and is labelled as such: it is only for ordering and for the
+       window bounds, and it is null — never 0, never Date.now() — when the
+       stamp does not parse. */
+    const createdAt = typeof row.created_at === "string" && row.created_at.trim()
+      ? row.created_at.trim() : null;
+    const parsed = createdAt === null ? NaN : Date.parse(createdAt);
+    const createdAtMs = Number.isFinite(parsed) ? parsed : null;
+    if (createdAtMs === null) undatedSeen++;
+
+    shaped.push({
+      headline,
+      source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : null,
+      createdAt, createdAtMs,
+      /* A FLAG THE VENDOR DID NOT SEND IS NOT FALSE. `is_major` defaults to
+         false on the REQUEST parameter, which says nothing about a response
+         that omits it — and "this was not flagged major" and "we do not know
+         whether it was" are different sentences. */
+      major: row.is_major === null || row.is_major === undefined ? null : Boolean(row.is_major),
+      /* The vendor's own word, carried, never mapped onto a number. A
+         sentiment string turned into a score here would be this file
+         inventing a quantity the vendor never published. */
+      sentiment: typeof row.sentiment === "string" && row.sentiment.trim()
+        ? row.sentiment.trim() : null,
+      /* DEDUPLICATED, because a renderer joining these onto board names counts
+         them: a row listing AAPL twice would make one headline look like two
+         mentions. An empty array is a MEASURED absence of related tickers (the
+         spec's own example carries `tickers: []` on a Federal Reserve
+         headline), not a failure to read the field — the row is published
+         either way, so the two never have to be told apart here. */
+      tickers: Array.isArray(row.tickers)
+        ? [...new Set(row.tickers.filter((t) => typeof t === "string" && t.trim())
+          .map((t) => t.trim().toUpperCase()))]
+        : [],
+      tags: Array.isArray(row.tags)
+        ? [...new Set(row.tags.filter((t) => typeof t === "string" && t.trim())
+          .map((t) => t.trim()))]
+        : [],
+    });
+  }
+
+  /* Newest first; undated rows to the end, in the order the vendor sent
+     them, because we have no basis to reorder rows we cannot date. */
+  shaped.sort((a, b) => {
+    if (a.createdAtMs === null && b.createdAtMs === null) return 0;
+    if (a.createdAtMs === null) return 1;
+    if (b.createdAtMs === null) return -1;
+    return b.createdAtMs - a.createdAtMs;
+  });
+
+  const rows = shaped.slice(0, cap);
+  const dated = rows.map((r) => r.createdAtMs).filter((ms) => ms !== null);
+
+  return {
+    rows,
+    /* THE FOUR COUNTS THAT KEEP A CAPPED LIST FROM READING AS A POPULATION.
+       `requested` is what we asked for, `returned` is what came back on the
+       wire, `kept` is what is in `rows`, and `shed` is the difference the CAP
+       made. They are four different numbers and a reader needs all four: 100
+       returned of 100 requested means the vendor's own ceiling was hit and
+       the true population is unknown and at least that large, which is a
+       different fact from our cap having dropped forty rows we did see. */
+    requested, returned: wire.length, kept: rows.length,
+    cap, capped: shaped.length > cap, shed: Math.max(0, shaped.length - cap),
+    atVendorLimit: wire.length >= requested,
+    unusable,
+    /* TWO UNDATED COUNTS, BECAUSE THEY ANSWER TWO QUESTIONS AND ONE NUMBER
+       CANNOT. Undated rows sort last, so the cap sheds them first: on a full
+       vendor page `undatedSeen` can be 2 while every published row is dated.
+       A single `undated: 2` beside `kept: 60` reads as "2 of the 60 you are
+       holding", which would be false. `undatedKept` is about the rows in this
+       payload; `undatedSeen` is about the wire. */
+    undatedKept: rows.filter((r) => r.createdAtMs === null).length,
+    undatedSeen,
+    /* THE WINDOW THE PUBLISHED ROWS ACTUALLY COVER, from their own stamps, so
+       a renderer states an age instead of implying one. Null when nothing
+       datable survived — not "now". */
+    newest: dated.length ? new Date(Math.max(...dated)).toISOString() : null,
+    oldest: dated.length ? new Date(Math.min(...dated)).toISOString() : null,
+    ordered: true, orderedBy: "createdAt", orderedDesc: true,
+    /* THE THREE SILENCES, KEPT APART. "quiet" is a feed that was READ and had
+       nothing in it; "unreadable" is rows that arrived and none of them
+       shaped; "pending" is not ours to say — it is what the Worker answers
+       for a key this pipeline has not written yet. */
+    status: rows.length ? "ok" : (wire.length ? "unreadable" : "quiet"),
+    reason: rows.length
+      ? null
+      : (wire.length
+        ? `the headlines feed returned ${wire.length} row(s) and none carried a headline`
+        : "the headlines feed was read and returned no rows"),
+  };
+}
+
 /* ---------- the rolling band: movers, and premium by name --------
 
    ZERO ADDITIONAL API CALLS, AND THAT IS THE WHOLE DESIGN.
@@ -3814,7 +4198,19 @@ function buildMovers(withTilt, { cap = MOVER_ROWS } = {}) {
  * against a stub so the two can never silently disagree again.
  */
 function summarize(payload) {
-  return Array.isArray(payload.rows) ? `${payload.rows.length} rows` : "no rows";
+  if (Array.isArray(payload.rows)) return `${payload.rows.length} rows`;
+  /* A SECOND COLLECTION NAME, BECAUSE THE FIRST ONE'S ABSENCE WAS READ AS AN
+     EMPTY PUBLISH FOR WEEKS. `sector:trix` keeps its eleven readings under
+     `sectors`, so this line printed "published sector:trix: NO ROWS, 3563
+     bytes" on every run while the leg was measuring eleven of eleven — the
+     one early warning the renderer bug in tests/flows-payload-shape.mjs had,
+     saying the opposite of what was true. `sector:premium` publishes under
+     the same name, so it would have inherited the same lie on day one.
+
+     Named collections rather than "the first array on the payload": guessing
+     would make this line's meaning depend on key order. */
+  if (Array.isArray(payload.sectors)) return `${payload.sectors.length} sectors`;
+  return "no rows";
 }
 
 /* ---------- the dated archive -----------------------------------
@@ -4392,6 +4788,134 @@ function fakeSectorCandles(etf) {
       volume: Math.round(4e6 + vol() * 3e7),
     };
   });
+}
+
+/**
+ * The sector-etfs response, synthesised so that EVERY ARM OF sectorLean() IS
+ * REACHED BY A DRY RUN.
+ *
+ * The same argument fakeSectorCandles() makes for truncating XLRE: a fixture
+ * in which all eleven rows succeed never once executes the unmeasured paths,
+ * and those are the paths this project has shipped defects on. So three of
+ * the eleven are deliberately not "ok":
+ *
+ *   XLU  sends both premium sums as the string "0"  -> read "quiet". A
+ *        MEASURED zero: net stays a visible 0, the ratio is null because 0/0
+ *        is undefined, and the row is not confused with a missing one.
+ *   XLB  sends bullish_premium and omits bearish    -> read "unreadable". Half
+ *        a subtraction is not a lean.
+ *   XLRE sends bullish_premium as "   "             -> read "unreadable", and
+ *        this row is the whole reason vendorNum() trims before coercing:
+ *        Number("   ") is 0 and finite, so the house num() would have
+ *        manufactured a bullish premium of exactly zero dollars out of a blank
+ *        field, and the row would have published as a confident lean.
+ *
+ * Everything is a quoted string because that is how the vendor's own example
+ * sends these fields (docs/uw-openapi.yaml:11517-11643 types every premium,
+ * price and market-cap column as `string`), and a fixture that sent numbers
+ * would certify only the branch the wire never takes.
+ */
+function fakeSectorEtfs() {
+  const rnd = mulberry(4711);
+  /* SPY RIDES ALONG, because the vendor's own example puts it first in this
+     response and SECTOR_ETFS does not contain it. A fixture of exactly the
+     eleven we map would let sectorLean() match by POSITION and still pass;
+     with a twelfth row that no sector claims, only a match by ticker works,
+     and `returned` (12) is visibly not the sector count (11) on the payload. */
+  const BASKETS = [{ sector: "S&P 500 Index", etf: "SPY" }, ...SECTOR_ETFS];
+  return { data: BASKETS.map(({ sector, etf }, i) => {
+    const last = 40 + i * 9 + rnd() * 5;
+    const prev = last * (1 + (rnd() - 0.5) * 0.02);
+    /* Three orders of magnitude between the largest and smallest basket, on
+       purpose: it is exactly this spread that makes a dollar difference an
+       unusable cross-sectional ranking and the ratio the defensible one. */
+    const scale = etf === "SPY" ? 3e8 : 1e4 * Math.pow(10, (i % 4));
+    const bullish = Math.round(scale * (0.4 + rnd()));
+    const bearish = Math.round(scale * (0.4 + rnd()));
+    const row = {
+      ticker: etf,
+      full_name: etf === "SPY" ? "S&P 500 Index" : sector,
+      last: last.toFixed(2), prev_close: prev.toFixed(2),
+      open: prev.toFixed(2), high: (last * 1.004).toFixed(2), low: (last * 0.996).toFixed(2),
+      prev_date: "2026-08-21",
+      marketcap: String(Math.round(5e9 + rnd() * 4e11)),
+      volume: Math.round(1e6 + rnd() * 4e7),
+      call_premium: String(Math.round(scale * 1.1)),
+      put_premium: String(Math.round(scale * 0.9)),
+      call_volume: Math.round(300 + rnd() * 2e6),
+      put_volume: Math.round(300 + rnd() * 2e6),
+      avg30_stock_volume: String(Math.round(2e6 + rnd() * 6e7)),
+      week52_high: (last * 1.2).toFixed(2), week52_low: (last * 0.7).toFixed(2),
+      bullish_premium: String(bullish),
+      bearish_premium: String(bearish),
+    };
+    if (etf === "XLU") { row.bullish_premium = "0"; row.bearish_premium = "0"; }
+    if (etf === "XLB") { delete row.bearish_premium; }
+    if (etf === "XLRE") { row.bullish_premium = "   "; }
+    return row;
+  }) };
+}
+
+/**
+ * The headlines response, synthesised so the CAP, the UNDATED row and the
+ * UNUSABLE row are all reached by a dry run.
+ *
+ * It returns NEWS_VENDOR_LIMIT rows, which is the vendor's documented maximum,
+ * so `atVendorLimit` is true on every dry run and the "this is a ceiling, not
+ * a population" branch of the payload is exercised rather than merely
+ * written. That is more rows than NEWS_ROWS, so the cap binds and `shed` is
+ * non-zero — a fixture that fitted inside the cap would leave the truncation
+ * disclosure certified by nothing.
+ *
+ * ONE ROW IS UNDATED and one is UNPARSEABLE, because created_at is `required`
+ * in the spec and this repository has found the spec wrong six times running.
+ * One row is not an object at all, which is what a vendor sending `null`
+ * inside `data` looks like.
+ *
+ * The stamps walk BACKWARDS from the previous session's close for the same
+ * reason the dark-pool fixture does: a 05:15 ET run has no headlines from the
+ * session it is about to open, and dating them to the session date would make
+ * the corpus exercise only the reassuring branch of the staleness the payload
+ * exists to disclose.
+ */
+function fakeNewsHeadlines(tickers) {
+  const rnd = mulberry(8123);
+  const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
+  const SOURCES = ["BusinessWire", "MarketNews", "Reuters", "Bloomberg", "PRNewswire"];
+  const SENTIMENT = ["positive", "negative", "neutral"];
+  const TAGS = ["earnings", "guidance", "tech", "federal-reserve", "interest-rates", "m-and-a"];
+  const rows = Array.from({ length: NEWS_VENDOR_LIMIT }, (_, i) => {
+    /* Newest first on the wire — the route documents "the latest news
+       headlines" — so the SHUFFLE below is what proves shapeNews() sorts
+       rather than trusting the order it was handed. */
+    const at = Date.UTC(2026, 7, 21, 20, 0, 0) - i * 7 * 60000;
+    const withTickers = i % 3 !== 2;
+    return {
+      created_at: new Date(at).toISOString(),
+      headline: `Synthetic headline ${i + 1} about ` +
+        (withTickers ? names[Math.floor(rnd() * names.length)] : "the broader tape"),
+      source: SOURCES[i % SOURCES.length],
+      sentiment: SENTIMENT[i % SENTIMENT.length],
+      is_major: i % 7 === 0,
+      meta: {},
+      tags: [TAGS[i % TAGS.length], TAGS[(i + 3) % TAGS.length]],
+      tickers: withTickers
+        ? [names[Math.floor(rnd() * names.length)], names[Math.floor(rnd() * names.length)]]
+        : [],
+    };
+  });
+  delete rows[5].created_at;              // required by the spec, absent on the wire
+  rows[9].created_at = "not a timestamp"; // present and unparseable: a different silence
+  rows[12].headline = "";                 // no headline is no row
+  rows[17] = null;                        // the vendor sending a hole inside data
+  /* Handed to the shaper OUT OF ORDER, so "newest first" is something this
+     pipeline does rather than something it assumes. */
+  const shuffled = rows.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return { data: shuffled };
 }
 
 /** Does this row carry none of the four gamma legs buildSurface reads? */
@@ -7387,6 +7911,189 @@ async function main() {
     console.warn(`  political: ${error.message} — every key above published before this leg ran`);
   }
 
+  /* 7j. THE SECTOR OPTIONS LEAN — ONE call, eleven sectors, and NOT the
+     momentum leg at flows-pipeline.mjs:6789.
+
+     7d spends eleven candle calls to measure TRIX on daily closes. This spends
+     ONE call on /api/market/sector-etfs, which takes no parameters at all and
+     returns today's statistics for the same eleven SPDR baskets including
+     `bullish_premium` and `bearish_premium`. The quantity is different — a
+     premium lean, not a smoothed price oscillator — so it gets its own key.
+
+     WHY `sector:premium` AND NOT `sector:etfs`. Both legs are built from the
+     eleven SPDR sector ETFs, so a key named after the instruments cannot tell
+     them apart: `sector:etfs` beside `sector:trix` reads as "the ETF one" and
+     "the indicator one", which is not a distinction a reader can act on. The
+     key is named after the QUANTITY, because that is what a reader choosing
+     between the two panels is actually choosing between.
+
+     NO DEADLINE GUARD, unlike 7d, and the difference is the cost. Eleven calls
+     landing after the cards are abandoned is eleven calls wasted; one call is
+     not worth a branch. Same reasoning as the pulse and political legs above.
+
+     THE FIRST-ROW KEY DUMP is the same bounded diagnostic every other leg
+     carries. The vendor's own spec contradicts its own example on this route
+     (the properties block declares `week_52_high` and `close`; the example
+     sends `week52_high` and no `close` at all), which is exactly the class of
+     surprise one job log should settle rather than a week of guessing. */
+  try {
+    const raw = DRY_RUN
+      ? fakeSectorEtfs()
+      : await uw("/api/market/sector-etfs", {});
+    const wire = unwrapVendorRows(raw);
+    const sectors = sectorLean(raw);
+    const measured = sectors.filter((s) => s.read === "ok").length;
+    const quiet = sectors.filter((s) => s.read === "quiet").length;
+
+    /* ONCE PER RUN, AND ONLY WHEN SOMETHING LOOKS WRONG. Rows arrived but
+       fewer than half of the eleven produced a lean: that is the shape
+       mismatch this dump exists to name. Bounded to one row and 24 keys for
+       the same reason the pulse and political dumps are. */
+    if (wire.length && measured + quiet < SECTOR_ETFS.length / 2) {
+      const first = wire[0];
+      if (first && typeof first === "object") {
+        console.log("  sector:premium: NOTE returned rows but few shaped — first-row keys: " +
+          Object.keys(first).slice(0, 24).join(", "));
+      }
+    }
+
+    await publish("sector:premium", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* WHEN WE READ IT, distinct from the session it is about. This route
+         takes no date parameter, so "the current trading day" is the vendor's
+         determination and not one this pipeline pinned — a reader comparing
+         this key against `sessionDate` has to be able to see that the two are
+         asserted by different parties. */
+      readAt: new Date().toISOString(),
+      refreshed: "nightly",
+      vendorDated: false,
+      basis: "SPDR Select Sector ETFs, not GICS index levels",
+      /* THE UNITS, ON THE PAYLOAD, so no renderer has to infer them from a
+         field name it half-recognises. */
+      units: {
+        bullishPremiumUsd: "usd", bearishPremiumUsd: "usd",
+        grossPremiumUsd: "usd", netPremiumUsd: "usd",
+        leanRatio: "ratio", changeRatio: "ratio",
+        callVolume: "contracts", putVolume: "contracts", stockVolume: "shares",
+      },
+      /* THE DERIVATION, PUBLISHED, so a reader who disagrees can redo it from
+         the two raw sums that ride on every row. */
+      lean: {
+        rank: "leanRatio",
+        relation: "netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd; " +
+          "grossPremiumUsd = bullishPremiumUsd + bearishPremiumUsd; " +
+          "leanRatio = netPremiumUsd / grossPremiumUsd",
+        choice: true,
+        rejected: "ranking the eleven on netPremiumUsd, which ranks them by " +
+          "sector size: XLK clears three orders of magnitude more premium than " +
+          "XLB on an ordinary day, so the dollar difference is dominated by the " +
+          "basket rather than by the lean",
+        undefinedAtZero: "leanRatio is null when grossPremiumUsd is 0 (0/0 is " +
+          "undefined, not neutral); netPremiumUsd stays a visible measured 0",
+      },
+      /* NOT THE MOMENTUM KEY, said on the payload rather than only in a
+         comment nobody downstream reads. */
+      notSameAs: "sector:trix — that key is TRIX on daily closes and contains " +
+        "no option data; the two may disagree for weeks and neither is wrong",
+      sectors,
+      returned: wire.length,
+      measured, quiet,
+      unreadable: sectors.filter((s) => s.read === "unreadable").length,
+      /* THE SAME THREE SILENCES THE ROWS USE, at the level of the whole leg,
+         and deliberately NOT sector:trix's `ok`/`unavailable` pair. That pair
+         cannot tell "the vendor answered with nothing" from "the vendor
+         answered with rows we could not read", and those are the two states
+         whose difference decides whether the market was quiet or our field
+         names are wrong. `> 0` rather than a truthiness test on a count, for
+         the reason this file tests absence before coercion everywhere else. */
+      status: measured + quiet > 0 ? "ok" : (wire.length ? "unreadable" : "quiet"),
+    });
+    console.log(`  sector:premium: ${measured}/${SECTOR_ETFS.length} sectors leaned` +
+      (quiet ? `, ${quiet} measured-and-empty` : "") +
+      ` from ${wire.length} vendor row(s)`);
+    for (const s of sectors) {
+      if (s.reason) console.warn(`    ${s.sector} (${s.etf}): ${s.read} — ${s.reason}`);
+    }
+  } catch (error) {
+    console.warn(`  sector:premium: ${error.message} — every key above published before this leg ran`);
+  }
+
+  /* 7k. THE NEWS TAPE — ONE market-wide call, and the loop nobody should write.
+
+     `ticker` on /api/news/headlines is a FILTER on this same market-wide path,
+     not a per-ticker route — there is no per-ticker news endpoint at all. A
+     per-board-name loop would therefore cost +50 calls (the board) or +128
+     (the enriched pool) to obtain rows this single unfiltered call already
+     returns with a `tickers` array on every row. shapeNews() keeps that array,
+     so the per-name join is a filter in memory and costs nothing.
+
+     WHAT THIS LEG CANNOT FIX, AND SAYS SO INSTEAD. The job runs at 05:15 ET
+     and news is a stream; by the close these headlines are ten hours old. The
+     Worker's fifteen-minute cron already re-reads two keys intraday and this
+     one could ride it — see the note over shapeNews() for why it does not yet
+     (the shaper would have to move to shared/ for the Worker to import it
+     rather than keep a second copy, which is a change of its own). Until then
+     the payload refuses to imply freshness: every row carries the vendor's own
+     `created_at`, the envelope carries `readAt` and `refreshed: "nightly"`,
+     and `newest`/`oldest` bound the window the stored rows actually cover. */
+  try {
+    const raw = DRY_RUN
+      ? fakeNewsHeadlines((payloads.long.rows || []).map((r) => r.t))
+      : await uw("/api/news/headlines", { limit: NEWS_VENDOR_LIMIT });
+    const wire = unwrapVendorRows(raw);
+    /* THE LIMIT IS PASSED, NOT DEFAULTED. `atVendorLimit` is the claim "this
+       response was the vendor's ceiling", and it is only true if the number
+       the shaper compares against is the number the request actually sent.
+       Leaving it to the shaper's default makes that a coincidence held in two
+       places, and a future edit to the fetch above would silently turn the
+       claim into a lie rather than into a failure. */
+    const news = shapeNews(raw, { requested: NEWS_VENDOR_LIMIT });
+
+    /* The same bounded diagnostic the pulse feeds carry: rows arrived and
+       none of them shaped is a field-name mismatch, and one job log should
+       settle it. */
+    if (news.status === "unreadable") {
+      const first = wire[0];
+      if (first && typeof first === "object") {
+        console.log("  news: NOTE returned rows but none shaped — first-row keys: " +
+          Object.keys(first).slice(0, 24).join(", "));
+      }
+    }
+
+    await publish("news", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+      /* WHEN WE READ IT. On a stream this is the load-bearing field: without
+         it a renderer can only print the vendor's stamps, which say when the
+         news happened and not how long ago we looked. */
+      readAt: new Date().toISOString(),
+      refreshed: "nightly",
+      /* HOW STALE "FRESH" CAN LEGITIMATELY BE, stated rather than implied. The
+         two intraday keys can name the cron's cadence; this one cannot, and a
+         reader must be told which sort of key they are holding. */
+      cadence: "once per weekday morning at 05:15 America/New_York",
+      staleBy: "the close",
+      units: { returned: "rows", kept: "rows", shed: "rows", requested: "rows" },
+      scope: "market-wide; `ticker` on this route is a filter on the same path, " +
+        "so per-name news is a filter of `rows[].tickers` rather than a call",
+      ...news,
+    });
+    console.log(`  news: ${news.kept} headline(s) kept of ${news.returned} returned` +
+      (news.shed ? ` (${news.shed} shed by the ${NEWS_ROWS}-row cap)` : "") +
+      (news.atVendorLimit
+        ? ` — WHICH IS THE VENDOR'S MAXIMUM (${NEWS_VENDOR_LIMIT}), so the true ` +
+          "population is unknown and at least that large"
+        : "") +
+      (news.unusable ? `, ${news.unusable} unusable` : "") +
+      (news.undatedSeen
+        ? `, ${news.undatedSeen} undated on the wire (${news.undatedKept} of them kept)`
+        : "") +
+      `; window ${news.oldest || "—"} .. ${news.newest || "—"}`);
+  } catch (error) {
+    console.warn(`  news: ${error.message} — every key above published before this leg ran`);
+  }
+
   /* 7h. WAVE-B PROBES — six per-stock endpoints scouted on one liquid name.
 
      PROBES, NOT SECTIONS: the next wave builds per-name panels on these
@@ -8058,6 +8765,11 @@ export {
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SPAN, TRIX_SERIES, TRIX_WARMUP, TRIX_MIN_CANDLES,
   TRIX_FULL_SCALE_BP, ema, trixSeriesBp, scaleTrix, sectorTrix,
+  /* The sector OPTIONS lean and the news tape. Exported beside sectorTrix
+     deliberately: the contract suite asserts that the two sector shapers keep
+     DISJOINT field vocabularies, and a reader meeting them in one export list
+     is told they are neighbours rather than versions of each other. */
+  fakeSectorEtfs, fakeNewsHeadlines,
   MOVER_ROWS, moverRow, buildMovers,
   describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,

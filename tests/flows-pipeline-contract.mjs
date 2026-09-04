@@ -27,6 +27,7 @@ import {
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
+  vendorNum, sectorLean, shapeNews, NEWS_ROWS, NEWS_VENDOR_LIMIT,
 } from "../scripts/flows-pipeline.mjs";
 import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -3414,4 +3415,327 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself`);
+/* ---------- the sector OPTIONS lean, unit by unit ----------------
+
+   A DIFFERENT QUANTITY FROM sectorTrix ABOVE, AND THE TESTS SAY SO. That
+   function measures TRIX on daily closes and contains no option data; this
+   one turns two dollar sums into a lean. They cover the same eleven baskets
+   and are published under two keys precisely so a momentum reading and a
+   premium lean can never share a field name. */
+{
+  const row = (etf, over) => ({
+    ticker: etf, full_name: "Whatever the vendor calls it",
+    bullish_premium: "1000", bearish_premium: "1000",
+    last: "100", prev_close: "80", volume: 1234,
+    call_premium: "600", put_premium: "400", call_volume: 7, put_volume: 9,
+    ...over,
+  });
+  const all = (over = {}) => SECTOR_ETFS.map(({ etf }) => row(etf, over));
+  const find = (rows, etf) => sectorLean(rows).find((s) => s.etf === etf);
+
+  /* ---- the derivation, and both units, on one measured row ---- */
+  {
+    const r = find(all({ bullish_premium: "300", bearish_premium: "100" }), "XLK");
+    eq(r.read, "ok", "a sector with both premium sums reads ok");
+    eq(r.bullishPremiumUsd, 300, "the raw bullish sum is carried, coerced from the string");
+    eq(r.bearishPremiumUsd, 100, "and the raw bearish sum");
+    eq(r.grossPremiumUsd, 400, "gross is their sum, in dollars");
+    eq(r.netPremiumUsd, 200, "net is their difference, in dollars — SIGNED, not a magnitude");
+    eq(r.leanRatio, 0.5,
+       "and the lean is the DIMENSIONLESS share, 200/400 — a ratio and a dollar difference " +
+       "never share a field name, so both are published and neither is called `lean`");
+  }
+
+  /* ---- THE RATIO IS COMPARABLE ACROSS BASKETS AND THE DOLLARS ARE NOT ----
+
+     This is the whole argument for ranking on leanRatio, expressed as an
+     assertion rather than as a comment: a tiny sector leaning hard and a huge
+     sector leaning barely at all. Rank the two on dollars and the huge one
+     wins on size; rank on the ratio and the conviction wins. */
+  {
+    const rows = all();
+    rows[0] = row("XLB", { bullish_premium: "38000", bearish_premium: "2000" });
+    rows[5] = row("XLK", { bullish_premium: "520000000", bearish_premium: "480000000" });
+    const small = find(rows, "XLB"), big = find(rows, "XLK");
+    ok(big.netPremiumUsd > small.netPremiumUsd,
+       `the large basket wins on dollars (${big.netPremiumUsd} vs ${small.netPremiumUsd}), ` +
+       "which is a fact about sector size rather than about conviction");
+    ok(small.leanRatio > big.leanRatio,
+       `and the small basket wins on the ratio (${small.leanRatio} vs ${big.leanRatio}) — ` +
+       "which is why the payload ranks on leanRatio and publishes the dollars as its SIZE");
+  }
+
+  /* ---- THE MEASURED ZERO. Both sums present and both zero is a reading: a
+     sector where nothing traded. It is not the same as a sector we could not
+     read, and the two may not share a sentence. ---- */
+  {
+    const r = find(all({ bullish_premium: "0", bearish_premium: "0" }), "XLU");
+    eq(r.read, "quiet", "both sums zero is QUIET — measured and empty");
+    eq(r.netPremiumUsd, 0,
+       "and the dollar difference stays a VISIBLE 0. `Number(null)` is also 0, which is why " +
+       "absence is tested with === null before any arithmetic runs: a measured zero and a " +
+       "missing reading must not arrive at the same number");
+    eq(r.grossPremiumUsd, 0, "gross is a measured 0 too");
+    eq(r.leanRatio, null,
+       "the ratio is NULL, not 0 — 0/0 is undefined, and publishing 0 would put a sector " +
+       "where nothing traded on the same footing as one that traded evenly on both sides");
+    ok(/measured and empty/.test(r.reason), "and the row says which silence this is");
+  }
+
+  /* ---- ONE SIDE ABSENT IS UNREADABLE, NOT A LEAN OF THE OTHER SIDE ---- */
+  {
+    const noBear = find(all({ bearish_premium: undefined }), "XLE");
+    eq(noBear.read, "unreadable", "a sector missing one premium sum is unreadable");
+    eq(noBear.bullishPremiumUsd, 1000, "the side that DID arrive is still published");
+    eq(noBear.bearishPremiumUsd, null, "the side that did not is null");
+    eq(noBear.netPremiumUsd, null, "and the difference is null — half a subtraction is not a lean");
+    eq(noBear.leanRatio, null, "as is the ratio");
+    ok(/needs both terms/.test(noBear.reason), "and the reason names the missing term");
+
+    const neither = find(all({ bullish_premium: null, bearish_premium: null }), "XLE");
+    eq(neither.read, "unreadable", "neither sum present is also unreadable");
+    ok(/carried neither/.test(neither.reason),
+       "with a DIFFERENT reason from the one-sided case — two silences, two sentences");
+  }
+
+  /* ---- THE VENDOR SENDS QUOTED STRINGS, AND ONE OF THEM IS BLANK ----
+
+     Every premium, price and market-cap column in this schema is typed
+     `string` (docs/uw-openapi.yaml), so the coercion is the normal path, not
+     the edge case. The edge case is a string with nothing in it but spaces:
+     Number("   ") is 0 and finite, so the house num() helper would have
+     manufactured a bullish premium of exactly zero dollars out of a field the
+     vendor left blank, and the row would have published as a confident lean
+     against a bearish sum that was real. vendorNum() trims first. */
+  {
+    eq(vendorNum("  42 "), 42, "a padded number still reads as a number");
+    eq(vendorNum("   "), null,
+       "but a string of nothing but whitespace is ABSENT, not zero — Number(\"   \") is 0 and " +
+       "finite, which is the confident zero this repository has shipped five times");
+    eq(vendorNum("0"), 0, "while a quoted zero is a MEASURED zero and survives");
+    eq(vendorNum(0), 0, "as does a numeric zero");
+    eq(vendorNum(null), null, "null is absent");
+    eq(vendorNum(undefined), null, "so is undefined");
+    eq(vendorNum("n/a"), null, "and so is a string that is not a number at all");
+
+    const blank = find(all({ bullish_premium: "   " }), "XLRE");
+    eq(blank.read, "unreadable",
+       "so a blank premium string makes the row unreadable rather than a zero-dollar lean");
+    eq(blank.bullishPremiumUsd, null, "with the blank side null rather than 0");
+  }
+
+  /* ---- MATCHED BY TICKER, NOT BY POSITION, AND ALL ELEVEN ALWAYS RETURN ---- */
+  {
+    const partial = sectorLean({ data: [row("XLK"), row("SPY"), row("XLV")] });
+    eq(partial.length, SECTOR_ETFS.length,
+       "all eleven rows come back however few the vendor sent — a panel that quietly shrinks " +
+       "from eleven bars to nine is how an outage goes unnoticed for a week");
+    eq(partial.filter((s) => s.read === "ok").length, 2, "the two that were sent are measured");
+    const missing = partial.find((s) => s.etf === "XLE");
+    eq(missing.read, "unreadable", "and the nine that were not are unreadable");
+    ok(/no XLE row/.test(missing.reason), "each naming its own absence");
+
+    const shuffled = sectorLean({ data: SECTOR_ETFS.slice().reverse()
+      .map(({ etf }, i) => row(etf, { bullish_premium: String(1000 + i), bearish_premium: "0" })) });
+    eq(shuffled[0].etf, SECTOR_ETFS[0].etf, "output order is SECTOR_ETFS order, not the wire's");
+    eq(shuffled[0].bullishPremiumUsd, 1000 + SECTOR_ETFS.length - 1,
+       "and each row got ITS OWN ticker's numbers — a positional match would have silently " +
+       "attributed the last basket's premium to the first sector");
+  }
+
+  /* ---- THE CONTEXT COLUMNS CARRY THEIR UNITS AND REFUSE A FAKE ZERO ---- */
+  {
+    const r = find(all({ last: "110", prev_close: "100" }), "XLF");
+    eq(r.changeRatio, 0.1, "changeRatio is a RATIO, named so, not a percentage or a dollar move");
+    const noPrev = find(all({ prev_close: null }), "XLF");
+    eq(noPrev.changeRatio, null,
+       "and it is null with no previous close — a session with no comparison is not a session " +
+       "that did not move");
+    const zeroPrev = find(all({ prev_close: "0" }), "XLF");
+    eq(zeroPrev.changeRatio, null, "nor does a zero divisor produce an infinity");
+    eq(zeroPrev.prevCloseUsd, 0, "while the measured zero itself is still published");
+  }
+
+  /* ---- AND THE TWO SECTOR SHAPERS SHARE NO QUANTITY ---- */
+  {
+    const lean = Object.keys(find(all(), "XLK"));
+    const trix = Object.keys(sectorTrix(new Map())[0]);
+    const shared = lean.filter((f) => trix.includes(f)).sort();
+    assert.deepEqual(shared, ["etf", "reason", "sector"],
+      `the momentum row and the premium row share only the basket's identity and its absence ` +
+      `note (they share: ${shared.join(", ")}) — a TRIX reading and a premium lean under one ` +
+      `field name is exactly the drift the two-key split exists to stop`); checks++;
+  }
+}
+
+/* ---------- the news tape: the cap, the clock, and the order -----
+
+   THE CAP AND THE CLOCK ARE THE TWO THINGS A READER CANNOT RECOVER FROM THE
+   ROWS THEMSELVES. A truncated list looks exactly like a short one, and a
+   stale headline looks exactly like a fresh one, so both have to be facts on
+   the payload rather than properties of it. */
+{
+  const wire = (n, over = () => ({})) => ({ data: Array.from({ length: n }, (_, i) => ({
+    created_at: new Date(Date.UTC(2026, 7, 21, 20, 0, 0) - i * 60000).toISOString(),
+    headline: `Headline ${i}`, source: "Reuters", sentiment: "neutral",
+    is_major: false, tags: ["earnings"], tickers: ["AAPL"],
+    ...over(i),
+  })) });
+
+  /* ---- A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION ---- */
+  {
+    const s = shapeNews(wire(100), { cap: 60, requested: 100 });
+    eq(s.kept, 60, "the cap binds");
+    eq(s.rows.length, 60, "and `kept` is the length of what is published");
+    eq(s.returned, 100, "`returned` is what came off the wire, which is a different number");
+    eq(s.shed, 40, "`shed` is what OUR cap removed from what we saw");
+    eq(s.capped, true, "and the payload says plainly that it truncated");
+    eq(s.requested, 100, "it also records what we ASKED for");
+    eq(s.atVendorLimit, true,
+       "so that a full page can be reported as a CEILING: the true population is unknown and " +
+       "at least that large, which is not the same fact as our cap having shed rows we saw");
+
+    const short = shapeNews(wire(12), { cap: 60, requested: 100 });
+    eq(short.capped, false, "a short page is not capped");
+    eq(short.shed, 0, "and sheds nothing");
+    eq(short.atVendorLimit, false,
+       "and is NOT at the vendor's ceiling, so its count really is a measurement of the tape " +
+       "rather than of the request");
+  }
+
+  /* ---- THE ORDER IS OURS, SO THE CAP KEEPS THE NEWEST AND NOT THE FIRST ----
+
+     The vendor documents this route as "the latest news headlines" and the
+     ordering it applies is its own. A cap applied to an order nobody verified
+     is a cap that can drop the newest rows, so the rows are sorted here and
+     the payload states that they were. */
+  {
+    /* OLDEST FIRST ON THE WIRE, deliberately and exactly. `wire()` walks
+       backwards from a fixed instant, so reversing it puts the OLDEST row at
+       index 0 — and a cap applied before the sort would then keep the thirty
+       oldest headlines and publish them as the newest thirty. Nothing here is
+       shuffled at random: a comparator that returns a constant leaves an
+       order the engine chooses, which is not a fixture. */
+    const oldestFirst = wire(90).data.slice().reverse();
+    const s = shapeNews({ data: oldestFirst }, { cap: 30, requested: 100 });
+    const ms = s.rows.map((r) => r.createdAtMs);
+    ok(ms.every((v, i) => i === 0 || ms[i - 1] >= v),
+       "the published rows are newest-first whatever order the vendor sent");
+    eq(s.rows[0].headline, "Headline 0",
+       "and the NEWEST row survives a cap applied to an oldest-first wire — slicing before " +
+       "the sort would have published the thirty OLDEST headlines, in newest-first order, " +
+       "under a `newest` label that was true of none of them");
+    eq(s.rows[29].headline, "Headline 29",
+       "and the thirtieth published row is the thirtieth newest, not the thirtieth the vendor " +
+       "happened to send");
+    eq(s.ordered, true, "the payload states that it ordered");
+    eq(s.orderedBy, "createdAt", "and names the field");
+    eq(s.orderedDesc, true, "and the direction");
+  }
+
+  /* ---- THE VENDOR'S STAMP IS CARRIED VERBATIM; OURS IS LABELLED AS OURS ---- */
+  {
+    const s = shapeNews(wire(3), { cap: 60, requested: 100 });
+    eq(s.rows[0].createdAt, "2026-08-21T20:00:00.000Z",
+       "the vendor's own timestamp is carried as the STRING they sent — reformatting it would " +
+       "make the payload's timestamp ours, and the whole point of the field is that it is theirs");
+    eq(s.rows[0].createdAtMs, Date.parse("2026-08-21T20:00:00.000Z"),
+       "our parse of it rides beside it under a name that says it is a parse");
+    eq(s.newest, "2026-08-21T20:00:00.000Z", "the window is bounded from the rows' own stamps");
+    eq(s.oldest, "2026-08-21T19:58:00.000Z", "at both ends");
+  }
+
+  /* ---- AN UNDATED ROW IS NOT A ROW DATED NOW ----
+
+     created_at is `required` in the vendor's schema and this repository has
+     found that specification wrong six times. A row that cannot say when it
+     happened cannot be placed on a time axis: it sorts last, it is counted,
+     and it is never given a manufactured timestamp. Date.parse("") is NaN and
+     new Date(null) is the EPOCH — both are ways this has been got wrong. */
+  {
+    const s = shapeNews(wire(4, (i) => (i === 1 ? { created_at: null }
+      : i === 2 ? { created_at: "not a timestamp" } : {})), { cap: 60, requested: 100 });
+    eq(s.kept, 4, "undated rows are still PUBLISHED — dropping them would shrink the " +
+       "population without saying so");
+    eq(s.undatedSeen, 2, "and counted: one absent stamp and one unparseable one");
+    eq(s.undatedKept, 2, "both of which are in this payload, because nothing was capped away");
+    eq(s.rows[2].createdAtMs, null, "an unplaceable row carries a NULL parse");
+    eq(s.rows[3].createdAtMs, null, "never 0, and never the instant we happened to read it");
+    ok(s.rows[0].createdAtMs !== null && s.rows[1].createdAtMs !== null,
+       "and the datable rows come first, because an undated row cannot be ordered against them");
+    eq(s.newest, "2026-08-21T20:00:00.000Z",
+       "the window bounds are computed from the datable rows only");
+
+    /* THE TWO COUNTS ANSWER TWO QUESTIONS AND ONE NUMBER CANNOT. Undated rows
+       sort last, so a binding cap sheds them first: `undatedSeen` can be 2
+       while every published row is dated. A single `undated: 2` beside
+       `kept: 60` would read as "2 of the 60 you are holding". */
+    const capped = shapeNews(wire(20, (i) => (i > 17 ? { created_at: null } : {})),
+      { cap: 10, requested: 100 });
+    eq(capped.undatedSeen, 2, "the wire carried two undated rows");
+    eq(capped.undatedKept, 0, "and the cap shed both, so none of the published rows is undated");
+  }
+
+  /* ---- A ROW WITH NO HEADLINE IS NOT A ROW, AND SAYS SO SEPARATELY ---- */
+  {
+    const s = shapeNews({ data: [
+      { created_at: "2026-08-21T20:00:00.000Z", headline: "Real", source: "Reuters" },
+      { created_at: "2026-08-21T19:00:00.000Z", headline: "   " },
+      null,
+      "not an object",
+    ] }, { cap: 60, requested: 100 });
+    eq(s.kept, 1, "only the row with a headline is published");
+    eq(s.unusable, 3, "and the other three are counted rather than silently dropped");
+    eq(s.status, "ok", "a feed with one good row is ok");
+  }
+
+  /* ---- THE THREE SILENCES, WHICH MAY NOT SHARE A SENTENCE ---- */
+  {
+    const quiet = shapeNews({ data: [] }, { cap: 60, requested: 100 });
+    eq(quiet.status, "quiet",
+       "an empty response is QUIET — the tape was read and there was nothing on it");
+    ok(/read and returned no rows/.test(quiet.reason), "and says exactly that");
+    eq(quiet.newest, null, "with no window, because there is nothing to bound");
+    eq(quiet.kept, 0, "and no rows");
+
+    const unreadable = shapeNews({ data: [{ created_at: "2026-08-21T20:00:00Z" }] },
+      { cap: 60, requested: 100 });
+    eq(unreadable.status, "unreadable",
+       "rows that arrived and none of which shaped is UNREADABLE — a different silence, and " +
+       "the one that means our field names are wrong rather than the market being quiet");
+    ok(/none carried a headline/.test(unreadable.reason), "and names what was missing");
+
+    /* The third silence, "pending", is the Worker's to say for a key this
+       pipeline has not written yet — worker.js answers {status:"pending"} on
+       /api/flows/news. It is deliberately not a status this shaper can emit. */
+    ok(!["pending"].includes(quiet.status) && !["pending"].includes(unreadable.status),
+       "and the shaper never claims `pending`, which is the Worker's word for a key that has " +
+       "not been published rather than a fact about the feed");
+  }
+
+  /* ---- THE JOIN KEY THAT KEEPS THIS LEG AT ONE CALL ---- */
+  {
+    const s = shapeNews(wire(3, () => ({ tickers: ["aapl", "AAPL", " msft "] })),
+      { cap: 60, requested: 100 });
+    assert.deepEqual(s.rows[0].tickers, ["AAPL", "MSFT"],
+      "tickers are normalised and DEDUPLICATED — there is no per-ticker news endpoint, so " +
+      "the per-name join is a filter of this array, and a row listing one name twice would " +
+      "make a single headline look like two mentions"); checks++;
+    const none = shapeNews(wire(1, () => ({ tickers: [] })), { cap: 60, requested: 100 });
+    assert.deepEqual(none.rows[0].tickers, [],
+      "a market-wide headline carries an EMPTY array, which is a measured absence of related " +
+      "tickers rather than a failure to read the field"); checks++;
+  }
+
+  /* ---- A FLAG THE VENDOR DID NOT SEND IS NOT FALSE ---- */
+  {
+    const s = shapeNews(wire(3, (i) => (i === 1 ? { is_major: undefined } : {})),
+      { cap: 60, requested: 100 });
+    eq(s.rows[0].major, false, "a flag the vendor sent as false is false");
+    eq(s.rows[1].major, null,
+       "and a flag the vendor omitted is NULL — \"this was not flagged major\" and \"we do not " +
+       "know whether it was\" are different sentences");
+  }
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp`);

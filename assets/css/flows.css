@@ -907,6 +907,40 @@ p.fb-empty {
   line-height: 1.45;
 }
 
+/* THE READING PROMOTED TO THE TOP OF ITS PANEL. A survey of the fourteen
+   Flows renderers counted 101,768 characters of prose in 1,736 strings and
+   found `.fc-note` — the METHOD paragraph — emitted 87 times against 4
+   emissions of `.fc-reading`, the FINDING. The product led with its
+   methodology and buried the number. `.is-lead` is the same element at the
+   size the finding deserves: it is not a heading, because a heading names a
+   region and this is a sentence with a number in it, and it is not a
+   different class, because a reader learning that `.fc-reading` means "what
+   this panel found" must not have to learn it twice.
+
+   --fs-lead is the token base.css reserves for "the loudest single
+   readings", which is exactly what this is, and it is a step above
+   --fs-note rather than a jump — a panel is not improved by shouting. */
+.fc-reading.is-lead {
+  margin: 0.2rem 0 0.75rem;
+  font-size: var(--fs-lead);
+  line-height: 1.4;
+}
+
+/* A NOTE THAT COULD CHANGE WHAT THE READING MEANS, as opposed to one that
+   explains how the reading was made. The method now lives behind the panel's
+   disclosure; these stay in the open, and they have to be legible as a
+   different KIND of sentence from the decoder prose they used to sit in the
+   middle of — a truncated chain, a ranking from another session, a column
+   carrying no level. Full ink rather than the note's dim, and a rule down the
+   left so the eye finds them without reading them first. Deliberately not a
+   colour and not an icon: this is a qualification, not an alarm, and hue is
+   the last channel on this site. */
+.fc-note.is-qualifier {
+  color: var(--ink);
+  border-left: 2px solid var(--hairline);
+  padding-left: 0.6rem;
+}
+
 .fc-dead {
   margin: 0;
   padding: 0.8rem;
@@ -3736,6 +3770,70 @@ body.is-stale .flows-tablewrap {
    disclosures on this page, in the workspace-chrome block above — this rule
    set and .ft-all's were character-for-character identical in two places. */
 .ft-how .fc-note { margin-top: 0.5rem; }
+
+/* --- the explained element, and where its explanation can be read ----
+
+   THE SURVEY COUNTED ~145 `[title]` TOOLTIPS ACROSS THESE RENDERERS WITH NO
+   VISIBLE AFFORDANCE. A reader cannot tell an explained cell from an
+   unexplained one, so an explanation is only ever found by a mouse that
+   happened to rest on the right four characters — and `title` is shown on
+   keyboard focus by no browser and has no gesture at all on a touch screen.
+
+   THE DOTTED RULE IS THE WHOLE VISUAL CHANGE, and it is deliberately the
+   quietest mark that still reads as "there is more here": not a colour,
+   which is the last channel on this site and is already carrying sign
+   elsewhere; not a superscript glyph, which would reflow every table cell it
+   landed in; not a solid underline, which on this page means a link.
+   `cursor: help` is the second half of the same signal for a pointer. */
+.fc-why {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  cursor: help;
+}
+
+/* statList hangs the tooltip on the .fc-stat WRAPPER, which holds both the
+   label and the figure — see drawMarketRank, which has nowhere else to put
+   it. text-decoration on a block paints across every descendant and a child
+   cannot take it back, so the wrapper must never receive it: the mark goes
+   on the <dt>, which is the term the explanation is about. */
+.fc-stat.fc-why {
+  text-decoration: none;
+  cursor: help;
+}
+.fc-stat.fc-why > dt {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+/* The door a keyboard and a thumb can open: one <summary> per panel, and
+   behind it every marked TERM with its explanation in full. It reuses
+   .ft-how — same disclosure, same marker, same focus ring — because a second
+   idiom for "there is more text under here" is a second thing to learn. */
+/* Two disclosures can end up stacked at the foot of one panel — the panel's
+   own decoder and this one — and two summaries with nothing between them read
+   as a list of two links rather than as two different offers. */
+.ft-why {
+  border-top: 1px solid var(--hairline);
+  padding-top: 0.2rem;
+}
+.ft-why-l { margin: 0.5rem 0 0; }
+.ft-why-t {
+  margin-top: 0.55rem;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+}
+.ft-why-l > .ft-why-t:first-child { margin-top: 0; }
+.ft-why-d {
+  margin: 0.15rem 0 0;
+  color: var(--ink-dim);
+  font-size: var(--fs-data);
+  line-height: 1.5;
+}
 
 /* =====================================================================
    UNUSUAL ACTIVITY — /flows/unusual/ (assets/js/flows-unusual.js)

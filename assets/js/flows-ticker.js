@@ -122,6 +122,146 @@
     host.append(box);
   }
 
+  /**
+   * The same disclosure, for method paragraphs that are already ELEMENTS.
+   *
+   * `appendNotes` takes strings and builds the paragraphs itself, which is
+   * right for a drawer that owns its prose. drawMarketRank does not: its
+   * three method lines come from fmrCutLine, fmrSessionLine and
+   * fmrCoverageLine, each picking between three and four sentences, two of
+   * them hanging a tooltip on the paragraph. Re-deriving them as strings
+   * would put those branches in two places. Same threshold, same classes.
+   */
+  function appendMethod(host, nodes, summary) {
+    const list = (nodes || []).filter(Boolean);
+    if (!list.length) return;
+    const total = list.reduce((n, node) => n + String(node.textContent || "").length, 0);
+    if (total <= NOTE_WALL_CHARS) {
+      for (const node of list) host.append(node);
+      return;
+    }
+    const box = el("details", "ft-how");
+    box.append(el("summary", "ft-how-s", summary || "How this reading was made"));
+    for (const node of list) box.append(node);
+    host.append(box);
+  }
+
+  /* ---------- the reading first, the method under it ----------------
+
+     A SURVEY OF THE FOURTEEN FLOWS RENDERERS COUNTED 101,768 CHARACTERS of
+     prose in 1,736 strings, 42,151 of them on this route, and one ratio
+     named the defect: `.fc-note` — the METHOD paragraph — was emitted 87
+     times against 4 emissions of `.fc-reading`, the FINDING.
+
+     NOTHING BELOW DELETES A CAVEAT. Every sentence is still on the page and
+     still found by a find-in-page; what changes is the ORDER OF DISCOVERY
+     and the VISUAL WEIGHT. The line between the halves is not "long":
+
+       A note that could change WHAT THE READING MEANS stays in the open — a
+       truncated chain, a ranking from another session, a column carrying no
+       level, a value whose unit could not be reconciled, the cut a name
+       outside a feed did not clear. A note explaining HOW THE READING WAS
+       MADE goes behind the disclosure `appendNotes` already argues for.
+
+     The contract asserts BOTH halves, panel by panel: a rule with only the
+     first half is a rule that hides caveats. */
+
+  /**
+   * The panel's finding, first, in the largest type the panel owns.
+   *
+   * `.fc-reading` already meant "the finding, as opposed to the method below
+   * it" — its own CSS comment says so — but was drawn at note size under a
+   * chart, above six paragraphs of decoder, where it read as one more
+   * caption. `.is-lead` is that element promoted: same class, same meaning,
+   * one modifier saying this is the sentence the panel exists to say.
+   */
+  function leadReading(host, text) {
+    const p = el("p", "fc-reading is-lead");
+    p.textContent = text;
+    host.append(p);
+    return p;
+  }
+
+  /**
+   * Mark every explained element, and give the explanation a door a keyboard
+   * and a thumb can open.
+   *
+   * THE SURVEY COUNTED ~145 `[title]` TOOLTIPS WITH NO VISIBLE AFFORDANCE. A
+   * reader cannot tell an explained cell from an unexplained one, so an
+   * explanation is found only by a mouse that happened to rest on the right
+   * four characters — and `title` is shown on keyboard focus by no browser
+   * and has no gesture at all on a touch screen. An explanation nobody can
+   * reach is the appearance of documentation, not documentation.
+   *
+   * TWO HALVES, AND NEITHER WORKS ALONE. The class puts a dotted rule under
+   * the marked text so a reader can SEE that an explanation exists; the
+   * disclosure at the foot carries the marked TERMS with their explanations
+   * in full, so a reader can READ them with a tab and a return key or with
+   * one tap. The title attribute stays where it was.
+   *
+   * ONE TAB STOP PER PANEL, NOT ONE PER TERM. `tabindex="0"` on all 145 buys
+   * the keyboard reader 145 stops between one panel and the next and STILL
+   * shows nothing when focus lands; a <summary> is one stop for the set.
+   *
+   * THE MARKER IS WIDER THAN THE LIST. Every short explained element gets
+   * the marker; only the ones naming a TERM — a column head, a stat label, a
+   * block heading — are listed, because a list keys on a name and a data
+   * cell has none: "+412" is a value, explained by the number beside it.
+   * Long paragraphs that footnote themselves are the next wave's work.
+   */
+  const WHY_TERM_MAX = 48;
+  const WHY_TERM_TAGS = ["TH", "H4", "DT"];
+
+  /** The name a marked element goes into the list under, or "" for none. */
+  function whyTerm(node) {
+    /* statList wraps each pair in a .fc-stat div and the tooltip goes on the
+       wrapper — see drawMarketRank, which has no other place to hang it —
+       so the term is the wrapper's own <dt> rather than its whole text. */
+    if (node.classList.contains("fc-stat")) {
+      const dt = node.querySelector("dt");
+      return dt ? String(dt.textContent || "").trim() : "";
+    }
+    return WHY_TERM_TAGS.indexOf(node.tagName) >= 0
+      ? String(node.textContent || "").replace(/\s+/g, " ").trim()
+      : "";
+  }
+
+  function markExplained(host) {
+    const rows = [];
+    const seen = new Set();
+    for (const node of host.querySelectorAll("[title]")) {
+      const why = String(node.getAttribute("title") || "").trim();
+      if (!why) continue;
+      const shown = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      if (!shown || shown.length > WHY_TERM_MAX) continue;
+      node.classList.add("fc-why");
+      const term = whyTerm(node);
+      if (!term) continue;
+      /* ONE COLUMN HEAD IS ONE TERM. Its forty cells carrying the same
+         sentence are that term forty times, and a decoder that repeats it
+         forty times is a decoder nobody finishes. */
+      const key = term + "\u0000" + why;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push([term, why]);
+    }
+    if (!rows.length) return;
+    const box = el("details", "ft-how ft-why");
+    box.append(el("summary", "ft-how-s",
+      "What the marked terms mean (" + rows.length + ")"));
+    /* NOT statList. `.fc-stats` is an 8.5rem auto-fit grid built for a figure
+       under a label; a two-sentence explanation in one of those tracks wraps
+       to a column of single words. This list is a definition list shaped for
+       prose. */
+    const dl = el("dl", "ft-why-l");
+    for (const [term, why] of rows) {
+      dl.append(el("dt", "ft-why-t", term));
+      dl.append(el("dd", "ft-why-d", why));
+    }
+    box.append(dl);
+    host.append(box);
+  }
+
   /* ---------- the four drawers, in full -----------------------------
 
      Each is a sibling of the ten in flows-panels.js and follows the same
@@ -361,6 +501,51 @@
        rung of SURFACE_ROW_STEPS, where two decimals would print the same label
        on every adjacent pair of rows. */
     const dp = step !== null && step < 0.01 ? 3 : 2;
+
+    /* ---- THE READING, BEFORE THE PICTURE ----------------------------
+
+       THIS PANEL STATED NO FINDING AT ALL: a grid, a four-cell stat list,
+       then twelve paragraphs of decoder — 4,100 characters of method under a
+       chart whose one carry-away number, the steepest cell, sat in the
+       fourth cell of that list, below the fold on a phone.
+
+       WHY THE STEEPEST CELL IS THE FINDING. A shade cannot state a number
+       exactly; that is what the ramp pays for showing fifty cells at once.
+       The one number it cannot give back is its own extreme, and both
+       coordinates travel with it — a band without its expiry is not a smile,
+       an expiry without its band is not a term.
+
+       THREE ARMS, AND THE MIDDLE IS THE HOUSE RULE. `peak === null` is an
+       absence; a peak of exactly 0 is a MEASURED FLAT SMILE and gets its own
+       sentence. `isNum` is asked `=== null` rather than used as a truth
+       value: a measured zero is falsy and would be dropped on the way in. */
+    const placed = isNum(panel.placed), fresh = isNum(panel.fresh);
+    let peak = null;
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < cols.length; j++) {
+        const sk = isNum(Array.isArray(skM[i]) ? skM[i][j] : null);
+        if (sk === null) continue;
+        if (peak === null || Math.abs(sk) > Math.abs(peak.s)) peak = { s: sk, i, j };
+      }
+    }
+    const peakCell = peak === null ? null
+      : ftsBand(isNum(rows[peak.i]), dp) + " · " +
+        String((cols[peak.j] && cols[peak.j].expiry) || DASH).slice(5);
+    leadReading(host, peak === null
+      ? "No cell on this surface carries a measured distance from its own expiry's " +
+        "at-the-money level, so the grid below shows where this book is listed and " +
+        "nothing about how far off the level it is quoted."
+      : peak.s === 0
+        ? "Every quote on this surface sits exactly on its own expiry's at-the-money " +
+          "level: a measured flat smile across " + rows.length + " " +
+          ftsPlural(rows.length, "band", "bands") + " and " + cols.length + " " +
+          ftsPlural(cols.length, "expiry", "expiries") + ", not an absence of readings."
+        : "The steepest quote on this surface is " + ftsPts(peak.s) + " volatility points " +
+          (peak.s > 0 ? "above" : "below") + " its own expiry’s at-the-money level, at " +
+          peakCell + "." +
+          (fresh === null || placed === null
+            ? " How many of these cells traded today is not published."
+            : " " + fresh + " of " + placed + " placed cells are prints from today."));
 
     /* THE AT-THE-MONEY ROW IS THE ONE NEAREST ZERO, not the one equal to it.
        `rows` is normally symmetric about 0 and contains it exactly, but the
@@ -793,28 +978,15 @@
     host.append(svg);
 
     /* ---- the numbers the picture cannot state exactly ---------------- */
-    const placed = isNum(panel.placed), fresh = isNum(panel.fresh);
     const pairs = [];
     pairs.push(["Bands", rows.length + (step === null ? "" : " × " + (step * 100).toFixed(1) + "%")]);
     pairs.push(["Expiries", String(cols.length)]);
     pairs.push(["Shade cap", cap === null ? DASH : "±" + capTxt + " pts"]);
     pairs.push(["Prints today", fresh === null || placed === null ? DASH : fresh + " of " + placed]);
-    /* THE STEEPEST CELL, because a shade cannot state a number exactly and this
-       is the one reading a desk carries away. Both coordinates: a band without
-       its expiry is not a smile and an expiry without its band is not a term. */
-    let peak = null;
-    for (let i = 0; i < rows.length; i++) {
-      for (let j = 0; j < cols.length; j++) {
-        const s = isNum(Array.isArray(skM[i]) ? skM[i][j] : null);
-        if (s === null) continue;
-        if (peak === null || Math.abs(s) > Math.abs(peak.s)) peak = { s, i, j };
-      }
-    }
-    if (peak) {
-      pairs.push(["Steepest cell",
-        ftsPts(peak.s) + " pts · " + ftsBand(isNum(rows[peak.i]), dp) + " · " +
-        String(cols[peak.j] && cols[peak.j].expiry).slice(5)]);
-    }
+    /* THE SAME STEEPEST CELL THE PANEL ALREADY LED ON, in figures — measured
+       once, at the top of this drawer, so the sentence a reader reads first
+       and the cell they check it against cannot disagree. */
+    if (peak) pairs.push(["Steepest cell", ftsPts(peak.s) + " pts · " + peakCell]);
     host.append(statList(pairs));
 
     /* ---- the note: the decoder, in prose ----------------------------- */
@@ -914,34 +1086,42 @@
       "expiry. Nothing here is fitted, interpolated or repriced — that would need a rate and a " +
       "dividend yield, which this desk does not invent. The band on a cell's tooltip is the band's " +
       "stated centre, not that contract's own moneyness, which the card payload does not carry");
-    appendNotes(host, notes, "How to read this surface");
+    /* ---- coverage: ALWAYS STATED, AND ALWAYS ABOVE THE METHOD --------
 
-    /* ---- coverage, which is ALWAYS stated ---------------------------- */
-    /* Its own paragraph, and the truncated sentence is VERBATIM. This is the
-       line that says the whole picture may be an arbitrary slice of the book,
-       and a sentence like that must not be sanded into the middle of a
-       paragraph of decoder prose. */
+       Two of these three sentences change WHAT THE READING MEANS — an
+       arbitrary 500-row page of the book, or a card that will not say how
+       much of the book it saw — so they stay in the open, at full ink, above
+       the decoder and never inside it. The truncated one is still VERBATIM
+       and still its own paragraph: it says the whole picture may be an
+       arbitrary slice, and a sentence like that must not be sanded into the
+       middle of decoder prose.
+
+       The third says the vendor returned the whole chain, which qualifies
+       nothing and is exactly what a decoder is for, so it joins the notes
+       rather than spending a paragraph of attention saying nothing is
+       wrong. */
     const cov = panel.coverage;
     if (cov && cov.truncated === true) {
-      host.append(el("p", "fc-note",
+      host.append(el("p", "fc-note is-qualifier",
         "The vendor returned a full page of 500 contracts in no documented order. This is an " +
         "arbitrary subset of the book — the skew and term readings are withheld for that reason."));
     } else if (cov) {
       const seen = isNum(cov.rowsSeen), priced = isNum(cov.pricedRows);
-      host.append(el("p", "fc-note",
-        "The vendor returned the whole chain" +
+      notes.push("The vendor returned the whole chain" +
         (seen === null ? "" : ": " + seen + " " + ftsPlural(seen, "contract", "contracts") +
           (priced === null ? "" : ", " + priced + " of them priceable")) +
         ", so this surface is taken over the entire book rather than a page of it." +
-        (cov.filter ? " " + cov.filter.charAt(0).toUpperCase() + cov.filter.slice(1) + "." : "")));
+        (cov.filter ? " " + cov.filter.charAt(0).toUpperCase() + cov.filter.slice(1) + "." : ""));
     } else {
       /* A panel built before chainPanel() wrapped coverage on has no coverage
          key. "No coverage was published" is a fact; silence would read as
          "the whole book", which is the claim this page exists to refuse. */
-      host.append(el("p", "fc-note",
+      host.append(el("p", "fc-note is-qualifier",
         "This card publishes no coverage record for the chain, so how much of the book this " +
         "surface was taken over is not known."));
     }
+
+    appendNotes(host, notes, "How to read this surface");
   }
 
   /* ===== skewterm ===== */
@@ -1075,6 +1255,70 @@
     }
 
     panelHead(host, q);
+
+    /* ---------- THE TWO READINGS, BEFORE THE CHART -------------------
+
+       THE PANEL'S FINDING IS THE SKEW AND THE TERM, and a reader met them
+       fourth: the question, a 188px chart, the skew, the term, then eleven
+       hundred characters of method. The chart is the SHAPE of the term
+       structure; the two scalars are what a desk carries away. So the
+       scalars go first and the chart becomes their evidence.
+
+       THE SKEW READING IS STILL THE FIRST .fc-reading ON THE PANEL, and a
+       withheld skew still carries NO DIGIT — the contract test scopes "draws
+       no skew number" to `.fc-reading`, resolving to the FIRST one, and the
+       modal truncated card withholds the skew while publishing good levels.
+
+       AN ABSENT SCALAR IS STILL THE LEAD, at the size a published one gets:
+       demoting it would make a silence cheaper to ship than a number. */
+    const skew = isNum(panel.skew);
+    const skewB = panel.skewBasis || null;
+    let skewSaid;
+    if (skew === null || !skewB) {
+      skewSaid =
+        "The wing-to-wing skew is not published for this name. The reason it was " +
+        "withheld is stated below, verbatim, rather than replaced by a zero — a " +
+        "symmetric smile is a real and notable reading, and this is not one.";
+    } else {
+      /* VOLATILITY POINTS, one decimal, the same precision every level on this
+         panel is printed to. The sign glyph comes from `signed`, which is U+2212
+         and not the hyphen `toFixed` emits. */
+      skewSaid =
+        `Skew ${volPts(skew)} volatility points at ` +
+        `${skewB.days === null ? "an unstated tenor" : skewB.days + " days"} ` +
+        `(${skewB.expiry}): ` +
+        (skew > 0
+          ? "the put wing is bid over the call wing."
+          : skew < 0
+            ? "the call wing is bid over the put wing."
+            : "both wings are quoted at the same volatility.");
+    }
+    leadReading(host, skewSaid);
+
+    const term = isNum(panel.term);
+    const termB = panel.termBasis || null;
+    let termSaid;
+    if (term === null || !termB) {
+      termSaid =
+        "The term difference is not published for this name. The reason it was " +
+        "withheld is stated below, verbatim.";
+    } else {
+      /* term = far − near, so a NEGATIVE term is the FRONT bid over the back:
+         the near level is the higher one. Getting this backwards inverts the
+         whole reading, which is why the direction is spelled out beside the
+         signed number instead of being left to the sign. */
+      termSaid =
+        `Term ${volPts(term)} volatility points from ` +
+        `${termB.nearDays} days to ${termB.farDays} days: ` +
+        (term < 0
+          ? "the front is bid over the back — "
+          : term > 0
+            ? "the back is bid over the front — "
+            : "front and back are quoted at the same level — ") +
+        `at-the-money volatility ${vol1(termB.nearAtm)} at ${termB.near} against ` +
+        `${vol1(termB.farAtm)} at ${termB.far}.`;
+    }
+    leadReading(host, termSaid);
 
     /* [300, 1900]. The floor is the chart floor the 30rem panel rule protects
        (measured: a 320px viewport gives a 284.8px host). The ceiling binds only
@@ -1323,38 +1567,12 @@
             : ""));
     host.append(svg);
 
-    /* ---------- the two scalars, as TEXT ------------------------------ */
+    /* ---------- the two bases, under the readings they support -------
 
-    /* THE SKEW READING IS THE FIRST .fc-reading ON THE PANEL, and when the skew
-       is withheld it carries NO DIGIT. That is not a stylistic preference: the
-       contract test scopes "draws no skew number" to `.fc-reading`, which
-       resolves to the FIRST one, and the modal truncated card withholds the
-       skew while publishing perfectly good levels above it. Each scalar gets its
-       own reading element, so a withheld skew beside a published term is still a
-       digit-free first reading. */
-    const skew = isNum(panel.skew);
-    const skewB = panel.skewBasis || null;
-    const skewRead = el("p", "fc-reading");
-    if (skew === null || !skewB) {
-      skewRead.textContent =
-        "The wing-to-wing skew is not published for this name. The reason it was " +
-        "withheld is stated below, verbatim, rather than replaced by a zero — a " +
-        "symmetric smile is a real and notable reading, and this is not one.";
-    } else {
-      /* VOLATILITY POINTS, one decimal, the same precision every level on this
-         panel is printed to. The sign glyph comes from `signed`, which is U+2212
-         and not the hyphen `toFixed` emits. */
-      skewRead.textContent =
-        `Skew ${volPts(skew)} volatility points at ` +
-        `${skewB.days === null ? "an unstated tenor" : skewB.days + " days"} ` +
-        `(${skewB.expiry}): ` +
-        (skew > 0
-          ? "the put wing is bid over the call wing."
-          : skew < 0
-            ? "the call wing is bid over the put wing."
-            : "both wings are quoted at the same volatility.");
-    }
-    host.append(skewRead);
+       THE READINGS ARE ABOVE THE CHART — see THE TWO READINGS, at the top of
+       this drawer. What is left here is the EVIDENCE for each: the wings the
+       skew was measured between, the legs the term was measured across.
+       Evidence belongs under the picture; the finding does not. */
 
     /* THE BASIS IS PART OF THE READING, NOT A FOOTNOTE. "Skew +7.0 points" is
        meaningless without the moneyness each wing actually sat at: the pair is
@@ -1380,31 +1598,6 @@
           (skewB.days === null ? "" : " (" + skewB.days + "d)")],
       ]));
     }
-
-    const term = isNum(panel.term);
-    const termB = panel.termBasis || null;
-    const termRead = el("p", "fc-reading");
-    if (term === null || !termB) {
-      termRead.textContent =
-        "The term difference is not published for this name. The reason it was " +
-        "withheld is stated below, verbatim.";
-    } else {
-      /* term = far − near, so a NEGATIVE term is the FRONT bid over the back:
-         the near level is the higher one. Getting this backwards inverts the
-         whole reading, which is why the direction is spelled out beside the
-         signed number instead of being left to the sign. */
-      termRead.textContent =
-        `Term ${volPts(term)} volatility points from ` +
-        `${termB.nearDays} days to ${termB.farDays} days: ` +
-        (term < 0
-          ? "the front is bid over the back — "
-          : term > 0
-            ? "the back is bid over the front — "
-            : "front and back are quoted at the same level — ") +
-        `at-the-money volatility ${vol1(termB.nearAtm)} at ${termB.near} against ` +
-        `${vol1(termB.farAtm)} at ${termB.far}.`;
-    }
-    host.append(termRead);
 
     if (term !== null && termB) {
       host.append(statList([
@@ -1436,10 +1629,23 @@
     }
     host.append(stats);
 
-    /* ---------- the notes: every choice, and every stated absence ------ */
+    /* ---------- the notes, split by whether they change the reading ---
 
-    const scaleNote = el("p", "fc-note");
-    scaleNote.textContent =
+       QUALIFIERS APPENDED HERE AT FULL INK; METHOD INTO `method` for the
+       disclosure at the foot. The test asserts both halves.
+
+         the count of unlevelled columns — QUALIFIER: part of the drawn line
+         is not a measurement, which changes what the picture means.
+         why the rail sits below the axis — METHOD: the count already
+         carried the fact; this explains the choice.
+         the axis policy — METHOD: a zero origin is how the bars were drawn,
+         not what they say.
+         the borrowed grid, the truncated chain, a withheld scalar's own
+         reason and the payload's stated relation — QUALIFIERS, all four,
+         all still in the open below. */
+    const method = [];
+
+    method.push(
       "Columns are evenly spaced by listed expiry, not by elapsed time. Each " +
       "column's tenor is printed beneath it. " +
       (top > 0
@@ -1452,19 +1658,21 @@
       "there is no “no move” reading to rule, and a truncated axis would make any " +
       "term structure look dramatic by construction. The cost is that levels a few points " +
       "apart draw as bars of similar height: read the LINE for the shape and the bars for " +
-      "the level.";
-    host.append(scaleNote);
+      "the level.");
 
     if (missing.length) {
-      host.append(el("p", "fc-note",
+      host.append(el("p", "fc-note is-qualifier",
         `${missing.length} of ${cols.length} columns carry no at-the-money level and sit on ` +
-        "the rail BELOW the axis, not on it. The baseline is zero implied volatility, so a " +
-        "level the surface refused to vouch for would be drawn there as a confident " +
-        "measurement of nothing. Each marker carries that expiry's own stated reason, and " +
-        "the line breaks across them rather than crossing a value nobody measured."));
+        "the rail BELOW the axis, not on it. Each marker carries that expiry's own stated " +
+        "reason."));
+      method.push(
+        "A column with no level sits on the rail below the axis rather than on it because " +
+        "the baseline is zero implied volatility, and a level the surface refused to vouch " +
+        "for would be drawn there as a confident measurement of nothing. The line breaks " +
+        "across those columns rather than crossing a value nobody measured.");
     }
 
-    if (grid.borrowedNote) host.append(el("p", "fc-note", grid.borrowedNote));
+    if (grid.borrowedNote) host.append(el("p", "fc-note is-qualifier", grid.borrowedNote));
 
     /* COVERAGE IS ALWAYS STATED, and the reason is printed VERBATIM. A panel
        that shows a clean eight-point term line off a page the vendor truncated
@@ -1483,7 +1691,7 @@
           " The levels drawn above are built from that slice of the book, not from the book.");
       }
       if (cov.filter) parts.push("Selection: " + cov.filter + ".");
-      if (parts.length) host.append(el("p", "fc-note", parts.join(" ")));
+      if (parts.length) host.append(el("p", "fc-note is-qualifier", parts.join(" ")));
     }
 
     /* The withheld-scalar reasons, verbatim and unsummarised. Two identical
@@ -1493,10 +1701,11 @@
     if (skew === null && panel.skewReason) reasons.push(["The skew", panel.skewReason]);
     if (term === null && panel.termReason) reasons.push(["The term difference", panel.termReason]);
     if (reasons.length === 2 && reasons[0][1] === reasons[1][1]) {
-      host.append(el("p", "fc-note", "Neither scalar is published: " + reasons[0][1] + "."));
+      host.append(el("p", "fc-note is-qualifier",
+        "Neither scalar is published: " + reasons[0][1] + "."));
     } else {
       for (const pair of reasons) {
-        host.append(el("p", "fc-note", pair[0] + " is not published: " + pair[1] + "."));
+        host.append(el("p", "fc-note is-qualifier", pair[0] + " is not published: " + pair[1] + "."));
       }
     }
 
@@ -1505,7 +1714,19 @@
        should believe if the two ever disagree. It also carries the ±0.10, the
        0.04 and the 7 days as the pipeline actually holds them, which is the only
        defence against this file's restated copies of those three drifting. */
-    if (panel.relation) host.append(el("p", "fc-note", panel.relation));
+    /* THE STATED RELATION STAYS IN THE OPEN — the one piece of method here
+       that does. Its whole defence is that a drift between the pipeline's
+       constants and this file's restated copies of them is visible ON THE
+       SAME SCREEN as the restatement; inside a closed disclosure it is
+       visible on no screen at all. */
+    if (panel.relation) host.append(el("p", "fc-note is-qualifier", panel.relation));
+
+    /* AND THE METHOD LAST, behind the disclosure once it is a wall. The
+       axis policy alone is 750 characters, so on any card that draws a scale
+       this collapses; a chain with no levels leaves one short paragraph,
+       which appendNotes leaves open — a one-line decoder behind a click is a
+       click for nothing. */
+    appendNotes(host, method, "How to read this term structure");
   }
 
 
@@ -4313,6 +4534,7 @@
         continue;
       }
 
+      let said = null;
       if (f.status === "ok") {
         const fmrTitles = [];
         const value = fmrValue(f.value, f);
@@ -4360,6 +4582,33 @@
                 : "") + " in the feed."
             : "The feed carried no positions for this name."]);
         }
+        /* ---- THE READING, BEFORE THE FIGURES AND THE METHOD ----------
+
+           THE BLOCK OPENED ON A STAT LIST AND CLOSED ON FOUR PARAGRAPHS OF
+           PROVENANCE. Its one finding — that this name places somewhere in a
+           list of every name — was stated in prose UNDER the figures
+           (`fmr-said`) and buried by the cut, the session and the coverage.
+
+           SAID IN THE UNIT THE FEED EARNED, long form: `fmrValue`'s `long`
+           arm completes the phrase ("% OF THE PREVIOUS SESSION'S OPEN
+           INTEREST"), which belongs in a sentence and does not fit an 8.5rem
+           cell. Where the run could not name the unit the sentence says so
+           rather than printing a bare figure — a number under a heading a
+           reader reads as contracts might be a ratio. */
+        leadReading(block,
+          (rank === null || pop === null
+            ? "This name is in this market-wide list"
+            : "This name ranks " + tcInt(rank) + " of " + tcInt(pop) +
+              " in this market-wide list") +
+          (value === null
+            ? ", and the value it is ranked on could not be put in a unit this run " +
+              "could name."
+            : ", at " + fmrValue(f.value, f, true) + ".") +
+          (count !== null && count > 1
+            ? " " + tcInt(count) + " " + (key === "oiChange" ? "contracts" : "prints") +
+              " of this name are in it."
+            : ""));
+
         if (f.at) pairs.push(["Printed", fmrStamp(f.at) || DASH, "fmr-at"]);
         const dl = statList(pairs);
         /* statList takes no titles, so the tooltip is attached afterwards by
@@ -4378,12 +4627,15 @@
             "clearing snapshots it publishes beside it, so the value is not printed: a " +
             "number whose unit is unknown reads as contracts and might be a ratio."));
         }
-        block.append(el("p", "fc-note fmr-said",
-          "This name places " +
-          (rank === null || pop === null ? "in this feed" : tcInt(rank) + " of " + tcInt(pop)) +
-          " in a market-wide list this run reads once for the whole board. That is a " +
-          "cross-section the per-name feeds on this page cannot report, because a request " +
-          "for one name carries no other names in it."));
+        /* WHAT IS LEFT OF `fmr-said` IS ITS METHOD HALF. Its first clause
+           stated the rank, which the reading above now states first and
+           largest; keeping both would print one number twice and let the two
+           copies drift. What only this sentence says — that a cross-section
+           is a thing a per-name request cannot produce — is method. */
+        said = el("p", "fc-note fmr-said",
+          "This ranking comes from a market-wide list this run reads once for the whole " +
+          "board. That is a cross-section the per-name feeds on this page cannot report, " +
+          "because a request for one name carries no other names in it.");
       } else {
         /* MEASURED, AND NOT IN IT. The publisher's own sentence, verbatim —
            it is the sentence that separates a selection from a silence, and
@@ -4391,10 +4643,50 @@
         fmrSilence(block, "quiet", f.reason || "this name is not in this feed this run.");
       }
 
-      block.append(fmrCutLine(f));
-      block.append(fmrSessionLine(f, card && card.sessionDate));
+      /* ---- the provenance, split by whether it changes the reading ----
+
+         WHICH SIDE EACH LINE LANDS ON IS DECIDED BY THE FEED, not by length:
+
+           THE SESSION. Open whenever the ranking is not this card's session
+           or the feed states none — the difference between "ranks 14th
+           across the market today" and "ranked 14th yesterday, joined onto
+           today's card", which is point 2 of this drawer's header. It folds
+           only where the two sessions agree.
+
+           THE CUT. Open on the QUIET arm, where it IS the reading: a name
+           that missed the last place by a hair and one nowhere near it are
+           different findings and the cut is all that separates them. Folded
+           on the ok arm, where the name is in the list.
+
+           THE COVERAGE OF THE JOIN. Open on the thin branch the line already
+           computes for itself — at that reach most cards will say they are
+           not in the feed, and a reader owes that to any absence here.
+
+         Everything folded is one click away and found by a find-in-page. */
+      const quiet = !(f.status === "ok");
+      const cut = fmrCutLine(f);
+      const when = fmrSessionLine(f, card && card.sessionDate);
       const cov = fmrCoverageLine((panel.coverage || {})[key]);
-      if (cov) block.append(cov);
+      const covData = (panel.coverage || {})[key];
+      /* THE SAME TEST fmrCoverageLine MAKES, and it must stay the same one:
+         that line says "most cards will say they are not in it" on exactly
+         this branch, so a reader seeing that sentence must be seeing it
+         unopened. Typed the way that function types it rather than through
+         isNum — one condition in two places, not two spellings of it. */
+      const covThin = !!(covData && typeof covData.of === "number" &&
+        typeof covData.in === "number" && covData.of && covData.in * 5 < covData.of);
+
+      const open = [], folded = [];
+      (f.sameSession === true ? folded : open).push(when);
+      (quiet ? open : folded).push(cut);
+      if (cov) (covThin ? open : folded).push(cov);
+      if (said) folded.push(said);
+
+      for (const node of open) {
+        node.classList.add("is-qualifier");
+        block.append(node);
+      }
+      appendMethod(block, folded, "How this standing was read");
       host.append(block);
     }
 
@@ -4488,6 +4780,15 @@
         deadPanel(host, question, drawFailed(error));
       }
     }
+    /* THE AFFORDANCE SWEEP, ONCE, AFTER EVERY PANEL HAS DRAWN. A second walk
+       rather than a call inside the first: that loop leaves by four different
+       `continue`s, and a marker applied on only some of those paths is a
+       marker a reader learns to distrust. Reading the DOM back is what keeps
+       it honest — it marks what a renderer ACTUALLY emitted, so a tooltip
+       added tomorrow is marked tomorrow. */
+    for (const section of grid.querySelectorAll(".ft-panel[data-panel] > div")) {
+      markExplained(section);
+    }
     if (missing.length) {
       console.error("flows-ticker: no drawing host for panel(s): " + missing.join(", "));
     }
@@ -4542,6 +4843,7 @@
     if (zoomKey === "__score") {
       try { P.score(zoomHost, painted, question); }
       catch (error) { deadPanel(zoomHost, question, drawFailed(error)); }
+      markExplained(zoomHost);
       return;
     }
     const drawer = DRAW[zoomKey];
@@ -4556,6 +4858,10 @@
     }
     try { drawer(zoomHost, panel, painted, question, "zoom"); }
     catch (error) { deadPanel(zoomHost, question, drawFailed(error)); }
+    /* THE ENLARGED COPY IS THE COPY A READER IS LOOKING HARDEST AT, so it
+       gets the same marks and the same decoder. Skipping it here would make
+       the affordance a property of the grid rather than of the panel. */
+    markExplained(zoomHost);
   }
 
   /* CSS.escape is not in every browser this site still answers. The keys are
