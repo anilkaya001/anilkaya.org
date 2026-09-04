@@ -1063,6 +1063,11 @@ try {
        'version of this page\'s copy said "These readings describe the … session" — six ' +
        "routes wording one outage six ways is exactly why that function was lifted out of " +
        "the renderers, and this page had quietly become the seventh");
+    ok(new RegExp("describe the " + dayStamp(9) + " session").test(aged.stale),
+       `and it names the session it aged (${aged.stale}). The shape gate that now stands in ` +
+       "front of this parse rejects anything that is not YYYY-MM-DD, and a guard that had " +
+       "bought its silence by refusing real dates too would show up here as a banner that " +
+       "stopped firing on a well-formed nine-day-old session");
 
     /* AN ISOLATED READING IS STILL DRAWN. */
     eq((aged.callD.match(/M/g) || []).length, 2,
@@ -1096,6 +1101,95 @@ try {
        "from a quantity that was never measured");
 
     await old.close();
+  }
+
+  /* ---------- A SESSION DATE THAT PARSES AND WAS NEVER PUBLISHED --------
+
+     THE MIRROR TRUSTED A STRING NOTHING COULD READ. assessAge() reached
+     `Date.parse(String(payload.sessionDate) + "T21:00:00Z")` on the strength
+     of `if (payload.sessionDate)` — the TRUTHINESS OF THE KEY — and V8's
+     parser is lenient enough to make that dangerous: a bare "YYYY-MM" plus
+     that suffix comes back FINITE and dates the session to the first of that
+     month, a day the publisher never wrote. The shape is now tested BEFORE
+     the parse, against the same ISO_DAY the publisher validates on the way
+     out, so a month is not a day.
+
+     WITH A RECENT WRITE TIME THAT IS A BANNER OVER A CURRENT PAGE. The write
+     branch above passes, because the pipeline ran minutes ago; the invented
+     first-of-month then fails the four-day test, so the reader is told the
+     upstream feed is frozen and sent to look at a pipeline that is fine. A
+     staleness banner that cries wolf is the failure shared/flows-pulse.js
+     names as the worst one, because it is the one readers learn to ignore.
+
+     ONLY HALF OF THIS FIX IS OBSERVABLE HERE, AND THE OTHER HALF IS NOT
+     FAKED. assessAge() also stopped answering "fresh" for a payload whose
+     only date was unreadable, and answers "unknown" instead. setStale renders
+     the MESSAGE and nothing else, and "unknown" and "fresh" both carry a null
+     message, so the two kinds are indistinguishable in this DOM: nothing
+     below tells them apart and no assertion pretends to. That half is a
+     contract between assessAge() and its caller, pinned where the shared
+     function lives in assets/js/flows-ui.js. This block pins the half a
+     browser can see.
+
+     THE MALFORMED DATE IS DERIVED RATHER THAN TYPED, for the same reason
+     FRESH_SESSION is. A literal "2026-09" is more than four days old for most
+     of a month and three days old at the start of one, so a hard-coded month
+     would exercise the guard on some calendar days and prove nothing on the
+     rest — the exact rot the relative dayStamp() was introduced to stop.
+     Truncating a nine-day-old session to its month always lands on a
+     first-of-month at least nine days back. */
+  {
+    const MALFORMED_SESSION = dayStamp(9).slice(0, 7);   // "YYYY-MM": a month, not a day
+    const leniently = Date.parse(MALFORMED_SESSION + "T21:00:00Z");
+    ok(Number.isFinite(leniently),
+       `"${MALFORMED_SESSION}T21:00:00Z" still parses in this engine, to ` +
+       `${new Date(leniently).toISOString()}. The whole trap is that it does: if a future ` +
+       "V8 began rejecting it, this fixture would stop exercising the guard it was written " +
+       "for and would go on passing");
+    ok(Date.now() - leniently > 4 * 86400000,
+       "and the day it invents is more than four days old, so the ungated parse reaches the " +
+       "session branch rather than falling past it — a malformed date that happened to parse " +
+       "to something recent would pass against the very renderer this block exists to pin");
+
+    await put("market", Object.assign({}, payload, { sessionDate: MALFORMED_SESSION }));
+
+    const shaped = await browser.newPage();
+    await shaped.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await shaped.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    /* The tilt panel is painted after setStale in the same synchronous run,
+       so waiting on it is what makes a hidden banner below mean "assessAge
+       declined to raise one" rather than "the render had not happened yet". */
+    await shaped.waitForSelector("#mktTiltPanel:not([hidden])");
+
+    const bad = await shaped.evaluate(() => {
+      const s = document.getElementById("mktStale");
+      return {
+        hidden: s ? s.hidden : null,
+        text: s ? s.textContent : null,
+        kind: s ? s.getAttribute("data-stale") : "no element",
+        bodyClass: document.body.className,
+        status: (document.getElementById("mktStatus") || {}).textContent || "",
+      };
+    });
+    await shaped.close();
+
+    ok(bad.status.includes(MALFORMED_SESSION),
+       `the payload under test is the one on screen (${bad.status}) — a hidden banner proves ` +
+       "nothing about the shape gate if the page is still showing some earlier session");
+    eq(bad.hidden, true,
+       `a session date of "${MALFORMED_SESSION}" raises NO banner: it is not a date the ` +
+       "publisher can emit, so it dates nothing. The old mirror parsed it to the first of " +
+       "that month and announced a frozen upstream over a level written minutes ago");
+    eq(bad.text, "",
+       "and no sentence is left in the element either — hidden text is still text, and this " +
+       "one would name a session nobody published");
+    eq(bad.kind, null,
+       "with no data-stale kind stamped on it, so nothing reading the element rather than " +
+       "the prose can take a verdict out of a payload that carried no readable date");
+    ok(!/is-stale/.test(bad.bodyClass),
+       `and the page does not dim itself (${bad.bodyClass || "no body class"})`);
   }
 
   /* ---------- THE HALF-PUBLISHED SESSION ---------------------------------
@@ -1444,9 +1538,148 @@ try {
        "section one sentence, not a panel — the silence is in the stamp, where the missing " +
        "field is, and nowhere else");
   }
+  /* ---------- A READING THE VENDOR QUOTED -------------------------------
+
+     THE LOCAL isNum() USED TO REFUSE A NUMERIC STRING. It read
+     `typeof v === "number" && isFinite(v) ? v : null`, which is safe against
+     the confident zero — Number(null) never runs — and STRICTER than the
+     contract every other surface in this product holds: flows-ui.js's UI.isNum
+     and shared/flows-market.js's numOrNull both coerce a quoted reading, and
+     the vendor quotes several fields on the wire. The harm runs the opposite
+     way from a fallback zero. A reading that WAS taken rendered as an em dash,
+     which is this page's mark for "not measured", so the page published an
+     absence over a measurement. assets/js/flows-panels.js carries the same
+     divergence written up after it shipped: one payload field rendered as a
+     value on the board and as an em dash in the card panel, for the same card,
+     in the same session.
+
+     NOTHING ABOVE HAD EVER EXERCISED THE STRING PATH. Every fixture in this
+     file is a JS object literal handed to JSON.stringify, so every number
+     reaches the renderer as a number and the two spellings of the helper agree
+     on all of them. The type under test was the fixture author's choice and
+     never the payload's, which is why widening the helper could not have
+     failed a single assertion above.
+
+     THE FIELD IS `premium.net`, chosen by reading paintTape rather than for
+     convenience. It is the headline row of the tape table — "Net premium,
+     signed" — its absence is VISIBLE as the em dash in a cell this suite
+     already reads, and its whole path to the DOM runs through usd() and
+     toneClass(), each of which calls isNum itself and formats the RESULT.
+     `vol.iv30dMedian` is quoted beside it because it lands on pct(), the other
+     formatter, and a helper reached from two call sites is worth proving at
+     both.
+
+     THE TWO `pcr` ROWS ARE QUOTED TOO, AND THEY ARE THE REASON THIS BLOCK
+     EARNS ITS KEEP. They were the one pair in the file that tested with isNum
+     and then formatted the RAW field — `isNum(pcr.volume) === null ? DASH :
+     pcr.volume.toFixed(3)`. That was harmless while the helper rejected
+     strings, because the test failed and the em dash printed; widening the
+     helper turned it into a CRASH, since a quoted ratio now passes the test
+     and calls .toFixed on a String, which has no such method. The TypeError
+     escapes paintTape and takes every row after it off the page — so the
+     widening would have shipped as a blank tape rather than as a fixed one.
+     The renderer now formats the coerced value, like every other reading in
+     that table, and these two rows are how that is held.
+
+     THE IV ROW BELOW IS ALSO THE NO-THROW WITNESS. It is rendered after both
+     pcr rows in the same pass, so if the ratios threw, the assertion on it
+     could not find its row at all. That is deliberate: an assertion that a
+     later row still exists is the only way a suite reading the finished DOM
+     can tell "formatted correctly" from "never got there". */
+  {
+    await put("market", Object.assign({}, payload, {
+      premium: Object.assign({}, payload.premium, { net: "-2000000000" }),
+      vol: Object.assign({}, payload.vol, { iv30dMedian: "0.3412" }),
+      pcr: Object.assign({}, payload.pcr, { volume: "1.25", premium: "0.875" }),
+    }));
+
+    const quoted = await browser.newPage();
+    /* THE WITNESS IS THE DOM, NOT THE ERROR CHANNEL, and that is a measurement
+       rather than a preference. The failure this block exists to catch is not
+       a wrong string in a cell — it is a TypeError that stops the renderer
+       mid-table. The obvious instrument is page.on("pageerror"), and it was
+       tried here first: it collected NOTHING under the reverted renderer,
+       because paintTape runs inside the fetch promise chain, so the throw
+       arrives as an unhandled REJECTION and Playwright emits pageerror only
+       for uncaught exceptions. A listener that stays empty through the very
+       crash it was added for is worse than no listener, so it was removed and
+       the table itself is asked instead.
+
+       The wait is bounded and its failure is allowed through for the same
+       reason: a panel that never unhides is a symptom, and the assertion
+       under it says what actually did not render. */
+    await quoted.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await quoted.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    try {
+      await quoted.waitForSelector("#mktTapePanel:not([hidden])", { timeout: 8000 });
+    } catch {
+      /* Deliberately swallowed. A panel that never unhides is a symptom of
+         the throw the next assertion names. */
+    }
+
+    const tape = await quoted.evaluate(() =>
+      [...document.querySelectorAll("#mktTapeBody tr")].map((tr) => ({
+        k: tr.querySelector("th").textContent,
+        v: tr.querySelectorAll("td")[0].textContent,
+        cls: tr.querySelectorAll("td")[0].className,
+        n: tr.querySelectorAll("td")[1].textContent,
+      })));
+    await quoted.close();
+
+    /* THE WHOLE TABLE, asserted before anything in it is read. paintTape
+       builds all seven rows — an unconditional list, no payload field adds or
+       drops one — before it appends any of them, so a throw while building
+       costs the entire table and leaves panel.hidden set: under the reverted
+       renderer `tape` is empty, and without this line that surfaces as
+       "Cannot read properties of undefined" pointing at this suite instead of
+       at the page. The count is exact rather than a floor, because a row list
+       that silently loses an entry is the other failure this catches. */
+    eq(tape.length, 7,
+       `the tape rendered all seven of its rows (${tape.length}) on a payload whose numbers ` +
+       "arrived as strings. This is the no-throw witness: the two ratio rows formatted the " +
+       "RAW payload field after testing it with the helper, so widening the helper sent a " +
+       "quoted ratio into String.prototype.toFixed — and since the list is built before a " +
+       "single row is appended, the TypeError cost the whole table, not its tail");
+
+    const netRow = tape.find((r) => /^Net premium/.test(r.k));
+    eq(netRow.v, "−$2.00B",
+       `a net premium quoted on the wire as "-2000000000" renders as the sum it is ` +
+       `(${netRow.v}). Under the stricter helper this cell printed an em dash — the page's ` +
+       "own mark for a reading nobody took — over two billion dollars that were measured");
+    ok(/fb-neg/.test(netRow.cls),
+       `and the quoted reading keeps its sign in the DOM as well as in the glyph ` +
+       `(${netRow.cls}): usd() and toneClass() call the helper separately, so one that ` +
+       "half-admitted a string could print the dollars and lose the tone qualifying them");
+    eq(netRow.n, "180",
+       "with the population column beside it unmoved, because it arrived as a number all " +
+       "along and widening the helper must not disturb what already worked");
+
+    const volRow = tape.find((r) => /^Put contracts per call/.test(r.k));
+    eq(volRow.v, "1.250",
+       `a put/call ratio quoted as "1.25" renders to three places (${volRow.v}). This row ` +
+       "tested the value with the helper and then formatted the RAW field, so widening the " +
+       "helper made a quoted ratio reach String.prototype.toFixed — a TypeError, not an em " +
+       "dash. It formats the coerced value now");
+    const premRow = tape.find((r) => /^Put premium per call/.test(r.k));
+    eq(premRow.v, "0.875",
+       `and its premium twin the same (${premRow.v}), because the pair was written once and ` +
+       "copied, which is how one of them being fixed and the other not would look normal");
+
+    const ivRow = tape.find((r) => /implied vol/i.test(r.k));
+    ok(ivRow, "the tape still has rows BELOW the two ratios — the no-throw witness. A " +
+       "TypeError inside paintTape would leave this row unbuilt, and every assertion above " +
+       "it could still pass on the rows that were appended before the throw");
+    eq(ivRow.v, "34.1%",
+       `a quoted "0.3412" reaches pct() and renders as ${ivRow.v} — the same reading the ` +
+       "unquoted fixture above prints. The helper is reached from more than one formatter, " +
+       "and admitting a string at one of them would not be the fix");
+  }
+
 } finally {
   await browser.close();
   await server.stop();
 }
 
-console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, and every chart asserted at its DRAWN size rather than its declared one`);
+console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is rather than as the em dash this page keeps for a reading nobody took, two ratios that formatted the coerced value rather than the raw one and a row below them proving nothing threw on the way, and every chart asserted at its DRAWN size rather than its declared one`);

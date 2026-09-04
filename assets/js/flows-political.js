@@ -49,8 +49,28 @@
     return String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
   }
 
+  /* THE CANONICAL FORM, WHICH ADMITS A NUMERIC STRING. This read
+     `typeof v === "number" && isFinite(v)`, which is safe against the
+     confident zero — Number(null) never runs — but is STRICTER than the
+     contract every other surface in this product holds, and the harm runs the
+     other way: the vendor quotes several fields, so a present reading rendered
+     as an em dash. flows-panels.js already diagnosed this exact divergence
+     after it shipped: "one payload field rendered as a value on the board and
+     as an em dash in the card panel, for the same card, in the same session."
+     The payload side agrees — shared/flows-market.js numOrNull coerces the
+     same way.
+
+     ALIGNED RATHER THAN DELETED, and that is a measurement rather than a
+     shortcut. The obvious move is to drop the local copy for flows-ui.js's
+     `UI.isNum`, but the library is 24k of parse and tests/flows-weight ceilings
+     both routes that carry this copy: market goes 91k to 115k against a 95k
+     ceiling, political 49k to 73k against 55k. Both trip. So the body matches
+     the canonical one and the duplication stays until those routes can afford
+     the module. */
   function isNum(v) {
-    return typeof v === "number" && isFinite(v) ? v : null;
+    if (v === null || v === undefined || v === "") return null;
+    var n = typeof v === "number" ? v : Number(v);
+    return isFinite(n) ? n : null;
   }
   function el(tag, cls, text) {
     var n = document.createElement(tag);

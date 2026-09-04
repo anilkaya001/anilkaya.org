@@ -1264,13 +1264,26 @@ try {
     eq(counts.watch?.text, "2", "and the dead band's, which this page also has in hand");
     eq(counts.long?.hidden, false, "and reveals them once there is a real number");
 
-    /* THE SLOT THAT WAS NEVER RENDERED. flows-events.js has filled
-       [data-rail-count="events"] since the calendar shipped, and the rail
-       emitted the slot for three keys and not that one — so the query
-       matched nothing and the badge could never appear, silently. */
+    /* THE SLOT THAT WAS NEVER RENDERED, AND THEN NEVER FILLED FROM HERE.
+       flows-events.js has filled [data-rail-count="events"] since the
+       calendar shipped, and the rail emitted the slot for three keys and not
+       that one — so the query matched nothing and the badge could never
+       appear, silently. The slot exists now, and this page held the events
+       payload while filling three of the four badges it had in hand: the
+       count appeared on /flows/events/ and vanished on /flows/, which a
+       reader takes for "nothing reports this week" rather than "this page
+       did not say".
+
+       THIS PHASE IS THE WITHHOLDING ARM, and it is a different fact from
+       either of those. The calendar key is deliberately unpublished until
+       the earnings join below, so the page holds a pending envelope — not a
+       measurement — and a pending envelope has no population to badge. The
+       filled arm is asserted twice below, once on a calendar the region
+       shows whole and once on one it caps. */
     ok("events" in counts, "the events slot exists to be filled at all");
     eq(counts.events?.hidden, true,
-       "and stays hidden here, because this page has no count for it");
+       "and withholds while the calendar key is unpublished — a pending envelope is not a " +
+       "count, and the rows this page would have drawn from one are not its population");
 
     const sub = await page.locator("#ccBullSub").textContent();
     ok(/all 5/.test(sub), `the region header says how many the side actually holds (${sub})`);
@@ -1415,6 +1428,20 @@ try {
     eq(evRows[1][4], "—",
        "a gated name has no score, and an em dash is not a zero");
     eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
+
+    /* AND THE FOURTH BADGE FILLS, NOW THAT THERE IS A CALENDAR TO BADGE.
+       This is the arm the phase above could not reach: the same page, the
+       same payload, one publish later. The quantity is `inWindow` — the
+       names reporting — which is the quantity flows-events.js writes into
+       this identical slot on /flows/events/, so a reader crossing between
+       the two routes reads one number rather than two. */
+    const evBadge = await page.evaluate(() => {
+      const el = document.querySelector('[data-rail-count="events"]');
+      return { text: el.textContent.trim(), hidden: el.hidden };
+    });
+    eq(evBadge.hidden, false, "the rail badges the calendar once a population has arrived");
+    eq(evBadge.text, String(eventsPayload.inWindow),
+       `with the ${eventsPayload.inWindow} names the payload says report inside the window`);
   }
 
   /* ---------- the calendar names its numerator too --------------- */
@@ -1437,6 +1464,19 @@ try {
        "a calendar longer than the cap is listed eight deep");
     eq((await page.locator("#ccEventsSub").textContent()).trim(), "8 of 30 in the window",
        "and the subtitle names the eight it drew as well as the thirty it did not");
+    /* THE BADGE IS THE POPULATION, AND THIS IS THE FIXTURE THAT PROVES IT.
+       Three integers are in reach here — thirty reporting, ten rows on the
+       wire, eight drawn in the region — and only one of them is the number
+       the rail's link opens onto. `rowCount`, which fills the three badges
+       beside it, would have published the ten; the region's own cap would
+       have published the eight. Either would have put a different number
+       under the same word on /flows/ than /flows/events/ prints from the
+       same payload, which is a reader discovering two quantities where the
+       pipeline measured one. */
+    eq(await page.evaluate(
+       () => document.querySelector('[data-rail-count="events"]').textContent.trim()), "30",
+       "the rail badges the thirty names reporting, not the ten rows published or the " +
+       "eight this page drew from them");
     await post("events", eventsPayload);
   }
 
@@ -2021,8 +2061,10 @@ try {
     `a board that does not answer contained to its own region instead of blanking the six ` +
     `that did, a pole that has not published never chosen over one that has, every capped ` +
     `region stating what it is showing out of what it holds rather than calling eight of ` +
-    `twelve "all 12", the read instant on a 24-hour clock that names its zone, and a ranked ` +
-    `price change that no longer shares a word with the score move seated above it`);
+    `twelve "all 12", the read instant on a 24-hour clock that names its zone, a ranked ` +
+    `price change that no longer shares a word with the score move seated above it, and a ` +
+    `fourth rail badge filled from the calendar's own population rather than the rows this ` +
+    `page drew from it, so /flows/ and /flows/events/ badge one quantity and not two`);
 } finally {
   await browser.close();
   await server.stop();

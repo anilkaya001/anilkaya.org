@@ -277,7 +277,91 @@ ok(overflow <= 1,
    "the measurement the sibling placement and the .st-field min-width:0 both exist for, and it " +
    "is the one that regressed to 352px when the wrap was a flex child");
 
-/* ---- 10. nothing threw along the way -------------------------------- */
+/* ---- 10. the rail badge states only what this side MEASURED --------- */
+
+/* Back to the width at which the rail is a column. Section 9 left the page at
+   320px, where the rail is a horizontal drawer; the readings below take the
+   slot's own `hidden` property rather than its computed visibility, so the
+   width cannot change the answer — but a badge certified only at a width where
+   the rail is a different component is a badge nobody has checked. */
+await page.setViewportSize({ width: 1280, height: 1000 });
+
+/* IT FILLS AT ALL, FIRST. Everything after this asserts the badge staying
+   silent or printing a zero, and all of that passes against a slot nothing
+   ever writes — including on a page whose fetch died. Read while the store
+   still holds the eight-name board, so the two silences below are known to be
+   choices rather than the absence of a fill. */
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const railFull = await page.evaluate(() => {
+  const el = document.querySelector('[data-rail-count="long"]');
+  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
+});
+eq(railFull.text, "8",
+   "the rail badge for this side reads the row count of the board on screen — the nav is served " +
+   "with the slot empty and hidden because filling it there would cost a D1 row read per page " +
+   "view for a number the page is about to fetch anyway, so the controller holding the payload " +
+   "fills it");
+eq(railFull.hidden, false, "and the slot is shown once it has a measurement in it");
+
+/* THE PENDING CASE IS WRITTEN, NOT ARRANGED BY DELETION. This is the exact
+   envelope the Worker answers with (worker.js:2605) both when the board row is
+   absent and when the D1 read THREW, so the page under test reads the same
+   bytes either cause produces. */
+await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForFunction(() => !!document.querySelector('[data-empty="unavailable"]'));
+const railPending = await page.evaluate(() => {
+  const el = document.querySelector('[data-rail-count="long"]');
+  return {
+    text: el ? el.textContent : null,
+    hidden: el ? el.hidden : null,
+    msg: document.querySelector('[data-empty="unavailable"]').textContent,
+  };
+});
+ok(/No board is available for this side/.test(railPending.msg),
+   "the pending payload reaches the branch that says no board is available — the badge is being " +
+   "read BESIDE that sentence, so the sentence is confirmed on screen rather than assumed");
+eq(railPending.hidden, true,
+   "the badge stays HIDDEN on a pending board. The fill at flows-board.js:1811 runs BEFORE the " +
+   "pending branch at :1840, and a pending payload has rows.length 0 by construction, so the " +
+   "unguarded String(rows.length) it replaced put a “0” in the rail beside a page saying the " +
+   "pipeline may never have published — a confident count of a market nobody measured");
+eq(railPending.text, "",
+   "and the slot holds no text at all: a hidden element carrying “0” prints that zero the moment " +
+   "anything — a stylesheet, a reading tool, a future rail — disagrees about `hidden`");
+
+/* THE OTHER HALF OF THE SAME RULE, and why the guard here is not the
+   `if (slot && rows.length)` flows-watch.js:434 uses. On a board a zero can be
+   a MEASUREMENT — names were scored and none of them cleared the dead band —
+   and suppressing it would report a working quiet session as an outage. The
+   fixture is the cold board with its rows taken away and a scored count added,
+   so `scored` is the only thing separating it from the payload above. */
+await put("board:short", {
+  ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 124,
+});
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForFunction(() => !!document.querySelector('[data-empty="quiet"]'));
+const railQuiet = await page.evaluate(() => {
+  const el = document.querySelector('[data-rail-count="short"]');
+  return {
+    text: el ? el.textContent : null,
+    hidden: el ? el.hidden : null,
+    msg: document.querySelector('[data-empty="quiet"]').textContent,
+  };
+});
+ok(/130 names were scored/.test(railQuiet.msg),
+   "the measured-empty payload reaches the quiet branch, the one silence of the three that is a " +
+   "statement about the market rather than about the plumbing");
+eq(railQuiet.text, "0",
+   "a session that scored 130 names and placed none on this side badges “0”, because here the " +
+   "zero IS the reading — which is what `rows.length || isNum(payload.scored) > 0` buys over the " +
+   "bare `rows.length` the watch rail can afford");
+eq(railQuiet.hidden, false,
+   "and that zero is VISIBLE: a rail that hides a measured emptiness collapses a quiet session " +
+   "into an outage, the same error as the pending case with its sign reversed");
+
+/* ---- 11. nothing threw along the way -------------------------------- */
 
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
@@ -288,4 +372,5 @@ await server.stop();
 console.log(`✓ flows-board-render: ${checks} assertions — the control bar exists at all, the ` +
   `library it depends on is named before its symptoms, a denominator that stays silent until ` +
   `it has something to say, a measured zero match distinguished from an empty board, orders ` +
-  `withheld exactly when the payload cannot produce them, and no overflow at 320px`);
+  `withheld exactly when the payload cannot produce them, a rail badge that is silent on a ` +
+  `pending board and prints its measured zero on a quiet one, and no overflow at 320px`);

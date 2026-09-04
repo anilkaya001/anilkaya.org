@@ -1792,7 +1792,26 @@
          only ever holds its own side, so it fills its own badge and leaves
          the other one hidden rather than guessing at it. */
       const slot = document.querySelector('[data-rail-count="' + which + '"]');
-      if (slot) { slot.textContent = String(rows.length); slot.hidden = false; }
+      /* AND IT FILLS ONLY WHAT IT MEASURED. This wrote String(rows.length)
+         unconditionally, so a pending payload — rows.length 0 by construction —
+         put a "0" in the rail beside a page that was about to say "No board is
+         available for this side. Either the pipeline has not published its
+         first session yet, or the store could not be read." The rail states the
+         rule itself, in shared/flows-pages.js: "A badge that says nothing until
+         the data lands is honest; a badge that says 0 while the fetch is in
+         flight is not."
+
+         NOT THE GUARD THE SIBLINGS USE. flows-watch.js and flows-events.js
+         write `if (slot && rows.length)`, which is right for them and wrong
+         here: on a board a zero can be a MEASUREMENT — a side where names were
+         scored and none cleared the dead band — and suppressing that would
+         collapse a working quiet day into an outage, which is the other half of
+         the same rule. `scored` is what separates them, exactly as the block
+         directly below already uses it for the sentence it prints. */
+      if (slot && (rows.length || isNum(payload.scored) > 0)) {
+        slot.textContent = String(rows.length);
+        slot.hidden = false;
+      }
 
       /* AN EMPTY SIDE IS NOT AN EMPTY STORE. Under the dead band a side can
          legitimately hold nothing — no name cleared the bar on this side of

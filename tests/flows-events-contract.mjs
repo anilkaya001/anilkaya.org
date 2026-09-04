@@ -1,10 +1,14 @@
 /* =============================================================
    flows-events-contract.mjs — the events calendar.
 
-   THIS SUITE IS SCOPED TO THE PURE MODULE AND THE PAYLOAD. Both
-   exist and are stable. assets/js/flows-events.js is being written
-   in parallel; nothing here touches it, imports it, or assumes it
-   exists.
+   THIS SUITE IS SCOPED TO THE PURE MODULE AND THE PAYLOAD, WITH
+   ONE DELIBERATE EXCEPTION. Both the module and the payload exist
+   and are stable, and §1 through §15 touch nothing else. §16 opens
+   the rendered page in a browser, because the defect it pins lives
+   between two published fields rather than inside either: the
+   module has emitted `shown` and `inWindow` as two separate facts
+   since §8, and the renderer filled the nav badge from the wrong
+   one. No assertion over the payload can see that.
 
    WHAT IS WORTH ASSERTING ABOUT THIS MODULE is not that it computes
    what it computes. shared/flows-events.js rests on two corrections,
@@ -46,11 +50,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { chromium } from "playwright";
 
 import {
   buildEvents, eventRow, sessionsToEarnings, calendarDaysTo, ivPathOf,
   IV_PATH_LABELS, EVENT_ROWS, EVENT_WINDOW_DAYS, EVENTS_NOTES,
 } from "../shared/flows-events.js";
+import { eventsPage } from "../shared/flows-pages.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 
@@ -1125,6 +1131,144 @@ const gateDteFrom = (origin) => (date) =>
   eq(nd.sdte, null, "and so is its session horizon — both are null together, always");
 }
 
+/* ============================================================
+   §16. THE RAIL BADGE IS THE POPULATION, NOT THE PAGE.
+
+   THE ONE SECTION THAT OPENS THE RENDERER, and it is here because
+   the two integers it has to tell apart are both published and are
+   equal on the emitted corpus. §8 pins them as separate facts —
+   `shown` is what the table draws, `inWindow` is how many names
+   report inside the window — and on an ordinary week the cap does
+   not bind, so 200 seats over sixty names makes them the same
+   number. A suite that never rendered the page could therefore
+   watch the badge fill from `shown` forever and stay green.
+
+   IT DID. flows-events.js filled the badge from `shown`, which is
+   POST-CAP, four lines below a status sentence that says "the cap
+   holds the list to 200" in words: with 240 names reporting the
+   rail said 200 while the sentence beside it said 240 existed. A
+   number in the nav that silently means "as many as we chose to
+   draw" is the truncation defect one element wide, and /flows/
+   fills this same slot from this same payload — two routes wording
+   one quantity differently is how a reader concludes there are two
+   quantities.
+
+   SO THE FIXTURE IS §8's `far` FIXTURE: four dated names into two
+   seats, where the two integers are 4 and 2 and can be told apart
+   by looking. The page is served from shared/flows-pages.js and its
+   own fetch is stubbed with the payload, so no Worker, session or
+   store is involved: what is under test is which published field
+   reaches the DOM node, and nothing else.
+   ============================================================ */
+{
+  /* The served shell without its two script tags. flows-events.js is
+     injected below instead, so it runs against a stub that is already in
+     place, and nav.js — which this section is not about — never runs. */
+  const HTML = eventsPage({ username: "test" }).replace(/<script[^>]*><\/script>/g, "");
+  const browser = await chromium.launch();
+  try {
+    const render = async (payload) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.route("**/*", (route) =>
+        route.fulfill({ contentType: "text/html", body: HTML }));
+      await page.addInitScript((pl) => {
+        window.fetch = () => Promise.resolve({
+          ok: true, status: 200,
+          /* A FRESH X-Payload-Updated, so the staleness banner stays down and
+             the only thing under test is the badge. */
+          headers: { get: () => String(Date.now()) },
+          json: () => Promise.resolve(JSON.parse(JSON.stringify(pl))),
+        });
+      }, payload);
+      await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
+      await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
+      /* WAITING ON THE STATUS STRIP WAITS ON THE EXACT FUNCTION UNDER TEST:
+         renderStatus writes that sentence and then fills the badge, so a
+         strip that has left "Loading the calendar…" means the badge line has
+         run — including on the empty-calendar branch, which calls
+         renderStatus deliberately and draws no row to wait for. */
+      await page.waitForFunction(
+        () => !/^Loading/.test(document.getElementById("evStatus").textContent),
+        null, { timeout: 15000 });
+      const read = await page.evaluate(() => {
+        const slot = document.querySelector('[data-rail-count="events"]');
+        return {
+          present: !!slot,
+          text: slot ? slot.textContent.trim() : null,
+          hidden: slot ? slot.hidden : null,
+          status: document.getElementById("evStatus").textContent,
+          rows: document.querySelectorAll("#evBody tr").length,
+        };
+      });
+      await page.close();
+      return { ...read, errors };
+    };
+
+    /* (a) THE CAPPED CALENDAR. Four names inside the window, two seats. */
+    const capped = buildEvents([
+      nameAt("D4", "2026-09-04"), nameAt("D1", "2026-08-27"),
+      nameAt("D3", "2026-09-02"), nameAt("D2", "2026-08-31"),
+    ], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, cap: 2 });
+    eq(capped.shown, 2, "the fixture draws two rows");
+    eq(capped.inWindow, 4,
+       "out of a population of four — the two integers the badge has to tell apart");
+
+    const cap = await render(capped);
+    deep(cap.errors, [], `the calendar renders without throwing (${cap.errors[0] || "clean"})`);
+    /* THE DEPENDENCY BEFORE THE SYMPTOM. The slot was queried by this file
+       and emitted by nothing for as long as the badge existed, and a missing
+       node makes every assertion below read as a wrong number rather than as
+       an absent element. */
+    ok(cap.present, "the events page emits the badge slot the renderer queries");
+    eq(cap.rows, 2, "the table draws the two rows the cap left it");
+    eq(cap.text, "4",
+       "and the badge reads 4 — the names reporting inside the window, which is the " +
+       "population the page was asked about and not the length of its own table");
+    ok(cap.text !== String(capped.shown),
+       `and never ${capped.shown}, the post-cap count it used to publish: a badge that ` +
+       `means "as many as we chose to draw" is the truncation the cap already performed, ` +
+       `restated in the nav as a fact about the market`);
+    eq(cap.hidden, false, "and it is revealed, because a population did arrive");
+    /* ONE QUANTITY, TWICE, ON ONE SCREEN. The strip and the badge are four
+       lines apart in the same function; a reader who can see both must not
+       be able to subtract them. */
+    ok(/2 of 4 names reporting inside the/.test(cap.status),
+       `the sentence beside it names the same four (${cap.status.slice(0, 60)}…)`);
+    ok(/the cap holds the list to 2/.test(cap.status),
+       "and says out loud that the two on the page are a choice this page made");
+
+    /* (b) WHAT IS WITHHELD IS AN inWindow THAT NEVER ARRIVED. The rows are
+       still there and still drawn, so the row count is available to fall back
+       on — and it is exactly the number that must not be published. No
+       population was measured, so none is claimed. */
+    const withheld = { ...capped };
+    delete withheld.inWindow;
+    const held = await render(withheld);
+    eq(held.rows, 2, "a payload with no population still draws its rows");
+    eq(held.text, "", "but the badge is left empty rather than filled from them");
+    eq(held.hidden, true, "and stays hidden, which is the page declining to answer");
+
+    /* (c) A ZERO IS A MEASUREMENT AND IS PRINTED. renderStatus never runs on
+       a pending payload — that branch returns before it — so the only zero
+       that can reach this line is one a run measured, and the empty-calendar
+       branch calls renderStatus deliberately, as "a measured emptiness". A
+       badge guarded on truthiness withheld precisely that reading, and left
+       the rail silent on the one session where an empty calendar is news. */
+    const quiet = buildEvents([], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+    eq(quiet.inWindow, 0, "an empty universe measures a population of zero");
+    const none = await render(quiet);
+    eq(none.rows, 1, "the table says so in a row of its own rather than going blank");
+    eq(none.text, "0",
+       "and the badge prints the zero — 'no name reports this week' is a reading, and " +
+       "withholding it is indistinguishable from a calendar that never published");
+    eq(none.hidden, false, "so the slot is revealed to carry it");
+  } finally {
+    await browser.close();
+  }
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the run's ` +
   `own Eastern date and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +
@@ -1137,5 +1281,7 @@ console.log(`✓ flows-events: ${checks} assertions — a session count measured
   `both sites share and agreeing in both directions over the payload, a dte that is the ` +
   `gate's own number rather than a second opinion about it, coverage counters that move by ` +
   `exactly the number withheld from them, a price that refuses a zero close in six shapes, ` +
-  `an announce column withheld whole with its reason published, and the sentences that keep ` +
-  `the page from claiming a forecast`);
+  `an announce column withheld whole with its reason published, the sentences that keep ` +
+  `the page from claiming a forecast, and a rail badge read off a rendered page that counts ` +
+  `the names reporting rather than the rows the cap left on it, withholds where no ` +
+  `population was published, and prints a measured zero`);

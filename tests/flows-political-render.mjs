@@ -535,6 +535,70 @@ try {
       "produced it");
   }
 
+  /* ---------- §5d a quoted number is still a number ---------------- */
+  {
+    /* THE STRING PATH NEITHER POLITICAL SUITE WALKED. Both fixtures in this
+       repository are JS object literals, so every number in them arrives
+       already typed and this renderer's isNum() is never handed anything
+       else. The live feed is JSON from a vendor that QUOTES several of these
+       fields, and the strict form the function used to carry — `typeof v ===
+       "number" && isFinite(v)` — answered null for every quoted one: a reading
+       that was present in the payload printed as an em dash, which is this
+       page's word for something the filings do not say. flows-panels.js:56-70
+       diagnosed exactly this divergence after it shipped — "one payload field
+       rendered as a value on the board and as an em dash in the card panel,
+       for the same card, in the same session" — and shared/flows-market.js's
+       numOrNull coerces the same way on the payload side, so the strict copy
+       here was the one surface in the product holding a narrower contract
+       than every other one.
+
+       Ada's row is re-sent with its total, its filing count and its median
+       lag quoted the way the vendor sends them. Ben's keeps two fields
+       genuinely absent, so what this fixture proves is the COERCION and not
+       merely that a table drew something. */
+    await put("political", { ...payload, buyers: { ...payload.buyers, rows: [
+      { ...payload.buyers.rows[0], bought: "10000000", boughtLo: "9000000",
+        boughtHi: "12000000", buys: "14", medianLagDays: "38" },
+      /* AND AN EMPTY STRING IS STILL NOT A ZERO. `Number("")` is 0, so a
+         coercion that does not exclude it turns a field the vendor left blank
+         into a disclosed sale of $0 — the confident zero the strict form was
+         right to be afraid of, and the reason the guard runs before Number()
+         rather than the fix being a plain call to it. */
+      { ...payload.buyers.rows[1], sells: 2, sold: "", medianLagDays: null },
+      payload.buyers.rows[2],
+    ] } });
+    const p9 = await browser.newPage();
+    await p9.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p9.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p9.waitForSelector("#plBuyers tbody tr");
+    const quoted = await p9.evaluate(() =>
+      [...document.querySelectorAll("#plBuyers tbody tr")].map((tr) => ({
+        mid: tr.children[3].textContent,
+        filings: tr.children[7].textContent,
+        lag: tr.children[9].textContent,
+        sold: tr.children[10].textContent,
+      })));
+    eq(quoted[0].mid, "$10.0M",
+      "A QUOTED TOTAL IS FORMATTED AS MONEY. The vendor sends this figure as the " +
+      "string \"10000000\", and the strict form read it as no reading at all and " +
+      "printed the em dash this page reserves for what the filings do not state — " +
+      "the harm running the opposite way from the zero the strictness guarded against");
+    eq(quoted[0].filings, "14",
+      "and a quoted count is drawn as the count, rather than as a dash beside a " +
+      "total it is the population of");
+    eq(quoted[0].lag, "38d",
+      "and a quoted median lag keeps its unit, so the column that says how late " +
+      "these filings were still says it");
+    eq(quoted[1].lag, "—",
+      "while a row that genuinely states no lag still prints the em dash — the " +
+      "coercion widened what counts as a reading, it did not invent one");
+    eq(quoted[1].sold, "—",
+      "and a field the vendor sent as an empty string reads as absent rather than " +
+      "as a disclosed sale of $0, which is what Number(\"\") on its own makes it");
+    await p9.close();
+    await put("political", payload);
+  }
+
   /* ---------- §8 the notes reach the page, one paragraph each ----- */
   {
     const foot = await page.evaluate(() =>
@@ -790,4 +854,4 @@ console.log(`✓ flows-political-render: ${checks} assertions — a midpoint bar
   `fixed position, a card link built from the payload's own list of carded names with the ` +
   `symbol normalised before the lookup, a breadth block whose first row is third by ` +
   `dollars, the width of the read in the status line, a vendor that ignored pagination said out ` +
-  `loud, three silences in three sentences, a breadth block that draws its own silence rather than vanishing with the panel above it, a floor printed from the payload and never from a literal, an account share that says "not published" rather than "none stated", a newest filing placed AFTER the session it is after, and nothing overflowing at 320px`);
+  `loud, three silences in three sentences, a breadth block that draws its own silence rather than vanishing with the panel above it, a floor printed from the payload and never from a literal, an account share that says "not published" rather than "none stated", a newest filing placed AFTER the session it is after, a number the vendor quoted formatted rather than dashed while an empty string stays a dash, and nothing overflowing at 320px`);

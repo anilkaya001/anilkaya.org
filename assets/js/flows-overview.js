@@ -1652,6 +1652,21 @@
     setRailCount("long", bullN);
     setRailCount("short", bearN);
     setRailCount("watch", rowCount(watch));
+    /* THE FOURTH SLOT WAS EMITTED AND NEVER FILLED FROM HERE. The nav renders
+       a badge for four keys (shared/flows-pages.js:84) and this page held the
+       events payload — it is fetched at :1453 and read at :1571 — while
+       filling three. So the rail's events count appeared on /flows/events/
+       and vanished on /flows/, which reads as "nothing reports this week"
+       rather than "this page did not say".
+
+       AND IT IS THE POPULATION, the same quantity flows-events.js:1142 now
+       writes. `rowCount` would have been the published rows — capped at 200
+       on the wire and at eight in the region above — so the two routes would
+       have filled one badge with two different numbers, which is the defect
+       this fix exists to close, not the fix. `inWindow` is null on a pending
+       envelope and setRailCount withholds on null. */
+    setRailCount("events", events && events.status !== "pending"
+      ? isNum(events.inWindow) : null);
   }).catch(() => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again.";
   });

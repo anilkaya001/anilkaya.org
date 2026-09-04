@@ -24,8 +24,22 @@
   var MINUS = "−";           // U+2212, not a hyphen
   var DASH = "—";
 
+  /* THE CANONICAL FORM, WHICH ADMITS A NUMERIC STRING. This read
+     `typeof v === "number" && isFinite(v)` — safe against the confident zero,
+     but STRICTER than the contract every other surface here holds, and the
+     harm ran the other way: the vendor quotes several fields, so a measured
+     reading printed an em dash. flows-panels.js:56-70 diagnosed the same
+     divergence after it shipped, and shared/flows-market.js numOrNull coerces
+     the same way on the wire.
+
+     ALIGNED RATHER THAN DELETED, which is a measurement: flows-ui.js owns
+     `UI.isNum`, but it is 24k of parse and tests/flows-weight ceilings both
+     routes carrying this copy — market 91k to 115k against 95k, political 49k
+     to 73k against 55k. Both trip. */
   function isNum(v) {
-    return typeof v === "number" && isFinite(v) ? v : null;
+    if (v === null || v === undefined || v === "") return null;
+    var n = typeof v === "number" ? v : Number(v);
+    return isFinite(n) ? n : null;
   }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -193,6 +207,9 @@
   // check: the pipeline does not run at all on a Saturday.
   var STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   var STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  // Mirrored from flows-ui.js:147 — the shape the publisher validates on the
+  // way out, and the gate the parse below sits behind.
+  var ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   function assessAge(payload) {
     var now = Date.now();
@@ -201,10 +218,18 @@
     /* THE MISSING-VALUE TEST BEFORE THE COERCION, and it matters more here
        than almost anywhere: Number(null) is 0, 0 is a finite millisecond
        stamp — the epoch — and a payload with no write header would be
-       reported as fifty-six years stale. A non-positive stamp is absent for
-       the same reason. */
-    var written = isNum(payload.__updatedAt);
-    if (written !== null && written > 0 && now - written > STALE_WRITE_MS) {
+       reported as fifty-six years stale.
+
+       A NON-POSITIVE STAMP IS AN ABSENT ONE, turned into one here once rather
+       than tested at each use. This carried the `> 0` inside the stale branch
+       and asked `written === null` at the bottom — the shape flows-ui.js:203
+       documents fixing, where a stamp of 0 skips the branch as "not old" and
+       falls through to "fresh". Unreachable today, since shared/flows-market.js
+       normalises 0 to null upstream; but a second line of defence that works
+       only while the first holds is not one. */
+    var stamped = isNum(payload.__updatedAt);
+    var written = stamped !== null && stamped > 0 ? stamped : null;
+    if (written !== null && now - written > STALE_WRITE_MS) {
       var hours = Math.floor((now - written) / 3600000);
       var days = Math.floor(hours / 24);
       /* The hour branch cannot fire while the threshold is 30 hours — every
@@ -221,20 +246,38 @@
       };
     }
 
-    if (payload.sessionDate) {
-      /* 21:00Z is after every US close, so a session date is aged from the
-         end of its own session rather than from its midnight. */
-      var session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
-      if (isFinite(session) && now - session > STALE_SESSION_MS) {
-        return {
-          kind: "session",
-          message: "These numbers describe the " + payload.sessionDate + " session, " +
-            "which is more than four days old. The pipeline is running but its " +
-            "data is not advancing.",
-        };
-      }
+    /* 21:00Z is after every US close, so a session date is aged from the end
+       of its own session rather than from its midnight.
+
+       THE SHAPE IS CHECKED BEFORE THE PARSE, because Date.parse is lenient
+       enough to be dangerous: "2026-09" + "T21:00:00Z" comes back FINITE in
+       V8 and dates a session to a day nobody published — raising a stale
+       banner over a current level, on the one route with no other freshness
+       signal to contradict it.
+
+       AND THE PARSE RESULT IS KEPT, not just tested. This asked
+       `!payload.sessionDate`, the PRESENCE of the key, so a date of pure
+       garbage ("Thursday") still reported "fresh". What did not parse belongs
+       with the silences. Both fixes are flows-ui.js:229-249 reaching the
+       mirror that claimed to hold them. */
+    var session = null;
+    if (ISO_DAY.test(String(payload.sessionDate || ""))) {
+      var parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
+      if (isFinite(parsed)) session = parsed;
     }
-    if (written === null && !payload.sessionDate) return { kind: "unknown", message: null };
+    if (session !== null && now - session > STALE_SESSION_MS) {
+      return {
+        kind: "session",
+        message: "These numbers describe the " + payload.sessionDate + " session, " +
+          "which is more than four days old. The pipeline is running but its " +
+          "data is not advancing.",
+      };
+    }
+
+    /* NOTHING DATABLE AT ALL IS NOT A PASS. "unknown" says no claim was made;
+       "fresh" says a claim was made and it held. Only a payload that carried
+       at least one READABLE date gets the second. */
+    if (written === null && session === null) return { kind: "unknown", message: null };
     return { kind: "fresh", message: null };
   }
 
@@ -451,10 +494,20 @@
     body.textContent = "";
 
     var p = m.premium || {}, pcr = m.pcr || {}, ag = m.aggressor || {}, vol = m.vol || {};
+    /* THE COERCED VALUE IS THE ONE THAT GETS FORMATTED. These two rows were
+       the only place here that tested with isNum and then formatted the RAW
+       field — harmless while isNum rejected strings, a CRASH once it was
+       widened: a quoted ratio passes the test and calls .toFixed on a String.
+       The list below is built entirely before a single row is appended, so
+       that costs the whole table and panel.hidden is never cleared; and it
+       escapes as an unhandled REJECTION from the fetch chain, so window.onerror
+       never sees it. The page renders one panel fewer, in silence. A widened
+       guard that hands the unwidened value onward is not a widened guard. */
+    var pcrVol = isNum(pcr.volume), pcrPrem = isNum(pcr.premium);
     var rows = [
       ["Net premium, signed", usd(p.net), p.priced, toneClass(p.net)],
-      ["Put contracts per call", isNum(pcr.volume) === null ? DASH : pcr.volume.toFixed(3), pcr.quotedVolume, ""],
-      ["Put premium per call", isNum(pcr.premium) === null ? DASH : pcr.premium.toFixed(3), pcr.quotedPremium, ""],
+      ["Put contracts per call", pcrVol === null ? DASH : pcrVol.toFixed(3), pcr.quotedVolume, ""],
+      ["Put premium per call", pcrPrem === null ? DASH : pcrPrem.toFixed(3), pcr.quotedPremium, ""],
       ["Calls lifted at the offer", pct(ag.callLift), ag.quoted, ""],
       ["Puts lifted at the offer", pct(ag.putLift), ag.quoted, ""],
       ["Median 30-day implied vol", pct(vol.iv30dMedian), vol.iv30dQuoted, ""],
