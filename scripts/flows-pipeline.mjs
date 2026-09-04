@@ -680,6 +680,45 @@ const permits = makePermitQueue({
   maxInFlight: 6,
 });
 
+/* ---------- the ingest write lane --------------------------------
+
+   ONE SHARED LANE FOR EVERY WRITE TO THE INGEST ROUTE, which is the answer
+   this file already wrote down for itself before anything needed it: "the
+   answer is one shared lane for ingest traffic rather than re-serialising
+   these two."
+
+   PUBLISH_SPACING_MS WAS PER-LEG AND THE ROUTE'S FAILURE IS GLOBAL. Every
+   writer slept 150ms after its own POST, so one leg at a time saw ~6.7
+   writes/s — comfortably under the ~3.4/s that tripped Cloudflare's rate
+   challenge on the first live run (publish()'s own comment: 37 POSTs in
+   eleven seconds). But the spacing never knew about the other legs. Three
+   paced streams in the air at once present the SUM, and a per-writer sleep
+   cannot see that.
+
+   IT IS ALSO WHAT THE CARDS LEG NEEDS BEFORE IT CAN BE POOLED. Fifty card
+   writes spaced 150ms apart is 7.5s serially; at four workers each still
+   sleeping its own 150ms it is ~26 POSTs/s, which is not a speed-up, it is
+   the documented 403. A lane fixes that by construction: the departures stay
+   150ms apart no matter how many workers are producing, exactly as the vendor
+   lane keeps the vendor's rate while letting the round trips overlap.
+
+   WRITES ONLY, AND THAT IS EVIDENCE-LED RATHER THAN CAUTIOUS. The incident on
+   record is 37 POSTs; the archive walk's 270 reads pace themselves at
+   ARCHIVE_READ_PACE_MS=40 and have never been implicated. Putting reads in a
+   150ms lane would quadruple that walk to serve a limit nothing has observed
+   on reads. If edge 403s ever appear on the read path, this is where the two
+   would merge — one lane, one constant, one place. */
+const ingestWrites = makePermitQueue({
+  delayMs: () => PUBLISH_SPACING_MS,
+  now: () => Date.now(),
+  sleep,
+  /* Two, not six. The vendor lane exists to overlap round trips; this one
+     exists to bound a burst, and the ingest route has already shown it counts
+     arrivals. Two lets a slow write stop being the critical path without ever
+     presenting the route more than two open sockets. */
+  maxInFlight: 2,
+});
+
 /* ---------- the bounded worker pool -------------------------------
 
    TWO LEGS ARE ONE NAME WIDE AND NEITHER NEEDS TO BE. The enrichment loop and
@@ -3824,6 +3863,14 @@ async function retire(key) {
     return { ok: true, status: 0 };
   }
   try {
+    /* THE SAME LANE AS publish(). A DELETE is a write to the same route and
+       counts against the same burst the challenge measures, so the sweep and
+       the publish phase share one clock rather than each keeping their own
+       150ms and presenting the route the sum. The prune runs early and the
+       card writes run late, so in practice they rarely meet — but "rarely
+       meet" was the reasoning that left the spacing per-leg, and it is a
+       property of the current schedule rather than of the route. */
+    await ingestWrites.acquire();
     const response = await fetch(
       ingestURL() + "?key=" + encodeURIComponent(key),
       {
@@ -3832,7 +3879,6 @@ async function retire(key) {
         headers: ingestHeaders(),
       },
     );
-    await sleep(PUBLISH_SPACING_MS);
     return { ok: response.ok, status: response.status };
   } catch (error) {
     return { ok: false, status: 0, message: error.message };
@@ -3956,6 +4002,11 @@ async function publish(key, payload) {
   }
   let response, lastDetail = "";
   for (let attempt = 0; ; attempt++) {
+  /* THE LANE, CLAIMED BEFORE THE WRITE RATHER THAN SLEPT AFTER IT. Spacing
+     that runs after a POST is spacing only that writer observes; a permit
+     taken before it is spacing the ROUTE observes, whichever leg or worker
+     the writer belongs to. Same departure rate, one shared clock. */
+  await ingestWrites.acquire();
   response = await fetch(
     ingestURL() + "?key=" + encodeURIComponent(key),
     {
@@ -3974,12 +4025,12 @@ async function publish(key, payload) {
       body,
     },
   );
-  // Space the writes. 37 POSTs inside eleven seconds from one datacenter
-  // address is what tripped Cloudflare's rate challenge on the first live run;
-  // the boards and every card had already landed, so the challenge was purely
-  // a function of burst rate. 150ms puts the whole publish phase near six
-  // seconds and well under the threshold, against a job budgeted in minutes.
-  await sleep(PUBLISH_SPACING_MS);
+  // The spacing is the lane's, claimed above. 37 POSTs inside eleven seconds
+  // from one datacenter address is what tripped Cloudflare's rate challenge on
+  // the first live run; the boards and every card had already landed, so the
+  // challenge was purely a function of burst rate. It used to be a sleep here,
+  // which spaced each WRITER at 150ms and left the ROUTE seeing the sum of
+  // however many legs were in the air.
 
   /* THE EDGE SAYS "LATER", SO WAIT AND ASK AGAIN — up to three times, backing
      off hard. 1s, then 4s, then 9s: quadratic rather than doubling, because
@@ -3999,6 +4050,13 @@ async function publish(key, payload) {
       `(retry ${attempt + 1} of ${PUBLISH_RETRIES}; ` +
       `${Math.round(publishRetrySpentMs / 1000)}s of the run's ` +
       `${PUBLISH_RETRY_BUDGET_MS / 1000}s retry budget spent)`);
+    /* EVERY WRITER BACKS OFF, NOT JUST THIS ONE. The edge refused because of
+       the rate it is seeing, which is the whole lane's rate — so letting the
+       other writers keep their slots is how one challenge becomes several.
+       Same argument as the vendor 429 deferring the vendor lane, and the
+       reason the spacing had to become a lane before this could be said at
+       all: a sleep can only ever back off the caller that runs it. */
+    ingestWrites.defer(wait);
     await sleep(wait);
     continue;
   }
