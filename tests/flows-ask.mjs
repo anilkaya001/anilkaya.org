@@ -28,7 +28,8 @@
    ============================================================= */
 
 import assert from "node:assert/strict";
-import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor }
+import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
+         tickerCoverage }
   from "../shared/flows-ask.js";
 
 let checks = 0;
@@ -711,6 +712,94 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "tie falls to the fixed source order rather than to whichever fact was indexed first");
 }
 
+/* ---------- 6b. THE LEAD IS A CLAIM ABOUT COVERAGE ---------------- */
+{
+  /* THE DEFECT THE OWNER SAW ON THE LIVE SITE. "what is new for NVDA
+     Calls", asked on the bullish board where NVDA sat at rank 30, came
+     back with a market-wide put/call ratio under "These are the
+     published readings that bear on what you asked." NVDA had matched
+     nothing; "calls" had matched the ratio's topic; one boolean covered
+     both cases, and a reader was told a ratio over 668 names bore on
+     the one name they typed. */
+  const q = "what is the premium doing on PLTR";
+  const blind = selectFacts(INDEX, q);
+  const plainBlind = renderFactsPlain(blind.picked, q);
+  ok(!/bear on what you asked/.test(plainBlind),
+     "a question naming a symbol no served fact is about does NOT lead with \"these are " +
+     "the published readings that bear on what you asked\" merely because a topic word " +
+     "matched — that sentence attaches every figure below it to the name typed");
+  ok(/None of the readings below is about PLTR\./.test(plainBlind),
+     "it leads with the withholding, naming the symbol, in the open and ahead of every " +
+     "reading");
+  ok(/They are the session's readings on the other words in the question/.test(plainBlind),
+     "and then says what the readings ARE about — the topic words that did match — rather " +
+     "than leaving a reader to guess why they are there");
+  ok(!/nothing (has been )?published/i.test(plainBlind) && !/this index holds/i.test(plainBlind),
+     "and it claims only what it can see: not \"nothing published\" (the name may be on a " +
+     "board and hold a card) and not \"this index holds no reading\" (it is handed the picked " +
+     "facts, never the index) — the diagnosis belongs to a roster that can make it");
+
+  /* THE CONTROL, without which the assertions above pass against a
+     renderer that deleted the confident sentence outright. */
+  const qc = "what is going on with SYN46";
+  const covered = renderFactsPlain(selectFacts(INDEX, qc).picked, qc);
+  ok(/bear on what you asked/.test(covered),
+     "a symbol a served fact IS about still gets the confident lead: the sentence was not " +
+     "deleted, it was made conditional on the thing it claims");
+  ok(!/None of the readings below/.test(covered), "and carries no withholding");
+
+  const topical = renderFactsPlain(selectFacts(INDEX, "premium").picked, "premium");
+  ok(/bear on what you asked/.test(topical),
+     "a question with no symbol in it, matched on a topic word, is answered by readings " +
+     "that genuinely bear on it");
+
+  /* THE MIXED QUESTION: one name covered, one not. */
+  const qm = "SYN46 versus PLTR premium";
+  const mixed = renderFactsPlain(selectFacts(INDEX, qm).picked, qm);
+  ok(/bear on SYN46\./.test(mixed) && /None of the readings below is about PLTR\./.test(mixed),
+     "a question naming one covered and one uncovered symbol says which is which, rather " +
+     "than claiming both or withholding both");
+
+  /* A NAME WITH A DIGIT IS REFERRED TO, NOT PRINTED. The plain reading
+     must pass the guard, and the guard scans numerals: SYN99 printed into
+     the lead would put a 99 on the page that no fact carries. */
+  const qd = "what about SYN99 premium";
+  const digits = selectFacts(INDEX, qd);
+  const plainDigits = renderFactsPlain(digits.picked, qd);
+  ok(!/SYN99/.test(plainDigits) && /the name you asked about/.test(plainDigits),
+     "a symbol carrying a digit is referred to as \"the name you asked about\" rather than " +
+     "printed, because printing it would put a numeral on the page that no fact carries");
+  ok(guardAnswer(plainDigits, digits.picked).ok,
+     "and the plain reading for it passes the guard, which is the reason for the rule");
+
+  /* THE MODEL IS TOLD. Rule 6 asks it to say when the facts do not
+     answer, but it cannot know PLTR matched nothing: "for PLTR, the
+     put/call ratio is 0.55" passes the guard because the figure IS in a
+     fact. A market-wide figure attached to one name is the one
+     fabrication the numeral scan cannot see. */
+  const told = promptFor(blind.picked, q);
+  ok(/COVERAGE: the question names PLTR/.test(told.user),
+     "the model's user turn carries a COVERAGE line naming the uncovered symbol");
+  ok(/Do not attribute any figure to it/.test(told.user),
+     "and tells it not to attach a figure to that name");
+  ok(/7\. If a COVERAGE line/.test(told.system),
+     "and the system rules carry the matching rule, so the instruction is not only in the " +
+     "turn a model may skim");
+  const untold = promptFor(selectFacts(INDEX, qc).picked, qc);
+  ok(!/COVERAGE:/.test(untold.user),
+     "while a question whose symbol IS covered carries no coverage line — a withholding " +
+     "stated where nothing is withheld is noise a model learns to ignore");
+
+  /* THE HELPER ITSELF. */
+  const cov = tickerCoverage(selectFacts(INDEX, "PLTR SYN46 premium").picked,
+    "PLTR SYN46 premium");
+  ok(cov.miss.includes("pltr") && cov.hit.includes("syn46") && cov.wordHit === true,
+     "tickerCoverage splits hit from miss and reports the topic-word match separately");
+  const dig = tickerCoverage(digits.picked, qd);
+  ok(dig.miss.length === 1 && dig.missSaid.length === 0,
+     "and a name with a digit is in `miss` but not in `missSaid`, the printable subset");
+}
+
 /* ---------- 7. THE FALLBACK PASSES ITS OWN GUARD ---------------- */
 {
   /* THIS IS THE ASSERTION THAT MATTERS MOST. renderFactsPlain is
@@ -1255,4 +1344,7 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `published payload, three silences that stay three from the store all the way into the ` +
   `answer, deterministic selection that caps truthfully and never returns nothing while it ` +
   `holds something, a guard that refuses an invented figure and a claim about the future, ` +
-  `and a fallback answer that passes the guard it exists to satisfy`);
+  `and a fallback answer that passes the guard it exists to satisfy, whose lead is now a ` +
+  `claim about coverage — a name asked about that no served fact is about is withheld in ` +
+  `the open, named where the guard allows it and referred to where it does not, and the ` +
+  `model is told the same withholding so a market-wide figure cannot be attached to it`);
