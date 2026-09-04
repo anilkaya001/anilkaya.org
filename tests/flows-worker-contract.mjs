@@ -369,6 +369,55 @@ try {
          "the pulse refuses an anonymous reader — behind it is a metered vendor " +
          "relationship, exactly like every other flows key");
 
+      /* THE SECTOR OPTIONS LEAN GETS ITS OWN ROUTE, and that is the point of
+         the assertion below rather than an accident of layout. /api/flows/
+         sectors serves `sector:trix` — TRIX on daily closes, no option data
+         in it anywhere. This serves today's bullish-minus-bearish premium per
+         sector. The two can disagree for weeks without either being wrong, so
+         a reader who asked for one must never be handed the other, which is
+         what a single route with a `kind` parameter would eventually do. */
+      const leanApi = await get("/api/flows/sector-premium",
+        { headers: { Cookie: "flows_session=" + token } });
+      eq(leanApi.status, 200, "an authenticated sector-premium request succeeds");
+      const leanPayload = await leanApi.json();
+      ok(leanPayload.status === "pending" || Array.isArray(leanPayload.sectors),
+         "and answers pending or a real lean, never a half-shaped object");
+      ok(Array.isArray(leanPayload.sectors),
+         "the pending envelope carries an empty `sectors` array, so a page that opens before " +
+         "the first publish iterates nothing rather than guarding an undefined");
+      eq((await get("/api/flows/sector-premium")).status, 401,
+         "and it refuses an anonymous reader, like every other flows key");
+
+      const sectorsApi = await get("/api/flows/sectors",
+        { headers: { Cookie: "flows_session=" + token } });
+      eq(sectorsApi.status, 200, "the momentum route still answers on its own path");
+      ok(sectorsApi.url !== leanApi.url,
+         "and it is genuinely a different route — two quantities, two keys, two paths");
+
+      /* THE NEWS TAPE, AND THE ROUTE SHAPE THAT MUST NOT EXIST. The vendor
+         has no per-ticker news endpoint: `ticker` is a query filter on the
+         same market-wide path. A `?t=` parameter here would look reasonable
+         and would either spend a vendor call per name behind an authenticated
+         route or filter a blob the caller could filter itself, so the route
+         ignores it entirely and every stored row carries its own `tickers`. */
+      const newsApi = await get("/api/flows/news", { headers: { Cookie: "flows_session=" + token } });
+      eq(newsApi.status, 200, "an authenticated news request succeeds");
+      const newsPayload = await newsApi.json();
+      ok(newsPayload.status === "pending" || Array.isArray(newsPayload.rows),
+         "and answers pending or a real tape, never a half-shaped object");
+      ok(Array.isArray(newsPayload.rows),
+         "with an empty `rows` array on the pending envelope");
+      const filtered = await get("/api/flows/news?t=AAPL",
+        { headers: { Cookie: "flows_session=" + token } });
+      eq(filtered.status, 200,
+         "a `?t=` parameter is neither honoured nor an error — it is IGNORED, because the " +
+         "only two things this route could do with it are spend a vendor call per name or " +
+         "filter a blob the caller already has");
+      assert.deepEqual(await filtered.json(), newsPayload,
+        "and the answer is byte-identical to the unfiltered one, so no reader can come to " +
+        "believe a per-ticker news route exists here"); checks++;
+      eq((await get("/api/flows/news")).status, 401, "the tape refuses an anonymous reader");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();
@@ -525,6 +574,28 @@ try {
        "the vendor-alerts feed is an accepted key");
     eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,
        "and so is the market pulse");
+
+    /* THE TWO MARKET-WIDE KEYS THIS WAVE ADDED. `sector:premium` is a SECOND
+       sector key beside `sector:trix`, not a widening of it: one is TRIX on
+       daily closes and the other is today's option premium lean, and they are
+       published separately so a momentum reading and a premium lean can never
+       end up sharing a field. The door has to accept both names, and it has
+       to keep refusing anything that merely looks like them — this key
+       becomes a primary key, and the read path rebuilds it from a literal, so
+       a shape the two sides could disagree about is a row nothing can read. */
+    eq((await post("sector:premium", JSON.stringify({ sectors: [] }), INGEST_TOKEN)).status, 200,
+       "the sector option lean is an accepted key");
+    eq((await post("sector:trix", JSON.stringify({ sectors: [] }), INGEST_TOKEN)).status, 200,
+       "and the sector momentum key it must never be merged with still is too");
+    eq((await post("news", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
+       "and so is the market-wide news tape");
+    eq((await post("sector:lean", "{}", INGEST_TOKEN)).status, 400,
+       "while a near-miss sector key is refused — the publisher and the reader build this " +
+       "string from two literals, and a door that guessed would turn a typo into a row " +
+       "nothing ever reads");
+    eq((await post("news:2026-01-02", "{}", INGEST_TOKEN)).status, 400,
+       "and the news tape has no dated form: it is a view of today, not a record of a " +
+       "session, so a dated key would accumulate rows the prune does not sweep");
     eq((await post("scores:02-01-2026", "{}", INGEST_TOKEN)).status, 400,
        "but a scores key with a malformed date is refused at the door — the read " +
        "path rebuilds this key from a date, so any other shape is unreachable forever");
@@ -690,6 +761,47 @@ try {
     // And it is still gated.
     eq((await get("/api/flows/board?side=long")).status, 401,
        "the ingested board is still refused to anonymous callers");
+
+    /* ---- THE TWO SECTOR KEYS, ROUND-TRIPPED SIDE BY SIDE ----
+
+       The route assertions earlier in this file check that two paths exist
+       and that each answers. That is not the same as checking they serve
+       DIFFERENT things: with both keys unpublished both answer the pending
+       envelope, and a route wired to the wrong key would pass. So both are
+       ingested here with payloads that can only have come from one of them,
+       and each route is required to hand back its own.
+
+       This is the assertion that fails if someone ever "simplifies" the two
+       routes into one, or points /api/flows/sector-premium at `sector:trix`:
+       a reader asking for today's option premium lean would be served a
+       triple-smoothed price oscillator, and both are eleven numbers between
+       plausible bounds, so nothing on the page would look wrong. */
+    eq((await post("sector:premium",
+      JSON.stringify({ sectors: [{ etf: "XLK", leanRatio: 0.5, netPremiumUsd: 200 }] }),
+      INGEST_TOKEN)).status, 200, "the option lean ingests");
+    eq((await post("sector:trix",
+      JSON.stringify({ sectors: [{ etf: "XLK", trixBp: 12, trix: 62 }] }),
+      INGEST_TOKEN)).status, 200, "and the momentum key ingests beside it");
+
+    const lean = await (await get("/api/flows/sector-premium",
+      { headers: { Cookie: "flows_session=" + token } })).json();
+    const momentum = await (await get("/api/flows/sectors",
+      { headers: { Cookie: "flows_session=" + token } })).json();
+    eq(lean.sectors[0].leanRatio, 0.5,
+       "/api/flows/sector-premium serves the OPTION LEAN it was published with");
+    ok(!("trixBp" in lean.sectors[0]),
+       "and carries no momentum field, so a renderer cannot read one off it");
+    eq(momentum.sectors[0].trixBp, 12,
+       "/api/flows/sectors still serves the MOMENTUM, unchanged by the new neighbour");
+    ok(!("leanRatio" in momentum.sectors[0]),
+       "and carries no premium field — two quantities, two keys, two routes, and the only " +
+       "way for a reader to be handed the wrong one is a wiring mistake this catches");
+
+    eq((await post("news", JSON.stringify({ rows: [{ headline: "TEST", tickers: ["TEST"] }],
+      kept: 1, returned: 1 }), INGEST_TOKEN)).status, 200, "the news tape ingests");
+    const tape = await (await get("/api/flows/news",
+      { headers: { Cookie: "flows_session=" + token } })).json();
+    eq(tape.rows[0].headline, "TEST", "and reads back through its own route unchanged");
   }
 
   /* ---------- BODY BOUNDS: Content-Length is not a bound ----------
@@ -960,7 +1072,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent`);
 } finally {
   await server.stop();
 }

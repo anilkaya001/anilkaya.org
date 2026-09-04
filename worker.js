@@ -2474,7 +2474,17 @@ async function route(request, env, url, ctx) {
        hand an authorised publisher unbounded distinct primary keys. */
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^meta$/.test(key);
+      /* `sector:premium` is deliberately a SECOND sector key beside
+         `sector:trix`, not a widening of the first. They are different
+         quantities measured from the same eleven SPDR baskets — a triple-
+         smoothed oscillator on daily closes, and today's option premium lean
+         — and merging them behind one key is how a momentum reading and a
+         premium lean end up sharing a field name. Two keys, two routes below.
+
+         `news` is the market-wide headlines tape. It is a stream published by
+         a once-a-day job, so its payload carries `readAt` and the window its
+         rows cover; this door only decides that the key exists. */
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^meta$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2704,6 +2714,44 @@ async function route(request, env, url, ctx) {
          affordable at all where a per-name one would not be. */
       const key = path.endsWith("/movers") ? "movers" : "sector:trix";
       const stored = await readFlowsPayload(env, key);
+      if (stored === null) return json({ status: "pending", rows: [] });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/sector-premium") {
+      /* THE SECTOR OPTIONS LEAN — one market-wide vendor call a run, covering
+         all eleven SPDR sector baskets, served like everything here: one
+         stored blob, handed back as bytes.
+
+         A SEPARATE ROUTE FROM /api/flows/sectors ON PURPOSE. That route
+         serves `sector:trix`, which is TRIX on daily closes and contains not
+         one option. This serves today's bullish-minus-bearish option premium
+         per sector. The two can disagree for weeks without either being
+         wrong, and a reader who asked for one must never be handed the other
+         — which is exactly what a single route with a `kind` parameter would
+         eventually do. */
+      const stored = await readFlowsPayload(env, "sector:premium");
+      if (stored === null) return json({ status: "pending", sectors: [] });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/news") {
+      /* THE MARKET-WIDE HEADLINES TAPE — one vendor call a run, capped rows,
+         served as bytes like everything else here.
+
+         NOT A PER-TICKER ROUTE, AND THERE MUST NEVER BE ONE. The vendor has
+         no per-ticker news endpoint: `ticker` is a query filter on the same
+         market-wide path. A `?t=` parameter here would look reasonable and
+         would either spend one vendor call per name behind an authenticated
+         route — which is the shape this whole architecture exists to keep off
+         the Worker — or filter a blob the caller could have filtered itself.
+         Each stored row carries its own `tickers` array; per-name news is a
+         filter in the renderer.
+
+         `rows: []` on the pending envelope for the same reason /movers and
+         /sectors carry theirs: a page that opens before the first publish
+         gets an empty list to iterate rather than an undefined to guard. */
+      const stored = await readFlowsPayload(env, "news");
       if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }

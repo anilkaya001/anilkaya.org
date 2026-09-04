@@ -2761,6 +2761,564 @@ try {
     ok(spill.body <= 1, `and neither does its body (${spill.body}px)`);
     await page.close();
   }
+
+  /* ---------- 7. the reading leads, and the method is still there -----
+
+     THE SURVEY THAT PROMPTED THIS SECTION counted 101,768 characters of
+     user-facing prose across the fourteen Flows renderers, 42,151 of them on
+     this route, and found `.fc-note` — the METHOD paragraph — emitted 87
+     times against 4 emissions of `.fc-reading`, the FINDING. The product led
+     with its methodology and buried the number a reader came for.
+
+     THE FIX IS AN ORDERING, NOT A DELETION, AND THIS SECTION IS WHAT KEEPS
+     IT ONE. Every assertion below is written in a pair: the finding is
+     FIRST, and the method is STILL PRESENT AND STILL REACHABLE. A suite that
+     asserted only the first half would pass on a renderer that fixed the
+     ordering by throwing the caveats away, which is the one outcome this
+     product cannot survive — the honesty discipline is the whole value.
+
+     AND THE SPLIT IS ASSERTED IN BOTH DIRECTIONS TOO. A note that could
+     change WHAT THE READING MEANS is on the page with nothing to open; a
+     note explaining HOW THE READING WAS MADE is behind a disclosure. Both
+     halves are checked on the same panel, because a rule with only the first
+     half hides caveats and a rule with only the second is just a wall with a
+     lid on it.
+
+     MEASURED OFF THE RENDERED PAGE, never off the source: DOM order by
+     compareDocumentPosition, size by getComputedStyle, and "reachable" by
+     the text being in `textContent` while its <details> is shut — which is
+     the same thing a find-in-page reads. */
+  {
+    /* One evaluator, reused by every arm below. Returns the shape of one
+       panel: what leads it, what qualifies it, what is folded behind the
+       disclosure, and the two type sizes that carry the visual hierarchy. */
+    const READ = (key) => `(() => {
+      const host = document.querySelector('.ft-panel[data-panel="${key}"] > div');
+      if (!host) return { missing: true };
+      const txt = (n) => (n ? n.textContent.replace(/\\s+/g, " ").trim() : null);
+      const folded = (n) => {
+        const d = n && n.closest("details");
+        return d ? { inDetails: true, open: d.open } : { inDetails: false, open: true };
+      };
+      const leads = [...host.querySelectorAll(".fc-reading.is-lead")];
+      const notes = [...host.querySelectorAll(".fc-note")];
+      const firstSvg = host.querySelector("svg");
+      const firstStats = host.querySelector(".fc-stats");
+      const size = (n) => (n ? parseFloat(getComputedStyle(n).fontSize) : null);
+      return {
+        leads: leads.map(txt),
+        leadSize: size(leads[0]),
+        noteSize: size(notes[0]),
+        /* 4 === DOCUMENT_POSITION_FOLLOWING: the lead comes BEFORE it. */
+        leadBeforeChart: !!(leads[0] && firstSvg &&
+          (leads[0].compareDocumentPosition(firstSvg) & 4) === 4),
+        leadBeforeStats: !!(leads[0] && firstStats &&
+          (leads[0].compareDocumentPosition(firstStats) & 4) === 4),
+        leadBeforeNote: !!(leads[0] && notes[0] &&
+          (leads[0].compareDocumentPosition(notes[0]) & 4) === 4),
+        qualifiers: [...host.querySelectorAll(".fc-note.is-qualifier")]
+          .map((n) => ({ text: txt(n), ...folded(n) })),
+        notes: notes.map((n) => ({ text: txt(n), ...folded(n) })),
+        howSummaries: [...host.querySelectorAll("details.ft-how > summary")].map(txt),
+        openByDefault: [...host.querySelectorAll("details.ft-how")].map((d) => d.open),
+        /* What a find-in-page sees, disclosures shut and all. */
+        all: host.textContent.replace(/\\s+/g, " "),
+        marked: [...host.querySelectorAll(".fc-why")].length,
+        titled: [...host.querySelectorAll("[title]")]
+          .filter((n) => n.textContent.replace(/\\s+/g, " ").trim().length <= 48 &&
+                         n.textContent.trim())
+          .map((n) => ({ marked: n.classList.contains("fc-why"),
+                         tag: n.tagName, text: txt(n) })),
+        whyList: (() => {
+          const box = host.querySelector("details.ft-why");
+          if (!box) return null;
+          return {
+            open: box.open,
+            summary: txt(box.querySelector("summary")),
+            terms: [...box.querySelectorAll(".ft-why-t")].map(txt),
+            whys: [...box.querySelectorAll(".ft-why-d")].map(txt),
+            /* A <summary> is focusable with no tabindex at all — that is the
+               point of using one, and it is asserted rather than assumed. */
+            summaryTab: box.querySelector("summary").tabIndex,
+          };
+        })(),
+        /* NOBODY GAINED A TAB STOP. 145 new stops between one panel and the
+           next is the fix this design refused; if it ever lands, it lands
+           here. */
+        addedTabStops: [...host.querySelectorAll("[title][tabindex]")].length,
+        decoration: (() => {
+          const n = host.querySelector(".fc-why:not(.fc-stat)");
+          if (!n) return null;
+          const cs = getComputedStyle(n);
+          return { line: cs.textDecorationLine, style: cs.textDecorationStyle,
+                   cursor: cs.cursor };
+        })(),
+      };
+    })()`;
+
+    /* --- 7a. the chain's two vol panels, on a card that publishes both -- */
+    {
+      const card = withChain[0];
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const st = await page.evaluate(READ("skewTerm"));
+      const iv = await page.evaluate(READ("ivSurface"));
+
+      /* THE SKEW AND THE TERM ARE THE PANEL'S FINDING and are now the first
+         two things in it. Two lead elements, not one joined paragraph: the
+         suite scopes "draws no skew number" to the FIRST .fc-reading, and a
+         withheld skew beside a published term has to stay digit-free. */
+      eq(st.leads.length, 2,
+         `skewTerm leads on its two scalars, each in its own element (${st.leads.length})`);
+      ok(/^Skew /.test(st.leads[0]),
+         `the skew reading is first and says so ("${(st.leads[0] || "").slice(0, 60)}")`);
+      ok(/^Term /.test(st.leads[1]),
+         `the term reading second ("${(st.leads[1] || "").slice(0, 60)}")`);
+      ok(st.leadBeforeChart,
+         "and both come BEFORE the chart in DOM order — the chart is the shape of the " +
+         "term structure and the scalars are what a desk carries away from it, so the " +
+         "picture is now the reading's evidence rather than its preamble");
+      ok(st.leadBeforeNote,
+         "and before the first method paragraph, which is the ordering this section exists " +
+         "for: 87 method paragraphs against 4 readings was the ratio that named the defect");
+
+      /* THE LARGEST TYPE ON THE PANEL, MEASURED. A reading that leads in DOM
+         order but is drawn at note size has changed nothing a reader sees. */
+      ok(st.leadSize > st.noteSize,
+         `the reading is set larger than the method under it (${st.leadSize}px against ` +
+         `${st.noteSize}px) — DOM order alone is invisible to someone scanning a page`);
+
+      /* THE METHOD IS STILL THERE, WORD FOR WORD, ONE CLICK AWAY. The axis
+         policy is the paragraph that says why the origin is zero and what
+         that costs; it may be folded and it may not be deleted. */
+      const axis = st.notes.find((n) => /The origin is ZERO/.test(n.text));
+      ok(axis, "the axis policy is still on the panel, in full");
+      ok(axis && axis.inDetails,
+         "behind the panel's own disclosure rather than in the open — 750 characters of " +
+         "how-the-bars-were-drawn is a wall a reader scrolls past, not a rule they read");
+      ok(axis && !axis.open,
+         "and shut by default, which is the whole saving; an open <details> is a paragraph");
+      ok(/The origin is ZERO/.test(st.all),
+         "and STILL IN textContent with the disclosure shut, so a find-in-page and a " +
+         "screen reader's find both reach it — folded is not hidden");
+      ok(st.howSummaries.some((t) => /How to read this term structure/.test(t)),
+         `the disclosure names what is under it (${JSON.stringify(st.howSummaries)}) — ` +
+         "a summary that says nothing is a click a reader will not spend");
+
+      /* --- ivSurface: a panel that used to state no finding at all ------ */
+      eq(iv.leads.length, 1, "the surface leads on exactly one reading");
+      ok(iv.leadBeforeChart && iv.leadBeforeStats,
+         "before its grid and before its stat list — the steepest cell used to be the " +
+         "fourth cell of that list, below the fold on a phone");
+      ok(/volatility points (above|below)/.test(iv.leads[0]),
+         `and it states the steepest cell with its direction in words ("${iv.leads[0]}")`);
+      /* THE SIGN IS IN THE GLYPH BEFORE ANY WORD CARRIES IT. */
+      ok(/[−+]\d+\.\d volatility points/.test(iv.leads[0]),
+         `carrying the sign as a glyph, U+2212 for a negative ("${iv.leads[0]}")`);
+      /* ONE MEASUREMENT, TWO PLACES ON SCREEN, AND THEY MUST AGREE. */
+      const pts = /([−+]\d+\.\d) volatility points/.exec(iv.leads[0]);
+      ok(pts && iv.all.includes(pts[1] + " pts"),
+         `the lead and the "Steepest cell" statistic are the same number (${pts && pts[1]}) ` +
+         "— it is measured once, at the top of the drawer, so the sentence a reader reads " +
+         "first and the cell they check it against cannot drift apart");
+
+      eq(errors.length, 0, "both inverted panels draw without throwing");
+      await page.close();
+    }
+
+    /* --- 7b. a measured zero is a reading, and an absence is not -------
+
+       THE HOUSE RULE, ON THE ONE SENTENCE THIS WAVE ADDED. `Number(null)` is
+       0, so a surface with no measured skew anywhere and a surface measured
+       FLAT are one line of code apart and read identically to a reader. They
+       get different sentences and this proves it, in both directions, off
+       fixtures mutated by name. */
+    {
+      const flat = JSON.parse(JSON.stringify(withChain[0]));
+      let zeroed = 0;
+      flat.panels.ivSurface.skew = flat.panels.ivSurface.skew.map((row) =>
+        row.map((v) => (typeof v === "number" && Number.isFinite(v) ? (zeroed++, 0) : v)));
+      ok(zeroed > 0, `the flat fixture really carries ${zeroed} measured zeros`);
+
+      const gone = JSON.parse(JSON.stringify(withChain[0]));
+      gone.panels.ivSurface.skew = gone.panels.ivSurface.skew.map((row) => row.map(() => null));
+
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+
+      await mount(page, flat, { ticker: flat.ticker });
+      const a = await page.evaluate(READ("ivSurface"));
+      ok(/measured flat smile/.test(a.leads[0]),
+         `a surface measured flat says so ("${a.leads[0]}")`);
+      ok(!/above|below/.test(a.leads[0]),
+         "and claims no direction, because a zero has none");
+      ok(!/No cell/.test(a.leads[0]),
+         "and is never told as an absence — a flat smile is a finding about the book, and " +
+         "the difference between it and an unmeasured one is the difference this whole " +
+         "product is built to keep");
+      ok(a.all.includes("Steepest cell"),
+         "the statistic still names the cell the reading came from");
+      await page.close();
+
+      const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      page2.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page2, gone, { ticker: gone.ticker });
+      const b = await page2.evaluate(READ("ivSurface"));
+      ok(/^No cell on this surface carries a measured distance/.test(b.leads[0]),
+         `an unmeasured surface leads on the absence instead ("${b.leads[0]}")`);
+      ok(!/flat/.test(b.leads[0]), "and never borrows the flat reading's word");
+      ok(!b.all.includes("Steepest cell"),
+         "and publishes no steepest cell at all, rather than a confident zero in the slot");
+      eq(errors.length, 0, "neither arm throws");
+      await page2.close();
+    }
+
+    /* --- 7c. the qualifiers stay in the open ---------------------------
+
+       THE HALF THAT MAKES THIS AN ORDERING AND NOT A DELETION. A sentence
+       that changes WHAT THE READING MEANS may be moved and may not be
+       folded: on a card whose chain the vendor truncated the surface is an
+       arbitrary page of the book, and on a card whose skew was withheld the
+       reason is the reading. Neither may end up behind a click. */
+    if (truncated.length) {
+      const card = truncated[0];
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const iv = await page.evaluate(READ("ivSurface"));
+      const arb = iv.qualifiers.find((n) => /arbitrary subset of the book/.test(n.text));
+      ok(arb, "the truncated surface still says the picture may be an arbitrary slice");
+      ok(arb && !arb.inDetails,
+         "in the open, with nothing to click — this is the line that says the whole picture " +
+         "may be a page of the book rather than the book, and a caveat behind a disclosure " +
+         "is a caveat most readers will never meet");
+      for (const q of iv.qualifiers) {
+        ok(!q.inDetails,
+           `no qualifier on the surface is folded ("${q.text.slice(0, 55)}") — the split is ` +
+           "by whether a note changes what the reading MEANS, never by how long it is");
+      }
+      eq(errors.length, 0, "the truncated card draws without throwing");
+      await page.close();
+    }
+
+    /* A WITHHELD SCALAR, PREFERRED FROM THE CORPUS AND STAGED BY NAME WHEN
+       THE RUN DID NOT PRODUCE ONE. The dry run's names mostly quote both
+       wings, so the branch that matters most here — a withheld number that
+       must still LEAD its panel and must still carry no digit — cannot be
+       left to whichever cards happened to build. One named field is mutated
+       and the mutation is the point of the test. */
+    {
+      const found = cards.find((c) => c.panels && c.panels.skewTerm &&
+        c.panels.skewTerm.status === "ok" && c.panels.skewTerm.skew === null &&
+        c.panels.skewTerm.skewReason);
+      const card = JSON.parse(JSON.stringify(found || withChain[0]));
+      if (!found) {
+        card.panels.skewTerm.skew = null;
+        card.panels.skewTerm.skewBasis = null;
+        card.panels.skewTerm.skewReason =
+          "no listed strike sat within 0.04 of either wing on an expiry past the day floor";
+      }
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const st = await page.evaluate(READ("skewTerm"));
+      ok(st.leads.length === 2,
+         `the panel still leads on two scalars with one of them withheld (${st.leads.length})`);
+      ok(/^The wing-to-wing skew is not published/.test(st.leads[0] || ""),
+         `and the withheld one LEADS ("${(st.leads[0] || "").slice(0, 60)}") — demoting an ` +
+         "absence would make a silence cheaper to ship than a number");
+      ok(!/\d/.test(st.leads[0] || ""),
+         `carrying no digit at all ("${st.leads[0]}"), because a reader who sees a number ` +
+         "where a reason belongs has been told something the chain never said");
+      ok(st.leadBeforeChart && st.leadBeforeNote,
+         "and it is still first — an absence is a finding and is placed like one");
+
+      const why = st.qualifiers.find((n) =>
+        /is not published:|Neither scalar is published/.test(n.text));
+      ok(why, "the reason it was withheld is on the panel, verbatim");
+      ok(why && !why.inDetails,
+         `in the open, beside the reading it explains ("${(why.text || "").slice(0, 60)}")`);
+      ok(st.qualifiers.every((q) => !q.inDetails),
+         "and so is every other qualifier the panel raised");
+      eq(errors.length, 0, "the withheld-scalar card draws without throwing");
+      await page.close();
+    }
+
+    /* --- 7d. the market-wide standing leads on where it places ---------- */
+    {
+      const base = withChain.find((c) =>
+        c.panels.marketRank && c.panels.marketRank.status === "ok" &&
+        c.panels.marketRank.feeds.oiChange.status === "ok");
+      ok(base, "an emitted card places in the market-wide open-interest feed");
+      const card = JSON.parse(JSON.stringify(base));
+
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const got = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
+        const txt = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : null);
+        /* THE CLASS IS THE BRANCH; THE <details> IS ONLY ITS USUAL EFFECT.
+           appendMethod leaves a short method set open — a one-line decoder
+           behind a click is a click for nothing — so "is it inside a
+           <details>" passes by accident whenever the folded set happens to
+           be under the 420-character wall. `is-qualifier` is applied to
+           exactly the nodes the renderer put on the OPEN side, so asserting
+           on it pins the decision itself rather than one of its outcomes. */
+        const folded = (n) => {
+          const d = n && n.closest("details");
+          return {
+            qualifier: !!(n && n.classList.contains("is-qualifier")),
+            inDetails: !!d, open: d ? d.open : true,
+          };
+        };
+        return [...host.querySelectorAll(".fmr-block")].map((b) => {
+          const lead = b.querySelector(".fc-reading.is-lead");
+          const stats = b.querySelector(".fc-stats");
+          return {
+            lead: txt(lead),
+            leadBeforeStats: !!(lead && stats &&
+              (lead.compareDocumentPosition(stats) & 4) === 4),
+            when: { text: txt(b.querySelector(".fmr-when")),
+                    ...folded(b.querySelector(".fmr-when")) },
+            cut: { text: txt(b.querySelector(".fmr-cut")),
+                   ...folded(b.querySelector(".fmr-cut")) },
+            said: { text: txt(b.querySelector(".fmr-said")),
+                    ...folded(b.querySelector(".fmr-said")) },
+            all: b.textContent.replace(/\s+/g, " "),
+          };
+        });
+      });
+
+      const oi = got[0];
+      ok(/^This name ranks \d+ of \d+/.test(oi.lead || ""),
+         `the block leads on where the name places, with the population ("${oi.lead}") — a ` +
+         "bare ordinal is a number a reader cannot size, and it used to be stated in prose " +
+         "underneath four paragraphs of provenance");
+      ok(oi.leadBeforeStats,
+         "before the figures rather than after them");
+      ok(/contract|%|\$/.test(oi.lead || ""),
+         `and the unit travels with the value in the sentence ("${oi.lead}")`);
+
+      /* THE SESSION IS THE ONE PIECE OF PROVENANCE THAT CAN INVERT THE
+         READING, and the emitted corpus reproduces the 05:15-against-06:45
+         gap, so this is the branch a live run takes. */
+      ok(/NOT the session this card describes/.test(oi.when.text || ""),
+         `the ranking still says outright that it is from another session ("${
+           (oi.when.text || "").slice(0, 70)}")`);
+      ok(oi.when.qualifier && !oi.when.inDetails,
+         "and says it in the open, marked as a qualifier — this is the difference between " +
+         "\"ranks 14th across the market today\" and \"ranked 14th yesterday, joined onto " +
+         "today's card\", which is the whole reason the line exists");
+
+      /* AND THE PIECE THAT CANNOT. The name is IN the list, so how the list " +
+         was cut is method. */
+      ok(!oi.cut.qualifier,
+         `the cut is NOT a qualifier on a name that placed ("${(oi.cut.text || "").slice(0, 55)}") ` +
+         "— the name is in the list, so how the list was cut is method");
+      ok(oi.cut.inDetails && !oi.cut.open,
+         "and it is folded behind the shut disclosure with the rest of the method");
+      ok(/last place in the feed held|reaches back to|no order this run could measure/
+        .test(oi.all),
+         "and still readable in the block's text with the disclosure shut");
+      ok(oi.said.inDetails,
+         "so is the sentence about what a cross-section is, which is method by any reading");
+      ok(!/This name places \d+ of \d+/.test(oi.all),
+         "and the rank is stated ONCE — the prose copy under the figures is gone, because " +
+         "two copies of one number are two numbers that can drift");
+      eq(errors.length, 0, "the panel draws without throwing");
+      await page.close();
+    }
+
+    /* --- 7e. the cut is the reading when the name is NOT in the list ----
+
+       THE SAME LINE, THE OTHER SIDE OF THE SPLIT. A name that missed the
+       last place by a hair and a name nowhere near it are different
+       findings, and on the quiet arm the cut is the only thing on the block
+       that tells them apart. It may not be folded there. */
+    {
+      const card = JSON.parse(JSON.stringify(withChain[0]));
+      const quiet = withChain
+        .map((c) => c.panels.marketRank && c.panels.marketRank.feeds.oiChange)
+        .find((f) => f && f.status === "quiet");
+      ok(quiet, "the emitted corpus contains a name that is in no market-wide list");
+      card.panels.marketRank.feeds.oiChange = JSON.parse(JSON.stringify(quiet));
+      /* AND A FEED THAT AGREES WITH THE CARD'S SESSION, staged by name: the
+         one branch on which the session line qualifies nothing and folds.
+         The dry run does not produce it — the vendor's market-wide feed is a
+         session behind by construction — and a fixture that cannot reach the
+         branch it certifies is this repository's most repeated mistake. */
+      card.panels.marketRank.feeds.darkpool.sameSession = true;
+      card.panels.marketRank.feeds.darkpool.asOfStated = true;
+      card.panels.marketRank.feeds.darkpool.asOf = card.sessionDate;
+
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const got = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
+        const txt = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : null);
+        const folded = (n) => {
+          const d = n && n.closest("details");
+          return {
+            qualifier: !!(n && n.classList.contains("is-qualifier")),
+            inDetails: !!d, open: d ? d.open : true,
+          };
+        };
+        return [...host.querySelectorAll(".fmr-block")].map((b) => ({
+          cut: { text: txt(b.querySelector(".fmr-cut")),
+                 ...folded(b.querySelector(".fmr-cut")) },
+          when: { text: txt(b.querySelector(".fmr-when")),
+                  ...folded(b.querySelector(".fmr-when")) },
+          empty: (b.querySelector("[data-empty]") || {}).getAttribute
+            ? b.querySelector("[data-empty]").getAttribute("data-empty") : null,
+          all: b.textContent.replace(/\s+/g, " "),
+        }));
+      });
+
+      eq(got[0].empty, "quiet", "the fixture really renders the quiet arm");
+      ok(got[0].cut.qualifier && !got[0].cut.inDetails,
+         `the cut is a QUALIFIER on a name that is NOT in the list ("${
+           (got[0].cut.text || "").slice(0, 60)}") — there it is the scale of the miss, and a ` +
+         "near miss and a name nowhere near the list are different readings. The same line " +
+         "is method on the arm above, and the feed decides which");
+      ok(got[0].cut.text && got[0].cut.text.length > 20,
+         "and it carries its sentence rather than being an empty element");
+
+      ok(!got[1].when.qualifier,
+         "the session line is NOT a qualifier where the feed dates itself to this card's " +
+         "own session — that branch qualifies nothing");
+      ok(got[1].when.inDetails,
+         `the session line folds on the ONE branch where it qualifies nothing — the feed ` +
+         `dates itself to this card's own session ("${(got[1].when.text || "").slice(0, 60)}")`);
+      ok(/the same session this card describes/.test(got[1].all),
+         "and is still readable with the disclosure shut");
+      eq(errors.length, 0, "both arms draw without throwing");
+      await page.close();
+    }
+
+    /* --- 7f. an explained element looks explained ----------------------
+
+       ~145 `[title]` TOOLTIPS ACROSS THESE RENDERERS HAD NO VISIBLE
+       AFFORDANCE. A reader could not tell an explained cell from an
+       unexplained one, so the explanation was reachable only by a mouse that
+       happened to rest on the right four characters — and `title` is shown
+       on keyboard focus by no browser and has no gesture at all on a touch
+       screen. Three assertions: the mark is visible, the mark is on
+       everything that has an explanation, and the explanation has a door
+       that is not a hover. */
+    {
+      const card = withChain[0];
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+
+      const swept = await page.evaluate(() => {
+        const out = [];
+        for (const section of document.querySelectorAll(".ft-panel[data-panel] > div")) {
+          const key = section.parentElement.dataset.panel;
+          const titled = [...section.querySelectorAll("[title]")]
+            .filter((n) => {
+              const t = n.textContent.replace(/\s+/g, " ").trim();
+              return t && t.length <= 48;
+            });
+          const box = section.querySelector("details.ft-why");
+          out.push({
+            key,
+            titled: titled.length,
+            unmarked: titled.filter((n) => !n.classList.contains("fc-why"))
+              .map((n) => n.tagName + ":" + n.textContent.trim().slice(0, 24)),
+            tabbed: [...section.querySelectorAll("[title][tabindex]")].length,
+            terms: box ? [...box.querySelectorAll(".ft-why-t")].map((n) => n.textContent) : null,
+            whys: box ? [...box.querySelectorAll(".ft-why-d")].map((n) => n.textContent) : null,
+            summary: box ? box.querySelector("summary").textContent : null,
+            summaryTab: box ? box.querySelector("summary").tabIndex : null,
+            boxOpen: box ? box.open : null,
+          });
+        }
+        const mark = document.querySelector(".ft-panel .fc-why:not(.fc-stat)");
+        const cs = mark ? getComputedStyle(mark) : null;
+        const stat = document.querySelector(".ft-panel .fc-stat.fc-why");
+        return {
+          panels: out,
+          mark: cs ? { line: cs.textDecorationLine, style: cs.textDecorationStyle,
+                       cursor: cs.cursor } : null,
+          statMark: stat ? {
+            self: getComputedStyle(stat).textDecorationLine,
+            dt: getComputedStyle(stat.querySelector("dt")).textDecorationLine,
+          } : null,
+        };
+      });
+
+      const titledTotal = swept.panels.reduce((n, p) => n + p.titled, 0);
+      ok(titledTotal >= 20,
+         `the page really carries explained elements to mark (${titledTotal}) — an assertion ` +
+         "about marking nothing would pass on a page that renders nothing");
+      const unmarked = swept.panels.flatMap((p) => p.unmarked.map((t) => p.key + " " + t));
+      eq(unmarked.length, 0,
+         `every explained element carries the affordance (${unmarked.slice(0, 4).join(" | ")}) ` +
+         "— an explanation a reader cannot tell is there is the appearance of documentation");
+
+      ok(swept.mark && /underline/.test(swept.mark.line),
+         `and the affordance is VISIBLE: a dotted rule under the marked text (${
+           JSON.stringify(swept.mark)})`);
+      eq(swept.mark && swept.mark.style, "dotted",
+         "dotted rather than solid, because a solid underline on this page means a link");
+      eq(swept.mark && swept.mark.cursor, "help",
+         "with the pointer saying the same thing a second way");
+
+      /* text-decoration PAINTS ACROSS DESCENDANTS AND A CHILD CANNOT TAKE IT
+         BACK, so a .fc-stat wrapper carrying the tooltip must never receive
+         the rule: it would underline the figure as well as its label. */
+      if (swept.statMark) {
+        ok(!/underline/.test(swept.statMark.self),
+           "a stat wrapper that carries the tooltip is NOT itself underlined — the rule " +
+           "would paint across the figure too, and a child cannot take it back");
+        ok(/underline/.test(swept.statMark.dt),
+           "the mark goes on its label, which is the term the explanation is about");
+      }
+
+      /* THE DOOR. One <summary> per panel, natively focusable with no
+         tabindex, and every marked term listed under it with its explanation
+         in full — so a keyboard or a thumb reaches what a hover reached. */
+      const withList = swept.panels.filter((p) => p.terms);
+      ok(withList.length >= 3,
+         `${withList.length} panels publish a decoder for their marked terms`);
+      for (const p of withList) {
+        eq(p.terms.length, p.whys.length, `${p.key}: every listed term has an explanation`);
+        ok(p.terms.every((t) => t.trim()), `${p.key}: and no term is blank`);
+        ok(p.whys.every((w) => w.trim().length > 10),
+           `${p.key}: and no explanation is a stub`);
+        ok(p.summary.includes("(" + p.terms.length + ")"),
+           `${p.key}: the summary counts what is under it ("${p.summary}") — a list that ` +
+           "says nothing about its own size is a list a reader opens blind");
+        eq(p.summaryTab, 0,
+           `${p.key}: the summary is reachable by keyboard with no tabindex of its own`);
+        eq(p.boxOpen, false, `${p.key}: and shut until it is asked for`);
+      }
+      const tabbed = swept.panels.reduce((n, p) => n + p.tabbed, 0);
+      eq(tabbed, 0,
+         `no explained element became a tab stop (${tabbed}) — tabindex="0" on 145 elements ` +
+         "buys the keyboard reader the explanation at the price of 145 stops between them " +
+         "and the next panel, and the browser still shows them nothing on focus");
+      eq(errors.length, 0, "the sweep throws nothing");
+      await page.close();
+    }
+  }
+
 } finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
@@ -2780,4 +3338,9 @@ console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup,
   `name that is finally told the gate removed it instead of being pointed at a watch ` +
   `list it cannot be on, and a market-wide standing whose rank never appears without the ` +
   `population it sits inside, whose absence is quiet and carries the cut it missed, and ` +
-  `which says on the page that the cross-section it ranks in is a prior session's`);
+  `which says on the page that the cross-section it ranks in is a prior session's, and ` +
+  `three panels that now lead on their FINDING in the largest type they own with the ` +
+  `method folded under it — measured flat told from unmeasured in both directions, ` +
+  `every qualifier still in the open with nothing to click, every folded sentence still ` +
+  `in textContent for a find-in-page, and every explained element wearing a visible mark ` +
+  `whose explanation a keyboard and a thumb can open without adding one tab stop`);
