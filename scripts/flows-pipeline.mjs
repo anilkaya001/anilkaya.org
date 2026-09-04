@@ -161,10 +161,14 @@ export const RATE = {
 
      `delayMs` may spike to maxDelayMs for ONE call after a 429; the floor is
      what every subsequent call pays for the rest of the run. A floor allowed
-     to reach 5s would cost CALL_BUDGET x 5s = 79 minutes against a 36-minute
+     to reach 5s would cost CALL_BUDGET x 5s = 104 minutes against a 36-minute
      deadline — the run would publish nothing at all, which is a strictly worse
      failure than being rate-limited. At 750ms the same budget costs
-     950 x 0.75 = 713s, comfortably inside the window the chain leg reserves.
+     1250 x 0.75 = 938s, inside the window the chain leg reserves. (Both
+     figures were carried over from a 950-call budget and never moved when
+     CALL_BUDGET became 1250: 79 minutes is 948 calls at 5s, and 713s is 950
+     at 0.75. The conclusion held; the arithmetic behind it had stopped
+     matching the constant it was about.)
      rateFloorSurvivesBudget() below is the assertion, and it is tested — and
      it is the assertion, not this comment, that fails the build if the budget
      is raised past what the deadline can absorb (2,399 calls at this floor).
@@ -208,7 +212,9 @@ export const RATE = {
         answered ok with ZERO rows on 2026-08-31, so it re-probes with a
         dated param until it shows a row shape or proves empty by design;
         the five confirmed probes retired into the sections they scouted)
-   = 1076 modelled.
+   = 1077 modelled. (This line read 1076 while the thirteen terms above it
+   summed to 1077 — an off-by-one in a total nobody re-added after a term was
+   revised. It is the number every budget argument in this file starts from.)
 
    MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
    170 were 429s that were then retried — so ~852 attempts carried a distinct
@@ -232,7 +238,7 @@ export const CALL_BUDGET = 1250;
    percentileRank, neutralize, effectiveBreadth — is ~1.5ms, ONCE. Total CPU
    for the whole cross-section: about 0.6 seconds.
 
-   Against it, 1076 modelled calls at the floor the run actually pinned at
+   Against it, 1077 modelled calls at the floor the run actually pinned at
    (RATE.floorCeilingMs = 750ms) is 807 seconds of scheduled waiting inside a
    DEADLINE_MS of 2160. CPU is under a tenth of a percent of the sleep.
 
@@ -614,8 +620,41 @@ export function describeChainProbe(ticker, expiry, rows, { pageSize = CHAIN_PAGE
    panels that arrive after the cards were abandoned. */
 const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 
-/** Delay between publishes, to stay under the edge's burst-rate challenge. */
-const PUBLISH_SPACING_MS = 150;
+/* DELAY BETWEEN PUBLISHES, SET FROM THE ONLY RATE THE EDGE HAS EVER REFUSED.
+
+   THE RECORDED INCIDENT IS 37 POSTs IN ELEVEN SECONDS — 3.36/s — and
+   publish()'s own comment concludes "the challenge was purely a function of
+   burst rate". It cost two payloads silently: `sector:trix` never landed and
+   `board:long` kept its pre-chain copy while the short board got the new
+   columns.
+
+   150ms WAS 6.67/s, WHICH IS TWICE THAT, and the comment below called it
+   "comfortably under". It was not, and the arithmetic had been inverted in
+   the file since the lane replaced the per-writer sleep. The lane made
+   departures EVEN, which is a real improvement over a clumpy average — but
+   evenness does not help against a challenge that counts arrivals in a
+   window, and an even 6.67/s puts ~73 POSTs in any eleven seconds where 37
+   was enough.
+
+   POOLING THE CARDS LEG IS WHAT MADE IT REACHABLE. Fifty card writes now
+   queue back to back on this lane: at 150ms that is 50 POSTs in 7.5 seconds,
+   worse than the refused shape on BOTH count and rate, and it is the one
+   stretch of the run that saturates the lane rather than trickling.
+
+   400ms IS 2.5/s — about 25% under the refused rate — so the cards leg
+   becomes 50 writes over 20s and no eleven-second window holds more than 28.
+   The whole run's 162 ingest writes go from 24.3s of lane to 64.8s: +40s
+   against a run last measured at 1502s under a 2700s job kill. Forty seconds
+   of a budget with twenty minutes of slack, to stop losing payloads that fail
+   silently, is the trade this constant exists to make.
+
+   THIS IS STILL A CEILING INFERRED FROM ONE INCIDENT, not a published limit.
+   Cloudflare does not document the threshold and one refusal does not locate
+   it; 3.36/s is the only rate observed to trip it and 2.5/s is a margin under
+   that, not a measurement. If a run reports edge 403s at this spacing the
+   answer is a WAF skip rule keyed on the honest User-Agent ingestHeaders()
+   already sends, not a smaller number guessed a second time. */
+const PUBLISH_SPACING_MS = 400;
 
 /* THE THREE NUMBERS THIS FILE ASKED FOR AND NEVER HAD. The floorCeilingMs
    comment above says the binding 750ms ceiling "is NOT obviously right — a 429
@@ -688,12 +727,12 @@ const permits = makePermitQueue({
    these two."
 
    PUBLISH_SPACING_MS WAS PER-LEG AND THE ROUTE'S FAILURE IS GLOBAL. Every
-   writer slept 150ms after its own POST, so one leg at a time saw ~6.7
-   writes/s — comfortably under the ~3.4/s that tripped Cloudflare's rate
-   challenge on the first live run (publish()'s own comment: 37 POSTs in
-   eleven seconds). But the spacing never knew about the other legs. Three
-   paced streams in the air at once present the SUM, and a per-writer sleep
-   cannot see that.
+   writer slept the spacing after its own POST, so the route saw the SUM of
+   however many legs were in the air rather than one paced stream, and a
+   per-writer sleep cannot see that. (This paragraph used to claim the
+   per-leg rate was "comfortably under" the ~3.4/s that drew the challenge
+   while stating that rate as ~6.7/s — twice it. The comparison was inverted;
+   the constant it excused is set from the incident now, above.)
 
    IT IS ALSO WHAT THE CARDS LEG NEEDS BEFORE IT CAN BE POOLED. Fifty card
    writes spaced 150ms apart is 7.5s serially; at four workers each still
@@ -5712,9 +5751,12 @@ async function main() {
      ARCHIVE_READ_PACE_MS=40 is ~11s of pacing plus 270 round trips. The ~30s
      this line used to state came from the 180-key walk; the walk is 270 keys
      now and the estimate moved with it. `pruneArchive`
-     names 90 dated keys and pays PUBLISH_SPACING_MS after each DELETE, of
-     which in steady state exactly three match anything — ~20s, most of it
-     spent being told 404 by a route that was never going to have the row.
+     names 90 dated keys and claims a permit from the shared ingest lane before
+     each DELETE, of which in steady state exactly two match anything (the
+     count this file states at :3855) — most of that lane time spent being
+     told 404 by a route that was never going to have the row. At the current
+     spacing that is ~36s of a lane the publishes also need, which is worth
+     narrowing at its source rather than by spending less time per request.
 
      Awaited in sequence they were ~50 seconds of housekeeping standing in
      front of the sector, chain and card legs, charged in full against the
@@ -5731,9 +5773,10 @@ async function main() {
      stating rather than discovering. All three speak to the ingest route, and
      the route's documented failure is burst rate: publish()'s own comment
      records 37 POSTs in eleven seconds tripping a Cloudflare challenge, which
-     is why every write is followed by PUBLISH_SPACING_MS. That spacing is
-     per-leg, not global, so while these two are in the air the route sees the
-     sum of up to three paced streams rather than one. In practice they finish
+     is why every write claims a permit from `ingestWrites` before it goes.
+     That lane IS global — it is the fix for the per-leg spacing this
+     paragraph used to describe — so these two and the publishes share one
+     clock instead of presenting the route their sum. In practice they finish
      inside the first minute — the walk in ~30s and the sweep in a handful of
      seconds against 18 keys — long before the fifty card writes, so the
      overlap is with the dated copies, the watch list and the movers band: a
@@ -7910,6 +7953,37 @@ async function main() {
   );
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 
+  /* ---- THE BUDGET, SAID OUT LOUD ----------------------------------
+
+     CALL_BUDGET WAS DECORATION. It is asserted in tests/flows-pipeline-contract
+     against rateFloorSurvivesBudget(), and that function is never called at
+     runtime — so the number constrained a unit test and nothing else. A run
+     that overshot it failed nothing until the 45-minute job kill, and a kill
+     publishes NOTHING and exits non-zero.
+
+     THIS IS REPORTING, NOT ENFORCEMENT, AND THE DIFFERENCE IS DELIBERATE. By
+     the time the count is known the calls are spent; refusing here would only
+     discard work already paid for. What it buys is that the next leg added to
+     this pipeline overshoots VISIBLY, in the log line an operator already
+     reads, instead of surfacing weeks later as an unexplained timeout. Every
+     per-ticker endpoint costs +50 or +128 calls, so the wave that adds them is
+     exactly when this stops being decoration.
+
+     `stats.calls` counts ATTEMPTS — it is incremented inside the retry loop —
+     so a refused morning legitimately reports more than it intended to spend,
+     and the line says which number is which rather than leaving the reader to
+     assume they are the same. */
+  if (stats.calls > CALL_BUDGET) {
+    const over = stats.calls - CALL_BUDGET;
+    console.warn(
+      `BUDGET: ${stats.calls} attempts against a modelled budget of ${CALL_BUDGET} — ` +
+      `${over} over (${((over / CALL_BUDGET) * 100).toFixed(1)}%). ` +
+      `${stats.rateLimited} of those attempts were 429 retries rather than distinct calls. ` +
+      "The budget is what DEADLINE_MS was sized against; a run that exceeds it is " +
+      "spending time the chain and card legs were promised.",
+    );
+  }
+
   /* ---- WHERE THE WALL CLOCK WENT, which this file has been asking for ----
 
      The floorCeilingMs comment states the open question outright: raising the
@@ -7989,6 +8063,7 @@ export {
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote, fakePriorUnusual,
+  PUBLISH_SPACING_MS,
 };
 
 // Only run when invoked directly. Without this guard, importing the module —

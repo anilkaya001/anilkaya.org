@@ -21,6 +21,7 @@ import {
   unusualContractId, markNewContracts, priorNote,
   readBoardMemory, fakePriorBoard,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
+  PUBLISH_SPACING_MS,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
   DEEP_NAMES, deepNames, publishRetryDelay, MARKET_CROSS_LIMIT,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
@@ -2169,6 +2170,56 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(raiseRateFloor(RATE.minDelayMs) > RATE.minDelayMs * 1.5,
        "the first step is a real step: 1.5x of 60ms is below anything a limiter notices, " +
        "so the opening raise is floored at a meaningful delay instead");
+
+    /* ---- the ingest lane, stated as the incident rather than as a number ----
+
+       THE ONE RATE THE EDGE HAS EVER REFUSED is 37 POSTs inside eleven
+       seconds, and publish()'s comment concludes the challenge was "purely a
+       function of burst rate". It cost two payloads silently — `sector:trix`
+       never landed and `board:long` kept its pre-chain copy.
+
+       THE LANE MAKES DEPARTURES EVEN, which is why this is expressible as an
+       invariant at all: with one departure every PUBLISH_SPACING_MS, the most
+       POSTs that can enter any eleven-second window is exactly
+       11000/PUBLISH_SPACING_MS, no matter how many workers are producing. That
+       number must stay under the 37 that was refused.
+
+       ASSERTED AS THE WINDOW, NOT AS THE CONSTANT, because a test that pins
+       150 or 400 only tells the next reader what the number is. This one tells
+       them what it is FOR, and it fails for the right reason: the lane was set
+       to 150ms, which admits 73 POSTs in eleven seconds — twice the refused
+       shape — and the comment above it claimed that was "comfortably under".
+       Nothing in this suite disagreed, which is how an inverted comparison
+       survived in a file this careful. */
+    const REFUSED_POSTS = 37, REFUSED_WINDOW_MS = 11000;
+    const admits = REFUSED_WINDOW_MS / PUBLISH_SPACING_MS;
+    ok(admits < REFUSED_POSTS,
+       `the ingest lane cannot put ${REFUSED_POSTS} writes into ${REFUSED_WINDOW_MS / 1000} ` +
+       `seconds: at ${PUBLISH_SPACING_MS}ms the most any such window holds is ` +
+       `${admits.toFixed(1)}, against the ${REFUSED_POSTS} that drew a Cloudflare challenge ` +
+       "and lost two payloads on the first wide-board run");
+
+    /* AND THE CARDS LEG IS THE STRETCH THAT SATURATES IT. Fifty card writes
+       queue back to back since the leg was pooled; every other write on this
+       route trickles. If the lane ever admits them faster than the refused
+       shape, it is this leg that will draw the challenge. */
+    const CARD_WRITES = 50, INGEST_WRITES_PER_RUN = 162;
+    const cardsSeconds = (CARD_WRITES * PUBLISH_SPACING_MS) / 1000;
+    ok(cardsSeconds > (CARD_WRITES / REFUSED_POSTS) * (REFUSED_WINDOW_MS / 1000),
+       `and the pooled cards leg is stretched past the refused shape: ${CARD_WRITES} writes ` +
+       `take ${cardsSeconds.toFixed(1)}s, where the refused run put ${REFUSED_POSTS} into ` +
+       `${REFUSED_WINDOW_MS / 1000}s — so the one stretch that saturates this lane is slower ` +
+       "than the burst that drew the challenge, not faster");
+
+    /* THE COST IS AN ASSERTION TOO, so raising the spacing can never be a free
+       decision made quietly. This is the whole run's ingest traffic against
+       the 1502s the last measured run took under a 2700s job kill. */
+    const laneSeconds = (INGEST_WRITES_PER_RUN * PUBLISH_SPACING_MS) / 1000;
+    ok(laneSeconds < 120,
+       `and the whole run's ${INGEST_WRITES_PER_RUN} ingest writes cost ` +
+       `${laneSeconds.toFixed(1)}s of lane — bounded here so that buying burst safety with ` +
+       "spacing stays a trade someone has to justify against a 1502s run, rather than a " +
+       "constant that can drift upward one incident at a time");
   }
 
   /* ---------- the publish retry, bounded twice ------------------------
