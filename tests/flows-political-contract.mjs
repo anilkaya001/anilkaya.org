@@ -20,8 +20,8 @@
 
 import assert from "node:assert/strict";
 import {
-  parseBand, valueBand, sideOf, filingRow, rankBuyers, rankAssets, shapeRecent,
-  shapeHolders, buildPolitical, unwrapRows,
+  parseBand, valueBand, sideOf, filingRow, rankBuyers, rankAssets, rankClusters,
+  newestFiled, shapeRecent, shapeHolders, buildPolitical, unwrapRows,
   POLITICAL_CAPS, POLITICAL_NOTES, POLITICAL_FEEDS, SIZE_BASIS, HOLDER_QTY_UNIT,
 } from "../shared/flows-political.js";
 
@@ -231,6 +231,159 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(built.rows[0].sells, 1, "and the sales are carried beside, not folded in");
 }
 
+/* ---------- §5b untickered size, and the confident zero ---------- */
+{
+  /* THE LIVE DEFECT, REBUILT. Ten of twenty-five buyer rows on the published
+     payload read "$2.05M across 0 names", because a filing that names no
+     listed security — a Treasury bill, a fund, a partnership interest — had
+     its midpoint summed into the total while the ticker set it could not join
+     stayed empty. The assets panel beside it requires a ticker, so the same
+     money was silently absent there and nothing said the two disagreed. */
+  const rows = [
+    { who: "Bond Buyer", id: "b1", t: null, side: "buy", mid: 375000, lo: 250000, hi: 500000,
+      lagDays: 20, filedDate: "2026-08-01", executedBy: null },
+    { who: "Bond Buyer", id: "b1", t: null, side: "buy", mid: 1675000, lo: 1000000,
+      hi: 2350000, lagDays: 20, filedDate: "2026-08-01", executedBy: null },
+    { who: "Mixed", id: "m1", t: "AAA", side: "buy", mid: 100000, lo: 90000, hi: 110000,
+      lagDays: 10, filedDate: "2026-08-02", executedBy: "self" },
+    { who: "Mixed", id: "m1", t: null, side: "buy", mid: 50000, lo: 40000, hi: 60000,
+      lagDays: 10, filedDate: "2026-08-02", executedBy: "spouse" },
+  ];
+  const ranked = rankBuyers(rows, { latestFiled: "2026-08-02" });
+  const bond = ranked.rows.find((r) => r.who === "Bond Buyer");
+  const mixed = ranked.rows.find((r) => r.who === "Mixed");
+
+  eq(bond.names, null,
+    "A FILER WHO NAMED NO LISTED SECURITY REPORTS NO NAME COUNT — null, never 0. " +
+    "\"$2.05M across 0 names\" reads as a filer who bought nothing identifiable, " +
+    "which is not what the filings say");
+  eq(bond.bought, 2050000, "while the disclosed size is still ranked, because it is real");
+  eq(bond.boughtListed, 0,
+    "with none of it naming a listed security — a MEASURED zero, and the one number " +
+    "here that is honestly zero");
+  eq(bond.boughtOther, 2050000, "and all of it in the other half");
+  eq(bond.buysOther, 2, "over both filings");
+  eq(bond.buysListed, 0, "and none of them listed");
+  eq(bond.boughtListed + bond.boughtOther, bond.bought,
+    "the split is EXHAUSTIVE: the two halves are the total, so the columns reconcile " +
+    "with the bar beside them rather than being two views of different populations");
+
+  eq(mixed.names, 1, "a filer who named one security reports one");
+  eq(mixed.boughtListed, 100000, "with the listed half of the total");
+  eq(mixed.boughtOther, 50000, "and the rest beside it");
+  eq(mixed.buysListed + mixed.buysOther, mixed.buys,
+    "and the filing counts partition the same way");
+
+  /* THE TWO PANELS NOW RECONCILE, which they could not before: everything the
+     assets ranking can see is exactly the listed half of the buyer totals. */
+  const assets = rankAssets(rows, { latestFiled: "2026-08-02" });
+  const assetTotal = assets.rows.reduce((a, r) => a + r.bought, 0);
+  const listedTotal = ranked.rows.reduce((a, r) => a + r.boughtListed, 0);
+  eq(assetTotal, listedTotal,
+    "THE ASSETS PANEL'S TOTAL IS THE BUYERS PANEL'S LISTED HALF, exactly — which is " +
+    "the reconciliation the untickered rows used to break in silence");
+
+  /* THE SELF-FILED SHARE, which POLITICAL_NOTES.attribution has promised since
+     this module shipped and only the holders block delivered. */
+  eq(mixed.ownerKnown, 2, "both of this filer's filings state an executing account");
+  eq(mixed.selfFiled, 1, "one of which is the filer's own");
+  eq(bond.ownerKnown, 0, "the other filer's state none");
+  eq(bond.selfFiled, null,
+    "SO THE SHARE IS UNKNOWN, NOT ZERO AND NOT ALL — a null, which is the only " +
+    "reading the wire supports, and is what the attribution note promises");
+  ok(/self-filed share/.test(POLITICAL_NOTES.attribution),
+    "and the note that promises it is still the note being kept");
+  ok(/no name count rather than a count of/.test(POLITICAL_NOTES.listed),
+    "with the listed/other split published in prose beside the arithmetic");
+
+  /* FRESHNESS IS A DATE FROM THE TAPE, NOT "TODAY". */
+  eq(newestFiled(rows), "2026-08-02", "the newest filing date is the one the window holds");
+  eq(newestFiled([]), null, "an empty window has no newest date rather than a default one");
+  eq(newestFiled([{ who: "X", filedDate: null }]), null,
+    "and neither does one whose filings carry no date");
+  eq(mixed.freshBuys, 2, "the filer who disclosed on that date is counted");
+  eq(bond.freshBuys, 0,
+    "and one who did not reports a MEASURED zero — the date itself is published, so " +
+    "zero here means 'nothing that day' rather than 'not asked'");
+}
+
+/* ---------- §5c breadth, which size buries ----------------------- */
+{
+  /* THE CASE THE SIZE ORDERING GETS WRONG, AND IT IS THE LIVE ONE. One
+     account's $3.75M in a single name tops the published ranking on two
+     filings by one filer, while five separate filers converging on another
+     name sit third because that name is smaller in dollars. */
+  const rows = [
+    { who: "Solo", id: "s1", t: "BIG", side: "buy", mid: 3750000, lo: 3000000,
+      hi: 4500000, lagDays: 60, filedDate: "2026-08-01", executedBy: "spouse" },
+    { who: "Solo", id: "s1", t: "BIG", side: "buy", mid: 1000000, lo: 900000,
+      hi: 1100000, lagDays: 60, filedDate: "2026-08-01", executedBy: "spouse" },
+  ];
+  for (let i = 0; i < 5; i++) {
+    rows.push({ who: "Filer" + i, id: "f" + i, t: "WIDE", side: "buy", mid: 31200,
+      lo: 15000, hi: 50000, lagDays: 24, filedDate: "2026-08-02", executedBy: "self" });
+  }
+  rows.push({ who: "Pair A", id: "pa", t: "TWO", side: "buy", mid: 500000, lo: 400000,
+    hi: 600000, lagDays: 5, filedDate: "2026-08-02", executedBy: "self" });
+  rows.push({ who: "Pair B", id: "pb", t: "TWO", side: "buy", mid: 500000, lo: 400000,
+    hi: 600000, lagDays: 5, filedDate: "2026-08-02", executedBy: "self" });
+
+  const bySize = rankAssets(rows, { latestFiled: "2026-08-02" });
+  eq(bySize.rows[0].t, "BIG", "by dollars the single-filer name leads");
+  eq(bySize.rows[2].t, "WIDE",
+    "and the five-filer name is THIRD — which is the ordering this block exists " +
+    "beside, not one it argues is wrong");
+
+  const clusters = rankClusters(rows, { latestFiled: "2026-08-02" });
+  eq(clusters.rows.length, 1, "one name clears the stated floor");
+  eq(clusters.rows[0].t, "WIDE", "and it is the one five separate filers converged on");
+  eq(clusters.rows[0].filers, 5, "with the count that ordered it published as a column");
+  eq(clusters.minFilers, 3,
+    "THE FLOOR IS STATED AND IS NOT 2: a pair is the smallest number that could be " +
+    "called convergence at all, and on a market-wide window many names collect two " +
+    "by coincidence");
+  eq(clusters.namesSeen, 3,
+    "over the names that drew any purchase, so 'no clusters' can be told apart from " +
+    "'no filings'");
+  ok(!clusters.rows.some((r) => r.t === "TWO"),
+    "the two-filer name does not clear the floor, and the floor is not relaxed to " +
+    "fill the panel");
+
+  /* THE ORDERING IS TIEBREAKS, NOT A WEIGHTING. Equal filers, so the fresher
+     median lag decides — and nothing blends the two into a composite. */
+  const tied = [];
+  for (let i = 0; i < 3; i++) {
+    tied.push({ who: "S" + i, id: "s" + i, t: "STALE", side: "buy", mid: 900000,
+      lo: 800000, hi: 1000000, lagDays: 90, filedDate: "2026-08-01" });
+    tied.push({ who: "F" + i, id: "f" + i, t: "FRESH", side: "buy", mid: 10000,
+      lo: 9000, hi: 11000, lagDays: 3, filedDate: "2026-08-02" });
+  }
+  const order = rankClusters(tied).rows.map((r) => r.t);
+  deep(order, ["FRESH", "STALE"],
+    "at equal breadth the fresher median lag leads, though it is ninety times smaller " +
+    "in dollars — each key breaks ties in the one before it and none is weighted");
+
+  /* AN UNKNOWN LAG DOES NOT WIN A RECENCY TIEBREAK. Letting null sort first
+     is the same confident-absence defect as ranking an unmeasured name at
+     zero, one column over. */
+  const undated = [];
+  for (let i = 0; i < 3; i++) {
+    undated.push({ who: "U" + i, id: "u" + i, t: "UNDATED", side: "buy", mid: 10000,
+      lo: 9000, hi: 11000, lagDays: null });
+    undated.push({ who: "D" + i, id: "d" + i, t: "DATED", side: "buy", mid: 10000,
+      lo: 9000, hi: 11000, lagDays: 40 });
+  }
+  deep(rankClusters(undated).rows.map((r) => r.t), ["DATED", "UNDATED"],
+    "a name whose filings carry no lag sorts BEHIND every measured one: it has not " +
+    "demonstrated recency, and an absent reading may not outrank a present one");
+
+  const quiet = rankClusters(rows.slice(0, 2));
+  eq(quiet.status, "quiet", "a window with no convergence reports quiet");
+  eq(quiet.rows.length, 0, "with nothing drawn");
+  eq(quiet.minFilers, 3, "and the floor still published, so the emptiness can be read");
+  ok(/DISTINCT filers/.test(quiet.basis), "and the ordering named even when it ordered nothing");
+}
+
 /* ---------- §6 holders: the vendor's own numbers ----------------- */
 {
   const h = shapeHolders({ data: [
@@ -319,5 +472,9 @@ console.log(`✓ flows-political: ${checks} assertions — an open-ended band wi
   `carried beside every midpoint total, disclosure lag on the row and the median under the ` +
   `total, an owner that stays unknown rather than becoming "self", recency by filing date, ` +
   `caps with counted shed, byte-identical rebuilds, both wire spellings of a filing read ` +
-  `onto one row, a holder count named for the unit the vendor gives it, and prose that ` +
-  `needs no allow-list`);
+  `onto one row, a holder count named for the unit the vendor gives it, a filer whose ` +
+  `disclosures named no listed security reporting no name count rather than a count of ` +
+  `zero, a listed/other split that makes the two panels reconcile exactly, the self-filed ` +
+  `share the attribution note has always promised, a breadth ordering whose fixture puts ` +
+  `the five-filer name third by dollars, an unknown lag that cannot win a recency ` +
+  `tiebreak, and prose that needs no allow-list`);

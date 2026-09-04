@@ -116,6 +116,29 @@ export const POLITICAL_NOTES = Object.freeze({
      answer is to rephrase until the ban needs no allow-list, not to widen
      the ban's exceptions, so "how a position fared" carries the meaning
      that the forbidden word would have. */
+  listed:
+    "A filing need not name a listed security. Treasury bills, funds and " +
+    "partnership interests carry no ticker, and their disclosed size was being " +
+    "summed into a filer's total beside a name count of zero while the panel " +
+    "ranking securities — which needs a ticker — excluded the same money. Each " +
+    "filer's total is now split into the part that named a listed security and " +
+    "the part that did not, so the two panels reconcile and a filer who " +
+    "disclosed no equity at all reports no name count rather than a count of " +
+    "zero.",
+  breadth:
+    "Size is the weakest thing this data knows. One account's large purchase " +
+    "of a single name outranks five separate filers converging on another, " +
+    "because the ranking is by dollars and dollars are what a band midpoint " +
+    "estimates. The clusters block orders the same aggregates by the number of " +
+    "DISTINCT filers instead, with a stated floor, and applies no weighting: " +
+    "each key breaks ties in the one before it, so nothing here is a composite " +
+    "nobody can argue with.",
+  fresh:
+    "The newest filing date the window contains is published, together with how " +
+    "many disclosures carry it. That date is what \"new\" means on this page — " +
+    "not the session date, because on the ordinary morning nothing at all is " +
+    "filed, and marking every row stale against a day with no filings would " +
+    "describe the calendar rather than the tape.",
   refusals:
     "A disclosure is an opening with no paired closing print, so nothing here " +
     "measures how any position fared and no such measure is shown. Nothing " +
@@ -299,7 +322,7 @@ const median = (xs) => {
  * questions, and mixing them would let a large seller top a list captioned
  * about buying.
  */
-export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
+export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers, latestFiled = null } = {}) {
   const by = new Map();
   for (const r of rows) {
     if (!r || !r.who) continue;
@@ -309,7 +332,9 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
       a = {
         who: r.who, id: r.id, memberType: r.memberType,
         boughtMid: 0, boughtLo: 0, boughtHi: 0, openFloor: 0, buys: 0,
+        listedMid: 0, otherMid: 0, buysListed: 0, buysOther: 0,
         soldMid: 0, sells: 0, openBands: 0, unclassified: 0,
+        ownerKnown: 0, selfFiled: 0, freshBuys: 0,
         tickers: new Set(), lags: [],
       };
       by.set(key, a);
@@ -317,8 +342,35 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
     if (r.t) a.tickers.add(r.t);
     if (r.lagDays !== null) a.lags.push(r.lagDays);
     if (r.openBand) a.openBands++;
+    /* WHOSE ACCOUNT, COUNTED RATHER THAN ASSUMED. POLITICAL_NOTES.attribution
+       has promised since this module shipped that "the totals report the
+       self-filed share", and until now only the holders block — the one feed
+       that 422s — actually did. The vendor supplies the executing account on
+       the unusual-trades spelling of a filing; where it does not, the share is
+       UNKNOWN and is published as null rather than as 100%. */
+    if (r.executedBy !== null && r.executedBy !== undefined) {
+      a.ownerKnown++;
+      if (/self/i.test(r.executedBy)) a.selfFiled++;
+    }
     if (r.side === "buy") {
       a.buys++;
+      /* LISTED OR NOT, and the split is the whole point of the column.
+
+         A filing that names no ticker is a Treasury bill, a fund, or a
+         partnership interest — "US Treas Bills Int Rate 0.000% MAT 8/5/2026"
+         is a live example. Its midpoint used to be summed into `bought` while
+         the ticker set it could not join stayed empty, so the row published
+         two million dollars beside a NAMES count of 0 and the assets panel
+         beside it — which requires a ticker — silently excluded the same
+         money. Ten of twenty-five live rows read that way.
+
+         The total still ranks the panel, because "who disclosed the largest
+         purchases" is a question about purchases and a Treasury purchase is
+         one. What changes is that the total is now DECOMPOSED, so a reader can
+         see which half of it the equity page beside it can speak to, and the
+         two panels reconcile instead of disagreeing in silence. */
+      if (r.t) a.buysListed++; else a.buysOther++;
+      if (r.filedDate && latestFiled && r.filedDate === latestFiled) a.freshBuys++;
       /* ALL THREE OR NONE, over one population.
 
          The low, the midpoint and the high are a triple describing the SAME
@@ -332,6 +384,7 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
          rather than dropped. */
       if (r.mid !== null) {
         a.boughtMid += r.mid;
+        if (r.t) a.listedMid += r.mid; else a.otherMid += r.mid;
         if (r.lo !== null) a.boughtLo += r.lo;
         if (r.hi !== null) a.boughtHi += r.hi;
       } else if (r.lo !== null) {
@@ -351,14 +404,37 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
     out.push({
       who: a.who, id: a.id, memberType: a.memberType,
       bought: a.boughtMid, boughtLo: a.boughtLo, boughtHi: a.boughtHi,
+      /* THE SAME TOTAL, SPLIT BY WHETHER A LISTED SECURITY WAS NAMED. Only the
+         midpoints split: the low and high bounds stay on the whole, because
+         splitting a triple that must satisfy lo <= mid <= hi into two triples
+         doubles the ways that invariant can be broken for a column nobody
+         asked for. The counts split beside them so the reader can see how many
+         filings are behind each half. */
+      boughtListed: a.listedMid,
+      boughtOther: a.otherMid,
+      buysListed: a.buysListed,
+      buysOther: a.buysOther,
       sold: a.soldMid, buys: a.buys, sells: a.sells,
-      names: a.tickers.size,
+      /* NULL, NOT ZERO, WHEN NO FILING NAMED A LISTED SECURITY. A filer whose
+         whole disclosure was Treasury bills named no equity, and "0 names"
+         beside two million dollars reads as a measurement — a filer who bought
+         nothing identifiable — rather than as the truth, which is that this
+         page's name column has nothing to say about that money. */
+      names: a.tickers.size || null,
       medianLagDays: median(a.lags),
       openBands: a.openBands,
       /* The disclosed floor of the purchases the totals above could not
          include. Zero when there were none. */
       openFloor: a.openFloor,
       unclassified: a.unclassified,
+      /* The self-filed share, over the filings whose account the vendor
+         stated. Null when it stated none: unknown is not "all their own". */
+      ownerKnown: a.ownerKnown,
+      selfFiled: a.ownerKnown ? a.selfFiled : null,
+      /* Purchases disclosed on the newest filing date in this window. Zero is
+         a measurement here — this filer disclosed nothing that day — because
+         the date itself is known and published beside it. */
+      freshBuys: a.freshBuys,
     });
   }
   /* Total order: size, then name, so one response publishes one byte string. */
@@ -374,19 +450,32 @@ export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers } = {}) {
 
 /* ---------- what: ranked by disclosed purchase size -------------- */
 
-export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
+export function rankAssets(rows, { cap = POLITICAL_CAPS.assets, latestFiled = null } = {}) {
   const by = new Map();
   for (const r of rows) {
     if (!r || !r.t) continue;
     let a = by.get(r.t);
     if (!a) a = { t: r.t, asset: r.asset, boughtMid: 0, boughtLo: 0, boughtHi: 0,
-                  openFloor: 0, openBands: 0,
+                  openFloor: 0, openBands: 0, ownerKnown: 0, selfFiled: 0, freshBuys: 0,
                   soldMid: 0, buys: 0, sells: 0, who: new Set(), lags: [] }, by.set(r.t, a);
     if (r.who) a.who.add(r.id || r.who);
     if (r.lagDays !== null) a.lags.push(r.lagDays);
     if (r.openBand) a.openBands++;
+    /* THE SECURITY'S OWN NAME, PREFERRED OVER WHICHEVER ROW ARRIVED FIRST.
+       The aggregate used to keep the description from the first filing for
+       this ticker and never look again, so the label a reader saw depended on
+       vendor row order and could change between two runs over the same window
+       — a non-deterministic string in a byte-identical payload. The first
+       NON-NULL description wins now, which is a stated rule rather than an
+       accident of ordering. */
+    if (a.asset === null || a.asset === undefined) a.asset = r.asset;
+    if (r.executedBy !== null && r.executedBy !== undefined) {
+      a.ownerKnown++;
+      if (/self/i.test(r.executedBy)) a.selfFiled++;
+    }
     if (r.side === "buy") {
       a.buys++;
+      if (r.filedDate && latestFiled && r.filedDate === latestFiled) a.freshBuys++;
       /* The same all-three-or-none rule the buyer ranking keeps — see there
          for why a floor without a ceiling stays out of the summed triple. */
       if (r.mid !== null) {
@@ -410,6 +499,9 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
       sold: a.soldMid, buys: a.buys, sells: a.sells,
       filers: a.who.size, medianLagDays: median(a.lags),
       openBands: a.openBands, openFloor: a.openFloor,
+      ownerKnown: a.ownerKnown,
+      selfFiled: a.ownerKnown ? a.selfFiled : null,
+      freshBuys: a.freshBuys,
     });
   }
   out.sort((x, y) => (y.bought - x.bought) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
@@ -419,6 +511,84 @@ export function rankAssets(rows, { cap = POLITICAL_CAPS.assets } = {}) {
     status: kept.length ? "ok" : "quiet",
     rows: kept, seen, cap, shed: seen - kept.length, basis: SIZE_BASIS,
   };
+}
+
+/* ---------- what: ranked by how many filers converged on it ------ */
+
+/**
+ * Names that more than one filer disclosed buying, ordered by BREADTH.
+ *
+ * WHY A THIRD BLOCK AND NOT A THIRD SORT KEY. The two panels above rank by
+ * disclosed size, which is the question they were built for and the one the
+ * band midpoint can answer. Size is also the WEAKEST thing this dataset knows:
+ * one spouse's $3.75M in a single name tops the live ranking on two filings by
+ * one filer, while five independent filers converging on one name sits third
+ * because it is smaller in dollars. Breadth and freshness are already computed
+ * on every aggregate — `filers`, `buys`, `medianLagDays` — and neither had ever
+ * ordered anything.
+ *
+ * THE ORDERING IS NOT A WEIGHTING. Nothing here blends breadth with size into
+ * a composite; that would be an invented number nobody could argue with. The
+ * order is: distinct filers, then freshness by median lag, then size, then the
+ * ticker. Each key is a published column, and every one of them is a tiebreak
+ * on the one before, so a reader can reconstruct the ordering by eye.
+ *
+ * THE FLOOR IS STATED AND IS NOT 2. A pair of filers is the smallest number
+ * that can be called convergence at all, and on a market-wide window a great
+ * many names collect two by coincidence. Three is the floor this block claims,
+ * it is published as `minFilers`, and a window that produces none says so
+ * rather than relaxing it to fill the panel.
+ */
+export function rankClusters(rows, {
+  cap = POLITICAL_CAPS.assets, minFilers = 3, latestFiled = null,
+} = {}) {
+  const ranked = rankAssets(rows, { cap: Infinity, latestFiled });
+  const wide = ranked.rows.filter((r) => r.filers >= minFilers);
+  wide.sort((x, y) =>
+    (y.filers - x.filers) ||
+    /* Fresher first, and an unknown lag sorts BEHIND every known one rather
+       than ahead of it: a name whose filings carry no transaction date has not
+       demonstrated recency, and letting null win a recency tiebreak is the
+       same confident-absence defect as ranking it at zero. */
+    ((x.medianLagDays === null ? Infinity : x.medianLagDays) -
+     (y.medianLagDays === null ? Infinity : y.medianLagDays)) ||
+    (y.bought - x.bought) ||
+    (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
+  const seen = wide.length;
+  const kept = wide.slice(0, cap);
+  return {
+    status: kept.length ? "ok" : "quiet",
+    rows: kept, seen, cap: cap === Infinity ? null : cap, shed: seen - kept.length,
+    minFilers,
+    /* The population the floor was applied to, so "no clusters" can be told
+       apart from "no filings": one is a reading about convergence, the other
+       is a reading about the window. */
+    namesSeen: ranked.rows.length,
+    basis: "ordered by the number of DISTINCT filers who disclosed a purchase, then by " +
+      "median disclosure lag, then by summed midpoint. No weighting is applied and no " +
+      "composite is computed: each key breaks ties in the one before it.",
+  };
+}
+
+/**
+ * The newest FILING date in a shaped window, or null.
+ *
+ * WHAT "NEW" MEANS HERE, AND WHY IT IS NOT "TODAY". A subscriber opening this
+ * page daily could not tell what had arrived since yesterday: the tape is
+ * ordered by filing date and nothing marked the newest one. Marking rows
+ * against the session date would be wrong on the ordinary morning when nothing
+ * was filed — every row would read as stale with no statement of how stale.
+ * The newest date the window actually contains is a measured fact, it is
+ * published so the page can NAME it, and a reader comparing it against the
+ * payload's own sessionDate learns whether "new" means today or last week.
+ */
+export function newestFiled(rows) {
+  let newest = null;
+  for (const r of rows || []) {
+    if (!r || !r.filedDate) continue;
+    if (newest === null || r.filedDate > newest) newest = r.filedDate;
+  }
+  return newest;
 }
 
 /* ---------- the filings themselves ------------------------------- */
@@ -511,7 +681,13 @@ export function buildPolitical(raws = {}) {
     const reason = String(f.__failed);
     out.buyers = { status: "unavailable", reason };
     out.assets = { status: "unavailable", reason };
+    /* THE SAME SILENCE AS ITS NEIGHBOURS. A block that simply went missing
+       when the feed failed would render as "measured and empty" on a page
+       whose whole discipline is telling those two apart. */
+    out.clusters = { status: "unavailable", reason };
     out.recent = { status: "unavailable", reason };
+    out.latestFiled = null;
+    out.freshFilings = null;
   } else {
     const shaped = [];
     let unusable = 0;
@@ -519,11 +695,25 @@ export function buildPolitical(raws = {}) {
       const row = filingRow(raw);
       if (row) shaped.push(row); else unusable++;
     }
-    out.buyers = rankBuyers(shaped);
-    out.assets = rankAssets(shaped);
+    /* THE NEWEST DISCLOSURE DATE IN THIS WINDOW, decided once and handed to
+       every block, so "new" means the same thing in all three of them. Two
+       blocks deriving it separately is two chances for the tape's mark and the
+       ranking's count to disagree about the same day. */
+    const latestFiled = newestFiled(shaped);
+    out.buyers = rankBuyers(shaped, { latestFiled });
+    out.assets = rankAssets(shaped, { latestFiled });
+    out.clusters = rankClusters(shaped, { latestFiled });
     out.recent = shapeRecent(shaped);
     out.filings = shaped.length;
     out.unusable = unusable;
+    out.latestFiled = latestFiled;
+    /* How many of the window's filings arrived on that date. A measured zero
+       is impossible here — the date came FROM a filing — so this is at least
+       1 whenever latestFiled is non-null, and null when no row carried a
+       filing date at all. */
+    out.freshFilings = latestFiled === null
+      ? null
+      : shaped.filter((r) => r.filedDate === latestFiled).length;
   }
 
   const h = raws.holders;

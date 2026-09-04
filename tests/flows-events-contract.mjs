@@ -540,9 +540,24 @@ const gateDteFrom = (origin) => (date) =>
   ok(PAYLOAD.shown <= PAYLOAD.cap, `shown (${PAYLOAD.shown}) is within the cap (${PAYLOAD.cap})`);
   ok(PAYLOAD.shown <= PAYLOAD.inWindow,
      `and within the in-window population (${PAYLOAD.inWindow})`);
-  ok(PAYLOAD.inWindow >= PAYLOAD.cap,
-     `the cap is reached in this corpus — ${PAYLOAD.inWindow} names qualify for ` +
-     `${PAYLOAD.cap} seats`);
+  /* THE CAP NO LONGER BINDS ON AN ORDINARY WEEK, AND THE PAYLOAD SAYS SO.
+
+     This used to assert the opposite — that the corpus REACHED the cap — which
+     was true at 60 seats and was the defect rather than the certificate: the
+     rows are date-ordered, so a bound cap does not thin the table, it ENDS it
+     at a date earlier than the window, and the chart's empty right-hand half
+     was being blamed on the window. At 200 seats an ordinary week publishes
+     the whole in-window population, and `capBound` is the field that says
+     which of the two limits stopped the table. The bound branch is exercised
+     against a constructed cap below, where it can be reached deliberately
+     rather than by waiting for an earnings season. */
+  eq(PAYLOAD.capBound, PAYLOAD.inWindow > PAYLOAD.shown,
+     `capBound states whether the cap bound (${PAYLOAD.inWindow} in window, ` +
+     `${PAYLOAD.shown} shown of ${PAYLOAD.cap} seats)`);
+  eq(PAYLOAD.beyondCap, PAYLOAD.inWindow - PAYLOAD.shown,
+     "and beyondCap counts what it did not show — a measured zero when it showed everything");
+  eq(PAYLOAD.lastShownDate, ROWS.length ? ROWS[ROWS.length - 1].d : null,
+     "while lastShownDate is the newest date the drawing can speak for");
   ok(!ROWS.some((r) => r.dte > PAYLOAD.windowDays),
      `no published row reports beyond the ${PAYLOAD.windowDays}-CALENDAR-DAY window`);
   ok(!ROWS.some((r) => r.dte === null || r.sdte === null),
@@ -582,6 +597,114 @@ const gateDteFrom = (origin) => (date) =>
      "the cap keeps the two NEAREST reports, in date order, whatever order they arrived in");
   eq(far.shown, 2, "shown is the capped count");
   eq(far.inWindow, 4, "while inWindow is the uncapped population — the two are different facts");
+
+  /* THE BOUND CAP, SAID OUT LOUD. Two of four seated, so the drawing ends on
+     2026-08-31 while the window runs three weeks past it. A page that read
+     only `windowDays` here would tell the reader the calendar simply holds
+     nothing after that date, which is false about two named companies. */
+  eq(far.capBound, true, "a cap that bound says so");
+  eq(far.beyondCap, 2, "and counts the named rows inside the window it does not show");
+  eq(far.lastShownDate, "2026-08-31",
+     "and names the date the drawing stops at — which is NOT the window's edge, and is " +
+     "the distinction the note used to get wrong");
+  ok(far.lastShownDate < far.rows[0].d ? false : true,
+     "lastShownDate is the newest drawn date, so it is at or after the first row's");
+
+  /* AND THE UNBOUND CASE IS THE OPPOSITE READING, not a quieter version of the
+     same one: nothing is withheld, so beyondCap is a measured zero. */
+  const roomy = buildEvents([
+    nameAt("D4", "2026-09-04"), nameAt("D1", "2026-08-27"),
+  ], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, cap: 10 });
+  eq(roomy.capBound, false, "a cap with room to spare says that instead");
+  eq(roomy.beyondCap, 0, "with nothing held back");
+  eq(roomy.lastShownDate, "2026-09-04", "and the drawing reaches the farthest name it has");
+
+  /* AN EMPTY TABLE HAS NO LAST DATE. Publishing one would name a date the
+     drawing cannot speak for at all. */
+  const none = buildEvents([], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  eq(none.lastShownDate, null, "an empty table names no last date rather than inventing one");
+  eq(none.capBound, false, "and a cap cannot bind on nothing");
+}
+
+/* ============================================================
+   §8b. THE FLOW GROUP, AND THE EVENT PREMIUM.
+
+   A FLOW PRODUCT'S EVENT CALENDAR PUBLISHED NO FLOW. Every tilt
+   below is computed by screenerTilt for every eligible name and was
+   thrown away for all but the enriched; the only flow reading that
+   reached this page did so inside a title attribute.
+   ============================================================ */
+{
+  const tilt = tiltOf({
+    premiumTilt: 0.4123456, netTilt: -0.2, volTilt: 0.05,
+    surpriseTilt: 1.25, oiTilt: -0.011, putCallRatio: 0.7654,
+  });
+  const row = eventRow(nameAt("FLOW", "2026-09-04").row, tilt, { gateOrigin: GATE_ORIGIN });
+  near(row.pt, 0.4123, "the premium tilt rides the row");
+  near(row.nt, -0.2, "the net tilt with its sign");
+  near(row.vt, 0.05, "the aggressed-contract tilt");
+  near(row.sut, 1.25, "the volume-surprise log ratio");
+  near(row.ot, -0.011, "the open-interest tilt");
+  near(row.pcr, 0.77, "and the vendor's put/call ratio, rounded to two");
+
+  /* ABSENT IN, ABSENT OUT. A tilt the screener could not compute is null on
+     the row — never 0, which on a SIGNED share means "balanced", a reading
+     this data did not make. */
+  const quiet = eventRow(nameAt("QUIET", "2026-09-04").row,
+    tiltOf({ premiumTilt: null, netTilt: undefined, volTilt: "", surpriseTilt: null,
+             oiTilt: null, putCallRatio: null }),
+    { gateOrigin: GATE_ORIGIN });
+  for (const k of ["pt", "nt", "vt", "sut", "ot", "pcr"]) {
+    eq(quiet[k], null, `${k} is null when the tilt was not measured, never a balanced 0`);
+  }
+  eq(eventRow(nameAt("ZERO", "2026-09-04").row, tiltOf({ premiumTilt: 0 }),
+    { gateOrigin: GATE_ORIGIN }).pt, 0,
+    "while a MEASURED zero tilt publishes as zero — the two are different facts");
+
+  /* THE EVENT PREMIUM IS A RATIO, NOT AN AVERAGE. The vendor's quote brackets
+     the report; the benchmark spreads a 30-day vol evenly over the sessions
+     before it, which is the assumption a scheduled report breaks. The amount
+     by which the first exceeds the second is the only number on the row that
+     is about the EVENT. */
+  const priced = eventRow(nameAt("PREM", "2026-09-04").row,
+    tiltOf({ iv30: 0.40, impliedMovePerc: 0.09 }), { gateOrigin: GATE_ORIGIN });
+  ok(priced.ev !== null && priced.im !== null, "both horizons are measured on this row");
+  near(priced.evp, Number((priced.im / priced.ev).toFixed(2)),
+    "the event premium is the vendor's quote over the benchmark, exactly");
+  ok(priced.evp > 1,
+     `and on a 40% name reporting in ${priced.sdte} sessions the vendor's quote is ` +
+     `${priced.evp}x the constant-vol benchmark — which is the whole reason the ` +
+     "benchmark may not be labelled a market quote");
+  ok(Math.abs(priced.evp - (priced.im + priced.ev) / 2) > 0.01,
+     "it is NOT the average of the two horizons, which EVENTS_NOTES.vendorMove refuses " +
+     "because an average of two numbers quoted to two horizons is quoted to neither");
+
+  eq(eventRow(nameAt("NOIM", "2026-09-04").row, tiltOf({ impliedMovePerc: null }),
+    { gateOrigin: GATE_ORIGIN }).evp, null,
+    "with no vendor quote there is no premium to state, and none is stated");
+  eq(eventRow(nameAt("NOIV", "2026-09-04").row, tiltOf({ iv30: null }),
+    { gateOrigin: GATE_ORIGIN }).evp, null,
+    "and with no benchmark to divide by, likewise — never an infinity and never a 1.0");
+
+  /* THE LEGEND IS STATED ONCE, which is what pays for the short keys. */
+  const built = buildEvents([nameAt("FLOW", "2026-09-04")],
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  for (const k of ["pt", "nt", "vt", "sut", "ot", "pcr", "rvol"]) {
+    ok(typeof built.flow.labels[k] === "string" && built.flow.labels[k].length > 10,
+       `the header names the ${k} column rather than leaving a short key unexplained`);
+  }
+  ok(/unit-free/.test(built.flow.units),
+     "and states that the group shares a unit, which is why it may share an axis");
+  ok(/no vendor call/.test(EVENTS_NOTES.flow),
+     "the flow note says what it cost");
+  ok(/CONSTANT-VOL/.test(EVENTS_NOTES.priced) && /variance accrues/.test(EVENTS_NOTES.priced),
+     "the priced note now names the assumption a scheduled report violates");
+  ok(/below the vendor/.test(EVENTS_NOTES.priced),
+     "and states which side of the vendor's quote the benchmark is expected to sit");
+  ok(/ratio of two published numbers/.test(EVENTS_NOTES.eventPremium),
+     "the event-premium note names its construction");
+  ok(/ENDS/.test(EVENTS_NOTES.cap) && /never attributed to the window/.test(EVENTS_NOTES.cap),
+     "and the cap note refuses the attribution the old drawing made");
 }
 
 /* ============================================================
@@ -878,8 +1001,23 @@ const gateDteFrom = (origin) => (date) =>
      'what the option market is charging' from 'what this desk thinks'. */
   ok(/not a forecast/i.test(EVENTS_NOTES.priced),
      "notes.priced states in words that the priced move is NOT A FORECAST");
-  ok(/charging/i.test(EVENTS_NOTES.priced),
-     "and says what it IS: what the option market is CHARGING for that stretch");
+  /* THE CLAIM THIS ASSERTION USED TO PIN HAS BEEN WITHDRAWN, DELIBERATELY.
+
+     It required the note to say the priced move is "what the option market is
+     CHARGING for that stretch". That sentence is the overclaim: the option
+     market is not quoting iv30·sqrt(t) to anybody. It is this desk's
+     constant-vol model of a quote, and it sat to the LEFT of the vendor's
+     actual quote, which was labelled merely "Vendor" — so the modelled number
+     wore the language of the observed one.
+
+     The note now says what it IS in the only terms the arithmetic supports: a
+     benchmark computed here, expected to sit below the vendor's own
+     event-bracketing quote. The assertion moves with it. */
+  ok(/BENCHMARK/.test(EVENTS_NOTES.priced),
+     "and says what it IS: a constant-vol BENCHMARK computed by this desk, not a quote");
+  ok(!/what the option market is CHARGING/.test(EVENTS_NOTES.priced),
+     "and no longer claims to be what the option market is charging — square-root-of-time " +
+     "is a model of a quote, not a quote, and a scheduled report is the case that breaks it");
   ok(/square root of time/i.test(EVENTS_NOTES.priced),
      "naming the construction, so the number can be checked rather than trusted");
   ok(/no rate, no dividend/i.test(EVENTS_NOTES.priced),
