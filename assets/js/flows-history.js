@@ -42,6 +42,17 @@
   const MIN_SESSIONS = 5;
 
   let drawnHorizons = null;          // the last horizons handed to renderCurve
+  let drawnMeta = {};                // and the epoch prose that rode with them
+
+  /* ONE PUBLISH CADENCE PLUS SLACK, and one weekend plus one public holiday —
+     the same two numbers assets/js/flows-ui.js uses for every other Flows
+     surface. They are duplicated here rather than imported because this route
+     does not load flows-ui.js and this file cannot change which scripts the
+     page pulls; if that changes, delete these and call UI.staleness(). What
+     may NOT happen is the two drifting: two routes wording one outage
+     differently is how a reader concludes they are looking at two outages. */
+  const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
+  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
 
   /* The missing-value test comes BEFORE the coercion — Number(null) is 0 and
      0 is finite, so the naive shape turns an absent hit rate into "0%" and
@@ -66,6 +77,10 @@
     return (n < 0 ? MINUS : n > 0 ? "+" : "") + s + "%";
   }
 
+  /* A HORIZON IS A COUNT OF SESSIONS AND CARRIES THE WORD. "1 sessions" rode
+     every aria-label and every point title on this chart. */
+  const kSaid = (k) => k + (k === 1 ? " session" : " sessions");
+
   function cell(text, className) {
     const td = document.createElement("td");
     if (className) td.className = className;
@@ -83,56 +98,132 @@
      Long-minus-short by horizon, with a zero line that is always drawn and
      always at zero. A chart of returns whose baseline floats to the data's
      minimum turns a uniformly negative record into a rising line, which is
-     the single most common way this kind of plot lies. */
+     the single most common way this kind of plot lies.
 
-  function renderCurve(horizons) {
+     TWO SERIES, BECAUSE THE PAYLOAD CARRIES TWO POPULATIONS.
+
+     The scorer reports the horizon means separately on either side of the
+     selection epoch — `ls`/`n` under the current rule, `prior`/`priorN`
+     before it — precisely so that two different populations are never
+     averaged into one number. This renderer read only the first for the whole
+     life of the page. On a run where EVERY retained session predates the
+     epoch (the pipeline's log records exactly that shape: 22 of 22) the curve
+     plotted nothing, the page said no session had been scored, and a fully
+     measured 22-session record sat unread in the same object it was handed.
+
+     The two series are told apart WITHOUT HUE — the prior rule is dashed with
+     hollow dots, named in the note and named in the aria-label — so the
+     distinction survives greyscale and a monochrome printout. */
+
+  /**
+   * The drawing width, MEASURED FROM THE HOST and never floored above it.
+   *
+   * This emitted `width:"100%"` for its whole life, which is the chart
+   * invariant's quieter failure: the viewBox says W units, the box says
+   * whatever CSS gives it, and one viewBox unit stops being one CSS pixel the
+   * moment those disagree — 9px axis type rendering at 5px on a phone. The
+   * width attribute is now explicit. It is also clamped DOWN to the host,
+   * because an explicit width larger than the box it sits in is horizontal
+   * overflow at 320px, which the old 300-unit floor would have produced the
+   * moment the floor stopped being masked by width:100%.
+   */
+  function curveWidth() {
+    const host = Math.round(curveHost.clientWidth) || 0;
+    return host > 0 ? Math.min(760, host) : 300;
+  }
+
+  function renderCurve(horizons, meta) {
     drawnHorizons = horizons;             // kept for the resize repaint
+    drawnMeta = meta || {};
     curveHost.replaceChildren();
 
     /* Each horizon passes through isNum ONCE, here, and everything below
        plots the result — filtering on the coercion and then drawing the raw
-       field is how a string survives to arithmetic. */
-    const usable = horizons
-      .map((h) => ({ k: h.k, ls: isNum(h.ls), n: isNum(h.n) ?? 0 }))
-      .filter((h) => h.ls !== null && h.n >= MIN_SESSIONS);
-    if (!usable.length) {
+       field is how a string survives to arithmetic. `n` is no longer floored
+       at zero on the way in: an absent count is not a count of zero, and the
+       floor test below now has to see the absence to refuse it. */
+    const rows = (Array.isArray(horizons) ? horizons : [])
+      .map((h) => ({
+        k: isNum(h && h.k),
+        ls: isNum(h && h.ls),
+        n: isNum(h && h.n),
+        prior: isNum(h && h.prior),
+        priorN: isNum(h && h.priorN),
+      }))
+      .filter((h) => h.k !== null);
+
+    /* A MEAN NEEDS BOTH ITS VALUE AND ITS SAMPLE SIZE to be drawn. Either
+       missing is an absence, and an absence is not plotted at all — never at
+       zero, which is a real published return. */
+    const plottable = (v, n) => v !== null && n !== null && n >= MIN_SESSIONS;
+    const cur = rows.filter((h) => plottable(h.ls, h.n));
+    const pri = rows.filter((h) => plottable(h.prior, h.priorN));
+
+    if (!cur.length && !pri.length) {
       const p = document.createElement("p");
       p.className = "rec-empty";
-      const best = horizons.reduce((m, h) => Math.max(m, isNum(h && h.n) ?? 0), 0);
-      p.textContent = best > 0
+      /* THE DEEPEST SAMPLE EITHER POPULATION HAS, so a record that is entirely
+         pre-epoch reports its real size rather than the current rule's zero. */
+      let best = null;
+      for (const h of rows) {
+        for (const n of [h.n, h.priorN]) {
+          if (n !== null && (best === null || n > best)) best = n;
+        }
+      }
+      p.textContent = best !== null && best > 0
         ? "No horizon has reached " + MIN_SESSIONS + " scored sessions yet — the " +
           "longest has " + best + ". Nothing is plotted, because a mean of " +
           best + " observations is mostly its own sampling error."
-        : "No session has been scored yet. The record begins with the first " +
-          "pipeline run after this page shipped, and the shortest horizon " +
-          "needs that many sessions to close before it can be measured.";
+        /* NOT "no session has been scored": the table below can hold rows
+           while this is true. A session reaches a horizon mean only once that
+           horizon has closed AND both sides of the spread were measured, so
+           the sentence is about horizons, which is what this chart draws. */
+        : "No horizon carries a scored session yet. The record begins with the " +
+          "first pipeline run after this page shipped, and the shortest horizon " +
+          "needs that many sessions to close — with both sides of the spread " +
+          "measured — before it can be plotted.";
       curveHost.append(p);
       return;
     }
 
-    /* SIZED FROM THE HOST, the way every card panel is. A fixed 720-unit
-       viewBox at width:100% scales — 9px axis type becomes 5px on a phone and
-       oversized on a wide desk — which is the exact defect flows-card.js
-       documents. One viewBox unit here is one CSS pixel. */
-    const W = Math.max(300, Math.min(760, curveHost.clientWidth || 720)), H = 220;
-    const padL = 54, padR = 18, padT = 18, padB = 40;
+    /* THE HORIZON AXIS IS THE UNION OF WHAT EITHER SERIES CAN PLOT, ordered by
+       horizon rather than by position in an array. Indexing x by an array
+       position was safe while one series was drawn and silently wrong the
+       moment there were two: the prior rule's k=21 would have landed on the
+       current rule's k=10 whenever the two subsets differed. */
+    const axis = [...new Set([...cur, ...pri].map((h) => h.k))].sort((a, b) => a - b);
+
+    const W = curveWidth();
+    /* The prior series adds a second n line under each point, and the frame
+       grows to hold it rather than the label hanging outside the viewBox. */
+    const H = pri.length ? 234 : 220;
+    const padL = 54, padR = 18, padT = 18, padB = pri.length ? 54 : 40;
     const plotW = W - padL - padR, plotH = H - padT - padB;
 
-    const values = usable.map((h) => h.ls);
+    const values = [...cur.map((h) => h.ls), ...pri.map((h) => h.prior)];
     /* The domain always INCLUDES zero, and is padded symmetrically, so the
        zero line sits where the eye expects it and a negative record cannot be
-       cropped out of frame. */
+       cropped out of frame. Both series share it: two lines on two scales
+       would be a comparison nobody can make. */
     const lo = Math.min(0, ...values), hi = Math.max(0, ...values);
     const span = Math.max(hi - lo, 1e-4);
     const pad = span * 0.15;
     const yLo = lo - pad, yHi = hi + pad;
     const yOf = (v) => padT + plotH - ((v - yLo) / (yHi - yLo)) * plotH;
-    const xOf = (i) => padL + (usable.length === 1
+    const xOf = (k) => padL + (axis.length === 1
       ? plotW / 2
-      : (i / (usable.length - 1)) * plotW);
+      : (axis.indexOf(k) / (axis.length - 1)) * plotW);
 
     const svg = svgEl("svg", {
-      class: "rc", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      class: "rc", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
+      /* A TRANSIENT CLAMP, NOT THE SIZING MECHANISM. The width attribute is
+         what sizes this drawing, and it equals the host, so this rule is inert
+         in the settled state. It exists for the ~160ms between a viewport
+         shrinking and the debounced repaint: without it the previous, wider
+         svg is briefly wider than the page, and a chart that overflows the
+         viewport for a sixth of a second is still a chart that overflows the
+         viewport. */
+      style: "max-width:100%",
       role: "img", preserveAspectRatio: "xMidYMid meet",
       /* THE PLOT REGION, PUBLISHED. Whether the zero line lands inside the
          band reserved for data or gets crammed into the top margin is the
@@ -162,47 +253,135 @@
       svg.append(t);
     }
 
-    let d = "";
-    usable.forEach((h, i) => { d += (i ? " L" : "M") + xOf(i) + " " + yOf(h.ls); });
-    svg.append(svgEl("path", { class: "rc-line", d }));
+    /* NO SEGMENT ACROSS A HORIZON THE SERIES DOES NOT HAVE. A line drawn from
+       k=5 to k=21 through a k=10 this population never measured is a claim
+       nobody made — the same refusal to interpolate the score track's strips
+       obey, and the reason the path is built by walking the shared axis and
+       lifting the pen rather than by joining the points a series happens to
+       hold. */
+    function pathFor(series, valueOf) {
+      const have = new Map(series.map((h) => [h.k, valueOf(h)]));
+      let d = "", open = false;
+      for (const k of axis) {
+        if (!have.has(k)) { open = false; continue; }
+        d += (open ? " L" : d ? " M" : "M") +
+          xOf(k).toFixed(2) + " " + yOf(have.get(k)).toFixed(2);
+        open = true;
+      }
+      return d;
+    }
 
-    usable.forEach((h, i) => {
-      const cy = yOf(h.ls);
-      const dot = svgEl("circle", {
-        class: "rc-dot " + (h.ls < 0 ? "is-neg" : "is-pos"),
-        cx: xOf(i), cy, r: 4.5,
-      });
-      const title = svgEl("title");
-      title.textContent = h.k + " sessions: " + pct(h.ls) + " long minus short, over " +
-        h.n + " scored session" + (h.n === 1 ? "" : "s");
-      dot.append(title);
-      svg.append(dot);
+    /* THE PRIOR RULE IS DRAWN FIRST so the current rule sits over it, and it
+       is dashed rather than tinted: series identity has to survive greyscale
+       and a monochrome printout, so it is carried by the stroke pattern and by
+       the words in the note, never by hue. */
+    if (pri.length) {
+      svg.append(svgEl("path", {
+        class: "rc-line is-prior", d: pathFor(pri, (h) => h.prior),
+        "stroke-dasharray": "6 4",
+      }));
+    }
+    if (cur.length) {
+      svg.append(svgEl("path", { class: "rc-line", d: pathFor(cur, (h) => h.ls) }));
+    }
 
-      const xl = svgEl("text", { class: "rc-ticklabel", x: xOf(i), y: H - padB + 20, "text-anchor": "middle" });
-      xl.textContent = h.k + "d";
+    const byK = new Map();
+    for (const h of cur) byK.set(h.k, { ...(byK.get(h.k) || {}), cur: h });
+    for (const h of pri) byK.set(h.k, { ...(byK.get(h.k) || {}), pri: h });
+
+    for (const k of axis) {
+      const at = byK.get(k) || {};
+      const x = xOf(k);
+
+      if (at.pri) {
+        /* HOLLOW, so the two series differ in shape as well as in stroke. The
+           fill and stroke are presentation attributes because no stylesheet
+           rule exists for this series, and `.rc-dot` alone sets neither. */
+        const dot = svgEl("circle", {
+          class: "rc-dot is-prior", cx: x, cy: yOf(at.pri.prior), r: 4,
+          fill: "none", stroke: "currentColor", "stroke-width": 1.4,
+        });
+        const title = svgEl("title");
+        title.textContent = kSaid(k) + " under the PRIOR selection rule: " +
+          pct(at.pri.prior) + " long minus short, over " + at.pri.priorN +
+          " scored session" + (at.pri.priorN === 1 ? "" : "s");
+        dot.append(title);
+        svg.append(dot);
+      }
+
+      if (at.cur) {
+        const dot = svgEl("circle", {
+          class: "rc-dot " + (at.cur.ls < 0 ? "is-neg" : at.cur.ls > 0 ? "is-pos" : "is-flat"),
+          cx: x, cy: yOf(at.cur.ls), r: 4.5,
+        });
+        const title = svgEl("title");
+        title.textContent = kSaid(k) + ": " + pct(at.cur.ls) + " long minus short, over " +
+          at.cur.n + " scored session" + (at.cur.n === 1 ? "" : "s");
+        dot.append(title);
+        svg.append(dot);
+      }
+
+      const xl = svgEl("text", { class: "rc-ticklabel", x, y: H - padB + 20, "text-anchor": "middle" });
+      xl.textContent = k + "d";
       svg.append(xl);
 
-      /* n RIDES EVERY POINT. A percentage without its sample size is the
-         thing this page exists to stop printing. */
-      const nl = svgEl("text", { class: "rc-nlabel", x: xOf(i), y: H - padB + 33, "text-anchor": "middle" });
-      nl.textContent = "n=" + h.n;
-      svg.append(nl);
-    });
+      /* n RIDES EVERY POINT, AND EACH SERIES CARRIES ITS OWN. A percentage
+         without its sample size is the thing this page exists to stop
+         printing, and two populations sharing one n would be worse than
+         either printing none. */
+      if (at.cur) {
+        const nl = svgEl("text", { class: "rc-nlabel", x, y: H - padB + 33, "text-anchor": "middle" });
+        nl.textContent = "n=" + at.cur.n;
+        svg.append(nl);
+      }
+      if (at.pri) {
+        const nl = svgEl("text", { class: "rc-nlabel is-prior", x, y: H - padB + (at.cur ? 44 : 33), "text-anchor": "middle" });
+        nl.textContent = "prior n=" + at.pri.priorN;
+        svg.append(nl);
+      }
+    }
 
+    const said = [];
+    if (cur.length) {
+      said.push("Current selection rule: " +
+        cur.map((h) => kSaid(h.k) + ", " + pct(h.ls) + " over " + h.n +
+          (h.n === 1 ? " session" : " sessions")).join("; "));
+    }
+    if (pri.length) {
+      said.push("Prior selection rule" + (drawnMeta.epoch ? " (before " + drawnMeta.epoch + ")" : "") +
+        ", drawn dashed: " +
+        pri.map((h) => kSaid(h.k) + ", " + pct(h.prior) + " over " + h.priorN +
+          (h.priorN === 1 ? " session" : " sessions")).join("; "));
+    }
     svg.setAttribute("aria-label",
-      "Long-minus-short price return by holding horizon. " +
-      usable.map((h) => h.k + " sessions, " + pct(h.ls) + " over " + h.n + " sessions").join("; ") + ".");
+      "Long-minus-short price return by holding horizon. " + said.join(". ") + ".");
     curveHost.append(svg);
 
-    const skipped = horizons.length - usable.length;
+    /* A horizon neither population could plot. Counted over the union, because
+       "too few closed sessions" said of a horizon the prior rule DID measure
+       would be false. */
+    const skipped = rows.length - axis.length;
     if (curveNote) {
-      curveNote.textContent =
-        "Equal-weighted price return of the published long names minus the short names, " +
-        "measured from the close each board was published at. " +
-        (skipped > 0
-          ? skipped + " longer horizon" + (skipped === 1 ? " has" : "s have") +
-            " too few closed sessions to plot yet."
-          : "");
+      const note = ["Equal-weighted price return of the published long names minus the " +
+        "short names, measured from the close each board was published at."];
+      if (pri.length) {
+        note.push("The dashed line with hollow dots is the record under the PRIOR " +
+          "selection rule" + (drawnMeta.epoch ? ", before " + drawnMeta.epoch : "") +
+          ", drawn beside the current one rather than averaged into it, and carrying " +
+          "its own n at every point." +
+          (cur.length ? "" : " Every session retained so far predates the epoch, so the " +
+            "solid line has nothing to draw — that is the shape of the archive, not a " +
+            "record of zero."));
+        /* THE EPOCH PROSE IS THE PAYLOAD'S OWN. A renderer paraphrasing why
+           two populations are reported separately is a renderer inventing the
+           methodology it is supposed to be quoting. */
+        if (drawnMeta.epochNote) note.push(drawnMeta.epochNote + ".");
+      }
+      if (skipped > 0) {
+        note.push(skipped + " horizon" + (skipped === 1 ? " has" : "s have") +
+          " too few closed sessions in either population to plot yet.");
+      }
+      curveNote.textContent = note.join(" ");
     }
   }
 
@@ -384,11 +563,74 @@
       if (!drawnHorizons) return;
       const svg = curveHost.querySelector("svg");
       const drawnW = svg ? Number(String(svg.getAttribute("viewBox")).split(/\s+/)[2]) : 0;
-      const w = Math.max(300, Math.min(760, curveHost.clientWidth || 720));
+      /* The SAME width function the paint uses. These were two copies of one
+         expression, and a repaint measuring the width differently from the
+         paint is how the two quietly stop agreeing. */
+      const w = curveWidth();
       if (svg && Math.abs(w - drawnW) < 8) return;
-      renderCurve(drawnHorizons);
+      /* The epoch prose rides along, or the resize would silently drop the
+         sentence that explains the second series. */
+      renderCurve(drawnHorizons, drawnMeta);
     }, 160);
   });
+
+  /**
+   * TWO INDEPENDENT WAYS A PUBLISHED RECORD IS NOT TODAY'S, and they get two
+   * sentences because the remedies are two different people:
+   *
+   *   write   — the blob's own write time is old. The pipeline is not running.
+   *   session — the write is fresh and the SESSION it describes is old. The
+   *             pipeline is running and its input is frozen.
+   *
+   * THE RECORD IS THE SURFACE THAT NEEDS THIS MOST AND WAS THE ONLY ONE
+   * WITHOUT IT. A stale board looks like a board that stopped moving; a stale
+   * record looks exactly like a live record of the same good sessions, and it
+   * will keep looking like one for as long as nobody publishes.
+   *
+   * The missing-value test comes before the coercion, as everywhere:
+   * Number(null) is 0, 0 is a finite millisecond stamp — the epoch — and a
+   * payload with no write header would otherwise be reported as fifty-six
+   * years stale.
+   */
+  function renderStale(payload) {
+    const written = isNum(payload && payload.__updatedAt);
+    const now = Date.now();
+    let message = null;
+
+    if (written !== null && written > 0 && now - written > STALE_WRITE_MS) {
+      const hours = Math.floor((now - written) / 3600000);
+      const days = Math.floor(hours / 24);
+      /* The hour branch cannot fire while the threshold is 30 hours. It is
+         here so that lowering the threshold can never start printing
+         "0 days", which is a confident zero wearing a unit. */
+      const age = days >= 1
+        ? days + (days === 1 ? " day" : " days")
+        : hours + (hours === 1 ? " hour" : " hours");
+      message = "This record was last written " + age + " ago. The pipeline has " +
+        "not published since — check the Actions tab. Every figure below is that " +
+        "run's, and no session has been scored into it since.";
+    } else if (payload && payload.sessionDate) {
+      /* 21:00Z is after every US close, so a session date is aged from the end
+         of its own session rather than from its midnight. */
+      const session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
+      if (Number.isFinite(session) && now - session > STALE_SESSION_MS) {
+        message = "These numbers describe the " + payload.sessionDate + " session, " +
+          "which is more than four days old. The pipeline is running but its data " +
+          "is not advancing, so no new session has been scored into the record.";
+      }
+    }
+    if (!message) return;
+
+    /* The page template carries no element for this, and this file cannot
+       change the template, so the band is created beside the status line it
+       qualifies — same class and same role as the one every other Flows
+       surface renders. */
+    const band = document.createElement("p");
+    band.className = "flows-stale";
+    band.setAttribute("role", "status");
+    band.textContent = message;
+    statusEl.insertAdjacentElement("afterend", band);
+  }
 
   fetch("/api/flows/record", {
     credentials: "same-origin",
@@ -396,7 +638,15 @@
   }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
     if (!response.ok) throw new Error("HTTP " + response.status);
-    return response.json();
+    /* X-Payload-Updated is stamped by the Worker onto every passthrough, and
+       is annotated onto the payload as __updatedAt — a client-side note, not
+       a claim the pipeline writes the field. The same read every other Flows
+       page performs; this one simply never performed it. */
+    const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
+    return response.json().then((payload) => {
+      if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
+      return payload;
+    });
   }).then((payload) => {
     if (!payload) return;
 
@@ -404,7 +654,11 @@
     const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
     const retained = isNum(payload.retained);
 
-    renderCurve(horizons);
+    renderStale(payload);
+    renderCurve(horizons, {
+      epoch: typeof payload.epoch === "string" ? payload.epoch : null,
+      epochNote: typeof payload.epochNote === "string" ? payload.epochNote : null,
+    });
     renderSessions(sessions);
     renderFeatures(payload.features);
 
@@ -481,7 +735,42 @@
 
     const parts = [];
     if (retained !== null) parts.push(retained + " session" + (retained === 1 ? "" : "s") + " retained");
-    if (sessions.length) parts.push(sessions.length + " scored");
+
+    /* "N SCORED" WAS A NUMBER ABOUT THE TABLE WEARING THE NAME OF THE RECORD.
+       `sessions` is capped by the publisher; the horizon means are not. Once
+       the archive passes the cap this line said "88 sessions retained · 30
+       scored" directly above a point labelled n=78, and a reader reasonably
+       took 30 as the number of sessions that have closed a horizon. What this
+       count actually is, is the number of rows in the table below, so that is
+       what it now says.
+
+       And when the stated horizon's own means were taken over MORE sessions
+       than the table lists, the table is provably a truncated slice and says
+       so with both numbers. That comparison is sound in one direction only:
+       every session counted in those means also qualified for the table (both
+       score the same session at the same horizon, and the mean additionally
+       requires a spread), so more counted than listed can only mean the
+       listing was cut. The reverse tells us nothing, and nothing is claimed
+       from it. */
+    let closedAtStated = null;
+    const stated = isNum(payload.statedHorizon);
+    if (stated !== null) {
+      const row = horizons.find((h) => isNum(h && h.k) === stated);
+      if (row) {
+        const n = isNum(row.n), pn = isNum(row.priorN);
+        /* A floor, not a total: an absent half contributes nothing rather than
+           inventing a count, and a floor can only ever UNDER-report the
+           truncation it is used to detect. */
+        if (n !== null || pn !== null) closedAtStated = (n || 0) + (pn || 0);
+      }
+    }
+    if (sessions.length) {
+      parts.push(sessions.length + " listed below" +
+        (closedAtStated !== null && closedAtStated > sessions.length
+          ? ", the most recent of at least " + closedAtStated + " sessions that have " +
+            "closed the " + stated + "-session horizon with both legs measured"
+          : ""));
+    }
     /* THE SPLIT, SAID OUT LOUD WHENEVER THERE ARE SESSIONS ON BOTH SIDES OF IT.
 
        The board's selection rule changed, so sessions before that date scored

@@ -536,6 +536,26 @@ export function buildSkewTerm(surface, scalars) {
 /* ---------- the tape: contracts and the aggressor ladder --------- */
 
 /**
+ * One chain's rows as {p, row} tuples, parsing only what has not been parsed.
+ *
+ * WHY A TUPLE AND NOT A PARALLEL ARRAY. buildChainPanels parses each contract
+ * once and hands the result to four consumers. A parallel array indexed by
+ * position would put the whole scheme one filter away from pricing row i with
+ * row j's strike — a defect that produces a plausible chain, prices a trade
+ * that does not exist, and shows up nowhere until someone checks a symbol
+ * against its own strike. The parse travels WITH its row, so there is no index
+ * to get wrong.
+ *
+ * A caller that supplies nothing gets the old behaviour exactly: every entry
+ * point here still parses for itself, which is what keeps the desk route and
+ * the suites that call these builders directly untouched.
+ */
+function asParsedPairs(rows, given) {
+  if (Array.isArray(given)) return given;
+  return (rows || []).map((row) => ({ p: parseOptionSymbol(row && row.option_symbol), row }));
+}
+
+/**
  * The day's most-traded contracts.
  *
  * PARSED DIRECTLY, NOT THROUGH priceSale. priceSale exists to price a SALE
@@ -549,10 +569,16 @@ export function buildSkewTerm(surface, scalars) {
  * dollarised here — that would need a price basis, which is a choice, and the
  * choice belongs beside the number that used it rather than buried in a total.
  */
-export function buildTopContracts(rows, { spot, ivDivisor = 1, limit = TOP_CONTRACTS } = {}) {
+export function buildTopContracts(rows, {
+  spot, ivDivisor = 1, limit = TOP_CONTRACTS,
+  /* ALREADY-PARSED {p, row} TUPLES, when the caller has them. See
+     asParsedPairs: this is the same chain buildChainPanels has already walked,
+     and re-running the symbol regex over it is the single largest avoidable
+     cost in the chain shaper. Absent, this parses for itself. */
+  parsed: given = null,
+} = {}) {
   const parsed = [];
-  for (const row of rows || []) {
-    const p = parseOptionSymbol(row && row.option_symbol);
+  for (const { p, row } of asParsedPairs(rows, given)) {
     if (!p) continue;
     const volume = numOrNull(row.volume);
     if (volume === null || !(volume > 0)) continue;      // "did not trade" is not a top contract
@@ -612,12 +638,13 @@ export function buildTopContracts(rows, { spot, ivDivisor = 1, limit = TOP_CONTR
  * did, keeps a chain the vendor reported thinly from rendering as a flat and
  * confident "no aggression anywhere".
  */
-export function buildAggressor(rows, { spot, maxStrikes = AGGRESSOR_STRIKES } = {}) {
+export function buildAggressor(rows, {
+  spot, maxStrikes = AGGRESSOR_STRIKES, parsed: given = null,
+} = {}) {
   const byStrike = new Map();
   const allStrikes = new Set();
   let reported = 0, unreported = 0;
-  for (const row of rows || []) {
-    const p = parseOptionSymbol(row && row.option_symbol);
+  for (const { p, row } of asParsedPairs(rows, given)) {
     if (!p) continue;
     allStrikes.add(p.strike);
     const ask = numOrNull(row.ask_volume);
@@ -722,6 +749,11 @@ export function buildChainPanels(chainRows, {
      complete enumeration of the name's expiries, and the response merely
      confirms it. Identification comes from the REQUEST, not from the page. */
   requestedExpiry = null,
+  /* THE BOARD'S OWN VIEW OF THIS NAME, threaded through to the unusual feed
+     that is built in here. Optional and null by default, so every existing
+     caller — the desk route, the card leg, every fixture — is unchanged. See
+     buildUnusualRows for why the feed needs it and why null omits the key. */
+  stage = null,
 } = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
   const truncated = all.length >= CHAIN_PAGE_SIZE;
@@ -732,12 +764,26 @@ export function buildChainPanels(chainRows, {
      are on the old scale, so its moneyness is nonsense against today's spot,
      and its volume ranks it first on the tape. Dropped by root, counted, and
      the count is published rather than being an invisible filter. */
-  const rows = ticker
-    ? all.filter((r) => {
-      const p = parseOptionSymbol(r && r.option_symbol);
-      return p && p.ticker === ticker;
-    })
-    : all;
+  /* PARSED ONCE, HERE, AND THREADED DOWN.
+
+     This filter used to parse every contract and throw the parse away, and so
+     did priceSale, buildTopContracts, buildAggressor and buildUnusualRows
+     below — five passes of OPTION_SYMBOL_RE plus five trim/upper-case copies
+     over the same 500 strings, on every one of the deep names. Measured at
+     0.264ms a pass over a full page, which made the four redundant passes
+     about a fifth of this function.
+
+     The pairs carry the parse WITH the row, never a parallel array indexed by
+     position: a filter or a sort between here and a consumer would silently
+     reindex the latter, and pricing one contract with another's strike is the
+     class of defect this file already refuses in three other places. */
+  const pairs = all.map((row) => ({ p: parseOptionSymbol(row && row.option_symbol), row }));
+  /* Named for what it is and NOT `kept`: `kept` is already taken further down
+     by preferOutOfTheMoney's surviving priced contracts, and two different
+     populations under one name in one function is how a builder ends up handed
+     the surface's rows where it wanted the chain's. */
+  const parsedRows = ticker ? pairs.filter((x) => x.p && x.p.ticker === ticker) : pairs;
+  const rows = ticker ? parsedRows.map((x) => x.row) : all;
   const foreignRows = all.length - rows.length;
   if (!rows.length) {
     const reason = foreignRows
@@ -767,8 +813,8 @@ export function buildChainPanels(chainRows, {
      is downstream of getting it right once. */
   const conv = ivConvention(rows.map((r) => numOrNull(r && r.implied_volatility)));
   const priced = [];
-  for (const row of rows) {
-    const p = priceSale(row, { spot, asOf, ivDivisor: conv.divisor });
+  for (const pair of parsedRows) {
+    const p = priceSale(pair.row, { spot, asOf, ivDivisor: conv.divisor, parsed: pair.p });
     if (p) priced.push(p);
   }
 
@@ -868,8 +914,8 @@ export function buildChainPanels(chainRows, {
     ivBasis: conv.basis,
     ivSurface: serial,
     skewTerm: buildSkewTerm(serial, scalars),
-    topContracts: buildTopContracts(rows, { spot, ivDivisor: conv.divisor }),
-    aggressor: buildAggressor(rows, { spot }),
+    topContracts: buildTopContracts(rows, { spot, ivDivisor: conv.divisor, parsed: parsedRows }),
+    aggressor: buildAggressor(rows, { spot, parsed: parsedRows }),
     /* THE UNUSUAL-ACTIVITY FEED'S CONTRIBUTION FROM THIS CHAIN, built HERE
        and not by the caller, because three things it needs exist only in this
        scope and every one of them is a correctness requirement rather than a
@@ -890,6 +936,7 @@ export function buildChainPanels(chainRows, {
        name the chain leg reached and published once, under `unusual`. */
     unusualRows: buildUnusualRows(rows, {
       ticker, spot, ivDivisor: conv.divisor, sessionDate: asOf, truncated,
+      stage, parsed: parsedRows,
     }),
     ivDivisor: conv.divisor,
     /* THE OPEN-INTEREST BASIS CHECK, computed here for the same reason the

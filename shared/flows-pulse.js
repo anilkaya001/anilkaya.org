@@ -30,6 +30,7 @@
    ============================================================= */
 
 import { parseOptionSymbol } from "./flows-premium.js";
+import { REFRESH_CADENCE_MINUTES } from "./flows-freshness.js";
 
 /* Absent in, absent out — Number(null) is 0 and a confident zero is
    the house defect. Same idiom as flows-scores.js and flows-alerts.js. */
@@ -285,7 +286,29 @@ const SHAPERS = {
  * that its neighbours are untouched by it.
  */
 export function buildPulse(raws = {}) {
-  const out = { notes: PULSE_NOTES };
+  /* THE CADENCE RIDES ON THE PAYLOAD, so the browser stops keeping its own copy
+     of it.
+
+     assets/js/flows-market.js decides whether this feed's stamp is still worth
+     believing — "one cadence plus one cadence of slack: a cron that fired late
+     is not yet a cron that stopped firing" — and to do that it needs the number
+     the Worker's cron is actually configured for. It could not import
+     shared/flows-freshness.js, because shared/ is not served to the browser, so
+     it declared its own `var REFRESH_CADENCE_MINUTES = 15` under a comment
+     naming the problem: "this constant mirrors it and this comment is the only
+     link between them. The right end state is the pulse payload carrying its
+     own cadence, which would make this constant deletable."
+
+     This is that end state. A constant duplicated across a boundary with a
+     comment for a link is a constant that will eventually disagree with itself,
+     and the failure is silent in the worst direction: raise the cron to thirty
+     minutes and the page goes on calling a twenty-five-minute-old read stale,
+     which trains a reader to ignore the one banner that tells them the data
+     stopped moving.
+
+     Imported rather than restated here for exactly the same reason — this file
+     is not allowed to be the third copy. */
+  const out = { notes: PULSE_NOTES, cadenceMinutes: REFRESH_CADENCE_MINUTES };
   for (const feed of PULSE_FEEDS) {
     const raw = raws[feed];
     if (raw && typeof raw === "object" && !Array.isArray(raw) && raw.__failed) {

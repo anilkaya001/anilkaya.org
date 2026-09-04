@@ -44,7 +44,7 @@ import {
   unusualNameRow, rankUnusualNames,
   describeFlowAlerts, describeOiBasis, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
-import { buildChainPanels } from "../shared/flows-chain.js";
+import { buildChainPanels, buildTopContracts, buildAggressor } from "../shared/flows-chain.js";
 import { daysToExpiry, SHARES_PER_CONTRACT } from "../shared/flows-premium.js";
 import { fakeChain, screenerTilt } from "../scripts/flows-pipeline.mjs";
 
@@ -449,8 +449,33 @@ const rebuild = (em) => {
 
 /* ---------- §8 st is null when EITHER average is missing --------- */
 {
-  const em = PAYLOAD.names.rows.find(REBUILDABLE);
-  const row = rebuild(em);
+  /* THE ROW IS CHOSEN FOR THE PROPERTY UNDER TEST, not taken first.
+
+     This read `PAYLOAD.names.rows.find(REBUILDABLE)` — whichever rebuildable
+     row happened to be at the front — and then asserted that a one-sided
+     fallback on THAT row would publish at least half again its true ratio.
+     But that margin is a property of the row's own call/put balance, not of
+     the module: it held only while the corpus happened to put a lopsided name
+     first. Widening the dry-run screener's earnings window changed which names
+     clear the gate, a differently balanced row moved to the front, and the
+     assertion failed on a change that touched nothing it was testing —
+     2.29 against a true 1.879, a real margin that simply was not 1.5x.
+
+     So the row is SEARCHED FOR, by the very quantity the section is about,
+     and the search coming back empty is itself the finding: it would mean the
+     corpus contains no name lopsided enough to demonstrate what the guard
+     prevents, which is a fixture problem and should be reported as one rather
+     than passing quietly on a row that proves nothing. */
+  const candidates = PAYLOAD.names.rows.filter(REBUILDABLE).map((r) => {
+    const built = rebuild(r);
+    const oneSided = (Number(built.call_volume) + Number(built.put_volume)) /
+      Number(built.avg_30_day_put_volume);
+    return { em: r, built, oneSided, margin: oneSided / r.st };
+  }).sort((a, b) => b.margin - a.margin);
+
+  ok(candidates.length > 0, "the corpus offers a rebuildable name row to work from");
+  const em = candidates[0].em;
+  const row = candidates[0].built;
   const st = (r) => unusualNameRow(r, screenerTilt(r)).st;
   eq(st(row), em.st, "the intact row reproduces the emitted st");
 
@@ -465,8 +490,7 @@ const rebuild = (em) => {
 
   /* The specific lie: the numerator is (call + put), so a module that fell back
      to the surviving denominator would publish roughly double the true ratio. */
-  const inflated = (Number(row.call_volume) + Number(row.put_volume)) /
-    Number(row.avg_30_day_put_volume);
+  const inflated = candidates[0].oneSided;
   ok(inflated > em.st * 1.5,
      `the one-sided fallback would have published about ${inflated.toFixed(2)} against a ` +
      `true ${em.st} — the failure this null is refusing, and it is large enough to be a ` +
@@ -928,6 +952,27 @@ const rebuild = (em) => {
      "a percent-quoted chain decides on a divisor of 100 from its own median");
   eq(panel.ivDivisor, 1, "while the fraction-quoted one decides on 1");
 
+  /* ---- the board's own view of the name, threaded through --------
+
+     The alerts table beside this feed has carried a Stage column since it
+     shipped and the counter feed carried none, so a 40x volume-over-open-
+     interest on a name the board ranks LONG and the same ratio on a name it
+     scored into the dead band were indistinguishable on this page. */
+  const staged = buildChainPanels(CHAIN,
+    { spot: SPOT, asOf: "2026-08-24", ticker: "SYN001", stage: "long" });
+  ok(staged.unusualRows.length > 0 && staged.unusualRows.every((r) => r.st === "long"),
+     "a stage supplied to buildChainPanels reaches every row of the feed it builds");
+  ok(panel.unusualRows.every((r) => !("st" in r)),
+     "AND ITS ABSENCE OMITS THE KEY rather than publishing null on every row: sixty " +
+     "rows of `\"st\":null` is bytes spent saying nothing, and a renderer testing for " +
+     "the key can tell a payload built before this shipped from a name with no stage");
+  ok(buildUnusualRows(CHAIN, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24" })
+    .every((r) => !("st" in r)),
+     "and the same holds when the feed builder is called directly");
+  ok(buildUnusualRows(CHAIN, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24",
+    stage: "" }).every((r) => !("st" in r)),
+     "an empty string is not a stage either — it would render as a badge with no word in it");
+
   const bySymbol = new Map();
   for (const r of pct) {
     const m = /^SYN001(\d{2})(\d{2})(\d{2})([PC])(\d{8})$/.exec(r.option_symbol);
@@ -966,6 +1011,89 @@ const rebuild = (em) => {
   /* And the diagnostic is computed in the same scope, on the same rows. */
   ok(panel.oiBasis && typeof panel.oiBasis.verdict === "string",
      "the open-interest basis check rides along on the same root-filtered rows");
+}
+
+/* ---------- §14b one chain, one parse of every symbol ------------ */
+
+/* THE COST THIS PINS IS REAL AND WAS MEASURED, not guessed at.
+
+   buildChainPanels has five consumers of the same contract symbols — the root
+   filter, priceSale, the top-contract tape, the aggressor ladder and this feed
+   — and each of them used to run OPTION_SYMBOL_RE over the same string, each
+   parse paying a trim and an upper-case copy before the regex. At a full page
+   of 500 contracts across the deep set that is 125,000 regex executions where
+   25,000 do the same work.
+
+   Counting is done by making `option_symbol` a GETTER, which is the only
+   honest way to measure it from outside: every parse must read the property
+   exactly once, so the read count IS the parse count and no instrumentation of
+   the module under test is required.
+
+   THE EXPECTED NUMBER IS EXACT, not a bound. One parse for every row the
+   vendor sent, plus one further read per PRICED row — priceSale echoes the
+   symbol back onto the sale it returns, which is a copy and not a parse. A
+   bound like "fewer than five passes" would still pass if a sixth consumer
+   were added and two were removed; the equality fails the moment anyone parses
+   twice. */
+{
+  let reads = 0;
+  const counted = CHAIN.map((row) => {
+    const sym = row.option_symbol;
+    const o = {};
+    for (const k of Object.keys(row)) if (k !== "option_symbol") o[k] = row[k];
+    Object.defineProperty(o, "option_symbol", {
+      get() { reads++; return sym; }, enumerable: true,
+    });
+    return o;
+  });
+  const opts = { spot: SPOT, asOf: "2026-08-24", ticker: "SYN001" };
+
+  reads = 0;
+  const panel = buildChainPanels(counted, opts);
+  const panelReads = reads;
+  eq(panel.status, "ok", "the counted chain still builds a panel");
+  eq(panelReads, CHAIN.length + panel.pricedRows,
+     `every symbol is parsed ONCE (${CHAIN.length} rows) and read once more only where ` +
+     `priceSale copies it onto a sale (${panel.pricedRows} priced) — ${panelReads} reads in ` +
+     "total, against the five passes the five consumers used to take");
+
+  /* THE FIXTURE CAN TELL THE TWO APART. A single consumer parsing for itself
+     costs one pass, so five of them cost five: the assertion above is only
+     meaningful because that baseline is far above it and is measured here
+     rather than asserted from memory. */
+  reads = 0;
+  buildUnusualRows(counted, { ticker: "SYN001", spot: SPOT, sessionDate: "2026-08-24" });
+  const soloReads = reads;
+  eq(soloReads, CHAIN.length,
+     "one standalone consumer parses every row exactly once, which is the unit the " +
+     "count above is expressed in");
+  ok(panelReads < soloReads * 3,
+     `and the whole panel now costs ${panelReads} reads where the five consumers alone ` +
+     `would cost about ${soloReads * 5}`);
+
+  /* AND THE ANSWER DID NOT CHANGE. Threading a parse down is worth nothing if
+     it moves a number, so the panel's three tape surfaces are compared against
+     the same builders parsing for themselves over the same root-filtered rows.
+     Deep equality, not a spot check: a strike shifted onto a neighbouring row
+     is exactly the failure a parallel array would produce, and it would leave
+     every count identical. */
+  const rooted = CHAIN.filter((r) => /^SYN001\d{6}[PC]\d{8}$/.test(r.option_symbol));
+  const bare = buildChainPanels(CHAIN, opts);
+  assert.deepEqual(
+    bare.unusualRows,
+    buildUnusualRows(rooted, {
+      ticker: "SYN001", spot: SPOT, ivDivisor: bare.ivDivisor,
+      sessionDate: "2026-08-24", truncated: false,
+    }),
+    "the threaded feed is row-for-row what the standalone builder answers"); checks++;
+  assert.deepEqual(
+    bare.topContracts,
+    buildTopContracts(rooted, { spot: SPOT, ivDivisor: bare.ivDivisor }),
+    "and so is the top-contract tape"); checks++;
+  assert.deepEqual(
+    bare.aggressor,
+    buildAggressor(rooted, { spot: SPOT }),
+    "and the aggressor ladder"); checks++;
 }
 
 /* ---------- §15 the root filter is UPSTREAM of the x100 ---------- */
@@ -1035,6 +1163,217 @@ const rebuild = (em) => {
      "adjusted series' pre-split strike would look like against a live spot");
 }
 
+/* ============================================================
+   §16. THE PAGE, IN A BROWSER.
+
+   Everything above is arithmetic the shaper can be held to. What
+   this section pins is the half the arithmetic cannot reach: two
+   payloads, two fetches, and a page that has to join them without
+   letting either one's failure become the other's.
+
+   THE JOIN IS THE POINT. The alerts table and the counter feed carry
+   the same four-tuple — name, side, strike, expiry — and until this
+   layer a trader could find a contract in both only by scanning sixty
+   rows against fifty by hand. AAA appears in both fixtures below and
+   ZZZ and BBB appear in exactly one each, so a mark that fired on
+   everything, or on nothing, fails here rather than shipping.
+   ============================================================ */
+{
+  /* The alerts <thead> in shared/flows-pages.js has ten columns and the
+     renderer's ALERT_COLS has to match it exactly or the wiring bails; the
+     count is written here rather than imported because the renderer is a
+     browser IIFE with nothing to import from. */
+  const ALERT_COLUMNS = 10;
+  const { chromium } = await import("playwright");
+  const { signSession } = await import("../shared/session.js");
+  const { startWorker, SESSION_SECRET, FLOWS_TEST_USER } =
+    await import("./worker-server.mjs");
+
+  const INGEST = "unusual-token-aaaaaaaa";
+  const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST}`] });
+  const at = (path) => server.baseURL + path;
+  const session = await signSession(
+    { sub: FLOWS_TEST_USER, aud: "flows", epoch: "1", exp: Date.now() + 600000 },
+    SESSION_SECRET);
+  const put = (key, body) => fetch(at("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST },
+    body: JSON.stringify(body),
+  });
+
+  const contract = (t, cp, k, expiry, vol, stage) => {
+    const row = {
+      t, k, expiry, cp, vol, oi: 100, doi: 5, vor: vol / 100, bidPx: 1, askPx: 1.2,
+      nlo: 1000, nhi: 1200, aggr: 10, lift: 0.6, iv: 0.3, m: 0.01, dte: 20, p: 0,
+    };
+    /* BBB carries no stage, so the badge has a negative case to fail on: a
+       renderer that drew one unconditionally would pass an assertion that only
+       looked at AAA. */
+    if (stage) row.st = stage;
+    return row;
+  };
+  await put("unusual", {
+    v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", status: "ok",
+    contracts: {
+      rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long"),
+             contract("BBB", "P", 50, "2026-10-16", 400)],
+      shown: 2, eligible: 2, cap: 60, perName: 30, capBound: null,
+    },
+    coverage: [{ t: "AAA", rows: 400 }, { t: "BBB", rows: 300 }],
+    namesSeen: 2, dteAnchor: "sessionDate",
+    names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0, earningsGated: 0 },
+    basis: { unit: "A contract counter, and not a trade.",
+             date: "no date parameter, the span is unobserved, readAt is when it was read" },
+  });
+  await put("flowalerts", {
+    v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
+    seen: 2, shed: 0, cap: 50, coverage: { withContract: 2, calls: 1, puts: 1 },
+    rows: [
+      /* AAA is in BOTH feeds, on the same strike and the same expiry. */
+      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", oc: "AAA260918C00100000",
+        prem: 250000, askPrem: 200000, bidPrem: 50000, size: 800, trades: 12,
+        sweep: true, floor: false, single: true, opening: null,
+        spanStart: "2026-09-01T13:31:00Z", spanEnd: "2026-09-01T13:36:00Z",
+        rule: "RepeatedHits", st: "long" },
+      /* ZZZ is in the vendor's selection only — the counter feed never saw it. */
+      { t: "ZZZ", cp: "P", k: 20, exp: "2026-09-25", oc: "ZZZ260925P00020000",
+        prem: 90000, askPrem: 10000, bidPrem: 80000, size: 300, trades: 4,
+        sweep: false, floor: false, single: false, opening: false,
+        spanStart: "2026-09-01T14:00:00Z", spanEnd: "2026-09-01T14:02:00Z",
+        rule: "Sweep", st: "foreign" },
+    ],
+  });
+
+  const browser = await chromium.launch();
+  try {
+    /* 320px FROM THE FIRST FRAME. Zero horizontal overflow is a tested
+       invariant of this site, and the filter group added here is four pills in
+       a flex row whose shared rule does not wrap. */
+    const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    const thrown = [];
+    page.on("pageerror", (e) => thrown.push(String(e)));
+    await page.context().addCookies([{
+      name: "flows_session", value: session, url: server.baseURL,
+    }]);
+    await page.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+    await page.waitForSelector("#uaFeedBody tr");
+
+    const first = await page.evaluate(() => ({
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      feedBoth: [...document.querySelectorAll("#uaFeedBody .ua-both")].length,
+      feedBothTitle: (document.querySelector("#uaFeedBody .ua-both") || {}).title || "",
+      alertBoth: [...document.querySelectorAll("#uaAlertsBody .ua-both")].length,
+      feedRows: document.querySelectorAll("#uaFeedBody tr").length,
+      alertRows: document.querySelectorAll("#uaAlertsBody tr").length,
+      alertHeads: document.querySelectorAll("#uaAlerts thead .fb-sort").length,
+      feedHeads: document.querySelectorAll("#uaFeed thead .fb-sort").length,
+      pressed: [...document.querySelectorAll("#uaFilters button")]
+        .map((b) => b.textContent + ":" + b.getAttribute("aria-pressed")),
+      stages: [...document.querySelectorAll("#uaFeedBody tr")]
+        .map((tr) => (tr.querySelector(".ua-stage") || {}).textContent || null),
+    }));
+    eq(first.overflow, 0, "nothing overflows at 320px with the filter group on the page");
+    eq(thrown.length, 0, `the page threw nothing: ${thrown.join("; ")}`);
+
+    eq(first.alertHeads, ALERT_COLUMNS,
+       "EVERY ALERTS HEADING IS A SORT CONTROL. This table was the newer, richer and " +
+       "fresher of the two on the page and was the one a reader could not rank at all — " +
+       "wireHeads opened with a guard on the feed table and served it alone");
+    eq(first.feedHeads, 10, "and the counter feed keeps its own, unchanged");
+
+    eq(first.feedBoth, 1,
+       "exactly one counter-feed row is marked as also flagged by the vendor — a mark " +
+       "that fired on every row, or on none, would pass a laxer assertion than this");
+    eq(first.alertBoth, 1, "and exactly one alerts row is marked reciprocally");
+    ok(/RepeatedHits/.test(first.feedBothTitle),
+       "with the vendor's own rule named on the mark rather than left to a legend");
+    ok(/premium/.test(first.feedBothTitle),
+       "and the window's premium beside it, so the mark carries the reading and not just " +
+       "the fact of a match");
+    deep(first.pressed, ["All:true", "Calls:false", "Puts:false", "Both feeds:false"],
+       "the filter group starts unfiltered and says so on every control");
+
+    deep(first.stages, ["long", null],
+       "THE BOARD'S OWN VIEW REACHES THE COUNTER FEED'S NAME CELL, and only where the " +
+       "payload states one — a badge drawn unconditionally would look identical on the " +
+       "row that carries a stage and would be a fabrication on the row that does not");
+
+    /* THE FILTER IS ONE CONTROL OVER TWO TABLES. A filter that narrowed one
+       and not the other would publish two counts of one population. */
+    await page.click("#uaFilters button:nth-child(3)");
+    const puts = await page.evaluate(() => ({
+      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
+        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
+      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      note: document.getElementById("uaFilterNote").textContent,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    }));
+    deep(puts.feed, ["BBB"], "filtering to puts narrows the counter feed");
+    deep(puts.alerts, ["ZZZ"], "and the alerts table, from the same control");
+    ok(/1 of 2 flagged windows and 1 of 2 contracts/.test(puts.note),
+       `and the note states both drawn counts against both published ones — got: ${puts.note}`);
+    ok(/published and hidden, not absent from the read/.test(puts.note),
+       "SO A NARROWED TABLE IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
+       "risk a filter introduces to a page that reports what a vendor did not send");
+    eq(puts.overflow, 0, "and the filtered page still does not overflow at 320px");
+
+    /* IN BOTH FEEDS: the single strongest reading this page can produce, and
+       the one that needed sixty rows read against fifty by hand. */
+    await page.click("#uaFilters button:nth-child(1)");
+    await page.click("#uaFilters button:nth-child(4)");
+    const both = await page.evaluate(() => ({
+      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
+        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
+      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+    }));
+    deep(both.feed, ["AAA"],
+      "the counter feed narrows to the one contract both selections agree on");
+    deep(both.alerts, ["AAA"],
+      "and so does the vendor's table — two independent selections, one line");
+
+    /* THE ALERTS TABLE RANKS, AND SAYS SO TO A SCREEN READER. */
+    await page.click("#uaFilters button:nth-child(4)");        // release the join filter
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    const ranked = await page.evaluate(() => ({
+      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
+      others: [...document.querySelectorAll("#uaAlerts thead th")]
+        .map((n) => n.getAttribute("aria-sort")),
+      label: document.querySelector("#uaAlerts thead th:nth-child(3) .fb-sort")
+        .getAttribute("aria-label"),
+    }));
+    deep(ranked.order, ["AAA", "ZZZ"], "premium ranks the larger window first");
+    eq(ranked.aria, "descending", "with aria-sort carrying the state, not the glyph");
+    eq(ranked.others.filter((v) => v === "none").length, ALERT_COLUMNS - 1,
+       "and every other heading is explicitly reset — a stale attribute announces two " +
+       "sorted columns and there is only ever one");
+    ok(/activate to/.test(ranked.label),
+       "with an accessible name that names the action rather than the abbreviation");
+
+    /* A THIRD ACTIVATION RETURNS THE VENDOR'S OWN ORDER. The published rank
+       must be recoverable: it is the ordering the payload argued for. */
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
+    const restored = await page.evaluate(() => ({
+      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
+        .map((n) => n.firstChild.textContent),
+      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
+    }));
+    deep(restored.order, ["AAA", "ZZZ"], "the third activation restores the published order");
+    eq(restored.aria, "none", "and reports no ranking at all");
+    eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
+  } finally {
+    /* THE WORKER IS A CHILD PROCESS AND IT MUST BE STOPPED. Without this the
+       suite prints its success line and then hangs forever holding a wrangler
+       process open — which reads to a runner exactly like a failing test. */
+    await browser.close();
+    await server.stop();
+  }
+}
+
 console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite because the ` +
   `population is defined and not because a guard caught it, floors that decide membership ` +
   `and claim nothing about what they exclude, a lift and a notional bracket withheld whole ` +
@@ -1042,5 +1381,11 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `a per-name cap derived from the board and the binding constraint named, a name with no ` +
   `30-day average counted rather than ranked at zero, twelve probe outcomes that stay ` +
   `pairwise distinct so a rate limit never becomes a refusal, a diagnostic whose zero ` +
-  `branch says INCONCLUSIVE in words, and a vocabulary ban enforced over the payload's own ` +
-  `prose with four named exceptions and no weakened regex`);
+  `branch says INCONCLUSIVE in words, a vocabulary ban enforced over the payload's own ` +
+  `prose with four named exceptions and no weakened regex, one parse of every contract ` +
+  `symbol per chain counted through a getter rather than asserted from memory, the board's ` +
+  `own stage threaded to the feed and OMITTED rather than nulled when absent, and — in a ` +
+  `browser at 320px — two payloads joined on the four-tuple they share with a mark that ` +
+  `fires on exactly the one contract both selections chose, a filter group both tables ` +
+  `honour whose note keeps a narrowed table from reading as a thin market, and an alerts ` +
+  `table that finally ranks, announces its ranking, and gives the vendor's order back`);

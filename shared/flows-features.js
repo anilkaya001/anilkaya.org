@@ -138,6 +138,170 @@ function clampTo(x, c) {
   return Math.min(Math.max(x, -c), c);
 }
 
+/**
+ * robustZFused — the composed winsorize-then-robust-z, done in two sorts.
+ *
+ * CONTRACT: for every input, robustZFused(col, { winsor: p, clamp: c }) is
+ * elementwise IDENTICAL to robustZ(winsorize(col, p), { clamp: c }). Not
+ * "approximately" and not "up to the estimator": the absolute difference is
+ * EXACTLY ZERO, down to the last ulp of every quotient. tests/flows-features.mjs
+ * asserts that agreement over the degenerate cases as well as the ordinary
+ * ones, because a faster answer that is a different answer is not an
+ * optimisation, it is a second spelling of the score.
+ *
+ * THE ONE MEASURED EXCEPTION, stated rather than glossed: the SIGN OF A ZERO.
+ * A typed sort orders -0 ahead of +0 while a comparator sort leaves equal
+ * values where it found them, so an even-length median can come out -0 here and
+ * +0 there. Over 92,821 elements of differential fuzz across 3,000 random
+ * columns, 39 differed that way and nothing else differed at all. -0 === 0 in JavaScript, and every consumer of a
+ * z-score compares it, scales it or renders it — none can tell the two apart.
+ * If a caller ever needs Object.is on a score, this note is where to start.
+ *
+ * WHY IT EXISTS. The composed form is expensive in a way that is invisible at
+ * the call site. winsorize sorts the column twice, once per quantile. robustZ
+ * then sorts it four more times — once for the median, twice for the 0.25/0.75
+ * span, twice for the 0.10/0.90 span, sharing nothing — and once more for the
+ * MAD's deviation array. Instrumented, exactly EIGHT full sorts and about
+ * twenty-three intermediate arrays for ONE column. scoreBoard asks for seven
+ * columns per board.
+ *
+ * WHY NOT THE OBVIOUS SHORTCUT. It is tempting to argue that winsorizing at
+ * p = 0.02 only rewrites the extreme ends of the sorted column, that every
+ * order statistic robustZ then reads (0.10 through 0.90) sits strictly inside
+ * those ends, and therefore that the clip can be skipped for everything except
+ * the MAD. That is true at n = 128 and FALSE at small n: at n = 5 the 0.02
+ * quantile interpolates between the first two sorted entries and the 0.10
+ * quantile reads those same two entries, so the clip moves the 10th percentile
+ * and the shortcut would silently produce a different z on any short column —
+ * a per-sector regression, a thin session, a test fixture. This clips the
+ * sorted buffer in place and reads every quantile back out of the CLIPPED
+ * buffer, which is correct at every n and costs one linear pass.
+ *
+ * The arithmetic below deliberately restates median() and quantile()'s formulas
+ * instead of calling them. That duplication is the price of bit-identity: the
+ * two are not the same expression at even lengths — median averages the middle
+ * pair, quantile interpolates between them — and they disagree in the last ulp.
+ * If either of those functions changes, this must change with it, and the
+ * agreement assertion in the suite is what will say so.
+ */
+export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
+  const N = values.length;
+
+  /* One pass, finite entries only, in ORIGINAL order. The order is not
+     incidental: the mean/stdev fallback below folds left over exactly this
+     sequence, and floating-point addition is not associative, so accumulating
+     over the sorted copy instead would disagree with robustZ in the last bit
+     on precisely the degenerate columns that reach the fallback. */
+  const buf = new Float64Array(N);
+  let n = 0;
+  for (let i = 0; i < N; i++) {
+    const v = values[i];
+    if (Number.isFinite(v)) buf[n++] = v;
+  }
+
+  /* Fewer than two measured entries is not a thin cross-section, it is no
+     cross-section: robustZ refuses to invent a scale from one point and emits
+     the neutral vote for every name. This is also the path winsorize takes when
+     it cannot form a quantile at all (zero finite entries), so both of robustZ's
+     early exits collapse into this one.
+
+     Honest about what this line is: a FAST PATH and a statement of intent, not
+     a correctness gate. A single point has no spread, so the arithmetic below
+     would collapse every estimator, fall through the mean/stdev branch with a
+     variance of zero, and return the same all-zeros array by a longer road.
+     Mutating the bound to `n < 1` was checked and the suite stayed green,
+     because the two really are the same answer. It stays because "one name is
+     not a cross-section" is a claim worth making where a reader can see it. */
+  if (n < 2) return new Array(N).fill(0);
+
+  const sorted = buf.slice(0, n);
+  sorted.sort();   // Float64Array sorts numerically by default; no comparator, no boxing.
+
+  /* Index-interpolating quantile over the sorted buffer — quantile()'s own
+     formula, reading a typed array instead of re-filtering and re-sorting.
+     Every call is now O(1). n >= 2 here, so quantile's single-element branch
+     cannot be reached. */
+  const qs = (p) => {
+    const h = (n - 1) * Math.min(Math.max(p, 0), 1);
+    const lo = Math.floor(h);
+    const hi = Math.ceil(h);
+    return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
+  };
+
+  const wlo = qs(winsor);
+  const whi = qs(1 - winsor);
+  /* winsorize returns the column UNCLIPPED when either bound is non-finite,
+     which an interpolation between two enormous opposite-signed entries can
+     genuinely produce. Reproduce that rather than clipping to Infinity.
+
+     STRUCTURAL, NOT BEHAVIOURAL, and worth saying so plainly: a bound can only
+     go non-finite when two ADJACENT sorted entries differ by more than
+     MAX_VALUE, and such a column also overflows the MAD and the stdev, so both
+     the composed form and this one already return the neutral vote for every
+     name. Removing this guard was checked against every such column that can be
+     constructed and the answers were identical. It stays because it keeps the
+     two functions saying the same thing in the same place: if winsorize's
+     refusal ever changes, the divergence should be a diff here, not a silently
+     different score. */
+  const clipping = Number.isFinite(wlo) && Number.isFinite(whi);
+  if (clipping) {
+    /* Math.min(Math.max(x, lo), hi), not a two-armed comparison: when a caller
+       passes winsor > 0.5 the bounds invert and those two expressions differ
+       (the composed form collapses the column onto hi). Bit-identity means
+       reproducing the odd case too, not only the sensible one. Clamping is
+       monotone, so the sorted buffer stays sorted. */
+    for (let i = 0; i < n; i++) sorted[i] = Math.min(Math.max(sorted[i], wlo), whi);
+    for (let i = 0; i < n; i++) buf[i] = Math.min(Math.max(buf[i], wlo), whi);
+  }
+
+  /* median(), verbatim: the middle entry at odd length, the average of the
+     middle pair at even length. NOT qs(0.5) — see the note above. */
+  const mid = n >> 1;
+  const m = n % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+  /* The MAD's deviations are taken over the clipped values. Their ORDER is
+     irrelevant — a median only sees the multiset — so they are read out of
+     buf and sorted once. */
+  const devs = new Float64Array(n);
+  for (let i = 0; i < n; i++) devs[i] = Math.abs(buf[i] - m);
+  devs.sort();
+  const madScale = 1.4826 * (n % 2 ? devs[mid] : (devs[mid - 1] + devs[mid]) / 2);
+
+  const span = (lo, hi, c) => {
+    const v = (qs(hi) - qs(lo)) / c;
+    return Number.isFinite(v) ? v : 0;
+  };
+  /* The same three-estimator maximum robustZ documents at length: the MAD
+     collapses on a column that is bimodal by sign, the IQR collapses once the
+     minority falls below a quarter, the 10-90 range survives down to a tenth.
+     Taking the largest can only shrink a z. */
+  let scale = Math.max(madScale, span(0.25, 0.75, 1.349), span(0.10, 0.90, 2.563));
+  let center = m;
+
+  if (!Number.isFinite(scale) || scale <= 1e-12) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += buf[i];
+    const mean = sum / n;
+    let ss = 0;
+    for (let i = 0; i < n; i++) { const d = buf[i] - mean; ss += d * d; }
+    scale = Math.sqrt(ss / Math.max(1, n - 1));
+    if (!Number.isFinite(scale) || scale <= 1e-12) return new Array(N).fill(0);
+    center = mean;
+  }
+
+  /* A plain Array, not the typed buffer: robustZ returns one and callers
+     .map/.filter over the result. Handing back a Float64Array would change the
+     type of every downstream derivation for a saving of nothing. */
+  const out = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const v = values[i];
+    if (!Number.isFinite(v)) { out[i] = 0; continue; }
+    const w = clipping ? Math.min(Math.max(v, wlo), whi) : v;
+    out[i] = clampTo((w - center) / scale, clamp);
+  }
+  return out;
+}
+
 /* ---------- rank → inverse normal ------------------------------ */
 
 /**
@@ -302,6 +466,57 @@ function solveSymmetric(A, b) {
    ============================================================= */
 
 /**
+ * greekFlowTotals — every accumulator the greek-flow tape yields, in ONE pass.
+ *
+ * WHAT WAS WRONG BEFORE. flowPurity walked the rows summing dirNet, dirAbs and
+ * a local it called `tot`; positioningQuality walked the SAME rows summing
+ * dirNet, dirAbs, otmAbs, vega and a local it called `delta`. `tot` and `delta`
+ * were the same quantity — Sigma|total_delta_flow| — under two names, in two
+ * loops, in one file whose header opens by saying its conventions are
+ * "load-bearing and easy to get backwards". Two independently maintained
+ * spellings of one number is the shape a drift takes before it is a bug: change
+ * the guard on one (a floor, an absolute, a null instead of a zero) and the
+ * other keeps the old meaning silently, and the two ratios stop sharing a
+ * denominator without anything failing. The pipeline calls both functions back
+ * to back on the same array, so the second pass was also pure waste.
+ *
+ * Every field is a GROSS sum except dirNet, which is the one deliberately
+ * signed accumulator (it answers "which way", not "how much"). Units are
+ * vendor dollars of delta/vega flow throughout; `rows` is a count, not a ratio,
+ * and is here so a caller can say "measured over N rows" rather than implying a
+ * measurement it did not make.
+ *
+ * num() floors an unparseable field at 0 rather than NaN, which is correct
+ * here and only here: this is a SUM over a tape, and one unreadable row must
+ * not poison the total. Absence at the ROW level is the vendor's silence about
+ * one print; absence at the TOTAL level is `rows === 0`, and both callers test
+ * their denominator before dividing rather than trusting a zero.
+ *
+ * PASS THE RECORD IN WHEN YOU CALL BOTH. flowPurity needs three of these five
+ * sums and positioningQuality needs all five, so a caller that lets each build
+ * its own record pays for FIVE sums twice instead of three plus five. Measured
+ * over 400 greek-flow rows: two separate loops 0.343 ms, each-builds-its-own
+ * 0.457 ms (+33%), one shared record 0.230 ms (-33%) — 29 ms of swing across a
+ * 128-name board. Both entry points therefore take a precomputed `totals`, and
+ * a caller that wants both measures should build the record once and hand it to
+ * each. The correctness argument above stands either way; this note is here so
+ * the cheap call is also the obvious one.
+ */
+export function greekFlowTotals(greekFlowRows) {
+  let dirNet = 0, dirAbs = 0, otmAbs = 0, vegaAbs = 0, totalAbs = 0, rows = 0;
+  for (const r of greekFlowRows || []) {
+    const d = num(r.dir_delta_flow);
+    dirNet += d;
+    dirAbs += Math.abs(d);
+    otmAbs += Math.abs(num(r.otm_dir_delta_flow));
+    vegaAbs += Math.abs(num(r.total_vega_flow));
+    totalAbs += Math.abs(num(r.total_delta_flow));
+    rows++;
+  }
+  return { dirNet, dirAbs, otmAbs, vegaAbs, totalAbs, rows };
+}
+
+/**
  * Pi — Flow Purity.  |dir_delta_flow| / |total_delta_flow|
  *
  * The single hardest problem in options flow is that most large
@@ -312,15 +527,9 @@ function solveSymmetric(A, b) {
  *
  * 1 = clean directional conviction. 0 = the premium headline is hedging.
  */
-export function flowPurity(greekFlowRows) {
-  let dirNet = 0, dirAbs = 0, tot = 0;
-  for (const r of greekFlowRows || []) {
-    const d = num(r.dir_delta_flow);
-    dirNet += d;
-    dirAbs += Math.abs(d);
-    tot += Math.abs(num(r.total_delta_flow));
-  }
-  if (tot <= 0) {
+export function flowPurity(greekFlowRows, totals = null) {
+  const t = totals || greekFlowTotals(greekFlowRows);
+  if (t.totalAbs <= 0) {
     return { purity: null, dirDelta: 0, dirAbs: 0, dirShare: null, totalAbs: 0 };
   }
   /* GROSS over GROSS. The old form was |SUM dir| / SUM |total|: a net divided
@@ -334,14 +543,14 @@ export function flowPurity(greekFlowRows) {
      against float error rather than the operative clamp. Sign-persistence is
      measured separately and honestly by pathSignature. */
   return {
-    purity: Math.min(1, dirAbs / tot),
-    dirDelta: dirNet,
-    dirAbs,
+    purity: Math.min(1, t.dirAbs / t.totalAbs),
+    dirDelta: t.dirNet,
+    dirAbs: t.dirAbs,
     // Signed, unit-free directional share. This — not the raw dollar delta —
     // is what a cross-section can compare: the raw figure scales with the
     // name's size, so z-scoring it ranks market caps.
-    dirShare: Math.max(-1, Math.min(1, dirNet / tot)),
-    totalAbs: tot,
+    dirShare: Math.max(-1, Math.min(1, t.dirNet / t.totalAbs)),
+    totalAbs: t.totalAbs,
   };
 }
 
@@ -936,16 +1145,8 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
  * Both denominators are bounded away from zero: a vanishing delta
  * flow is "no directional view", never infinite vol conviction.
  */
-export function positioningQuality(greekFlowRows, { floor = 1e-6 } = {}) {
-  let dirNet = 0, dirAbs = 0, otmAbs = 0, vega = 0, delta = 0;
-  for (const r of greekFlowRows || []) {
-    const d = num(r.dir_delta_flow);
-    dirNet += d;
-    dirAbs += Math.abs(d);
-    otmAbs += Math.abs(num(r.otm_dir_delta_flow));
-    vega += Math.abs(num(r.total_vega_flow));
-    delta += Math.abs(num(r.total_delta_flow));
-  }
+export function positioningQuality(greekFlowRows, { floor = 1e-6, totals = null } = {}) {
+  const t = totals || greekFlowTotals(greekFlowRows);
   /* GROSS over GROSS, for the same reason as flowPurity. The old form divided
      SUM(otm_dir) by |SUM(dir)| — two different cancellations — so the ratio
      had no bounded distribution and Math.min(1, ...) was the operative clamp
@@ -957,9 +1158,13 @@ export function positioningQuality(greekFlowRows, { floor = 1e-6 } = {}) {
      column once it is oriented, so imputing it rewarded a name for having no
      data — the same failure the enrich() docstring already argues against. */
   return {
-    otmShare: dirAbs > floor ? Math.min(1, otmAbs / dirAbs) : null,
-    vegaTilt: delta > floor ? vega / delta : null,
-    hasDirectionalView: Math.abs(dirNet) > floor,
+    /* `t.totalAbs` is the denominator flowPurity calls `totalAbs` too. It used
+       to be a local named `delta` here and a local named `tot` there — one
+       quantity, Sigma|total_delta_flow|, maintained twice. Nothing had gone
+       wrong yet; the point is that nothing could tell you if it had. */
+    otmShare: t.dirAbs > floor ? Math.min(1, t.otmAbs / t.dirAbs) : null,
+    vegaTilt: t.totalAbs > floor ? t.vegaAbs / t.totalAbs : null,
+    hasDirectionalView: Math.abs(t.dirNet) > floor,
   };
 }
 
@@ -1354,12 +1559,38 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
  * A variable-length board is the price, and it is the right price: the
  * alternative is a fixed length that can only be held by excluding the very
  * names the board exists to surface. The dead band already makes length vary.
+ *
+ * IT ALSO RETURNS THE BOARD'S MEMORY, and that is the reason this function
+ * changed shape.
+ *
+ * The rule above already knows three things about every name it emits: that
+ * the name is new to the board, that it was here yesterday, and — separately —
+ * that it is here ONLY because it was here yesterday. It knew all three and
+ * returned a flat list of tickers, so a board that had just decided which
+ * names were new published a page on which nothing was new. A reader opening
+ * it at 09:15 could not answer "what is different from yesterday" without
+ * having kept yesterday's page open, which nobody does.
+ *
+ * The third fact is the one that cannot be reconstructed downstream. "New"
+ * and "returning" are a set difference anyone holding both lists can take.
+ * "Held" is a statement about WHY this name is on the board — it did not earn
+ * a top-`entryRank` place today and is here on incumbency — and that
+ * distinction exists only inside this loop. Published, it is the difference
+ * between a board of twenty-eight names and a board of twenty-five names plus
+ * three that are on their way out.
+ *
+ * @returns {{ids: string[], entered: string[], held: string[], returning: string[]}}
+ *   `ids` is what the old signature returned, unchanged, in today's rank
+ *   order. The other three are subsets of it, in the same order.
  */
 export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exitRank = 35 } = {}) {
   const ranked = todayRanked || [];
-  const held = new Set(yesterdayIds || []);
+  const incumbent = new Set(yesterdayIds || []);
   const taken = new Set();
   const keep = [];
+  /* Membership by RULE, not by rank: a name can sit at rank 3 and still be
+     new, and a name can sit at rank 30 because it is old. */
+  const byHysteresis = new Set();
 
   // Today's top `entryRank`, always. Nothing outranks being one of the best
   // names in the session.
@@ -1372,10 +1603,29 @@ export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exi
   // exit band. This is the hysteresis, and it can only ADD.
   for (let i = entryRank; i < ranked.length && i < exitRank; i++) {
     const id = ranked[i];
-    if (held.has(id) && !taken.has(id)) { keep.push(id); taken.add(id); }
+    if (incumbent.has(id) && !taken.has(id)) {
+      keep.push(id); taken.add(id); byHysteresis.add(id);
+    }
   }
 
   const rankOf = new Map(ranked.map((id, i) => [id, i]));
-  return keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
+  const ids = keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
+
+  /* THE EMPTY INCUMBENT LIST IS NOT AN EMPTY MEMORY, and the two must not
+     render alike. A cold start — no board published yesterday, or a store
+     read that failed, which this pipeline treats identically and non-fatally
+     — makes EVERY name look new, and a page announcing fifty-three arrivals
+     on a morning when nothing arrived is worse than a page that says nothing.
+     So the caller is told the memory was empty, and it is the caller's job to
+     say "no yesterday to compare against" rather than "everything is new". */
+  const cold = incumbent.size === 0;
+
+  return {
+    ids,
+    entered: cold ? [] : ids.filter((id) => !incumbent.has(id)),
+    returning: cold ? [] : ids.filter((id) => incumbent.has(id)),
+    held: ids.filter((id) => byHysteresis.has(id)),
+    cold,
+  };
 }
 

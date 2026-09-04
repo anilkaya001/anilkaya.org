@@ -17,10 +17,25 @@
    shareable and reload-proof, which a private per-browser key is
    not. Same idiom as the board's side and view toggles.
 
-   EVERY NUMBER SAYS HOW OLD IT IS. The route serves from an edge
-   cache and answers a throttled refresh with the copy it already
-   has. A desk that renders a two-minute-old quote identically to a
-   live one is lying by omission, so the age ships in the row.
+   EVERY NUMBER SAYS HOW OLD IT IS, AND THE AGE IS A FUNCTION OF NOW.
+   The route serves from an edge cache and answers a throttled refresh
+   with the copy it already has. A desk that renders a two-minute-old
+   quote identically to a live one is lying by omission, so the age
+   ships in the row. It was still lying: X-Chain-Age was read once at
+   fetch and rendered forever, so a desk priced at 09:31 and left open
+   said "just now" at 10:11. The header states the age AT THE INSTANT
+   OF THE RESPONSE and everything after it is wall clock, so the
+   reception instant is stored beside it and the two are added at
+   render — on a thirty-second tick, because nothing else on this page
+   moves on its own.
+
+   THE TABLE IS A SLICE AND SAYS SO. The Worker ranks each chain and
+   keeps the top slice of it; a ranked list that truncates in silence
+   reads as "this is everything". Every cut is stated with the number
+   kept, the number it was cut from, and the ordering that decided it —
+   and because that ordering decided WHICH rows survived, changing the
+   ranking on a cut symbol cannot be honoured by re-sorting the rows in
+   hand. It goes back to the chain.
    ============================================================= */
 (() => {
   "use strict";
@@ -49,6 +64,19 @@
   const MAX_SYMBOLS = 20;           // each is a live vendor call; the ceiling is deliberate
   const CONCURRENCY = 3;
 
+  /* HOW OFTEN THE PRINTED AGES ARE REDRAWN. fmtAge() below is minute-grained
+     above forty-five seconds, so a half-minute tick is the coarsest period
+     that never shows a stale minute. Nothing else on this page moves without a
+     keystroke, which is exactly why the age used to freeze. */
+  const AGE_TICK_MS = 30000;
+
+  /* PAST THIS THE DESK STOPS CALLING THEM QUOTES. Deliberately NOT the
+     Worker's own cache TTL: coupling the browser to a server constant makes
+     two numbers that have to be edited together, and this is a different
+     statement anyway. Not "the cache would have expired" but "a table of bids
+     this old is a record of a market rather than a price in it". */
+  const QUOTE_STALE_SECONDS = 300;
+
   /* The SAME pattern the Worker validates against. If the two disagree, a
      symbol the user can add is one the API refuses, which reads as a broken
      desk rather than as a rejected input. */
@@ -60,6 +88,16 @@
   /** symbol -> { selected, state: "idle"|"loading"|"ok"|"error", payload, error } */
   const book = new Map();
   let inflight = 0;
+
+  /* WHOSE SENTENCE IS IN THE STATUS LINE. Most of the time it is
+     updateStatus()'s, which is free to rewrite it whenever anything changes.
+     Sometimes it is a one-off answer to something the reader just did — "that
+     is not a symbol", "the desk holds 20" — and the age tick, which fires on a
+     clock rather than on an action, must not silently eat one of those thirty
+     seconds after it was written. say() marks the line as the handler's; any
+     call to updateStatus() takes it back. */
+  let statusOwned = true;
+  function say(text) { statusEl.textContent = text; statusOwned = false; }
 
   /* THE ACCOUNT SIZE, or null when the reader has not said. Null is not zero
      and the two must not collapse: zero buying power would size every line to
@@ -133,6 +171,39 @@
     if (n < 45) return "just now";
     if (n < 5400) return Math.round(n / 60) + "m ago";
     return Math.round(n / 3600) + "h ago";
+  }
+
+  /* THE AGE OF A PAYLOAD, AT THE MOMENT OF ASKING. `__age` is what the route's
+     X-Chain-Age header said when the response arrived and `__at` is when that
+     was; everything since is the browser's own clock. The previous version
+     stored only the first number and printed it forever, so an hour-old desk
+     still read "just now" — the exact omission the file header calls out for
+     cached rows, committed by the code that was meant to prevent it.
+
+     A payload with no `__at` gets the header's reading unchanged rather than
+     an invented elapsed time: a missing reception instant means the age cannot
+     be advanced honestly, and guessing one is how a frozen number becomes a
+     wrong number. */
+  function ageOf(payload) {
+    if (!payload) return null;
+    const base = isNum(payload.__age);
+    if (base === null) return null;
+    const at = isNum(payload.__at);
+    if (at === null) return base;
+    return base + Math.max(0, (Date.now() - at) / 1000);
+  }
+
+  /** The oldest quote on the table right now, or null if nothing is priced. */
+  function oldestQuoteAge() {
+    let oldest = null;
+    for (const symbol of selectedSymbols()) {
+      const state = book.get(symbol);
+      if (!state || state.state !== "ok") continue;
+      const age = ageOf(state.payload);
+      if (age === null) continue;
+      if (oldest === null || age > oldest) oldest = age;
+    }
+    return oldest;
   }
 
   /* ---------- buying power ----------------------------------------
@@ -254,6 +325,38 @@
 
   /* ---------- the watchlist chips --------------------------------- */
 
+  /** Everything a chip says about one symbol, as text. Extracted from
+   *  renderList() so the age tick can redraw it in place — see tickAges(). */
+  function noteFor(entryState) {
+    if (!entryState) return "";
+    if (entryState.state === "loading") return "loading…";
+    if (entryState.state === "error") return entryState.error || "failed";
+    const p = entryState.payload;
+    if (!p) return "";
+    const parts = [];
+    if (isNum(p.spot) !== null) {
+      /* WHICH PRICE THIS WAS PRICED AGAINST. A covered call's collateral IS
+         the shares at spot and every moneyness is measured from it, so a
+         table built on yesterday's close and one built on a live print are
+         different tables. Rendering them identically is the same omission
+         as showing a cached row as live. */
+      parts.push("$" + fmt2(p.spot) + (p.spotSource === "daily-close" ? " close" : ""));
+    }
+    /* HOW MANY OF THE SELLABLE LINES ARE ACTUALLY ON THE TABLE. `priced` is
+       the count BEFORE the Worker's slice and the rows are the count after,
+       and the chip printed only the first — so a chain with 412 sellable lines
+       announced 412 above a table holding 120, with nothing anywhere saying a
+       cut had happened. Both numbers, whenever they differ. */
+    const shown = (p.rows || []).length;
+    const priced = isNum(p.priced);
+    parts.push((priced !== null && shown < priced
+      ? fmtInt(shown) + " of " + fmtInt(priced)
+      : fmtInt(priced)) + " sellable" + (p.truncated ? " of a partial chain" : ""));
+    const age = fmtAge(ageOf(p));
+    if (age) parts.push(age);
+    return parts.join(" · ");
+  }
+
   function renderList() {
     list.textContent = "";
     if (!book.size) {
@@ -293,26 +396,13 @@
 
       const note = document.createElement("span");
       note.className = "desk-chip__note";
-      if (entryState.state === "loading") note.textContent = "loading…";
-      else if (entryState.state === "error") note.textContent = entryState.error || "failed";
-      else if (entryState.payload) {
-        const p = entryState.payload;
-        const parts = [];
-        if (isNum(p.spot) !== null) {
-          /* WHICH PRICE THIS WAS PRICED AGAINST. A covered call's collateral IS
-             the shares at spot and every moneyness is measured from it, so a
-             table built on yesterday's close and one built on a live print are
-             different tables. Rendering them identically is the same omission
-             as showing a cached row as live. */
-          parts.push("$" + fmt2(p.spot) + (p.spotSource === "daily-close" ? " close" : ""));
-        }
-        parts.push(fmtInt(p.priced) + " sellable" + (p.truncated ? " of a partial chain" : ""));
-        if (p.__age !== undefined) {
-          const age = fmtAge(p.__age);
-          if (age) parts.push(age);
-        }
-        note.textContent = parts.join(" · ");
-      }
+      note.textContent = noteFor(entryState);
+      /* THE NOTE ELEMENT IS KEPT so the age tick can rewrite its text without
+         rebuilding the chip. A full renderList() every thirty seconds would
+         destroy the focus ring on whichever checkbox the reader has their hands
+         on, and a page that steals focus twice a minute is worse than one that
+         is a minute out of date. */
+      entryState.__note = note;
       chip.append(note);
 
       const remove = document.createElement("button");
@@ -392,7 +482,13 @@
       } else {
         state.state = "ok";
         state.payload = body;
-        if (body) body.__age = Number.isFinite(age) ? age : undefined;
+        /* THE HEADER'S AGE AND THE INSTANT IT WAS TRUE, together. Storing the
+           first without the second is what froze the desk's clock: the number
+           is only an age when something says what it is an age FROM. */
+        if (body) {
+          body.__age = Number.isFinite(age) ? age : undefined;
+          body.__at = Number.isFinite(age) ? Date.now() : undefined;
+        }
       }
     } catch {
       state.state = "error";
@@ -443,9 +539,12 @@
   function render() {
     const chosen = selectedSymbols();
     const rows = [];
-    let screened = 0, priced = 0;
+    let screened = 0, priced = 0, shown = 0;
     const gatedTotals = Object.create(null);
-    let oldest = null;
+    /* PER-SYMBOL SLICE EVIDENCE. A merged table cannot state one cut, because
+       each symbol is sliced against its own chain: naming them separately is
+       the only version of the sentence that reconciles. */
+    const slices = [];
 
     for (const symbol of chosen) {
       const state = book.get(symbol);
@@ -453,10 +552,15 @@
       const p = state.payload;
       screened += isNum(p.screened) || 0;
       priced += isNum(p.priced) || 0;
+      const kept = (p.rows || []).length;
+      shown += kept;
+      const sellable = isNum(p.priced);
+      if (sellable !== null && kept < sellable) {
+        slices.push({ symbol, kept, sellable, rankedBy: p.rankedBy || null });
+      }
       for (const [reason, n] of Object.entries(p.gated || {})) {
         gatedTotals[reason] = (gatedTotals[reason] || 0) + (isNum(n) || 0);
       }
-      if (p.__age !== undefined && (oldest === null || p.__age > oldest)) oldest = p.__age;
       for (const r of p.rows || []) rows.push({ ...r, __spot: p.spot });
     }
 
@@ -507,7 +611,7 @@
       }
       foot.textContent = "";
       renderPlan([]);
-      updateStatus(oldest);
+      updateStatus();
       return;
     }
 
@@ -547,17 +651,36 @@
     const universe = cut.length
       ? priced + " of at least " + screened + " quoted contracts are sellable"
       : priced + " of " + screened + " quoted contracts are sellable";
+    /* THE CUT, STATED. Until this sentence existed the footnote said "412 of
+       1,940 quoted contracts are sellable" above a table holding 120 of them,
+       and nothing on the page said a slice had been taken — which reads as
+       "these 120 ARE the 412". Three facts make it honest and all three are
+       needed: how many are here, how many there were, and the ordering that
+       chose between them, because a top-120 by annualised yield and a top-120
+       by premium are different hundred and twenty rows. */
+    const sliceNote = slices.length
+      ? " This table is a slice: " +
+        slices.map((c) => c.symbol + " shows its top " + fmtInt(c.kept) + " of " +
+          fmtInt(c.sellable) + " sellable lines, ranked by " + rankWord(c.rankedBy)).join("; ") +
+        " — " + fmtInt(priced - shown) + (priced - shown === 1 ? " line" : " lines") +
+        " below the cut " + (priced - shown === 1 ? "is" : "are") + " not on this table, " +
+        "and re-sorting the ones that are cannot bring them back — so changing the " +
+        "ranking refetches " +
+        (slices.length === 1 ? "this name" : "these names") + " rather than reordering " +
+        "what is already here."
+      : "";
     foot.textContent = universe +
       (dropped.length
         ? ". The rest fail a gate: " + dropped.join(", ") +
           " — each counted once, under the first gate it failed."
         : ".") +
+      sliceNote +
       (cut.length
         ? " " + cut.join(", ") + " " + (cut.length === 1 ? "has" : "have") +
           " more contracts than this desk fetches, so " +
           (cut.length === 1 ? "its" : "their") + " ranking is taken over a partial chain."
         : "");
-    updateStatus(oldest);
+    updateStatus();
   }
 
   /* ---------- the session plan -------------------------------------
@@ -707,7 +830,7 @@
   function fmtSkew(v) {
     const n = numOr(v);
     if (n === null) return DASH;
-    return (n < 0 ? MINUS : "+") + Math.abs(n * 100).toFixed(1);
+    return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n * 100).toFixed(1);
   }
 
   /** Log-moneyness as a percent, signed with U+2212 rather than a hyphen. */
@@ -715,7 +838,7 @@
     const n = numOr(v);
     if (n === null) return DASH;
     if (Math.abs(n) < 5e-5) return "0.0%";
-    return (n < 0 ? MINUS : "+") + Math.abs(n * 100).toFixed(1) + "%";
+    return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n * 100).toFixed(1) + "%";
   }
 
   /* Which symbol's surface is on screen. Held in the URL beside the
@@ -1272,6 +1395,25 @@
     return bits.join(". ") + ".";
   }
 
+  /* THE SERVER'S RANK KEYS IN WORDS. Not read off the #deskRank options,
+     though four of the five match: "collectible" is a client-only key — it
+     needs a balance the Worker deliberately never learns — so the select is
+     not a complete map of what a payload's `rankedBy` can say, and a lookup
+     that is right four times out of five is the kind that fails silently. */
+  function rankWord(key) {
+    switch (key) {
+      case "annualized": return "annualised yield";
+      case "premium": return "premium received";
+      case "yieldOnCollateral": return "yield on collateral";
+      case "cushionSigmas": return "cushion";
+      /* The payload always states its own key. A null here means a response
+         that did not, and naming an ordering this page did not read would be
+         worse than admitting the gap. */
+      case null: case undefined: return "an ordering the payload did not name";
+      default: return String(key);
+    }
+  }
+
   function reasonWord(reason) {
     switch (reason) {
       case "spread": return "too wide";
@@ -1291,12 +1433,135 @@
     return td;
   }
 
+  /* A SECOND LINE UNDER A NUMBER, and it is a second line rather than more
+     text on the same one for a measured reason: every cell in this table is
+     white-space:nowrap, so anything appended sideways widens its column, and
+     the desk contract asserts that thirteen columns still fit without a
+     horizontal scroll at 1440px. A block child costs row height, which is the
+     cheaper axis here — the table already scrolls vertically inside a pane the
+     reader can resize.
+
+     THE STYLE IS INLINE because the stylesheet is not this file's to change,
+     and a class with no rule behind it would render as a full-size second line
+     that reads like a second number. Presentation attributes and inline styles
+     are the same belt the surface's <text> nodes wear, for the same reason. */
+  function subLine(text, title) {
+    const span = document.createElement("span");
+    span.style.display = "block";
+    span.style.fontSize = "0.72em";
+    /* THE PALETTE'S OWN SECONDARY INK, not an opacity. Fading the text would
+       set its contrast from whatever happens to be behind it — and the row
+       behind it changes on hover and on the unaffordable marker — where the
+       token is the one colour this site has already decided is readable for
+       text at this weight. */
+    span.style.color = "var(--ink-faint)";
+    span.style.letterSpacing = "0.02em";
+    span.textContent = text;
+    if (title) span.title = title;
+    return span;
+  }
+
+  /* HOW FAR OUT THE STRIKE IS, beside the strike. `moneyness` has been on
+     every row since the first version of this desk and was drawn only on the
+     volatility surface: the table printed a 4.2% yield and never said the
+     strike was 7% away from spot, which is most of the difference between a
+     cushion and a coin toss.
+
+     THE WORD IS NOT REDUNDANT WITH THE DISTANCE. A put below spot and a call
+     above it are both out of the money, so the raw signed distance cannot say
+     which side of the money a line sits on without the reader also tracking
+     the Sell column. The word says it directly, and it survives greyscale — no
+     hue anywhere in this cell. The signed statement ("below spot") is in the
+     title, where there is room for the sentence.
+
+     0% is a MEASURED at-the-money strike, not a missing one, and it is drawn
+     as its own word rather than being swept into "in the money" by a `< 0`
+     test that has to put the boundary somewhere. */
+  function strikeCell(r) {
+    const td = document.createElement("td");
+    td.className = "c-num";
+    td.append(document.createTextNode(fmt2(r.strike)));
+    const m = isNum(r.moneyness);
+    const spot = isNum(r.__spot);
+    if (m === null || (r.strategy !== "csp" && r.strategy !== "cc")) return td;
+    const atTheMoney = Math.abs(m) < 5e-5;
+    const otm = r.strategy === "csp" ? m < 0 : m > 0;
+    const word = atTheMoney ? "at the money" : otm ? "OTM" : "ITM";
+    const side = m < 0 ? "below" : "above";
+    td.append(subLine(
+      atTheMoney ? word : fmtPct(Math.abs(m), 1) + " " + word,
+      atTheMoney
+        ? "This strike is the spot price" + (spot === null ? "" : " of " + fmt2(spot)) + "."
+        : "This strike is " + fmtPct(Math.abs(m), 1) + " " + side + " spot" +
+          (spot === null ? "" : " of " + fmt2(spot)) + ", which for a " +
+          (r.strategy === "csp" ? "cash-secured put" : "covered call") + " is " +
+          (otm ? "out of the money" : "in the money") + "."));
+    return td;
+  }
+
+  /* THE YIELD'S OWN DENOMINATOR, on the row. `collateral` decides whether the
+     trade is possible at all and it appeared nowhere a reader could see it
+     without a balance typed in: it was in the Collect tooltip, which does not
+     exist until then, and in the empty-plan sentence. So the desk showed a
+     4.2% yield and never said the line reserves $44,300 — a percentage with
+     its denominator withheld, which is the unit-less number this codebase bans
+     everywhere else.
+
+     WHICH COLLATERAL, in the title, because the two strategies reserve
+     different things: a cash-secured put reserves the strike in cash and a
+     covered call reserves a hundred shares you must already own. Same
+     arithmetic, completely different requirement. */
+  function yieldCell(r) {
+    const td = document.createElement("td");
+    td.className = "c-num";
+    td.append(document.createTextNode(fmtPct(r.yieldOnCollateral, 2)));
+    const collateral = isNum(r.collateral);
+    if (collateral === null) {
+      /* NOT A SILENT SINGLE LINE. A row with no collateral has no yield
+         either, and saying which number is missing beats leaving the cell
+         looking like every other one. */
+      td.append(subLine("on no quotable collateral",
+        "This line carries no collateral figure, so the yield above has no denominator."));
+      return td;
+    }
+    td.append(subLine("on " + fmtMoney(collateral),
+      r.strategy === "cc"
+        ? "A covered call ties up 100 shares, worth " + fmtMoney(collateral) +
+          " at spot — shares you have to already own."
+        : "A cash-secured put ties up " + fmtMoney(collateral) +
+          " in cash: the strike, times 100, reserved until expiry."));
+    return td;
+  }
+
   function rowFor(r) {
     const tr = document.createElement("tr");
 
     const sym = document.createElement("th");
     sym.scope = "row";
-    sym.textContent = r.ticker || DASH;
+    /* THE DESK PRICES A TRADE ON A NAME AND /flows/ticker/ ANALYSES IT, and
+       there was no door between the two rooms in either direction. Every other
+       surface in Flows links out this way.
+
+       THE BOARD LINKS ONLY ITS DEEP ROWS, on the argument that a link which
+       usually dead-ends is worse than no link. That argument does not carry
+       here and the difference is who chose the name: a board row is a name the
+       pipeline picked, so most of them are answerable; a desk row is a name the
+       reader typed, so the reader is already asking about THIS one and is owed
+       the route to whatever else the site knows about it. The destination
+       degrades honestly — a name outside today's board is told so and offered
+       the names that do have a card — and the title says as much before the
+       click rather than after it. */
+    const ticker = r.ticker ? String(r.ticker) : "";
+    if (ticker) {
+      const link = document.createElement("a");
+      link.href = "/flows/ticker/?t=" + encodeURIComponent(ticker);
+      link.textContent = ticker;
+      link.title = "Open " + ticker + " on the analysis page. Cards are built only for " +
+        "the names on today's board; if this one is not among them the page says so.";
+      sym.append(link);
+    } else {
+      sym.textContent = DASH;
+    }
     tr.append(sym);
 
     /* "Sell" says the trade in words rather than in a P/C letter, because
@@ -1306,7 +1571,7 @@
       : r.strategy === "cc" ? "Covered call" : DASH;
     tr.append(cell(side, "c-side"));
 
-    tr.append(cell(fmt2(r.strike), "c-num"));
+    tr.append(strikeCell(r));
     /* THE EARNINGS MARKER RIDES THE EXPIRY CELL rather than claiming a
        fourteenth column. A desk that grows a column per fact has answered
        "what else could we show" instead of "what is this table for".
@@ -1362,7 +1627,7 @@
       tr.append(td);
     }
 
-    tr.append(cell(fmtPct(r.yieldOnCollateral, 2), "c-num"));
+    tr.append(yieldCell(r));
 
     /* The annualized figure is a CONVENTION and the payload says so. It is
        marked in the DOM too: a 900% cell that looks like every other cell is
@@ -1419,13 +1684,16 @@
     const change = isNum(r.oiChange);
     const oiText = oi === null ? DASH
       : change === null || change === 0 ? fmtInt(oi)
-      : fmtInt(oi) + " (" + (change > 0 ? "+" : MINUS) + fmtInt(Math.abs(change)) + ")";
+      : fmtInt(oi) + " (" + (change > 0 ? "+" : change < 0 ? MINUS : "") + fmtInt(Math.abs(change)) + ")";
     tr.append(cell(oiText, "c-num"));
 
     return tr;
   }
 
-  function updateStatus(oldestAge) {
+  function updateStatus() {
+    /* Every line below is one updateStatus() itself can rewrite at any time.
+       say() marks the opposite case — see its comment. */
+    statusOwned = true;
     if (inflight > 0) {
       statusEl.textContent = "Pricing " + inflight + " symbol" + (inflight === 1 ? "" : "s") + "…";
       return;
@@ -1434,7 +1702,19 @@
     const chosen = selectedSymbols();
     if (!chosen.length) { statusEl.textContent = "Select a symbol to price it."; return; }
     const failed = chosen.filter((s) => (book.get(s) || {}).state === "error");
-    const age = oldestAge === undefined || oldestAge === null ? "" : " · quotes " + fmtAge(oldestAge);
+    /* READ AT THE MOMENT OF WRITING, not handed in from render(). The status
+       is also redrawn by the age tick, which has no render pass to inherit an
+       age from — and an age passed down a call chain is an age that goes stale
+       the moment the chain is entered from somewhere else. */
+    const oldestAge = oldestQuoteAge();
+    const age = oldestAge === null ? "" : " · quotes " + fmtAge(oldestAge);
+    /* AND THE POINT WHERE IT STOPS BEING A QUOTE. "42m ago" is honest and
+       still easy to skim past; the desk says out loud that the table is no
+       longer a price, and what to press. */
+    const staleQuotes = oldestAge !== null && oldestAge > QUOTE_STALE_SECONDS
+      ? " — older than this desk will call a price, so treat the table as a record " +
+        "of the market rather than one you can trade; Refresh requotes it"
+      : "";
 
     /* THE SESSION, and any symbol not priced against a live print. The vendor
        names the session ("regular", "pre", "post"); it is passed through
@@ -1482,7 +1762,7 @@
       ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " +
         failed.join(", ") + " unavailable"
       : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") +
-      session + age + staleNote + earnNote;
+      session + age + staleQuotes + staleNote + earnNote;
   }
 
   function showEmpty(text) {
@@ -1651,6 +1931,119 @@
     announce();
   })();
 
+  /* ---------- the clock ---------------------------------------------
+
+     THE ONLY THING ON THIS PAGE THAT MOVES WITHOUT A KEYSTROKE, and its
+     absence was the defect: every age was recomputed on render(), render() is
+     driven by user input, so a desk nobody touched never recomputed anything.
+     A quote fetched at 09:31 still read "just now" at 10:11.
+
+     IT REPAINTS THE TWO PLACES AN AGE IS PRINTED AND NOTHING ELSE. Not
+     renderList(), which rebuilds every chip and would take the focus ring off
+     whatever checkbox the reader has their hands on twice a minute; not
+     render(), which re-merges and re-sorts a table that has not changed. The
+     chip keeps a handle on its own note element and only the text is
+     rewritten. */
+  function tickAges() {
+    let priced = false;
+    for (const e of book.values()) {
+      if (e.state !== "ok" || !e.payload) continue;
+      priced = true;
+      if (e.__note) e.__note.textContent = noteFor(e);
+    }
+    /* Nothing is priced, so there is no age to advance and no sentence to
+       rewrite — and rewriting the status here would stamp on whatever a
+       handler last said. */
+    if (priced && statusOwned) updateStatus();
+  }
+  setInterval(tickAges, AGE_TICK_MS);
+
+  /* A BACKGROUNDED TAB HAS ITS TIMERS THROTTLED to roughly one a minute, and
+     some browsers suspend them entirely. A desk returned to after an hour
+     would show whatever the last throttled tick managed until the next one
+     fired, so the age is brought current the moment the tab is looked at
+     again — which is the moment it is read. */
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) tickAges();
+  });
+
+  /* ---------- what stays put while the rows scroll -------------------
+
+     THE DESK ALREADY HAD ONE STICKY BLOCK and it was written as a one-off:
+     the symbol column, pinned left in the stylesheet, because thirteen columns
+     scroll horizontally and a row whose symbol has scrolled off is a row of
+     numbers about nothing. The identical sentence is true on the other axis —
+     the table scrolls vertically inside a 70vh pane, and a row whose HEADER
+     has scrolled off is also a row of numbers about nothing — and it is true
+     of the controls, which scroll off the top of the page exactly when a
+     reader deep in a long table wants to change the ranking.
+
+     ONE HELPER, THREE APPLICATIONS. The pattern is: pin it, give it a layer
+     above what slides underneath, and give it an opaque ground, because a
+     transparent sticky element shows the rows passing through it.
+
+     WHY THIS IS INLINE STYLE AND NOT A CLASS. The stylesheet is not this
+     file's to change. An inline declaration is the strongest one there is,
+     which is the reason for the one exception below: the first header cell's
+     `position` is left alone, because the stylesheet drops it to `static`
+     under 40rem where there is no horizontal room for a pinned column, and an
+     inline `position: sticky` cannot be un-set by a media query. Sticky takes
+     both axes from one declaration, so supplying only `top` gives that cell
+     the second axis while the stylesheet keeps deciding the first. */
+  (() => {
+    /* THE TOP BAR IS FIXED AND 100 DEEP, so anything pinned at top:0 slides
+       under it. Measured rather than guessed: a hardcoded offset is a number
+       that silently goes wrong the first time the bar's padding changes. */
+    const topbar = document.querySelector(".topbar");
+    const barHeight = () => (topbar ? Math.round(topbar.getBoundingClientRect().height) : 0);
+
+    const headCells = Array.from(document.querySelectorAll(".desk-table thead th"));
+    headCells.forEach((th, i) => {
+      th.style.top = "0px";
+      /* Above the body's own sticky symbol column, which sits at 1. */
+      th.style.zIndex = "3";
+      if (i > 0) th.style.position = "sticky";
+      /* border-collapse resolves a cell's border onto its neighbour, and the
+         neighbour scrolls away — so a sticky header row loses its rule the
+         moment it detaches. Repainted as an inset shadow, which is drawn by
+         the cell itself and therefore stays. */
+      th.style.boxShadow = "inset 0 -1px 0 var(--hairline)";
+    });
+
+    /* THE CONTROLS, PINNED ONLY WHERE THERE IS HEIGHT TO SPARE. On a phone the
+       bar wraps to three rows; pinning it would spend a third of the viewport
+       on controls to save a scroll, which is the trade the stylesheet already
+       refuses at this breakpoint for the resize grips and the symbol column.
+       The same breakpoint, deliberately: two components disagreeing about where
+       "narrow" starts is how a layout gets a seam. */
+    const controls = document.querySelector(".desk-controls");
+    const wide = window.matchMedia("(min-width: 40.001rem)");
+    function applyControls() {
+      if (!controls) return;
+      if (!wide.matches) {
+        controls.style.position = "";
+        controls.style.top = "";
+        controls.style.zIndex = "";
+        controls.style.background = "";
+        controls.style.paddingBottom = "";
+        controls.style.borderBottom = "";
+        return;
+      }
+      controls.style.position = "sticky";
+      controls.style.top = barHeight() + "px";
+      /* Under the fixed top bar at 100, over the table at 3. */
+      controls.style.zIndex = "20";
+      controls.style.background = "var(--bg)";
+      controls.style.paddingBottom = "0.7rem";
+      controls.style.borderBottom = "1px solid var(--hairline)";
+    }
+    applyControls();
+    /* The bar's height changes with the viewport (its padding is a max() of a
+       safe-area inset), so the offset is re-measured rather than cached. */
+    window.addEventListener("resize", applyControls);
+    if (typeof wide.addEventListener === "function") wide.addEventListener("change", applyControls);
+  })();
+
   /* ---------- events ---------------------------------------------- */
 
   function add(symbols) {
@@ -1671,7 +2064,7 @@
     event.preventDefault();
     const wanted = normalise(String(input.value || "").split(/[,\s]+/));
     if (!wanted.length) {
-      statusEl.textContent = "That is not a symbol this desk can price.";
+      say("That is not a symbol this desk can price.");
       return;
     }
     /* Count the symbols that actually NEED a slot, not every symbol typed. A
@@ -1683,18 +2076,18 @@
     const added = add(wanted);
     input.value = "";
     if (!needSlots.length) {
-      statusEl.textContent = wanted.length === 1
+      say(wanted.length === 1
         ? wanted[0] + " is already on the desk."
-        : "Already on the desk.";
+        : "Already on the desk.");
     } else if (added.length < needSlots.length) {
       /* The cap is a quota decision — each symbol is a live lookup — so it is
          stated as one rather than letting the overflow vanish unexplained,
          and it names what was dropped. */
       const dropped = needSlots.filter((w) => !book.has(w));
-      statusEl.textContent = "The desk holds " + MAX_SYMBOLS +
+      say("The desk holds " + MAX_SYMBOLS +
         " symbols; each one is a live lookup. " +
         (dropped.length ? "Not added: " + dropped.join(", ") + ". " : "") +
-        "Remove one to add another.";
+        "Remove one to add another.");
     }
   });
 
@@ -1715,7 +2108,7 @@
 
   refreshBtn.addEventListener("click", () => {
     const chosen = selectedSymbols();
-    if (!chosen.length) { statusEl.textContent = "Select a symbol to refresh."; return; }
+    if (!chosen.length) { say("Select a symbol to refresh."); return; }
     /* refresh=1 asks the Worker to go back to the vendor. It may decline and
        serve the copy it has — the age in each row is what says which
        happened, rather than the button implying it always refetched. */
@@ -1821,11 +2214,39 @@
         if (sel.value === "collectible" && buyingPower === null) {
           sel.value = "annualized";
           writeURL();
-          statusEl.textContent = "Enter a buying power to rank by premium collectible.";
+          say("Enter a buying power to rank by premium collectible.");
           if (bpInput) { bpInput.focus(); bpInput.select(); }
           return;
         }
+        /* A LOCAL RE-SORT IS ONLY EXACT WHEN NOTHING WAS CUT, and this branch
+           used to re-sort unconditionally.
+
+           The Worker ranks each chain and keeps the top slice; the key it
+           ranked by therefore decided WHICH rows were sent, not merely the
+           order they arrived in. Re-sorting a cut payload by a new key
+           produces the best rows of the OLD key's slice — switch a big chain
+           from annualised yield to premium received and the table's top line
+           was the fattest premium among 120 short-dated far-OTM weeklies,
+           while the chain's genuine top premium lines were never sent and
+           nothing on the page said so.
+
+           So the cut symbols go back to the chain under the new key, and only
+           those: a payload holding every sellable line it has already answers
+           any ordering, and spending a metered vendor call to reorder rows
+           that are already in hand is exactly what the comment above forbids.
+           `priced > rows.length` is the condition, read off the payload. */
+        const recut = selectedSymbols().filter((sym) => {
+          const p = (book.get(sym) || {}).payload;
+          const sellable = p ? isNum(p.priced) : null;
+          return sellable !== null && (p.rows || []).length < sellable;
+        });
         render();
+        /* NOT ANNOUNCED IN THE STATUS LINE. runPool() writes "Pricing N
+           symbols…" there on its first tick, so any sentence put there here is
+           gone before it can be read. The durable place for this is the
+           footnote, which says the cut and now says what a re-rank does about
+           it — before the reader changes the key, rather than after. */
+        if (recut.length) runPool(recut, {});
       }
     });
   }

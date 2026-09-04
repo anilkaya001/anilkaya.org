@@ -112,13 +112,42 @@ export function perNameCap(namesSeen, { rows = UA_ROWS, min = UA_PER_NAME_MIN, m
 export function buildUnusualRows(rows, {
   ticker = null, spot = null, ivDivisor = 1, sessionDate = null, truncated = false,
   minVolume = UA_MIN_VOLUME, minOi = UA_MIN_OI,
+  /* WHERE THIS NAME STOPPED IN THE BOARD'S OWN FUNNEL, when the caller knows.
+     "long" | "short" | "watch" | "gated" | null.
+
+     THE ALERTS TABLE BESIDE THIS FEED HAS ALWAYS CARRIED IT and this one never
+     did, so the counter feed's Name column was a bare link: a 40x volume over
+     open interest on a name the board ranks LONG and the same ratio on a name
+     the board scored into the dead band are different facts, and the page
+     could not tell them apart. Every name in this feed is a board name by
+     construction — the pipeline reads chains only for board names — so the
+     stage is knowable for all of them.
+
+     Null means "the caller did not supply one", and the key is then OMITTED
+     rather than published as null: sixty rows of `"st":null` is bytes spent
+     saying nothing, and a renderer testing for the key can tell a payload
+     built before this shipped from a name with no stage. */
+  stage = null,
+  /* ALREADY-PARSED {p, row} TUPLES from buildChainPanels, which has walked
+     this same chain to build them. The feed used to re-run the option-symbol
+     regex over every contract a fourth time; the tuple carries the parse with
+     its own row so there is no index to misalign. Absent, this parses for
+     itself, which is what every direct caller and every fixture does. */
+  parsed = null,
 } = {}) {
   const out = [];
   const s = numOrNull(spot);
   const div = numOrNull(ivDivisor) || 1;
 
-  for (const raw of Array.isArray(rows) ? rows : []) {
-    const sym = parseOptionSymbol(raw && raw.option_symbol);
+  const pairs = Array.isArray(parsed)
+    ? parsed
+    : (Array.isArray(rows) ? rows : []).map((row) => ({
+      p: parseOptionSymbol(row && row.option_symbol), row,
+    }));
+
+  const st = typeof stage === "string" && stage ? stage : null;
+
+  for (const { p: sym, row: raw } of pairs) {
     if (!sym) continue;
 
     const vol = numOrNull(raw.volume);
@@ -153,7 +182,7 @@ export function buildUnusualRows(rows, {
     const legs = askVol !== null && bidVol !== null ? askVol + bidVol : null;
     const lift = legs !== null && legs > 0 ? askVol / legs : null;
 
-    out.push({
+    const row = {
       t: ticker || sym.ticker,
       k: sym.strike,
       expiry: sym.expiry,
@@ -187,7 +216,9 @@ export function buildUnusualRows(rows, {
          mixes names and a page-level flag could not say which rows it applied
          to. */
       p: truncated ? 1 : 0,
-    });
+    };
+    if (st !== null) row.st = st;
+    out.push(row);
   }
   return out;
 }

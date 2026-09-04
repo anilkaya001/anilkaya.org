@@ -72,34 +72,49 @@ const payload = {
     rows: [
       { who: "Ada Reyes", id: "p1", memberType: "senate", bought: 10_000_000,
         boughtLo: 9_000_000, boughtHi: 12_000_000, sold: 250_000, buys: 14, sells: 2,
-        names: 9, medianLagDays: 38, openBands: 0, openFloor: 0, unclassified: 0 },
+        boughtListed: 10_000_000, boughtOther: 0, buysListed: 14, buysOther: 0,
+        names: 9, medianLagDays: 38, openBands: 0, openFloor: 0, unclassified: 0,
+        ownerKnown: 14, selfFiled: 9, freshBuys: 2 },
       { who: "Ben Osei", id: "p2", memberType: "house", bought: 9_500_000,
         boughtLo: 8_000_000, boughtHi: 11_000_000, sold: 0, buys: 11, sells: 0,
-        names: 7, medianLagDays: 61, openBands: 0, openFloor: 0, unclassified: 0 },
+        boughtListed: 9_500_000, boughtOther: 0, buysListed: 11, buysOther: 0,
+        names: 7, medianLagDays: 61, openBands: 0, openFloor: 0, unclassified: 0,
+        ownerKnown: 11, selfFiled: 4, freshBuys: 0 },
+      /* THE UNTICKERED FILER. Every one of Cara's disclosures is a Treasury
+         bill or a fund: real disclosed size, and no listed security anywhere
+         in it. The old renderer printed "0" in the Names column beside $1.2M,
+         which reads as a filer who bought nothing identifiable. */
       { who: "Cara Lindqvist", id: "p3", memberType: "house", bought: 1_200_000,
         boughtLo: 900_000, boughtHi: 1_500_000, sold: 0, buys: 3, sells: 0,
-        names: 3, medianLagDays: 96, openBands: 1, openFloor: 50_000_000, unclassified: 0 },
+        boughtListed: 0, boughtOther: 1_200_000, buysListed: 0, buysOther: 3,
+        names: null, medianLagDays: 96, openBands: 1, openFloor: 50_000_000,
+        unclassified: 0, ownerKnown: 0, selfFiled: null, freshBuys: 0 },
     ],
   },
   assets: {
     status: "ok", seen: 12, cap: 25, shed: 0, basis: "band midpoint: stated convention",
     rows: [
-      { t: "NVDA", issuer: "NVIDIA Corporation", bought: 8_000_000, boughtLo: 6_000_000,
+      { t: "NVDA", asset: "NVIDIA Corporation", bought: 8_000_000, boughtLo: 6_000_000,
         boughtHi: 10_000_000, sold: 100_000, buys: 9, sells: 1, filers: 6,
-        medianLagDays: 44, openBands: 0, openFloor: 0 },
-      { t: "PFE", issuer: "Pfizer Inc", bought: 1_000_000, boughtLo: 800_000,
+        medianLagDays: 44, openBands: 0, openFloor: 0,
+        ownerKnown: 9, selfFiled: 5, freshBuys: 1 },
+      { t: "PFE", asset: "Pfizer Inc", bought: 1_000_000, boughtLo: 800_000,
         boughtHi: 1_300_000, sold: 0, buys: 2, sells: 0, filers: 2,
-        medianLagDays: 51, openBands: 0, openFloor: 0 },
+        medianLagDays: 51, openBands: 0, openFloor: 0,
+        ownerKnown: 2, selfFiled: 0, freshBuys: 0 },
     ],
   },
   recent: {
     status: "ok", seen: 4, cap: 60, shed: 0,
     rows: [
       { who: "Ada Reyes", t: "NVDA", txnType: "Purchase", side: "buy",
-        lo: 15_001, hi: 50_000, mid: 32_500.5,
+        lo: 15_001, hi: 50_000, mid: 32_500.5, executedBy: "spouse",
+        notes: "NVIDIA Corporation - Common Stock (NVDA) [ST]",
         txnDate: "2026-08-01", filedDate: "2026-08-30", lagDays: 29 },
+      /* NO EXECUTING ACCOUNT ON THE WIRE. Absent is not "self", and the cell
+         must say so rather than leaving the reader to assume the member. */
       { who: "Ben Osei", t: "PFE", txnType: "Receive", side: null,
-        lo: 1_000, hi: 15_000, mid: 8_000,
+        lo: 1_000, hi: 15_000, mid: 8_000, executedBy: null,
         txnDate: "2026-05-20", filedDate: "2026-08-20", lagDays: 92 },
       { who: "Cara Lindqvist", t: "AAPL", txnType: "Sale (Partial)", side: "sell",
         lo: 50_001, hi: 100_000, mid: 75_000.5,
@@ -109,6 +124,31 @@ const payload = {
         txnDate: "2026-06-01", filedDate: "2026-08-10", lagDays: 70 },
     ],
   },
+  /* THE BREADTH ORDERING, AND IT DISAGREES WITH THE SIZE ORDERING ON PURPOSE.
+     SPCX is third by dollars and first by filers; a block that merely re-sorted
+     the size ranking would put NVDA on top and prove nothing. */
+  clusters: {
+    status: "ok", seen: 2, cap: 25, shed: 0, minFilers: 3, namesSeen: 4,
+    basis: "ordered by the number of DISTINCT filers who disclosed a purchase, then by " +
+      "median disclosure lag, then by summed midpoint. No weighting is applied and no " +
+      "composite is computed: each key breaks ties in the one before it.",
+    rows: [
+      { t: "SPCX", asset: "Spectral Systems", bought: 156_002, boughtLo: 120_000,
+        boughtHi: 190_000, sold: 0, buys: 5, sells: 0, filers: 5, medianLagDays: 24,
+        openBands: 0, openFloor: 0, ownerKnown: 5, selfFiled: 5, freshBuys: 3 },
+      { t: "NVDA", asset: "NVIDIA Corporation", bought: 8_000_000, boughtLo: 6_000_000,
+        boughtHi: 10_000_000, sold: 100_000, buys: 9, sells: 1, filers: 6,
+        medianLagDays: 44, openBands: 0, openFloor: 0,
+        ownerKnown: 9, selfFiled: 5, freshBuys: 1 },
+    ],
+  },
+  latestFiled: "2026-08-30",
+  freshFilings: 1,
+  /* The names a detail card exists for, as the pipeline publishes them. BRK.B
+     is deliberately absent from the ranking and BRKB present here: the set is
+     keyed the way the card store keys it, and the renderer must normalise the
+     filed symbol before it looks anything up. */
+  carded: ["NVDA", "BRKB"],
   holders: {
     status: "ok", seen: 3, cap: 40, shed: 0, names: 2,
     qtyUnit: HOLDER_QTY_UNIT, selfFiled: 1, ownerKnown: 2,
@@ -283,10 +323,13 @@ try {
         return {
           filed: cells[0], side: side.textContent, sideClass: side.className,
           lagClass: lag.className, lagTitle: lag.getAttribute("title"),
-          band: cells[6],
+          /* THE ACCOUNT COLUMN SITS BETWEEN THE FILER AND THE NAME, so the
+             disclosed range is the eighth cell and no longer the seventh. */
+          account: cells[4], accountClass: tr.children[4].className,
+          band: cells[7],
         };
       }));
-    eq(rows[0].filed, "2026-08-30", "newest disclosure first, as published");
+    ok(/2026-08-30$/.test(rows[0].filed), "newest disclosure first, as published");
     eq(rows[1].side, "Receive",
       "THE VENDOR'S OWN WORD. A gift is neither a purchase nor a sale, and " +
       "printing our classification instead of the filing's would turn an " +
@@ -352,11 +395,127 @@ try {
     eq(banner, true, "and no pagination warning when pagination answered");
   }
 
+  /* ---------- §5b the account, the split and the new-today mark --- */
+  {
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll("#plRecent tbody tr")].map((tr) => ({
+        filed: tr.children[0].textContent,
+        freshMark: !!tr.querySelector(".pl-fresh"),
+        account: tr.children[4].textContent,
+        accountClass: tr.children[4].className,
+        asset: (tr.querySelector(".pl-asset") || {}).textContent || null,
+        link: (tr.querySelector(".pl-tick") || {}).tagName || null,
+        href: (tr.querySelector(".pl-tick") || {}).getAttribute
+          ? tr.querySelector(".pl-tick").getAttribute("href") : null,
+      })));
+
+    /* THE VENDOR'S `issuer` IS THE ACCOUNT, AND IT NOW HAS A COLUMN.
+       It used to be printed under the ticker as if it were the company, so
+       the live page read "BE / spouse" and "FWONK / child". */
+    eq(rows[0].account, "spouse",
+      "the executing account is drawn in its own column, not under the ticker where a " +
+      "company name belongs");
+    eq(rows[1].account, "not stated",
+      "and a filing the vendor sent no account for says so — absent is not 'self'");
+    ok(/is-unknown/.test(rows[1].accountClass),
+      "carrying the same unknown treatment the holders table gives the same missing fact");
+    ok(!/is-unknown/.test(rows[0].accountClass),
+      "while a stated account does not");
+
+    /* THE SECURITY'S DESCRIPTION, from the field that carries one. On the
+       congress spelling it arrives in `notes` and was shaped and discarded. */
+    ok(/NVIDIA/.test(rows[0].asset || ""),
+      "the company description reaches the page from the filing that carried it");
+
+    /* NEW SINCE YESTERDAY, IN A GLYPH AND A POSITION. */
+    eq(rows[0].freshMark, true, "the filing on the window's newest date carries the mark");
+    eq(rows[1].freshMark, false, "an older filing does not");
+    ok(/^◆/.test(rows[0].filed),
+      "and the mark leads the date cell — a fixed position, so it survives greyscale " +
+      "and a monochrome printout where a tint would not");
+
+    /* THE LINK EXISTS EXACTLY WHERE THE PAYLOAD SAYS A CARD DOES. */
+    eq(rows[0].link, "A", "a name the payload lists as carded is a link");
+    eq(rows[0].href, "/flows/ticker/?t=NVDA", "to that name's card");
+    eq(rows[2].link, "SPAN", "and a name it does not list is plain text, not a hopeful link");
+
+    const buyers = await page.evaluate(() =>
+      [...document.querySelectorAll("#plBuyers tbody tr")].map((tr) => ({
+        other: tr.children[6].textContent,
+        otherTitle: tr.children[6].getAttribute("title"),
+        names: tr.children[8].textContent,
+        namesTitle: tr.children[8].getAttribute("title"),
+        fresh: !!tr.querySelector(".pl-fresh"),
+      })));
+    /* THE CONFIDENT ZERO THIS COLUMN EXISTED TO PUBLISH. Cara's whole
+       disclosure is Treasury bills: $1.2M of real disclosed size naming no
+       listed security, printed for months as "0 names". */
+    eq(buyers[2].names, "—",
+      "a filer whose disclosures named no listed security gets an em dash, never a 0 — " +
+      "'bought nothing identifiable' is not what the filings say");
+    ok(/not a count of zero/.test(buyers[2].namesTitle || ""),
+      "and the cell says which of the two it means");
+    eq(buyers[0].names, "9", "while a filer who named nine keeps the count");
+    ok(/\$1\.2M/.test(buyers[2].other),
+      "the size that named no listed security is drawn beside the total that contains it");
+    ok(/Treasury bills/.test(buyers[2].otherTitle || ""),
+      "with the reason on the cell");
+    eq(buyers[0].other, "—",
+      "and a filer whose every purchase named a security gets a dash there instead");
+    ok(/named a listed security/.test(buyers[0].otherTitle || ""),
+      "whose title says the dash means none rather than unmeasured");
+    eq(buyers[0].fresh, true, "the filer with purchases on the newest date is marked");
+    eq(buyers[1].fresh, false, "and one without them is not");
+
+    const buyersNote = await page.evaluate(() =>
+      document.getElementById("plBuyersNote").textContent);
+    ok(/13 of the 25 filings that state an executing account are the filer’s own/.test(buyersNote),
+      "THE SELF-FILED SHARE, WHICH THE ATTRIBUTION NOTE HAS PROMISED SINCE THIS MODULE " +
+      "SHIPPED and only the holders block delivered — got: " + buyersNote);
+    ok(/named no listed security/.test(buyersNote),
+      "and the panel says how much of its ranked size the assets panel cannot show");
+    ok(/2026-08-30/.test(buyersNote),
+      "and names the date the new-today mark refers to rather than saying 'today'");
+  }
+
+  /* ---------- §5c breadth, ordered against size ------------------- */
+  {
+    const cl = await page.evaluate(() => {
+      const box = document.querySelector(".pl-clusters");
+      if (!box) return null;
+      return {
+        rows: [...box.querySelectorAll("tbody tr")].map((tr) => ({
+          name: tr.querySelector(".pl-tick").textContent,
+          filers: tr.children[2].textContent,
+          mid: tr.children[4].textContent,
+        })),
+        caption: box.querySelector("caption").textContent,
+        note: box.querySelector(".fc-note").textContent,
+      };
+    });
+    ok(cl, "the breadth block is drawn beside the size ranking, not in place of it");
+    /* THE TWO ORDERS DISAGREE, WHICH IS THE ENTIRE POINT. NVDA is eight
+       million dollars and SPCX is a hundred and fifty thousand; five separate
+       filers converged on the smaller one, and the size ranking buries it. */
+    eq(cl.rows[0].name, "SPCX",
+      "the name with the most separate filers leads, though it is the smallest by dollars");
+    eq(cl.rows[0].filers, "5", "with its filer count drawn as a column, not a hover");
+    ok(/\$8\.0M/.test(cl.rows[1].mid) && /\$156K/.test(cl.rows[0].mid),
+      "and the sizes are shown, so a reader can see the order is not by them");
+    ok(/DISTINCT filers/.test(cl.caption),
+      "the caption names the key rather than leaving the ordering to be inferred");
+    ok(/breaks ties in the one before it/.test(cl.note),
+      "and states that nothing here is a weighted composite");
+    ok(/floor is 3 separate filers/.test(cl.note),
+      "with the floor named, so 'no clusters' can be read against the threshold that " +
+      "produced it");
+  }
+
   /* ---------- §8 the notes reach the page, one paragraph each ----- */
   {
     const foot = await page.evaluate(() =>
       [...document.querySelectorAll("#plFoot .flows-foot-p")].map((p) => p.textContent));
-    eq(foot.length, 5, "all five published notes are drawn, one paragraph each");
+    eq(foot.length, 8, "all eight published notes are drawn, one paragraph each");
     ok(foot.some((t) => t === POLITICAL_NOTES.refusals),
       "VERBATIM. The prose is published beside the arithmetic that produced it, " +
       "so a renderer cannot soften a refusal into a claim by rewording it");
@@ -485,5 +644,9 @@ console.log(`✓ flows-political-render: ${checks} assertions — a midpoint bar
   `its own whisker on a shared axis, overlapping neighbours counted rather than warned about, ` +
   `an open band's held-back floor published as a number, the filing's own word for a gift, a ` +
   `late mark that is not carried by hue alone, a holder table with no currency mark anywhere ` +
-  `in it, the width of the read in the status line, a vendor that ignored pagination said out ` +
+  `in it, an executing account in its own column where a company name used to sit, an em ` +
+  `dash where a filer named no listed security, a new-today mark carried by a glyph in a ` +
+  `fixed position, a card link built from the payload's own list of carded names with the ` +
+  `symbol normalised before the lookup, a breadth block whose first row is third by ` +
+  `dollars, the width of the read in the status line, a vendor that ignored pagination said out ` +
   `loud, three silences in three sentences, and nothing overflowing at 320px`);

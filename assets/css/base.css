@@ -9,28 +9,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=93") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=93") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=93") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=93") format("woff2");
 }
 
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
@@ -52,7 +52,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=93") format("woff2");
   /* The latin range carries U+2212 MINUS SIGN, which every negative number on
      this site is written with rather than a hyphen. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -64,7 +64,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=92") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=93") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }
@@ -126,7 +126,101 @@
   --pad: clamp(1.1rem, 4vw, 2.5rem);
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- THE TYPE SCALE ----
+
+     TWENTY-EIGHT DISTINCT SIZES, over 146 declarations. Two stylesheets
+     between them wrote 0.6, 0.62, 0.64, 0.66, 0.68, 0.7, 0.72, 0.74, 0.76,
+     0.78, 0.8, 0.82, 0.84, 0.85, 0.86, 0.88, 0.9, 0.92, 0.94, 0.95, 0.96, 1,
+     1.05, 1.1, 1.15, 1.25, 1.3 and 1.5rem — twenty-eight sizes for what a
+     reader can tell apart at maybe eight. Sizes two hundredths of a rem apart
+     are not two steps of a hierarchy; they are two edits that never met, and
+     the cost is that nobody can size a new element without inventing a
+     twenty-ninth value, because there is no ladder to land on.
+
+     Nine steps, each the cluster of what was already there, so nothing is
+     redesigned by this: measured against the previous file, 80 of the 140
+     declarations in flows.css move at all, the median move is 2.8% and the
+     largest is 8.0%. They are named for the JOB rather than for a number
+     (--fs-note, not --fs-6), so a rule states what it is rather than where it
+     sits, and the ladder can be retuned without every call site lying about
+     its rank.
+
+     THREE THINGS ARE DELIBERATELY NOT ON THIS SCALE, and each is an
+     exception with a reason rather than an oversight:
+
+       - `.pill a` in the top bar. Those sizes are a MEASURED FIT of four
+         nav tabs against a 320px viewport (see the two measurement notes
+         further down this file); tests/regression.mjs asserts the geometry
+         at nine widths. A typographic step that happens to be 2.6% larger
+         puts a tab off-screen. A measured constant is not a design token.
+       - `.flows-form input { font-size: 16px }`. Below 16px iOS zooms the
+         viewport on focus. That is a platform threshold in device pixels,
+         not a size.
+       - Text inside an SVG, which is in px because ONE VIEWBOX UNIT IS ONE
+         CSS PIXEL on every chart in this product (assets/js/flows-ui.js).
+         A rem there would be measured against the root and then scaled by
+         the viewBox, which is how an axis label ends up 1.71x its intended
+         size. Those px values are their own small ladder, listed in
+         flows.css beside the charts that use them. */
+  --fs-micro: 0.64rem;   /* table headers, rail group labels, micro chrome */
+  --fs-label: 0.68rem;   /* panel eyebrows: mono, uppercase, letterspaced   */
+  --fs-fine:  0.74rem;   /* dense cells, chips, marks                      */
+  --fs-data:  0.80rem;   /* table bodies, controls, form text              */
+  --fs-note:  0.86rem;   /* notes, captions, ledes — the reading size      */
+  /* 0.90 AND NOT THE CLUSTER'S MIDPOINT, on purpose. `.flows-table` sits on
+     this step, and this file's own density note records that three percent of
+     extra advance width — the webfont, not a type change — was enough to push
+     the desk's fourteen-column table into a horizontal scroll it is built to
+     avoid, caught by the desk contract at exactly that width. So the step is
+     pinned to the value the tables already had and the four sizes above it
+     come DOWN onto it. A scale that widens a width-constrained table is not a
+     tidy-up, it is a regression with a nicer name. */
+  --fs-body:  0.90rem;   /* running prose, table bodies and buttons        */
+  --fs-lead:  1.08rem;   /* sub-headings and the loudest single readings   */
+  --fs-head:  1.30rem;   /* region titles                                  */
+  --fs-mark:  1.50rem;   /* the identity glyph: a ticker, the brand        */
 }
+
+/* =============================================================
+   THE BREAKPOINT LADDER — nine widths, one unit, one place.
+
+   It was eleven distinct widths spread across two files in two units,
+   and 640px and 40rem were BOTH in use: the same width written two
+   ways, so a reader could not tell whether they were one tier or two,
+   and an edit to one silently left the other behind. 480px and 30rem
+   were the same pair again.
+
+   Everything is rem now, and rem in a media query is measured against
+   the ROOT font size — the reader's browser default — never against
+   the `font-size` of anything on the page. That is the point rather
+   than a side effect: a reader who runs a 20px default gets a phone
+   layout up to 800px instead of 640px, which is right, because every
+   label these breakpoints were measured against grew by the same
+   ratio. The px values below are what each step is at a 16px default,
+   for reading the measurement notes that cite them.
+
+     25rem   400px   narrow phone     the fourth nav tab stops fitting
+     30rem   480px   phone            single-column decks, zero panel inset
+     40rem   640px   large phone      dialogs go full-bleed; grips stand down
+     50rem   800px   tablet           "Econometrics Lab" stops fitting
+     60rem   960px   laptop           THE RAIL becomes a column
+     76rem  1216px   desk             the ticker grid takes a second track
+     92rem  1472px   wide desk        main is let off its 78rem leash
+    108rem  1728px   ultrawide        a third ticker track
+    132rem  2112px   ceiling          a fourth, and main stops growing
+
+   TWO STEPS WERE FOLDED AWAY rather than merely converted. 600px sat
+   40px under 640px with no measurement behind it, so it joined 40rem —
+   the brand mark now leaves 40px earlier, which costs nothing. And the
+   overview's 100rem tier joined 92rem, which is the tier where
+   `.flows-main` is actually allowed to grow past 78rem: pinning the
+   twelve-column overview to a width the page could not yet use was the
+   only thing 100rem ever meant.
+
+   A MIN AND A MAX AT THE SAME STEP are written `min-width: 60rem` and
+   `max-width: 59.99rem`. That is one tier, not two.
+   ============================================================= */
 
 /* ---- Modern reset ---- */
 *, *::before, *::after { box-sizing: border-box; }
@@ -157,6 +251,29 @@ body {
 
 img, svg, video, canvas { display: block; max-width: 100%; }
 input, button, textarea, select { font: inherit; color: inherit; }
+
+/* `hidden` MUST ACTUALLY HIDE.
+
+   `[hidden] { display: none }` lives in the USER-AGENT stylesheet, and an
+   author `display` on the same element beats it — that is cascade ORIGIN, not
+   specificity, so no amount of class-level care avoids it. Every element this
+   codebase toggles with `el.hidden` that also carries a layout rule here was
+   therefore never hidden at all, silently, and only on the routes where the
+   toggle mattered.
+
+   Measured with a real browser across all twelve gated routes: four elements,
+   all on /flows/ticker/, and two of them are not cosmetic. With no ?t= that
+   page is the NAME PICKER — and under it, `#ftGrid` rendered its twenty-one
+   panel shells anyway, an empty bordered box per panel, plus an empty
+   identity header above them. The page has shipped like that.
+
+   `!important` is the point rather than a shortcut: this rule exists
+   specifically to outrank the layout declarations that caused the bug, and a
+   plain declaration would lose to any later `display` in flows.css — which is
+   exactly the failure being fixed. It closes the class, not the four
+   instances, because the next `display: grid` on a toggled element would
+   reopen it. */
+[hidden] { display: none !important; }
 
 a {
   color: var(--gold-harvest);
@@ -214,7 +331,7 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
 
 .topbar__brand {
   justify-self: start;
-  font-weight: 700; font-size: 1.5rem; line-height: 1;
+  font-weight: 700; font-size: var(--fs-mark); line-height: 1;
   text-decoration: none;
   padding: 0.55rem; margin: -0.55rem;   /* invisible ≥40px hit area */
   background: linear-gradient(140deg, var(--gold-celadon), var(--gold-harvest), var(--gold-mystic));
@@ -250,6 +367,10 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.5rem 1.05rem;
   border-radius: 999px;
+  /* NOT A TYPE-SCALE TOKEN, and the three sizes below are not either. These
+     are a measured fit of four tabs against a 320px viewport (see the two
+     measurement notes below), asserted at nine widths by tests/regression.mjs.
+     Rounding one of them onto the ladder moves a tab off-screen. */
   font-size: 0.9rem; line-height: 1; white-space: nowrap;
   color: var(--ink-dim); text-decoration: none;
   transition: color 0.25s var(--ease);
@@ -293,14 +414,21 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
    suite's scrollWidth assertion stayed green while half the nav was invisible.
 
    Swapping to the short label saves roughly four times the difference, because
-   all four tabs shrink together. The cutoff is 800px because 794px is the
-   narrowest width that still fitted the full label. */
-@media (max-width: 800px) {
+   all four tabs shrink together. The cutoff is 50rem because 794px is the
+   narrowest width that still fitted the full label, and 50rem is 800px at the
+   16px default the measurement was taken at. Written in rem so the tier moves
+   with the reader's own text size, which is what set the 794px in the first
+   place. */
+@media (max-width: 50rem) {
   .lab-full { display: none; }
   .lab-short { display: inline; }     /* "Lab" instead of "Econometrics Lab" */
 }
 
-@media (max-width: 600px) {
+/* FOLDED UP FROM 600px, which was a tenth breakpoint with no measurement
+   behind it and 40px of separation from the next one. Between 600 and 640px
+   the brand mark now leaves the bar 40px earlier than it used to; the pill
+   stays centred by the explicit grid placement below, so nothing else moves. */
+@media (max-width: 40rem) {
   .topbar__brand { display: none; }
   /* keep grid placement when the brand leaves the flow: pill stays centered,
      social stays right (auto-placement would cram both leftward) */
@@ -308,7 +436,7 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   .topbar__social { grid-column: 3; }
   .pill a { padding: 0.5rem 0.7rem; font-size: 0.82rem; }
 }
-@media (max-width: 480px) {
+@media (max-width: 30rem) {
   .pill a { padding: 0.46rem 0.6rem; font-size: 0.78rem; }
   .social-btn { width: 2.1rem; height: 2.1rem; }
   .social-btn::after { inset: -7px; }
@@ -323,10 +451,11 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
    the bold tab is ALSO the longest label, so nav.js equalizes every tab to the
    wider bold metric. body{overflow-x:hidden} swallows it, so the suite's
    scrollWidth assertion does not catch it.
-   Dropping the weight change below 400px makes tab width independent of which
-   page is active; the sliding gold indicator and colour still mark "current".
+   Dropping the weight change below 25rem (400px at a 16px root) makes tab
+   width independent of which page is active; the sliding gold indicator and
+   colour still mark "current".
    Verified clip-free at 320/360/390 on all eleven pages. */
-@media (max-width: 400px) {
+@media (max-width: 25rem) {
   .pill a { padding: 0.46rem 0.44rem; }
   .pill a.is-current { font-weight: 400; }
 }
@@ -339,7 +468,7 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
   z-index: 200; max-width: min(92vw, 30rem);
   background: var(--bg-elev); color: var(--ink);
   border: 1px solid var(--hairline); border-radius: 12px;
-  padding: 0.8rem 1.1rem; font-size: 0.92rem;
+  padding: 0.8rem 1.1rem; font-size: var(--fs-body);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
   opacity: 0; pointer-events: none;
   transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
@@ -350,7 +479,7 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
 .btn {
   display: inline-flex; align-items: center; gap: 0.5rem;
   padding: 0.7rem 1.3rem; border-radius: 999px;
-  font-weight: 700; font-size: 0.95rem; line-height: 1;
+  font-weight: 700; font-size: var(--fs-body); line-height: 1;
   text-decoration: none; cursor: pointer;
   border: 1px solid transparent;
   transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), opacity 0.2s var(--ease);

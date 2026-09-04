@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   num, median, quantile, mad, winsorize, robustZ, invNorm, vanDerWaerden,
   neutralize, flowPurity, aggressorGamma, gammaFlip, bookDisplacement,
+  robustZFused, greekFlowTotals,
   pathSignature, gammaDecayCalendar, positioningQuality,
   greekTermStructure, legPresent, GREEK_UNITS,
   callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg, callDeltaLeg, putDeltaLeg,
@@ -27,6 +28,7 @@ import {
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const deepEq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const near = (a, b, tol, msg) => {
   assert.ok(Math.abs(a - b) <= tol, `${msg} — got ${a}, want ${b} ±${tol}`);
   checks++;
@@ -331,6 +333,79 @@ const near = (a, b, tol, msg) => {
        "a cancelling session reports its true OTM share, not the clamp");
   ok(none.vegaTilt === null, "zero delta flow yields an UNMEASURED vega tilt, not Infinity and not zero");
   ok(!none.hasDirectionalView, "zero delta flow reports no directional view");
+}
+
+/* ---------- one tape, one set of totals -------------------------- */
+{
+  /* WHAT THIS GUARDS. flowPurity used to accumulate a local called `tot` and
+     positioningQuality a local called `delta`, in two separate loops over the
+     same rows. They were the same quantity — Sigma|total_delta_flow| — under
+     two names, so a change to one could not be seen from the other. Both now
+     read one record, and these assertions are what would notice if they ever
+     stopped: the two ratios must share a denominator BY CONSTRUCTION. */
+  /* THE FOURTH ROW EARNS ITS PLACE: its total_delta_flow is NEGATIVE. Without a
+     sign change in that column, Sigma|total| and |Sigma total| are the same
+     number and nothing in this block can tell a gross accumulator from a net
+     one — a version that dropped the Math.abs passed the first draft of these
+     assertions. Every "gross" claim below is only checkable because this tape
+     reverses. */
+  const TAPE = [
+    { dir_delta_flow: "600", otm_dir_delta_flow: "150", total_vega_flow: "40", total_delta_flow: "1000" },
+    { dir_delta_flow: "-200", otm_dir_delta_flow: "-50", total_vega_flow: "10", total_delta_flow: "400" },
+    { dir_delta_flow: "0", otm_dir_delta_flow: "0", total_vega_flow: "5", total_delta_flow: "100" },
+    { dir_delta_flow: "-300", otm_dir_delta_flow: "-90", total_vega_flow: "-20", total_delta_flow: "-500" },
+  ];
+  const t = greekFlowTotals(TAPE);
+  near(t.dirNet, 100, 1e-9, "dirNet is the one SIGNED accumulator — it answers which way");
+  near(t.dirAbs, 1100, 1e-9, "dirAbs is gross, so cancelling prints still count as flow");
+  near(t.otmAbs, 290, 1e-9, "otmAbs is gross too");
+  near(t.vegaAbs, 75, 1e-9, "vegaAbs is gross — a negative vega print is vol traded, not vol undone");
+  near(t.totalAbs, 2000, 1e-9, "totalAbs is Sigma|total_delta_flow| — the ONE denominator");
+  ok(t.totalAbs !== 1000, "and it is GROSS: the reversing row adds 500, it does not subtract it");
+  eq(t.rows, 4, "rows is a COUNT of measured prints, not a ratio");
+
+  eq(greekFlowTotals([]).rows, 0, "an empty tape measured zero rows");
+  eq(greekFlowTotals(null).rows, 0, "and a missing tape is the same zero rows, never a throw");
+  near(greekFlowTotals(null).totalAbs, 0, 0, "with every sum at its identity");
+
+  /* THE POINT OF THE REFACTOR, asserted rather than asserted-in-a-comment:
+     flowPurity's published denominator IS positioningQuality's. */
+  const purity = flowPurity(TAPE);
+  near(purity.totalAbs, t.totalAbs, 0,
+       "flowPurity divides by exactly the totals record's totalAbs, not its own copy");
+  near(purity.dirDelta, t.dirNet, 0, "and publishes the same signed net");
+  near(purity.dirAbs, t.dirAbs, 0, "and the same gross");
+  near(positioningQuality(TAPE).vegaTilt, t.vegaAbs / t.totalAbs, 1e-12,
+       "positioningQuality's vegaTilt divides by that same totalAbs");
+  /* THE TWO RATIOS HAVE DIFFERENT DENOMINATORS ON PURPOSE, and the tape is
+     built so they differ numerically (1100 against 2000). otmShare asks what
+     fraction of the DIRECTIONAL flow was out of the money — bounded in [0,1]
+     because |otm_dir| <= |dir| row by row — while vegaTilt asks about the whole
+     tape. Dividing otmShare by totalAbs instead would still look plausible and
+     would still be bounded; only this assertion says which is meant. */
+  near(positioningQuality(TAPE).otmShare, t.otmAbs / t.dirAbs, 1e-12,
+       "otmShare divides the gross OTM by the gross DIRECTIONAL, not by the tape's total");
+  ok(t.dirAbs !== t.totalAbs,
+     "and the two denominators really are different numbers here, so that assertion can fail");
+
+  /* THREADING A PRECOMPUTED RECORD MUST CHANGE NOTHING. The pipeline calls both
+     measures on one array back to back; handing them one record is a ~33%
+     saving on that pair, and is worth nothing if it is also a different answer. */
+  eq(JSON.stringify(flowPurity(TAPE, t)), JSON.stringify(flowPurity(TAPE)),
+     "flowPurity is identical whether it builds the totals or is handed them");
+  eq(JSON.stringify(positioningQuality(TAPE, { totals: t })), JSON.stringify(positioningQuality(TAPE)),
+     "positioningQuality is identical whether it builds the totals or is handed them");
+  eq(JSON.stringify(positioningQuality(TAPE, { floor: 1e5, totals: t })),
+     JSON.stringify(positioningQuality(TAPE, { floor: 1e5 })),
+     "and the floor still applies when a record is threaded — the option bag is not swallowed");
+  ok(positioningQuality(TAPE, { floor: 1e5 }).otmShare === null,
+     "a floor above the tape's own gross reports UNMEASURED — the branch the line above compares");
+
+  /* THE ZERO-TAPE GUARD IS STILL THE OLD ONE. A tape whose every print carries
+     no total delta is not "purity zero" — zero is a real reading here. */
+  const dead = flowPurity([{ dir_delta_flow: "5", total_delta_flow: "0" }]);
+  ok(dead.purity === null, "a tape with no total delta is UNMEASURED purity, not zero");
+  near(dead.totalAbs, 0, 0, "and reports the zero denominator it actually measured");
 }
 
 /* ---------- gamma decay calendar -------------------------------- */
@@ -647,6 +722,246 @@ const near = (a, b, tol, msg) => {
      "and still has real dispersion — the floor shrinks z, it does not flatten it");
 }
 
+/* ---------- the fused hot path must be the SAME answer ----------- */
+{
+  /* THE DELIVERABLE OF THE FUSION IS THIS BLOCK, not the speedup.
+     robustZ(winsorize(col, p)) issues EIGHT full sorts of one column — two in
+     winsorize, one for the median, four across the two spans, one for the MAD's
+     deviations — and scoreBoard asks for seven columns per board. robustZFused
+     does it in two typed sorts. A faster answer that is a different answer is
+     not an optimisation, it is a second spelling of the score, so every fixture
+     below is checked ELEMENTWISE against the composed form.
+
+     THE STATED TOLERANCE IS ZERO. Not "small": the absolute difference must be
+     exactly 0 on every element of every fixture. The one representational
+     difference that does occur is the SIGN OF A ZERO — a typed sort orders -0
+     before +0 while a comparator sort leaves equal values where it found them,
+     so an even-length median can come out -0 in one path and +0 in the other.
+     -0 === 0 in JavaScript, every consumer of a z-score compares, scales or
+     renders it, and none of those can tell the two apart. `agree` therefore
+     requires exact numeric equality and tolerates only that. */
+  const agree = (col, opts, label) => {
+    const composed = robustZ(winsorize(col, opts.winsor ?? 0.02), { clamp: opts.clamp ?? 3 });
+    const fused = robustZFused(col, opts);
+    eq(fused.length, composed.length, `${label}: fused returns one z per input row`);
+    ok(Array.isArray(fused), `${label}: and returns a plain Array, as robustZ does`);
+    /* TYPE BEFORE VALUE, because `Math.abs(0 - null)` is 0 and this suite would
+       otherwise have certified a version that returned an array of nulls as
+       "identical". That is this repository's oldest scar wearing a test
+       helper's clothes: absence must be checked BEFORE coercion, here as much
+       as in the payload. Every z is a finite number or the comparison below
+       means nothing. */
+    ok(fused.every((v) => typeof v === "number" && Number.isFinite(v)),
+       `${label}: every fused z is a finite NUMBER — never null, undefined or NaN`);
+    let worst = 0;
+    for (let i = 0; i < composed.length; i++) worst = Math.max(worst, Math.abs(composed[i] - fused[i]));
+    ok(worst === 0, `${label}: fused equals robustZ(winsorize(...)) exactly (worst |diff| ${worst})`);
+  };
+
+  /* An ordinary board-shaped column: signed, with holes where a name was not
+     measured. This is the case the pipeline actually runs. */
+  const board = Array.from({ length: 128 }, (_, i) =>
+    (i % 8 === 3 ? null : Math.sin(i * 2.399) * 1.7 + (i % 17 === 0 ? 9 : 0)));
+  agree(board, { winsor: 0.02 }, "a 128-name board column with holes");
+
+  /* THE DEGENERATE CASES. Each of these reaches a DIFFERENT branch, and the
+     comment beside each says which — a fixture that cannot reach the branch it
+     certifies is this repo's most repeated mistake. */
+
+  // n = 0 finite: winsorize cannot form a quantile and returns the column
+  // unclipped; robustZ then sees fewer than two finite entries.
+  agree([], {}, "an empty column");
+  agree([NaN, NaN, NaN, NaN], {}, "an ALL-NaN column — nothing was ever measured");
+  agree([null, undefined, "", "abc"], {}, "a column of nulls, undefineds and unparseable strings");
+
+  // n = 1 finite: winsorize clips a single value to itself; robustZ still
+  // refuses to invent a scale from one point.
+  agree([5], {}, "a single element");
+  agree([null, 7, NaN], {}, "a single measured element among the silences");
+  deepEq(robustZFused([null, 7, NaN], {}), [0, 0, 0],
+     "a column too thin to score is the NEUTRAL VOTE for every row — literally 0, " +
+     "not null and not undefined, because every caller does arithmetic on it");
+  deepEq(robustZFused([], {}), [], "and an empty column is an empty array, not a row of anything");
+
+  // n = 2: the smallest column that gets a real scale at all.
+  agree([1, 2], {}, "n = 2, the smallest scored column");
+
+  // MAD zero AND IQR zero AND stdev zero: every estimator collapses, and both
+  // paths must fall all the way through to the all-zeros return.
+  agree(new Array(40).fill(7), {}, "an ALL-EQUAL column — MAD, both spans and the stdev all collapse");
+  const allEqual = robustZFused(new Array(40).fill(7), {});
+  ok(allEqual.every((v) => v === 0),
+     "and the all-equal column really does reach the final all-zeros exit, not merely agree by luck");
+
+  /* MAD zero AND both spans zero, but the mean/stdev fallback DOES fire — a
+     branch the all-equal fixture cannot reach, and one that is easy to write a
+     fixture for and miss: 62 twos and a single 9 does NOT reach it, because
+     winsorize at 0.02 clips the lone 9 back down to 2 and the column becomes
+     all-equal after all. Two survivors are needed for the 0.98 quantile to
+     land above the flat body. */
+  const nearlyFlat = [...new Array(61).fill(2), 9, 9];
+  agree(nearlyFlat, {}, "a near-constant column with two live values — the mean/stdev fallback");
+  const flatZ = robustZFused(nearlyFlat, {});
+  ok(flatZ.some((v) => v !== 0),
+     "and that fallback really fires: the live values are not flattened to the neutral vote");
+  /* THE FALLBACK ALSO MOVES THE CENTRE, from the median to the mean, so the
+     flat body no longer sits at exactly zero. That is robustZ's own behaviour
+     and the fused form reproduces it; the assertion is here so a future reader
+     does not "fix" a body that is meant to be slightly off zero. */
+  ok(new Set(flatZ.map((v) => v.toFixed(12))).size === 2,
+     "two distinct z values: the flat body and the two live names");
+  ok(flatZ[0] < 0 && flatZ[62] > 0,
+     "and the body sits BELOW the mean while the live names sit above it — the centre moved");
+
+  /* THE FALLBACK'S SUM IS ORDER-SENSITIVE, and the fused form folds it over the
+     ORIGINAL row order because robustZ does. It would be natural to accumulate
+     over the sorted buffer instead — it is right there, already built — and on
+     ordinary data nobody would ever notice. This fixture notices. 101 entries:
+     ten at -1e16, ten at +1e16, eighty-one at exactly 1, INTERLEAVED. Every
+     decile lands inside the flat body so all three robust estimators collapse
+     and the fallback runs; the extremes are large enough that adding 1 to them
+     is a no-op, so the sum is 72 in the interleaved order and exactly 0 in
+     sorted order. A different mean is a different z for every name.
+
+     Without this case the suite passed a version that summed the sorted copy.
+     It was found by mutation, not by reading. */
+  const orderSensitive = [];
+  for (let i = 0; i < 10; i++) orderSensitive.push(-1e16, 1e16, 1);
+  while (orderSensitive.length < 101) orderSensitive.push(1);
+  agree(orderSensitive, { winsor: 0.02 }, "an order-sensitive mean/stdev fallback");
+  ok(orderSensitive.reduce((a, b) => a + b, 0) !==
+     orderSensitive.slice().sort((a, b) => a - b).reduce((a, b) => a + b, 0),
+     "and the fixture really is order-sensitive: its sum differs between row order and sorted order");
+  ok(new Set(robustZFused(orderSensitive, { winsor: 0.02 }).map((v) => v.toFixed(12))).size === 3,
+     "three distinct z values — the two extremes and the flat body, which is NOT at zero");
+
+  /* Zero interquartile span with a LIVE 10-90 span: the third estimator is the
+     only one carrying the scale, so this fixture is the only thing in the suite
+     that would notice if the fused form dropped it. 15 low, 70 flat, 15 high:
+     the quartiles both land inside the flat body and the deciles do not. */
+  const wideOnly = [...new Array(15).fill(-5), ...new Array(70).fill(0), ...new Array(15).fill(5)];
+  agree(wideOnly, {}, "a column whose interquartile span is zero but whose 10-90 span is not");
+  const wideZ = robustZFused(wideOnly, {});
+  near(wideZ[0], -5 / ((5 - -5) / 2.563), 1e-12,
+       "the 10-90 estimator is what scaled it: z is the raw value over (span/2.563)");
+  ok(Math.abs(wideZ[0]) < 3, "and nothing saturated the clamp, which is the whole point of the third span");
+  ok(wideZ[20] === 0, "while the flat body sits at exactly the median");
+
+  // The sparse-signal trap this file opens by naming.
+  agree([...new Array(90).fill(0), 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], {}, "the sparse-signal MAD trap");
+
+  // Bimodal by sign — the family-D failure the robustZ comment records.
+  const bimodal2 = (pos, neg) => [
+    ...Array.from({ length: pos }, (_, i) => 0.5 + (i % 5) * 0.01),
+    ...Array.from({ length: neg }, (_, i) => -(0.5 + (i % 5) * 0.01)),
+  ];
+  for (const [a, b] of [[14, 10], [18, 6], [20, 4], [12, 12]]) {
+    agree(bimodal2(a, b), { winsor: 0.02 }, `a ${a}/${b} sign split`);
+  }
+
+  /* THE SHORTCUT THIS FUNCTION REFUSES. It is tempting to skip the clip for
+     every quantile except the MAD's, on the argument that winsorizing at 0.02
+     only rewrites the sorted ends while 0.10..0.90 sits inside them. That is
+     true at n = 128 and FALSE at n = 5, where the 0.02 quantile interpolates
+     between the first two sorted entries and the 0.10 quantile reads those same
+     two. This fixture is the one that would catch that shortcut. */
+  agree([1, 2, 3, 4, 5], { winsor: 0.02 }, "n = 5, where the clip moves the 10th percentile");
+  agree([-100, 1, 2, 3, 4, 5, 900], { winsor: 0.02 }, "n = 7 with both tails live");
+
+  // A winsor wide enough to invert the bounds: lo > hi collapses the whole
+  // column onto hi in the composed form, and the fused form must do the same
+  // odd thing rather than the sensible thing.
+  for (const p of [0, 0.01, 0.25, 0.49, 0.5, 0.6]) {
+    agree([-100, 1, 2, 3, 4, 5, 900], { winsor: p }, `winsor = ${p}`);
+  }
+  for (const c of [0.5, 1, 3, 10]) agree([-100, 1, 2, 3, 4, 5, 900], { clamp: c }, `clamp = ${c}`);
+
+  /* HUGE OPPOSITE-SIGNED EXTREMES. At n = 7 the 0.02 quantile still lands
+     between two ordinary entries, so the bounds are finite and the clip happens
+     normally — this fixture is NOT the overflow case, and saying so is the
+     point: it was written believing it was. */
+  agree([-1e308, 1e308, 0, 5, -5, 2, -2], { winsor: 0.02 }, "huge opposite-signed extremes, bounds still finite");
+
+  /* THE ACTUAL OVERFLOW. At n = 2 the quantile interpolates directly between
+     the two extremes, sorted[1] - sorted[0] overflows to Infinity, and the
+     bound comes back non-finite. winsorize responds by returning the column
+     UNCLIPPED, and the fused form has to refuse in the same place rather than
+     clamping every name to Infinity. The same fixture then overflows the MAD
+     (the even-length median sums the pair before halving it) and the stdev
+     after it, so it also lands on the final all-zeros exit — the one reached
+     when even the mean/stdev fallback cannot produce a usable scale. */
+  const overflow = [-1e308, 1e308];
+  agree(overflow, { winsor: 0.02 }, "bounds that overflow to Infinity — the clip is refused");
+  ok(robustZFused(overflow, { winsor: 0.02 }).every((v) => v === 0),
+     "and an unusable scale is the neutral vote for everyone, never Infinity and never NaN");
+  agree([-1e308, -1e308, 1e308], { winsor: 0.02 }, "only the upper bound overflows");
+  agree([-1e308, 1e308, 1e308], { winsor: 0.02 }, "only the lower bound overflows");
+
+  /* TWO THINGS THIS SUITE DELIBERATELY DOES NOT ASSERT, recorded so the next
+     reader does not spend the afternoon finding out the same way:
+
+       * reading the MAD's deviations out of the sorted buffer instead of the
+         original-order one is EQUIVALENT — a median only ever sees the
+         multiset — so no fixture can distinguish it, and none pretends to;
+       * dropping the non-finite-bound guard is equivalent TOO, because a bound
+         can only overflow on a column that also overflows the MAD and the
+         stdev, and both paths then return the neutral vote for everyone. The
+         four fixtures above reach that branch and agree either way. The guard
+         exists so the fused form and winsorize refuse in the same place, not
+         because a divergence is currently reachable.
+
+     Both were established by mutating the implementation and re-running this
+     file. Three other mutations of the same kind — skipping the clip before the
+     quantiles, taking the median through the quantile formula, and folding the
+     fallback's sum over the sorted copy — are NOT equivalent, and the fixtures
+     above kill all three. */
+
+  /* AND A DIFFERENTIAL FUZZ, so the agreement is a property rather than a list
+     of cases someone thought of. Deterministic seed: a failure is reproducible. */
+  let seed = 20260904;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  let worstFuzz = 0, elements = 0;
+  for (let trial = 0; trial < 600; trial++) {
+    const n = 1 + Math.floor(rnd() * 60);
+    const col = [];
+    for (let i = 0; i < n; i++) {
+      const r = rnd();
+      if (r < 0.12) col.push(null);
+      else if (r < 0.18) col.push(NaN);
+      else if (r < 0.22) col.push(undefined);
+      else if (r < 0.30) col.push(Math.round((rnd() - 0.5) * 4));       // ties, on purpose
+      else col.push((rnd() - 0.5) * Math.pow(10, Math.floor(rnd() * 8) - 2));
+    }
+    const opts = { winsor: [0, 0.01, 0.02, 0.1, 0.3][Math.floor(rnd() * 5)],
+                   clamp: [1, 3, 5][Math.floor(rnd() * 3)] };
+    const composed = robustZ(winsorize(col, opts.winsor), { clamp: opts.clamp });
+    const fused = robustZFused(col, opts);
+    for (let i = 0; i < composed.length; i++) {
+      elements++;
+      worstFuzz = Math.max(worstFuzz, Math.abs(composed[i] - fused[i]));
+    }
+  }
+  ok(elements > 15000, `the fuzz actually exercised the paths (${elements} elements compared)`);
+  ok(worstFuzz === 0,
+     `600 random columns agree exactly, ties and silences included (worst |diff| ${worstFuzz})`);
+
+  /* THE SORT CENSUS. The whole reason this function exists is the sort count,
+     so assert it rather than trusting the comment: eight for the composed form,
+     two for the fused one. If a future edit reintroduces a sort, this fails. */
+  const countSorts = (fn) => {
+    let sorts = 0;
+    const realArray = Array.prototype.sort, realTyped = Float64Array.prototype.sort;
+    Array.prototype.sort = function (...a) { sorts++; return realArray.apply(this, a); };
+    Float64Array.prototype.sort = function (...a) { sorts++; return realTyped.apply(this, a); };
+    try { fn(); } finally { Array.prototype.sort = realArray; Float64Array.prototype.sort = realTyped; }
+    return sorts;
+  };
+  eq(countSorts(() => robustZ(winsorize(board, 0.02))), 8,
+     "the composed form issues eight full sorts of one column — the defect being fixed");
+  eq(countSorts(() => robustZFused(board, { winsor: 0.02 })), 2,
+     "the fused form issues two: one for the column, one for the MAD's deviations");
+}
+
 /* ---------- rank hysteresis ------------------------------------- */
 {
   const today = Array.from({ length: 60 }, (_, i) => "T" + (i + 1));
@@ -657,7 +972,7 @@ const near = (a, b, tol, msg) => {
      them first fixed that and overcorrected: incumbency came to beat rank
      absolutely, so with 25 incumbents at ranks 5..29 the board was exactly
      those 25 and the four strongest names in the session were not on it. */
-  const slipped = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 });
+  const slipped = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 }).ids;
   for (const t of ["T1", "T2", "T3", "T4"]) {
     ok(slipped.includes(t), `${t} is one of the session's best and is on the board`);
   }
@@ -667,29 +982,83 @@ const near = (a, b, tol, msg) => {
      `the board grows rather than dropping the best (got ${slipped.length})`);
 
   // With no incumbents it is exactly today's top entryRank.
-  const fresh = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 });
+  const fresh = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 }).ids;
   eq(fresh.length, 25, "no incumbents means exactly the top entryRank");
   eq(fresh[0], "T1", "ordered by today's rank");
   eq(fresh[24], "T25", "and cut at entryRank");
 
   // An incumbent past the exit band goes, which is the whole point of exitRank.
-  const dropped = applyHysteresis(today, ["T36", "T50"], { entryRank: 25, exitRank: 35 });
+  const dropped = applyHysteresis(today, ["T36", "T50"], { entryRank: 25, exitRank: 35 }).ids;
   ok(!dropped.includes("T36") && !dropped.includes("T50"),
      "an incumbent beyond exitRank is not held");
   eq(dropped.length, 25, "so the board does not grow for it");
 
   // The board is always ordered by TODAY's rank, never by incumbency.
-  const mixed = applyHysteresis(today, today.slice(25, 34), { entryRank: 25, exitRank: 35 });
+  const mixed = applyHysteresis(today, today.slice(25, 34), { entryRank: 25, exitRank: 35 }).ids;
   const positions = mixed.map((t) => today.indexOf(t));
   ok(positions.every((v, i) => i === 0 || v > positions[i - 1]),
      "the emitted board is in today's rank order");
   ok(new Set(mixed).size === mixed.length, "and holds no duplicates");
 
   // Degenerate inputs must not throw or invent names.
-  eq(applyHysteresis([], ["T1"]).length, 0, "an empty session yields an empty board");
-  eq(applyHysteresis(null, null).length, 0, "and null inputs are safe");
-  const short = applyHysteresis(today.slice(0, 8), today.slice(0, 8), { entryRank: 25, exitRank: 35 });
+  eq(applyHysteresis([], ["T1"]).ids.length, 0, "an empty session yields an empty board");
+  eq(applyHysteresis(null, null).ids.length, 0, "and null inputs are safe");
+  const short = applyHysteresis(today.slice(0, 8), today.slice(0, 8), { entryRank: 25, exitRank: 35 }).ids;
   eq(short.length, 8, "a pool shorter than entryRank is kept whole, not padded");
+}
+
+/* ---------- the board's memory ----------------------------------
+   applyHysteresis already knew which names were new, which returned, and
+   which were here only on incumbency. It returned a flat list of tickers, so
+   a board that had just decided all three published a page on which nothing
+   was new. These are those three facts, and the fourth that keeps them
+   honest: a cold memory is not a memory full of arrivals. */
+{
+  const today = Array.from({ length: 60 }, (_, i) => "T" + (i + 1));
+
+  /* Yesterday held T5..T29. So T1..T4 are new by rank, T5..T25 return by
+     rank, and T26..T29 are here ONLY because they were here yesterday. */
+  const m = applyHysteresis(today, today.slice(4, 29), { entryRank: 25, exitRank: 35 });
+
+  deepEq(m.entered, ["T1", "T2", "T3", "T4"],
+    "the four names that entered the top 25 overnight are named, in rank order — the " +
+    "single sentence a ranked list most owes a reader who was not looking yesterday");
+  deepEq(m.held, ["T26", "T27", "T28", "T29"],
+    "and the names here on incumbency rather than on rank are named separately: this is " +
+    "the fact no downstream set difference can recover, because it is a statement about " +
+    "WHY a name is on the board");
+  ok(m.returning.length === m.ids.length - m.entered.length,
+    "entered and returning partition the board exactly — no name is both and none is neither");
+  for (const id of m.held) ok(m.returning.includes(id),
+    `${id} is held, so it is by construction also returning`);
+  for (const id of m.entered) ok(!m.held.includes(id),
+    `${id} entered today, so it cannot be here on incumbency`);
+  for (const id of m.entered) ok(m.ids.includes(id), `${id} is on the board it entered`);
+
+  /* THE COLD MEMORY. This is the case that makes the difference between a
+     useful flag and a daily lie: the store read is non-fatal by design, so a
+     week of failed reads would otherwise publish "everything is new" every
+     morning and a reader would learn to ignore the flag entirely. */
+  const cold = applyHysteresis(today, [], { entryRank: 25, exitRank: 35 });
+  ok(cold.cold, "an empty incumbent list is reported as a COLD memory, not as a full board of arrivals");
+  eq(cold.entered.length, 0,
+     "so nothing claims to be new — 25 names would each be technically correct and the " +
+     "page would be wrong");
+  eq(cold.returning.length, 0, "and nothing claims to be returning either");
+  eq(cold.ids.length, 25, "while the board itself is unaffected: the memory is a separate question");
+  eq(cold.held.length, 0, "and no name can be held by an incumbency that does not exist");
+
+  const warm = applyHysteresis(today, ["T1"], { entryRank: 25, exitRank: 35 });
+  ok(!warm.cold, "one incumbent is a memory");
+  eq(warm.entered.length, 24, "and 24 of the 25 are then genuinely new");
+  deepEq(warm.returning, ["T1"], "with the one that was here named");
+
+  /* Order is the board's order in all three, so a renderer can zip them. */
+  const order = new Map(m.ids.map((t, i) => [t, i]));
+  for (const list of [m.entered, m.returning, m.held]) {
+    ok(list.every((t, i) => i === 0 || order.get(t) > order.get(list[i - 1])),
+       "every subset comes back in the board's own rank order");
+  }
 }
 
 /* ---------- asset-version pinning -------------------------------
@@ -1153,4 +1522,4 @@ const near = (a, b, tol, msg) => {
     "two builds over one response are byte-identical");
 }
 
-console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg sign convention that differs by Greek asserted from the vendor's own example`);
+console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg sign convention that differs by Greek asserted from the vendor's own example, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);

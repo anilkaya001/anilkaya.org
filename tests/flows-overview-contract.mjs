@@ -20,6 +20,17 @@
    A reader who cannot see that band reads a short page as a broken page,
    so the band is drawn — and here, measured.
 
+   AND THE PAGE NOW LEADS ON CHANGE. It answered "what is the LEVEL" — both
+   tails ranked, the band drawn — which is the right page at 16:00 and the
+   wrong one at 09:15, when the reader already knows GOOG is +71 because it
+   was +71 yesterday. So "What changed" is the first region under the verdict
+   bar, spans the whole grid, and ranks CROSSINGS of the dead band above
+   magnitude: a name that left the band became actionable this session and a
+   name that fell back into it stopped being so, and neither is a bigger
+   version of a drift. Every number in it arrives DERIVED, from the change
+   layer on the payload, and this file's fixture is built by the same shaper
+   that publishes it so the two cannot drift apart.
+
    THREE SILENCES, THREE SENTENCES, and this file asserts all three at once
    rather than trusting the prose. `events` is never published, so that
    region is PENDING; `scoretrack` is failed at the network for one load,
@@ -35,6 +46,7 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startWorker, FLOWS_PASSWORD, FLOWS_TEST_USER } from "./worker-server.mjs";
+import { buildScoreTrack } from "../shared/flows-scores.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -104,35 +116,83 @@ const board = (side, rows, sessionDate = SESSION, extra = {}) => ({
   ...extra,
 });
 
-/* THE TRACE, AND THE MOVES IT IMPLIES.
+/* THE TRACE IS BUILT BY THE SHAPER THAT PUBLISHES IT.
 
-   "What changed" is last-minus-previous over each name's own measured
-   history, so this fixture makes every branch of that arithmetic answer
-   once:
+   A hand-written scoretrack was the right fixture while the renderer did its
+   own subtraction. It is the wrong one now: the payload carries the change
+   layer, and a hand-written `d1` is this file's OPINION about what
+   buildScoreTrack emits rather than what it emits. So the fixture states the
+   thing the archive actually holds — sessions of scores — and
+   shared/flows-scores.js derives d1, lastAt, run, ext and change from them.
+   A change to that derivation now reaches this suite instead of passing it.
 
-     PFE  -60 -> -91   a move of -31, the largest, and it must lead
-     MU   -20, gap, -35   a move of -15 ACROSS A GAP: the previous session
-                          the name was SCORED, never a zero substituted in
-     ORCL  80 ->  88   a move of +8
-     DE / BAC / CAT / ADBE  flat: measured twice, moved zero. Not a move.
-     KLA   one session only: nothing to subtract from, so not a move either
-     XOM   absent from the trace entirely, which its strip must say with an
-           em dash rather than a flat line drawn at zero. */
-const trackNames = [
-  { t: "ORCL", s: [80, 88], n: 2, last: 88 },
-  { t: "PFE", s: [-60, -91], n: 2, last: -91 },
-  { t: "MU", s: [-20, null, -35], n: 2, last: -35 },
-  { t: "DE", s: [57, 57], n: 2, last: 57 },
-  { t: "BAC", s: [-62, -62], n: 2, last: -62 },
-  { t: "CAT", s: [26, 26], n: 2, last: 26 },
-  { t: "ADBE", s: [33, 33], n: 2, last: 33 },
-  { t: "KLA", s: [41], n: 1, last: 41 },
+   THE SESSIONS ARE CHOSEN SO EVERY BRANCH OF THE CHANGE LAYER FIRES ONCE,
+   against the board's ±20 dead band:
+
+     CAT   -30 ->  26  FLIPPED: outside the band at both ends, opposite
+                       signs. The largest move on the page — and the one name
+                       the run built NO detail card for, so a crossing must
+                       still render as plain text rather than be minted into
+                       an opener that opens nothing.
+     NKE    45 ->  18  FADED: out of the band and into it. NKE is the watch
+                       board's first row at 18, so the two payloads agree
+                       about where it ended up.
+     MU    -18 -> -35  CLEARED, ACROSS A GAP of two sessions: the name was
+                       not scored on 2026-08-21 at all, and a renderer that
+                       filters the nulls out before subtracting cannot tell.
+     PFE   -60 -> -91  the largest DRIFT, and larger than two of the three
+                       crossings — so a renderer still ranking on |delta|
+                       heads the region with it and fails here.
+     ORCL   80 ->  88  a small overnight drift, and the only pair carrying a
+                       residual at both ends, so it is the only row that can
+                       print an unsaturated move.
+     DE / ADBE         measured twice, moved zero. Held, which is not moved.
+     BAC   -55 -> -62  moved, and its newest score is on the PRIOR session:
+                       the reading is real and it is not about today.
+     AVGO   62 ->  40  stale AND spanning the board-only backfill session,
+                       which is sparser rather than quieter.
+     KLA    41         one session only: nothing to subtract from.
+     XOM               absent from the trace entirely, which its strip must
+                       say with an em dash rather than a flat line at zero. */
+const TRACK_DAYS = [
+  { d: "2026-08-18", source: "boards", rows: [
+    { t: "ORCL", s: 74 }, { t: "PFE", s: -55 }, { t: "NKE", s: 50 },
+    { t: "CAT", s: -30 }, { t: "DE", s: 57 }, { t: "BAC", s: -50 }, { t: "AVGO", s: 62 },
+  ] },
+  { d: "2026-08-19", source: "scores", rows: [
+    { t: "ORCL", s: 76 }, { t: "PFE", s: -58 }, { t: "MU", s: -18 }, { t: "NKE", s: 47 },
+    { t: "CAT", s: -31 }, { t: "DE", s: 57 }, { t: "ADBE", s: 33 }, { t: "BAC", s: -55 },
+  ] },
+  { d: "2026-08-21", source: "scores", rows: [
+    { t: "ORCL", s: 80, q: 1820 }, { t: "PFE", s: -60 }, { t: "NKE", s: 45 },
+    { t: "CAT", s: -30 }, { t: "DE", s: 57 }, { t: "ADBE", s: 33 },
+    { t: "BAC", s: -62 }, { t: "AVGO", s: 40 },
+  ] },
+  { d: SESSION, source: "scores", rows: [
+    { t: "ORCL", s: 88, q: 2450 }, { t: "PFE", s: -91 }, { t: "MU", s: -35 },
+    { t: "NKE", s: 18 }, { t: "CAT", s: 26 }, { t: "DE", s: 57 },
+    { t: "ADBE", s: 33 }, { t: "KLA", s: 41 },
+  ] },
 ];
-const scoretrack = (names) => ({
-  v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
-  windowSessions: 42, deadBand: 20, epoch: "2026-08-26",
-  sessions: [{ d: "2026-08-21", source: "boards" }, { d: SESSION, source: "full" }],
-  names, namesSeen: names.length, namesShed: 0,
+
+/* EVERY NAME COMPARED, NOT ONE OF THEM MOVED. A reading about the session,
+   and the one silence on this region that is a claim about the market. */
+const FLAT_DAYS = ["2026-08-21", SESSION].map((d) => ({
+  d, source: "scores",
+  rows: [...bullRows, ...bearRows].map((r) => ({ t: r.t, s: r.s })),
+}));
+
+/* TWO SESSIONS THAT SHARE NO NAME. Nothing has two observations, so no
+   change EXISTS to report — which is a fact about the archive and not about
+   a market that stood still, and the two may not share a sentence. */
+const COLD_DAYS = [
+  { d: "2026-08-21", source: "scores", rows: [{ t: "ORCL", s: 80 }] },
+  { d: SESSION, source: "scores", rows: [{ t: "PFE", s: -91 }] },
+];
+
+const scoretrack = (days) => ({
+  v: 2, sessionDate: SESSION, generatedAt: new Date().toISOString(),
+  ...buildScoreTrack(days, { deadBand: 20, epoch: "2026-08-26" }),
 });
 
 const market = {
@@ -169,7 +229,7 @@ await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
 await post("board:watch", watch);
 await post("market", market);
 await post("flowalerts", alerts);
-await post("scoretrack", scoretrack(trackNames));
+await post("scoretrack", scoretrack(TRACK_DAYS));
 /* `events` IS DELIBERATELY NEVER PUBLISHED. The worker answers an
    unpublished key with {status:"pending"}, which is the silence this file
    needs a live example of — an endpoint that has not spoken is not an
@@ -213,16 +273,31 @@ try {
         s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
         cls: t.querySelector(".cc-tile-v")?.className || "",
       })));
-    eq(tiles.length, 6, "the verdict bar states six readings");
+    eq(tiles.length, 7, "the verdict bar states seven readings");
     const by = Object.fromEntries(tiles.map((t) => [t.k, t]));
 
     eq(by.Session?.v, SESSION, "the verdict names the session it is about");
     eq(by.Screened?.v, "264", "and how many names were screened, from the market payload");
-    /* U+2212, not a hyphen — the whole site's rule, and the reason the
-       formatter lives in flows-ui.js rather than in each page. */
-    eq(by.Tilt?.v, "−0.0143", "the level the board's own score neutralises away");
-    ok(/is-neg/.test(by.Tilt?.cls || ""),
-       `and a sold tape is toned as one (${by.Tilt?.cls})`);
+
+    /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE
+       BETWEEN THEM. breadth.tilt counts names and premium.tilt weights
+       dollars; shared/flows-market.js says publishing both is what removes
+       the weighting choice instead of burying it. This bar used to print ONE
+       of them under the bare label "Tilt", so on a day the two part company
+       the landing page showed the opposite sign to /flows/market/ over the
+       same payload — and it printed a bounded ratio to four decimals with no
+       unit at all. U+2212, not a hyphen, in both. */
+    eq(by["Tilt · names"]?.v, "−1.4%",
+       "the equal-weight tilt is a share of names, with its unit");
+    eq(by["Tilt · dollars"]?.v, "−2.1%",
+       "and the dollar-weight tilt is a share of premium, on the same tile row");
+    eq(by["Tilt · names"]?.s, "of names, bull − bear",
+       "each tile says what it is a share OF");
+    eq(by["Tilt · dollars"]?.s, "of gross premium, calls − puts",
+       "and the two subtitles are not the same sentence");
+    ok(/is-neg/.test(by["Tilt · names"]?.cls || "") &&
+       /is-neg/.test(by["Tilt · dollars"]?.cls || ""),
+       `and a sold tape is toned as one on both (${by["Tilt · names"]?.cls})`);
     eq(by.Breadth?.v, "9 / 12", "breadth is bull over bear, from the market payload");
     eq(by["Both sides"]?.v, "5 / 4", "and both boards are counted whole, not to the region cap");
     eq(by["Flagged windows"]?.v, "7", "the vendor's flagged-window count");
@@ -235,8 +310,12 @@ try {
     /* The board used to hide half the session behind a LONG/SHORT toggle,
        and then behind a three-tile cap. A session leans in two directions
        and a reader comparing them should not have to remember the other. */
-    const bull = (await page.locator(".cc-bull tbody .cc-t").allTextContents()).map((s) => s.trim());
-    const bear = (await page.locator(".cc-bear tbody .cc-t").allTextContents()).map((s) => s.trim());
+    /* THE NAME NODE, NOT THE WHOLE CELL. The cell now also carries the
+       crossing tag and the earnings marker, which are facts ABOUT the name
+       and not part of it — reading the cell whole would make this assertion
+       fail the moment either one fires, which is exactly what it did. */
+    const bull = (await page.locator(".cc-bull tbody .cc-t > :first-child").allTextContents()).map((s) => s.trim());
+    const bear = (await page.locator(".cc-bear tbody .cc-t > :first-child").allTextContents()).map((s) => s.trim());
     ok(bull.length > 0 && bear.length > 0, "both sides are populated from one page load");
 
     /* FIVE AND FOUR. The regions show ten; a renderer truncated to three
@@ -266,7 +345,7 @@ try {
     /* The other columns are the ones the six tiles had no room for. */
     const orcl = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".cc-bull tbody tr"));
-      const row = rows.find((r) => r.querySelector(".cc-t")?.textContent.trim() === "ORCL");
+      const row = rows.find((r) => r.querySelector(".cc-t > :first-child")?.textContent.trim() === "ORCL");
       return Array.from(row.querySelectorAll("td"), (td) => td.textContent.trim());
     });
     deep(orcl.slice(0, 6), ["1", "ORCL", "+88", "81", "+1.92%", "$36.7M"],
@@ -295,7 +374,7 @@ try {
        is what actually keeps the fifth out of the click delegation. */
     const cat = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".cc-bull tbody tr"));
-      const row = rows.find((r) => r.querySelector(".cc-t")?.textContent.trim() === "CAT");
+      const row = rows.find((r) => r.querySelector(".cc-t > :first-child")?.textContent.trim() === "CAT");
       const el = row.querySelector(".cc-t > *");
       return { tag: el.tagName, t: el.dataset.t || null, title: el.getAttribute("title") };
     });
@@ -303,14 +382,17 @@ try {
     eq(cat.t, null, "with no data-t, so the delegation cannot reach it");
     ok(/No detail card/.test(cat.title || ""),
        `and it says why rather than looking broken (${cat.title})`);
-    eq(await page.locator(".cc-open").count(), 8,
+    /* SCOPED TO THE TWO RANKED REGIONS. The lead region mints openers for
+       the same rule over its own rows, so a page-wide count would be
+       counting two regions and asserting about one. */
+    eq(await page.locator(".cc-bull .cc-open, .cc-bear .cc-open").count(), 8,
        "so eight of the nine published names open a card and the ninth says why");
 
     /* THE CARD OPENS IN PLACE. A marker set on the window survives a
        dialog; it does not survive a navigation, which is the difference
        this whole change is about. */
     await page.evaluate(() => { window.__noReload = true; });
-    await page.locator('.cc-open[data-t="ORCL"]').click();
+    await page.locator('.cc-bull .cc-open[data-t="ORCL"]').click();
     await page.waitForSelector("#flowsCard[open]", { timeout: 10000 });
     ok(await page.evaluate(() => window.__noReload === true),
        "clicking a name opens the card WITHOUT reloading the document");
@@ -336,7 +418,7 @@ try {
       const read = (sel) => Array.from(document.querySelectorAll(sel), (td) => {
         const svg = td.querySelector("svg");
         return {
-          t: td.closest("tr").querySelector(".cc-t").textContent.trim(),
+          t: td.closest("tr").querySelector(".cc-t > :first-child").textContent.trim(),
           drawn: !!svg,
           label: svg && svg.getAttribute("aria-label"),
           zero: !!(svg && svg.querySelector(".cc-zero")),
@@ -366,7 +448,7 @@ try {
     const ends = await page.evaluate(() => {
       const y = (side, name) => {
         const row = Array.from(document.querySelectorAll(`${side} tbody tr`))
-          .find((r) => r.querySelector(".cc-t").textContent.trim() === name);
+          .find((r) => r.querySelector(".cc-t > :first-child").textContent.trim() === name);
         const dots = Array.from(row.querySelectorAll(".cc-trk circle"),
           (c) => Number(c.getAttribute("cy")));
         return { min: Math.min(...dots), max: Math.max(...dots) };
@@ -378,27 +460,145 @@ try {
        `ORCL ${ends.orcl.max.toFixed(1)}; y grows downward)`);
   }
 
-  /* ---------- what changed --------------------------------------- */
+  /* ---------- the lead region: what changed ---------------------- */
   {
-    /* THE QUESTION NO OTHER ROUTE ANSWERS. Every surface in this section
-       reports a level; none reports a change, so a name that moved forty
-       points overnight looked exactly like one that had not moved in a
-       month. */
-    const moves = await page.evaluate(() => Array.from(
-      document.querySelectorAll("#ccChg .cc-moves li"),
-      (li) => Array.from(li.children, (c) => c.textContent.trim())));
-    deep(moves.map((m) => m[0]), ["PFE", "MU", "ORCL"],
-      "the moves are ranked by size regardless of direction, and only real moves are moves");
-    deep(moves[0], ["PFE", "−31", "now −91"],
-      "each move names the delta and where it left the score");
-    /* ACROSS A GAP. MU's trace is -20, nothing, -35: the comparison is
-       against the previous session the name was SCORED. A gap means the
-       name was not scored that day and never means it scored zero — the
-       arithmetic that treats a gap as zero would print -35 here. */
-    deep(moves[1], ["MU", "−15", "now −35"],
-      "a gap in a trace is skipped, never read as a zero to subtract from");
-    ok(!moves.some((m) => m[0] === "DE" || m[0] === "KLA"),
-       "a name that held its score, and a name with only one session, are not moves");
+    /* THE PAGE NOW LEADS ON CHANGE. Every surface in this section reports a
+       LEVEL; at 09:15 the reader already knows GOOG is +71 because it was
+       +71 yesterday. What they do not know is which four names crossed. So
+       this region is first under the verdict bar and spans the whole grid,
+       rather than being two of twelve columns holding a three-item list
+       BELOW both ranked tables. */
+    const seat = await page.evaluate(() => {
+      const region = document.getElementById("ccChg").closest(".cc-region");
+      const grid = region.parentNode;
+      const after = document.getElementById("ccVerdict").nextElementSibling;
+      return {
+        leads: after === region,
+        aboveBull: !!(region.compareDocumentPosition(document.getElementById("ccBull")) &
+                      Node.DOCUMENT_POSITION_FOLLOWING),
+        width: Math.round(region.getBoundingClientRect().width),
+        gridWidth: Math.round(grid.getBoundingClientRect().width),
+      };
+    });
+    ok(seat.leads, "the change region is the first region under the verdict bar");
+    ok(seat.aboveBull, "and it reads before the ranked poles rather than after them");
+    ok(Math.abs(seat.width - seat.gridWidth) <= 2,
+       `and spans the whole twelve-column grid (${seat.width} of ${seat.gridWidth})`);
+
+    /* THE DENOMINATOR IS PUBLISHED WITH THE MOVES. "Eight names moved" is
+       not a reading: eight of twelve is a session that turned and eight of
+       four hundred is a Tuesday. The change layer counts the whole pool
+       BEFORE the payload's size cap sheds rows, so this paragraph states a
+       population no renderer counting its own visible rows could reach. */
+    const lede = (await page.locator("#ccChg .cc-lede").textContent()).trim();
+    ok(/7 of 9 names/.test(lede),
+       `the region states how many moved out of how many were comparable (${lede})`);
+    ok(/±20/.test(lede), `and the threshold the crossings are counted against (${lede})`);
+    ok(/1 cleared, 1 faded back inside, 1 flipped sides/.test(lede),
+       `and the three crossing counts by name, not as one total (${lede})`);
+    ok(/2026-08-21/.test(lede) && new RegExp(SESSION).test(lede),
+       `and the two sessions it is a change between (${lede})`);
+    ok(/2 names were scored on the prior session and not on this one/.test(lede),
+       `and the names that left the pool, which no delta can show (${lede})`);
+
+    const rows = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccChg tbody tr"),
+      (tr) => Array.from(tr.children, (td) => td.textContent.trim())));
+
+    /* CROSSINGS OUTRANK MAGNITUDE. PFE's −31 is larger than two of the three
+       crossings and it still sorts below all of them, because a change of
+       CATEGORY is not a bigger version of a change of degree: inside the
+       band a name reaches no board at all. A renderer ranking on |delta| —
+       which is what this file used to assert — heads the list with PFE and
+       fails here. */
+    deep(rows.map((r) => r[1]), ["CAT", "NKE", "MU", "PFE", "ORCL", "AVGO", "BAC"],
+      "crossings lead, then fresh drift by size, then the readings that are not about today");
+
+    deep(rows[0], ["flipped · window high", "CAT", "+56", "1 session", "+26", "—", "1",
+                   "this session"],
+      "each row names the event, the move, the span it took, where it landed and how old the opinion is");
+
+    /* THE GAP TRAVELS WITH THE DELTA, ALWAYS. MU was not scored on
+       2026-08-21 at all: its −17 spans two sessions and PFE's −31 spans one,
+       and the integers alone cannot be told apart. Filtering the nulls out
+       before subtracting — which is what this page used to do — discards
+       exactly this. */
+    const by = Object.fromEntries(rows.map((r) => [r[1], r]));
+    eq(by.MU[3], "2 sessions", "a move across a gap says how many sessions it spans");
+    eq(by.PFE[3], "1 session", "and an overnight move says that it is one");
+    eq(by.MU[0], "cleared · window low",
+       "the name that came out of the dead band is the headline event, in words");
+    eq(by.NKE[0], "faded · window low",
+       "and the exit signal is worded as its own event, not as a smaller entry");
+
+    /* A BOARD-ONLY SESSION IS SPARSER, NOT QUIETER: those columns were
+       reconstructed from archived boards, which hold only the names that
+       made a board that day. A comparison that spans one is not a
+       comparison across a full pool and says so. */
+    eq(by.AVGO[3], "2 sessions · board-only",
+       "a comparison spanning the backfill is marked rather than presented as adjacency");
+
+    /* THE SCORE SATURATES AND THE RESIDUAL DOES NOT. Only ORCL carried a
+       residual at both ends, so it is the only row that can print the move
+       in units that do not compress — and an absent residual is an em dash,
+       never a zero. */
+    eq(by.ORCL[5], "+630", "a move is also given in residual units where both ends carried one");
+    eq(by.PFE[5], "—", "and absent where either end did not, which is not a zero");
+
+    /* STALE MEANS REAL, BUT NOT ABOUT TODAY. BAC's newest score is on the
+       PRIOR session, so its −7 happened before this morning. A page that
+       leads on change owes that before it owes the magnitude, and both such
+       rows sort below every reading that is about this session. */
+    eq(by.BAC[7], "2026-08-21 · 1 session back",
+       "a name not scored in the newest session says which session it was last scored on");
+    eq(by.ORCL[7], "this session", "and one that was says so");
+    const fresh = rows.findIndex((r) => r[7] !== "this session");
+    ok(fresh === 5, `and the stale readings are demoted below the fresh ones (${fresh})`);
+
+    ok(!rows.some((r) => r[1] === "DE" || r[1] === "ADBE"),
+       "a name that held its score is counted in the paragraph and is not a move");
+    ok(!rows.some((r) => r[1] === "KLA"),
+       "and a name with one scored session has nothing to subtract from");
+
+    /* THE NAMES OPEN. These are the same deep board rows that are rendered
+       as openers in the ranked region twelve lines below, and this region
+       used to emit a plain <span> for every one of them — so the region
+       leading the page was the only dead text on it. */
+    const cells = await page.evaluate(() => {
+      const out = {};
+      for (const tr of document.querySelectorAll("#ccChg tbody tr")) {
+        const name = tr.children[1];
+        const node = name.querySelector("*");
+        out[name.textContent.trim()] =
+          { tag: node.tagName, t: node.dataset.t || null, title: node.getAttribute("title") };
+      }
+      return out;
+    });
+    eq(cells.ORCL?.tag, "BUTTON", "a changed name with a card opens it in place");
+    eq(cells.ORCL?.t, "ORCL", "carrying the ticker the card delegation reads");
+    /* CAT crossed the band AND has no detail card. A crossing does not mint
+       an opener that opens nothing. */
+    eq(cells.CAT?.tag, "SPAN", "a crossing with no card is still plain text");
+    eq(cells.CAT?.t, null, "with no data-t for the delegation to reach");
+    ok(/No detail card/.test(cells.CAT?.title || ""),
+       `and it says why rather than looking broken (${cells.CAT?.title})`);
+    /* AVGO is in the trace and on neither board, so no card exists for it
+       and none is claimed. */
+    eq(cells.AVGO?.tag, "SPAN", "and a name on no board opens nothing either");
+
+    /* AND IT REALLY OPENS. The delegation in flows-card.js matches
+       .cc-open[data-t] anywhere on the document, so the proof that this
+       region's names are live — rather than merely button-shaped — is
+       opening one from it and coming back out. */
+    await page.locator('#ccChg .cc-open[data-t="MU"]').click();
+    await page.waitForSelector("#flowsCard[open]", { timeout: 10000 });
+    ok(/[?&]t=MU/.test(page.url()),
+       `a name in the lead region opens its card in place (${page.url()})`);
+    ok(await page.evaluate(() => window.__noReload === true),
+       "without reloading the document");
+    await page.goBack();
+    await page.waitForFunction(
+      () => !document.getElementById("flowsCard").open, null, { timeout: 10000 });
   }
 
   /* ---------- the three silences, side by side ------------------- */
@@ -494,10 +694,8 @@ try {
   /* ---------- a measured emptiness IS a reading ------------------ */
   {
     /* Every name compared, every one unchanged. That is a fact about the
-       session and it is allowed to be said — unlike the two above. */
-    await post("scoretrack", scoretrack(trackNames.map((n) => ({
-      ...n, s: n.s.map((v) => (v === null ? null : n.last)),
-    }))));
+       session and it is allowed to be said — unlike the silences below it. */
+    await post("scoretrack", scoretrack(FLAT_DAYS));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
     const still = await page.evaluate(() => {
@@ -505,16 +703,44 @@ try {
       return { kind: p.dataset.empty, text: p.textContent.trim() };
     });
     eq(still.kind, "empty", "a trace that moved nowhere is a measured emptiness");
-    ok(/No name's score moved between the last two archived sessions/.test(still.text),
+    ok(/Every one of the 9 names with two scored sessions held its score/.test(still.text),
        `and says exactly that, in the session's own terms (${still.text})`);
+    ok(/reading about the session rather than a gap in the archive/.test(still.text),
+       `and names which of the two it is (${still.text})`);
+    ok(/±20/.test(still.text) && /No name crossed it/.test(still.text),
+       `and states the threshold nothing crossed (${still.text})`);
     ok(!/fixture|dry run|synthetic/i.test(still.text),
        "without explaining itself in terms of how the data was made");
-    ok(/\d+ names were compared/.test(still.text),
+    ok(/\b9\b/.test(still.text),
        `and says how many names it compared, so the claim has a population (${still.text})`);
     /* THE STRIPS STILL DRAW. A flat trace is a trace. */
     ok(await page.locator(".cc-bull tbody .cc-trk svg").count() === 5,
        "and the strips still draw, because a flat line is a measurement");
-    await post("scoretrack", scoretrack(trackNames));
+  }
+
+  /* ---------- an archive too thin to answer is NOT a quiet market - */
+  {
+    /* THE FOURTH SENTENCE. Two sessions that share no name: nothing has two
+       observations, so no change EXISTS to report. That is the shape of the
+       archive, and wording it like the block above would publish "nothing
+       moved" — a claim about the market — out of a page that could not
+       measure movement at all. */
+    await post("scoretrack", scoretrack(COLD_DAYS));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
+    const cold = await page.evaluate(() => {
+      const p = document.querySelector("#ccChg [data-empty]");
+      return { kind: p.dataset.empty, text: p.textContent.trim() };
+    });
+    eq(cold.kind, "unavailable",
+       "an archive with nothing to compare is not a measured emptiness");
+    ok(/No name in the pool was scored on two sessions/.test(cold.text),
+       `and says what is missing (${cold.text})`);
+    ok(/not a market that stood still/.test(cold.text),
+       `refusing the reading it cannot make (${cold.text})`);
+    ok(!/held its score/.test(cold.text),
+       "in words that are not the measured-emptiness sentence");
+    await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
   /* ---------- the dead band is DRAWN, not inferred --------------- */
@@ -675,7 +901,12 @@ try {
        get under. It has to scroll inside its own box; the page may not. */
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.waitForTimeout(200);
+      /* LONGER THAN THE SPINE'S RESIZE DEBOUNCE. The spine is redrawn at the
+         new width rather than scaled to it — one viewBox unit is one CSS
+         pixel — and it repaints 150ms after the last resize event. Measuring
+         the document's scrollWidth before that repaint measures the old
+         width, which is a transient this assertion is not about. */
+      await page.waitForTimeout(450);
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth + 1);
       eq(overflow, false, `the overview overflows nothing at ${width}px`);
@@ -741,14 +972,277 @@ try {
        "and the region header counts the nothing rather than promising ten");
   }
 
+  /* ---------- the earnings join, in both directions -------------- */
+  {
+    /* THE MOST EXPENSIVE MISTAKE THIS SURFACE CAN LET A READER MAKE is
+       carrying a long signal into a print. Both boards and the events
+       calendar were already fetched in the same Promise.all and were never
+       joined: the page ranked ORCL #1 bullish in one region while another
+       region three hundred pixels below said ORCL reports in three sessions,
+       and neither region knew about the other.
+
+       TWO SOURCES AND TWO UNITS. The board row carries `edte` in CALENDAR
+       DAYS (the gate's own arithmetic on the row it spared) and the events
+       payload carries `sdte` in TRADING SESSIONS. "3" means different things
+       in each, so the marker prints the unit and the fixture gives ORCL both
+       — the events count must win, because it is the count the gate itself
+       measured. */
+    await post("board:long", board("long", bullRows.map((r) =>
+      r.t === "ORCL" ? { ...r, ed: "2026-08-27", edte: 3 }
+      : r.t === "CAT" ? { ...r, ed: "2026-09-08", edte: 15 } : r), SESSION, { deep: 4 }));
+    await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
+    await post("events", {
+      v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+      windowDays: 21, inWindow: 2, gateOrigin: SESSION,
+      rows: [
+        { t: "ORCL", d: "2026-08-27", dte: 3, sdte: 3, im: 0.0642, s: 88, st: "ranked" },
+        /* A GATED NAME REACHED THE CALENDAR WITH NO SCORE AT ALL. The board
+           was forbidden from holding an opinion on it, which is not the same
+           as holding a neutral one — so this row must print an em dash and
+           never a confident 0. */
+        { t: "PFE", d: "2026-09-04", dte: 11, sdte: 8, im: 0.0310, s: null, st: "gated" },
+      ],
+    });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccEvents tbody tr", { timeout: 15000 });
+
+    const marks = await page.evaluate(() => {
+      const out = {};
+      for (const td of document.querySelectorAll(".cc-bull tbody .cc-t")) {
+        const mark = td.querySelector(".cc-ern");
+        out[td.querySelector(".cc-open, .cc-flat").textContent.trim()] =
+          mark ? { text: mark.textContent.trim(), title: mark.getAttribute("title") } : null;
+      }
+      return out;
+    });
+    ok(marks.ORCL, "a ranked name that reports inside the window is marked on the ranked row");
+    eq(marks.ORCL.text, "⚠3s",
+       "with the events payload's own unit — sessions, which is what the gate counted");
+    ok(/2026-08-27/.test(marks.ORCL.title || ""),
+       `and the date in the title, because a count with no origin is not checkable (${marks.ORCL.title})`);
+    ok(/3 sessions/.test(marks.ORCL.title || ""),
+       `spelled out rather than abbreviated (${marks.ORCL.title})`);
+    /* CAT is on no calendar row, so the marker falls back to the board's own
+       edte — a different quantity in a different unit, and it says so. */
+    eq(marks.CAT?.text, "⚠15d",
+       "a board row with no calendar row falls back to the board's calendar-day count");
+    ok(/15 calendar days/.test(marks.CAT?.title || ""),
+       `and never prints one unit's number under the other's name (${marks.CAT?.title})`);
+    eq(marks.DE, null, "and a name that reports outside the window carries no marker at all");
+
+    /* THE RECIPROCAL. The event row already carried the funnel stage and the
+       score, and this region printed neither — so "Reporting soon" was a
+       calendar sitting on the same page as a ranking with no thread between
+       them. */
+    const evRows = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccEvents tbody tr"),
+      (tr) => Array.from(tr.children, (td) => td.textContent.trim())));
+    deep(evRows[0], ["ORCL", "2026-08-27", "3s", "±6.4%", "+88", "ranked"],
+      "the calendar row carries the score and the funnel stage it already held");
+    eq(evRows[1][4], "—",
+       "a gated name has no score, and an em dash is not a zero");
+    eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
+  }
+
+  /* ---------- the two tilts, when they disagree ------------------ */
+  {
+    /* THE DISAGREEMENT IS THE READING. breadth.tilt counts names and
+       premium.tilt weights dollars; when they part company the session was a
+       lot of small buying against a little large selling, or the reverse,
+       and no single number can say that. The bar used to print one of them
+       under the bare label "Tilt", so on this session the landing page
+       showed the opposite sign to /flows/market/ over the same payload. */
+    await post("market", { ...market,
+      breadth: { ...market.breadth, tilt: 0.0500 },
+      premium: { ...market.premium, tilt: -0.0300 } });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    const tiles = await page.evaluate(() => Object.fromEntries(
+      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
+        t.querySelector(".cc-tile-k")?.textContent.trim(),
+        { v: t.querySelector(".cc-tile-v")?.textContent.trim(),
+          s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
+          cls: t.querySelector(".cc-tile-v")?.className || "" }])));
+    eq(tiles["Tilt · names"]?.v, "+5.0%", "both weightings are printed, each as its own share");
+    eq(tiles["Tilt · dollars"]?.v, "−3.0%", "so the page cannot show one sign and hide the other");
+    ok(/is-pos/.test(tiles["Tilt · names"]?.cls || "") &&
+       /is-neg/.test(tiles["Tilt · dollars"]?.cls || ""),
+       "and each carries its own sign in the glyph before any hue is applied");
+    eq(tiles["Tilt · names"]?.s, "the two weightings disagree in sign",
+       "and the disagreement is stated rather than left for the reader to spot");
+    eq(tiles["Tilt · dollars"]?.s, "the two weightings disagree in sign",
+       "on both tiles, because either one alone would be the misleading half");
+    await post("market", market);
+  }
+
+  /* ---------- one viewBox unit is one CSS pixel ------------------ */
+  {
+    /* THE INVARIANT flows-ui.js:20-27 STATES VERBATIM, which this chart was
+       the only one on the site to break. renderSpine measured the host, then
+       clamped the width to 900 and emitted width:"100%" — so at the 132rem
+       canvas tier, where this region spans all twelve columns, a 900-unit
+       viewBox was stretched across ~1700 CSS pixels: every dot rendered near
+       radius 10 instead of 4.5, the 6-unit hatch became ~11px and the 9px
+       tick labels rendered near 17px. */
+    await page.setViewportSize({ width: 2000, height: 1000 });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
+    const wide = await page.evaluate(() => {
+      const svg = document.querySelector("#spinePlot svg");
+      const vb = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+      return {
+        vbW: vb[2], attrW: svg.getAttribute("width"),
+        rendered: Math.round(svg.getBoundingClientRect().width),
+        host: Math.round(document.getElementById("spinePlot").clientWidth),
+        par: svg.getAttribute("preserveAspectRatio"),
+      };
+    });
+    ok(wide.host > 1000, `the canvas tier really does give the spine a wide host (${wide.host})`);
+    eq(wide.attrW, String(wide.vbW),
+       "the svg carries an explicit width attribute equal to its viewBox width");
+    ok(Math.abs(wide.rendered - wide.vbW) <= 1,
+       `so one viewBox unit renders as one CSS pixel (${wide.rendered} css for ${wide.vbW} units)`);
+    ok(Math.abs(wide.rendered - wide.host) <= 1,
+       `and the drawing is the measured host width, not a 900-unit clamp (${wide.host})`);
+    eq(wide.par, "xMidYMid meet", "with the aspect rule the invariant names");
+
+    /* REDRAWN AT THE NEW WIDTH, NEVER SCALED TO IT. Without the debounced
+       repaint the first drag of a window edge reintroduces the same defect
+       the clamp did, and nothing on the page corrects it. */
+    await page.setViewportSize({ width: 1100, height: 1000 });
+    await page.waitForTimeout(450);
+    const narrow = await page.evaluate(() => {
+      const svg = document.querySelector("#spinePlot svg");
+      const vb = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+      return { vbW: vb[2], rendered: Math.round(svg.getBoundingClientRect().width),
+               host: Math.round(document.getElementById("spinePlot").clientWidth) };
+    });
+    ok(narrow.vbW < wide.vbW,
+       `a resize repaints the chart at the new width (${wide.vbW} -> ${narrow.vbW})`);
+    ok(Math.abs(narrow.rendered - narrow.vbW) <= 1 && Math.abs(narrow.rendered - narrow.host) <= 1,
+       `and the invariant survives it (${narrow.rendered} css for ${narrow.vbW} units)`);
+
+    /* THE TRAIL IS THE CHANGE, ON THE LEVEL AXIS. Each mark trails back to
+       the score the name held at its previous scored session, so the
+       distribution of MOVEMENT is readable on the same fixed axis as the
+       distribution of level — and a trail spanning more than one session is
+       DASHED rather than tinted, so the difference survives a monochrome
+       printout. */
+    const trails = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#spinePlot .sp-move"), (l) => ({
+        t: (l.querySelector("title") || {}).textContent || "",
+        dashed: !!l.getAttribute("stroke-dasharray"),
+        x1: Number(l.getAttribute("x1")), x2: Number(l.getAttribute("x2")),
+      })));
+    ok(trails.length >= 5, `the published names trail their moves (${trails.length})`);
+    const orcl = trails.find((l) => /^ORCL/.test(l.t));
+    ok(orcl && /over 1 session/.test(orcl.t),
+       `and each trail states its span in the title (${orcl && orcl.t})`);
+    ok(orcl && orcl.x2 > orcl.x1, "with the trail running from where the name was to where it is");
+    ok(!orcl.dashed, "an overnight move is drawn solid");
+    const mu = trails.find((l) => /^MU/.test(l.t));
+    ok(mu && mu.dashed && /over 2 sessions/.test(mu.t),
+       `and a move across a gap is dashed rather than tinted (${mu && mu.t})`);
+    /* A CROSSING IS RINGED, which is a shape and not a hue — and only TWO of
+       the session's three crossings can be ringed here, because the spine
+       marks PUBLISHED names and a name that faded is by definition back
+       inside the band and on neither board. That is the whole argument for
+       leading the page with the change region rather than with this chart:
+       the exit signal is invisible on a picture of the published
+       distribution, and it is the reading a holder needs most. */
+    eq(await page.locator("#spinePlot .sp-cross").count(), 2,
+       "the names that cleared and flipped are ringed on the axis");
+    const ringed = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#spinePlot .sp-cross"), (c) => c.getAttribute("class")));
+    deep(ringed.map((c) => c.replace("sp-cross ", "")).sort(), ["is-cleared", "is-flipped"],
+      "each ring says which category change it marks");
+    eq(await page.locator('#spinePlot .sp-dot[data-t="NKE"]').count(), 0,
+       "and the faded name is on no board, so the spine cannot show it at all");
+    await page.setViewportSize({ width: 1280, height: 1000 });
+  }
+
+  /* ---------- the staleness guard -------------------------------- */
+  {
+    /* THIS WAS THE ONLY FLOWS ROUTE WITHOUT ONE, and it is the route the
+       section opens on. loadBoard read r.json() and dropped the
+       X-Payload-Updated header the Worker stamps on every payload, so during
+       a pipeline outage /flows/long/ warned and /flows/ rendered Tuesday's
+       board on Friday with a "Session" tile naming a date and no warning
+       anywhere on the page.
+
+       TWO INDEPENDENT FAILURES. A dead pipeline has an old WRITE time and a
+       current session date; a frozen upstream has a fresh write time and an
+       old session. They are served here as two separate fixtures because a
+       guard that only ever reads one of the two would pass on the other. */
+    const today = new Date().toISOString().slice(0, 10);
+    const serve = async (sessionDate, updatedAt) => {
+      for (const [side, rows] of [["long", bullRows], ["short", bearRows]]) {
+        await page.route("**/api/flows/board?side=" + side, (route) => route.fulfill({
+          status: 200,
+          headers: { "Content-Type": "application/json", "X-Payload-Updated": String(updatedAt) },
+          body: JSON.stringify(board(side, rows, sessionDate, { deep: 4 })),
+        }));
+      }
+    };
+    const stop = async () => {
+      for (const side of ["long", "short"]) {
+        await page.unroute("**/api/flows/board?side=" + side);
+      }
+    };
+    const read = () => page.evaluate(() => ({
+      hidden: document.getElementById("flowsStale").hidden,
+      text: document.getElementById("flowsStale").textContent.trim(),
+      body: document.body.classList.contains("is-stale"),
+    }));
+
+    // A session written minutes ago, describing today. Nothing to warn about.
+    await serve(today, Date.now() - 5 * 60 * 1000);
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    let s = await read();
+    eq(s.hidden, true, "a fresh session raises no staleness warning");
+    eq(s.body, false, "and leaves the document unmarked");
+    eq(s.text, "", "with no sentence left behind in the slot");
+    await stop();
+
+    /* THE WRITE-TIME BRANCH, REACHABLE ONLY BY READING THE HEADER. The
+       session date is today's, so a page that checked only the payload body
+       would see nothing wrong here. */
+    await serve(today, Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
+    s = await read();
+    eq(s.body, true, "a payload last written five days ago marks the document stale");
+    ok(s.text.length > 20 && /written/.test(s.text),
+       `and says the pipeline has not published, not that the market was quiet (${s.text})`);
+    ok(!/different sessions/.test(s.text),
+       "in words that are not the mismatched-halves sentence");
+    await stop();
+
+    /* THE SESSION-AGE BRANCH, off the real fixture: the write is minutes old
+       and the session it describes is the fixed 2026-08-24 of this file,
+       which every run after 2026-08-28 is more than four days past. */
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
+    s = await read();
+    eq(s.body, true, "and a session that stopped advancing marks it too");
+    ok(new RegExp(SESSION).test(s.text),
+       `naming the session the numbers actually describe (${s.text})`);
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
-  console.log(`✓ flows-overview: ${checks} assertions — seven regions from seven endpoints ` +
-    `that already existed, both sides whole and in the payload's own rank order, a score ` +
-    `strip per row on one shared domain, what changed measured across gaps rather than ` +
-    `through them, names that open a card without a reload, three silences in three ` +
-    `sentences, a fixed axis with the dead band hatched onto it, live rail counts, and two ` +
-    `halves that refuse to be presented as one session when they are not`);
+  console.log(`✓ flows-overview: ${checks} assertions — a page that leads on CHANGE: ` +
+    `crossings of the dead band ranked above magnitude, every delta printed with the ` +
+    `number of sessions it spans, readings that are not about today demoted and dated, ` +
+    `and the whole thing stated against the published denominator. Plus both sides whole ` +
+    `in the payload's own rank order, a score strip per row on one shared domain, earnings ` +
+    `joined onto the ranked names in the events payload's own unit and the score joined ` +
+    `back onto the calendar, both weightings of the tilt rather than a silent choice ` +
+    `between them, four silences in four sentences, a spine at one viewBox unit per CSS ` +
+    `pixel that repaints on resize and trails each name's move, a staleness guard driven ` +
+    `by the write header, and two halves that refuse to be presented as one session when ` +
+    `they are not`);
 } finally {
   await browser.close();
   await server.stop();

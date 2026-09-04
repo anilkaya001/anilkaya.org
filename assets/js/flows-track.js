@@ -34,6 +34,30 @@
    in words when it does not.
 
    ============================================================
+   AND THE QUESTION THIS PAGE COULD NOT BE ASKED: WHICH NAME MOVED.
+
+   For its whole life the page offered three orderings and all
+   three ranked the same snapshot column. The default ranked on
+   |last| — the newest score ANYWHERE in the window — so a name
+   last scored thirty sessions ago at +45 sat above a name scored
+   that morning at +30, under a header reading "the most recent
+   published score in the window" that every reader took to mean
+   yesterday. Nothing on the page stated the age of a reading. And
+   the key coerced the absence on the way past: Math.abs(b.last ?? 0)
+   does not sort a missing score last, it sorts it into the middle.
+
+   The change layer is now READ, never re-derived. `lastAt` dates
+   every row and marks the stale ones by how many sessions they
+   are behind; `d1` carries the move WITH THE SPAN IT COVERS, so a
+   five-session move cannot masquerade as an overnight one; its
+   `cross` names the crossing, which is the early-warning event and
+   outranks any magnitude; `run` says whether the opinion is new or
+   old; `ext` says where the window's own edges are. The page opens
+   on the latest session's score with the names that were not
+   scored in it sorted LAST, and the paragraph above the table
+   states the population every count came out of.
+
+   ============================================================
    THE DRAWING CONTRACT, same as every chart on this product: one
    viewBox unit is one CSS pixel, measured from a VISIBLE host (the
    panel is unhidden before the measurement — flows-events measured
@@ -84,6 +108,11 @@
      button below the table appends the rest in the same order. */
   const PAGE = 60;
 
+  /* The ordering the page opens on is CHOSEN FROM THE PAYLOAD, in prepare():
+     "now" whenever the names carry `lastAt`, because that is the only field
+     that can tell the latest session's score from the newest score anywhere
+     in the window. "abs" is the fallback for a payload published before the
+     change layer, and is what the page used to open on unconditionally. */
   const state = { q: "", sort: "abs", shown: PAGE };
   let ctx = null;         // the prepared payload the renderers draw from
   let drawnW = 0;         // strip width at last paint, for the resize repaint
@@ -91,6 +120,13 @@
   // Scaffold nodes, built once so typing in the filter never rebuilds the input.
   let built = false;
   let capEl = null, bodyEl = null, axisHost = null, moreBtn = null;
+  let changeEl = null;    // the "what moved, out of how many" paragraph
+  let stripHead = null;   // the strip column's <th>, measured for the drawing
+  /* WHICH OPTIONAL COLUMNS THIS PAYLOAD CAN FILL. A column of em dashes is
+     not honesty, it is furniture: a payload published before the change layer
+     draws the four columns it can answer and no more, and the paragraph above
+     the table says which fields were missing. */
+  let colSet = { move: false, run: false, asOf: false };
 
   /* ---------- the fetch helper -------------------------------------
 
@@ -138,6 +174,71 @@
     return { lo, hi };
   }
 
+  /* THE THREE CROSSING WORDS THE PAYLOAD PUBLISHES, and the only three this
+     page prints. An unrecognised value is dropped rather than shown raw: a
+     word in the Event column reads as a category this product defines, and it
+     defines exactly these three. The rank is the reading order — a name that
+     became actionable outranks one that changed sides, which outranks one
+     that stopped being actionable. */
+  const CROSS_RANK = { cleared: 0, flipped: 1, faded: 2 };
+  const CROSS_SAID = {
+    cleared: "Inside the dead band at the previous scored session and outside it " +
+      "now: the name became actionable this session. This is the early warning; " +
+      "everything the change layer reports other than a crossing is drift.",
+    faded: "Outside the dead band and inside it now — the exit signal, and exactly " +
+      "as load-bearing as the entry.",
+    flipped: "Outside the band at both ends with opposite signs: the name did not " +
+      "weaken and re-strengthen, it changed sides without resting in the middle.",
+  };
+
+  const sessionsSaid = (n) => n + plural(n, " session", " sessions");
+
+  /**
+   * The published move, or null. BOTH HALVES ARE REQUIRED.
+   *
+   * `v` without `gap` is the exact reading this layer was built to replace: a
+   * number that is the headline of the session when it happened overnight and
+   * is noise when it happened across three weeks the name spent off the board,
+   * with the identical integer printed either way. A move whose span this
+   * payload does not state is therefore not drawn as a move at all.
+   */
+  function readMove(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const v = isNum(raw.v), gap = isNum(raw.gap);
+    if (v === null || gap === null || gap < 1) return null;
+    return {
+      v, gap,
+      /* The same move in residual units, which do not saturate. Absent
+         wherever either end carried no residual — an absence, never a zero. */
+      qv: isNum(raw.qv),
+      cross: Object.prototype.hasOwnProperty.call(CROSS_RANK, raw.cross) ? raw.cross : null,
+    };
+  }
+
+  /** The window extremes with the session INDICES they happened on. */
+  function readExt(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const hi = isNum(raw.hi), lo = isNum(raw.lo);
+    if (hi === null && lo === null) return null;
+    return { hi, lo, hiAt: isNum(raw.hiAt), loAt: isNum(raw.loAt) };
+  }
+
+  /**
+   * How far a name's newest score sits from the nearer end of its own window,
+   * in score points: a subtraction of two published numbers already in one
+   * unit, not a new measurement. Zero means the newest score IS the extreme,
+   * which is the strongest sentence this archive can produce about a name.
+   */
+  function nearestExtreme(last, ext) {
+    if (last === null || !ext) return { gap: null, end: null };
+    const toHi = ext.hi === null ? null : ext.hi - last;
+    const toLo = ext.lo === null ? null : last - ext.lo;
+    if (toHi === null && toLo === null) return { gap: null, end: null };
+    if (toHi === null) return { gap: toLo, end: "low" };
+    if (toLo === null) return { gap: toHi, end: "high" };
+    return toHi <= toLo ? { gap: toHi, end: "high" } : { gap: toLo, end: "low" };
+  }
+
   function prepare(payload) {
     const sessions = (Array.isArray(payload.sessions) ? payload.sessions : [])
       .map((s) => ({
@@ -146,14 +247,50 @@
         preEpoch: !!(s && s.preEpoch),
       }));
 
+    /* THE CHANGE LAYER IS READ, NEVER RE-DERIVED. Every field below is
+       published: `lastAt` is the index of the name's newest measured score,
+       `d1` is the move with the span it covers, `run` is how long the current
+       sign has held, `ext` is the window's extremes with their session
+       indices. Subtracting two cells of `s` in the browser would produce a
+       number that looks identical and cannot say whether it covers one
+       session or twenty — which is the whole reason the layer exists. */
+    const lastIndex = sessions.length - 1;
     const rows = [];
     for (const r of (Array.isArray(payload.names) ? payload.names : [])) {
       if (!r || typeof r.t !== "string" || !r.t) continue;
+      const last = isNum(r.last);
+      const lastAt = isNum(r.lastAt);
+      const ext = readExt(r.ext);
+      const near = nearestExtreme(last, ext);
       rows.push({
         t: r.t,
         s: Array.isArray(r.s) ? r.s : [],
-        n: isNum(r.n) ?? 0,
-        last: isNum(r.last),
+        /* `n` IS NO LONGER COERCED TO ZERO. It arrived here as
+           `isNum(r.n) ?? 0`, which prints "0" in the sample-size column
+           beside a full strip of marks the moment the publisher stops
+           sending the field — a confident zero in the one number on this
+           page that may never be guessed, and a sort key that ranked an
+           unstated count below a measured one of the same value. */
+        n: isNum(r.n),
+        last,
+        lastAt,
+        /* HOW OLD THIS ROW'S READING IS, in sessions, taken from the
+           published index rather than from a scan of the series. null is a
+           third answer — this payload stated no index — and it is drawn as
+           neither fresh nor stale. */
+        staleBy: lastAt === null || lastIndex < 0 ? null : lastIndex - lastAt,
+        /* THE SCORE AT THE LATEST SESSION, or null because the name was not
+           scored in it. This is what the default ordering ranks on, and the
+           reason it had to exist: `last` is the newest score ANYWHERE in the
+           window, so ranking on `last` put a name last scored thirty sessions
+           ago at +45 above a name scored this morning at +30, under a column
+           header every reader took to mean "yesterday". */
+        now: lastAt !== null && lastAt === lastIndex ? last : null,
+        d1: readMove(r.d1),
+        run: isNum(r.run),
+        ext,
+        extGap: near.gap,
+        extEnd: near.end,
       });
     }
 
@@ -175,6 +312,24 @@
       sessions, rows, deadBand,
       domain: scoreDomain(rows, deadBand),
       epoch: typeof payload.epoch === "string" ? payload.epoch : null,
+      /* THE DENOMINATOR, which no renderer could count for itself: the change
+         block is computed over the whole pool BEFORE the payload's size cap
+         sheds rows, so "84 names moved" can be printed with the population it
+         came out of rather than with the number of rows that fit on the wire. */
+      change: (payload.change && typeof payload.change === "object") ? payload.change : null,
+      shedBy: typeof payload.shedBy === "string" ? payload.shedBy : null,
+      shed: isNum(payload.namesShed),
+      notes: (payload.notes && typeof payload.notes === "object") ? payload.notes : {},
+      /* WHICH ORDERINGS THIS PAYLOAD CAN ACTUALLY ANSWER. An ordering offered
+         over a field nobody published sorts every row into one bucket and
+         tells the reader nothing, which is worse than not offering it: the
+         reader concludes the pool is flat. */
+      has: {
+        now: rows.some((r) => r.lastAt !== null),
+        move: rows.some((r) => r.d1 !== null),
+        run: rows.some((r) => r.run !== null),
+        ext: rows.some((r) => r.extGap !== null),
+      },
       boardsIdx, boundary,
       allPre: sessions.length > 0 && pre.every(Boolean),
       allPost: sessions.length > 0 && pre.every((x) => !x),
@@ -185,21 +340,74 @@
 
   /* ---------- ordering and filtering ------------------------------ */
 
+  /* EVERY ORDERING SENDS ITS OWN ABSENCES TO THE BOTTOM, and none of them
+     coerces a missing value to reach them. Three of these read
+     `Math.abs(b.last ?? 0)`, and a `?? 0` inside a comparator is the
+     confident zero in the one place nobody looks: it does not sort an
+     absence last, it sorts it into the MIDDLE of a signed column and to the
+     TOP of a magnitude one, so a name carrying no published score outranked
+     a name measured at ±3. The absence test comes first, before any
+     arithmetic touches the value. */
+  function descNum(x, y) {
+    if (x === null) return y === null ? 0 : 1;
+    if (y === null) return -1;
+    return y - x;
+  }
+  function ascNum(x, y) {
+    if (x === null) return y === null ? 0 : 1;
+    if (y === null) return -1;
+    return x - y;
+  }
+  const mag = (v) => (v === null ? null : Math.abs(v));
+  const moveMag = (r) => (r.d1 === null ? null : Math.abs(r.d1.v));
+  const crossRank = (r) => (r.d1 && r.d1.cross !== null ? CROSS_RANK[r.d1.cross] : null);
+  const byTicker = (a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
+
+  /* Ties break on the measured count and then the ticker, so every ordering
+     is total: a repaint at a new width cannot reshuffle rows the reader was
+     part-way through. */
+  const tie = (a, b) => descNum(a.n, b.n) || byTicker(a, b);
+
   const SORTS = {
-    /* |last| descending: the names the distribution currently cares most
-       about, either side, which is the question this page answers first. */
-    abs: (a, b) => Math.abs(b.last ?? 0) - Math.abs(a.last ?? 0)
-      || b.n - a.n || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0),
-    last: (a, b) => (b.last ?? -Infinity) - (a.last ?? -Infinity)
-      || b.n - a.n || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0),
-    n: (a, b) => b.n - a.n
-      || Math.abs(b.last ?? 0) - Math.abs(a.last ?? 0)
-      || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0),
+    /* THE DEFAULT, AND THE ONE THIS PAGE OWED ITS READER FROM THE START.
+       |score at the LATEST session| descending — the question a page headed
+       with today's date is asked. A name not scored in the latest session
+       has no value here at all, so it sorts last instead of being promoted
+       by a reading that is weeks old. */
+    now: (a, b) => descNum(mag(a.now), mag(b.now)) || tie(a, b),
+    /* The old default, kept and renamed to what it actually is: the newest
+       score ANYWHERE in the window, however long ago it was measured. */
+    abs: (a, b) => descNum(mag(a.last), mag(b.last)) || tie(a, b),
+    last: (a, b) => descNum(a.last, b.last) || tie(a, b),
+    /* WHAT MOVED. Magnitude of the published move, with its span printed in
+       the row beside it, because a five-session move must not be able to
+       masquerade as an overnight one by sorting next to it. */
+    move: (a, b) => descNum(moveMag(a), moveMag(b)) || tie(a, b),
+    /* A CROSSING OUTRANKS A MAGNITUDE, whatever the sizes. A +56 drift and a
+       +8 crossing are not two sizes of one thing: the second is a change of
+       category — the name became actionable, or stopped being — and the
+       first is the distribution breathing. */
+    cross: (a, b) => ascNum(crossRank(a), crossRank(b))
+      || descNum(moveMag(a), moveMag(b)) || tie(a, b),
+    /* How old the opinion is: one session is a new one, thirty is an old one. */
+    run: (a, b) => descNum(a.run, b.run) || tie(a, b),
+    /* Closest to its own window high or low first, so a name sitting AT its
+       42-session extreme is the first row rather than one a reader has to
+       find by eye across five hundred strips. */
+    ext: (a, b) => ascNum(a.extGap, b.extGap) || descNum(mag(a.last), mag(b.last)) || tie(a, b),
+    n: (a, b) => descNum(a.n, b.n) || descNum(mag(a.last), mag(b.last)) || byTicker(a, b),
   };
 
+  /* The caption says the ordering in words, so a reader who never opens the
+     select still knows what the top of the list means. */
   const SORT_WORDS = {
-    abs: "strongest last score first",
-    last: "last score, high to low",
+    now: "strongest score in the latest session first, names not scored in it last",
+    abs: "strongest last measured score first, however long ago it was measured",
+    last: "last measured score, high to low",
+    move: "biggest move since each name's previous scored session, either direction",
+    cross: "names that crossed the dead band first — cleared, then flipped, then faded",
+    run: "longest unbroken run on one sign first",
+    ext: "nearest its own window high or low first",
     n: "most sessions measured first",
   };
 
@@ -226,26 +434,54 @@
      CSS pixel — and the axis in the header shares the same geometry
      function, so a mark sits under its date by construction. */
 
+  /* The visible column count, which the empty row must span exactly. It was
+     a literal 4 in one place and the header list in another; the two are now
+     one function so a column added to one cannot be missing from the other. */
+  function columnCount() {
+    return 4 + (colSet.move ? 2 : 0) + (colSet.asOf ? 1 : 0) + (colSet.run ? 1 : 0);
+  }
+
   function buildScaffold() {
     if (built) return;
     built = true;
+    colSet = { move: ctx.has.move, run: ctx.has.run, asOf: ctx.has.now };
 
     const controls = el("div", "st-controls");
     const search = UI.searchBox({
       label: "Filter", placeholder: "Ticker", prefix: "st", id: "stQ",
       onInput: (v) => { state.q = v; state.shown = PAGE; renderBody(); },
     });
+    /* THE ORDERINGS ARE OFFERED ONLY WHERE THE PAYLOAD CAN ANSWER THEM.
+       Before this the select held three orderings and all three ranked the
+       same snapshot column, so the page could be asked "which name is
+       biggest" three ways and "which name moved" no way at all — on a page
+       whose own lede promises a name drifting toward a board is visible
+       before the morning it arrives. */
+    const options = [];
+    if (ctx.has.now) {
+      options.push({ value: "now", label: "Latest session, strongest first", selected: true });
+    }
+    options.push({ value: "abs", label: "Last measured score, strongest", selected: !ctx.has.now });
+    options.push({ value: "last", label: "Last measured score, high to low" });
+    if (ctx.has.move) {
+      options.push({ value: "move", label: "Biggest move, with its span" });
+      options.push({ value: "cross", label: "Crossed the dead band first" });
+    }
+    if (ctx.has.run) options.push({ value: "run", label: "Longest run on one sign" });
+    if (ctx.has.ext) options.push({ value: "ext", label: "Nearest its own window extreme" });
+    options.push({ value: "n", label: "Most sessions measured" });
+
     const sort = UI.sortSelect({
       label: "Order", prefix: "st", id: "stSort",
-      options: [
-        { value: "abs", label: "Strongest last score first", selected: true },
-        { value: "last", label: "Last score, high to low" },
-        { value: "n", label: "Most sessions measured first" },
-      ],
+      options,
       onChange: (v) => { state.sort = v; state.shown = PAGE; renderBody(); },
     });
     controls.append(search.root, sort.root);
-    trackHost.append(controls);
+
+    /* The population paragraph sits ABOVE the controls: what moved and out of
+       how many is the reading, and the ordering is how the reader searches it. */
+    changeEl = el("p", "fc-note st-change");
+    trackHost.append(changeEl, controls);
 
     const wrap = el("div", "st-scroll");
     wrap.tabIndex = 0;
@@ -267,13 +503,76 @@
     axisHost = el("div", "st-axis");
     hStrip.append(axisHost);
     hr.append(hStrip);
+    stripHead = hStrip;
+
+    /* THE COLUMN WIDTHS FOR THE CHANGE COLUMNS ARE SET HERE, not in the
+       stylesheet, for the same reason the strip's width is: with
+       table-layout:fixed the header row alone settles every column, this file
+       is what decides which of those columns exist for a given payload, and
+       the strip svg is emitted at whatever pixel width is left over. Splitting
+       that decision across two files is how a column set and a measurement
+       drift apart. The table no longer fits 320px without the wrapper's own
+       horizontal scroll — .st-scroll has always had it, and every other table
+       on this product relies on it — because a delta with no span beside it
+       and a score with no date beside it are the two readings this layer was
+       built to stop publishing. */
+    const headCell = (cls, label, title, width) => {
+      const th = el("th", cls);
+      th.scope = "col";
+      if (width) th.style.width = width;
+      if (title) {
+        const abbr = el("abbr", null, label);
+        abbr.title = title;
+        th.append(abbr);
+      } else {
+        th.textContent = label;
+      }
+      return th;
+    };
+
+    if (colSet.move) {
+      hr.append(headCell("st-c-event", "Event", ctx.notes.crossing ||
+        "Whether this name crossed the dead band since its previous scored " +
+        "session — cleared it, faded back inside it, or flipped sides. " +
+        "Everything else the change layer reports is drift, however large.",
+        "7rem"));
+      hr.append(headCell("st-c-move", "\u0394 \u00b7 over", ctx.notes.change ||
+        "The change in score since this name's PREVIOUS SCORED session, and how " +
+        "many sessions that change spans. The two observations need not be " +
+        "adjacent: a gap of one is an overnight move, and anything larger " +
+        "covers sessions the name was not scored in.",
+        "8.6rem"));
+    }
+
     const hLast = el("th", "c-num st-c-last");
     hLast.scope = "col";
     const lastAbbr = el("abbr", null, "Last");
-    lastAbbr.title = "The most recent published score in the window — the same " +
-      "composite the board printed that morning, signed.";
+    /* THE HEADER USED TO READ "the most recent published score in the window",
+       which every reader took to mean yesterday. It is the most recent score
+       ANYWHERE IN THE WINDOW — for a name last scored thirty sessions ago it
+       is thirty sessions old — and nothing on the page said so. The As-of
+       column beside it now dates every one of them. */
+    lastAbbr.title = "The most recent score published for this name anywhere in " +
+      "the window, signed — the same composite the board printed on the session " +
+      "the As-of column names, which is not necessarily the latest one.";
     hLast.append(lastAbbr);
     hr.append(hLast);
+
+    if (colSet.asOf) {
+      hr.append(headCell("st-c-asof", "As of",
+        "The session this name was last scored on, taken from the index the " +
+        "payload publishes. A row not scored in the latest session says how " +
+        "many sessions back its reading is: it is real, and it is not about today.",
+        "7.6rem"));
+    }
+    if (colSet.run) {
+      hr.append(headCell("c-num st-c-run", "Run", ctx.notes.run ||
+        "Consecutive scored sessions on the current sign. One is a new opinion, " +
+        "thirty is an old one, and zero means the newest score is exactly zero, " +
+        "which belongs to neither side.",
+        "2.8rem"));
+    }
+
     const hN = el("th", "c-num st-c-n");
     hN.scope = "col";
     const nAbbr = el("abbr", null, "n");
@@ -305,10 +604,38 @@
    * fallback it silently buys breaks the one-unit-one-pixel rule in the
    * direction nobody notices. flows-events shipped exactly that.
    */
+  /* The narrowest strip worth drawing. Below this the columns beside it have
+     eaten the drawing entirely, and the honest move is to force the column and
+     let the wrapper scroll rather than emit a 240-unit svg into a cell that is
+     forty pixels wide — which is what the old `Math.round(w) || 240` did the
+     moment a fixed layout squeezed the column to zero: a falsy 0 fell through
+     to the fallback and every mark landed under the wrong date. */
+  const MIN_STRIP = 100;
+
   function stripWidth() {
     if (panelEl) panelEl.hidden = false;
-    const w = axisHost && axisHost.clientWidth;
-    return Math.max(48, Math.min(1600, Math.round(w) || 240));
+    /* The inline width is cleared BEFORE measuring, every time: a floor
+       applied on a phone must not survive the rotation that made it
+       unnecessary, and a floor left in place is what turns a laptop's
+       comfortable table into one that scrolls sideways by twenty pixels. */
+    if (stripHead) stripHead.style.width = "";
+    let w = Math.round((axisHost && axisHost.clientWidth) || 0);
+    if (stripHead && w < MIN_STRIP) {
+      /* THE FLOOR IS A CONTENT WIDTH AND `width` IS A BORDER-BOX ONE —
+         base.css sets box-sizing:border-box globally — so setting it to the
+         floor delivers the floor MINUS the cell's padding. The shortfall is
+         measured and added back rather than the stylesheet's padding being
+         guessed at from here: a hard-coded 16 would be a second copy of a
+         number that lives in flows.css. */
+      stripHead.style.width = MIN_STRIP + "px";
+      let got = Math.round(axisHost.clientWidth) || 0;
+      if (got < MIN_STRIP) {
+        stripHead.style.width = (2 * MIN_STRIP - got) + "px";
+        got = Math.round(axisHost.clientWidth) || MIN_STRIP;
+      }
+      w = got;
+    }
+    return Math.max(48, Math.min(1600, w || 240));
   }
 
   /* ---------- the axis header -------------------------------------
@@ -419,6 +746,55 @@
 
   /* ---------- the rows -------------------------------------------- */
 
+  /** The ISO date at a session index, or null. */
+  function dateAt(i) {
+    const s = i === null || i === undefined ? null : ctx.sessions[i];
+    return s && s.d ? s.d : null;
+  }
+
+  /* THE SIGN IS CARRIED BY THE GLYPH, which fmtSigned always prints; the tone
+     class repeats it in hue for the readers who have it. A measured zero gets
+     no tone at all — it is a measurement, and dimming it would file it beside
+     the em dash it must never resemble. */
+  const tone = (v) => (v === null ? "" : v > 0 ? " fb-pos" : v < 0 ? " fb-neg" : "");
+
+  /** Where a row's reading sits in time, in one clause, or null if unstated. */
+  function asOfSaid(r) {
+    if (r.lastAt === null) return null;
+    const on = dateAt(r.lastAt);
+    const where = on ? "on " + on : "at session " + (r.lastAt + 1);
+    if (r.staleBy === null) return "last scored " + where;
+    return r.staleBy === 0
+      ? "last scored " + where + ", the latest session in this window"
+      : "last scored " + where + ", " + sessionsSaid(r.staleBy) +
+        " before the latest session in this window";
+  }
+
+  function stripSaid(r, S) {
+    const said = [];
+    said.push(r.t + " " + MID + " scored " +
+      (r.n === null
+        ? "an unstated number of the " + S + " " + plural(S, "session", "sessions") +
+          " in this window — this payload published no count for it"
+        : r.n + " of " + S + " " + plural(S, "session", "sessions") +
+          (r.n < S
+            ? ", and the empty stretches are sessions it was not scored, never zeros"
+            : "")));
+    const when = asOfSaid(r);
+    said.push("last " + fmtSigned(r.last) + (when ? ", " + when : ""));
+    if (r.run !== null) {
+      said.push(r.run === 0
+        ? "the newest score is exactly zero, which belongs to neither side"
+        : sessionsSaid(r.run) + " in a row on that sign");
+    }
+    if (r.ext) {
+      const hiOn = dateAt(r.ext.hiAt), loOn = dateAt(r.ext.loAt);
+      said.push("window high " + fmtSigned(r.ext.hi) + (hiOn ? " on " + hiOn : "") +
+        ", low " + fmtSigned(r.ext.lo) + (loOn ? " on " + loOn : ""));
+    }
+    return said.join(" " + MID + " ");
+  }
+
   function rowFor(r, W) {
     const tr = el("tr");
 
@@ -431,10 +807,7 @@
 
     const td = el("td", "st-c-strip");
     const S = ctx.sessions.length;
-    td.title = r.t + " " + MID + " scored " + r.n + " of " + S + " " +
-      plural(S, "session", "sessions") +
-      (r.n < S ? " — the empty stretches are sessions it was not scored, never zeros" : "") +
-      " " + MID + " last " + fmtSigned(r.last);
+    td.title = stripSaid(r, S);
     UI.scoreStrip(td, {
       values: r.s,
       deadBand: ctx.deadBand,
@@ -447,12 +820,79 @@
     });
     tr.append(td);
 
+    if (colSet.move) {
+      /* THE EVENT, AS A WORD. Category and sign survive greyscale and a
+         monochrome printout because they are spelled out; the class beside
+         them is a hook for a tint that repeats what the word already says. */
+      const ev = el("td", "st-c-event" + (r.d1 && r.d1.cross ? " is-" + r.d1.cross : ""));
+      if (!r.d1) {
+        ev.textContent = DASH;
+        ev.title = r.n !== null && r.n < 2
+          ? "This name was scored on fewer than two sessions in this window, so " +
+            "there is no previous score for it to have changed from. Absent, not zero."
+          : "This payload published no move for this name, so no change can be " +
+            "stated for it. Absent, not zero.";
+      } else {
+        ev.append(el("span", null, r.d1.cross
+          ? r.d1.cross
+          : r.d1.v === 0 ? "held" : "drift"));
+        ev.title = r.d1.cross
+          ? CROSS_SAID[r.d1.cross]
+          : r.d1.v === 0
+            ? "This name was scored on both sessions and its score did not change. " +
+              "A held score is a measurement of the session, not a missing one."
+            : "The name did not change category: it sat on the same side of the " +
+              "dead band at both ends of the comparison. Drift, however large.";
+        /* THE WINDOW EXTREME, FREE IN THE SAME PAYLOAD: the newest score IS
+           the highest or the lowest this name reached inside the window. It
+           is the strongest sentence this archive can produce about a name,
+           and it sat in `ext` with nothing reading it. */
+        if (r.lastAt !== null && r.ext) {
+          const end = r.ext.hiAt === r.lastAt ? "high" : r.ext.loAt === r.lastAt ? "low" : null;
+          if (end) {
+            const tag = el("span", null, " " + MID + " " + end);
+            tag.title = "This name's newest score is its window " + end + ": " +
+              fmtSigned(end === "high" ? r.ext.hi : r.ext.lo) + " across the " +
+              sessionsSaid(ctx.sessions.length) + " drawn here.";
+            ev.append(tag);
+          }
+        }
+      }
+      tr.append(ev);
+
+      /* THE MOVE AND ITS SPAN IN ONE CELL, because they are one reading. A
+         delta printed without the number of sessions it covers is the exact
+         defect this layer replaced: +38 is the headline of the session when
+         it happened overnight and is noise when it happened across three
+         weeks the name spent off the board, and the integer is identical. */
+      const mv = el("td", "st-c-move" + (r.d1 ? tone(r.d1.v) : ""));
+      if (!r.d1) {
+        mv.textContent = DASH;
+        mv.title = ev.title;
+      } else {
+        mv.append(el("span", null, fmtSigned(r.d1.v)));
+        mv.append(el("span", null, " " + MID + " " +
+          (r.d1.gap === 1 ? "overnight" : sessionsSaid(r.d1.gap))));
+        mv.title = fmtSigned(r.d1.v) + plural(Math.abs(r.d1.v), " score point", " score points") +
+          " against this name's previous scored session, which was " +
+          (r.d1.gap === 1
+            ? "the session immediately before"
+            : sessionsSaid(r.d1.gap) + " earlier") + "." +
+          (r.d1.qv === null
+            ? " The same move in residual units is absent, because one end of the " +
+              "comparison carried no residual."
+            : " The score saturates and the residual does not, so the same move in " +
+              "residual units is " + fmtSigned(r.d1.qv) + " × 10⁻⁴.");
+      }
+      tr.append(mv);
+    }
+
     /* ZERO IS PRINTED AT FULL INK with no tone class: it is a measurement,
        and dimming it would file it beside the em dash it must never
        resemble. The tint on the signed cases repeats a sign the glyph
        already carries — hue as confirmation, never the carrier. */
     const last = el("td", "c-num st-c-last" +
-      (r.last === null ? " is-none" : r.last > 0 ? " fb-pos" : r.last < 0 ? " fb-neg" : ""),
+      (r.last === null ? " is-none" : tone(r.last)),
       fmtSigned(r.last));
     if (r.last === null) {
       last.title = "No last score was published for this name. Not measured — not zero.";
@@ -462,7 +902,54 @@
     }
     tr.append(last);
 
-    tr.append(el("td", "c-num st-c-n", fmtInt(r.n)));
+    if (colSet.asOf) {
+      /* THE AGE OF THE READING, ON EVERY ROW. Nothing on this page stated it
+         before, so a score measured thirty sessions ago and one measured this
+         morning were the same cell under the same header. */
+      const asOf = el("td", "st-c-asof" + (r.staleBy ? " is-old" : ""));
+      const on = dateAt(r.lastAt);
+      if (r.lastAt === null) {
+        asOf.textContent = DASH;
+        asOf.title = "This payload published no session index for this name, so " +
+          "which session its score was measured on cannot be stated. That is a " +
+          "gap in the payload, not a claim that the reading is old.";
+      } else if (r.staleBy === 0) {
+        /* MM-DD, matching the axis labels above; the hyphen belongs to the
+           ISO date and stays a hyphen. */
+        asOf.textContent = on ? on.slice(5) : "latest";
+        asOf.title = "Scored in the latest session in this window" +
+          (on ? " (" + on + ")" : "") + ".";
+      } else {
+        asOf.append(el("span", null, on ? on.slice(5) : "earlier"));
+        asOf.append(el("span", null, " " + MID + " " + r.staleBy + " back"));
+        asOf.title = "Not scored in the latest session. This name's newest score was " +
+          "measured " + (on ? "on " + on + ", " : "") + sessionsSaid(r.staleBy) +
+          " before the latest session drawn here, so its Last and its move are " +
+          "real and are not about today.";
+      }
+      tr.append(asOf);
+    }
+
+    if (colSet.run) {
+      const run = el("td", "c-num st-c-run", fmtInt(r.run));
+      run.title = r.run === null
+        ? "This payload published no run length for this name."
+        : r.run === 0
+          ? "The newest score is exactly zero, which belongs to neither side and " +
+            "ends the run."
+          : sessionsSaid(r.run) + " in a row on the sign of the last score. A run " +
+            "of one is a new opinion; a run of thirty is an old one.";
+      tr.append(run);
+    }
+
+    /* fmtInt DRAWS AN ABSENT COUNT AS AN EM DASH, which is why `n` is no
+       longer floored at zero in prepare(): a "0" beside a strip full of marks
+       is a sample size nobody measured. */
+    const nCell = el("td", "c-num st-c-n", fmtInt(r.n));
+    if (r.n === null) {
+      nCell.title = "This payload published no measured-session count for this name.";
+    }
+    tr.append(nCell);
     return tr;
   }
 
@@ -478,7 +965,7 @@
           ? "No name in this payload matches “" + state.q.trim() + "”. The " +
             "filter reads tickers only — it says nothing about what was scored."
           : "No name to draw.");
-      td.colSpan = 4;
+      td.colSpan = columnCount();
       tr.append(td);
       bodyEl.append(tr);
     } else {
@@ -504,6 +991,191 @@
     } else {
       moreBtn.hidden = true;
     }
+  }
+
+  /* ---------- what moved, and out of how many ----------------------
+
+     A COUNT WITHOUT ITS POPULATION IS NOT A READING. "Eight names moved" is a
+     session that turned when eight is out of twelve and a Tuesday when it is
+     out of four hundred. The change block is computed over the whole pool
+     BEFORE the payload's size cap sheds rows, so this paragraph can state a
+     denominator no renderer counting its own visible rows could reach — and
+     it must, because the rows below are at most the sixty this page drew.
+
+     FOUR STATUSES, FOUR SENTENCES, and they may not be collapsed. "flat" is a
+     measurement of the session: every comparable name was compared and none
+     moved. "cold" and "single-session" are statements about how much archive
+     exists, which is a fact about this pipeline and not about the market.
+     Printing one sentence for all four is how a page reports a session in
+     which nothing happened as a session it could not see. */
+
+  function bandSaid() {
+    return ctx.deadBand === null
+      ? "No dead band was published with this track, so no crossing can be claimed " +
+        "and none is."
+      : "The dead band is ±" + ctx.deadBand + plural(ctx.deadBand, " score point", " score points") +
+        " wide, and it is drawn to scale in every strip.";
+  }
+
+  /** How many of the rows on this payload are not about the latest session. */
+  function staleSaid() {
+    if (!ctx.has.now || !ctx.sessions.length) return null;
+    let old = 0, unknown = 0;
+    for (const r of ctx.rows) {
+      if (r.staleBy === null) unknown++;
+      else if (r.staleBy > 0) old++;
+    }
+    const said = [];
+    if (old) {
+      said.push(old + " of the " + ctx.rows.length + " " +
+        plural(ctx.rows.length, "name", "names") + " carried here " +
+        plural(old, "was", "were") + " not scored in the latest session. " +
+        "Their Last and their move are real readings of an older session, the " +
+        "As-of column dates each one, and the default ordering sorts them last " +
+        "rather than promoting a stale reading over a measured one.");
+    }
+    if (unknown) {
+      said.push(unknown + " " + plural(unknown, "name carries", "names carry") +
+        " no session index, so how old " + plural(unknown, "its reading is", "their readings are") +
+        " cannot be stated.");
+    }
+    return said.length ? said.join(" ") : null;
+  }
+
+  function changeSaid() {
+    const ch = ctx.change;
+    const said = [];
+
+    if (!ch) {
+      /* THE PAYLOAD IS READABLE AND PREDATES THE CHANGE LAYER. That is
+         neither a failed fetch nor a quiet market and must not borrow either
+         sentence. It is also the branch that refuses to subtract two cells of
+         `s` in the browser: a difference with no session span attached is not
+         a reading, and this page has spent a version proving it. */
+      said.push("This track published no session-level change summary, so the " +
+        "moves below are the ones this payload happens to carry rather than a " +
+        "share of a stated population. This page will not subtract two scores " +
+        "itself: a difference with no session span attached cannot say whether " +
+        "it covers one session or twenty.");
+      said.push(bandSaid());
+      return said.join(" ");
+    }
+
+    const comparable = isNum(ch.comparable);
+    const consecutive = isNum(ch.consecutive);
+    const moved = isNum(ch.moved);
+    const held = isNum(ch.held);
+    const current = isNum(ch.current);
+    const entered = isNum(ch.entered);
+    const left = isNum(ch.left);
+    const from = typeof ch.prior === "string" ? ch.prior : null;
+    const to = typeof ch.session === "string" ? ch.session : null;
+    const span = from && to ? " between " + from + " and " + to : "";
+
+    if (ch.status === "single-session") {
+      said.push("This window holds a single scored session" + (to ? " (" + to + ")" : "") +
+        ", so there is nothing to compare it against and no move exists to report. " +
+        "The first change lands once a second session is archived.");
+      said.push(bandSaid());
+      return said.join(" ");
+    }
+    if (ch.status === "cold") {
+      said.push("No name in this pool was scored on two sessions inside the window, " +
+        "so no change exists to report. That is the shape of the archive, not a " +
+        "market that stood still.");
+      said.push(bandSaid());
+      return said.join(" ");
+    }
+    if (ch.status === "flat") {
+      said.push("Every one of the " + (comparable === null ? "compared" : comparable) +
+        " names with two scored sessions held its score" + span + ". Nothing moved, " +
+        "and that is a reading about the session rather than a gap in the archive.");
+      said.push(bandSaid() + " No name crossed it.");
+      return said.join(" ");
+    }
+    if (ch.status !== "ok") {
+      /* A STATUS THIS PAGE DOES NOT RECOGNISE IS NAMED, not quietly folded
+         into "ok". A fifth value added upstream would otherwise be reported
+         with the sentence written for the fourth. */
+      said.push("This track states a change status this page does not recognise" +
+        (typeof ch.status === "string" && ch.status ? " (\u201c" + ch.status + "\u201d)" : "") +
+        ", so the counts below are printed without the sentence that belongs to it.");
+    }
+
+    said.push((moved === null ? "Some" : moved) + " of the " +
+      (comparable === null ? "" : comparable + " ") + "names with two scored sessions " +
+      "moved" + span +
+      (held === null ? "" : "; " + held + " held their score") + ".");
+    if (current !== null) {
+      said.push("The session itself scored " + current +
+        plural(current, " name", " names") + ".");
+    }
+
+    if (consecutive !== null && comparable !== null) {
+      said.push(consecutive + " of those " + comparable + " comparisons span a single " +
+        "session; the rest reach back further, and every row prints how far.");
+    }
+
+    const cr = ch.crossings && typeof ch.crossings === "object" ? ch.crossings : null;
+    const cleared = cr ? isNum(cr.cleared) : null;
+    const faded = cr ? isNum(cr.faded) : null;
+    const flipped = cr ? isNum(cr.flipped) : null;
+    if (cleared !== null && faded !== null && flipped !== null) {
+      const total = cleared + faded + flipped;
+      said.push(bandSaid() + " " + (total === 0
+        ? "No name crossed it this session, so everything below is drift."
+        : total + plural(total, " name", " names") + " crossed it: " + cleared +
+          " cleared, " + faded + " faded back inside, " + flipped + " flipped sides. " +
+          "Those are the early warnings; everything else below is drift, however large."));
+    } else {
+      said.push(bandSaid());
+    }
+
+    if (entered) {
+      said.push(entered + plural(entered, " name was", " names were") +
+        " scored for the first time in this window and " +
+        plural(entered, "has", "have") + " no prior reading to compare against.");
+    }
+    if (left) {
+      said.push(left + plural(left, " name was", " names were") +
+        " scored on the prior session and not on this one.");
+    }
+    if (ctx.shedBy && ctx.shed) {
+      said.push(ctx.shed + plural(ctx.shed, " name is", " names are") +
+        " counted in those totals but not carried on this payload — the " +
+        (ctx.shedBy === "names" ? "row ceiling" : "byte ceiling") +
+        " shed them — so the table below is shorter than the count above it.");
+    }
+    return said.join(" ");
+  }
+
+  /**
+   * WHICH SILENCE THIS IS, AS A TAG AND NOT ONLY AS PROSE — the same
+   * three-way distinction every other Flows surface carries, so a reader and
+   * a test can both tell them apart without parsing a sentence:
+   *
+   *   unavailable — the change layer was never published, or the archive
+   *                 holds nothing to compare. A fact about the pipeline.
+   *   quiet       — every comparable name was compared and none moved. A
+   *                 measurement of the session, and the only one of the three
+   *                 that makes a claim about the market.
+   *   (no tag)    — the layer is present and something moved.
+   */
+  function changeSilence() {
+    const ch = ctx.change;
+    if (!ch) return "unavailable";
+    if (ch.status === "cold" || ch.status === "single-session") return "unavailable";
+    if (ch.status === "flat") return "quiet";
+    return null;
+  }
+
+  function renderChange() {
+    if (!changeEl) return;
+    const stale = staleSaid();
+    changeEl.textContent = changeSaid() + (stale ? " " + stale : "");
+    const kind = changeSilence();
+    if (kind) changeEl.dataset.empty = kind;
+    else delete changeEl.dataset.empty;
   }
 
   /* ---------- the note under the track ----------------------------- */
@@ -570,11 +1242,21 @@
   const BASIS_LABELS = {
     score: "What the score is",
     gaps: "What a gap means",
+    change: "What a change is",
+    crossing: "What a crossing is",
+    run: "What a run is",
+    saturation: "Why the score compresses",
     backfill: "Board-only sessions",
     epoch: "The selection epoch",
     window: "The window",
   };
-  const BASIS_ORDER = ["score", "gaps", "backfill", "epoch", "window"];
+  /* The four change-layer notes are ordered next to the gap note deliberately:
+     a reader meeting the Event and Δ columns for the first time needs "what a
+     change is" and "what a crossing is" before the archive's own caveats. They
+     reached the page only through the unknown-key loop below, labelled with
+     their bare keys, until they were named here. */
+  const BASIS_ORDER = ["score", "gaps", "change", "crossing", "run", "saturation",
+    "backfill", "epoch", "window"];
 
   function basisItem(key, value) {
     const text = String(value === null || value === undefined ? "" : value).trim();
@@ -645,10 +1327,27 @@
         : ""));
 
     if (sources) {
-      const full = isNum(sources.full) ?? 0;
-      const boardsOnly = isNum(sources.boardsOnly) ?? 0;
-      parts.push(full + " " + plural(full, "session", "sessions") + " scored in full, " +
-        boardsOnly + " reconstructed from the archived boards alone");
+      /* A CONFIDENT ZERO IN A PRINTED COUNT, and it was in the sentence that
+         tells the reader how much of this window is a reconstruction rather
+         than a full scoring. These read `isNum(x) ?? 0`, so a payload that
+         stopped publishing either key would have printed "0 sessions
+         reconstructed from the archived boards alone" — a reassurance nobody
+         measured. Each half is now printed only if it was published. */
+      const full = isNum(sources.full);
+      const boardsOnly = isNum(sources.boardsOnly);
+      const fullSaid = full === null ? null
+        : full + " " + plural(full, "session", "sessions") + " scored in full";
+      const backSaid = boardsOnly === null ? null
+        : boardsOnly + " " + plural(boardsOnly, "session", "sessions") +
+          " reconstructed from the archived boards alone";
+      if (fullSaid && backSaid) parts.push(fullSaid + ", " + backSaid);
+      else if (fullSaid || backSaid) {
+        parts.push((fullSaid || backSaid) + ", and the other half of that split " +
+          "was not published");
+      } else {
+        parts.push("this payload carried a source split with neither count in it, so " +
+          "how much of the window is a board-only reconstruction is not stated");
+      }
     }
 
     if (archive) {
@@ -743,6 +1442,7 @@
     buildScaffold();
     drawnW = stripWidth();
     renderAxis(drawnW);
+    renderChange();
     renderNote();
     renderBody();
   }
@@ -800,6 +1500,11 @@
 
     renderStatus(payload);
     ctx = prepare(payload);
+    /* THE PAGE OPENS ON THE QUESTION THE MORNING ASKS. It opened on |last|
+       — the newest score anywhere in the window — so a name last scored
+       thirty sessions ago at +45 sat above a name scored this morning at
+       +30, under a header the reader read as "yesterday". */
+    state.sort = ctx.has.now ? "now" : "abs";
     renderTrack();
     renderBasis(payload);
   }).catch((error) => {

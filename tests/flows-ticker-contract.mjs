@@ -24,7 +24,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
-import { TICKER_PANELS, TICKER_PANEL_KEYS, SCORE_KEY } from "../shared/flows-panels.js";
+import {
+  TICKER_PANELS, TICKER_PANEL_KEYS, SCORE_KEY, TICKER_GROUPS, PANEL_TIERS,
+} from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -191,8 +193,8 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
  * discrimination and the header wiring — every part of this file that decides
  * WHICH state the reader gets. The stub answers the two real endpoints.
  */
-async function mount(page, card, { ticker = null, boards = null } = {}) {
-  await page.addInitScript(({ card, boards }) => {
+async function mount(page, card, { ticker = null, boards = null, hash = "", events = null } = {}) {
+  await page.addInitScript(({ card, boards, events }) => {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
@@ -201,19 +203,29 @@ async function mount(page, card, { ticker = null, boards = null } = {}) {
          defect in this stub, not in the page. `boards` stands for the LONG
          side; the short side answers empty unless a test says otherwise. */
       const u = String(url);
+      /* THE FUNNEL IS ITS OWN ENDPOINT and must be answered as one: it carries
+         no "side", so without this arm it fell through to the short board and
+         answered every gated-name question with an empty board payload. */
       const body = u.includes("/api/flows/card")
         ? card
-        : (u.includes("side=long") ? (boards || { rows: [], status: "pending" })
-                                   : { rows: [], status: "pending" });
+        : u.includes("/api/flows/events")
+          ? (events || { rows: [], status: "pending" })
+          : (u.includes("side=long") ? (boards || { rows: [], status: "pending" })
+                                     : { rows: [], status: "pending" });
       return Promise.resolve({
         ok: true, status: 200,
         headers: { get: () => String(Date.now()) },
         json: () => Promise.resolve(JSON.parse(JSON.stringify(body))),
       });
     };
-  }, { card, boards });
+  }, { card, boards, events });
+  /* THE HASH IS PART OF THE URL THE READER WAS SENT, so it has to be on the
+     goto rather than assigned afterwards: the controller reads it once the
+     card has painted, and a hash set after load would test a different code
+     path from the one a pasted link exercises. */
   const url = "https://example.test/flows/ticker/" +
-    (ticker ? "?t=" + encodeURIComponent(ticker) : "");
+    (ticker ? "?t=" + encodeURIComponent(ticker) : "") +
+    (hash ? "#" + hash : "");
   await page.route("**/*", (route) => route.fulfill({ contentType: "text/html", body: pageHTML }));
   await page.goto(url);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
@@ -1350,6 +1362,727 @@ try {
     await page.close();
   }
 
+  /* ---------- 6j. the registry's chrome reaches the page --------------
+
+     TWENTY-ONE PANELS IN ONE FLAT SCROLL, no index, no group boundaries and
+     no way to link a colleague to one of them. The registry now carries a
+     `group` and a `tier` for every panel — but `shared/` is never served, so
+     the browser cannot import it and the controller keeps a PANEL_CHROME
+     projection of the same two fields.
+
+     A PROJECTION IS ONLY SAFE IF SOMETHING COMPARES IT. This is that
+     comparison, and it is made against the RENDERED DOM rather than against
+     the controller's source: reading the table out of the file would prove
+     the two literals match and nothing about whether either reached a panel.
+     Both directions, because one direction is how four published panels went
+     undrawn for weeks. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+
+    const dom = await page.evaluate(() =>
+      [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => ({
+        key: s.dataset.panel, group: s.dataset.group, tier: s.dataset.tier, id: s.id,
+      })));
+
+    eq(dom.length, TICKER_PANELS.length, "every registry panel is mounted");
+    for (let i = 0; i < TICKER_PANELS.length; i++) {
+      const want = TICKER_PANELS[i];
+      eq(dom[i].key, want.key, `panel ${i} of the DOM is the registry's ${want.key}`);
+      /* REGISTRY → DOM. A group or tier that never reaches an element is a
+         field the emitter and the controller disagree about. */
+      eq(dom[i].group, want.group,
+         `${want.key} is mounted in its registry group (${want.group})`);
+      eq(dom[i].tier, want.tier,
+         `${want.key} wears its registry chrome tier (${want.tier})`);
+      /* DOM → REGISTRY. A panel the controller had no chrome entry for would
+         mount with no group and no tier at all, and would look like an
+         ordinary chart rather than like the omission it is. */
+      ok(dom[i].group && dom[i].tier,
+         `${want.key} carries BOTH a group and a tier — a panel the controller's ` +
+         `chrome table has never heard of mounts with neither`);
+      eq(dom[i].id, "panel-" + want.key,
+         `${want.key} has its own fragment id, so it can be linked to`);
+    }
+
+    /* THE VALUES ARE LEGAL, not merely present. A tier with no stylesheet
+       rule is a box with no chrome and a group with no heading is a panel
+       that never appears in the index. */
+    const groupKeys = TICKER_GROUPS.map((g) => g.key);
+    for (const p of TICKER_PANELS) {
+      ok(groupKeys.includes(p.group), `panel "${p.key}" names a declared group`);
+      ok(PANEL_TIERS.includes(p.tier), `panel "${p.key}" names a declared tier`);
+    }
+
+    /* THE GROUPS ARE CONTIGUOUS AND IN THE DECLARED ORDER. Non-contiguous
+       groups would make the heading meaningless — a "Tape" heading followed
+       by two tape panels, a volatility panel and another tape panel is worse
+       than no heading, because it says the boundary is real. */
+    const runs = [];
+    for (const p of TICKER_PANELS) {
+      if (!runs.length || runs[runs.length - 1] !== p.group) runs.push(p.group);
+    }
+    eq(runs.length, new Set(runs).size,
+       `each group is one contiguous run (${runs.join(" ")})`);
+    eq(runs.join(","), groupKeys.join(","),
+       "and the runs come in the order the group list declares");
+
+    /* EXACTLY ONE LEAD PER GROUP, AND IT IS FIRST. With 21 boxes of identical
+       chrome the eye has no way to find the primary reading of a section, so
+       the lead wears heavier chrome — which is only true if there is exactly
+       one of it and it is the panel the reader meets first. */
+    for (const g of TICKER_GROUPS) {
+      const members = TICKER_PANELS.filter((p) => p.group === g.key);
+      ok(members.length > 0, `group "${g.key}" has panels in it`);
+      const leads = members.filter((p) => p.tier === "lead");
+      eq(leads.length, 1, `group "${g.key}" has exactly one lead panel`);
+      eq(members[0].tier, "lead",
+         `and it is the group's first panel (${members[0].key}), not one buried inside it`);
+    }
+    eq(TICKER_PANELS[0].key, SCORE_KEY,
+       "and the very first lead is still the score derivation");
+
+    /* THE HEADINGS ARE IN THE GRID, IN ORDER, EACH IMMEDIATELY BEFORE ITS OWN
+       GROUP. They are grid children spanning every column, so DOM order stays
+       tab order and nothing is hidden — the whole point of not using tabs. */
+    const flow = await page.evaluate(() =>
+      [...document.getElementById("ftGrid").children].map((n) =>
+        n.classList.contains("ft-group")
+          ? { kind: "h", id: n.id, text: n.textContent }
+          : { kind: "p", key: n.dataset.panel }));
+    const heads = flow.filter((n) => n.kind === "h");
+    eq(heads.length, TICKER_GROUPS.length,
+       `the grid opens each group with a heading (${heads.length})`);
+    for (let i = 0; i < TICKER_GROUPS.length; i++) {
+      const g = TICKER_GROUPS[i];
+      eq(heads[i].id, g.hash,
+         `heading ${i} carries the group's own fragment id (${g.hash}) — a slug computed ` +
+         `at render time would break every link the moment a label was reworded`);
+      ok(heads[i].text.includes(g.label), `and its label (${g.label})`);
+      ok(heads[i].text.includes(g.blurb.slice(0, 40)),
+         "and the group's own published sentence, verbatim");
+      const at = flow.findIndex((n) => n.kind === "h" && n.id === g.hash);
+      const first = TICKER_PANELS.find((p) => p.group === g.key);
+      eq(flow[at + 1].key, first.key,
+         `and it sits immediately before ${first.key}, the group's first panel`);
+    }
+
+    /* THE JUMP STRIP AND THE FULL INDEX. Five anchors answer "where is the
+       volatility section"; they do not answer "where is the gamma roll-off",
+       which is the question that made a reader scan seven screens — so every
+       panel is named too, and every href in both resolves. */
+    const nav = await page.evaluate(() => {
+      const strip = [...document.querySelectorAll(".ft-jump .ft-jump-b")]
+        .map((a) => a.getAttribute("href"));
+      const all = [...document.querySelectorAll(".ft-all-l a")]
+        .map((a) => a.getAttribute("href"));
+      const resolves = [...strip, ...all].filter((h) => {
+        try { return !document.getElementById(decodeURIComponent(h.slice(1))); }
+        catch { return true; }
+      });
+      const bar = document.querySelector(".ft-bar");
+      return {
+        strip, all, dead: resolves,
+        sticky: bar ? getComputedStyle(bar).position : null,
+        holdsHead: !!(bar && bar.contains(document.getElementById("ftHead"))),
+        holdsJump: !!(bar && bar.querySelector(".ft-jump")),
+      };
+    });
+    eq(nav.strip.join(","), TICKER_GROUPS.map((g) => "#" + g.hash).join(","),
+       "the jump strip lists every group, in reading order");
+    eq(nav.all.length, TICKER_PANELS.length,
+       `the full index names all ${TICKER_PANELS.length} panels`);
+    eq(nav.dead.length, 0,
+       `every anchor in the index resolves to an element (${nav.dead.join(", ")})`);
+    eq(nav.sticky, "sticky",
+       "the identity bar is sticky — it used to scroll away after the first panel, " +
+       "taking the name, the score and the session date with it");
+    ok(nav.holdsHead && nav.holdsJump,
+       "and it carries BOTH the identity and the index, so neither can outscroll the other");
+
+    eq(errors.length, 0, `the workspace chrome throws nothing (${errors.join("; ")})`);
+    await page.close();
+
+    /* THE JUMP CHIPS ARE A REAL TOUCH TARGET, MEASURED BY HIT-TESTING.
+
+       They are 25px boxes carrying a 44px transparent pseudo-element, which
+       is the pattern .ft-zoom-open already uses — and it silently did not
+       work here: a box with overflow-x auto has its overflow-y COMPUTED to
+       auto, so the strip is a scroll container in BOTH axes and clipped the
+       extension back to the chip. Nothing looked wrong; the control simply
+       claimed a target it did not have. A geometry assertion on the
+       pseudo-element's declared height would have passed on the broken
+       version, so this walks the viewport with elementFromPoint and counts
+       the rows of pixels that actually hit the anchor. */
+    const touch = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    await mount(touch, withChain[0], { ticker: withChain[0].ticker });
+    const hit = await touch.evaluate(() => {
+      const b = document.querySelector(".ft-jump-b");
+      const r = b.getBoundingClientRect();
+      const cx = Math.round(r.left + r.width / 2);
+      let span = 0;
+      for (let y = Math.round(r.top) - 25; y <= Math.round(r.bottom) + 25; y++) {
+        if (document.elementFromPoint(cx, y) === b) span++;
+      }
+      return { box: Math.round(r.height), span };
+    });
+    ok(hit.span >= 44,
+       `a jump chip is at least 44px of hit area at 320px (${hit.span}px over a ` +
+       `${hit.box}px box) — the extension is worthless if its own scroll container clips it`);
+    await touch.close();
+  }
+
+  /* ---------- 6k. the page leads on CHANGE ----------------------------
+
+     THE PRODUCT IS READ AS AN EARLY WARNING AND THE PAGE OPENED ON A
+     SNAPSHOT. Twenty-one panels described one session in enormous detail and
+     nothing said what the number had done: no move against the previous
+     scored session, no run, no dead-band crossing, no notice that the newest
+     reading was three sessions old.
+
+     EVERY FIXTURE BELOW IS AN EMITTED CARD WITH NAMED SCORES MUTATED, and the
+     mutation is the branch. A crossing, a multi-session gap and a stale
+     reading do not all occur in one dry run, and a fixture that cannot reach
+     the branch it certifies is this repository's most repeated mistake. */
+  {
+    const base = withChain.find((c) =>
+      c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
+      c.panels.scoreOverlay.rows.length >= 6 &&
+      typeof c.panels.scoreOverlay.deadBand === "number");
+    ok(base, "an emitted card carries a joined overlay with a published dead band");
+    const BAND = base.panels.scoreOverlay.deadBand;
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    /** An emitted card whose last two scored sessions are set by name. */
+    const staged = (fn) => {
+      const c = JSON.parse(JSON.stringify(base));
+      fn(c.panels.scoreOverlay, c.panels.scoreOverlay.rows);
+      const ovl = c.panels.scoreOverlay;
+      /* The counters are kept honest with the rows the mutation left behind,
+         so the overlay panel below the block does not contradict it. A
+         mutation that removes `rows` outright is one of the two silences and
+         has no counters to keep. */
+      if (Array.isArray(ovl.rows)) {
+        ovl.scored = ovl.rows.filter((r) => typeof r.score === "number").length;
+        ovl.gaps = ovl.rows.length - ovl.scored;
+      }
+      return c;
+    };
+
+    const read = async (card) => {
+      await mount(page, card, { ticker: card.ticker });
+      return page.evaluate(() => {
+        const c = document.getElementById("ftChange");
+        const pick = (sel) => {
+          const n = c && c.querySelector(sel);
+          return n ? n.textContent : "";
+        };
+        const chip = (id) => {
+          const n = document.getElementById(id);
+          return n ? { text: n.textContent, empty: n.getAttribute("data-empty") } : null;
+        };
+        return {
+          hidden: !c || c.hidden,
+          text: c ? c.textContent : "",
+          lead: pick(".ft-chg-lead"),
+          event: pick(".ft-chg-e"),
+          stale: pick(".ft-chg-stale"),
+          empties: c ? [...c.querySelectorAll("[data-empty]")]
+            .map((n) => n.getAttribute("data-empty")) : [],
+          d1: chip("ftD1"), price: chip("ftPrice"), side: chip("ftSide"),
+        };
+      });
+    };
+
+    /* THE ORDINARY CASE: the newest scored session and the one before it. */
+    const rows = base.panels.scoreOverlay.rows;
+    const last = rows[rows.length - 1], prev = rows[rows.length - 2];
+    if (typeof last.score === "number" && typeof prev.score === "number") {
+      const got = await read(base);
+      ok(!got.hidden, "the change block is drawn above the panels");
+      ok(got.lead.includes(prev.d),
+         `the headline names the previous scored session (${prev.d})`);
+      ok(/1 session earlier/.test(got.lead),
+         "and how many sessions the move spans — a delta without its gap is the defect " +
+         "this layer replaced");
+      ok(/score points?\b/.test(got.text),
+         "the move carries its unit: a bare number is not a reading, and the score is an " +
+         "index whose differences are POINTS rather than percent");
+      ok(got.d1 && /session/.test(got.d1.text),
+         `the sticky header carries the move and its gap too (${got.d1 && got.d1.text})`);
+    }
+
+    /* A MOVE OF EXACTLY ZERO IS A MEASUREMENT. It must read as "unchanged",
+       never as an absence and never as a missing reading — the two are one
+       keystroke apart in every renderer this repository has shipped. */
+    const flat = await read(staged((o, r) => { r[r.length - 1].score = r[r.length - 2].score; }));
+    ok(/unchanged/i.test(flat.lead),
+       `an identical score reads as unchanged (${flat.lead.slice(0, 90)})`);
+    ok(flat.d1 && /^0/.test(flat.d1.text.trim()),
+       `and the header chip shows the measured zero (${flat.d1 && flat.d1.text})`);
+    ok(!/no move to state/i.test(flat.lead),
+       "and is NOT reported as an absence — a measured zero and an unmeasured session " +
+       "are different facts");
+
+    /* THE FOUR DEAD-BAND VERDICTS. The band is the board's own membership
+       rule, so crossing it is the event and everything else is drift. */
+    const cleared = await read(staged((o, r) => {
+      r[r.length - 2].score = 0;
+      r[r.length - 1].score = BAND + 40;
+    }));
+    ok(/cleared the dead band/i.test(cleared.event),
+       `a name leaving the band is called out as the entry event (${cleared.event})`);
+    ok(/actionable/i.test(cleared.event), "in the words the payload's own layer uses");
+
+    const faded = await read(staged((o, r) => {
+      r[r.length - 2].score = BAND + 40;
+      r[r.length - 1].score = 0;
+    }));
+    ok(/faded into the dead band/i.test(faded.event),
+       `a name entering the band is the exit signal (${faded.event})`);
+
+    const flipped = await read(staged((o, r) => {
+      r[r.length - 2].score = BAND + 40;
+      r[r.length - 1].score = -(BAND + 30);
+    }));
+    ok(/flipped/i.test(flipped.event),
+       `a sign change outside the band on both ends is a flip (${flipped.event})`);
+
+    const held = await read(staged((o, r) => {
+      r[r.length - 2].score = BAND + 40;
+      r[r.length - 1].score = BAND + 45;
+    }));
+    ok(/no crossing/i.test(held.event),
+       "and a name that did not cross says so, rather than leaving a blank where the " +
+       "event would be");
+    ok(held.empties.includes("quiet"),
+       "tagged as the MEASURED silence: both ends were scored and neither crossed");
+
+    /* THE BAND ITSELF CAN BE ABSENT, and then the crossing is UNKNOWN rather
+       than absent — the friendlier of the two sentences is the wrong one. */
+    const noBand = await read(staged((o) => { o.deadBand = null; }));
+    ok(/cannot be stated/i.test(noBand.event),
+       `an unpublished dead band makes the crossing unknowable, and says so (${noBand.event})`);
+    ok(noBand.empties.includes("unavailable"),
+       "and tags it as a publisher-side absence, not as a measured one");
+    ok(!/no crossing/i.test(noBand.event),
+       "it never reports 'no crossing' from a band nobody published — that is a " +
+       "confident answer built out of a missing input");
+
+    /* A GAP IS NOT AN OVERNIGHT MOVE. Null the previous session and the same
+       delta now spans two sessions with the name unscored in between. */
+    const gapped = await read(staged((o, r) => {
+      r[r.length - 2].score = null;
+      r[r.length - 1].score = BAND + 40;
+    }));
+    ok(/2 sessions earlier/.test(gapped.lead),
+       `the gap is counted and printed (${gapped.lead.slice(0, 120)})`);
+    ok(/not an overnight one/i.test(gapped.lead),
+       "and the sentence refuses the overnight reading a bare delta would invite");
+
+    /* A STALE READING SAYS SO BEFORE IT SAYS ANYTHING ELSE. */
+    const stale = await read(staged((o, r) => { r[r.length - 1].score = null; }));
+    ok(/1 session old/.test(stale.stale),
+       `a newest session with no score for this name is announced as stale (${stale.stale.slice(0, 110)})`);
+    ok(stale.stale.length > 0 && stale.text.indexOf(stale.stale.slice(0, 20)) <
+       stale.text.indexOf(stale.lead.slice(0, 20)),
+       "and the staleness line comes BEFORE the move, so no reader takes the move for " +
+       "this morning's");
+
+    /* THE RUN, AND THE GAP IT REFUSES TO STEP OVER. */
+    const broken = await read(staged((o, r) => {
+      for (let i = 0; i < r.length; i++) r[i].score = BAND + 10;
+      r[r.length - 4].score = null;
+    }));
+    ok(/consecutive scored sessions on the bullish side/i.test(broken.text),
+       "the run states its side and its length");
+    ok(/not\s+stepped over that gap/i.test(broken.text),
+       "and says it stopped at an unscored session rather than counting through it — " +
+       "continuity nobody measured is not continuity");
+
+    /* A NEWEST SCORE OF EXACTLY ZERO IS THE CENTRE OF THE BAND, not a run of
+       zero on some side. */
+    const atZero = await read(staged((o, r) => { r[r.length - 1].score = 0; }));
+    ok(/exactly zero/i.test(atZero.text),
+       "a newest score of zero is named as the centre of the dead band");
+    ok(!/on the bullish side|on the bearish side/i.test(atZero.text.split("Derived from")[0]),
+       "and is not assigned a side it does not hold");
+
+    /* ONE SCORED SESSION IS NOT A MOVE OF ZERO. */
+    const lone = await read(staged((o, r) => {
+      for (let i = 0; i < r.length - 1; i++) r[i].score = null;
+      r[r.length - 1].score = BAND + 5;
+    }));
+    ok(/no move to state/i.test(lone.lead),
+       "a single scored session states the reading and refuses to derive a move from it");
+    ok(/not a move of zero/i.test(lone.lead),
+       "in the words that rule out the substitution");
+    ok(!lone.d1, "and the header carries no move chip at all rather than a zero");
+
+    /* THE THREE SILENCES, one sentence and one tag each. */
+    const unavailable = await read(staged((o) => {
+      o.status = "unavailable";
+      o.reason = "the score track was not assembled this run";
+      delete o.rows;
+    }));
+    ok(unavailable.text.includes("the score track was not assembled this run"),
+       "an unavailable track prints the publisher's own reason verbatim");
+    ok(unavailable.empties.includes("unavailable"), "and is tagged as a publisher fault");
+
+    const quiet = await read(staged((o) => {
+      o.status = "quiet";
+      o.reason = "the price window and the score window do not share a single session";
+      delete o.rows;
+    }));
+    ok(quiet.empties.includes("quiet"),
+       "two windows read in full and found disjoint is the MEASURED silence");
+    ok(!quiet.empties.includes("unavailable"),
+       "and never wears the unavailable tag — one is a skipped leg, the other an " +
+       "ordinary state for a name new to the board");
+
+    const legacy = JSON.parse(JSON.stringify(base));
+    delete legacy.panels.scoreOverlay;
+    const predates = await read(legacy);
+    ok(/predates|built before/i.test(predates.text),
+       `a card from before the overlay dates its own absence (${predates.text.slice(0, 110)})`);
+    ok(predates.empties.includes("unavailable"), "and tags it as an absence, not a silence");
+
+    /* THE IDENTITY STRIP. Price, side and score, from the card's own panels —
+       and each absence named rather than dashed. */
+    const idOk = await read(base);
+    ok(/^\$\d/.test(idOk.price.text.trim()),
+       `the strip carries the spot the card was measured at (${idOk.price.text})`);
+    ok(idOk.side.text.trim().length > 0, `and the side (${idOk.side.text})`);
+
+    /* THE SIDE IS THE CARD'S PUBLISHED SCORE READ AGAINST THE PUBLISHED BAND,
+       so the fixture stages the score itself — mutating the overlay's newest
+       row would test a different number. A score of +1 with a band of ±1 is
+       not a bullish name; it is a name the board declined to rank, and the
+       header calling it bullish is exactly the confident reading this product
+       exists to refuse. */
+    const inside = JSON.parse(JSON.stringify(base));
+    inside.score = BAND;
+    const inBand = await read(inside);
+    ok(/dead band/i.test(inBand.side.text),
+       `a score inside the band is not called bullish (${inBand.side.text})`);
+    ok(!/bullish|bearish/i.test(inBand.side.text),
+       "and is given no side at all, because it holds none");
+
+    const noSpot = JSON.parse(JSON.stringify(base));
+    for (const k of ["levels", "pricedMove", "gamma"]) {
+      noSpot.panels[k] = { status: "unavailable", reason: "no spot price" };
+    }
+    const priceless = await read(noSpot);
+    eq(priceless.price.empty, "unavailable",
+       "a card whose three spot-carrying panels are all unavailable says the price is " +
+       "UNAVAILABLE — never $0.00, which is what Number(null) would have produced");
+    ok(!/\$0/.test(priceless.price.text), `and prints no dollar figure (${priceless.price.text})`);
+
+    eq(errors.length, 0, `no change-block state throws (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 6l. the shaper itself, on payloads no run produces -------
+
+     changeFrom is the arithmetic the header and the block both read, so it is
+     exercised directly as well as through the DOM: a renderer assertion can
+     pass on a shaper that returns the right SHAPE and the wrong number. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+    const got = await page.evaluate(() => {
+      const f = window.FlowsPanels.changeFrom;
+      const mk = (scores, deadBand) => ({
+        status: "ok", deadBand,
+        rows: scores.map((s, i) => ({ d: "2026-08-" + String(10 + i).padStart(2, "0"),
+          close: 100 + i, score: s })),
+      });
+      return {
+        /* Six sessions, the last two scored one apart. */
+        plain: f(mk([5, 6, 7, 8, 9, 12], 1)),
+        /* The name is unscored for two sessions before the newest. */
+        gapped: f(mk([5, 6, 7, null, null, 12], 1)),
+        /* The newest session carries no score: the reading is three old. */
+        stale: f(mk([5, 6, 40, null, null, null], 1)),
+        /* Inside the band, then outside it. */
+        cleared: f(mk([0, 0, 0, 0, 0, 40], 1)),
+        /* Outside, then inside. */
+        faded: f(mk([40, 40, 40, 40, 40, 0], 1)),
+        /* Outside on both ends, opposite signs. */
+        flipped: f(mk([40, 40, 40, 40, 40, -40], 1)),
+        /* A run broken by an unscored session rather than by a sign change. */
+        broken: f(mk([9, 9, null, 9, 9, 9], 1)),
+        /* Zero is a reading, not an absence. */
+        zero: f(mk([9, 9, 9, 9, 9, 0], 1)),
+        /* No band published. */
+        bandless: f(mk([0, 0, 0, 0, 0, 40], null)),
+        /* Nothing scored at all. */
+        empty: f(mk([null, null, null], 1)),
+        /* The three non-ok inputs. */
+        absent: f(undefined),
+        dead: f({ status: "unavailable", reason: "the track was not assembled" }),
+        disjoint: f({ status: "quiet", reason: "no shared session" }),
+      };
+    });
+
+    eq(got.plain.d1.v, 3, "the move is the difference between the two newest scored sessions");
+    eq(got.plain.d1.gap, 1, "and an overnight move spans one session");
+    eq(got.plain.stale, 0, "a newest session that is scored is not stale");
+    eq(got.plain.run, 6, "the run counts every consecutive session on the current sign");
+    ok(got.plain.runCapped,
+       "and says so when it reached the start of the window — the run may be older than " +
+       "this card can see");
+    eq(got.plain.ext.hi, 12, "the window high is the largest score in it");
+    eq(got.plain.ext.lo, 5, "and the low the smallest");
+    eq(got.plain.ext.hiAt, "2026-08-15", "each extreme carries the date it was set on");
+
+    eq(got.gapped.d1.gap, 3,
+       "a move over an absence spans every session between the two readings — 3, not 1");
+    eq(got.gapped.d1.v, 5, "and is still the difference between the two scored ends");
+    eq(got.gapped.run, 1,
+       "the run stops at the unscored session rather than counting through it");
+    ok(got.gapped.runBroken, "and says which of the two reasons it stopped for");
+    ok(!got.gapped.runCapped, "a run that ended at a gap did not end at the window edge");
+
+    eq(got.stale.stale, 3,
+       "three unscored sessions after the newest score make the reading three sessions old");
+    eq(got.stale.at.d, "2026-08-12", "and the reading itself is dated by ITS session");
+
+    eq(got.cleared.cross, "cleared", "inside the band then outside it is a clearing");
+    eq(got.faded.cross, "faded", "outside then inside is a fade");
+    eq(got.flipped.cross, "flipped", "outside at both ends on opposite signs is a flip");
+    eq(got.plain.cross, null, "and a name that stayed put crossed nothing");
+    ok(got.plain.crossKnown,
+       "which is KNOWN, because a band was published and both ends were scored");
+
+    eq(got.broken.run, 3, "a run counts back to the gap and stops");
+    ok(got.broken.runBroken, "and reports the gap as the reason");
+
+    eq(got.zero.run, 0,
+       "a newest score of exactly zero is a run of 0 — the centre of the dead band, not " +
+       "a length-zero run on a side it does not hold");
+    eq(got.zero.d1.v, -9, "while the move to it is still a measured move");
+
+    eq(got.bandless.band, null, "an unpublished dead band is null, never zero");
+    eq(got.bandless.cross, null, "so no crossing is claimed");
+    eq(got.bandless.crossKnown, false, "and the renderer is told the difference");
+    eq(got.bandless.inside, null,
+       "and whether the name sits inside the band is UNKNOWN rather than false");
+
+    eq(got.empty.status, "quiet",
+       "a window with no scored session at all is a measured emptiness");
+    eq(got.absent.status, "unavailable", "a card with no overlay key predates the panel");
+    ok(/built before/.test(got.absent.reason), "and says so");
+    eq(got.dead.status, "unavailable", "an unavailable track is a publisher-side absence");
+    ok(got.dead.reason.includes("the track was not assembled"),
+       "carrying the publisher's own reason");
+    eq(got.disjoint.status, "quiet", "and disjoint windows are the measured silence");
+
+    await page.close();
+  }
+
+  /* ---------- 6m. deep links, both directions -------------------------
+
+     `location.hash` was read in NO file in this product, so there was no way
+     to send a colleague panel 14 — the URL got them the name and a sentence
+     told them to scroll. The grid is `hidden` while the card is in flight, so
+     the browser's own fragment scroll on load lands on an element with no box
+     and does nothing; the controller has to re-run the jump after paint, and
+     that is what is asserted here.
+
+     ONE PAGE PER HASH, and the reason is not tidiness. Two goto()s to the
+     same path differing only in fragment are a SAME-DOCUMENT navigation:
+     Playwright does not reload, mount() injects the two controllers a second
+     time into a document that already has them, and the page ends up with two
+     of everything. A fresh page per hash is what a reader following a link
+     actually gets. */
+  {
+    const card = withChain[0];
+    const target = TICKER_PANELS[TICKER_PANELS.length - 2].key;
+
+    /* THE SCROLL HAS TO SETTLE BEFORE IT IS MEASURED. base.css sets
+       `html { scroll-behavior: smooth }`, so a position test that fires the
+       moment the target enters the viewport is measuring a page in motion —
+       which is how the first draft of this section read a heading at 23px
+       against a sticky bar that had not reached its offset yet. Two
+       consecutive animation frames at the same offset is settled. */
+    const settled = (page) => page.waitForFunction(() => {
+      const y = Math.round(window.scrollY);
+      const same = window.__lastY === y;
+      window.__lastY = y;
+      return same && y > 100;
+    }, null, { timeout: 8000 });
+
+    const open = async (hash) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, hash });
+      return { page, errors };
+    };
+
+    {
+      const { page, errors } = await open("panel-" + target);
+      await settled(page);
+      const landed = await page.evaluate((k) => {
+        const s = document.getElementById("panel-" + k);
+        const r = s.getBoundingClientRect();
+        return {
+          top: r.top, focused: document.activeElement === s, scrolled: window.scrollY,
+          /* The sticky bar must not be sitting ON the panel the link named. */
+          barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
+        };
+      }, target);
+      ok(landed.scrolled > 200,
+         `an incoming #panel-${target} scrolls the page to it (${Math.round(landed.scrolled)}px)`);
+      ok(landed.top >= landed.barBottom - 4,
+         `and lands BELOW the sticky bar rather than under it (panel ${Math.round(landed.top)}, ` +
+         `bar ends ${Math.round(landed.barBottom)})`);
+      ok(landed.focused,
+         "and focus follows the jump, or a keyboard reader lands on panel 20 and carries " +
+         "on tabbing from panel 1");
+      eq(errors.length, 0, `a panel deep link throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    /* A GROUP ANCHOR IS THE OTHER HALF OF THE INDEX. */
+    {
+      const g = TICKER_GROUPS[3];
+      const { page, errors } = await open(g.hash);
+      await settled(page);
+      const grp = await page.evaluate((h) => ({
+        scrolled: window.scrollY,
+        current: [...document.querySelectorAll(".ft-jump-b[aria-current='true']")]
+          .map((a) => a.getAttribute("href")),
+        headTop: document.getElementById(h).getBoundingClientRect().top,
+        barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
+      }), g.hash);
+      ok(grp.scrolled > 100, "a group anchor scrolls to its heading");
+      ok(grp.headTop >= grp.barBottom - 4,
+         `and the heading clears the sticky bar rather than hiding behind it ` +
+         `(heading ${Math.round(grp.headTop)}, bar ends ${Math.round(grp.barBottom)})`);
+      eq(errors.length, 0, `a group deep link throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    /* A HOSTILE HASH REACHES getElementById AND NOTHING ELSE. querySelector
+       ('#' + hash) throws on anything that is not an identifier, and a throw
+       here would take the whole paint down AFTER the card had arrived — the
+       worst possible moment, because every panel is already on the page. */
+    for (const bad of ["../etc", "panel-<script>", "%%%", "a b c"]) {
+      const { page, errors } = await open(encodeURIComponent(bad));
+      const alive = await page.evaluate(() =>
+        document.querySelectorAll(".ft-panel[data-panel]").length);
+      eq(alive, TICKER_PANELS.length, `a hash of ${JSON.stringify(bad)} paints the page anyway`);
+      eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    /* THE OPEN PANEL IS REFLECTED INTO THE URL, and closing puts back what was
+       there. replaceState rather than an assignment to location.hash, so
+       twenty enlarges do not become twenty back-button steps. */
+    {
+      const { page, errors } = await open(TICKER_GROUPS[1].hash);
+      const before = await page.evaluate(() => location.hash);
+      await page.click('.ft-panel[data-panel="gamma"] .ft-zoom-open');
+      await page.waitForFunction(
+        () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
+      const opened = await page.evaluate(() => location.hash);
+      eq(opened, "#panel-gamma",
+         "enlarging a panel puts that panel in the URL, so a reader can send the chart " +
+         "they are looking at");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(
+        () => !document.getElementById("ftZoom").open, null, { timeout: 2000 });
+      const closed = await page.evaluate(() => location.hash);
+      eq(closed, before,
+         "and closing restores the hash the reader arrived on rather than clearing it");
+      eq(errors.length, 0, `the enlarge round trip throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
+
+  /* ---------- 6n. a gated name lands on a page that used to deny -----
+
+     EVERY TICKER ON /flows/events/ LINKS HERE, and 57 of the 60 rows on a
+     typical funnel payload are gated — so the sentence a reader met most
+     often was this one, and both halves of it were wrong for exactly those
+     names: "Cards are built only for the names the board publishes, so there
+     is nothing to show for this name today — it may be on the watch list."
+     A gated name is absent because the board was FORBIDDEN to score it, and
+     it cannot be on the watch list, which holds only names that WERE scored
+     and landed inside the dead band. */
+  {
+    const say = async (events) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { status: "pending", ticker: "ZZZ" }, {
+        ticker: "ZZZ",
+        boards: { rows: [{ t: "QQQ", r: 1, s: 5, dp: 1 }] },
+        events,
+      });
+      const got = await page.evaluate(() => ({
+        text: document.getElementById("ftStatus").textContent,
+        href: (document.querySelector("#ftStatus a") || {}).getAttribute
+          ? document.querySelector("#ftStatus a").getAttribute("href") : null,
+      }));
+      eq(errors.length, 0, `the absent-name branch throws nothing (${errors.join("; ")})`);
+      await page.close();
+      return got;
+    };
+
+    const gated = await say({
+      gateOrigin: "2026-09-03", gateDays: 12,
+      rows: [{ t: "ZZZ", d: "2026-09-08", dte: 5, st: "gated", s: null }],
+    });
+    ok(gated.text.includes("2026-09-08"),
+       `a gated name is told when it reports (${gated.text.slice(0, 120)})`);
+    ok(/5 calendar days/.test(gated.text),
+       "with the count in its own unit — calendar days, which is what the gate measures in");
+    ok(gated.text.includes("2026-09-03"),
+       "and the origin the gate counted from, so the number can be checked");
+    ok(/BEFORE the composite ran/.test(gated.text),
+       "and says the gate fired before any score existed — not that it scored badly");
+    ok(/not a low one/.test(gated.text),
+       "which is the reading a reader would otherwise take");
+    ok(!/it may be on the watch list/.test(gated.text),
+       "the false watch-list suggestion is gone");
+    ok(/holds only names that were scored/.test(gated.text),
+       "and is replaced by what the watch list actually holds");
+    eq(gated.href, "/flows/events/",
+       "and the page offers the way on, which the old dead end did not");
+
+    const stalled = await say({
+      gateOrigin: "2026-09-03", gateDays: 12,
+      rows: [{ t: "ZZZ", d: "2026-11-01", dte: 59, st: "eligible", s: null }],
+    });
+    ok(/eligible/.test(stalled.text),
+       `a name that cleared the gate is told which stage it stopped at (${stalled.text.slice(0, 120)})`);
+    ok(/cleared the earnings gate/.test(stalled.text),
+       "and told that it was NOT gated — the opposite fact from the row above");
+    ok(!/BEFORE the composite ran/.test(stalled.text),
+       "and never borrows the gated sentence");
+
+    const missing = await say({ gateOrigin: "2026-09-03", gateDays: 12, rows: [] });
+    ok(/cannot say which stage/.test(missing.text),
+       `a name with no funnel row gets no invented stage (${missing.text.slice(0, 120)})`);
+    ok(/capped/.test(missing.text),
+       "and is told the calendar is capped, so its silence is not evidence the name was " +
+       "never gated — the reassuring inference is the one refused here");
+
+    const unread = await say({ status: "pending" });
+    ok(/could not be read/.test(unread.text),
+       `an unreadable funnel says so rather than guessing (${unread.text.slice(0, 120)})`);
+    ok(/not on today/.test(unread.text),
+       "while still stating the one thing that IS known: the name is not on the board");
+  }
+
   /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({
@@ -1380,6 +2113,14 @@ try {
     await mount(page, card, { ticker: card.ticker });
     const box = await page.evaluate(() => {
       const p = document.querySelector(".ft-panel");
+      /* SCROLLED INTO VIEW FIRST, and `instant` because base.css sets
+         `html { scroll-behavior: smooth }` — a rect read in the same tick as a
+         smooth scroll is the rect from before it. The sticky bar and the
+         change block now sit above the grid, so the first panel starts below
+         the fold at this viewport and a mouse.move to a point outside the
+         viewport lands on nothing at all. That is a property of the page, not
+         of the spotlight this section is about. */
+      p.scrollIntoView({ block: "center", behavior: "instant" });
       const r = p.getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
@@ -1426,10 +2167,15 @@ try {
 }
 
 console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup, the ` +
-  `drawers and the shed ladder all read, four payloads that shipped for weeks with ` +
-  `no renderer finally drawn, an enlarge that redraws rather than scales and cannot ` +
-  `shrink the panels it exists for, absent and unavailable told apart, the three ` +
-  `stock panels rendering the payload's own numbers and notes with quiet, ` +
+  `drawers, the chrome and the shed ladder all read, four payloads that shipped for ` +
+  `weeks with no renderer finally drawn, an enlarge that redraws rather than scales ` +
+  `and cannot shrink the panels it exists for, absent and unavailable told apart, the ` +
+  `three stock panels rendering the payload's own numbers and notes with quiet, ` +
   `unavailable and pre-wave absence held apart, a rank that is never rescaled and ` +
-  `a strip that never bridges a gap, and a page that answers "no name" with an ` +
-  `index instead of an error`);
+  `a strip that never bridges a gap, twenty-one panels grouped into five contiguous ` +
+  `sections with one lead each and an index that links to every one of them, a page ` +
+  `that opens on the overnight move with its gap and its dead-band crossing rather ` +
+  `than on a snapshot — with a measured zero told from an unmeasured session in both ` +
+  `directions — deep links that survive a hidden grid and a hostile hash, and a gated ` +
+  `name that is finally told the gate removed it instead of being pointed at a watch ` +
+  `list it cannot be on`);

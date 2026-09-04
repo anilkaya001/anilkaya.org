@@ -51,19 +51,75 @@
     return n;
   };
 
-  const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  /* THE MISSING-VALUE TEST COMES BEFORE THE COERCION, and this copy used to
+     be the odd one out.
+
+     It read `typeof v === "number" && Number.isFinite(v) ? v : null`, which
+     is safe against the confident zero — Number(null) never runs — but it is
+     STRICTER than the contract every other surface in this product holds. The
+     canonical form (assets/js/flows-ui.js, and numOrNull in shared/) admits a
+     numeric STRING, because the vendor quotes several fields that way and the
+     pipeline passes some of them through untouched. So one payload field
+     rendered as a value on the board and as an em dash in the card panel, for
+     the same card, in the same session — the two files disagreeing about what
+     "present" means, with nothing failing either way.
+
+     Written out rather than delegated to window.FlowsUI: flows-ui.js is
+     loaded on two of the eleven Flows routes and this file is loaded on four,
+     so reaching for it here would make the panels depend on a script that is
+     absent on the page they are drawn on. The duplication is the smaller
+     defect until the loader is fixed; the DIVERGENCE was the real one. */
+  const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
   /* ONE MINUS SIGN, U+2212, everywhere on the card. JavaScript's own toFixed
      emits U+002D, which is narrower and sits lower, so a card mixed the two
      within a single numeric column — the money formatter used the typographic
      minus and every other formatter the hyphen. */
   const MINUS = "\u2212";
   const neg = (str) => String(str).replace(/-/g, MINUS);
-  const signed = (n, body) => (n >= 0 ? "+" : MINUS) + body(Math.abs(n));
-  const pct = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(2) + "%"));
-  const pct1 = (v) => (isNum(v) === null ? DASH : signed(v, (a) => (a * 100).toFixed(1) + "%"));
-  const sigma = (v) => (isNum(v) === null ? DASH : signed(v, (a) => a.toFixed(2) + "σ"));
-  const px2 = (v) => (isNum(v) === null ? DASH : neg(v.toFixed(2)));
-  const vol1 = (v) => (isNum(v) === null ? DASH : neg((v * 100).toFixed(1)) + "%");
+  const signed = (n, body) => (n < 0 ? MINUS : n > 0 ? "+" : "") + body(Math.abs(n));
+
+  /**
+   * Guard once, then format the value THE GUARD RETURNED.
+   *
+   * Sixteen sites in this file were written as
+   * `isNum(x) === null ? DASH : <expression using x>` — they tested one thing
+   * and then formatted another. That was harmless only while isNum was the
+   * narrow copy that could not coerce; the moment it was aligned with the
+   * canonical contract (which admits a numeric string, because the vendor
+   * quotes several fields that way) `x.toFixed(2)` on a passing value became
+   * a TypeError inside a renderer. A guard whose result is discarded is not a
+   * guard, it is a comment with a runtime cost.
+   *
+   * The em dash is the absence, not a zero: this whole helper exists so a
+   * missing reading can never arrive as one.
+   */
+  const fmtOr = (v, body) => { const n = isNum(v); return n === null ? DASH : body(n); };
+
+  /* THE SIGN AS A CLASS, THREE-WAY, IN ONE PLACE.
+
+     Four call sites in this file each wrote their own two-armed version —
+     `x >= 0 ? "is-pos" : "is-neg"` — which tints a reading of exactly zero
+     with a side it does not hold. Zero is the centre of the dead band and a
+     score this pipeline assigns; it is not a small positive, and it is not an
+     absence either, which is what `is-null` and the em dash are for.
+
+     A helper rather than four corrected ternaries, because the version that
+     gets forgotten on the next new chart is the one that was never written
+     down. `is-flat` is the stylesheet's existing word for this and the
+     families that use it carry their own neutral rule, since the base classes
+     set `fill: none` or no stroke at all — a path with a polarity class that
+     has no rule is not a neutral line, it is an invisible one. */
+  const polarity = (n) => (n === null || n === undefined || !Number.isFinite(Number(n))
+    ? "is-null" : Number(n) < 0 ? "is-neg" : Number(n) > 0 ? "is-pos" : "is-flat");
+  const pct = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(2) + "%"));
+  const pct1 = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(1) + "%"));
+  const sigma = (v) => fmtOr(v, (n) => signed(n, (a) => a.toFixed(2) + "σ"));
+  const px2 = (v) => fmtOr(v, (n) => neg(n.toFixed(2)));
+  const vol1 = (v) => fmtOr(v, (n) => neg((n * 100).toFixed(1)) + "%");
   // "$-1.23B" prints the sign inside the currency symbol. The minus belongs in
   // front of the whole quantity, which is where a reader scanning a column
   // expects it.
@@ -623,7 +679,7 @@
         if (on) { d += (open ? "L" : "M") + pts[i][0].toFixed(1) + " " + pts[i][1].toFixed(1) + " "; open = true; }
         else open = false;
       });
-      if (d) svg.append(svgEl("path", { class: "gp-cum " + (sign > 0 ? "is-pos" : "is-neg"), d }));
+      if (d) svg.append(svgEl("path", { class: "gp-cum " + (sign > 0 ? "is-pos" : sign < 0 ? "is-neg" : "is-flat"), d }));
     }
 
     /* Plates are nudged apart rather than allowed to overlap.
@@ -1512,7 +1568,7 @@
       ["Front expiry", rows[0].expiry],
       ["Front share", (rows[0].share * 100).toFixed(0) + "%"],
       ["Half-life", panel.halfLifeExpiry || DASH],
-      ["Mean life", isNum(panel.meanLifeDays) === null ? DASH : panel.meanLifeDays.toFixed(0) + " days"],
+      ["Mean life", fmtOr(panel.meanLifeDays, (n) => n.toFixed(0) + " days")],
       ["Expiries", String(panel.expiries)],
     ]));
 
@@ -1654,11 +1710,11 @@
       // implied leg is quoted over. Labelled by what was measured.
       ["Realized vol, 21 sessions", vol1(panel.rv30)],
       ["Variance risk premium",
-        isNum(panel.vrp) === null ? DASH : signed(panel.vrp, (a) => (a * 100).toFixed(1) + " vol pts")],
+        fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
       ["Band", panel.richness === null ? DASH : panel.richness],
-      ["IV rank", isNum(panel.ivRank) === null ? DASH : Math.round(panel.ivRank * 100) + "% of its year"],
-      ["IV, past week", isNum(panel.ivMomentum) === null ? DASH
-        : signed(panel.ivMomentum, (a) => (a * 100).toFixed(1) + " vol pts")],
+      ["IV rank", fmtOr(panel.ivRank, (n) => Math.round(n * 100) + "% of its year")],
+      ["IV, past week",
+        fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
     ]));
 
     host.append(el("p", "fc-note",
@@ -1740,7 +1796,7 @@
       ["21 sessions", pct1(panel.r21)],
       ["42 sessions", pct1(panel.r42)],
       ["52-week position",
-        isNum(panel.week52Pos) === null ? DASH : Math.round(panel.week52Pos * 100) + "% of range"],
+        fmtOr(panel.week52Pos, (n) => Math.round(n * 100) + "% of range")],
     ]));
 
     host.append(el("p", "fc-note",
@@ -1932,12 +1988,12 @@
 
     const dLast = lastOf(dU);
     svg.append(svgEl("path", {
-      class: "fp-line " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"), d: dOf(dU),
+      class: "fp-line " + polarity(delta[dLast]), d: dOf(dU),
       fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linejoin": "round",
     }));
     if (dLast >= 0) {
       svg.append(svgEl("circle", {
-        class: "fp-line-end " + (delta[dLast] >= 0 ? "is-pos" : "is-neg"),
+        class: "fp-line-end " + polarity(delta[dLast]),
         cx: x(dLast), cy: y(dU[dLast]), r: 2.6, fill: "currentColor",
       }));
     }
@@ -2229,6 +2285,156 @@
    * and no meaningful zero. The two lines crossing therefore means nothing,
    * which the note says out loud: they share only the date axis.
    */
+  /**
+   * WHAT CHANGED — derived from the same joined rows the overlay draws.
+   *
+   * THE PAGE LED ON A SNAPSHOT AND THE PRODUCT IS AN EARLY WARNING. Twenty-one
+   * panels described one session in enormous detail and NOTHING on the page
+   * said what the number had just done: no move against the previous scored
+   * session, no run length, no crossing of the dead band, no note that the
+   * newest reading was three sessions old. A reader could not tell a name that
+   * had just cleared the band from one that had been sitting outside it for a
+   * month, which is the single distinction this product exists to draw.
+   *
+   * WHY IT IS DERIVED HERE AND NOT FETCHED. The `scoretrack` payload publishes
+   * d1/run/ext/lastAt per name and is the RIGHT home for this arithmetic — it
+   * is computed once, in the pipeline, against the track's own session
+   * calendar. But the card already carries `panels.scoreOverlay.rows`: the
+   * dated score joined onto the dated close, built by shared/flows-overlay.js
+   * and already on the wire. Fetching the track from this page would spend a
+   * second read on every ticker view to recompute what is in the payload the
+   * page has already parsed. So: derived from the card, and the derivation
+   * lives here beside the renderer that draws the same rows rather than inside
+   * the controller, so a test can call it on a staged payload.
+   *
+   * THE ONE THING THIS CANNOT SAY, and the renderer must not pretend it can:
+   * `gap` counts sessions of the JOINED window — the sessions the card's price
+   * window and the score archive have in common — not sessions of the track's
+   * own calendar. Where the price window is shorter, a gap of 2 here can be a
+   * gap of 2 there or fewer. The sentence beside it names the window.
+   *
+   * @param {object} join `card.panels.scoreOverlay`, in any of its states.
+   * @returns a tagged union: unavailable / quiet / ok. Never a number on its own.
+   */
+  function changeFrom(join) {
+    /* THE THREE SILENCES, told apart before a number is touched. `undefined`
+       is a card built before the overlay panel existed; "unavailable" is the
+       pipeline declining, with its own reason; "quiet" is both windows read
+       in full and found disjoint, which is an ordinary state for a name new
+       to the board. One generic "no data" would collapse all three. */
+    if (join === undefined || join === null) {
+      return { status: "unavailable",
+        reason: "this card was built before the score overlay existed, so it carries " +
+          "no score history to measure a move against" };
+    }
+    if (join.status !== "ok") {
+      return { status: join.status === "quiet" ? "quiet" : "unavailable",
+        reason: join.reason ||
+          (join.status === "quiet"
+            ? "the score archive and this card's price window share no session"
+            : "the score history for this name was not published on this card") };
+    }
+
+    const rows = Array.isArray(join.rows) ? join.rows : [];
+    const scored = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (isNum(rows[i] && rows[i].score) !== null) scored.push(i);
+    }
+    if (!scored.length) {
+      return { status: "quiet",
+        reason: "not one of the " + rows.length + " sessions this card shares with the " +
+          "score archive carries a score for this name" };
+    }
+
+    const window = {
+      sessions: rows.length,
+      from: rows[0].d,
+      to: rows[rows.length - 1].d,
+      scored: scored.length,
+    };
+    const iAt = scored[scored.length - 1];
+    const at = { i: iAt, d: rows[iAt].d, score: isNum(rows[iAt].score) };
+    /* THE STALENESS COUNT, which is `lastAt` stated as a distance. Zero means
+       the newest session in the window scored this name; anything else means
+       the reading below is not about the latest session and a page leading on
+       CHANGE has to say so before it says anything else. */
+    const stale = rows.length - 1 - iAt;
+
+    let prior = null, d1 = null;
+    if (scored.length >= 2) {
+      const iPrior = scored[scored.length - 2];
+      prior = { i: iPrior, d: rows[iPrior].d, score: isNum(rows[iPrior].score) };
+      d1 = {
+        v: at.score - prior.score,
+        /* ALWAYS BESIDE THE DELTA. A move of +23 over one session and the same
+           +23 over five — with the name absent from the board in between — are
+           different facts, and a delta printed without its gap is the exact
+           defect this layer replaced. */
+        gap: iAt - iPrior,
+        from: prior.d, to: at.d,
+      };
+    }
+
+    /* THE RUN, on the CURRENT SIGN. A run of 1 is a new opinion; 30 is an old
+       one. Zero is its own answer: the newest score is exactly zero, which is
+       the centre of the dead band and a reading this pipeline assigns — not a
+       run of length zero on some side. */
+    let run = 0, runBroken = false, runCapped = false;
+    if (at.score === 0) {
+      run = 0;
+    } else {
+      const sign = at.score < 0 ? -1 : 1;
+      let i = iAt;
+      for (;;) {
+        run++;
+        if (i === 0) { runCapped = true; break; }
+        const prevV = isNum(rows[i - 1].score);
+        /* AN UNSCORED SESSION ENDS THE RUN RATHER THAN BEING STEPPED OVER.
+           Claiming six consecutive sessions across a day nobody scored would
+           be a continuity nothing measured — the same refusal the overlay
+           line makes when it breaks at a gap instead of bridging it. */
+        if (prevV === null) { runBroken = true; break; }
+        if ((prevV < 0 ? -1 : prevV > 0 ? 1 : 0) !== sign) break;
+        i--;
+      }
+    }
+
+    let hi = null, hiAt = null, lo = null, loAt = null;
+    for (const i of scored) {
+      const v = isNum(rows[i].score);
+      if (hi === null || v > hi) { hi = v; hiAt = rows[i].d; }
+      if (lo === null || v < lo) { lo = v; loAt = rows[i].d; }
+    }
+
+    /* THE DEAD BAND IS THE BOARD'S MEMBERSHIP RULE, so crossing it is the
+       event: a name that has just left the band became actionable this
+       session, and one that has just entered it is the exit signal. Without a
+       published band neither can be stated, and the renderer says THAT rather
+       than quietly reporting no crossing — "we cannot tell" and "it did not
+       happen" are different sentences. */
+    const band = isNum(join.deadBand);
+    const bandKnown = band !== null && band >= 0;
+    const insideOf = (v) => Math.abs(v) <= band;
+    let cross = null;
+    if (bandKnown && prior) {
+      const wasIn = insideOf(prior.score), isIn = insideOf(at.score);
+      if (wasIn && !isIn) cross = "cleared";
+      else if (!wasIn && isIn) cross = "faded";
+      else if (!wasIn && !isIn && Math.sign(prior.score) !== Math.sign(at.score)) cross = "flipped";
+    }
+
+    return {
+      status: "ok",
+      window, at, prior, d1, stale,
+      run, runBroken, runCapped,
+      ext: { hi, hiAt, lo, loAt },
+      band: bandKnown ? band : null,
+      inside: bandKnown ? insideOf(at.score) : null,
+      cross,
+      crossKnown: bandKnown && !!prior,
+    };
+  }
+
   function renderOverlay(host, join, questionIn) {
     const question = questionIn ||
       "How has this name\u2019s daily score moved against its own price?";
@@ -2480,7 +2686,7 @@
         (isNum(panel.seen) !== null && panel.seen !== rows.length
           ? " of " + panel.seen + " read" : "")],
       ["Largest leg", compact(peak)],
-      ["Gross size", isNum(panel.grossAbs) === null ? DASH : compact(panel.grossAbs)],
+      ["Gross size", compact(panel.grossAbs)],
     ]));
 
     if (panel.unit) host.append(el("p", "fc-note gts-unit", String(panel.unit)));
@@ -2520,7 +2726,7 @@
     for (const axis of AXES) {
       const v = legacy && !axis.signed ? null : isNum(card.fam[axis.k]);
       const li = el("li", (axis.signed ? "is-signed " : "is-gauge ") +
-        (v === null ? "is-null" : !axis.signed ? "is-pos" : v < 0 ? "is-neg" : "is-pos"));
+        (v === null ? "is-null" : !axis.signed ? "is-pos" : polarity(v)));
       li.append(el("span", "fc-fam-k", axis.k));
 
       const track = el("span", "fc-fam-track");
@@ -2555,19 +2761,17 @@
 
     const conv = card.conv || {};
     host.append(statList([
-      ["Score", isNum(card.score) === null ? DASH
-        : (card.score > 0 ? "+" : card.score < 0 ? MINUS : "") + Math.abs(card.score)],
-      ["Conviction", isNum(card.conviction) === null ? DASH : String(card.conviction)],
-      ["Agreement", isNum(conv.agreement) === null ? DASH : Math.round(conv.agreement * 100) + "%"],
-      ["Axes present", isNum(conv.breadth) === null ? DASH : conv.breadth + " of 3"],
-      ["Sources", isNum(conv.coverage) === null ? DASH : Math.round(conv.coverage * 5) + " of 5"],
+      ["Score", fmtOr(card.score, (n) => signed(n, (a) => String(a)))],
+      ["Conviction", fmtOr(card.conviction, (n) => String(n))],
+      ["Agreement", fmtOr(conv.agreement, (n) => Math.round(n * 100) + "%")],
+      ["Axes present", fmtOr(conv.breadth, (n) => n + " of 3")],
+      ["Sources", fmtOr(conv.coverage, (n) => Math.round(n * 5) + " of 5")],
       /* THE THIRD TERM OF THE COMPOSITE, which this list showed two of.
          A reader could see agreement and coverage, could not see persistence,
          and so watched a published conviction move by eleven points with
          nothing on the card accounting for it. */
-      ["Persistence", isNum(conv.persistence) === null ? DASH
-        : Math.round(conv.persistence * 100) + "%"],
-      ["Quality gate", isNum(conv.gate) === null ? DASH : "\u00d7" + conv.gate.toFixed(2)],
+      ["Persistence", fmtOr(conv.persistence, (n) => Math.round(n * 100) + "%")],
+      ["Quality gate", fmtOr(conv.gate, (n) => "\u00d7" + n.toFixed(2))],
     ]));
 
     convictionArithmetic(host, card, conv);
@@ -2680,8 +2884,14 @@
     deltaExposure: (host, panel, card, q) => greekTermPanel(host, panel, q,
       "How much directional exposure are dealers carrying, by expiry?"),
 
+    /* THE OVERLAY'S ARITHMETIC, exported beside the drawer that draws the
+       same rows. /flows/ticker/ leads on it and the card dialog does not, so
+       it is a function rather than a second copy in the controller. */
+    changeFrom,
+
     /* scaffolding */
-    el, svgEl, isNum, deadPanel, quietPanel, emptyPanel, statList, panelHead, panelWidth,
+    el, svgEl, isNum, fmtOr, polarity, deadPanel, quietPanel, emptyPanel, statList,
+    panelHead, panelWidth,
     niceStep, quantileAbs, symlog, surfaceRamp,
     DASH, MINUS, neg, signed, pct, pct1, sigma, px2, vol1, money, compact,
     AXIS_CH,

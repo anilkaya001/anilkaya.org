@@ -4,6 +4,20 @@
    from base.css; the only new custom properties here are the two
    semantic directional colours, which are deliberately NOT the
    site's gold accent so "up/down" never reads as "emphasis".
+
+   TWO LADDERS LIVE IN base.css AND NOT HERE: the type scale
+   (--fs-micro .. --fs-mark) and the nine breakpoints every @media in
+   this file uses. Both were sets of literals re-invented per rule —
+   twenty-seven font sizes, eleven breakpoint widths in two units with
+   640px and 40rem both in play. Do not add a tenth breakpoint or a
+   twenty-eighth size here; land on the ladder, or move the ladder.
+
+   THE ONE SCALE THAT IS NOT THERE is the chart-label ladder: text
+   inside an SVG is sized in px — 8.5, 9, 9.5, 10, 10.5, 11 — because
+   ONE VIEWBOX UNIT IS ONE CSS PIXEL on every chart in this product
+   (assets/js/flows-ui.js:20-27). A rem there is measured against the
+   root and then scaled again by the viewBox, which is how a 560-unit
+   axis label ends up at 1.71x. These stay px, and stay here.
    ============================================================= */
 
 :root {
@@ -43,7 +57,7 @@
 
 .flows-kicker {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--gold-mystic);
@@ -74,7 +88,7 @@
 
 .flows-auth__lede {
   color: var(--ink-dim);
-  font-size: 0.96rem;
+  font-size: var(--fs-body);
   margin-bottom: 1.4rem;
 }
 
@@ -82,7 +96,7 @@
   border-left: 2px solid var(--flow-down);
   background: color-mix(in srgb, var(--flow-down) 10%, transparent);
   color: var(--ink);
-  font-size: 0.92rem;
+  font-size: var(--fs-body);
   padding: 0.6rem 0.8rem;
   margin-bottom: 1.2rem;
 }
@@ -95,7 +109,7 @@
 
 .flows-form label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -123,7 +137,7 @@
   margin-top: 1.4rem;
   min-height: 44px;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #1a1407;
@@ -200,7 +214,7 @@
 
 .flows-user {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--fs-fine);
   color: var(--ink-dim);
 }
 
@@ -208,7 +222,7 @@
   min-height: 44px;
   padding: 0 0.9rem;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -222,7 +236,7 @@
 .flows-signout:hover { color: var(--ink); border-color: var(--gold-mystic); }
 
 .flows-status {
-  font-size: 0.9rem;
+  font-size: var(--fs-body);
   color: var(--ink-dim);
   padding: 0.9rem 0;
 }
@@ -246,7 +260,7 @@
   min-width: 6.5rem;
   padding: 0 1.1rem;
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -284,18 +298,53 @@
   background: var(--bg-elev);
 }
 
+/* ---- TABLE DENSITY, IN ONE PLACE ----
+
+   EVERY TABLE IN THIS PRODUCT WAS LEADED FOR PROSE. base.css sets
+   `body { line-height: 1.65 }`, which is right for the Latin Modern serif it
+   was written for and wrong for a thirteen-column row of figures: no rule in
+   this file overrode it, so a board row spent 1.485rem of leading plus 1.2rem
+   of padding — about 43px for one line of 0.9rem mono. The two tables that
+   needed to be denser did not fix the leading either; they forked the PADDING
+   and left the 1.65 in place, which is why the overview's summary of the board
+   fitted more rows on a screen than the board it summarises.
+
+   1.25 is the leading a numeric row wants: enough to separate the baselines of
+   two adjacent digits, not enough to read as paragraph rhythm. Over a 25-row
+   board it recovers about 9rem — three more rows on a laptop — with no markup
+   change at all.
+
+   THE THREE DENSITIES ARE NOW TWO CUSTOM PROPERTIES, so "what is dense" is
+   answered once instead of at each fork. `.st-table` and `.cc-tbl` are
+   deliberately NOT `.flows-table` (the first because .flows-table carries a
+   46rem floor it is built to live without, the second because it is a
+   different table), so they cannot take the `.is-dense` modifier — but they
+   can and do take the same two numbers, which is the part that was duplicated.
+   A new table picks a density here; it does not invent a fourth padding. */
 .flows-table {
   width: 100%;
   min-width: 46rem;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--fs-body);
+  --tbl-pad-y: 0.6rem;
+  --tbl-pad-x: 0.72rem;
 }
+
+/* Dense: a table that is a supporting reading rather than the page. */
+.flows-table.is-dense,
+.st-table { --tbl-pad-y: 0.4rem; --tbl-pad-x: 0.5rem; }
+
+/* Micro: seven of these on one screen, where the row is a lookup and never
+   something anyone scans down for a minute. */
+.flows-table.is-micro,
+.cc-tbl,
+.mk-pulse-table { --tbl-pad-y: 0.28rem; --tbl-pad-x: 0.52rem; }
 
 .flows-caption {
   caption-side: top;
   text-align: left;
   padding: 0.85rem 1rem;
-  font-size: 0.84rem;
+  font-size: var(--fs-note);
   color: var(--ink-faint);
   border-bottom: 1px solid var(--hairline);
 }
@@ -314,7 +363,10 @@
      back more than the font costs and reads denser besides, which is what this
      iteration wanted from the tables anyway. The vertical rhythm is untouched:
      row height is what makes a long table scannable. */
-  padding: 0.6rem 0.72rem;
+  padding: var(--tbl-pad-y) var(--tbl-pad-x);
+  /* The leading a row of figures wants, not the leading a paragraph wants.
+     Inherited 1.65 from base.css until this line existed. */
+  line-height: 1.25;
   text-align: left;
   border-bottom: 1px solid var(--hairline);
   white-space: nowrap;
@@ -322,7 +374,7 @@
 
 .flows-table thead th {
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--fs-micro);
   font-weight: 500;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -455,7 +507,7 @@
   padding: 2.2rem 1rem;
   text-align: center;
   color: var(--ink-dim);
-  font-size: 0.94rem;
+  font-size: var(--fs-body);
   margin: 0;
 }
 
@@ -471,7 +523,7 @@ p.fb-empty {
 .flows-foot {
   margin-top: 1.4rem;
   max-width: var(--measure);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   color: var(--ink-faint);
 }
 
@@ -523,7 +575,7 @@ p.fb-empty {
 .fc-id h2 {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 1.5rem;
+  font-size: var(--fs-mark);
   letter-spacing: 0.02em;
 }
 
@@ -532,14 +584,14 @@ p.fb-empty {
 .fc-score {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.15rem;
+  font-size: var(--fs-lead);
   font-weight: 600;
 }
 
 .fc-score.is-pos { color: var(--flow-up); }
 .fc-score.is-neg { color: var(--flow-down); }
 
-.fc-meta { color: var(--ink-dim); font-size: 0.86rem; }
+.fc-meta { color: var(--ink-dim); font-size: var(--fs-note); }
 
 .fc-close {
   flex: none;
@@ -547,7 +599,7 @@ p.fb-empty {
   border: 1px solid var(--hairline);
   border-radius: 3px;
   color: var(--ink-dim);
-  font-size: 1.3rem;
+  font-size: var(--fs-head);
   line-height: 1;
   padding: 0.15rem 0.5rem 0.3rem;
   cursor: pointer;
@@ -564,7 +616,7 @@ p.fb-empty {
   border-radius: 3px;
   background: color-mix(in srgb, var(--flow-down) 10%, transparent);
   color: var(--ink);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
 }
 
 /* Staleness is marked on the chrome, NOT by dimming text.
@@ -649,7 +701,7 @@ p.fb-empty {
   background: var(--panel-head);
   border-radius: var(--radius-2) var(--radius-2) 0 0;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -661,14 +713,14 @@ p.fb-empty {
 .fc-q {
   margin: 0 0 0.7rem;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
   font-style: italic;
 }
 
 .fc-note {
   margin: 0.6rem 0 0;
   color: var(--ink-dim);
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   line-height: 1.5;
 }
 
@@ -679,7 +731,7 @@ p.fb-empty {
 .fc-reading {
   margin: 0.55rem 0 0;
   color: var(--ink);
-  font-size: 0.88rem;
+  font-size: var(--fs-note);
   line-height: 1.45;
 }
 
@@ -689,7 +741,7 @@ p.fb-empty {
   border: 1px dashed var(--hairline);
   border-radius: 3px;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
 }
 
 .fc-prov {
@@ -698,7 +750,7 @@ p.fb-empty {
   border-top: 1px solid var(--hairline);
   color: var(--ink-faint);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--fs-fine);
 }
 
 /* ---------- gamma profile ---------------------------------------- */
@@ -883,20 +935,44 @@ p.fb-empty {
    inside a dl). With dt and dd as separate children of an auto-fit grid, six
    items in five columns pushed the sixth dt onto a new row and left its dd
    under the wrong label — on every desktop card, silently. */
+/* =============================================================
+   A HARD TRACK MINIMUM IS A HORIZONTAL SCROLLBAR WAITING FOR A
+   NARROW ENOUGH PHONE.
+
+   `repeat(auto-fit, minmax(19rem, 1fr))` reads as "at least 19rem
+   per column, as many as fit". The first half is the problem: 19rem
+   is 304px and it is a FLOOR, not a preference, so in a container
+   narrower than 304px the track does not shrink — the container
+   overflows. The market page's pulse grid did exactly that at 320px,
+   by three pixels, and no suite saw it because the 320px
+   zero-overflow invariant is asserted on the public pages and on the
+   two Flows routes that have a render suite. The market page has
+   neither.
+
+   `minmax(min(19rem, 100%), 1fr)` is the whole fix. Above the
+   threshold `min()` returns the rem value and every one of these
+   rules behaves exactly as it did; below it the track is allowed to
+   be the container, which is the only honest answer when the column
+   cannot have what it asked for. Applied to every auto-fit and
+   auto-fill track rather than only the one that was caught, because
+   the ones that are safe today are safe by arithmetic on the current
+   padding rather than by construction, and the guard costs nothing
+   where it does not bind.
+   ============================================================= */
 .fc-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
   gap: 0.5rem 1rem;
   margin: 0.8rem 0 0;
 }
 
 .fc-stat { min-width: 0; }
-.fc-stats dt { color: var(--ink-dim); font-size: 0.78rem; }
+.fc-stats dt { color: var(--ink-dim); font-size: var(--fs-data); }
 .fc-stats dd {
   margin: 0.1rem 0 0;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
+  font-size: var(--fs-body);
   overflow-wrap: anywhere;
 }
 
@@ -906,7 +982,7 @@ p.fb-empty {
 .fc-congress {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
 }
 
 .fc-levels th,
@@ -916,7 +992,7 @@ p.fb-empty {
   border-bottom: 1px solid var(--hairline);
   color: var(--ink-dim);
   font-weight: 500;
-  font-size: 0.76rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -945,14 +1021,14 @@ p.fb-empty {
   display: inline-block;
   margin-right: 0.4rem;
   color: var(--ink-faint);
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .fc-side.is-buy { color: var(--flow-up); }
 .fc-side.is-sell { color: var(--flow-down); }
-.fc-amt { color: var(--ink-dim); font-size: 0.8rem; }
+.fc-amt { color: var(--ink-dim); font-size: var(--fs-data); }
 
 /* Past 45 days the STOCK Act window has lapsed and the move is usually gone.
    Marked with weight as well as colour, so the signal is not colour-only. */
@@ -1036,16 +1112,16 @@ p.fb-empty {
 
 .fc-fam li.is-gauge.is-null .fc-fam-track i { left: 0; width: 2px; }
 
-.fc-fam-w { color: var(--ink-faint); font-size: 0.72rem; }
+.fc-fam-w { color: var(--ink-faint); font-size: var(--fs-fine); }
 
 .fc-fam-v {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
 }
 
-.fc-fam-l { color: var(--ink-dim); font-size: 0.78rem; }
+.fc-fam-l { color: var(--ink-dim); font-size: var(--fs-data); }
 
 /* ---------- the ticker button -------------------------------------- */
 
@@ -1062,7 +1138,7 @@ p.fb-empty {
 .fb-open:hover { color: var(--gold-celadon); border-bottom-color: currentColor; }
 .fb-open:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
 
-@media (max-width: 640px) {
+@media (max-width: 40rem) {
   .fc {
     inset: 0;
     width: 100vw;
@@ -1074,7 +1150,7 @@ p.fb-empty {
 
   .fc-fam li { grid-template-columns: 1.2rem minmax(3rem, 1fr) 2.6rem; }
   .fc-fam-l { grid-column: 1 / -1; padding-left: 1.8rem; }
-  .fc-congress .fc-amt { font-size: 0.72rem; }
+  .fc-congress .fc-amt { font-size: var(--fs-fine); }
 }
 
 /* Board staleness. A band, for the same reason the card uses one: a reader
@@ -1087,7 +1163,7 @@ p.fb-empty {
   border-radius: 3px;
   background: color-mix(in srgb, var(--flow-down) 10%, transparent);
   color: var(--ink);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
 }
 
 /* Same reasoning as the card: mark the chrome, never the text. */
@@ -1130,7 +1206,7 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--hairline);
   border-radius: 999px;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -1149,7 +1225,7 @@ body.is-stale .flows-tablewrap {
   /* auto-fill rather than auto-fit: with auto-fit a board of three names
      stretches three cards across a 1600px monitor, and a 500px-wide card of
      six numbers is not a card. */
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
   gap: 0.75rem;
   margin: 1.1rem 0 0;
 }
@@ -1261,7 +1337,7 @@ body.is-stale .flows-tablewrap {
 
 .fd-rank {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--fs-label);
   color: var(--ink-faint);
   min-width: 1.4rem;
 }
@@ -1270,7 +1346,7 @@ body.is-stale .flows-tablewrap {
   flex: 1;
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 1rem;
+  font-size: var(--fs-lead);
   letter-spacing: 0.02em;
   color: var(--ink);
   overflow: hidden;
@@ -1280,7 +1356,7 @@ body.is-stale .flows-tablewrap {
 .fd-score {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.05rem;
+  font-size: var(--fs-lead);
   font-weight: 600;
 }
 
@@ -1289,14 +1365,14 @@ body.is-stale .flows-tablewrap {
 .fd-px {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.9rem;
+  font-size: var(--fs-body);
   color: var(--ink-dim);
 }
 
 .fd-chg {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
 }
 
 .fd-spark { display: block; width: 100%; height: 30px; }
@@ -1320,7 +1396,7 @@ body.is-stale .flows-tablewrap {
 
 .fd-ret-k {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.08em;
   color: var(--ink-faint);
 }
@@ -1328,7 +1404,7 @@ body.is-stale .flows-tablewrap {
 .fd-ret-v {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.76rem;
+  font-size: var(--fs-fine);
 }
 
 .fd-ret.is-pos .fd-ret-v { color: var(--flow-up); }
@@ -1374,13 +1450,13 @@ body.is-stale .flows-tablewrap {
   column-gap: 0.5rem;
   row-gap: 0.15rem;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   color: var(--ink-faint);
 }
 
 .fd-foot > * { min-width: 0; }
 
-@media (max-width: 480px) {
+@media (max-width: 30rem) {
   .flows-deck { grid-template-columns: 1fr; }
 }
 
@@ -1447,7 +1523,7 @@ body.is-stale .flows-tablewrap {
 .flows-subnav a {
   padding: 0.55rem 0.9rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1475,7 +1551,7 @@ body.is-stale .flows-tablewrap {
 .desk-entry label {
   display: block;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1504,7 +1580,7 @@ body.is-stale .flows-tablewrap {
   border-radius: 3px;
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 0.95rem;
+  font-size: var(--fs-body);
   letter-spacing: 0.08em;
 }
 
@@ -1519,7 +1595,7 @@ body.is-stale .flows-tablewrap {
   min-height: 44px;
   padding: 0 1.1rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   border-radius: 999px;
@@ -1549,7 +1625,7 @@ body.is-stale .flows-tablewrap {
 
 .desk-help {
   margin: 0.45rem 0 0;
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   color: var(--ink-faint);
 }
 
@@ -1581,13 +1657,13 @@ body.is-stale .flows-tablewrap {
 
 .desk-chip__sym {
   font-family: var(--font-mono);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   letter-spacing: 0.06em;
   color: var(--ink);
 }
 
 .desk-chip__note {
-  font-size: 0.74rem;
+  font-size: var(--fs-fine);
   color: var(--ink-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -1604,7 +1680,7 @@ body.is-stale .flows-tablewrap {
   place-items: center;
   border-radius: 50%;
   color: var(--ink-faint);
-  font-size: 1.1rem;
+  font-size: var(--fs-lead);
   line-height: 1;
 }
 
@@ -1616,7 +1692,7 @@ body.is-stale .flows-tablewrap {
   align-items: center;
   gap: 0.45rem;
   cursor: pointer;
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   color: var(--ink-dim);
 }
 
@@ -1657,7 +1733,7 @@ body.is-stale .flows-tablewrap {
 
 .desk-filters label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1671,7 +1747,7 @@ body.is-stale .flows-tablewrap {
   border-radius: 3px;
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   cursor: pointer;
 }
 
@@ -1681,7 +1757,7 @@ body.is-stale .flows-tablewrap {
 }
 
 .desk-table td.c-side {
-  font-size: 0.82rem;
+  font-size: var(--fs-data);
   color: var(--ink-dim);
   white-space: nowrap;
 }
@@ -1716,7 +1792,7 @@ body.is-stale .flows-tablewrap {
 
 .desk-capital__entry label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1740,7 +1816,7 @@ body.is-stale .flows-tablewrap {
 
 .desk-capital__prefix {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
   color: var(--ink-faint);
   padding-right: 0.15rem;
 }
@@ -1754,7 +1830,7 @@ body.is-stale .flows-tablewrap {
   color: var(--ink);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
+  font-size: var(--fs-body);
 }
 
 #deskBP:focus { outline: none; }
@@ -1773,7 +1849,7 @@ body.is-stale .flows-tablewrap {
   border-radius: 3px;
   color: var(--ink-dim);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1790,7 +1866,7 @@ body.is-stale .flows-tablewrap {
   border-left: 2px solid var(--gold-harvest);
   background: var(--bg-elev);
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.55;
 }
 
@@ -1926,7 +2002,7 @@ body.is-stale .flows-tablewrap {
   border-radius: 3px;
   color: var(--ink-faint);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
@@ -2112,17 +2188,17 @@ body.is-stale .flows-tablewrap {
 }
 
 .desk-surface__title {
-  font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  font-size: var(--fs-fine); letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--ink-dim); font-weight: 400;
 }
 
 .desk-surface__field label {
-  font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--ink-faint); margin-right: 0.4rem;
 }
 
 .desk-surface__field select {
-  font: inherit; font-size: 0.8rem; color: var(--ink);
+  font: inherit; font-size: var(--fs-data); color: var(--ink);
   background: var(--bg-elev); border: 1px solid var(--hairline);
   border-radius: 4px; padding: 0.2rem 0.4rem;
 }
@@ -2139,7 +2215,7 @@ body.is-stale .flows-tablewrap {
 .ivs { display: block; max-width: 100%; }
 
 .desk-surface__note {
-  color: var(--ink-faint); font-size: 0.78rem; line-height: 1.6;
+  color: var(--ink-faint); font-size: var(--fs-data); line-height: 1.6;
   max-width: var(--measure);
 }
 
@@ -2238,7 +2314,7 @@ body.is-stale .flows-tablewrap {
 .rec-block { margin: 2rem 0 0; }
 
 .rec-block h2 {
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   font-family: var(--font-mono);
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -2248,7 +2324,7 @@ body.is-stale .flows-tablewrap {
 
 .rec-note {
   margin: 0 0 0.75rem;
-  font-size: 0.84rem;
+  font-size: var(--fs-note);
   line-height: 1.6;
   color: var(--ink-faint);
   max-width: 62ch;
@@ -2260,7 +2336,7 @@ body.is-stale .flows-tablewrap {
   border: 1px dashed var(--hairline);
   border-radius: 4px;
   color: var(--ink-faint);
-  font-size: 0.88rem;
+  font-size: var(--fs-note);
   line-height: 1.6;
 }
 
@@ -2314,7 +2390,7 @@ body.is-stale .flows-tablewrap {
    meant to recognise it from the board's own columns. */
 .rec-feat-key {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-data);
   color: var(--ink-dim);
   cursor: help;
 }
@@ -2323,7 +2399,7 @@ body.is-stale .flows-tablewrap {
    at reading width rather than table width: they are the caveats that make
    the numbers legible, not a caption. */
 .rec-notes { margin-top: 0.75rem; }
-.rec-notes .rec-note { margin-bottom: 0.5rem; font-size: 0.8rem; }
+.rec-notes .rec-note { margin-bottom: 0.5rem; font-size: var(--fs-data); }
 
 /* An unmeasured coefficient renders as the em dash with its reason in the
    title. It is dimmed rather than coloured: "nothing to measure" is not a
@@ -2332,8 +2408,8 @@ body.is-stale .flows-tablewrap {
 .rec-feat td.c-num[title] { color: var(--ink-faint); cursor: help; }
 
 @media (max-width: 40rem) {
-  .rec-block h2 { font-size: 0.68rem; }
-  .rec-feat-key { font-size: 0.72rem; }
+  .rec-block h2 { font-size: var(--fs-label); }
+  .rec-feat-key { font-size: var(--fs-fine); }
 }
 
 /* ---------- gamma surface (strike x expiry) --------------------
@@ -2517,7 +2593,7 @@ body.is-stale .flows-tablewrap {
 .rail-group {
   margin: 0.5rem 0 0.25rem;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -2532,7 +2608,7 @@ body.is-stale .flows-tablewrap {
   padding: 0.5rem 0.75rem;
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.06em;
   color: var(--ink-dim);
   text-decoration: none;
@@ -2554,7 +2630,7 @@ body.is-stale .flows-tablewrap {
 .flows-rail a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 
 .rail-count {
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   color: var(--ink-faint);
   padding: 0 0.3rem;
   border: 1px solid var(--hairline);
@@ -2604,7 +2680,7 @@ body.is-stale .flows-tablewrap {
 .spine-h {
   margin: 0 0 0.3rem;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -2638,7 +2714,10 @@ body.is-stale .flows-tablewrap {
    claim that the element still exists, and this file is read by people
    deciding what the page is made of. Its ancestor .spine survives, above. */
 
-.flows-lede { margin: 0; font-size: 0.9rem; color: var(--ink-dim); }
+/* min-width:0 so a long lede in a flex `.flows-controls` shrinks rather than
+   pushing the controls beside it off the row — the same reason every grid
+   child in this file says it. */
+.flows-lede { margin: 0; min-width: 0; font-size: var(--fs-body); color: var(--ink-dim); }
 
 /* ---------- the market level -------------------------------------
 
@@ -2650,9 +2729,9 @@ body.is-stale .flows-tablewrap {
 .mk-tilt { margin: 0 0 var(--space-3); }
 .mk-tilt + .mk-tilt { padding-top: var(--space-2); border-top: 1px solid var(--panel-border); }
 .mk-tilt-h { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
-.mk-tilt-k { color: var(--ink-dim); font-size: 0.9rem; }
-.mk-tilt-v { font-family: var(--font-mono); font-weight: 600; font-size: 1.05rem; }
-.mk-tilt-n { margin: 0.35rem 0 0; color: var(--ink-dim); font-size: 0.82rem; line-height: 1.5; }
+.mk-tilt-k { color: var(--ink-dim); font-size: var(--fs-body); }
+.mk-tilt-v { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-lead); }
+.mk-tilt-n { margin: 0.35rem 0 0; color: var(--ink-dim); font-size: var(--fs-data); line-height: 1.5; }
 
 /* The fixed [-1,+1] axis. DELIBERATELY NOT scaled to the data: a tilt of
    +0.03 drawn to fill the panel would read as a decisive session. */
@@ -2687,7 +2766,7 @@ body.is-stale .flows-tablewrap {
 .mk-legend {
   display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem;
   margin: 0.6rem 0 0; padding: 0; list-style: none;
-  color: var(--ink-dim); font-size: 0.82rem;
+  color: var(--ink-dim); font-size: var(--fs-data);
 }
 .mk-legend li { display: flex; align-items: center; gap: 0.4rem; }
 .mk-key { width: 0.7rem; height: 0.7rem; border-radius: 2px; display: inline-block; }
@@ -2701,29 +2780,29 @@ body.is-stale .flows-tablewrap {
   padding: 0.3rem 0;
 }
 .mk-sector + .mk-sector { border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent); }
-.mk-sector-k { flex: 0 0 9.5rem; font-size: 0.86rem; }
+.mk-sector-k { flex: 0 0 9.5rem; font-size: var(--fs-note); }
 .mk-sector-v {
   flex: 0 0 4.5rem; text-align: right;
-  font-family: var(--font-mono); font-size: 0.86rem;
+  font-family: var(--font-mono); font-size: var(--fs-note);
 }
 
 .mk-movers-grid {
   display: grid; gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
 }
 .mk-movers-h {
-  margin: 0 0 0.4rem; font-size: 0.78rem; font-weight: 600;
+  margin: 0 0 0.4rem; font-size: var(--fs-data); font-weight: 600;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim);
 }
 .mk-movers { margin: 0; padding: 0; list-style: none; }
 .mk-movers li {
   display: flex; justify-content: space-between; gap: 0.6rem;
-  padding: 0.22rem 0; font-family: var(--font-mono); font-size: 0.84rem;
+  padding: 0.22rem 0; font-family: var(--font-mono); font-size: var(--fs-note);
 }
 .mk-mv-t { font-weight: 600; }
 
 @media (max-width: 30rem) {
-  .mk-sector-k { flex-basis: 6.5rem; font-size: 0.8rem; }
+  .mk-sector-k { flex-basis: 6.5rem; font-size: var(--fs-data); }
   .mk-sector-v { flex-basis: 3.6rem; }
 }
 
@@ -2761,20 +2840,63 @@ body.is-stale .flows-tablewrap {
 }
 
 /* --- the identity block --------------------------------------------- */
+
+/* IT SCROLLED AWAY AND NEVER CAME BACK. This page is 5,729px tall at its
+   widest measured tier (see the note above the 108rem rule), and the one
+   element that says WHICH NAME you are reading sat at the top of it in normal
+   flow. A reader who has scrolled to the gamma surface on a twenty-one panel
+   page has nothing on screen that names the stock.
+
+   Sticky, and it costs no layout: `top: 0` against the page scroll, an OPAQUE
+   ground (a translucent one lets a chart's ink read through the header and
+   both become unreadable), and a hairline under it so the boundary is a shape
+   and not a colour. z-index 5 puts it over the panels it scrolls past; the
+   card and zoom dialogs are <dialog> elements painted in the top layer, which
+   no z-index on this page can reach past, so nothing here can cover them.
+
+   THE HEADER IS A HOST, not a fixed set of five slots. Whatever the ticker
+   controller paints into it rides along; the rules here only guarantee it
+   stays one line tall at desk widths and is allowed to wrap on a phone,
+   because a sticky block that grows to three lines eats the viewport it was
+   added to defend. */
 .ft-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--space-2); margin: 0 0 var(--space-3);
+  padding: var(--space-1) 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
 }
+
+/* The dense quote row: price, change, ATR, the flip and its distance — one
+   line of mono the header keeps pinned. Hidden until a controller fills it,
+   because an empty bar under a ticker reads as a reading that came back
+   blank. See the note on #ftQuote in shared/flows-pages.js. */
+.ft-quote {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0 var(--space-2);
+  font-family: var(--font-mono); font-size: var(--fs-fine);
+  color: var(--ink-dim);
+}
+.ft-quote b { font-weight: 600; color: var(--ink); }
+/* HUE REPEATS THE SIGN, it does not carry it. The controller writes the value
+   with its own U+2212 or "+" in the text, so a monochrome printout and a
+   reader who cannot separate these two hues both keep the reading. A tint
+   with no sign character in the string is the defect, not the rule. */
+.ft-quote .is-pos { color: var(--flow-up); }
+.ft-quote .is-neg { color: var(--flow-down); }
 .ft-head > * { min-width: 0; }
 .ft-head h2 {
-  margin: 0; font-family: var(--font-mono); font-size: 1.5rem;
+  margin: 0; font-family: var(--font-mono); font-size: var(--fs-mark);
   letter-spacing: 0.02em;
 }
 
 /* The link out of the card dialog and off a board row. Chrome, not data:
    gold is allowed here precisely because it carries no reading. */
 .ft-link {
-  color: var(--gold-harvest); text-decoration: none; font-size: 0.82rem;
+  color: var(--gold-harvest); text-decoration: none; font-size: var(--fs-data);
   white-space: nowrap;
 }
 .ft-link:hover { text-decoration: underline; }
@@ -2785,7 +2907,7 @@ body.is-stale .flows-tablewrap {
 .fb-tk:hover .ft-link, .fb-tk .ft-link:focus-visible { opacity: 1; }
 
 .ft-picker { margin: 0 0 var(--space-3); }
-.ft-picker h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+.ft-picker h2 { margin: 0 0 0.4rem; font-size: var(--fs-lead); }
 
 /* --- the enlarge affordance ----------------------------------------- */
 /* SCOPED TO .ft-panel. Making .fc-panel h3 a flex container would reflow the
@@ -2796,7 +2918,7 @@ body.is-stale .flows-tablewrap {
 }
 .ft-zoom-open {
   position: relative; flex: none; background: none; border: 0;
-  color: var(--ink-faint); font: inherit; font-size: 1.05rem; line-height: 1;
+  color: var(--ink-faint); font: inherit; font-size: var(--fs-lead); line-height: 1;
   padding: 0; cursor: pointer;
 }
 /* A 44px TOUCH TARGET WITHOUT A 44px BOX — declared at its true size rather
@@ -2887,7 +3009,7 @@ body.is-stale .flows-tablewrap {
 }
 .ft-zoom-close {
   flex: none; background: none; border: 0; color: var(--ink-dim);
-  font: inherit; font-size: 1.3rem; line-height: 1; padding: 0 0.2rem;
+  font: inherit; font-size: var(--fs-head); line-height: 1; padding: 0 0.2rem;
   cursor: pointer;
 }
 .ft-zoom-close:hover { color: var(--ink); }
@@ -2896,7 +3018,7 @@ body.is-stale .flows-tablewrap {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-2);
 }
-@media (max-width: 640px) {
+@media (max-width: 40rem) {
   .ft-zoom {
     inset: 0; width: 100vw; height: 100dvh; max-height: none;
     border: 0; border-radius: 0;
@@ -3068,7 +3190,7 @@ body.is-stale .flows-tablewrap {
    away, still in the DOM, still selectable, still found by find-in-page. */
 .ft-how { margin: var(--space-2) 0 0; }
 .ft-how-s {
-  cursor: pointer; color: var(--ink-dim); font-size: 0.82rem;
+  cursor: pointer; color: var(--ink-dim); font-size: var(--fs-data);
   letter-spacing: 0.04em; text-transform: uppercase;
   padding: 0.35rem 0; list-style: none;
 }
@@ -3141,7 +3263,7 @@ body.is-stale .flows-tablewrap {
 .ua-b-k {
   margin: 0 0 0.3rem;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -3152,7 +3274,7 @@ body.is-stale .flows-tablewrap {
   margin: 0;
   max-width: var(--measure);
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.55;
   /* Payload prose, at any width. A long relation with no spaces in it must
      break rather than push the panel wider than the page — the suite asserts
@@ -3188,7 +3310,7 @@ body.is-stale .flows-tablewrap {
 .ua-choice-tag {
   margin: 0 0 0.45rem;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -3203,11 +3325,11 @@ body.is-stale .flows-tablewrap {
   grid-template-columns: auto 1fr;
   gap: 0.15rem var(--space-2);
   margin: 0 0 0.55rem;
-  font-size: 0.82rem;
+  font-size: var(--fs-data);
 }
 .ua-defs dt {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -3237,7 +3359,7 @@ body.is-stale .flows-tablewrap {
 .ua-how-s {
   cursor: pointer;
   color: var(--ink-dim);
-  font-size: 0.82rem;
+  font-size: var(--fs-data);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 0.5rem 0;
@@ -3342,7 +3464,7 @@ body.is-stale .flows-tablewrap {
   margin: 0;
   padding: 0.9rem 0;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
   line-height: 1.5;
 }
 
@@ -3421,7 +3543,7 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--hairline);
   border-radius: 999px;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3459,7 +3581,7 @@ body.is-stale .flows-tablewrap {
 .ev-empty {
   padding: 1.1rem 1rem;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
   line-height: 1.55;
   white-space: normal;
 }
@@ -3476,7 +3598,7 @@ body.is-stale .flows-tablewrap {
 .ev-b-k {
   margin: 0 0 0.25rem;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -3486,7 +3608,7 @@ body.is-stale .flows-tablewrap {
   margin: 0;
   max-width: var(--measure);
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.6;
 }
 
@@ -3504,7 +3626,7 @@ body.is-stale .flows-tablewrap {
 .ev-withheld-tag {
   margin: 0 0 0.3rem;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -3523,7 +3645,7 @@ body.is-stale .flows-tablewrap {
 .ev-how-s {
   cursor: pointer;
   color: var(--ink-dim);
-  font-size: 0.82rem;
+  font-size: var(--fs-data);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 0.5rem 0;
@@ -3582,7 +3704,7 @@ body.is-stale .flows-tablewrap {
 
 .st-label {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -3641,12 +3763,13 @@ body.is-stale .flows-tablewrap {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 0.88rem;
+  font-size: var(--fs-note);
 }
 
 .st-table th,
 .st-table td {
-  padding: 0.4rem 0.5rem;
+  padding: var(--tbl-pad-y) var(--tbl-pad-x);
+  line-height: 1.25;
   text-align: left;
   vertical-align: middle;
   border-bottom: 1px solid var(--hairline);
@@ -3657,7 +3780,7 @@ body.is-stale .flows-tablewrap {
 
 .st-table thead th {
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--fs-micro);
   font-weight: 500;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -3779,7 +3902,7 @@ body.is-stale .flows-tablewrap {
   min-height: 44px;
   padding: 0 1.2rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -3795,7 +3918,7 @@ body.is-stale .flows-tablewrap {
   margin: 0;
   padding: 1rem 0.2rem;
   color: var(--ink-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-note);
   line-height: 1.55;
   white-space: normal;
 }
@@ -3809,7 +3932,7 @@ body.is-stale .flows-tablewrap {
 .st-b-k {
   margin: 0 0 0.25rem;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -3820,7 +3943,7 @@ body.is-stale .flows-tablewrap {
   margin: 0;
   max-width: var(--measure);
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.6;
 }
 
@@ -3861,7 +3984,7 @@ body.is-stale .flows-tablewrap {
 .mk-pulse-grid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr));
 }
 @media (min-width: 76rem) {
   .mk-pulse-card.is-wide { grid-column: span 2; }
@@ -3874,7 +3997,7 @@ body.is-stale .flows-tablewrap {
 }
 .mk-pulse-h {
   margin: 0 0 0.4rem;
-  font-size: 0.78rem;
+  font-size: var(--fs-data);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3883,12 +4006,12 @@ body.is-stale .flows-tablewrap {
 
 /* The cards' tables reuse .flows-table wholesale; only the density is
    theirs — seven small tables at full board scale would drown the page. */
-.mk-pulse-table { font-size: 0.8rem; }
+.mk-pulse-table { font-size: var(--fs-data); }
 .mk-pulse-table th,
-.mk-pulse-table td { padding: 0.28rem 0.55rem; }
+.mk-pulse-table td { padding: var(--tbl-pad-y) var(--tbl-pad-x); }
 .mk-pulse-kept {
   margin: 0.35rem 0 0;
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   color: var(--ink-faint);
 }
 
@@ -3914,7 +4037,7 @@ body.is-stale .flows-tablewrap {
 .mk-sea {
   display: grid;
   gap: 2px;
-  grid-template-columns: repeat(auto-fill, minmax(3.4rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(3.4rem, 100%), 1fr));
 }
 .mk-sea-cell {
   display: flex;
@@ -3930,13 +4053,13 @@ body.is-stale .flows-tablewrap {
   outline-offset: -1px;
 }
 .mk-sea-m {
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
-.mk-sea-v { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; }
-.mk-sea-p { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-dim); }
+.mk-sea-v { font-family: var(--font-mono); font-size: var(--fs-data); font-weight: 600; }
+.mk-sea-p { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-dim); }
 
 /* ==============================================================
    Wave 2 — the three per-name stock panels on /flows/ticker/
@@ -4011,7 +4134,7 @@ body.is-stale .flows-tablewrap {
 .ft-quiet {
   margin: 0.55rem 0 0;
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.5;
 }
 
@@ -4029,7 +4152,7 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-1);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -4045,14 +4168,14 @@ body.is-stale .flows-tablewrap {
 .foi-chg.is-down { color: var(--flow-down); }
 .foi-chg.is-flat,
 .foi-chg.is-unknown { color: var(--ink-dim); }
-.foi-streaks { font-family: var(--font-mono); font-size: 0.78rem; }
+.foi-streaks { font-family: var(--font-mono); font-size: var(--fs-data); }
 .foi-streak.is-unknown { color: var(--ink-dim); }
 
 /* --- volContext: term curve + IV rank --------------------------------- */
 .fvc-half { margin-top: 0.7rem; }
 .fvc-h {
   margin: 0 0 0.3rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-fine);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4078,10 +4201,10 @@ body.is-stale .flows-tablewrap {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.fvc-rank-n { font-size: 1.3rem; font-weight: 600; }
+.fvc-rank-n { font-size: var(--fs-head); font-weight: 600; }
 .fvc-rank-n.is-missing { font-weight: 400; color: var(--ink-dim); }
-.fvc-rank-u { font-size: 0.82rem; color: var(--ink-dim); }
-.fvc-rank-d { font-size: 0.76rem; color: var(--ink-faint); }
+.fvc-rank-u { font-size: var(--fs-data); color: var(--ink-dim); }
+.fvc-rank-d { font-size: var(--fs-fine); color: var(--ink-faint); }
 .fvc-count { font-variant-numeric: tabular-nums; }
 
 /* ==============================================================
@@ -4125,7 +4248,7 @@ body.is-stale .flows-tablewrap {
   grid-column: 1 / -1;
   display: grid;
   gap: 1px;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
   background: var(--panel-border);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
@@ -4140,21 +4263,21 @@ body.is-stale .flows-tablewrap {
 }
 .cc-tile-k {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--gold-celadon);
 }
 .cc-tile-v {
   font-family: var(--font-mono);
-  font-size: 1.25rem;
+  font-size: var(--fs-head);
   font-weight: 600;
   color: var(--ink);
   line-height: 1.15;
 }
 .cc-tile-v.is-pos { color: var(--flow-up); }
 .cc-tile-v.is-neg { color: var(--flow-down); }
-.cc-tile-s { font-size: 0.68rem; color: var(--ink-faint); }
+.cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
 
 /* ---------- a region ---------- */
 
@@ -4185,14 +4308,14 @@ body.is-stale .flows-tablewrap {
 .cc-h-t {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--gold-celadon);
 }
 .cc-h-s {
-  font-size: 0.68rem;
+  font-size: var(--fs-label);
   color: var(--ink-faint);
   font-family: var(--font-mono);
   min-width: 0;
@@ -4220,7 +4343,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-spine  { grid-column: 1 / -1; }
 .cc-spine > .spine { padding: 0.6rem 0.85rem; margin: 0.4rem 0 0; }
 
-@media (max-width: 100rem) {
+/* FOLDED DOWN FROM 100rem, which was the file's tenth breakpoint and meant
+   nothing anywhere else. 92rem is the tier where `.flows-main` is finally let
+   off its 78rem leash, so above it the page has width to spend and the
+   twelve-column arrangement below has somewhere to spend it; below it main is
+   pinned and a span-2 region is 190px of column for a list of names. Pinning
+   the widest overview tier to a width the page could not yet use is the only
+   thing 100rem ever said. */
+@media (max-width: 92rem) {
   .cc-bull, .cc-bear { grid-column: span 6; }
   .cc-chg { grid-column: span 12; }
   .cc-alerts { grid-column: span 7; }
@@ -4249,29 +4379,31 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   font-family: var(--font-mono);
 }
 .cc-tbl th {
   text-align: left;
-  font-size: 0.6rem;
+  font-size: var(--fs-micro);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-faint);
   font-weight: 500;
-  padding: 0.4rem 0.5rem 0.3rem;
+  padding: 0.4rem var(--tbl-pad-x) 0.3rem;
+  line-height: 1.25;
   border-bottom: 1px solid var(--panel-border);
   white-space: nowrap;
 }
 .cc-tbl td {
-  padding: 0.28rem 0.5rem;
+  padding: var(--tbl-pad-y) var(--tbl-pad-x);
+  line-height: 1.25;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
 }
 .cc-tbl tr:last-child td { border-bottom: 0; }
 .cc-tbl .c-num { text-align: right; font-variant-numeric: tabular-nums; }
 .cc-rank { color: var(--ink-faint); width: 1.6rem; }
 .cc-t { font-weight: 600; color: var(--ink); white-space: nowrap; }
-.cc-dim { color: var(--ink-faint); font-size: 0.74rem; }
+.cc-dim { color: var(--ink-faint); font-size: var(--fs-fine); }
 
 /* SCOPED TO .cc RATHER THAN DECLARED BARE. `is-pos` is a class fifteen other
    rules in this file already qualify; a global colour on it would reach
@@ -4326,7 +4458,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   gap: 0.6rem;
   padding: 0.26rem 0;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-data);
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
 }
 .cc-moves li:last-child { border-bottom: 0; }
@@ -4335,7 +4467,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 /* One of the three silences, in the region that owns it. Which silence is on
    data-empty; the sentence is the renderer's, and it owes the distinction in
    words as well as in the attribute. */
-.cc-quiet { margin: 0; padding: 0.7rem 0.85rem; font-size: 0.78rem; color: var(--ink-dim); }
+.cc-quiet { margin: 0; padding: 0.7rem 0.85rem; font-size: var(--fs-data); color: var(--ink-dim); }
 
 /* ---------- the score strips ----------
    FlowsUI.scoreStrip builds its classes from the caller's prefix; the
@@ -4362,7 +4494,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   background: var(--panel-head);
   border-radius: 0 var(--radius-2) var(--radius-2) 0;
   color: var(--ink-dim);
-  font-size: 0.86rem;
+  font-size: var(--fs-note);
   line-height: 1.55;
   max-width: var(--measure);
 }
@@ -4409,7 +4541,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .pl-tick { font-family: var(--font-mono); }
 .pl-chamber, .pl-issuer {
   display: block;
-  font-size: 0.74rem;
+  font-size: var(--fs-fine);
   color: var(--ink-faint);
   text-transform: lowercase;
   letter-spacing: 0.02em;
@@ -4433,7 +4565,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* The vendor's own word for the side. "Receive" is a gift or a transfer and
    is neither, so it gets neither treatment. */
-.pl-side { font-size: 0.82rem; }
+.pl-side { font-size: var(--fs-data); }
 .pl-side.is-buy { color: var(--flow-up); }
 .pl-side.is-sell { color: var(--flow-down); }
 .pl-side.is-neither { color: var(--ink-faint); font-style: italic; }
@@ -4449,6 +4581,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    with two thirds of the page blank beside them. Columns hold each line near
    the same measure while using the width — the same answer the canvas tier
    already reached for the section's other prose. */
+/* The measured-hit-rate slot. It ships as a sentence and may be replaced by a
+   measurement; either way it is the only part of the footer a reader is meant
+   to stop on, so it takes the note ink rather than the footer's faint one. A
+   number in here without its horizon and its n is the defect this slot exists
+   to end, and the controller owes both. */
+.foot-hit { color: var(--ink-dim); }
+.foot-hit [data-empty] { color: var(--ink-faint); }
+
 .flows-foot .flows-foot-p { margin: 0 0 var(--space-2); }
 .flows-foot .flows-foot-p:last-child { margin-bottom: 0; }
 #plFoot {
@@ -4457,3 +4597,446 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   column-gap: 2.5rem;
 }
 #plFoot .flows-foot-p { break-inside: avoid; }
+
+/* =============================================================
+   ZERO IS A MEASUREMENT AND IT GETS ITS OWN CHANNEL.
+
+   Eight polarity decisions across six renderers were two-way — a
+   ternary choosing between is-pos and is-neg with nothing in between —
+   so a reading of exactly zero was tinted with a side it does not
+   hold. The score badge on the ticker page was the clearest: its TEXT
+   printed an unsigned zero, correctly, on the line directly above a
+   className that tinted the same zero positive. The two disagreed
+   about the same number, on the same row, one line apart.
+
+   Zero is a score this pipeline assigns and defends. It is the centre
+   of the dead band, the reading that says a name was measured and
+   found to be neither. It is not an absence — absence is `is-null`
+   and the em dash, which these families already have — and it is not
+   a small positive.
+
+   THE NEUTRAL IS INK, NOT A THIRD HUE. A green, a red and an amber
+   would read as three sides. Grey reads as "no side", which is what
+   the measurement says, and it survives greyscale for the same reason
+   the glyphs beside it do: the sign was never carried by hue alone.
+
+   Every family below needs its own rule rather than inheriting one,
+   because the base classes deliberately set `fill: none` or no stroke
+   at all — a path emitted with a polarity class that has no rule is
+   not a neutral line, it is an invisible one. tests/flows-sign.mjs
+   asserts that every polarity class these renderers emit resolves to
+   a rule in this file, so a later consolidation cannot quietly delete
+   one and leave a chart drawing nothing.
+   ============================================================= */
+.fc-score.is-flat { color: var(--ink-dim); }
+.gp-cum.is-flat { stroke: var(--ink-faint); stroke-dasharray: 1 3; }
+.fp-line.is-flat { stroke: var(--ink-faint); }
+.fp-line-end.is-flat { fill: var(--ink-faint); }
+.rc-dot.is-flat { fill: var(--ink-faint); }
+/* The board's centre-origin bar. A zero score already draws a zero-width
+   bar, so this rule adds no ink — it exists so the element stops claiming
+   a SIDE it does not have, which mattered because .is-pos also sets
+   `left: 50%` and a future non-zero minimum width would have grown it in
+   the wrong direction from a reading with no direction. */
+.fd-track i.is-flat { left: 50%; width: 0; background: var(--ink-faint); }
+
+
+/* ==============================================================
+   THE THREE SILENCES, IN PIXELS.
+
+   The honesty was all in the prose. Every renderer here already
+   words its silences apart — "the key was never published", "the
+   payload could not be read", "it was measured and is empty" — and
+   FlowsUI.emptyState already tags each one on `data-empty` so a test
+   can tell them apart without parsing English. Then all six kinds
+   rendered as the same dim paragraph, and `.flows-empty` — the class
+   the shared primitive emits — had no rule in this file at all, so
+   the standard empty state fell back to 1.65-leaded serif body copy
+   while every hand-rolled one (.cc-quiet, .ft-quiet, .fc-dead) got a
+   treatment. A reader scanning a page could not see which regions
+   were quiet and which were broken without stopping to read.
+
+   SIX KINDS, THREE SILENCES, FOUR SHAPES. The kinds the renderers
+   emit are pending, unavailable, unreadable, failed, empty and
+   quiet. They group:
+
+     pending                → the pipeline has not spoken yet
+     unavailable            → it spoke, and this field was not in it
+     unreadable | failed    → the request did not come back. OUR fault
+     empty | quiet          → measured, and there was nothing. A READING
+
+   THE MARK IS A SHAPE AND A GLYPH, NEVER A HUE. Dotted, dashed, a
+   3px solid bar and a 1px hairline are four rules a monochrome
+   printout keeps, and the glyphs — … for "still coming", † for "not
+   on this payload", × for "broken" — are all inside the JetBrains
+   Mono subsets this site self-hosts, so none of them falls back to a
+   system face mid-line.
+
+   THE MEASURED-EMPTY CASE IS THE QUIETEST ONE, deliberately. It is
+   the only one of the four that is a fact about the market, and
+   .ft-quiet already wrote down why: "the feed answered with nothing"
+   is an ordinary reading and must not wear the Unavailable banner.
+   It gets a hairline and no glyph — present, calm, not an alarm.
+   ============================================================== */
+
+/* The shared primitive's paragraph, which had no rule. Sized at the
+   reading step rather than at body copy: it is a note about a region,
+   not the page's prose. */
+.flows-empty {
+  margin: 0.55rem 0 0;
+  color: var(--ink-dim);
+  font-size: var(--fs-note);
+  line-height: 1.5;
+}
+
+/* The mark. Scoped with :is() to the three block-level empty states so it
+   cannot reach the inline tags and table cells that also carry data-empty
+   (flows-ticker.js sets it on a span; a 3px bar there would be noise). */
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty] {
+  border-left: 1px solid var(--hairline);
+}
+/* The inset is only added where there is none. .cc-quiet already carries the
+   0.85rem the region's table cells are set at, and overriding that here would
+   pull one paragraph out of alignment with every row above it. */
+:is(.flows-empty, .ft-quiet)[data-empty] { padding-left: 0.6rem; }
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty]::before {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-right: 0.4rem;
+  color: var(--ink-faint);
+}
+
+/* Still coming. Dotted reads as "in progress" in every notation that has
+   ever used a dashed line, and the ellipsis says the same thing in a glyph. */
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="pending"] {
+  border-left: 2px dotted var(--ink-faint);
+}
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="pending"]::before {
+  content: "\2026";
+}
+
+/* Published, but this field is not on it — a footnote about the payload's
+   own age, which is exactly what a dagger has always meant. */
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="unavailable"] {
+  border-left: 2px dashed var(--ink-faint);
+}
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="unavailable"]::before {
+  content: "\2020";
+}
+
+/* The request broke. This is the only silence that is THIS PAGE'S fault, and
+   it is the only one that gets the signed-down colour and a bar wide enough
+   to find while scrolling — the reader's remedy here is "refresh", which no
+   other kind has. */
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="unreadable"],
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="failed"] {
+  border-left: 3px solid var(--flow-down);
+}
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="unreadable"]::before,
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="failed"]::before {
+  content: "\00d7";
+  color: var(--flow-down);
+}
+
+/* Measured, and empty. No glyph, no colour, a hairline: a reading, at the
+   same ink as any other note on the page. */
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="empty"],
+:is(.flows-empty, .cc-quiet, .ft-quiet)[data-empty="quiet"] {
+  border-left: 1px solid var(--hairline);
+  color: var(--ink-dim);
+}
+
+/* A STATE LINE IS NOT PROSE. .flows-status carries "Loading the latest
+   session…" and then whatever the controller replaces it with; unmarked, it
+   read as the page's first paragraph. A hairline down its left says "this
+   sentence is about the page, not about the market" and separates it from
+   the four marks above, which are about a region. */
+.flows-status {
+  border-left: 1px solid var(--hairline);
+  padding-left: 0.6rem;
+}
+
+/* Staleness keeps its band and gains a SHAPE. The 1px border plus a tinted
+   ground was a colour reading twice; in greyscale a 10% wash on a near-black
+   page is nearly nothing. A 4px left bar is the same fact in geometry, and it
+   is the widest rule on the page for the same reason the broken-request mark
+   is the second widest: both are things the reader has to act on. */
+.flows-stale {
+  border-left-width: 4px;
+}
+
+
+/* ==============================================================
+   BOARD MEMORY AND CHANGE — the marks the early-warning layer needs.
+
+   The payload grew a memory this session: board rows now carry `nw`
+   (new to this side today), `hy` (here on incumbency alone, on the
+   way out), `r0`/`dr` (yesterday's rank, and places climbed), `ed`
+   and `edte` (the next earnings date and its distance); the score
+   track carries `d1` ({v, gap, qv, cross}), `lastAt`, `run` and
+   `ext`. None of it had anywhere to be drawn.
+
+   FOUR RULES THESE MARKS ALL OBEY:
+
+     1. `nw` IS A TRISTATE. true, false, and NULL when yesterday's
+        board could not be read. A renderer must not draw the null as
+        the false: `.fm-new.is-unknown` is the third state and it says
+        "we do not know", never "not new". Number(null) is 0 is this
+        repo's oldest scar; false-for-null is the same scar in a
+        boolean.
+     2. A DELTA WITHOUT ITS GAP IS THE DEFECT THIS LAYER REPLACED. A
+        score that moved +18 over one session and one that moved +18
+        across a five-session absence are different readings. .fm-gap
+        exists so the gap is never optional, and it is styled to sit
+        AGAINST the delta rather than beside it as an afterthought.
+     3. SIGN IN POSITION OR GLYPH. Every mark below that has a
+        direction carries an arrow or a word. Hue only repeats it.
+     4. UNITS TRAVEL WITH NUMBERS. .fm-rank is places, .fm-gap is
+        sessions, .fm-ed is days, .fm-run is sessions. Each mark's
+        title or adjacent text owes the unit; the class only reserves
+        the shape.
+
+   THE CLASSES ARE DELIBERATELY BORING, and they are listed here in
+   full because four renderers this file does not own have to spell
+   them identically:
+
+     .fm-new                    "new to this side today"  (row carries nw === true)
+     .fm-new.is-unknown         yesterday's board was unreadable (nw === null)
+     .fm-hyst                   on the board on incumbency alone (hy === true)
+     .fm-rank                   rank move; .is-up / .is-down / .is-flat
+     .fm-gap                    the session span a delta covers
+     .fm-run                    consecutive sessions on the current sign
+     .fm-cross                  dead-band crossing;
+                                .is-cleared / .is-faded / .is-flipped
+     .fm-stale                  the reading is not from the latest session
+     .fm-ed                     earnings inside the window that will end this
+                                name's board run for a non-signal reason
+     .fm-ext                    a window extreme (hi/lo) with its session
+
+   Every one of them is an inline element that sits inside a table
+   cell, so all of them are `white-space: nowrap` and none of them
+   changes the line box height — a mark that reflows a 60-row board is
+   not a mark, it is a layout change.
+   ============================================================== */
+
+/* The shared chip. Bordered rather than filled: fifteen filled chips on one
+   board is a second table of colour, and the border reads at any density. */
+.fm-new, .fm-hyst, .fm-cross, .fm-stale, .fm-ed, .fm-run, .fm-ext {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.28rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: baseline;
+  color: var(--ink-dim);
+  cursor: help;
+}
+
+/* NEW TODAY. The loudest of the memory marks because it is the one that
+   answers "what should I look at that I did not look at yesterday" — a solid
+   rule on the left edge plus full ink, which survives greyscale as weight. */
+.fm-new {
+  border-color: var(--gold-mystic);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* THE THIRD STATE. `nw === null` means yesterday's board could not be read,
+   which is not "not new" and must not look like it. Dashed and dim, with the
+   same dashed vocabulary the unavailable silence uses six rules above: the
+   memory, not the market, is what is missing. */
+.fm-new.is-unknown {
+  border-style: dashed;
+  border-color: var(--ink-faint);
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+/* ON INCUMBENCY ALONE. It slipped past the entry rank and is inside the exit
+   band: a name on its way off the board. Hollow and dim — the visual opposite
+   of .fm-new, which is the reading. */
+.fm-hyst {
+  border-style: dotted;
+  color: var(--ink-faint);
+}
+
+/* THE DEAD-BAND CROSSING, which is the early-warning event and the only mark
+   here that is not drift. Three outcomes, three shapes:
+     cleared — was inside the band, now outside: the name became actionable
+     faded   — was outside, now inside: the exit signal
+     flipped — outside at both ends, opposite signs
+   Each carries a GLYPH as well as a border, because these three must be
+   separable on a monochrome printout and by a reader who cannot tell the
+   signed pair apart. The glyphs are U+2191/U+2193/U+00B1, all inside the
+   self-hosted latin subset. */
+.fm-cross { border-width: 2px; font-weight: 600; color: var(--ink); }
+.fm-cross.is-cleared { border-color: var(--flow-up); }
+.fm-cross.is-cleared::before { content: "\2191\00a0"; }
+.fm-cross.is-faded { border-color: var(--ink-faint); color: var(--ink-dim); }
+.fm-cross.is-faded::before { content: "\2193\00a0"; }
+.fm-cross.is-flipped { border-color: var(--flow-down); }
+.fm-cross.is-flipped::before { content: "\00b1\00a0"; }
+
+/* STALE READING. `lastAt < sessions.length - 1` — this name's newest score is
+   not from the latest session, so a page that leads on change is showing an
+   old number. Same dashed-plus-dagger vocabulary as the unavailable silence,
+   for the same reason: what is missing is a measurement, not a market. */
+.fm-stale {
+  border-style: dashed;
+  border-color: var(--flow-down);
+  color: var(--ink-dim);
+}
+.fm-stale::before { content: "\2020\00a0"; }
+
+/* EARNINGS INSIDE THE WINDOW. Every board name cleared the 12-day gate, so a
+   small edte (13-20) means this name is about to leave the board for a reason
+   that has nothing to do with its signal decaying. That is a fact about the
+   calendar, so it is drawn as chrome and never as a direction. */
+.fm-ed { border-style: dashed; letter-spacing: 0.06em; }
+
+/* RUN LENGTH and WINDOW EXTREME: context, not events. The quietest chips on
+   the page — no border colour of their own, no glyph. */
+.fm-run, .fm-ext { border-color: var(--hairline); color: var(--ink-faint); }
+
+/* THE RANK MOVE, and it is not a chip: it is a signed number with an arrow,
+   so it aligns in a column with other signed numbers rather than floating in
+   the middle of one. `dr` is places IMPROVED, so positive is a climb. */
+.fm-rank {
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+.fm-rank.is-up { color: var(--flow-up); }
+.fm-rank.is-down { color: var(--flow-down); }
+/* A rank that did not move is a MEASUREMENT and keeps full weight; it is not
+   an absence. An absent r0 is the em dash and carries no .is-* class at all. */
+.fm-rank.is-flat { color: var(--ink-faint); }
+
+/* THE GAP, WHICH MAY NEVER BE OPTIONAL. It is set in the same mono at the
+   fine step and dimmed one stop, so it reads as the qualifier on the delta it
+   follows rather than as a second number — but it is never smaller than the
+   micro step and never below the 4.5:1 ink, because a gap of five sessions is
+   the difference between a signal and an artefact. */
+.fm-gap {
+  margin-left: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  cursor: help;
+}
+/* A gap of exactly one session is overnight — the ordinary case, and the only
+   one that needs no emphasis. Anything above it means the name was ABSENT in
+   between, which is a different reading and gets the ink back. */
+.fm-gap.is-wide { color: var(--ink-dim); font-weight: 600; }
+
+
+/* ==============================================================
+   THE RAIL'S NAME BLOCK — key stats where the section links are.
+
+   On /flows/ticker/ the 13rem sticky column spends its whole height
+   on twelve destinations and says nothing about the name the page is
+   about. This is the host for that: emitted empty and hidden by
+   shared/flows-pages.js, filled by the ticker controller from the
+   card it already holds. It is the only element on the page besides
+   the header that survives a scroll.
+
+   BELOW 60rem THE RAIL IS A HORIZONTAL STRIP and this block would
+   turn it into a wall, so it is not rendered there at all. The same
+   numbers are in the page's own panels; the rail is a convenience at
+   desk widths, never the only place a reading exists.
+   ============================================================== */
+.rail-stats { display: none; }
+
+@media (min-width: 60rem) {
+  .rail-stats {
+    display: block;
+    margin: 0.35rem 0 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+  }
+  .rail-stats dl { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.4rem; margin: 0; }
+  .rail-stats dt { color: var(--ink-faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .rail-stats dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+  .rail-stats dd .is-pos { color: var(--flow-up); }
+  .rail-stats dd .is-neg { color: var(--flow-down); }
+  /* An absent reading is the em dash at faint ink and NEVER a zero: every
+     value in this block is a number whose zero is a real measurement. */
+  .rail-stats dd.is-null { color: var(--ink-faint); cursor: help; }
+  .rail-stats .rail-stats-g {
+    margin: 0.5rem 0 0.15rem;
+    color: var(--gold-celadon);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+}
+
+
+/* ==============================================================
+   THE SHARED FIELD, so a page can mount FlowsUI.searchBox.
+
+   flows-ui.js has shipped `searchBox` and `sortSelect` as finished,
+   accessible, label-bearing primitives since the score track needed
+   them, and exactly one page ever called them — because the classes
+   they generate (`${prefix}-field`, `-label`, `-input`) were only
+   ever styled for the score track's own "st" prefix. A primitive
+   that looks unstyled everywhere but one page is a primitive nobody
+   reuses.
+
+   These are the default "fui" prefix. `.flows-controls` is a control
+   bar that on seven of nine routes holds nothing but a paragraph;
+   with these rules a controller can mount a filter into it in three
+   lines and have it look like the rest of the section.
+   ============================================================== */
+.fui-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+/* In the control bar the field's baseline should meet the lede's, not its
+   centre — `.flows-controls` centres its children, and a two-row field
+   (label over input) centred against one line of prose sits visibly high. */
+.flows-controls .fui-field { align-self: flex-end; }
+
+.fui-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.fui-input,
+.fui-select {
+  min-height: 44px;              /* the comfortable tap minimum, as elsewhere */
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-mono);
+  /* 16px, NOT a type-scale step. Below 16px iOS zooms the viewport on focus,
+     which on a table page throws the reader's scroll position away. The same
+     exception .flows-form input takes, for the same reason. */
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--bg-deep);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-1);
+}
+.fui-input:focus-visible,
+.fui-select:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* The count beside a filter. "12 of 63 rows" is not decoration: a filtered
+   board with no denominator is indistinguishable from a thin session, which
+   is the same defect as a change count with no comparable count. */
+.fui-count {
+  align-self: end;
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}

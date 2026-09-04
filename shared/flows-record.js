@@ -110,6 +110,15 @@ export function scoreSessionAt(rowsBySide, closesByTicker, calendar, calendarIdx
        sided return as a spread. */
     ls: legs.long !== null && legs.short !== null ? legs.long - legs.short : null,
     hit: measured ? hits / measured : null,
+    /* THE RATIO'S OWN TWO NUMBERS, CARRIED BESIDE IT.
+
+       `hit` alone cannot be pooled across sessions: averaging per-session
+       ratios weights a session that measured four names the same as one that
+       measured two hundred, which is a mean of ratios and not a rate. The
+       counts are what pools, so they leave this function rather than being
+       recomputed by anyone who wants a total. */
+    hits,
+    measured,
     lost,
     names,
   };
@@ -166,25 +175,104 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
   const currentDates = dates.filter(inEpoch);
   const priorDates = dates.filter((d) => !inEpoch(d));
 
+  /**
+   * One population at one horizon: the session-mean of the spread, the
+   * spread of that mean, and the pooled hit rate under it.
+   *
+   * THREE NUMBERS AND THREE DENOMINATORS, AND THE UNITS ARE NOT THE SAME.
+   *
+   *   ls / n     — the mean of the per-session long-minus-short spreads, over
+   *                n SESSIONS. Sessions with one attrited leg have no spread
+   *                and are not in it.
+   *   sd / se    — the dispersion of those same n session spreads and the
+   *                standard error of their mean. This layer replaced a mean
+   *                published entirely naked: "+38bp over 22 sessions" and
+   *                "+38bp ± 210bp over 22 sessions" are the same mean and
+   *                opposite readings, and the page could not tell them apart
+   *                because the per-session values were accumulated into a sum
+   *                and thrown away. They are kept now.
+   *
+   *                A SAMPLE STANDARD DEVIATION NEEDS TWO OBSERVATIONS. At
+   *                n = 1 it is null, never 0: one session has no measured
+   *                dispersion, and a published 0 there would be the confident
+   *                zero this repository keeps paying for — it would read as a
+   *                mean known exactly.
+   *
+   *   hit / hitN — the pooled hit rate, counted over NAMES, not sessions, and
+   *                pooled from the per-session counts rather than by averaging
+   *                per-session ratios (a mean of ratios weights a session that
+   *                measured four names like one that measured two hundred).
+   *                hitSessions says how many sessions contributed those names,
+   *                so the two denominators can never be read as one.
+   *
+   * Every session that scored contributes its names to the hit rate, including
+   * sessions whose spread was withheld for a one-legged board: a name that was
+   * measured was measured, and dropping it because the OTHER side attrited
+   * would make the hit rate a statement about board completeness.
+   */
   const meanOver = (subset, k) => {
-    let sum = 0, n = 0;
+    const spreads = [];
+    let hits = 0, measured = 0, hitSessions = 0;
     for (const d of subset) {
       const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, k);
-      if (s.state === "ok" && s.ls !== null) { sum += s.ls; n++; }
+      if (s.state !== "ok") continue;
+      if (s.ls !== null) spreads.push(s.ls);
+      if (s.measured > 0) {
+        hits += s.hits; measured += s.measured; hitSessions++;
+      }
     }
-    return { ls: n ? round(sum / n, 4) : null, n };
+    const n = spreads.length;
+    const mean = n ? spreads.reduce((a, b) => a + b, 0) / n : null;
+    let sd = null;
+    if (n > 1) {
+      const ss = spreads.reduce((a, b) => a + (b - mean) * (b - mean), 0);
+      sd = Math.sqrt(ss / (n - 1));
+    }
+    return {
+      ls: mean === null ? null : round(mean, 4),
+      n,
+      /* Four places, same as the mean they qualify: a dispersion rounded
+         coarser than the number it brackets can print "+38bp ± 0bp". */
+      sd: sd === null ? null : round(sd, 4),
+      se: sd === null ? null : round(sd / Math.sqrt(n), 4),
+      hit: measured ? round(hits / measured, 4) : null,
+      hitN: measured,
+      hitSessions,
+    };
   };
 
   const horizonRows = horizons.map((k) => {
     const cur = meanOver(currentDates, k);
-    const row = { k, ls: cur.ls, n: cur.n };
+    const row = {
+      k, ls: cur.ls, n: cur.n, sd: cur.sd, se: cur.se,
+      /* THE PRODUCT'S HEADLINE NUMBER, MEASURED AT LAST. Until this row
+         carried it, `hit` existed only per session and nothing pooled it —
+         so the one question the page is named for could be answered only by
+         a reader eyeballing thirty rows of a column. The footer elsewhere on
+         the site asserting a hit rate near 51-52% was asserting a figure
+         nobody had computed; this is the computation, and it is published
+         with its own denominator in names beside n's denominator in
+         sessions. */
+      hit: cur.hit, hitN: cur.hitN, hitSessions: cur.hitSessions,
+    };
     /* PUBLISHED ONLY WHEN THERE IS SOMETHING ON THE OTHER SIDE. A `prior` key
        that is always present but usually null invites a renderer to draw an
-       empty second series on every chart forever. */
+       empty second series on every chart forever.
+
+       AND NEVER POOLED WITH THE CURRENT ONE. The prior population gets its
+       own mean, its own dispersion and its own hit rate. Averaging the two
+       hit rates into a single headline is the specific mistake that produced
+       the 51-52% claim this layer exists to replace: two experiments, one
+       number, belonging to neither. */
     if (priorDates.length) {
       const before = meanOver(priorDates, k);
       row.prior = before.ls;
       row.priorN = before.n;
+      row.priorSd = before.sd;
+      row.priorSe = before.se;
+      row.priorHit = before.hit;
+      row.priorHitN = before.hitN;
+      row.priorHitSessions = before.hitSessions;
     }
     return row;
   });
@@ -193,15 +281,33 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
   for (const d of [...dates].reverse()) {
     const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, statedK);
     if (s.state !== "ok") continue;          // the stated horizon has not closed
-    sessions.push({
+    const row = {
       d,
       long: round(s.long, 4),
       short: round(s.short, 4),
       ls: round(s.ls, 4),
       hit: round(s.hit, 2),
+      /* THE HIT RATE'S OWN DENOMINATOR, ON THE ROW THAT STATES IT. `hit`
+         is a share of the names this session actually measured, which is
+         `names` minus `lost` — arithmetic a reader should not have to do to
+         know whether a 0.75 is three of four or a hundred and fifty of two
+         hundred. It is also what makes the pooled rate on the horizon rows
+         reproducible from the table beneath it. */
+      measured: s.measured,
       lost: s.lost,
       names: s.names,
-    });
+    };
+    /* WHICH EXPERIMENT THIS ROW BELONGS TO.
+
+       The horizon means split at the epoch and the per-session table did not,
+       so the table mixed two populations under one heading with nothing on
+       the row saying which was which — a reader scanning the column had no
+       way to see the boundary the numbers above it turn on. The flag is
+       published ONLY when an epoch was supplied: absent means "no epoch was
+       stated", which is a different fact from `false`, and a renderer must
+       not draw one as the other. */
+    if (epoch) row.pre = d < epoch;
+    sessions.push(row);
     if (sessions.length >= maxSessions) break;
   }
 
@@ -216,6 +322,16 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
     epoch: epoch || null,
     epochRetained: epoch ? currentDates.length : null,
     priorRetained: epoch ? priorDates.length : null,
+    /* HOW MUCH OF THE PRIOR EXPERIMENT THE TABLE ACTUALLY SHOWS.
+
+       `sessions` is newest-first and capped, so on any archive deeper than
+       the cap every drawn row is post-epoch and the prior population appears
+       in the horizon means and NOWHERE ELSE. A page that says "reported
+       separately" while drawing one of the two is not reporting separately;
+       this count is what lets it say which half the table it is looking at
+       covers. Null when no epoch was stated, for the same reason `pre` is
+       absent then. */
+    preShown: epoch ? sessions.filter((r) => r.pre).length : null,
   };
 }
 
@@ -299,44 +415,148 @@ export function icTable(datedBoards, closesByTicker, calendar, {
   minN = 20,
   pearson,
   percentileRank,
+  /* THE DATE THE POOL BEING MEASURED CHANGED — the same constant scoreSessions
+     partitions on, and for the same reason.
+
+     This table used to take no epoch at all while the return scorer beside it
+     built its whole currentDates/priorDates split to avoid pooling across one.
+     So the page's research loop — the surface a reader uses to decide which
+     feature is worth anything — was the one place still averaging two
+     experiments, and RECORD_NOTES.epoch sat underneath it saying that must not
+     be done. Null keeps the pre-existing single-population behaviour exactly. */
+  epoch = null,
+  /* EVERY HORIZON, NOT ONE. The returns are already reported at four horizons
+     and the features were measured at one, so the decay of a coefficient with
+     horizon — the thing that says whether a feature leads or merely coincides
+     — was not on the wire. Defaults to [k], which is the old behaviour and the
+     old payload shape byte for byte. */
+  horizons = null,
 } = {}) {
   if (typeof pearson !== "function" || typeof percentileRank !== "function") {
     throw new Error("icTable needs the pearson and percentileRank helpers");
   }
   const calendarIdx = new Map(calendar.map((d, i) => [d, i]));
+  /* The stated horizon is always in the set and always first: it is the one
+     `ic` reports, and the one the board itself quotes. */
+  const ks = [k, ...(Array.isArray(horizons) ? horizons : [])]
+    .filter((h) => Number.isInteger(h) && h > 0);
+  const kSet = [...new Set(ks)];
 
+  /* key -> horizon -> { cur: {xs, ys}, pre: {xs, ys} }.
+
+     THE FEATURE COLUMNS ARE FLATTENED ONCE PER ROW, not once per horizon: the
+     flattening walks every key of the row and explodes two nested shapes, and
+     doing it inside the horizon loop would repeat that work k times over an
+     archive of tens of thousands of rows to produce identical output. */
   const pairsByKey = new Map();
+  const bucketFor = (key, h, pre) => {
+    let byH = pairsByKey.get(key);
+    if (!byH) { byH = new Map(); pairsByKey.set(key, byH); }
+    let cell = byH.get(h);
+    if (!cell) { cell = { cur: { xs: [], ys: [] }, pre: { xs: [], ys: [] } }; byH.set(h, cell); }
+    return pre ? cell.pre : cell.cur;
+  };
+
   for (const b of datedBoards || []) {
     if (!b || typeof b.d !== "string") continue;
+    const pre = Boolean(epoch) && b.d < epoch;
     for (const row of Array.isArray(b.rows) ? b.rows : []) {
       const entry = fin(row && row.px);
       if (entry === null || entry <= 0) continue;
-      const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, b.d, k);
-      if (fc.state !== "ok") continue;
-      const y = fc.exit / entry - 1;
       const cols = featureColumnsOf(row);
-      for (const key of Object.keys(cols)) {
-        if (!pairsByKey.has(key)) pairsByKey.set(key, { xs: [], ys: [] });
-        const p = pairsByKey.get(key);
-        p.xs.push(cols[key]); p.ys.push(y);
+      const keys = Object.keys(cols);
+      if (!keys.length) continue;
+      for (const h of kSet) {
+        const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, b.d, h);
+        if (fc.state !== "ok") continue;
+        const y = fc.exit / entry - 1;
+        for (const key of keys) {
+          const p = bucketFor(key, h, pre);
+          p.xs.push(cols[key]); p.ys.push(y);
+        }
       }
     }
   }
 
-  const cols = [...pairsByKey.keys()].sort().map((key) => {
-    const { xs, ys } = pairsByKey.get(key);
-    const n = xs.length;
-    if (n < minN) {
-      return { key, ic: null, n, reason: `fewer than ${minN} measured pairs` };
+  /** One population at one horizon, as a measured coefficient or a stated refusal. */
+  const coefficient = (pair) => {
+    const n = pair ? pair.xs.length : 0;
+    if (n < minN) return { ic: null, n, reason: `fewer than ${minN} measured pairs` };
+    const rho = pearson(percentileRank(pair.xs), percentileRank(pair.ys));
+    if (!Number.isFinite(rho)) return { ic: null, n, reason: "no variation to rank" };
+    return { ic: round(rho, 3), n };
+  };
+
+  const cols = [...pairsByKey.keys()].map((key) => {
+    const byH = pairsByKey.get(key);
+    const stated = coefficient(byH.get(k) && byH.get(k).cur);
+    const out = { key, ic: stated.ic, n: stated.n };
+    if (stated.reason) out.reason = stated.reason;
+
+    /* THE PRIOR POPULATION, BESIDE THE CURRENT ONE AND NEVER FOLDED INTO IT.
+       Published only where there is something on the other side of the epoch,
+       under the same rule the horizon rows use: a key that is present and
+       always null teaches a renderer to draw an empty column forever. */
+    if (epoch) {
+      const before = byH.get(k) && byH.get(k).pre;
+      if (before && before.xs.length) {
+        const prior = coefficient(before);
+        out.priorIc = prior.ic;
+        out.priorN = prior.n;
+        if (prior.reason) out.priorReason = prior.reason;
+      }
     }
-    const rho = pearson(percentileRank(xs), percentileRank(ys));
-    if (!Number.isFinite(rho)) {
-      return { key, ic: null, n, reason: "no variation to rank" };
+
+    /* THE DECAY CURVE. One coefficient at one horizon cannot say whether a
+       feature leads the move or merely coincides with it; four can. Peak is
+       by ABSOLUTE value because a feature that predicts reliably downward is
+       as informative as one that predicts upward — the sign is the relation,
+       the magnitude is the evidence. */
+    if (kSet.length > 1) {
+      const curve = kSet.slice().sort((a, b) => a - b).map((h) => {
+        const c = coefficient(byH.get(h) && byH.get(h).cur);
+        return { k: h, ic: c.ic, n: c.n };
+      });
+      out.curve = curve;
+      let peak = null;
+      for (const point of curve) {
+        if (point.ic === null) continue;
+        if (peak === null || Math.abs(point.ic) > Math.abs(peak.ic)) peak = point;
+      }
+      /* Null with no invented peak when no horizon measured: an unmeasured
+         curve has no strongest point, and reporting the stated horizon's null
+         as the peak would name a winner from an empty field. */
+      out.icPeak = peak ? peak.ic : null;
+      out.icPeakK = peak ? peak.k : null;
     }
-    return { key, ic: round(rho, 3), n };
+    return out;
   });
 
-  return { k, minN, cols };
+  /* ORDERED BY EVIDENCE, NOT BY THE ALPHABET.
+
+     This sorted `[...pairsByKey.keys()].sort()`, so "chg" and "cnv" headed the
+     table by spelling and the strongest column sat wherever the alphabet put
+     it — a research table whose first row is decided by orthography is a
+     research table nobody reads past. Strength is |ic| because the sign is the
+     relation and the magnitude is the evidence.
+
+     Unmeasured columns sort LAST as a block rather than being dropped: "there
+     was nothing to measure here" is a finding about coverage and belongs on
+     the page, just not above the measurements. Ties fall back to the key so
+     the ordering is total and two runs over one archive publish one byte
+     string. */
+  cols.sort((a, b) => {
+    const av = a.ic === null ? -1 : Math.abs(a.ic);
+    const bv = b.ic === null ? -1 : Math.abs(b.ic);
+    return (bv - av) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  });
+
+  const table = { k, minN, cols };
+  /* Echoed so a reader holding the payload can see which partition and which
+     horizons produced the columns, rather than inferring it from their shape. */
+  if (epoch) table.epoch = epoch;
+  if (kSet.length > 1) table.horizons = kSet.slice().sort((a, b) => a - b);
+  return table;
 }
 
 /**
@@ -360,4 +580,17 @@ export const RECORD_NOTES = {
     "stated date; sessions before it were drawn from a different pool, so their mean is " +
     "reported separately rather than averaged into the current one — same headings, " +
     "same units, a different population",
+  dispersion: "every horizon mean carries the sample standard deviation of the session " +
+    "spreads behind it and the standard error of that mean, sd / sqrt(n). The standard " +
+    "error is a SPREAD, not a test: consecutive sessions share most of a multi-session " +
+    "window, so the overlap deflation above applies to it too and no t-statistic or " +
+    "p-value is computed from it. A single session has no measured dispersion and " +
+    "reports none rather than reporting zero",
+  pooled: "the hit rate on each horizon row is pooled over NAMES — every measured name " +
+    "on both boards across the scored sessions, counted once each, and summed from the " +
+    "per-session counts rather than averaged from the per-session rates, which would " +
+    "weight a session that measured four names like one that measured two hundred. Its " +
+    "denominator is hitN and counts names; n beside it counts sessions, and the two are " +
+    "different quantities. The populations either side of the selection epoch are pooled " +
+    "separately: one hit rate averaged across both would belong to neither",
 };

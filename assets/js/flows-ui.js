@@ -99,6 +99,138 @@
   };
 
   /**
+   * MONEY AT THE SCALE IT LIVES ON: "$1.23B", "$2.18M", "$450K", "$382".
+   *
+   * ONE PREMIUM WAS RENDERING THREE DIFFERENT WAYS ON THREE ROUTES a reader
+   * is invited to move between: $2,180,000 of net premium printed "$2.2M" on
+   * the board row, "$2.18M" on the unusual feed and "2.2M" — with no currency
+   * mark at all — inside the ticker card. Six independent formatters, four
+   * precision ladders, one number. This is the ladder they should all be.
+   *
+   * TWO DECIMALS IS THE DEFAULT because the largest rungs are where the
+   * rounding hides the most money: one decimal on a billion throws away up to
+   * fifty million dollars, and the feed that already reasoned about this — the
+   * unusual feed, whose notional column is a BRACKET rather than a point
+   * estimate — reached for two. `dp` is the explicit opt-out for a caller
+   * with an equally explicit reason, so a coarser column is an argued choice
+   * in one place rather than the accident of whichever copy it inherited.
+   *
+   * The thousands rung is whole thousands in every existing copy and stays
+   * that way: a tenth of a thousand dollars is below the precision of every
+   * quantity on this site that is quoted in dollars.
+   *
+   * The minus is U+2212 and it sits OUTSIDE the currency mark ("−$1.30M"),
+   * which is the sign this whole module already spells one way. An absent
+   * value is the em dash: a premium that was not measured is not $0.
+   */
+  const fmtMoney = (v, opts) => {
+    const n = isNum(v);
+    if (n === null) return DASH;
+    const asked = isNum(opts && opts.dp);
+    const dp = asked === null ? 2 : Math.max(0, Math.min(4, Math.round(asked)));
+    const abs = Math.abs(n);
+    const sign = n < 0 ? MINUS : "";
+    if (abs >= 1e9) return sign + "$" + (abs / 1e9).toFixed(dp) + "B";
+    if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(dp) + "M";
+    if (abs >= 1e3) return sign + "$" + Math.round(abs / 1e3) + "K";
+    return sign + "$" + Math.round(abs);
+  };
+
+  /* ---------- staleness ---------------------------------------------
+
+     ONE PUBLISH CADENCE PLUS SLACK, and one weekend plus one public holiday.
+     Both thresholds were duplicated, with the same numbers and different
+     comments, in six renderers. */
+  const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
+  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+
+  /**
+   * TWO INDEPENDENT WAYS A PUBLISHED PAYLOAD IS NOT TODAY'S, told apart
+   * because the remedies are different people:
+   *
+   *   "write"   — the payload's own WRITE time is old. GitHub disables a
+   *               scheduled workflow after 60 days of repository inactivity,
+   *               and that failure's only symptom is a date that stops
+   *               advancing. The pipeline is not running. The remedy is the
+   *               Actions tab.
+   *   "session" — the write time is fresh and the SESSION the numbers
+   *               describe is old. The pipeline is running and its input is
+   *               frozen. The remedy is upstream, not in this repository.
+   *
+   * Collapsing those two into one "stale" flag sends the reader to the wrong
+   * place half the time, which is why they have always been two sentences.
+   *
+   * LIFTED HERE FROM assets/js/flows-board.js (where it was assessAge). Six
+   * routes had grown their own copy of the same two tests with the same two
+   * constants and six different sentences; two routes wording one outage
+   * differently is how a reader concludes they are looking at two outages.
+   *
+   * staleness(payload, now, {subject}) → {kind, message}
+   *   kind "write" | "session"  — message is the sentence to show
+   *   kind "fresh"              — the payload carried a timestamp and passed
+   *   kind "unknown"            — nothing datable arrived, so no claim is
+   *                               made either way. message is null
+   *
+   * IT ALWAYS RETURNS AN OBJECT. A bare null for "fresh" reads identically to
+   * a bare null for "there was nothing to check", and those are not the same
+   * answer: the first is a measurement, the second is a silence. A caller
+   * that wants to say something about the silence now can.
+   *
+   * `subject` names what was written, because these sentences appear on nine
+   * different surfaces and "This page was last written" is not what a reader
+   * of the calendar or the feed needs to hear. It is singular by contract:
+   * every caller's noun ("This board", "This feed", "This calendar") takes
+   * "was".
+   */
+  function staleness(payload, now, opts) {
+    const o = opts || {};
+    const at = isNum(now) ?? Date.now();
+    if (!payload || typeof payload !== "object") return { kind: "unknown", message: null };
+
+    /* THE MISSING-VALUE TEST BEFORE THE COERCION, again, and it matters more
+       here than almost anywhere: `Number(null)` is 0, 0 is a finite
+       millisecond stamp — the epoch — and a payload with no write header
+       would be reported as fifty-six years stale. The copies this replaces
+       wrote `Number(payload.__updatedAt) || null`, which survived only
+       because `|| null` happened to catch the zero it had just manufactured.
+       A non-positive stamp is treated as absent for the same reason. */
+    const written = isNum(payload.__updatedAt);
+    if (written !== null && written > 0 && at - written > STALE_WRITE_MS) {
+      const hours = Math.floor((at - written) / 3600000);
+      const days = Math.floor(hours / 24);
+      /* The hour branch cannot fire while the threshold is 30 hours — every
+         age past it is at least one day. It is here so that lowering the
+         threshold can never start printing "0 days", which is a confident
+         zero wearing a unit. */
+      const age = days >= 1
+        ? days + (days === 1 ? " day" : " days")
+        : hours + (hours === 1 ? " hour" : " hours");
+      return {
+        kind: "write",
+        message: (o.subject || "This page") + " was last written " + age +
+          " ago. The pipeline has not published since — check the Actions tab.",
+      };
+    }
+
+    if (payload.sessionDate) {
+      /* 21:00Z is after every US close, so a session date is aged from the
+         end of its own session rather than from its midnight. */
+      const session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
+      if (Number.isFinite(session) && at - session > STALE_SESSION_MS) {
+        return {
+          kind: "session",
+          message: "These numbers describe the " + payload.sessionDate + " session, " +
+            "which is more than four days old. The pipeline is running but its " +
+            "data is not advancing.",
+        };
+      }
+    }
+
+    if (written === null && !payload.sessionDate) return { kind: "unknown", message: null };
+    return { kind: "fresh", message: null };
+  }
+
+  /**
    * The standard empty-state paragraph: <p class="flows-empty" data-empty=kind>.
    *
    * `kind` names WHICH silence this is — "pending", "unreadable", "empty",
@@ -375,8 +507,9 @@
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
     isNum, el, svgEl,
-    fmtSigned, fmtInt,
+    fmtSigned, fmtInt, fmtMoney,
     emptyState, searchBox, sortSelect,
+    staleness,
     stripGeometry, scoreStrip,
   });
 })();

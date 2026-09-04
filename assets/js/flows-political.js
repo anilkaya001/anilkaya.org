@@ -30,6 +30,24 @@
 
   var MINUS = "−";      // U+2212, not a hyphen
   var DASH = "—";
+  /* THE NEW-TODAY MARK, AND IT IS A GLYPH IN A FIXED POSITION.
+
+     Every mark on this page has to survive greyscale and a monochrome
+     printout, so freshness cannot be a tint. The glyph sits at the front of
+     the filing-date cell — the same place on every row it appears on, absent
+     everywhere else — and carries a title naming the date it means. */
+  var FRESH = "◆";
+
+  /* Normalise a symbol the way the card store keys it.
+
+     THE LIVE DATA FALSIFIES THE NAIVE LOOKUP. The disclosure feed emits
+     "BRK.B" while the card is stored under "BRKB", so a link built from the
+     symbol as filed would 404 on exactly the largest names. Dots out, upper
+     case, and the same function is used for the membership test AND for the
+     href so the two can never disagree. */
+  function cardKey(t) {
+    return String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
+  }
 
   function isNum(v) {
     return typeof v === "number" && isFinite(v) ? v : null;
@@ -198,6 +216,86 @@
       " of disclosed " + subject + " that no bar above includes.";
   }
 
+  /* The self-filed share, over the rows drawn, said once and the same way in
+     both ranked panels.
+
+     POLITICAL_NOTES.attribution has promised this sentence since the module
+     shipped — "the totals report the self-filed share" — and until the shaper
+     started counting it, the only panel that delivered it was the holders
+     block, which 422s. Unknown is not "all their own": a window where the
+     vendor stated no account at all says so, in the same words the holders
+     note uses. */
+  function ownerNote(rows, unit) {
+    var known = 0, self = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var k = isNum(rows[i].ownerKnown);
+      if (k === null) continue;
+      known += k;
+      var sf = isNum(rows[i].selfFiled);
+      if (sf !== null) self += sf;
+    }
+    if (!known) {
+      return "The vendor stated an executing account on none of the filings behind these " +
+        unit + ", so the share disclosed in a filer’s own name is UNKNOWN here — which " +
+        "is not the same fact as all of them being their own.";
+    }
+    return self + " of the " + known + " filings that state an executing account are the " +
+      "filer’s own; the rest are a spouse’s, a dependant’s or joint.";
+  }
+
+  /* The count of rows drawn that carry the window's newest filing date, and
+     the sentence naming it. `latestFiled` is a measured date from the tape,
+     never "today": on the ordinary morning nothing is filed at all, and
+     marking every row stale against a day with no filings would describe the
+     calendar rather than the disclosures. */
+  function freshNote(p, drawn, subject) {
+    if (!p.latestFiled) return "";
+    var sameDay = p.sessionDate && p.sessionDate === p.latestFiled;
+    /* THE SUBJECT DIFFERS BY PANEL AND SO DOES THE SENTENCE. On the tape a
+       marked row IS the filing; on a ranked panel a marked row is an aggregate
+       that CONTAINS one, and saying "filed on" there would date the total
+       rather than the disclosure inside it. */
+    var what = subject || "filed on";
+    return FRESH + " marks the " + drawn + " row" + (drawn === 1 ? "" : "s") +
+      " " + what + " " + p.latestFiled + ", the newest disclosure date in this window" +
+      (sameDay ? ", which is the last completed session" :
+        (p.sessionDate ? ", which is before the last completed session on " + p.sessionDate : "")) +
+      ".";
+  }
+
+  /**
+   * A ticker cell: a link to the detail card when one exists, plain text when
+   * it does not.
+   *
+   * THE OLD CAPTION SAID "A LINK THAT USUALLY LEADS NOWHERE IS WORSE THAN NO
+   * LINK", and it was right about links and wrong about "usually": cards exist
+   * for a large share of the top of this ranking, including its first rows.
+   * The fix is not to link optimistically — it is to link from a published
+   * list, exactly as /flows/unusual/ links only names its payload's coverage
+   * array contains. When the payload carries no such list, nothing is linked
+   * and the caption says so, because a renderer guessing which cards exist is
+   * the failure the old caption was avoiding.
+   */
+  function tickerCell(t, carded, cls) {
+    var text = t === null || t === undefined ? DASH : String(t);
+    if (!carded || !t || !carded.has(cardKey(t))) return el("span", cls, text);
+    var a = el("a", cls, text);
+    a.href = "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
+    a.title = "Open the detail card the board published for " + text + ".";
+    return a;
+  }
+
+  /* The set of names a detail card exists for, or null when the payload did
+     not say. NULL AND EMPTY ARE DIFFERENT: an empty set is "the board went
+     deep on nothing", a null is "this payload does not carry the list", and
+     only the second one is a reason for the caption to apologise. */
+  function cardedSet(p) {
+    if (!Array.isArray(p.carded)) return null;
+    var set = new Set();
+    for (var i = 0; i < p.carded.length; i++) set.add(cardKey(p.carded[i]));
+    return set;
+  }
+
   /* ---------- panel 1: the filers ---------------------------------- */
 
   function paintBuyers(p) {
@@ -231,6 +329,9 @@
     var head = el("tr");
     [["#", "c-num"], ["Filer", ""], ["Disclosed purchases", "pl-c-bar"],
      ["Midpoint", "c-num"], ["Low", "c-num"], ["High", "c-num"],
+     /* NOT LISTED sits beside the midpoint it is part of, because the reader's
+        question on seeing a large total is "how much of that is equity". */
+     ["Not listed", "c-num"],
      ["Filings", "c-num"], ["Names", "c-num"], ["Median lag", "c-num"],
      ["Disclosed sales", "c-num"]].forEach(function (h) {
       var th = el("th", h[1] || null, h[0]);
@@ -256,10 +357,49 @@
       tr.append(td(usd(r.bought), "c-num pl-mid"));
       tr.append(td(usd(r.boughtLo), "c-num pl-bound"));
       tr.append(td(usd(r.boughtHi), "c-num pl-bound"));
+      /* THE PART OF THE TOTAL THIS PAGE'S OTHER PANELS CANNOT SEE. Treasury
+         bills, funds and partnership interests name no ticker, so they were
+         summed into the total here and excluded from the assets ranking, and
+         nothing said the two disagreed. An em dash means there were no such
+         filings — a fact the title states, so the dash is never read as a
+         withheld number. */
+      var other = el("td", "c-num pl-other");
+      var otherBuys = isNum(r.buysOther);
+      if (otherBuys) {
+        other.textContent = usd(r.boughtOther);
+        other.title = otherBuys + " of this filer’s " + isNum(r.buys) +
+          " disclosed purchases named no listed security — Treasury bills, funds and " +
+          "partnership interests carry no ticker — so that size is in the total beside " +
+          "it and in no row of the ranking by name.";
+      } else {
+        other.textContent = DASH;
+        other.title = otherBuys === null
+          ? "This payload does not split the total by whether a listed security was named."
+          : "Every disclosed purchase behind this total named a listed security.";
+      }
+      tr.append(other);
       tr.append(td(isNum(r.buys), "c-num"));
-      tr.append(td(isNum(r.names), "c-num"));
+      /* NULL IS AN EM DASH AND NOT A ZERO. "$2.05M across 0 names" read as a
+         measurement — a filer who bought nothing identifiable — when the truth
+         is that this column has nothing to say about that money. */
+      var names = el("td", "c-num");
+      var nCount = isNum(r.names);
+      names.textContent = nCount === null ? DASH : String(nCount);
+      if (nCount === null) {
+        names.title = "None of this filer’s disclosed purchases named a listed security, " +
+          "so there is no name count here. That is not a count of zero.";
+      }
+      tr.append(names);
       tr.append(td(days(r.medianLagDays), "c-num"));
       tr.append(td(r.sells ? usd(r.sold) : DASH, "c-num pl-sold"));
+      /* The newest-filing mark, in the same fixed position on the row it is
+         in as on every other panel: leading the filer's name cell. */
+      if (isNum(r.freshBuys)) {
+        var mark = el("sup", "pl-fresh", FRESH);
+        mark.title = isNum(r.freshBuys) + " of these purchases were disclosed on the " +
+          "window’s newest filing date.";
+        who.insertBefore(mark, who.firstChild);
+      }
       body.append(tr);
     }
     table.append(body);
@@ -272,8 +412,31 @@
         countedNote(feed, "filer"),
         overlapNote(rows),
         openNote(rows, "purchases"),
+        listedNote(rows),
+        ownerNote(rows, "totals"),
+        freshNote(p, rows.filter(function (r) { return isNum(r.freshBuys); }).length,
+          "carrying a purchase disclosed on"),
       ].filter(Boolean).join(" ");
     }
+  }
+
+  /* How much of the ranked size named no listed security, as one number.
+
+     The per-row column says it row by row; this says whether the panel as a
+     whole is an equity ranking or something wider. Silent when every filing
+     named a ticker, because a sentence that always appears and usually reads
+     "none" trains a reader to skip the line that matters. */
+  function listedNote(rows) {
+    var other = 0, filings = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var o = isNum(rows[i].boughtOther), c = isNum(rows[i].buysOther);
+      if (o !== null) other += o;
+      if (c !== null) filings += c;
+    }
+    if (!filings) return "";
+    return filings + " of the disclosures behind these totals named no listed security " +
+      "(Treasury bills, funds and partnership interests carry no ticker), adding " +
+      usd(other) + " that the ranking by name below cannot show.";
   }
 
   /* What the cap kept and what it dropped, in one sentence.
@@ -305,6 +468,7 @@
       "The window was read and no name in it drew a disclosed purchase.")) return;
 
     var rows = feed.rows;
+    var carded = cardedSet(p);
     var scale = 0;
     for (var i = 0; i < rows.length; i++) {
       scale = Math.max(scale, isNum(rows[i].boughtHi) || 0, isNum(rows[i].bought) || 0);
@@ -316,10 +480,21 @@
     wrap.setAttribute("aria-label", "Assets ranked by disclosed purchase size");
     var table = el("table", "flows-table pl-table");
     var cap = el("caption", "flows-caption");
+    /* THE CAPTION FOLLOWS THE PAYLOAD RATHER THAN A BELIEF ABOUT IT.
+
+       It used to read "a link that usually leads nowhere is worse than no
+       link" — sound reasoning about links, resting on a premise about cards
+       that the live store falsifies at the top of this very ranking. The
+       renderer now links from a PUBLISHED list of names a card exists for,
+       the way /flows/unusual/ does, and says which of the two states it is
+       in rather than asserting the pessimistic one either way. */
     cap.textContent = "The same discipline by name: summed midpoints of disclosed " +
-      "purchases across every filer. Tickers are plain text — a detail card " +
-      "exists only for names the board went deep on, and a link that usually " +
-      "leads nowhere is worse than no link.";
+      "purchases across every filer. " + (carded
+        ? "A name is a link where the board published a detail card for it and plain " +
+          "text where it did not — the list of carded names comes from the payload, " +
+          "never from a guess."
+        : "Names are plain text: this payload carries no list of the names a detail " +
+          "card exists for, and a link built on a guess is worse than no link.");
     table.append(cap);
     var thead = el("thead");
     var head = el("tr");
@@ -340,7 +515,13 @@
       var tr = el("tr");
       tr.append(td(j + 1, "c-num pl-rank"));
       var name = el("td", "pl-who");
-      name.append(el("span", "pl-tick", r.t || DASH));
+      if (isNum(r.freshBuys)) {
+        var amark = el("sup", "pl-fresh", FRESH);
+        amark.title = isNum(r.freshBuys) + " of the purchases behind this total were " +
+          "disclosed on the window’s newest filing date.";
+        name.append(amark);
+      }
+      name.append(tickerCell(r.t, carded, "pl-tick"));
       /* THE SECURITY'S NAME, from the field that names the security. This read
          `r.issuer` until 2026-09-03 and printed "joint" or "not-disclosed"
          where a company belongs — the vendor's spec types `issuer` as "The
@@ -371,8 +552,108 @@
         countedNote(feed, "name"),
         overlapNote(rows),
         openNote(rows, "purchases"),
+        ownerNote(rows, "names"),
+        freshNote(p, rows.filter(function (r) { return isNum(r.freshBuys); }).length,
+          "carrying a purchase disclosed on"),
       ].filter(Boolean).join(" ");
     }
+
+    paintClusters(p, host, carded);
+  }
+
+  /* ---------- panel 2b: the names more than one filer bought -------
+
+     RANKED BY BREADTH, BESIDE THE ONE RANKED BY SIZE, and drawn here rather
+     than in a panel of its own so the two orderings of the SAME aggregates sit
+     under one heading and can be read against each other. A name that is
+     third by dollars and first by filers is the reading this block exists to
+     make visible, and it is only visible if both orders are on the screen at
+     once. */
+  function paintClusters(p, host, carded) {
+    var feed = p.clusters;
+    if (!feed) return;                     // an older payload: draw nothing, claim nothing
+    var box = el("div", "pl-clusters");
+    /* NO CLASS: `.fc-panel h3` already styles a sub-heading inside a panel by
+       element, and a class the stylesheet does not define is a hook that reads
+       like styling and is not. */
+    box.append(el("h3", null, "The same window, ordered by how many filers"));
+
+    if (feed.status === "unavailable") {
+      box.append(tagged("p", "fc-q", "unavailable",
+        "The vendor did not answer for this feed" +
+        (feed.reason ? " (" + feed.reason + ")" : "") + ", so nothing is ordered here."));
+      host.append(box);
+      return;
+    }
+    var rows = Array.isArray(feed.rows) ? feed.rows : [];
+    if (!rows.length) {
+      /* MEASURED AND EMPTY, and the floor that measured it is named. "No
+         clusters" without the floor beside it reads as a claim about the
+         window rather than about the threshold applied to it. */
+      box.append(tagged("p", "fc-q", "quiet",
+        "No name in this window drew disclosed purchases from " +
+        (isNum(feed.minFilers) || 3) + " or more separate filers" +
+        (isNum(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any"
+          : "") + ". The floor is not relaxed to fill the panel."));
+      host.append(box);
+      return;
+    }
+
+    var wrap = el("div", "flows-tablewrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Names ordered by the number of separate filers");
+    var table = el("table", "flows-table pl-table");
+    var cap = el("caption", "flows-caption");
+    cap.textContent = "Ordered by the number of DISTINCT filers who disclosed a purchase, " +
+      "then by median disclosure lag, then by size. " + (feed.basis || "") +
+      " Size is the weakest thing this data knows: one account’s large purchase of a " +
+      "single name outranks several separate filers converging on another wherever " +
+      "dollars decide the order.";
+    table.append(cap);
+    var thead = el("thead");
+    var head = el("tr");
+    [["#", "c-num"], ["Name", ""], ["Filers", "c-num"], ["Filings", "c-num"],
+     ["Midpoint", "c-num"], ["Median lag", "c-num"]].forEach(function (h) {
+      var th = el("th", h[1] || null, h[0]);
+      th.setAttribute("scope", "col");
+      head.append(th);
+    });
+    thead.append(head);
+    table.append(thead);
+
+    var body = el("tbody");
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var tr = el("tr");
+      tr.append(td(i + 1, "c-num pl-rank"));
+      var name = el("td", "pl-who");
+      if (isNum(r.freshBuys)) {
+        var mark = el("sup", "pl-fresh", FRESH);
+        mark.title = isNum(r.freshBuys) + " of the purchases behind this total were " +
+          "disclosed on the window’s newest filing date.";
+        name.append(mark);
+      }
+      name.append(tickerCell(r.t, carded, "pl-tick"));
+      if (r.asset) name.append(el("span", "pl-asset", String(r.asset)));
+      tr.append(name);
+      tr.append(td(isNum(r.filers), "c-num pl-filers"));
+      tr.append(td(isNum(r.buys), "c-num"));
+      tr.append(td(usd(r.bought), "c-num pl-mid"));
+      tr.append(td(days(r.medianLagDays), "c-num"));
+      body.append(tr);
+    }
+    table.append(body);
+    wrap.append(table);
+    box.append(wrap);
+    box.append(el("p", "fc-note",
+      countedNote(feed, "name", "drew fewer filers") + " " +
+      "The floor is " + (isNum(feed.minFilers) || 3) + " separate filers, stated rather " +
+      "than tuned: two is the smallest number that could be called convergence at all, " +
+      "and on a market-wide window a great many names collect two by coincidence. " +
+      "Nothing here blends breadth with size into a single figure — each key breaks ties " +
+      "in the one before it, so the order can be checked by eye against the columns."));
+    host.append(box);
   }
 
   /* ---------- panel 3: the recent disclosures ---------------------- */
@@ -399,8 +680,18 @@
     table.append(cap);
     var thead = el("thead");
     var head = el("tr");
+    /* THE ACCOUNT THE FILING NAMES, as its own column.
+
+       The vendor's `issuer` field is "the person who executed the
+       transaction" — self, spouse, joint, not-disclosed — and this page used
+       to print it under the ticker where a company name belongs. The shaper
+       reads it for what it is now; this is where it goes. Treating a spouse's
+       account as the member's own judgement is the classic error this
+       repository already names in the card's congress panel, and it cannot be
+       avoided on a page that never shows the account. */
     [["Filed", ""], ["Transacted", ""], ["Lag", "c-num"], ["Filer", ""],
-     ["Name", ""], ["Side", ""], ["Disclosed range", "c-num"]].forEach(function (h) {
+     ["Account", ""], ["Name", ""], ["Side", ""],
+     ["Disclosed range", "c-num"]].forEach(function (h) {
       var th = el("th", h[1] || null, h[0]);
       th.setAttribute("scope", "col");
       head.append(th);
@@ -408,11 +699,22 @@
     thead.append(head);
     table.append(thead);
 
+    var carded = cardedSet(p);
     var body = el("tbody");
     for (var i = 0; i < feed.rows.length; i++) {
       var r = feed.rows[i];
       var tr = el("tr");
-      tr.append(td(r.filedDate));
+      /* The newest-filing mark leads the date it is about. Glyph and position,
+         never hue: this page is read in print and in greyscale. */
+      var filed = el("td", "pl-filed");
+      if (p.latestFiled && r.filedDate === p.latestFiled) {
+        var mark = el("sup", "pl-fresh", FRESH);
+        mark.title = "Filed on " + p.latestFiled + ", the newest disclosure date in " +
+          "this window.";
+        filed.append(mark);
+      }
+      filed.append(document.createTextNode(r.filedDate || DASH));
+      tr.append(filed);
       tr.append(td(r.txnDate));
       var lag = el("td", "c-num" + (isNum(r.lagDays) !== null && r.lagDays > 45 ? " pl-late" : ""));
       lag.textContent = days(r.lagDays);
@@ -421,7 +723,23 @@
       }
       tr.append(lag);
       tr.append(td(r.who));
-      tr.append(td(r.t));
+      /* Absent is absent. A filing the vendor sent no executing account for is
+         not a filing the member made for themselves — the same treatment the
+         holders table gives the same missing fact. */
+      tr.append(td(r.executedBy === null || r.executedBy === undefined
+        ? "not stated" : r.executedBy,
+        "pl-owner" + (r.executedBy === null || r.executedBy === undefined
+          ? " is-unknown" : "")));
+      var nameCell = el("td", "pl-who");
+      nameCell.append(tickerCell(r.t, carded, "pl-tick"));
+      /* THE SECURITY'S OWN DESCRIPTION, where the feed carries one. On the
+         congress spelling it arrives in `notes` ("Apple Inc. - Common Stock
+         (AAPL) [ST]") and was shaped and thrown away; on the unusual-trades
+         spelling it is `asset`. Either way it is the company, which is what a
+         reader looking at a ticker wants beside it. */
+      var described = r.asset || r.notes;
+      if (described) nameCell.append(el("span", "pl-asset", String(described)));
+      tr.append(nameCell);
       /* THE VENDOR'S OWN WORD, not our classification. "Receive" is a gift or
          a transfer and is neither a purchase nor a sale; printing our reading
          instead of the filing's would hide that. */
@@ -448,12 +766,19 @@
         dated++;
         if (feed.rows[k].lagDays > 45) late++;
       }
-      note.textContent = countedNote(feed, "disclosure", "were filed earlier") +
-        (dated
-          ? " " + late + " of the " + dated + " shown were filed past the 45 days " +
+      var fresh = 0;
+      for (var f = 0; f < feed.rows.length; f++) {
+        if (p.latestFiled && feed.rows[f].filedDate === p.latestFiled) fresh++;
+      }
+      note.textContent = [
+        countedNote(feed, "disclosure", "were filed earlier"),
+        dated
+          ? late + " of the " + dated + " shown were filed past the 45 days " +
             "the STOCK Act allows, which is the ordinary case rather than the " +
             "exception."
-          : "");
+          : "",
+        freshNote(p, fresh),
+      ].filter(Boolean).join(" ");
     }
   }
 
@@ -578,9 +903,19 @@
         ? "via " + src.route + (pages !== null
             ? ", " + pages + " page" + (pages === 1 ? "" : "s") + " deep" : "")
         : "";
+      /* WHAT ARRIVED MOST RECENTLY, IN THE STATUS LINE. A subscriber opening
+         this page daily could not tell what was new since yesterday: the tape
+         is ordered by filing date and nothing named the newest one. The date
+         is stated rather than the word "today", because on most mornings the
+         newest filing in the window is several days old and saying "today"
+         would be false on exactly the days it matters. */
+      var freshCount = isNum(p.freshFilings);
       status.textContent = [
         (isNum(p.filings) || 0) + " disclosure" + (p.filings === 1 ? "" : "s") +
           (w.from ? " filed between " + w.from + " and " + (w.to || "today") : ""),
+        freshCount !== null && p.latestFiled
+          ? freshCount + " of them on " + p.latestFiled + ", the newest filing date here"
+          : "",
         how,
         isNum(p.unusable) && p.unusable
           ? p.unusable + " carried no filer or name and were dropped" : "",
@@ -613,7 +948,8 @@
     if (foot) {
       /* THE PROSE TRAVELS WITH THE NUMBERS — published in the payload beside
          the arithmetic that produced them, printed verbatim. */
-      [notes.unit, notes.lag, notes.size, notes.attribution, notes.refusals]
+      [notes.unit, notes.lag, notes.size, notes.listed, notes.breadth,
+       notes.fresh, notes.attribution, notes.refusals]
         .filter(Boolean).forEach(function (text) {
           foot.append(el("p", "flows-foot-p", text));
         });

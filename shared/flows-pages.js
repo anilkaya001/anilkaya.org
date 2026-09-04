@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "92";
+export const ASSET_VERSION = "93";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -101,7 +101,21 @@ const rail = (active) => {
   <p class="rail-group" id="railName">Name</p>
   <div class="rail-items" role="group" aria-labelledby="railName">
     ${item("/flows/ticker/", "Ticker page", "ticker")}
-  </div>
+  </div>${active === "ticker" ? `
+  <!-- THE ONLY COLUMN ON THE PAGE THAT SURVIVES A SCROLL, and on the one
+       route that is about a single name it spent its whole height on twelve
+       destinations. This is the host for that name's key readings — price,
+       levels, convexity, quality — filled by assets/js/flows-ticker.js from
+       the card it already holds. No new fetch: every number is on the payload
+       the page has in hand.
+
+       EMITTED EMPTY AND HIDDEN, on this route only. A rail block that says
+       nothing until the card lands is honest; one that renders a frame of em
+       dashes while a fetch is in flight is a set of readings that came back
+       blank, which is a different and false claim. The stylesheet also drops
+       it entirely below 60rem, where the rail is a horizontal strip and a
+       stat wall would push every destination off the screen. -->
+  <div class="rail-stats" id="ftRail" hidden></div>` : ""}
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
@@ -381,10 +395,27 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
 
   </div>
 
+  <!-- THE NUMBER THAT WAS A CLAIM. This footer named an expected hit rate as
+       a two-point range, on the landing page of a paid product, through
+       months in which the store could not hold a past and nothing was being
+       measured at all — the exact defect the track record was built to
+       correct, restated as a literal in the one file that is not allowed to
+       hold derived numbers. It sat a rail-click from the page that now
+       measures the real one. The figure is deliberately not repeated here:
+       a number in a comment is still a number a reader can quote.
+
+       It is a SLOT now. The default sentence below is true whether or not any
+       controller ever fills it, which is the test a default has to pass; when
+       /api/flows/record answers, flows-overview.js replaces the span with the
+       measured rate, its horizon and its n, or with the pending sentence when
+       too few sessions have closed to measure anything. A measured hit rate
+       and an asserted one are not the same number even when they agree. -->
   <p class="flows-foot">
-    Scores are a ranked attention signal, not a return forecast. At the
-    information coefficient this class of signal supports, expect a hit rate near
-    51&ndash;52%. Names inside the dead band are not published on either side.
+    Scores are a ranked attention signal, not a return forecast. Names inside
+    the dead band are not published on either side.
+    <span class="foot-hit" id="flowsHitRate">Whether this board has been right
+    is measured rather than asserted, session by session, on the
+    <a href="/flows/history/">track record</a>.</span>
   </p>
 `)}
 ${cardDialog()}
@@ -474,10 +505,14 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
     </table>
   </div>
 
+  <!-- The same asserted hit rate the overview carried, and the same slot. See
+       the note in overviewPage: an unmeasured performance number restated in a
+       renderer is a claim wearing a measurement's clothes. -->
   <p class="flows-foot">
-    Scores are a ranked attention signal, not a return forecast. At the
-    information coefficient this class of signal supports, expect a hit rate near
-    51&ndash;52%.
+    Scores are a ranked attention signal, not a return forecast.
+    <span class="foot-hit" id="flowsHitRate">Whether this side has been right
+    is measured rather than asserted, session by session, on the
+    <a href="/flows/history/">track record</a>.</span>
   </p>
 `)}
 ${cardDialog()}
@@ -1128,8 +1163,19 @@ ${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
  * out of the DOM. See that file for why one list beats three.
  */
 export function tickerPage({ username = "" } = {}) {
-  const lede = "One name, the whole option book — including the four panels " +
-    "the card has published since the chain leg shipped and nothing has drawn.";
+  /* THIS SENTENCE IS THE MOST-READ PROSE ON THE PAGE and it used to be a
+     changelog entry: "including the four panels the card has published since
+     the chain leg shipped and nothing has drawn". Those four panels have
+     been drawn since the day that sentence was written — ivSurface, skewTerm,
+     topContracts and aggressor all have entries in the ticker's draw table —
+     so the lede described the implementation to its author, inaccurately, and
+     did it again as the page's <meta name="description">. What a reader wants
+     from a lede is what the page will tell them about the NAME. */
+  const lede = "One name and its whole option book: where dealer gamma sits " +
+    "and what flips it, what the chain is charging across strikes and " +
+    "expiries, which contracts carry the volume, and how far the price is " +
+    "from every level that matters — all of it read off the card the pipeline " +
+    "published this morning, with no vendor call made by this page.";
 
   /* Emitted from the registry rather than hand-written, unlike the card
      dialog's ten <section> blocks above. Every id, title, question and span
@@ -1160,6 +1206,17 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <span class="fc-meta" id="ftConv"></span>
     <span class="fc-meta" id="ftRegime"></span>
     <span class="fc-meta" id="ftDates"></span>
+    <!-- THE PRICE, WHICH THIS PAGE NEVER SHOWED. The identity block carried
+         the ticker, the score, conviction, the gamma regime and two dates —
+         and not one number a trader checks first. Spot, today's change, ATR,
+         the gamma flip and its distance are all already on the card this page
+         holds; they cost no vendor call and no payload change.
+
+         The header is sticky now (assets/css/flows.css, .ft-head), so
+         whatever lands here stays on screen for the whole 5,729px of panels
+         below it. Hidden until filled: an empty quote bar under a ticker
+         reads as a quote that came back blank. -->
+    <span class="ft-quote" id="ftQuote" hidden></span>
     <!-- ONCE YOU WERE ON A NAME THERE WAS NO WAY OFF IT. The index below
          renders only when ?t= is absent, so comparing two names meant editing
          the URL by hand. This is the way back to it, and it is in the header

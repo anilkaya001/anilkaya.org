@@ -26,6 +26,8 @@ import {
   shapeDarkpool, shapeSeasonality, buildPulse, unwrapRows,
   PULSE_FEEDS, PULSE_CAPS, PULSE_NOTES,
 } from "../shared/flows-pulse.js";
+import { REFRESH_CADENCE_MINUTES } from "../shared/flows-freshness.js";
+import { readFileSync } from "node:fs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -178,6 +180,43 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "the two ranked feeds both name the vendor as the selector — the headline caveat");
   ok(/no forecast|never a forecast|carries no claim/i.test(PULSE_NOTES.tide + " " + PULSE_NOTES.seasonality),
     "and the two series feeds refuse the forecast reading in words");
+}
+
+
+/* ---------- the cadence rides on the payload ----------------------
+
+   assets/js/flows-market.js decides whether this feed's stamp is still worth
+   believing — one cadence plus one cadence of slack, because a cron that fired
+   late is not yet a cron that stopped firing — and to do that it needs the
+   number the Worker's cron is actually configured for. It could not import the
+   shared module, because shared/ is not served to the browser, so it declared
+   its own copy under a comment naming the problem and the fix: "this constant
+   mirrors it and this comment is the only link between them. The right end
+   state is the pulse payload carrying its own cadence."
+
+   A constant duplicated across a boundary with a comment for a link is a
+   constant that will eventually disagree with itself, and this one fails in
+   the worst direction: raise the cron to thirty minutes and the page goes on
+   calling a twenty-five-minute-old read stale, which trains a reader to ignore
+   the one banner that says the data stopped moving. */
+{
+  const built = buildPulse({});
+  eq(built.cadenceMinutes, REFRESH_CADENCE_MINUTES,
+     "the pulse payload carries the refresh cadence the Worker's cron is configured for, so " +
+     "a renderer reads it rather than keeping a second copy across a boundary it cannot " +
+     "import across");
+  ok(Number.isFinite(built.cadenceMinutes) && built.cadenceMinutes > 0,
+     "and it is a usable number even on a build where every feed failed — the cadence is a " +
+     "fact about the CRON, not about any feed, so it must not go missing when the vendor does");
+
+  /* ONE SOURCE, ASSERTED AS ONE. If this ever stops being the same object the
+     freshness module exports, the two have already diverged. */
+  const src = readFileSync(new URL("../shared/flows-pulse.js", import.meta.url), "utf8");
+  ok(/import \{ REFRESH_CADENCE_MINUTES \} from "\.\/flows-freshness\.js"/.test(src),
+     "imported from the module that owns it rather than restated here — this file is not " +
+     "allowed to become the third copy");
+  ok(!/cadenceMinutes:\s*\d/.test(src),
+     "and the number is nowhere spelled out in this file as a literal");
 }
 
 console.log(`✓ flows-pulse: ${checks} assertions — both envelope spellings, absent staying absent ` +

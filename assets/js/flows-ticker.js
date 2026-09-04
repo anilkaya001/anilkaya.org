@@ -24,6 +24,21 @@
    than an empty box, because an empty box is indistinguishable from
    a panel that drew nothing on purpose.
 
+   TWO TABLES HERE ARE PROJECTIONS OF THAT ONE LIST, not second
+   opinions about it: DRAW maps each key to its renderer, and
+   PANEL_CHROME maps each key to the registry's own `group` and
+   `tier`. `shared/` is never served, so a browser file cannot import
+   the registry — and both tables are compared against it, key for
+   key and value for value, by tests/flows-ticker-contract.mjs. A
+   duplicate a test compares is a projection; a duplicate a test
+   cannot see is a drift.
+
+   THE PAGE OPENS ON WHAT CHANGED. It used to open on twenty-one
+   panels of one session with no index, no group boundaries, no way
+   to link a colleague to a panel, an identity block that scrolled
+   away, and nothing anywhere saying what the score had DONE. See
+   THE WORKSPACE, below.
+
    THE TEN SHIPPED RENDERERS ARE NOT COPIED HERE. They are
    window.FlowsPanels, extracted from flows-card.js so the dialog and
    this page draw the SAME code and can never disagree about a chart.
@@ -247,7 +262,7 @@
     const F = window.FlowsPanels;
     const n = F.isNum(v);
     if (n === null) return F.DASH;
-    return (n < 0 ? F.MINUS : "+") + Math.abs(n * 100).toFixed(1);
+    return (n < 0 ? F.MINUS : n > 0 ? "+" : "") + Math.abs(n * 100).toFixed(1);
   }
 
   /** A ROW LABEL: ln(K/S) to `dp` decimals with U+2212. Not a percentage —
@@ -2975,7 +2990,7 @@
          magnitudes unsigned because its two sides are "short" and "long",
          words its caption carries. Here the sign IS the field's published
          polarity and both halves are readings, so each names itself. */
-      lab.textContent = (t.sgn < 0 ? MINUS : "+") + faTickLabel(t.v);
+      lab.textContent = (t.sgn < 0 ? MINUS : t.sgn > 0 ? "+" : "") + faTickLabel(t.v);
       svg.append(lab);
     }
 
@@ -4115,10 +4130,18 @@
   let zoomKey = null;
   let zoomOpener = null;
 
+  let hashBeforeZoom = "";
+
   function openZoom(key, section) {
     if (!zoom || !zoomHost || typeof zoom.showModal !== "function") return;
     zoomKey = key;
     zoomOpener = section.querySelector(".ft-zoom-open");
+    /* THE OPEN PANEL IS REFLECTED INTO THE URL, so a reader looking at one
+       chart can send exactly that chart. Restored on close rather than
+       cleared, because a reader who arrived on #ftg-tape and enlarged a panel
+       expects to still be on #ftg-tape afterwards. */
+    hashBeforeZoom = String(location.hash || "").slice(1);
+    writeHash("panel-" + key);
     const titleEl = section.querySelector(".ft-panel-t");
     if (zoomTitle) zoomTitle.textContent = titleEl ? titleEl.textContent : "";
     zoom.showModal();
@@ -4182,6 +4205,7 @@
     });
     zoom.addEventListener("close", () => {
       zoomKey = null;
+      writeHash(hashBeforeZoom);
       if (zoomHost) zoomHost.replaceChildren();
       if (zoomOpener && document.contains(zoomOpener)) zoomOpener.focus();
       zoomOpener = null;
@@ -4201,6 +4225,11 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (!painted) return;
+      /* THE BAR IS RE-MEASURED WITH THE CHARTS. Its height is what every
+         anchor's scroll-margin is calculated from, and the identity row wraps
+         at a different count on every width — a stale height puts the panel a
+         reader jumped to underneath the bar that took them there. */
+      syncBarHeight();
       drawAll(painted, "grid");
       if (zoomKey) drawZoom();
     }, 160);
@@ -4332,9 +4361,901 @@
     return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : String(iso);
   }
 
+  /* =============================================================
+     THE WORKSPACE — an index, an identity strip that stays, and a
+     lead on WHAT CHANGED.
+
+     THE PAGE WAS TWENTY-ONE PANELS IN A FLAT SCROLL. Measured at
+     5,729px pinned and 7,185px gapless (the numbers are recorded in
+     assets/css/flows.css beside the tier that produced them), so a
+     reader hunting the gamma roll-off scanned five to seven screens
+     of near-identical headings with no table of contents, no group
+     boundaries and no way to send a colleague one of them —
+     `location.hash` was read in no file in this product, so "look at
+     panel 14" was a URL plus a sentence telling the reader to
+     scroll. The identity block scrolled away after the first panel,
+     taking the name, the score and the session date with it. And
+     nothing anywhere on the page said what the number had DONE: the
+     product is read as an early warning and it opened on a snapshot.
+
+     FOUR THINGS ARE ADDED HERE AND NOT ONE OF THEM HIDES ANYTHING.
+     No tabs, no accordion over the panels, no `grid-auto-flow:
+     dense`: this page states find-in-page as a design value and the
+     stylesheet refuses dense packing on purpose so DOM order stays
+     tab order. An index that hid twenty panels to make one findable
+     would trade a scroll for a search, and the scroll is the cheaper
+     of the two.
+
+       1. a sticky bar carrying the identity and the jump strip,
+       2. group headings inside the grid, from the registry,
+       3. chrome tiers, so a two-number panel and a fifty-row table
+          stop wearing the same box,
+       4. a change block above the fold, derived from the score
+          overlay the card already carries.
+
+     THE RULE THESE STYLES MAY NOT BREAK, stated here because the
+     next person to widen one will read this before the stylesheet:
+     nothing below changes a HORIZONTAL box metric of `.ft-panel` or
+     of its drawing host. Every chart on this page sizes its viewBox
+     from `host.clientWidth` and holds one viewBox unit to one CSS
+     pixel, and the term line's j-th bar centre has to land on the
+     surface's j-th column centre — which is an equality between two
+     panels' host widths. A 2px left border on one tier and 1px on
+     another would put a pixel between them and misalign a chart from
+     a stylesheet. So the lead tier's rail is an INSET BOX-SHADOW,
+     which paints and does not lay out.
+     ============================================================= */
+
+  /**
+   * The registry's `group` and `tier`, keyed by panel key.
+   *
+   * A SECOND COPY, AND THE SAME KIND OF SECOND COPY AS `DRAW`. `shared/` is
+   * in .assetsignore and is never served, so a browser file cannot import
+   * shared/flows-panels.js; the emitter puts each `question` into an
+   * attribute, but it cannot put a group heading into a panel — a heading is
+   * a BOUNDARY BETWEEN sections and its map has no shape for one. So the
+   * chrome table is projected here and pinned the way DRAW is pinned:
+   * tests/flows-ticker-contract.mjs reads the registry, reads what this
+   * controller wrote onto the mounted DOM, and asserts the two agree key for
+   * key AND value for value, in both directions. A duplicate a test compares
+   * is a projection; a duplicate a test cannot see is a drift.
+   */
+  const GROUPS = [
+    { key: "signal", label: "Signal", hash: "ftg-signal",
+      blurb: "The published score, what it is made of, and what it has done " +
+        "since the last session that scored this name." },
+    { key: "convexity", label: "Convexity", hash: "ftg-convexity",
+      blurb: "The dealer book: where gamma sits along the strike ladder and " +
+        "the term, and how it is moving." },
+    { key: "volatility", label: "Volatility", hash: "ftg-volatility",
+      blurb: "What the option chain charges — the smile, the term " +
+        "structure, and the move those two imply." },
+    { key: "tape", label: "Tape", hash: "ftg-tape",
+      blurb: "What actually traded: the lifted strikes, the largest lines, " +
+        "the session path and the off-exchange prints." },
+    { key: "context", label: "Context", hash: "ftg-context",
+      blurb: "Where this session sits in the name’s own year, and who " +
+        "has disclosed a trade in it." },
+  ];
+
+  const PANEL_CHROME = {
+    __score: { group: "signal", tier: "lead" },
+    scoreOverlay: { group: "signal", tier: "chart" },
+    gamma: { group: "convexity", tier: "lead" },
+    levels: { group: "convexity", tier: "reading" },
+    surface: { group: "convexity", tier: "chart" },
+    displacement: { group: "convexity", tier: "reading" },
+    calendar: { group: "convexity", tier: "chart" },
+    deltaExposure: { group: "convexity", tier: "chart" },
+    charm: { group: "convexity", tier: "chart" },
+    vanna: { group: "convexity", tier: "chart" },
+    ivSurface: { group: "volatility", tier: "lead" },
+    skewTerm: { group: "volatility", tier: "chart" },
+    pricedMove: { group: "volatility", tier: "reading" },
+    volContext: { group: "volatility", tier: "chart" },
+    aggressor: { group: "tape", tier: "lead" },
+    topContracts: { group: "tape", tier: "table" },
+    path: { group: "tape", tier: "chart" },
+    darkpool: { group: "tape", tier: "table" },
+    oiDeltas: { group: "tape", tier: "table" },
+    context: { group: "context", tier: "lead" },
+    congress: { group: "context", tier: "table" },
+  };
+
+  /* THE CHROME'S OWN RULES, SHIPPED WITH THE CODE THAT BUILDS IT.
+
+     Every element these rules style is CONSTRUCTED BY THIS FILE at runtime —
+     the bar, the jump strip, the group headings, the change block — and none
+     of them exists in the served markup. A rule for an element that only one
+     file can create belongs beside that file; the alternative is a stylesheet
+     carrying selectors for a DOM nobody can find by reading the markup, which
+     is how a dead rule outlives the code it was written for. The two tier
+     selectors do reach into `.ft-panel`, which the markup emits, and they
+     touch paint only.
+
+     `style-src 'self' 'unsafe-inline'` is already this site's policy — the
+     cursor spotlight writes --mx/--my as inline properties on every panel —
+     so this costs no CSP relaxation. */
+  const WORKSPACE_CSS = `
+.ft-bar {
+  position: sticky;
+  /* 4.4rem IS THE SITE'S TOPBAR CLEARANCE, not a guess: .flows-rail's top
+     padding and .course-nav's sticky offset are both 4.4rem, and .topbar is
+     position:fixed at z-index 100. A bar stuck at 0 would slide under the
+     navigation pill and take the name with it. */
+  top: 4.4rem;
+  z-index: 6;
+  background: var(--bg);
+  border-bottom: 1px solid var(--panel-border);
+  margin: 0 0 var(--space-3);
+  padding-top: var(--space-2);
+}
+.ft-bar .ft-head { margin: 0 0 var(--space-2); }
+.ft-id {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.ft-id b { font-weight: 600; color: var(--ink); }
+.ft-id.is-pos b { color: var(--flow-up); }
+.ft-id.is-neg b { color: var(--flow-down); }
+.ft-id.is-flat b { color: var(--flow-flat); }
+.ft-id.is-null b { color: var(--ink-faint); }
+.ft-id[data-empty] b { color: var(--ink-faint); }
+
+/* THE JUMP STRIP. Anchors, not buttons, and not a scripted scroller: a plain
+   <a href="#ftg-tape"> is keyboard-native, is copyable out of the status bar,
+   survives a script error, and is the same mechanism a deep link uses. The
+   controller's only job is marking which one is current. */
+.ft-jump {
+  display: flex; flex-wrap: nowrap; gap: var(--space-1);
+  margin: 0;
+  /* THE VERTICAL PADDING IS THE HIT AREA, and it is here rather than on the
+     chip because of a rule that is easy to miss: a box with overflow-x auto
+     and overflow-y visible has its overflow-y COMPUTED to auto — so this
+     strip is a scroll container in both axes, and the 44px pseudo-element
+     below was being clipped to the chip's own 25px. Measured: scrollHeight
+     35, clientHeight 35, no overflow at all. The control claimed a touch
+     target it did not have. Ten pixels of padding each side puts the whole
+     extension inside the padding box, where nothing clips it. */
+  padding: 10px 0 calc(var(--space-2) + 10px);
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+.ft-jump-b {
+  position: relative; flex: none;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-1);
+  padding: 0.24rem 0.5rem;
+  font-family: var(--font-mono); font-size: 0.68rem;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim); text-decoration: none;
+}
+/* A 44px TOUCH TARGET WITHOUT A 44px BOX, exactly the way .ft-zoom-open does
+   it: the hit area is a transparent pseudo-element, so five chips stay one
+   line tall on a phone and are still tappable. It only works because the
+   strip above reserves the room for it — see the padding note there. */
+.ft-jump-b::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
+.ft-jump-b:hover, .ft-jump-b:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
+.ft-jump-b:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-jump-b[aria-current="true"] { color: var(--gold-harvest); border-color: var(--gold-harvest); }
+.ft-jump-n { color: var(--ink-faint); }
+
+.ft-all { margin: 0 0 var(--space-2); }
+.ft-all-s {
+  font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-faint); cursor: pointer;
+  list-style: none;
+}
+.ft-all-s::-webkit-details-marker { display: none; }
+.ft-all-s::before { content: "+ "; color: var(--gold-harvest); }
+.ft-all[open] .ft-all-s::before { content: "\\2212 "; }
+.ft-all-s:hover { color: var(--ink); }
+.ft-all-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-all-l {
+  display: flex; flex-wrap: wrap; gap: 0.2rem var(--space-2);
+  margin: var(--space-2) 0 0; padding: 0; list-style: none;
+}
+.ft-all-l a { color: var(--ink-dim); font-size: 0.8rem; text-decoration: none; }
+.ft-all-l a:hover { color: var(--ink); text-decoration: underline; }
+.ft-all-l a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-all-g {
+  flex-basis: 100%; margin-top: var(--space-1);
+  color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.68rem;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+/* THE GROUP HEADING IS A GRID CHILD AND TAKES THE WHOLE ROW at every tier.
+   grid-column 1 / -1 is span-agnostic, so it is one declaration for two,
+   three and four columns — the same rule .ft-panel.is-wide already relies on.
+   (No backtick in this comment: it lives inside a template literal, and a
+   stray one closes the stylesheet mid-sentence.) */
+.ft-group {
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 calc(var(--space-2) * -1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 1rem;
+}
+.ft-group:first-child { margin-top: 0; }
+.ft-group-n {
+  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-harvest);
+}
+.ft-group-b {
+  display: block; margin-top: 0.3rem;
+  font-family: var(--font-serif); font-size: 0.86rem; font-weight: 400;
+  color: var(--ink-dim);
+}
+.ft-group:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 4px; }
+
+/* THE SCROLL OFFSET IS THE BAR'S MEASURED HEIGHT, written back by the
+   controller. A constant would be wrong at two of the four column tiers and
+   on every phone width where the identity row wraps. */
+.ft-grid { --ft-bar-h: 5.5rem; }
+.ft-grid .ft-panel, .ft-grid .ft-group {
+  scroll-margin-top: calc(4.4rem + var(--ft-bar-h) + 0.6rem);
+}
+
+/* ---- the chrome tiers ------------------------------------------------
+   PAINT ONLY. No padding, no border-width, no margin on the panel or on its
+   drawing host: two of these panels must measure the SAME host width or the
+   term line stops landing on the surface's columns. */
+.ft-panel[data-tier="lead"] { box-shadow: var(--shadow-card), inset 2px 0 0 var(--gold-harvest); }
+.ft-panel[data-tier="lead"] h3 { color: var(--gold-harvest); font-size: 0.74rem; }
+.ft-panel[data-tier="table"] h3 { border-bottom-color: var(--ink-faint); }
+/* A TWO-NUMBER PANEL STOPS WEARING A CHART'S BOX. It keeps its border and its
+   heading strip, so the grid still reads as a grid; it loses the raised
+   surface, which is what made a pair of stats look as heavy as a fifty-row
+   table. */
+.ft-panel[data-tier="reading"] { background: transparent; box-shadow: none; }
+.ft-panel[data-tier="reading"] h3 { background: none; color: var(--ink-dim); }
+
+/* ---- what changed ---------------------------------------------------- */
+.ft-change {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border: 1px solid var(--panel-border);
+  border-left: 2px solid var(--gold-harvest);
+  border-radius: var(--radius-2);
+  background: var(--panel-bg);
+}
+.ft-change h2 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-celadon);
+}
+.ft-chg-lead { margin: 0 0 var(--space-2); font-size: 1.02rem; line-height: 1.5; color: var(--ink); }
+.ft-chg-v {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 1.5rem; font-weight: 600; margin-right: 0.4rem;
+}
+.ft-chg-v.is-pos { color: var(--flow-up); }
+.ft-chg-v.is-neg { color: var(--flow-down); }
+.ft-chg-v.is-flat { color: var(--flow-flat); }
+.ft-chg-v.is-null { color: var(--ink-faint); }
+/* THE EVENT IS A WORD BEFORE IT IS A COLOUR, so every state below reads the
+   same in greyscale and on a monochrome printout. */
+.ft-chg-e {
+  display: inline-block; margin: 0 0 var(--space-2);
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--gold-harvest); border-radius: var(--radius-1);
+  font-family: var(--font-mono); font-size: 0.7rem;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-harvest);
+}
+.ft-chg-e.is-quiet { border-color: var(--panel-border); color: var(--ink-faint); }
+.ft-chg-stale {
+  margin: 0 0 var(--space-2); padding: 0.35rem 0.5rem;
+  border-left: 2px solid var(--flow-down);
+  color: var(--ink); font-size: 0.9rem;
+}
+/* WIDER COLUMNS THAN THE PANEL DEFAULT. Two of these readings are a signed
+   score AND the date it was set on; in the 8rem track .fc-stats hands out they
+   broke mid-ISO-date, as "2026-08-" over "17" — a date split across two lines
+   is a date a reader has to reassemble. */
+.ft-change .fc-stats {
+  margin: var(--space-2) 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+.ft-change .fc-note { margin: var(--space-2) 0 0; }
+/* THE POLARITY CLASSES THIS BLOCK EMITS HAVE RULES, all four of them. A
+   modifier with no rule is not neutral chrome, it is a promise the
+   stylesheet does not keep — and .is-flat is the arm a two-armed ternary
+   would have skipped. */
+.ft-change .fc-stats dd.is-pos { color: var(--flow-up); }
+.ft-change .fc-stats dd.is-neg { color: var(--flow-down); }
+.ft-change .fc-stats dd.is-flat { color: var(--flow-flat); }
+.ft-change .fc-stats dd.is-null { color: var(--ink-faint); }
+@media (max-width: 30rem) {
+  .ft-change { padding: var(--space-2); }
+  .ft-chg-v { font-size: 1.25rem; }
+}
+
+/* THE STICKY BAR IS A TAX ON EVERY SCREENFUL, and on a phone the screenful is
+   small. Measured at 380x667 the untightened bar took 195px — 29% of the
+   viewport, permanently — which is not an index, it is a wall. The chips keep
+   every word (nothing is display:none, so nothing leaves the accessibility
+   tree or a find-in-page); they are set smaller and packed tighter, and the
+   reading order above puts the name, the score, the price and the move ahead
+   of the metadata that now wraps below them. */
+@media (max-width: 46rem) {
+  /* THE IDENTITY ROW SCROLLS INSTEAD OF WRAPPING, which is the whole saving:
+     wrapped, ten chips are four lines and 90px; on one scrolling line they are
+     28px. The reading order set above is what makes that safe — name, score,
+     price, day, side, move come first and are what a phone shows at rest;
+     conviction, the gamma regime, the two dates and the switch are a swipe
+     away. The same treatment .flows-rail already takes on a phone, and the
+     same reason.
+
+     NOTHING IS display:none. Every chip stays in the document, in the
+     accessibility tree and in a find-in-page — hiding a reading to save
+     height would be answering a layout problem with a missing fact. */
+  .ft-bar .ft-head {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    gap: var(--space-1) var(--space-2);
+    padding-bottom: 0.2rem;
+  }
+  /* Or the flex line squeezes the ticker itself to fit, and the one word the
+     whole page is about is the one that gets ellipsised. */
+  .ft-bar .ft-head > * { flex: none; }
+  .ft-bar .ft-head h2 { font-size: 1.15rem; }
+  .ft-id, .ft-bar .fc-meta { font-size: 0.76rem; }
+  .ft-jump-b { padding: 0.2rem 0.42rem; font-size: 0.64rem; letter-spacing: 0.08em; }
+  .ft-all-s { font-size: 0.64rem; }
+  .ft-bar { padding-top: var(--space-1); }
+}
+`;
+
+  /* ---------- the sticky bar and the index -------------------------- */
+
+  let barEl = null;
+  let jumpEl = null;
+  let changeEl = null;
+
+  const countIn = (group) => {
+    let n = 0;
+    for (const k in PANEL_CHROME) if (PANEL_CHROME[k].group === group) n++;
+    return n;
+  };
+
+  /**
+   * Wrap the identity header and the jump strip into one sticky bar.
+   *
+   * THE HEADER IS MOVED, NOT REBUILT. `#ftHead` and every id inside it are
+   * emitted by the page and written by paint(); re-creating them here would
+   * be a second markup for the same block, which is the defect the panel
+   * registry exists to prevent one level up. It is re-parented into the bar
+   * so the two stick together — an identity that stays while its index
+   * scrolls away is half a fix.
+   */
+  function buildBar() {
+    if (!headEl || barEl) return;
+    barEl = el("div", "ft-bar");
+    barEl.hidden = true;
+    headEl.parentNode.insertBefore(barEl, headEl);
+    barEl.append(headEl);
+
+    jumpEl = el("nav", "ft-jump");
+    jumpEl.setAttribute("aria-label", "Jump to a group of panels");
+    for (const g of GROUPS) {
+      const a = el("a", "ft-jump-b");
+      a.href = "#" + g.hash;
+      a.append(document.createTextNode(g.label + " "));
+      a.append(el("span", "ft-jump-n", String(countIn(g.key))));
+      jumpEl.append(a);
+    }
+    barEl.append(jumpEl);
+
+    /* THE FULL INDEX, one click away and still in the DOM.
+       Five group anchors answer "where is the volatility section"; they do
+       not answer "where is the gamma roll-off", which is the question that
+       made a reader scan seven screens. Every panel is named here, under its
+       group, and collapsed by default so the bar stays one row of chips
+       tall. Nothing is hidden from find-in-page: a <details> keeps its
+       contents in the document and browsers open it to reveal a match. */
+    const all = el("details", "ft-all");
+    all.append(el("summary", "ft-all-s",
+      "All " + Object.keys(PANEL_CHROME).length + " panels"));
+    const list = el("ul", "ft-all-l");
+    for (const g of GROUPS) {
+      list.append(el("li", "ft-all-g", g.label));
+      for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
+        const chrome = PANEL_CHROME[section.dataset.panel];
+        if (!chrome || chrome.group !== g.key) continue;
+        const li = el("li");
+        const a = el("a");
+        a.href = "#panel-" + section.dataset.panel;
+        const title = section.querySelector(".ft-panel-t");
+        a.textContent = title ? title.textContent : section.dataset.panel;
+        li.append(a);
+        list.append(li);
+      }
+    }
+    all.append(list);
+    barEl.append(all);
+
+    changeEl = el("section", "ft-change");
+    changeEl.id = "ftChange";
+    changeEl.hidden = true;
+    changeEl.setAttribute("aria-labelledby", "ftChangeH");
+    barEl.parentNode.insertBefore(changeEl, barEl.nextSibling);
+  }
+
+  /**
+   * Give every panel its anchor, its group and its tier, and open each group
+   * with a heading inside the grid.
+   *
+   * A panel whose key is not in the chrome table keeps its anchor and is left
+   * where it is rather than dropped: the registry test fails on it, and a
+   * page that silently omitted it would make that test the only place a
+   * reader could learn the panel existed.
+   */
+  function mountChrome() {
+    let current = null;
+    const missing = [];
+    for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
+      const key = section.dataset.panel;
+      section.id = "panel-" + key;
+      const chrome = PANEL_CHROME[key];
+      const g = chrome ? GROUPS.find((x) => x.key === chrome.group) : null;
+      if (!chrome || !g) { missing.push(key); continue; }
+      section.dataset.group = chrome.group;
+      section.dataset.tier = chrome.tier;
+      if (chrome.group === current) continue;
+      current = chrome.group;
+      const h = el("h2", "ft-group");
+      h.id = g.hash;
+      h.tabIndex = -1;
+      h.dataset.group = g.key;
+      h.append(el("span", "ft-group-n", g.label));
+      h.append(el("span", "ft-group-b", g.blurb));
+      grid.insertBefore(h, section);
+    }
+    if (missing.length) {
+      console.error("flows-ticker: no chrome entry for panel(s): " + missing.join(", "));
+    }
+  }
+
+  /* The sticky bar's own height, written back so an anchor lands BELOW it
+     rather than under it. Measured rather than assumed: the identity row
+     wraps at three different widths and the strip scrolls rather than
+     wrapping, so no constant is right at more than one viewport. */
+  function syncBarHeight() {
+    if (!barEl || barEl.hidden) return;
+    const h = Math.round(barEl.getBoundingClientRect().height);
+    if (h > 0) grid.style.setProperty("--ft-bar-h", h + "px");
+  }
+
+  /* ---------- deep links -------------------------------------------
+
+     THERE WAS NO WAY TO SEND ANYONE A PANEL. Two anchor shapes now exist and
+     both are plain fragment ids, so the browser does the scrolling:
+
+       #ftg-<group>   a group heading
+       #panel-<key>   one panel
+
+     The controller's only job is to re-run the jump AFTER the card paints.
+     The grid is `hidden` while the fetch is in flight, so the browser's own
+     fragment scroll on load finds an element with no box and does nothing —
+     which is why an incoming link used to land at the top of the page.
+
+     OPENING THE ENLARGE DIALOG REFLECTS THE PANEL INTO THE HASH, and an
+     incoming hash does NOT open a dialog. A reader who was sent a link wants
+     the panel, at page width, in the context of the name; a modal they did
+     not ask for over a page they have not seen is a different thing. The
+     hash means the same panel either way, so the link says one thing. */
+  function hashTarget() {
+    let raw = "";
+    try { raw = decodeURIComponent(String(location.hash || "").slice(1)); }
+    catch { raw = String(location.hash || "").slice(1); }
+    if (!raw) return null;
+    /* getElementById, never querySelector('#' + raw): a hash is arbitrary
+       reader-supplied text and a selector throws on anything that is not a
+       valid identifier — which would take the whole paint down. */
+    const direct = document.getElementById(raw);
+    if (!direct || !grid.contains(direct)) return null;
+    return direct.classList.contains("ft-panel")
+      ? direct
+      : (direct.closest(".ft-panel") || direct);
+  }
+
+  function honourHash() {
+    const target = hashTarget();
+    if (!target) return;
+    syncBarHeight();
+    target.scrollIntoView({ block: "start" });
+    /* FOCUS FOLLOWS THE JUMP, or a keyboard reader lands visually on panel 14
+       and carries on tabbing from panel 1. */
+    if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
+    try { target.focus({ preventScroll: true }); } catch { target.focus(); }
+    markCurrentGroup(target.dataset ? target.dataset.group : null);
+  }
+
+  function markCurrentGroup(group) {
+    if (!jumpEl) return;
+    const entry = GROUPS.find((g) => g.key === group);
+    for (const a of jumpEl.querySelectorAll(".ft-jump-b")) {
+      if (entry && a.getAttribute("href") === "#" + entry.hash) {
+        a.setAttribute("aria-current", "true");
+      } else {
+        a.removeAttribute("aria-current");
+      }
+    }
+  }
+
+  /* WHICH GROUP THE READER IS IN, tracked by observation rather than by a
+     scroll handler doing arithmetic on every frame. Without
+     IntersectionObserver the strip simply never marks a current group, which
+     costs a highlight and nothing else — the anchors still work. */
+  function watchGroups() {
+    if (typeof IntersectionObserver !== "function") return;
+    const seen = new Map();
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        seen.set(e.target, e.isIntersecting ? e.boundingClientRect.top : null);
+      }
+      let best = null, bestTop = Infinity;
+      for (const [node, top] of seen) {
+        if (top === null) continue;
+        if (top < bestTop) { bestTop = top; best = node; }
+      }
+      if (best) markCurrentGroup(best.dataset.group);
+    }, { rootMargin: "-25% 0px -60% 0px" });
+    for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) io.observe(section);
+  }
+
+  /* history.replaceState rather than `location.hash = …`: assigning to the
+     hash pushes a history entry AND scrolls, so closing the enlarge dialog
+     would have jumped the page and left a trail of twenty back-button steps
+     behind a reader who opened twenty panels. */
+  function writeHash(value) {
+    try {
+      history.replaceState(null, "",
+        location.pathname + location.search + (value ? "#" + value : ""));
+    } catch { /* a browser that refuses is a browser without a deep link. */ }
+  }
+
+  /* ---------- the identity strip ------------------------------------ */
+
+  /**
+   * The price this whole card was measured against.
+   *
+   * THREE PANELS PUBLISH IT AND THE CARD'S TOP LEVEL DOES NOT. `levels`,
+   * `pricedMove` and `gamma` each carry the spot the pipeline resolved from
+   * the screener row, and each can be `unavailable` for its own reason — so
+   * the strip reads them in order and stops at the first that answers, and
+   * says which one it read. It does NOT fall back to the newest close on the
+   * score overlay: that is a different measurement, a settled close rather
+   * than the spot the levels were measured against, and quietly swapping one
+   * for the other is how a header comes to disagree with the panel under it.
+   */
+  function spotOf(card) {
+    for (const key of ["levels", "pricedMove", "gamma"]) {
+      const panel = card.panels && card.panels[key];
+      if (!panel || panel.status !== "ok") continue;
+      const v = isNum(panel.spot);
+      if (v !== null) return { v, from: key };
+    }
+    return null;
+  }
+
+  /** A header chip. `empty` tags WHY it is blank; a bare em dash is not a fact. */
+  function idChip(id, label, value, opts) {
+    const o = opts || {};
+    const node = $(id) || el("span", "fc-meta ft-id");
+    node.id = id;
+    node.className = "fc-meta ft-id" + (o.cls ? " " + o.cls : "");
+    node.replaceChildren();
+    if (label) node.append(document.createTextNode(label + " "));
+    node.append(el("b", null, value));
+    if (o.empty) node.setAttribute("data-empty", o.empty);
+    else node.removeAttribute("data-empty");
+    if (o.title) node.title = o.title;
+    else node.removeAttribute("title");
+    return node;
+  }
+
+  /**
+   * Name, price, side, score — and rank when the page can honestly state it.
+   *
+   * RANK IS NOT ON THIS PAYLOAD. It is published per side on the board
+   * (`rows[].r`); the card carries no copy of it, and this page fetches no
+   * board on load — deliberately, because two requests on every ticker view
+   * would be paid by every reader to serve the few who switch names. So the
+   * rank chip appears only once a board has actually been read (the name
+   * switcher reads both), and until then it is ABSENT rather than an em dash:
+   * a dash in a rank slot reads as "unranked", which is a claim about the
+   * name rather than about the payload.
+   */
+  function paintIdentity(card, chg) {
+    if (!headEl) return;
+    const score = isNum(card.score);
+    const spot = spotOf(card);
+    const ctx = card.panels && card.panels.context;
+    const chgPct = ctx && ctx.status === "ok" ? isNum(ctx.changePct) : null;
+
+    const price = idChip("ftPrice", "", spot === null ? DASH : "$" + spot.v.toFixed(2), {
+      empty: spot === null ? "unavailable" : null,
+      title: spot === null
+        ? "No panel on this card published a spot price: levels, priced move and gamma " +
+          "are all unavailable for this name today."
+        : "Spot as the " + spot.from + " panel resolved it, for the session of " +
+          fmtDate(card.sessionDate) + ".",
+    });
+    const day = idChip("ftChgPct", "", chgPct === null ? DASH : P.pct1(chgPct), {
+      cls: P.polarity(chgPct),
+      empty: chgPct === null ? "unavailable" : null,
+      title: chgPct === null
+        ? "The price context panel published no session change for this name, so the " +
+          "day's move is not stated rather than stated as flat."
+        : "Change against the previous close, from the price context panel.",
+    });
+
+    /* THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against
+       zero. A score of +1 with a band of ±1 is not a bullish name; it is a
+       name the board declined to rank, and calling it bullish in the header
+       is exactly the confident reading this product exists to refuse. */
+    const band = chg && chg.status === "ok" ? chg.band : null;
+    let sideText, sideCls, sideEmpty = null, sideTitle;
+    if (score === null) {
+      sideText = DASH;
+      sideCls = "is-null";
+      sideEmpty = "unavailable";
+      sideTitle = "This card carries no score, so it has no side.";
+    } else if (band === null) {
+      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
+      sideCls = P.polarity(score);
+      sideTitle = "No dead band was published on this card, so the side is stated " +
+        "against zero rather than against the board's own membership rule.";
+    } else if (Math.abs(score) <= band) {
+      sideText = "inside the dead band";
+      sideCls = "is-flat";
+      sideTitle = "Within ±" + band + POINTS(band) + " of zero, which is the band " +
+        "the board declines to rank inside.";
+    } else {
+      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
+      sideCls = P.polarity(score);
+      sideTitle = "Outside the published dead band of ±" + band + POINTS(band) + ".";
+    }
+    const side = idChip("ftSide", "", sideText,
+      { cls: sideCls, empty: sideEmpty, title: sideTitle });
+
+    /* THE MOVE RIDES IN THE HEADER, because it is the reading this page is
+       opened for and it must not scroll away with the block below. The gap
+       travels with it: a delta printed without its gap is the defect this
+       whole layer replaced. */
+    let d1Node = null;
+    if (chg && chg.status === "ok" && chg.d1) {
+      d1Node = idChip("ftD1", "", P.signed(chg.d1.v, (a) => String(a)) + " / " +
+        chg.d1.gap + (chg.d1.gap === 1 ? " session" : " sessions"), {
+        cls: P.polarity(chg.d1.v),
+        title: "Score points against the " + chg.d1.from + " session, the previous one " +
+          "that scored this name, " + chg.d1.gap + " sessions back in this card's window. " +
+          "Full working in the change block below.",
+      });
+    } else if ($("ftD1")) {
+      $("ftD1").remove();
+    }
+
+    /* INSERTED AFTER THE SCORE, NOT AT THE END OF THE HEADER. The emitted
+       markup runs name, score, conviction, regime, dates, switch — so
+       appending would have put the price, the day's move and the overnight
+       delta AFTER three pieces of metadata, and on a phone that is three
+       wrapped lines below the reading. Name, score, price, side, move first;
+       conviction, regime and the two dates after them. */
+    const anchor = $("ftConv") || $("ftSwitch");
+    for (const node of [price, day, side, d1Node]) {
+      if (!node) continue;
+      if (anchor) headEl.insertBefore(node, anchor);
+      else headEl.append(node);
+    }
+    paintRank();
+  }
+
+  /** Fill the rank chip once a board has been read. Before that, nothing. */
+  function paintRank() {
+    if (!headEl || !painted || !switchRows || !switchRows.length) return;
+    const me = switchRows.find((r) => r.t === painted.ticker);
+    if (!me || isNum(me.r) === null) return;
+    const sideCount = switchRows.filter((r) => r.side === me.side).length;
+    const chip = idChip("ftRank", "rank", me.r + " of " + sideCount, {
+      title: "Rank on today's " + (me.side === "short" ? "short" : "long") + " board, read " +
+        "from the board payload the name switcher fetched. It is not published on this card.",
+    });
+    const anchor = $("ftConv") || $("ftSwitch");
+    if (anchor) headEl.insertBefore(chip, anchor);
+    else headEl.append(chip);
+  }
+
+  /* ---------- what changed ------------------------------------------ */
+
+  const SESSIONS = (n) => n + (n === 1 ? " session" : " sessions");
+  /* THE UNIT TRAVELS WITH THE NUMBER, and it agrees with it. The score is a
+     bounded index — 100·tanh of a composite — so its differences are score
+     POINTS and never percent, and "1 score points" is the kind of seam that
+     makes a reader wonder who wrote the sentence. */
+  const POINTS = (n) => (Math.abs(n) === 1 ? " score point" : " score points");
+
+  const CROSSING = {
+    cleared: "Cleared the dead band — this name became actionable this session.",
+    faded: "Faded into the dead band — the exit signal.",
+    flipped: "Flipped sign — outside the band at both ends, on opposite sides.",
+  };
+
+  /**
+   * The block this page now opens with.
+   *
+   * IT IS A READING, SO IT CARRIES THE SAME THREE SILENCES AS A PANEL. "this
+   * card predates the overlay", "the pipeline published no track for this
+   * name" and "the two windows share no session" are three different facts
+   * about three different failures; each gets its own sentence and its own
+   * data-empty. One "no change data" would make them one.
+   *
+   * @returns the derivation, so the identity strip above can state the same
+   *   numbers without computing them a second time.
+   */
+  function paintChange(card) {
+    const chg = P.changeFrom(card.panels && card.panels.scoreOverlay);
+    if (!changeEl) return chg;
+    changeEl.replaceChildren();
+    changeEl.hidden = false;
+    const h = el("h2", null, "What changed");
+    h.id = "ftChangeH";
+    changeEl.append(h);
+
+    if (chg.status !== "ok") {
+      /* THE SAME TWO HEADINGS THE PANELS USE, and the reason VERBATIM under
+         them. deadPanel and quietPanel already teach this page's reader that
+         "Unavailable." is a failure and "Nothing to report." is a
+         measurement; a third vocabulary for the same distinction on the block
+         above them would be a third thing to learn. Capitalising the
+         publisher's sentence would also stop it being verbatim, which is the
+         property the suites check. */
+      const quiet = chg.status === "quiet";
+      const p = el("p", quiet ? "fc-quiet" : "fc-dead");
+      p.setAttribute("data-empty", quiet ? "quiet" : "unavailable");
+      p.append(el("strong", null, quiet ? "Nothing to report. " : "Unavailable. "));
+      p.append(document.createTextNode(chg.reason + "."));
+      changeEl.append(p);
+      return chg;
+    }
+
+    /* THE STALENESS LINE COMES FIRST AND NOTHING IS SAID BEFORE IT. A page
+       leading on change must not print a move as though it were this
+       morning's when the newest session in the window carries no score for
+       this name. */
+    if (chg.stale > 0) {
+      changeEl.append(el("p", "ft-chg-stale",
+        "This reading is " + SESSIONS(chg.stale) + " old: the newest session in the joined " +
+        "window is " + chg.window.to + " and it carries no score for this name. The newest " +
+        "score below is " + chg.at.d + "."));
+    }
+
+    /* THE EVENT, IF THERE WAS ONE. Everything else in this block is drift; a
+       dead-band crossing is the thing worth being told about, because the
+       band is the board's own membership rule. */
+    if (chg.cross) {
+      changeEl.append(el("p", "ft-chg-e", CROSSING[chg.cross]));
+    } else if (chg.crossKnown) {
+      const tag = el("p", "ft-chg-e is-quiet", chg.inside
+        ? "No crossing — inside the dead band at both ends."
+        : "No crossing — outside the dead band at both ends, on the same side.");
+      tag.setAttribute("data-empty", "quiet");
+      changeEl.append(tag);
+    } else {
+      const tag = el("p", "ft-chg-e is-quiet", chg.band === null
+        ? "No dead band was published on this card, so whether this move crossed one " +
+          "cannot be stated — it is unknown, not absent."
+        : "Only one session in this window carries a score for this name, so there is no " +
+          "crossing to state.");
+      tag.setAttribute("data-empty", chg.band === null ? "unavailable" : "quiet");
+      changeEl.append(tag);
+    }
+
+    /* THE HEADLINE. The sign is in the glyph before it is in the hue, and the
+       gap is in the same sentence as the delta. */
+    const lead = el("p", "ft-chg-lead");
+    if (chg.d1) {
+      lead.append(el("span", "ft-chg-v " + P.polarity(chg.d1.v),
+        P.signed(chg.d1.v, (a) => String(a))));
+      lead.append(document.createTextNode(
+        (chg.d1.v === 0
+          ? POINTS(chg.d1.v).trim() + " — unchanged since "
+          : POINTS(chg.d1.v).trim() + " since ") +
+        chg.d1.from + ", " + SESSIONS(chg.d1.gap) + " earlier" +
+        (chg.d1.gap === 1
+          ? ". "
+          : " — this name carries no score for the " + SESSIONS(chg.d1.gap - 1) +
+            " in between, so the move is not an overnight one. ") +
+        "It stands at " + P.signed(chg.at.score, (a) => String(a)) + " on " + chg.at.d + "."));
+    } else {
+      lead.append(el("span", "ft-chg-v " + P.polarity(chg.at.score),
+        P.signed(chg.at.score, (a) => String(a))));
+      lead.append(document.createTextNode(
+        POINTS(chg.at.score).trim() + " on " + chg.at.d +
+        ". No earlier session in this window carries a score " +
+        "for this name, so there is no move to state — which is not a move of zero."));
+    }
+    changeEl.append(lead);
+
+    changeEl.append(P.statList([
+      ["Move", chg.d1 === null ? DASH
+        : P.signed(chg.d1.v, (a) => String(a)) + POINTS(chg.d1.v),
+      chg.d1 === null ? "is-null" : P.polarity(chg.d1.v)],
+      ["Sessions apart", chg.d1 === null ? DASH : String(chg.d1.gap)],
+      ["Now", P.signed(chg.at.score, (a) => String(a)) + POINTS(chg.at.score),
+        P.polarity(chg.at.score)],
+      ["Run", chg.run === 0 ? "0 — at neutral"
+        : (chg.runCapped ? "≥ " : "") + SESSIONS(chg.run)],
+      ["Window high", P.signed(chg.ext.hi, (a) => String(a)) + " on " + chg.ext.hiAt],
+      ["Window low", P.signed(chg.ext.lo, (a) => String(a)) + " on " + chg.ext.loAt],
+      ["Dead band", chg.band === null ? DASH : "±" + chg.band + POINTS(chg.band)],
+    ]));
+
+    /* THE RUN, and the two ways it can be shorter than the truth. */
+    let runText;
+    if (chg.run === 0) {
+      runText = "The newest score is exactly zero — the centre of the dead band, which " +
+        "is a reading this pipeline assigns and not an absence.";
+    } else {
+      const runSide = chg.at.score < 0 ? "bearish" : chg.at.score > 0 ? "bullish" : "neutral";
+      runText = (chg.runCapped ? "At least " : "") + chg.run +
+        (chg.run === 1 ? " scored session" : " consecutive scored sessions") +
+        " on the " + runSide + " side" +
+        (chg.runCapped
+          ? ", which is as far back as this card's own window reaches — the run may be older."
+          : chg.runBroken
+            ? ", counted back to a session this name carries no score for. The run is not " +
+              "stepped over that gap: continuity nobody measured is not continuity."
+            : ".");
+    }
+    changeEl.append(el("p", "fc-note", runText));
+
+    /* THE WINDOW EVERYTHING ABOVE IS MEASURED IN, named once and in its own
+       unit. `gap` counts sessions of the JOINED window — the sessions this
+       card's price history and the score archive have in common — not
+       sessions of the score track's own calendar. Where the price window is
+       the shorter of the two the counts differ, and a reader told "4
+       sessions" without being told which calendar has been given a number
+       with no unit. */
+    changeEl.append(el("p", "fc-note",
+      "Derived from the " + SESSIONS(chg.window.sessions) + " between " + chg.window.from +
+      " and " + chg.window.to + " that this card's price window shares with the score " +
+      "archive, " + chg.window.scored + " of which carry a score for this name. Every " +
+      "session count above counts THOSE sessions. The series itself is in the " +
+      "score-over-price panel below."));
+
+    return chg;
+  }
+
+  /** Build the chrome once, before the first paint. */
+  function installWorkspace() {
+    installWorkspaceStyle();
+    buildBar();
+    mountChrome();
+    watchGroups();
+    window.addEventListener("hashchange", honourHash);
+  }
+
+  function installWorkspaceStyle() {
+    if (document.getElementById("ftWorkspaceCSS")) return;
+    const style = document.createElement("style");
+    style.id = "ftWorkspaceCSS";
+    style.textContent = WORKSPACE_CSS;
+    document.head.appendChild(style);
+  }
+
   function paint(card) {
     painted = card;
     if (headEl) headEl.hidden = false;
+    if (barEl) barEl.hidden = false;
     grid.hidden = false;
     if (picker) picker.hidden = true;
 
@@ -4343,7 +5264,8 @@
     const badge = $("ftScore");
     badge.textContent = score === null ? DASH
       : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
-    badge.className = "fc-score " + (score === null ? "" : score < 0 ? "is-neg" : "is-pos");
+    badge.className = "fc-score " +
+      (score === null ? "" : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat");
     const conv = isNum(card.conviction);
     $("ftConv").textContent = conv === null ? DASH : conv + " conviction";
     const regime = card.regime && card.regime.label;
@@ -4352,8 +5274,22 @@
     $("ftDates").textContent =
       "session " + fmtDate(card.sessionDate) + " \u00b7 built " + fmtDate(card.generatedAt);
 
+    /* CHANGE BEFORE DETAIL. paintChange returns its own derivation so the
+       identity strip states the same numbers rather than deriving them a
+       second time — two derivations of one move is two chances for the
+       header and the block under it to disagree about the same name. */
+    const chg = paintChange(card);
+    paintIdentity(card, chg);
+
     drawAll(card, "grid");
     setStale(assessAge(card));
+
+    /* AFTER THE PANELS EXIST, NOT BEFORE. The grid is `hidden` while the card
+       is in flight, so the browser's own fragment scroll on load lands on an
+       element with no box and does nothing at all — which is why a deep link
+       used to drop the reader at the top of the page. */
+    syncBarHeight();
+    honourHash();
 
     statusEl.textContent = (card.ticker || "This name") +
       " \u00b7 every panel the card carries, drawn at page width.";
@@ -4394,6 +5330,10 @@
             getJSON("/api/flows/board?side=short").catch(() => null),
           ]);
           switchRows = boardRows(long, short);
+          /* THE ONLY MOMENT THIS PAGE CAN HONESTLY STATE A RANK. It is a
+             board field and the card carries no copy of it; now that a board
+             has actually been read, the chip can be filled. */
+          paintRank();
         }
         if (!switchRows.length) {
           /* NOT AN ERROR AND NOT A BLANK LIST. The boards failed or are not
@@ -4417,6 +5357,11 @@
     if (!picker) return;
     grid.hidden = true;
     if (headEl) headEl.hidden = true;
+    /* THE INDEX GOES WITH THE PANELS IT INDEXES. Leaving the jump strip stuck
+       to the top of a picker would offer five anchors to a grid that is
+       `hidden` — every one of them a link to nothing. */
+    if (barEl) barEl.hidden = true;
+    if (changeEl) changeEl.hidden = true;
     picker.hidden = false;
 
     /* THE WAY BACK, and only when there is one. Opened from a name, the
@@ -4432,6 +5377,9 @@
           picker.hidden = true;
           grid.hidden = false;
           if (headEl) headEl.hidden = false;
+          if (barEl) barEl.hidden = false;
+          if (changeEl && painted) changeEl.hidden = false;
+          syncBarHeight();
           const h = document.getElementById("ftTicker");
           if (h) h.focus();
         };
@@ -4479,6 +5427,66 @@
     return out;
   }
 
+  /**
+   * Why this name has no card, IN THE FUNNEL PAYLOAD'S OWN TERMS.
+   *
+   * `st` is the stage the pipeline stopped this name at, and the two that
+   * matter here read completely differently to a reader: "gated" is a rule
+   * that fired before any number existed, and every other stage means the
+   * name was allowed through and did not get far enough. Collapsing them into
+   * one apologetic sentence is what the old copy did.
+   *
+   * NOTHING IS INFERRED FROM AN ABSENCE. The calendar is capped, so a name
+   * with no row in it may have been shed rather than never gated — and this
+   * says so rather than concluding it was not gated, which would be the
+   * reassuring guess.
+   */
+  function sayWhyAbsent(ticker, events) {
+    const lead = ticker + " is not on today's board, so no card was built for it. ";
+    const rows = events && Array.isArray(events.rows) ? events.rows : null;
+    const row = rows ? rows.find((r) => r && String(r.t).toUpperCase() === ticker) : null;
+
+    const parts = [lead];
+    if (!rows) {
+      parts.push(
+        "The earnings calendar could not be read just now, so this page cannot say which " +
+        "stage of the funnel it stopped at. It is not on the watch list either: that list " +
+        "holds only names that were scored and landed inside the dead band.");
+    } else if (row && row.st === "gated") {
+      const dte = isNum(row.dte);
+      parts.push(
+        "It reports on " + (row.d ? String(row.d) : "a date the calendar did not publish") +
+        (dte === null
+          ? ", with no calendar-day count published beside it, "
+          : ", " + dte + " calendar " + (dte === 1 ? "day" : "days") + " from " +
+            (events.gateOrigin || "the run's own Eastern date") + ", ") +
+        "and the earnings gate removed it BEFORE the composite ran" +
+        (isNum(events.gateDays) === null
+          ? ". " : " \u2014 the gate covers day 0 to day " + events.gateDays + ". ") +
+        "So there is no score under this name at all today, not a low one. It is not on " +
+        "the watch list either: that list holds only names that were scored and landed " +
+        "inside the dead band.");
+    } else if (row) {
+      parts.push(
+        "The funnel stopped it at \u201c" + String(row.st || "an unclassified stage") +
+        "\u201d: it cleared the earnings gate and did not reach the board. Cards are built " +
+        "only for board names, so there is nothing to draw for it today.");
+    } else {
+      parts.push(
+        "The earnings calendar carries no row for this name, so this page cannot say which " +
+        "stage of the funnel it stopped at \u2014 and that calendar is capped, so its " +
+        "silence is not evidence that the name was never gated.");
+    }
+
+    statusEl.replaceChildren(document.createTextNode(parts.join("")));
+    /* THE WAY ON, because the page a reader wants next is the funnel itself
+       and the old copy sent them nowhere. */
+    const link = el("a", "ft-link");
+    link.href = "/flows/events/";
+    link.textContent = " The earnings calendar and the whole funnel.";
+    statusEl.append(link);
+  }
+
   function start() {
     const ticker = readTicker();
 
@@ -4507,25 +5515,42 @@
     getJSON("/api/flows/card?t=" + encodeURIComponent(ticker)).then((card) => {
       if (!card) return;
       if (card.status === "pending" || !card.panels) {
-        /* TWO DIFFERENT FACTS THAT LOOK IDENTICAL FROM HERE, and the boards
-           are fetched ONLY to tell them apart. "Not on the board" is a
-           permanent property of this name today; "the card has not landed"
-           is a race that resolves itself in a minute. Telling a reader the
-           wrong one costs them either a pointless reload or a name they
-           give up on. */
+        /* THREE DIFFERENT FACTS THAT LOOK IDENTICAL FROM HERE, and the two
+           boards plus the funnel are fetched ONLY to tell them apart. "The
+           card has not landed" is a race that resolves itself in a minute;
+           "not on the board" is a permanent property of this name today; and
+           "the earnings gate removed it before the composite ran" is a THIRD
+           thing, which is the common case rather than the rare one — 57 of
+           the 60 rows on a typical funnel payload are gated.
+
+           THE SENTENCE THIS REPLACES WAS WRONG IN BOTH HALVES for exactly
+           those 57 names. It said cards are built only for the names the
+           board publishes "so there is nothing to show for this name today —
+           it may be on the watch list". A gated name is absent because the
+           board was FORBIDDEN to score it, not because it scored poorly; and
+           it cannot be on the watch list, which by construction holds only
+           names that WERE scored and landed inside the dead band. Every
+           ticker on /flows/events/ links here, so that sentence was the
+           landing page for most of the funnel.
+
+           THE FUNNEL PAYLOAD IS SAME-ORIGIN, ALREADY BUILT AND ALREADY
+           CACHED — no vendor call, and the cost is paid only on the path
+           where the page has nothing else to say. */
         return Promise.all([
           getJSON("/api/flows/board?side=long").catch(() => null),
           getJSON("/api/flows/board?side=short").catch(() => null),
-        ]).then(([long, short]) => {
+          getJSON("/api/flows/events").catch(() => null),
+        ]).then(([long, short, events]) => {
           const rows = boardRows(long, short);
           const onBoard = rows.some((r) => r.t === ticker);
-          statusEl.textContent = onBoard
-            ? "The board published " + ticker + " but its card has not landed yet. " +
-              "Cards are published after the boards, so one can briefly lag its row."
-            : ticker + " is not on today's board. Cards are built only for the " +
-              "names the board publishes, so there is nothing to show for this " +
-              "name today \u2014 it may be on the watch list.";
-          if (!onBoard && rows.length) {
+          if (onBoard) {
+            statusEl.textContent =
+              "The board published " + ticker + " but its card has not landed yet. " +
+              "Cards are published after the boards, so one can briefly lag its row.";
+            return;
+          }
+          sayWhyAbsent(ticker, events);
+          if (rows.length) {
             showPicker(rows, "These are the names that do have a card today.");
           }
         });
@@ -4548,5 +5573,6 @@
     });
   }
 
+  installWorkspace();
   start();
 })();

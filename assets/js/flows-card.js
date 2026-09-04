@@ -88,7 +88,8 @@
     const badge = $("fcScore");
     badge.textContent = score === null ? DASH
       : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
-    badge.className = "fc-score " + (score === null ? "" : score < 0 ? "is-neg" : "is-pos");
+    badge.className = "fc-score " +
+      (score === null ? "" : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat");
     const conv = isNum(card.conviction);
     $("fcConv").textContent = conv === null ? DASH : conv + " conviction";
     const regime = card.regime && card.regime.label;
