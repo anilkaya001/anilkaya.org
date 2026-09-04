@@ -141,7 +141,20 @@ const CEILING_KIB = {
      12k of headroom is what the two new regions need to be maintainable
      rather than golfed. */
   overviewPage: 312,
-  sidePage: 300,
+  /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COSTS 5k ON EVERY ROUTE.
+     The board was at 297k and the tab, the empty panel and the loader took
+     it to 302k. Raising the number is the honest move rather than shaving
+     five kilobytes of comment out of flows-board.js to fit under a line
+     nobody re-derived — this file's own header calls that degrading the
+     thing this codebase is strictest about.
+
+     WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
+     is 55k and arrives only when a reader opens the panel, so it is absent
+     from a measurement of what a route loads ON ARRIVAL — which is what
+     this suite measures and should keep measuring. It is a real cost, paid
+     on open, by the readers who asked for it. Stating it here is what stops
+     a lazy import from looking free. */
+  sidePage: 306,
   watchPage: 240,
   deskPage: 135,
   /* SET AT FIRST MEASUREMENT, 2026-09-04, against 102k — nav 3k, flows-ui 25k,
@@ -176,12 +189,24 @@ const CEILING_KIB = {
      costs the browser nothing — not to shorten what the page says. */
   askPage: 70,
   strategyPage: 120,
-  trackPage: 115,
-  marketPage: 95,
-  unusualPage: 85,
-  eventsPage: 85,
-  politicalPage: 55,
-  historyPage: 45,
+  trackPage: 118,
+  /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
+     was the tightest of the mid-weight routes at 95k against 95, so it is
+     the one the assistant pushed over. See sidePage above for why the
+     number moves rather than the comment budget, and for what this
+     measurement deliberately does NOT count. */
+  marketPage: 102,
+  /* THE +7 ON THIS AND THE FOUR ENTRIES BELOW IS THE DOCKED ASSISTANT.
+     assets/js/flows-dock.js is 5k and now ships on every gated route but
+     /flows/ask, and these were the routes with less than that in hand. The
+     reasoning is sidePage's, once: the number moves rather than the comment
+     budget, and the 55k renderer the dock fetches on first open is
+     deliberately NOT in this measurement, which is of what a route loads on
+     arrival. */
+  unusualPage: 92,
+  eventsPage: 92,
+  politicalPage: 62,
+  historyPage: 52,
   loginPage: 12,
 };
 

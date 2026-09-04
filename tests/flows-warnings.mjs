@@ -164,6 +164,27 @@ const CHECKS_ON_CLEAN = 13;
      "above is measured rather than merely unasked");
 }
 
+{
+  /* A NUMERATOR PRINTED ALONE READS AS THE WHOLE SET. Nothing in a bare
+     `checked: 7` says whether seven is every question the module carries
+     or seven of thirteen, so a store holding two keys would render the
+     same clean bill of health as a complete one — the truncation that
+     does not say it truncated, in the one place whose whole job is to say
+     so. A caller keeping its own copy of the total is the drift this
+     codebase keeps consolidating, so the module states it. */
+  const full = run(clean());
+  eq(full.questions, CHECKS_ON_CLEAN,
+     "the module says how many questions it carries, not only how many it could ask");
+  eq(full.checked, full.questions,
+     "which on a complete and healthy store is the same number");
+  const thin = run({ long: clean().long, short: clean().short });
+  eq(thin.questions, CHECKS_ON_CLEAN,
+     "a store holding two keys is measured against that same denominator");
+  ok(thin.checked < thin.questions,
+     "so a caller can say how much of the store went unasked rather than printing a count " +
+     "with nothing to read it against");
+}
+
 /* ---------- 2. absence is a silence, never a contradiction -------- */
 {
   for (const [label, store] of [
@@ -262,6 +283,27 @@ const CHECKS_ON_CLEAN = 13;
       "naming both surfaces, because a drift is a fact about a pair");
     checks++;
   }
+}
+{
+  /* THE PRINTED INTERVAL AND THE SEVERITY MUST NAME THE SAME THRESHOLD.
+     Twenty-three and a half hours is half an hour short of the boundary
+     this module defines as a session having closed since, and a rounded
+     interval printed it as the 24 that boundary IS — a sentence telling a
+     reader the two keys are a whole session apart under a badge telling
+     them they are not, with the module's own exported threshold as the
+     thing they would check it against. Flooring is what stops a figure
+     crossing a line the gap did not cross. */
+  const s = clean();
+  s.market.generatedAt = "2026-09-03T09:45:02.000Z";
+  const w = byId(run(s), "stamp:drift");
+  eq(w.severity, "caution",
+     "twenty-three and a half hours has not closed a session, so it is not blocking");
+  eq(w.n.hours, 23,
+     "and the gap is floored rather than rounded, so it cannot report the " +
+     `${THRESHOLDS.driftBlockingHours} that would mean it had`);
+  ok(!new RegExp(`${THRESHOLDS.driftBlockingHours} hours apart`).test(w.say),
+     "and the sentence a reader actually meets never states the blocking boundary underneath " +
+     "a caution: a figure that rounds across a threshold has stopped being the measurement");
 }
 {
   const s = clean();
@@ -466,6 +508,27 @@ const CHECKS_ON_CLEAN = 13;
   checks++;
 }
 
+{
+  /* THE FALL IS MEASURED AND ITS CAUSE IS NOT. Both sides publish
+     `cleared` — 44 and 53 of the 100 scored got PAST the dead band and the
+     earnings gate on this store — and `shed`, which says our own row cap
+     is what emptied the page. A sentence naming the band or the gate
+     sends a reader to widen a threshold that removed nothing, which is a
+     warning doing the exact damage it was written to undo. */
+  const s = clean();
+  s.long.memory.named = 40; s.short.memory.named = 40;
+  s.long.rows = []; s.short.rows = [];
+  s.long.shed = 44; s.short.shed = 53;
+  const w = byId(run(s), "population:shrank");
+  ok(w !== null, "a board that emptied against a prior of 80 is still reported");
+  ok(!/which is the dead band or the earnings gate removing names/.test(w.say),
+     "but the sentence does not assert a cause this check never measured: 97 names cleared " +
+     "both thresholds on this store and the row cap is what shed them");
+  ok(/cannot tell apart/.test(w.say),
+     "it names both candidates and says these two row counts do not separate them, which is " +
+     "what the check's own doc comment already said and the sentence had stopped saying");
+}
+
 /* ---------- 8. a measured zero is not an absent count ------------- */
 {
   /* THE WHOLE HOUSE RULE IN ONE PAIR OF STORES. `named: 0` is a prior
@@ -534,7 +597,32 @@ const CHECKS_ON_CLEAN = 13;
   eq(w.severity, "caution",
      "caution: the count is a true count of what we received and a false count of what exists");
   eq(w.n.limit, 200, "the ceiling quoted");
-  eq(w.n.carried, 2, "beside the rows the payload actually carries, which are two different numbers");
+  ok(/at least 200/.test(w.say),
+     "and the floor the sentence states is that limit — the same number shared/flows-ask.js " +
+     "states for the same payload, so one fact does not reach a reader as two");
+  ok(!("carried" in w.n),
+     "while the page's own row count is NOT quoted as that floor: shared/flows-alerts.js caps " +
+     "the published page at ALERT_ROWS and publishes `shed` beside it, so its length is a " +
+     "ceiling whose size we KNOW, and printing it as the floor of a population we do not know " +
+     "is the page/population confusion this warning exists to name, running backwards");
+}
+{
+  /* THE CEILING IS STATED BY TWO FIELDS AND THE ROWS ARE NOT ONE OF THEM.
+     Requiring a third field let an unreadable rows array take a fully
+     measured claim down with it, while the inherited check — which reads
+     the SAME flag — went on warning about the surface cut from it: the
+     page then carried the derived caveat and not the one it derives from. */
+  const s = clean();
+  s.alerts.vendorTruncated = true;
+  delete s.alerts.rows;
+  const out = run(s);
+  const w = byId(out, "ceiling:alerts");
+  ok(w !== null,
+     "an alerts payload whose rows arrived in a shape this module cannot read still gets its " +
+     "ceiling named, because vendorLimit and vendorTruncated state it between them");
+  eq(w.n.limit, 200, "from the two fields that actually carry the claim");
+  ok(byId(out, "ceiling:inherited") !== null,
+     "and the surface cut from that read is warned about beside it rather than instead of it");
 }
 {
   const s = clean();
@@ -551,7 +639,13 @@ const CHECKS_ON_CLEAN = 13;
   s.alerts.vendorTruncated = true;
   const w = byId(run(s), "ceiling:inherited");
   eq(w.n.limit, 200, "the movers band inherits the ceiling of the read it was cut from");
-  eq(w.n.windows, 2, "and its own window count is stated beside it as the floor it is");
+  eq(w.n.ranked, 2,
+     "and how many windows it ranks, named as a ranking rather than as a floor: alertBand " +
+     "caps the band and publishes `shed` beside it, so its length is a number we know exactly");
+  ok(/largest of what arrived/.test(w.say),
+     "because what the vendor's ceiling costs the band is not its length but its CLAIM — a " +
+     "ranking cut from a truncated read is the largest of what arrived, and the panel above " +
+     "it calls that the largest of the session");
   assert.deepEqual(w.sources.slice().sort(), ["flowalerts", "movers"],
     "this is the check that needs two payloads open at once and can be written in neither renderer");
   checks++;
@@ -584,6 +678,11 @@ const CHECKS_ON_CLEAN = 13;
   eq(byId(out, "ceiling:news"), null,
      "a truncation flag set true beside a return well under the request is someone else's " +
      "defect, and this module re-reads the two counts rather than repeating it as a warning");
+  eq(out.checked, CHECKS_ON_CLEAN - 1,
+     "and the check DECLINES rather than clearing: returning \"asked, nothing wrong\" would " +
+     "count the question among the ones the store answered, letting a caller print a clean " +
+     "bill of health over a key that is published and holds no coherent reading — which is " +
+     "the unreadable silence reported as the quiet one");
   const t = clean();
   delete t.news.requested;
   eq(run(t).checked, CHECKS_ON_CLEAN - 1, "and with no request count there is nothing to compare against");
@@ -633,6 +732,14 @@ const CHECKS_ON_CLEAN = 13;
      "the product's stated rule false in the one way a reader cannot see");
   eq(w.n.wider, 2, "the wider band");
   eq(w.n.narrower, 1, "and the narrower one");
+  ok(/dead band of ±2/.test(w.say),
+     "and the sign travels with the number, because `deadBand` is the HALF-width " +
+     "partitionSides compares |score| against: a bare 2 reads as a band spanning two points " +
+     "when it spans four, and a reader checking this sentence against the boards by hand " +
+     "would put a score of 1.5 outside a band that holds it");
+  ok(/on ±1,/.test(w.say),
+     "on both ends of the comparison rather than only the first, since it is the pair that " +
+     "is being read");
 }
 {
   const s = clean();

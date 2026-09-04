@@ -639,6 +639,19 @@
   var app = document.getElementById("askApp");
   if (!app) return;
 
+  /* TWO MOUNTS, ONE RENDERER. The route draws the briefing and the question
+     box; the docked rail on every other page draws the question box alone.
+     They are the same code because they are the same product — a second
+     implementation of the guard notice, the four fallback sentences and the
+     three silences is exactly how two surfaces come to disagree about what
+     the model was allowed to do.
+
+     THE DOCK DOES NOT REPEAT THE BRIEFING. A rail is 380px wide and the
+     briefing is three regions of findings; drawn there it would be a worse
+     copy of a page one click away, and it would fetch a key the route has
+     already fetched. So the dock skips the regions and asks. */
+  var DOCKED = app.getAttribute("data-mode") === "dock";
+
   /* THE STATUS LINE IS MOUNTED IF THE SHELL DID NOT CARRY ONE, because it is
      the channel this page reports its own failures on and a page with no such
      channel fails invisibly — which reads exactly like a quiet session.
@@ -1111,6 +1124,8 @@
       setAsking(false);
     });
   });
+
+  if (DOCKED) return;
 
   optional("/api/flows/brief").then(function (brief) {
     if (gated) return;

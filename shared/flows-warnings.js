@@ -284,7 +284,16 @@ function checkStampDrift(s) {
   const { low: oldest, high: newest } = extremes(stamps, (x) => x.ms);
   const gap = newest.ms - oldest.ms;
   if (gap < THRESHOLDS.driftCautionHours * HOUR) return [];
-  const hours = Math.round(gap / HOUR);
+  /* FLOORED, NOT ROUNDED, because the printed interval and the severity
+     beside it have to agree about which threshold the gap crossed. Rounding
+     sends a spread of twenty-three and a half hours to the page as "24
+     hours apart" — 24 being the exact number driftBlockingHours uses to
+     mean the older surface describes a session that has since closed —
+     while the severity stays caution, so the sentence tells a reader the
+     two keys are a whole session apart and the badge tells them they are
+     not. Flooring makes the two consistent by construction: the sentence
+     reaches 6 exactly when the check fires and 24 exactly when it blocks. */
+  const hours = Math.floor(gap / HOUR);
   const severity = gap >= THRESHOLDS.driftBlockingHours * HOUR ? "blocking" : "caution";
   return [warn(severity, "stamp:drift",
     KEY[oldest.slot] + " was generated " + oldest.at + " and " + KEY[newest.slot] + " " +
@@ -460,11 +469,20 @@ function checkPopulation(s) {
     : "The " + sides[0] + " board holds " + held + " " + plural(held, "name", "names");
   const n = { held, prior, fellPct };
   if (priorSession !== null) n.priorSession = priorSession;
+  /* THE FALL IS MEASURED AND ITS CAUSE IS NOT, WHICH THE DOC ABOVE SAYS
+     AND THE SENTENCE HAD STOPPED SAYING. `cleared` and `shed` sit on these
+     same two payloads, so the store where both sides cleared most of the
+     pool and published none of it is our own row cap emptying the page —
+     not the band, not the gate. Naming either of them there sends a reader
+     to widen a threshold that removed nothing, which is a warning doing
+     the exact damage it was written to undo. Both candidates are stated
+     and neither is chosen, because these two row counts do not separate
+     them. */
   return [warn("caution", "population:shrank",
     subject + " against " + prior + " on the " +
     (priorSession === null ? "previous" : priorSession) + " board, a fall of " + fellPct +
-    "%, which is the dead band or the earnings gate removing names rather than the market " +
-    "going quiet.",
+    "%, and a fall this size comes from the dead band or the earnings gate cutting deeper " +
+    "as readily as from a quieter tape, which these two row counts cannot tell apart.",
     n, sources)];
 }
 
@@ -480,6 +498,25 @@ function checkPopulation(s) {
  * the comparison a reader makes across sessions is then between two
  * ceilings rather than between two markets.
  *
+ * THE NUMBER THE SENTENCE QUOTES IS THE VENDOR'S LIMIT AND NEVER OUR OWN
+ * ROW COUNT, because the two ceilings are opposite facts wearing the same
+ * grammar. The vendor's leaves the population UNKNOWN and at least as
+ * large as what arrived; ours leaves it KNOWN and states exactly what it
+ * dropped, which is why shared/flows-alerts.js publishes `cap` and `shed`
+ * beside the rows and sets ALERT_ROWS to 60 against a vendor limit of 200.
+ * A truncated read that shed 140 rows into a 60-row page and then called
+ * 60 "a floor" would take the one ceiling whose size we know and print it
+ * as the one whose size we do not — the population/page confusion this
+ * check exists to name, running backwards. The page below already prints
+ * its row count; the only thing that count cannot say about itself is the
+ * ceiling above it, so that is what the sentence says.
+ *
+ * AND SO THE ROWS ARE NOT READ AT ALL. `vendorLimit` and `vendorTruncated`
+ * state the ceiling between them, and requiring a third field would let a
+ * rows array that arrived in an unreadable shape take a measured claim
+ * down with it while checkInheritedCeiling, which reads the same flag,
+ * went on warning about the surface cut from it.
+ *
  * THE FLAG IS A BOOLEAN AND IS TESTED AS ONE. `num` is for readings;
  * an absent flag is not `false`, so a payload that carries no claim
  * either way stops this check rather than clearing it.
@@ -488,16 +525,14 @@ function checkAlertCeiling(s) {
   const al = answered(s.alerts);
   if (!al) return null;
   const limit = num(al.vendorLimit);
-  const rows = rowsOf(s.alerts);
-  if (limit === null || rows === null || typeof al.vendorTruncated !== "boolean") return null;
+  if (limit === null || typeof al.vendorTruncated !== "boolean") return null;
   if (al.vendorTruncated !== true) return [];
-  const carried = rows.length;
   return [warn("caution", "ceiling:alerts",
-    "flowalerts hit the vendor's " + limit + "-row ceiling on the read that built it, so " +
-    "the " + carried + " " + plural(carried, "window", "windows") + " it carries " +
-    plural(carried, "is", "are") + " a floor rather than a count and today's total cannot " +
-    "be compared with another session's as a measurement.",
-    { limit, carried },
+    "flowalerts hit the vendor's " + limit + "-row ceiling on the read that built it, so the " +
+    "windows flagged this session are unknown in number and at least " + limit + ", and the " +
+    "row count on the page below is what our own cap kept of that read rather than a count " +
+    "of the session.",
+    { limit },
     [KEY.alerts])];
 }
 
@@ -519,7 +554,15 @@ function checkNewsCeiling(s) {
   const requested = num(nw.requested);
   const returned = num(nw.returned);
   if (requested === null || returned === null || typeof nw.atVendorLimit !== "boolean") return null;
-  if (nw.atVendorLimit !== true || returned < requested) return [];
+  if (nw.atVendorLimit !== true) return [];
+  /* AND THE DISAGREEMENT IS A DECLINE RATHER THAN A CLEAN BILL. Returning
+     [] here counts the question among the ones the store answered, so a
+     caller printing "nothing is wrong" beside a full `checked` would be
+     certifying a key whose own two numbers refute each other. Published,
+     and no coherent reading inside it, is the unreadable silence — and
+     reporting it as the quiet one is the collapse every other line in
+     this module is written to prevent. */
+  if (returned < requested) return null;
   return [warn("caution", "ceiling:news",
     "news returned " + returned + " " + plural(returned, "headline", "headlines") +
     " against the " + requested + " it requested, so the response ended at the vendor's own " +
@@ -578,13 +621,19 @@ function checkInheritedCeiling(s) {
   const bandRows = band && Array.isArray(band.rows) ? band.rows : null;
   if (limit === null || bandRows === null || typeof al.vendorTruncated !== "boolean") return null;
   if (al.vendorTruncated !== true) return [];
-  const windows = bandRows.length;
+  const ranked = bandRows.length;
+  /* THE BAND'S LENGTH IS A CHOICE AND NOT A FLOOR, for the reason
+     checkAlertCeiling sets out above: alertBand publishes `cap` and `shed`
+     beside these rows, so how many it ranks is a number we know exactly.
+     What the vendor's ceiling costs the band is not its length but its
+     CLAIM — a ranking cut from a truncated read is the largest of what
+     arrived, and the panel calls it the largest of the session. */
   return [warn("caution", "ceiling:inherited",
     "The movers per-contract premium band is cut from a flowalerts read that hit the " +
-    "vendor's " + limit + "-row ceiling, so the " + windows + " contract " +
-    plural(windows, "window", "windows") + " it ranks " + plural(windows, "is", "are") +
-    " a floor rather than the session's largest.",
-    { limit, windows },
+    "vendor's " + limit + "-row ceiling, so the " + ranked + " contract " +
+    plural(ranked, "window", "windows") + " it ranks " + plural(ranked, "is", "are") +
+    " the largest of what arrived under that ceiling rather than the largest of the session.",
+    { limit, ranked },
     [KEY.movers, KEY.alerts])];
 }
 
@@ -653,9 +702,18 @@ function checkDeadBand(s) {
   if (seen.length < 2) return null;
   const { low: narrow, high: wide } = extremes(seen, (x) => x.v);
   if (narrow.v === wide.v) return [];
+  /* THE SIGN TRAVELS WITH THE NUMBER, because `deadBand` is a HALF-width
+     and reads as a whole one. partitionSides holds a name inside the band
+     on `Math.abs(score) < deadBand` and cuts the sides at `>= deadBand` and
+     `<= -deadBand`, so the band published as 2 spans four points of score
+     rather than two — which is why the pipeline's own log line writes it
+     "+-2" instead of "2". A bare "a dead band of 2" invites a reader to
+     take the number for the band's width and place a score of 1.5 outside
+     a band that in fact holds it, and this sentence exists to be checked
+     against the boards by hand. */
   return [warn("blocking", "band:disagree",
-    KEY[wide.slot] + " partitions on a dead band of " + wide.v + " and " + KEY[narrow.slot] +
-    " on " + narrow.v + ", so the same score puts a name on a board by one surface and " +
+    KEY[wide.slot] + " partitions on a dead band of ±" + wide.v + " and " + KEY[narrow.slot] +
+    " on ±" + narrow.v + ", so the same score puts a name on a board by one surface and " +
     "inside the band by the other.",
     { wider: wide.v, narrower: narrow.v, widerKey: KEY[wide.slot], narrowerKey: KEY[narrow.slot] },
     [KEY[wide.slot], KEY[narrow.slot]])];
@@ -804,6 +862,16 @@ const CHECKS = [
  * "no warnings" beside a `checked` of 0 can see that it has printed
  * nothing at all.
  *
+ * AND `checked` IS RETURNED WITH ITS DENOMINATOR, because a numerator
+ * printed alone reads as the whole set. Nothing in a bare `checked: 7`
+ * says whether seven is every question this module carries or seven of
+ * thirteen, so a store holding two keys renders the same clean bill of
+ * health as a complete one — the truncation that does not say it
+ * truncated, in the one place whose job is to say so. `questions` is how
+ * many checks exist, so "seven of thirteen could be asked" is sayable
+ * without a caller keeping a copy of the total that drifts the first time
+ * a check is added to the list above.
+ *
  * Sorted by severity, and stable within it: a blocking contradiction is
  * the first thing a reader should meet, and two warnings of one severity
  * keep the order the checks are declared in so the same store always
@@ -844,5 +912,5 @@ export function assess(store) {
     for (const w of found) warnings.push(w);
   }
   warnings.sort((a, b) => RANK[a.severity] - RANK[b.severity]);
-  return { warnings, checked };
+  return { warnings, checked, questions: CHECKS.length };
 }

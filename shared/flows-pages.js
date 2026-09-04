@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "106";
+export const ASSET_VERSION = "107";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -144,6 +144,45 @@ const rail = (active) => {
 
 /* The chrome every Flows page shares. Kept in one place so the rail, the
    identity block and the heading structure cannot drift between four pages. */
+/* THE ASSISTANT, DOCKED ON EVERY GATED PAGE BUT ITS OWN.
+ *
+ * A question box at one route is a destination: a reader looking at the
+ * bearish board and wondering what changed has to leave the board to ask.
+ * This puts the same box on the right edge of every page, one key away.
+ *
+ * NOT ON /flows/ask, WHERE THE PAGE IS THE ASSISTANT. Two mounts would
+ * collide on `#askApp` — one id, two elements, and the renderer takes
+ * whichever the DOM hands it — and a floating copy of the page you are
+ * already reading is noise rather than access.
+ *
+ * THE RENDERER IS NOT LOADED HERE. `data-src` names it and
+ * assets/js/flows-dock.js fetches it on first open. flows-ask.js is 55KB;
+ * served on all thirteen routes it would break six weight ceilings and
+ * bill every reader who never opens the rail. What ships on arrival is
+ * the tab, the empty panel and a loader.
+ *
+ * `hidden` ON THE PANEL AND NOT ON THE TAB: the tab is the affordance and
+ * must survive a page with no JavaScript at all, where it does nothing and
+ * says nothing — which is better than a rail that paints an empty box.
+ */
+const dock = (active) => (active === "ask" ? "" : `
+<button type="button" class="ak-dock-tab" id="askDockTab"
+        aria-expanded="false" aria-controls="askDockPanel">
+  <span class="ak-dock-tab-l">Ask</span>
+</button>
+<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
+  <div class="ak-dock-panel" id="askDockPanel" role="complementary"
+       aria-label="Ask about the published readings" hidden tabindex="-1">
+    <div class="ak-dock-head">
+      <p class="ak-dock-title">Ask about what has been published</p>
+      <button type="button" class="ak-dock-close" aria-label="Close the assistant">×</button>
+    </div>
+    <p class="flows-status" id="askStatus" role="status"></p>
+    <div id="askApp" data-mode="dock"></div>
+  </div>
+</aside>
+<script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
+
 const shell = (title, kicker, active, username, body) => `
 <body class="flows-body has-rail">
 ${topbar(true)}
@@ -160,7 +199,8 @@ ${rail(active)}
     </div>
   </header>
 ${body}
-</main>`;
+</main>
+${dock(active)}`;
 
 /* ---------- login ---------------------------------------------- */
 

@@ -6439,3 +6439,74 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .ak-warn.is-blocking .ak-warn-mark { color: var(--flow-down, var(--ink)); }
 .ak-warn.is-caution .ak-warn-mark { color: var(--gold-harvest); }
 .ak-warn.is-note .ak-warn-mark { color: var(--ink-faint); }
+
+/* =============================================================
+   THE DOCKED ASSISTANT — a tab on every gated page but /flows/ask.
+
+   ALWAYS ACCESSIBLE IS NOT ALWAYS OPEN. A 380px rail held open on the
+   board takes a quarter of the width from a thirteen-column table that
+   two design phases were spent earning. The tab is always visible and
+   costs 3rem of the right edge; the panel is one click, and the choice
+   is remembered per reader.
+   ============================================================= */
+.ak-dock-tab {
+  position: fixed;
+  right: 0;
+  top: 40%;
+  z-index: 40;
+  padding: 1rem 0.45rem;
+  font: inherit;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  color: var(--ink-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-right: 0;
+  border-radius: var(--radius-2) 0 0 var(--radius-2);
+  cursor: pointer;
+}
+.ak-dock-tab:hover, .ak-dock-tab:focus-visible { color: var(--ink); }
+
+.ak-dock { position: fixed; inset: 0 0 0 auto; z-index: 41; pointer-events: none; }
+.ak-dock-panel {
+  pointer-events: auto;
+  width: min(30rem, 92vw);
+  height: 100%;
+  overflow-y: auto;
+  padding: 1.25rem 1.4rem;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-card);
+}
+.ak-dock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.ak-dock-title { margin: 0 0 0.75rem; font-size: var(--fs-lead); }
+.ak-dock-close {
+  font: inherit;
+  font-size: var(--fs-lead);
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.ak-dock-close:hover, .ak-dock-close:focus-visible { color: var(--ink); border-color: var(--panel-border); }
+
+/* INSIDE THE RAIL THE QUESTION BOX IS ONE COLUMN. The page version caps
+   its row at 62rem and puts the button beside the field; at 30rem there
+   is no beside, so the button goes under and takes the full width — a
+   target the thumb can reach on the phone, where this panel is nearly
+   the whole screen. */
+.ak-dock .ak-ask-row { max-width: none; }
+.ak-dock .ak-ask-in { flex: 1 1 100%; }
+.ak-dock .ak-ask-go { flex: 1 1 100%; }
+.ak-dock .ak-panel { padding: 0; border: 0; background: transparent; }
+.ak-dock .fc-panel-h { display: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ak-dock-panel { transition: transform 160ms var(--ease, ease); }
+  .ak-dock:not(.is-open) .ak-dock-panel { transform: translateX(100%); }
+}
