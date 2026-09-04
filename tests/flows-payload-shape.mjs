@@ -82,9 +82,17 @@ const emitted = (key) => {
    would check each one's fields against all three payloads. Where a
    file draws a single payload, fn is null and the whole file counts.
 
-   `vars` are the identifiers the payload arrives under. These are
-   parameter names, so they are checked against the source below —
-   a renamed parameter must not silently disable the scan. */
+   `at` scopes the scan to a block that has no name to find it by:
+   the closure a page assembles itself in is a payload-reading site
+   like any other, and leaving it out because it is anonymous covered
+   the regions with a heading on them and none of the arithmetic
+   between them. It anchors on the block's own text and runs to `to`,
+   or to the end of the file.
+
+   `vars` are the identifiers the payload arrives under. They are
+   parameter names, destructured parameters or bindings, and each one
+   is checked against the source below — a renamed identifier must
+   not silently disable the scan. */
 const SURFACES = [
   { key: "sector:trix", file: "assets/js/flows-market.js", fn: "paintSectors", vars: ["sectors"] },
   { key: "movers", file: "assets/js/flows-market.js", fn: "paintMovers", vars: ["movers"] },
@@ -114,6 +122,56 @@ const SURFACES = [
   { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintAlerts", vars: ["payload"] },
   { key: "events", file: "assets/js/flows-overview.js", fn: "paintEvents", vars: ["payload"] },
   { key: "board:watch", file: "assets/js/flows-overview.js", fn: "paintWatch", vars: ["payload"] },
+  /* AND THE OTHER HALF OF THAT PAGE, which was reading eight payload sites
+     through four of them. The four above are the regions with a heading on
+     them; the four below read a payload without owning one, so nothing on
+     screen is named after them and a renamed field there is answered by the
+     page's own vocabulary of absences — an em dash, an empty index, an axis
+     with no hatch. That is the sector sentence exactly: a confident ordinary
+     reading, produced by a renderer that could not see the data.
+
+     readTrack() builds the score index every ranked row, the change table
+     and the spine then draw from, out of `sessions`, `names` and `deadBand`.
+     Rename one and the index comes back empty: no crossing tag on any row,
+     no trail on the spine, no move anywhere — three regions each printing
+     the ordinary "nothing moved" case off one unread field. */
+  { key: "scoretrack", file: "assets/js/flows-overview.js", fn: "readTrack", vars: ["payload"] },
+  /* paintVerdict() draws FOUR payloads into the seven tiles the route opens
+     on and takes each under its own name, so it registers four times rather
+     than once against a union that would pass a field belonging to any of
+     them. Every tile is allowed to print an em dash — that is the honest
+     answer for an endpoint that did not answer — which is precisely why a
+     rename here is invisible: `market.breadth` gone is "— / —" under Breadth
+     on a session the pipeline screened and measured in full. */
+  { key: "market", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["market"] },
+  { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["alerts"] },
+  { key: "board:long", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["long"] },
+  { key: "board:short", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["short"] },
+  /* renderSpine() is the page's one chart, and it reads the band, the scored
+     population and the neutral count off the board root. `deadBand` renamed
+     draws an axis with no hatch and a caption stating the band's width is not
+     published — a claim about the session, made over a number sitting three
+     fields away in the payload it was handed. */
+  { key: "board:long", file: "assets/js/flows-overview.js", fn: "renderSpine", vars: ["payload"] },
+  /* AND THE CLOSURE THAT ASSEMBLES THE PAGE, a payload-reading site with no
+     name of its own: it joins the seven fetches, builds the two cross-region
+     indexes and writes the three region subtitles. Its reads are the ones no
+     painter takes — `alerts.seen` and `events.inWindow` are the denominators
+     those subtitles state, `alerts.readAt` is the instant the flow feed was
+     read, `lng.deep` is how a row knows whether it has a card behind it — so
+     it is anchored by its own text rather than left unchecked for want of a
+     function to name. Five entries over one scope, one per payload, for the
+     same reason paintVerdict takes four. */
+  { key: "board:long", file: "assets/js/flows-overview.js", at: "Promise.all([",
+    label: "the region assembly", vars: ["lng", "payload", "meta"] },
+  { key: "board:short", file: "assets/js/flows-overview.js", at: "Promise.all([",
+    label: "the region assembly", vars: ["sht"] },
+  { key: "flowalerts", file: "assets/js/flows-overview.js", at: "Promise.all([",
+    label: "the region assembly", vars: ["alerts"] },
+  { key: "events", file: "assets/js/flows-overview.js", at: "Promise.all([",
+    label: "the region assembly", vars: ["events"] },
+  { key: "scoretrack", file: "assets/js/flows-overview.js", at: "Promise.all([",
+    label: "the region assembly", vars: ["track"] },
 ];
 
 /* ---------- absences that are arguments, not accidents --------------
@@ -154,6 +212,19 @@ for (const surf of SURFACES) {
        under-reading is not, so the fallback is the rest of the file. */
     const next = src.indexOf("\n  function ", start + 1);
     scope = src.slice(start, next === -1 ? src.length : next);
+  } else if (surf.at) {
+    /* THE SAME NARROWING, FOR A BLOCK WITH NO NAME. Anchored on its own
+       text, the way the card section below anchors on the drawer's comment
+       marker. A missing anchor is reported rather than silently widening to
+       the whole file, because a whole-file scope here would check five
+       payloads' fields against one key and pass on the union. */
+    const start = src.indexOf(surf.at);
+    ok(start !== -1,
+       `${surf.file} still carries the block anchored at \`${surf.at}\` — if it moved or was ` +
+       "reworded, this scan silently stopped checking that payload and the move must update " +
+       "SURFACES");
+    const end = surf.to ? src.indexOf(surf.to, start + 1) : -1;
+    scope = src.slice(start, end === -1 ? src.length : end);
   }
 
   /* The parameter really is named what SURFACES claims. A renamed
@@ -173,15 +244,28 @@ for (const surf of SURFACES) {
        check: the name must appear in the parameter list of a function inside
        the scanned scope, so renaming it still fails here loudly instead of
        silently disabling every assertion below. */
-    ok(new RegExp("function\\s+\\w+\\s*\\([^)]*\\b" + v + "\\b[^)]*\\)").test(scope) || !surf.fn,
-       `${surf.file}:${surf.fn || "(module)"} still receives its payload as \`${v}\` — ` +
-       "a renamed parameter makes this whole scan vacuous");
+    /* AND IT NEED NOT BE A NAMED FUNCTION'S PARAMETER EITHER. The page's
+       assembling closure takes its seven payloads through a destructured
+       arrow parameter and names the board it draws the spine from in a
+       `const`, so an anchor-scoped surface has no `function name(...)` to
+       match and the old check would have had to be waived for exactly the
+       block it was added to cover. All three binding forms count; what does
+       not count is the name being absent, which is still the failure. */
+    const bound =
+      new RegExp("function\\s+\\w+\\s*\\([^)]*\\b" + v + "\\b[^)]*\\)").test(scope) ||
+      new RegExp("\\(\\s*\\[?[^)]*\\b" + v + "\\b[^)]*\\]?\\s*\\)\\s*=>").test(scope) ||
+      new RegExp("\\b(?:const|let|var)\\s+(?:\\[[^\\]]*\\b" + v + "\\b[^\\]]*\\]|" +
+                 "\\{[^}]*\\b" + v + "\\b[^}]*\\}|" + v + "\\b)").test(scope);
+    ok(bound || !(surf.fn || surf.at),
+       `${surf.file}:${surf.fn || surf.label || "(module)"} still names its payload \`${v}\` — ` +
+       "a renamed parameter or binding makes this whole scan vacuous");
   }
 
   const payload = emitted(surf.key);
   ok(payload && typeof payload === "object",
-     `the pipeline emitted a "${surf.key}" payload for ${surf.fn || surf.file} to be checked ` +
-     "against — a key that stopped publishing is itself the failure this suite reports");
+     `the pipeline emitted a "${surf.key}" payload for ${surf.fn || surf.label || surf.file} ` +
+     "to be checked against — a key that stopped publishing is itself the failure this suite " +
+     "reports");
   if (!payload) continue;
 
   /* PROSE IS NOT A READ. The first run of this suite reported
@@ -211,17 +295,39 @@ for (const surf of SURFACES) {
     while ((a = asg.exec(code)) !== null) selfAssigned.add(a[1]);
   }
 
+  /* THE SAME RULE, FOR AN ANNOTATION WRITTEN NOWHERE NEAR ITS READ. The
+     scope-local pass above sees `payload.__updatedAt = …` because the
+     renderer that stamps it is the renderer that reads it back.
+     flows-overview.js stamps the spine's three onto the board payload in the
+     closure that assembles them — `meta.__bull = bull` — and renderSpine
+     reads them off its own parameter, so the write is two hundred lines and
+     one name away and a scope-local pass cannot see it. This one is
+     file-wide and deliberately narrow: only `__`-prefixed fields, which this
+     codebase reserves for client-side notes, and only where the file really
+     assigns one. It stays self-enforcing for the same reason as the pass
+     above — stop assigning it and it must be published — which an allow-list
+     entry naming three fields would not have been. */
+  const annotated = new Set();
+  {
+    const whole = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+    const asg = /\b\w+\.(__[A-Za-z0-9_]+)\s*=(?!=)/g;
+    let a;
+    while ((a = asg.exec(whole)) !== null) annotated.add(a[1]);
+  }
+
   ok(reads.size > 0,
-     `the scan actually found root-field reads in ${surf.fn || surf.file} — zero reads means ` +
-     "the regex or the variable name is wrong, and a vacuous pass is worse than a failure");
+     `the scan actually found root-field reads in ${surf.fn || surf.label || surf.file} — ` +
+     "zero reads means the regex or the variable name is wrong, and a vacuous pass is worse " +
+     "than a failure");
 
   const allowed = OPTIONAL[surf.key] || {};
   for (const field of [...reads].sort()) {
     if (Object.prototype.hasOwnProperty.call(payload, field)) { checks++; continue; }
     if (Object.prototype.hasOwnProperty.call(allowed, field)) { checks++; continue; }
     if (selfAssigned.has(field)) { checks++; continue; }
-    missingReport.push(`${surf.file}:${surf.fn || "(module)"} reads \`${surf.vars[0]}.${field}\`` +
-      ` but the published "${surf.key}" payload has no such key` +
+    if (annotated.has(field)) { checks++; continue; }
+    missingReport.push(`${surf.file}:${surf.fn || surf.label || "(module)"} reads ` +
+      `\`${surf.vars[0]}.${field}\` but the published "${surf.key}" payload has no such key` +
       ` (it has: ${Object.keys(payload).sort().join(", ")})`);
   }
 }
@@ -440,4 +546,6 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `only with a written reason, the sector regression pinned by name in both directions, and ` +
   `the card's panel-level renderers finally in scope: the market-wide join's drawer read ` +
   `against the panel the pipeline emits, on BOTH arms of its union, with the coverage of the ` +
-  `join and the prior-session date of its ranking asserted on the wire`);
+  `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
+  `whole rather than half of it: the score index, the seven verdict tiles, the spine and the ` +
+  `closure that writes the region subtitles all read against the payloads they are handed`);
