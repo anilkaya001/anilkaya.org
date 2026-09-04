@@ -144,6 +144,28 @@ const CEILING_KIB = {
   sidePage: 300,
   watchPage: 240,
   deskPage: 135,
+  /* SET AT FIRST MEASUREMENT, 2026-09-04, against 102k — nav 3k, flows-ui 25k,
+     flows-strategy 75k.
+
+     THE ROUTE'S BUDGET WAS AN ARGUMENT BEFORE IT WAS A NUMBER, and the
+     argument is what it does NOT load. The strategy tester needs a payoff
+     engine, a diagram, a chain table and a leg editor; what it emphatically
+     does not need is flows-panels.js, which is 152k and sits on four other
+     routes for the sake of a card dialog this page has no reason to open.
+     Putting the tester on the premium desk's route — its natural neighbour,
+     and the one other page that spends live vendor calls on the request
+     path — would have cost the desk 75k against 15k of headroom, so it is its
+     own route and the desk is untouched.
+
+     Every kilobyte of the 102 is either this page's own code or FlowsUI, which
+     is 25k and is the reason the page has no second copy of isNum, the em dash
+     or the U+2212 formatter. That is the shape a route has when its weight is
+     what it uses rather than what it inherited.
+
+     120 rather than 105: the proportion of room this file's own rule asks for,
+     and the same the desk and the track pages were given, so ordinary work on
+     the engine is not a budget negotiation on every commit. */
+  strategyPage: 120,
   trackPage: 115,
   marketPage: 95,
   unusualPage: 85,

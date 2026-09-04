@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "104";
+export const ASSET_VERSION = "105";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -119,6 +119,7 @@ const rail = (active) => {
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
+    ${item("/flows/strategy/", "Strategy tester", "strategy")}
   </div>
   <p class="rail-group" id="railDisclosures">Disclosures</p>
   <div class="rail-items" role="group" aria-labelledby="railDisclosures">
@@ -1591,8 +1592,302 @@ ${shell("Political Disclosures", "Options-flow intelligence", "political", usern
 </html>`;
 }
 
+/* ---------- the strategy tester -------------------------------- */
+
+/**
+ * BUILD A POSITION FROM REAL CONTRACTS AND SEE WHAT IT PAYS.
+ *
+ * THE PAYOFF LINE IS THE ONE READING ON THIS PAGE THAT NEEDS NOTHING. At
+ * expiry an option is worth its intrinsic value, which is arithmetic on the
+ * strike and the underlying and contains no rate, no dividend, no volatility
+ * and no distribution. Everything else on the page is either a sum of quoted
+ * numbers or a labelled convention, and the difference is stated wherever a
+ * reader might mistake one for the other.
+ *
+ * THE DATE SLIDER WAS THE DESIGN DECISION AND IT WENT TO TAYLOR. Two engines
+ * could draw a curve between today and expiry:
+ *
+ *   BLACK-SCHOLES re-prices every leg at every point, which is what a
+ *   textbook does — and it needs a risk-free rate and a dividend yield.
+ *   Those are the exact two free parameters shared/flows-chain.js and
+ *   shared/flows-premium.js refuse by name, and the refusal is the reason
+ *   this section has never published an assignment probability or a fair
+ *   value. Adopting them here to draw a nicer curve would overturn the
+ *   discipline of the whole product for a line.
+ *
+ *   A TAYLOR EXPANSION in the vendor's own quoted greeks needs nothing that
+ *   is not on the wire: delta, gamma, theta and vega come per contract on the
+ *   endpoint this page already reads. It is a LOCAL approximation and it is
+ *   least accurate exactly where a reader looks hardest — near the strike,
+ *   near expiry — so the page says so beside the curve rather than in a
+ *   footnote, and the slider refuses to run past the nearest leg's expiry,
+ *   where an expansion around today's greeks stops describing anything at all.
+ *
+ * Taylor wins because its inaccuracy is STATED and bounded, where the
+ * alternative's is two invented numbers a reader cannot see. That choice is
+ * on the page in the reader's own words, not only here.
+ *
+ * WHAT IS REFUSED IS NAMED ON THE PAGE RATHER THAN OMITTED. Buying power
+ * reduction is broker-specific and appears nowhere in 28,755 lines of the
+ * vendor's spec; conditional value at risk needs a distribution nobody
+ * quoted. A calculator that silently lacks a reading its competitors show
+ * reads as an oversight. One that says which readings it will not invent, and
+ * why, is making an argument — and that argument is this product.
+ */
+export function strategyPage({ username = "" } = {}) {
+  const lede = "Pick a name, build a position out of the contracts that are " +
+    "actually listed, and see what it pays at expiry. Every quote is the " +
+    "vendor's; every sum is arithmetic on those quotes; every extrapolation " +
+    "carries the name of the assumption it rests on.";
+  return `${head("Flows — Strategy tester", lede)}
+${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
+  <div class="flows-status" id="sgStatus" role="status">Enter a symbol to begin.</div>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <form class="sg-entry" id="sgEntry" autocomplete="off">
+    <label for="sgTicker">Symbol</label>
+    <div class="sg-entry__row">
+      <input id="sgTicker" name="ticker" type="text" inputmode="latin"
+             autocapitalize="characters" autocorrect="off" spellcheck="false"
+             placeholder="NVDA" aria-describedby="sgEntryHelp">
+      <button type="submit" class="sg-load">Load</button>
+      <!-- RE-PRICING IS A SEPARATE BUTTON FROM LOADING because the two spend
+           different amounts of a shared vendor quota, and a reader who has
+           spent ten minutes building a four-leg position should be able to
+           refresh the price it is measured against without the page deciding
+           to do it for them. -->
+      <button type="button" class="sg-reprice" id="sgReprice" hidden>Re-price</button>
+    </div>
+    <p class="desk-help" id="sgEntryHelp">
+      One listed US symbol. The book is read one expiry at a time — that is the
+      read this page can afford against a metered vendor key on a request path.
+    </p>
+  </form>
+
+  <section class="fc-panel sg-panel" id="sgContextPanel" hidden aria-labelledby="sgContextH">
+    <h2 class="fc-panel-h" id="sgContextH">What this name is trading at</h2>
+    <div id="sgContext"></div>
+    <p class="fc-note" id="sgContextNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgChainPanel" hidden aria-labelledby="sgChainH">
+    <h2 class="fc-panel-h" id="sgChainH">The book, one expiry at a time</h2>
+    <div class="sg-controls">
+      <span class="sg-field">
+        <label for="sgExpiry">Expiry</label>
+        <select id="sgExpiry"></select>
+      </span>
+      <span class="sg-field">
+        <label for="sgWindow">Strikes within</label>
+        <select id="sgWindow">
+          <option value="0.1">10% of spot</option>
+          <option value="0.25" selected>25% of spot</option>
+          <option value="0.5">50% of spot</option>
+          <option value="0">Every listed strike</option>
+        </select>
+      </span>
+    </div>
+    <!-- A DIV RATHER THAN A PARAGRAPH because FlowsUI.emptyState() returns a
+         <p>, and the three silences this note carries are emitted through that
+         shared primitive so the stylesheet can tell them apart. A <p> inside a
+         <p> is invalid markup even when the DOM will hold it. -->
+    <div class="fc-note" id="sgChainNote"></div>
+    <div class="flows-tablewrap sg-chainwrap" id="sgChainWrap" tabindex="0" role="region"
+         aria-label="Listed contracts at the selected expiry" hidden>
+      <table class="flows-table sg-chain">
+        <caption class="flows-caption">
+          Every contract the vendor lists at this expiry, unfiltered. The premium
+          desk screens this same endpoint down to what is sellable; this page does
+          not, because a long in-the-money call is a position a reader builds and
+          the desk&#39;s universe cannot express it. A greek the vendor did not send
+          is an em dash — the vendor marks all five nullable and its own example
+          carries a row with none of them.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col" class="c-num">Bid</th>
+            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction. The percent-or-fraction convention is decided once from the whole expiry's median, never per contract">IV</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
+            <th scope="col" class="c-num">Call</th>
+            <th scope="col" class="c-num sg-k">Strike</th>
+            <th scope="col" class="c-num">Put</th>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction">IV</abbr></th>
+            <th scope="col" class="c-num">Bid</th>
+            <th scope="col" class="c-num">Ask</th>
+          </tr>
+        </thead>
+        <tbody id="sgChainBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgLegsPanel" hidden aria-labelledby="sgLegsH">
+    <h2 class="fc-panel-h" id="sgLegsH">The position</h2>
+    <div class="sg-controls">
+      <span class="sg-field">
+        <label for="sgBasis">Price legs at</label>
+        <select id="sgBasis">
+          <option value="mid">The mid</option>
+          <option value="marketable">Marketable — ask on buys, bid on sells</option>
+        </select>
+      </span>
+      <button type="button" class="sg-clear" id="sgClear">Clear position</button>
+    </div>
+    <div class="flows-tablewrap" id="sgLegsWrap" tabindex="0" role="region"
+         aria-label="Position legs" hidden>
+      <table class="flows-table sg-legs">
+        <caption class="flows-caption">
+          One row per leg. The mid is not a price anyone is obliged to trade at;
+          the marketable basis is what crossing the spread on every leg actually
+          costs. Switching between them moves the whole diagram, which is the
+          honest way to show what a spread is worth.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Leg</th>
+            <th scope="col" class="c-num">Qty</th>
+            <th scope="col" class="c-num">Bid</th>
+            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" class="c-num">Priced at</th>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Gamma as quoted: the change in delta per one dollar of underlying">&#915;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Theta as quoted, taken as a one-day derivative of the contract's price">&#920;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Vega as quoted, taken as the change in the contract's price for a one-point move in implied volatility">V</abbr></th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody id="sgLegsBody"></tbody>
+      </table>
+    </div>
+    <div class="fc-note" id="sgLegsNote"></div>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
+    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
+    <div id="sgReadings"></div>
+    <p class="fc-note" id="sgReadNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
+    <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
+    <div id="sgPlot"></div>
+    <p class="fc-note" id="sgPlotNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
+    <h2 class="fc-panel-h" id="sgSceneH">One scenario, priced two ways</h2>
+    <div class="sg-controls">
+      <span class="sg-field">
+        <label for="sgScenePx">Underlying at</label>
+        <input id="sgScenePx" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+      </span>
+      <span class="sg-field">
+        <label for="sgSceneDays">Days from now</label>
+        <input id="sgSceneDays" type="range" min="0" max="0" step="1" value="0">
+      </span>
+    </div>
+    <div id="sgScene"></div>
+    <p class="fc-note" id="sgSceneNote"></p>
+  </section>
+
+  <!-- STATIC, AND IN THE DOCUMENT RATHER THAN IN THE RENDERER. These are the
+       claims the page declines to make; they are true before any fetch, they
+       are true if every fetch fails, and a reader who arrives with JavaScript
+       still parsing should see them. A refusal that only appears once data
+       lands is a refusal that can disappear with a bug. -->
+  <section class="fc-panel sg-panel" id="sgRefusePanel" aria-labelledby="sgRefuseH">
+    <h2 class="fc-panel-h" id="sgRefuseH">What this page will not tell you</h2>
+    <dl class="sg-refuse">
+      <dt>Buying power reduction</dt>
+      <dd>
+        <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
+        the same short put reduces buying power by different amounts at two
+        brokers on the same afternoon, and by different amounts again in a
+        portfolio-margin account. Nothing in the vendor&#39;s specification
+        mentions buying power, margin or collateral anywhere in its 28,755
+        lines. Publishing one would be inventing a figure about your money.
+      </dd>
+      <dt>Conditional value at risk</dt>
+      <dd>
+        <strong>Refused.</strong> A tail expectation is an average over a
+        distribution, and no distribution is quoted anywhere on this page. It
+        would need a volatility surface, a drift and a horizon, none of which
+        the vendor supplies and all of which would be chosen here. The
+        distribution-free statement this page can make instead is the maximum
+        loss at expiry, which is below and is exact.
+      </dd>
+      <dt>Beta-weighted delta</dt>
+      <dd>
+        <strong>Published, with its terms stated.</strong> It is not delta
+        times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
+        index&#39;s price), so it needs a reference index and that index&#39;s live
+        price, and it is a different number against a different index. Both
+        are named and printed in the readings above rather than assumed, and
+        when either is missing the reading is an em dash — never a zero.
+      </dd>
+      <dt>A share leg</dt>
+      <dd>
+        <strong>Not offered yet.</strong> A covered call or a collar cannot be
+        expressed here, because this page builds positions out of listed
+        contracts only. Said out loud rather than left for you to discover by
+        looking for a control that is not there.
+      </dd>
+    </dl>
+  </section>
+
+  <p class="flows-foot">
+    <span class="flows-foot-p">
+      THE EXPIRY LINE IS MODEL-FREE. At expiry an option is worth its intrinsic
+      value, so the payoff diagram&#39;s solid line is arithmetic on the strikes,
+      the quoted premiums and the underlying &#8212; it contains no volatility,
+      no interest rate, no dividend and no distribution. The maximum profit,
+      the maximum loss and the breakevens are read off that same line and are
+      exact to the quotes they were built from. A leg with unbounded loss
+      reports <em>unbounded</em> rather than a large number, because there is
+      no number there to report.
+    </span>
+    <span class="flows-foot-p">
+      THE PROJECTED LINE IS A TAYLOR EXPANSION IN THE VENDOR&#39;S OWN GREEKS,
+      and that is a stated convention, not a measurement. Each leg is moved by
+      delta and gamma in the underlying, by theta in time and by vega in
+      implied volatility, all as quoted for that contract. It is a local
+      approximation: it is least accurate exactly where you will look hardest,
+      near a strike and near expiry, and it degrades as the horizon lengthens.
+      The slider therefore stops at the nearest leg&#39;s expiry, where an
+      expansion around today&#39;s greeks has stopped describing anything, and the
+      exact line takes over. The alternative &#8212; re-pricing every leg with
+      Black-Scholes &#8212; would need a risk-free rate and a dividend yield, the
+      two free parameters this codebase refuses everywhere else, so it was not
+      taken.
+    </span>
+    <span class="flows-foot-p">
+      MONTHLY DECAY IS THIRTY TIMES A ONE-DAY DERIVATIVE, which is a
+      convention in the same sense the premium desk&#39;s annualised yield is one:
+      theta is convex in time and thirty days of it is not thirty of today&#39;s.
+      It is offered because it is the number a reader is comparing against a
+      position&#39;s cost, and it is labelled because nobody earns it. Days are
+      calendar days, counted from the session the quotes were read on.
+    </span>
+    <span class="flows-foot-p">
+      Options can lose their entire premium, and a short call&#39;s loss has no
+      upper bound. This is a calculator, not advice.
+    </span>
+  </p>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-ui.js")}" defer></script>
+<script src="${v("/assets/js/flows-strategy.js")}" defer></script>
+</body>
+</html>`;
+}
+
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, eventsPage, trackPage, ASSET_VERSION,
+  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, ASSET_VERSION,
 };
