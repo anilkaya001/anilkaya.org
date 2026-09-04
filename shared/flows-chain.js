@@ -749,6 +749,11 @@ export function buildChainPanels(chainRows, {
      complete enumeration of the name's expiries, and the response merely
      confirms it. Identification comes from the REQUEST, not from the page. */
   requestedExpiry = null,
+  /* THE BOARD'S OWN VIEW OF THIS NAME, threaded through to the unusual feed
+     that is built in here. Optional and null by default, so every existing
+     caller — the desk route, the card leg, every fixture — is unchanged. See
+     buildUnusualRows for why the feed needs it and why null omits the key. */
+  stage = null,
 } = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
   const truncated = all.length >= CHAIN_PAGE_SIZE;
@@ -930,7 +935,8 @@ export function buildChainPanels(chainRows, {
        Not a panel: this does not go on the card. It is collected across every
        name the chain leg reached and published once, under `unusual`. */
     unusualRows: buildUnusualRows(rows, {
-      ticker, spot, ivDivisor: conv.divisor, sessionDate: asOf, truncated, parsed: parsedRows,
+      ticker, spot, ivDivisor: conv.divisor, sessionDate: asOf, truncated,
+      stage, parsed: parsedRows,
     }),
     ivDivisor: conv.divisor,
     /* THE OPEN-INTEREST BASIS CHECK, computed here for the same reason the
