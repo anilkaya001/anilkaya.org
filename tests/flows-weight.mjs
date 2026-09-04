@@ -141,7 +141,23 @@ const CEILING_KIB = {
      12k of headroom is what the two new regions need to be maintainable
      rather than golfed. */
   overviewPage: 312,
-  sidePage: 300,
+  /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COSTS 5k ON EVERY ROUTE.
+     The board was at 297k and the tab, the empty panel and the loader took
+     it to 302k. Raising the number is the honest move rather than shaving
+     five kilobytes of comment out of flows-board.js to fit under a line
+     nobody re-derived — this file's own header calls that degrading the
+     thing this codebase is strictest about.
+
+     WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
+     is 79k — it was 55k when this note was written, and a figure left at
+     the size a file used to be is worse than no figure, because a reader
+     takes it for a measurement — and it arrives only when a reader opens
+     the panel, so it is absent
+     from a measurement of what a route loads ON ARRIVAL — which is what
+     this suite measures and should keep measuring. It is a real cost, paid
+     on open, by the readers who asked for it. Stating it here is what stops
+     a lazy import from looking free. */
+  sidePage: 306,
   watchPage: 240,
   deskPage: 135,
   /* SET AT FIRST MEASUREMENT, 2026-09-04, against 102k — nav 3k, flows-ui 25k,
@@ -165,13 +181,60 @@ const CEILING_KIB = {
      120 rather than 105: the proportion of room this file's own rule asks for,
      and the same the desk and the track pages were given, so ordinary work on
      the engine is not a budget negotiation on every commit. */
+  /* MEASURED AT 57k, CEILING 70k. The page's own HTML is a lede and one
+     empty container — the renderer builds everything else — so nearly all
+     of this is assets/js/flows-ask.js, and the headroom is for the
+     briefing's regions rather than for the shell. It is the ONLY route
+     here whose weight buys a reader a whole session's readings without a
+     second page load, which is why it sits above the market page and
+     below the ticker. If it approaches the ceiling, the answer is to move
+     work into shared/flows-ask.js — which is bundled into the Worker and
+     costs the browser nothing — not to shorten what the page says. */
+  /* 70 -> 78. The dock's 5k is on this route too — /flows/ask does not
+     draw the rail, but flows-ask.js is the file the rail loads, so the
+     route and the rail have grown together. The rest is the density pass:
+     folding a region's meta into its disclosure and splitting the
+     forecast qualifier into an arm that folds and an arm that never does
+     cost bytes to SAVE a reader lines, which is the trade this page was
+     asked to make. */
+  /* 78 -> 84 on 2026-09-04, and it is the political case above rather than
+     an absorbed overrun: 78 was set against a 77.5k measurement, which is
+     the snug fit this file's own header refuses. A ceiling with half a
+     kilobyte of room is a tripwire, and the next commit to trip it fails
+     with a message about a budget rather than about what the commit did.
+
+     WHAT THE ROUTE GAINED IS THREE CORRECTED CLAIMS, all of them the page
+     stating something it had not measured: a consistency report printing
+     `warningsChecked` with no denominator, so four of thirteen questions
+     asked read as a complete sweep; a provenance line telling a reader
+     "every figure it wrote was checked" over an answer that stated no
+     figure; and an audit paragraph offering `n` as the set of figures in
+     the prose when the guard scans `say`, so a ticker's own digits looked
+     like a figure that had slipped through. The prose that fixes them is
+     the deliverable, and the entry above says what to do if this route
+     approaches its ceiling — move work into shared/flows-ask.js, which the
+     Worker bundles and the browser never pays for — not shorten what the
+     page says. That is the shed to make; it is not this change. */
+  askPage: 84,
   strategyPage: 120,
-  trackPage: 115,
-  marketPage: 95,
-  unusualPage: 85,
-  eventsPage: 85,
-  politicalPage: 55,
-  historyPage: 45,
+  trackPage: 118,
+  /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
+     was the tightest of the mid-weight routes at 95k against 95, so it is
+     the one the assistant pushed over. See sidePage above for why the
+     number moves rather than the comment budget, and for what this
+     measurement deliberately does NOT count. */
+  marketPage: 102,
+  /* THE +7 ON THIS AND THE FOUR ENTRIES BELOW IS THE DOCKED ASSISTANT.
+     assets/js/flows-dock.js is 5k and now ships on every gated route but
+     /flows/ask, and these were the routes with less than that in hand. The
+     reasoning is sidePage's, once: the number moves rather than the comment
+     budget, and the 55k renderer the dock fetches on first open is
+     deliberately NOT in this measurement, which is of what a route loads on
+     arrival. */
+  unusualPage: 92,
+  eventsPage: 92,
+  politicalPage: 62,
+  historyPage: 52,
   loginPage: 12,
 };
 

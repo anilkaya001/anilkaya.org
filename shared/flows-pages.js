@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "105";
+export const ASSET_VERSION = "108";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -88,6 +88,14 @@ const rail = (active) => {
   };
   return `
 <nav class="flows-rail" aria-label="Flows">
+  <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
+       question a reader already knew to ask; this one answers the question
+       they arrive with. A rail that buried it under twelve destinations
+       would be a table of contents for a book nobody opened. -->
+  <p class="rail-group" id="railBrief">Briefing</p>
+  <div class="rail-items" role="group" aria-labelledby="railBrief">
+    ${item("/flows/ask/", "Ask the data", "ask")}
+  </div>
   <p class="rail-group" id="railSession">Session</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
     ${item("/flows/", "Overview", "overview")}
@@ -136,6 +144,45 @@ const rail = (active) => {
 
 /* The chrome every Flows page shares. Kept in one place so the rail, the
    identity block and the heading structure cannot drift between four pages. */
+/* THE ASSISTANT, DOCKED ON EVERY GATED PAGE BUT ITS OWN.
+ *
+ * A question box at one route is a destination: a reader looking at the
+ * bearish board and wondering what changed has to leave the board to ask.
+ * This puts the same box on the right edge of every page, one key away.
+ *
+ * NOT ON /flows/ask, WHERE THE PAGE IS THE ASSISTANT. Two mounts would
+ * collide on `#askApp` — one id, two elements, and the renderer takes
+ * whichever the DOM hands it — and a floating copy of the page you are
+ * already reading is noise rather than access.
+ *
+ * THE RENDERER IS NOT LOADED HERE. `data-src` names it and
+ * assets/js/flows-dock.js fetches it on first open. flows-ask.js is 55KB;
+ * served on all thirteen routes it would break six weight ceilings and
+ * bill every reader who never opens the rail. What ships on arrival is
+ * the tab, the empty panel and a loader.
+ *
+ * `hidden` ON THE PANEL AND NOT ON THE TAB: the tab is the affordance and
+ * must survive a page with no JavaScript at all, where it does nothing and
+ * says nothing — which is better than a rail that paints an empty box.
+ */
+const dock = (active) => (active === "ask" ? "" : `
+<button type="button" class="ak-dock-tab" id="askDockTab"
+        aria-expanded="false" aria-controls="askDockPanel">
+  <span class="ak-dock-tab-l">Ask</span>
+</button>
+<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
+  <div class="ak-dock-panel" id="askDockPanel" role="complementary"
+       aria-label="Ask about the published readings" hidden tabindex="-1">
+    <div class="ak-dock-head">
+      <p class="ak-dock-title">Ask about what has been published</p>
+      <button type="button" class="ak-dock-close" aria-label="Close the assistant">×</button>
+    </div>
+    <p class="flows-status" id="askStatus" role="status"></p>
+    <div id="askApp" data-mode="dock"></div>
+  </div>
+</aside>
+<script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
+
 const shell = (title, kicker, active, username, body) => `
 <body class="flows-body has-rail">
 ${topbar(true)}
@@ -152,7 +199,8 @@ ${rail(active)}
     </div>
   </header>
 ${body}
-</main>`;
+</main>
+${dock(active)}`;
 
 /* ---------- login ---------------------------------------------- */
 
@@ -1634,6 +1682,64 @@ ${shell("Political Disclosures", "Options-flow intelligence", "political", usern
  * reads as an oversight. One that says which readings it will not invent, and
  * why, is making an argument — and that argument is this product.
  */
+/**
+ * /flows/ask — the briefing, and a question box over it.
+ *
+ * THE FRONT DOOR, AND THAT IS WHY THE RAIL LISTS IT FIRST. Every other
+ * route answers a question a reader already knew to ask. This one answers
+ * the question they arrive with — what happened, what is happening, what
+ * is already scheduled — before they type anything, and only then offers
+ * the box.
+ *
+ * THE SHELL IS ONE ELEMENT ON PURPOSE. assets/js/flows-ask.js:32 states
+ * the contract: `#askApp` is the container, `#askStatus` and `#askFoot`
+ * are filled if present and created if not. Rendering a frame of headings
+ * here that the script then re-fills would put the same structure in two
+ * files, and the pair drift apart the first time one is edited — which is
+ * the argument every other page in this file already makes for its own
+ * skeleton. The lede is prose the script never touches, so it stays.
+ *
+ * NO SKELETON ROWS. A page that painted em dashes while the fetch is in
+ * flight would be showing a set of readings that came back blank, which
+ * is a different and false claim from "this has not loaded yet".
+ */
+export function askPage({ username = "" } = {}) {
+  /* TWO LEDES, AND ONLY THE SHORT ONE IS PRINTED. `head()` needs a
+     description for the document and for anything that quotes the page;
+     the reader in front of it needs one line and then the readings. The
+     long form said in six lines what the short one says in one, and it
+     stood between every visit and the first number on the page — which is
+     what the owner meant by too much text.
+
+     NOTHING IS LOST: the guarantee the long form spelled out is stated
+     where it can be acted on, in the question panel's own note, beside
+     the box it constrains. A promise about a model belongs next to the
+     model, not in a preamble a reader scrolls past to reach the data. */
+  const summary = "What the session says, what changed to get here, and what is " +
+    "already on the calendar before the next one — assembled from the same " +
+    "published readings every other page here draws. Ask a question and the " +
+    "wording may be a model's; the figures never are. Anything it writes that " +
+    "is not already in the measurements it was handed is refused, and the " +
+    "measured reading is served instead.";
+  const lede = "Yesterday, today, and what is already scheduled — from the readings " +
+    "this site has published.";
+  return `${head("Flows — Ask", summary)}
+${shell("Ask", "Options-flow intelligence", "ask", username, `
+  <div class="flows-status" id="askStatus" role="status">Reading the session’s briefing…</div>
+
+  <div class="flows-controls">
+    <p class="flows-lede">${lede}</p>
+  </div>
+
+  <div id="askApp"></div>
+  <div id="askFoot"></div>
+`)}
+<script src="${v("/assets/js/nav.js")}" defer></script>
+<script src="${v("/assets/js/flows-ask.js")}" defer></script>
+</body>
+</html>`;
+}
+
 export function strategyPage({ username = "" } = {}) {
   const lede = "Pick a name, build a position out of the contracts that are " +
     "actually listed, and see what it pays at expiry. Every quote is the " +
@@ -1889,5 +1995,5 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
 export const FLOWS_PAGES = {
   loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };

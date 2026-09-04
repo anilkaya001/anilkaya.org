@@ -6270,3 +6270,321 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 }
 
 .sg-refuse dd strong { color: var(--ink); }
+
+/* =============================================================
+   /flows/ask — the briefing and the question box.
+
+   THIS ROUTE'S PROSE IS SHORT ON PURPOSE, SO IT DOES NOT TAKE COLUMNS.
+   The rule at :189 splits `.fc-note`, `.fc-q`, `.flows-foot` and
+   `.flows-lede` into 32rem columns above 92rem, and the reasoning there
+   is sound for the pages it was written for: a long method paragraph
+   costs 5-9% more height when capped at 68ch, and columns buy that back.
+   But columns only pay when there is enough text to fill them. This
+   page's lede is three lines. Split in two it became two lines a side,
+   and the eye had to jump a 2.5rem gutter mid-sentence — the shot read
+   "Ask a question and | the wording may be a model's", which is not a
+   measure problem, it is two broken fragments. CSS cannot count lines,
+   so the judgement is made per route by the author who knows how long
+   the prose is. Here it is short, so it stays in one column.
+   ============================================================= */
+.ak-panel .flows-lede,
+.ak-panel .fc-note,
+.ak-panel .fc-q,
+.flows-body .flows-lede { columns: auto; max-width: var(--measure); }
+
+.ak-brief { display: grid; gap: 1.25rem; }
+.ak-region, .ak-askbox { padding: 1.5rem 1.75rem; }
+
+.ak-panel .fc-panel-h { margin: 0 0 0.35rem; font-size: var(--fs-head); }
+.ak-sub { margin: 0.5rem 0 1rem; font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* THE FACTS TILE, BECAUSE A BRIEFING IS SCANNED AND NOT READ THROUGH.
+   Each fact is an independent statement — the tilt does not depend on the
+   sector lean, and neither depends on the alert count — so stacking them
+   in one column down a 2560px screen spent 55% of every panel on gutter
+   and pushed the third region below the fold. They are laid out as cards
+   that fill the width the canvas already earned. `auto-fill` with a 30rem
+   floor is what keeps each one near the same measure the prose uses, so
+   widening the window adds COLUMNS rather than lengthening lines. */
+.ak-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem 1.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+}
+.ak-fact { margin: 0; padding: 0.7rem 0 0.7rem 0.9rem; border-left: 2px solid var(--panel-border); }
+
+/* THE FIRST FACT IS THE FINDING AND SPANS THE ROW. flows.css:5934 records
+   the survey: across fourteen renderers the method was drawn 87 times
+   against 4 drawings of the reading. Promoting index 0 here is only half
+   the fix — a lead sentence the same size as the four beside it is not
+   promoted, it is merely first. It takes the full row so the eye lands on
+   it before the grid starts. */
+.ak-fact.is-lead { grid-column: 1 / -1; border-left-color: var(--gold-harvest); }
+.ak-fact-say { margin: 0; }
+.ak-fact.is-lead .ak-fact-say { font-size: var(--fs-lead); line-height: 1.45; }
+
+.ak-fact-src { margin: 0.3rem 0 0; font-size: var(--fs-micro); color: var(--ink-dim); }
+.ak-src-key { font-family: var(--font-mono); }
+
+/* THE QUESTION BOX IS AS WIDE AS ITS PANEL. It rendered at the browser's
+   default textarea size — about 190px, narrower than the placeholder it
+   was showing — inside a panel two thousand pixels across. A control
+   sized smaller than its own example text tells a reader to type
+   something short, which is the opposite of what this box wants.
+   16px is the floor iOS uses to decide whether to zoom the viewport on
+   focus; below it the page jumps. */
+.ak-ask { margin: 0.75rem 0 0; }
+.ak-ask-l { display: block; margin-bottom: 0.4rem; font-size: var(--fs-note); color: var(--ink-dim); }
+/* THE ROW IS CAPPED, NOT STRETCHED. Left to fill a 2000px panel the
+   textarea became roughly 1700px wide and the button ended up most of a
+   screen away from the field it submits — a target the eye has to hunt
+   for after typing. A question here is a sentence, so the field is sized
+   for a sentence and the button stays beside it. */
+.ak-ask-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  max-width: 62rem;
+}
+.ak-ask-in {
+  flex: 1 1 24rem;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: max(1rem, 16px);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  resize: vertical;
+}
+.ak-ask-go {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0.6rem 1.4rem;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+/* A BUTTON THAT LOOKS THE SAME WHILE IT IS REFUSING CLICKS IS PRESSED
+   TWICE, and the second press costs a second question out of a daily
+   allowance shared with every other reader on this account. */
+.ak-ask-go[disabled] { opacity: 0.5; cursor: progress; }
+.ak-busy { margin: 0.6rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* THE ANSWER IS SET APART FROM THE FACTS IT WAS BUILT FROM, because the
+   whole safety story of this page is that those are two different kinds
+   of thing: the sentences are evidence this pipeline measured, and the
+   paragraph may be a model's wording of them. A reader who cannot tell
+   which is which at a glance has none of the guarantee. */
+.ak-answer { margin: 1.25rem 0 0; padding: 1rem 1.25rem; border: 1px solid var(--panel-border); border-radius: var(--radius-1); }
+.ak-asked-l { font-size: var(--fs-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.ak-asked { margin: 0 0 0.75rem; color: var(--ink-dim); }
+.ak-answer-list { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+.ak-answer-item { margin: 0.25rem 0; }
+
+/* WHO WROTE THE WORDING, IN A GLYPH AND A POSITION — NEVER IN A HUE
+   ALONE. flows.css:880 states the rule for the four silence marks and
+   flows-political.js:31 for its freshness glyph: the mark has to survive
+   greyscale, a monochrome printout and the eight percent of readers for
+   whom two of our accents are the same colour. The mark sits in a fixed
+   column so the two states are told apart by shape and alignment before
+   any colour is read. */
+.ak-prov { margin: 0.75rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); display: flex; gap: 0.5rem; }
+.ak-prov-mark { flex: 0 0 1em; font-family: var(--font-mono); }
+
+/* 59.99 AND NOT 60: three min-width:60rem tiers already exist in this
+   file, and a 60/60 pair matches at exactly 60rem, applying both tiers at
+   once. tests/flows-motion.mjs enforces the .99 convention for precisely
+   this, and caught this rule — the collision is invisible at every width
+   but one. */
+@media (max-width: 59.99rem) {
+  .ak-facts { grid-template-columns: 1fr; }
+  .ak-region, .ak-askbox { padding: 1.1rem 1rem; }
+}
+
+/* AN EMPTY ANSWER BOX IS A FRAME AROUND NOTHING. Before anyone asks, the
+   region has no content, and a bordered box waiting there reads as an
+   answer that failed to load rather than as a question not yet put. It is
+   `:empty` rather than a flag the script has to remember to clear,
+   because the two would drift and the drift shows as this exact box. */
+.ak-answer:empty { display: none; }
+
+/* THE CONSISTENCY REPORT, ABOVE EVERYTHING IT QUALIFIES. */
+.ak-warns { padding: 1.25rem 1.75rem; }
+.ak-warns-none { margin: 0; }
+.ak-warns-list { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.9rem; }
+
+/* THE MARK IS A GLYPH IN A FIXED COLUMN AND THE SEVERITY IS SPELLED OUT.
+   A coloured dot is a legend a reader has to have been taught, and it is
+   the one channel that does not survive greyscale, a printout, or the
+   readers for whom two of these accents are the same colour. Shape and
+   position carry it; the tint is the last channel and it is added on top
+   of a distinction that already works without it. */
+.ak-warn { display: flex; gap: 0.75rem; align-items: baseline; }
+.ak-warn-mark {
+  flex: 0 0 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  text-align: right;
+}
+.ak-warn-body { flex: 1 1 auto; max-width: var(--measure); }
+.ak-warn-say { margin: 0; }
+.ak-warn-src { margin: 0.2rem 0 0; font-size: var(--fs-micro); color: var(--ink-dim); }
+.ak-warn-sev { text-transform: uppercase; letter-spacing: 0.08em; }
+
+.ak-warn.is-blocking .ak-warn-mark { color: var(--flow-down, var(--ink)); }
+.ak-warn.is-caution .ak-warn-mark { color: var(--gold-harvest); }
+.ak-warn.is-note .ak-warn-mark { color: var(--ink-faint); }
+
+/* =============================================================
+   THE DOCKED ASSISTANT — a tab on every gated page but /flows/ask.
+
+   ALWAYS ACCESSIBLE IS NOT ALWAYS OPEN. A 380px rail held open on the
+   board takes a quarter of the width from a thirteen-column table that
+   two design phases were spent earning. The tab is always visible and
+   costs 3rem of the right edge; the panel is one click, and the choice
+   is remembered per reader.
+   ============================================================= */
+.ak-dock-tab {
+  position: fixed;
+  right: 0;
+  top: 40%;
+  z-index: 40;
+  padding: 1rem 0.45rem;
+  font: inherit;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  color: var(--ink-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-right: 0;
+  border-radius: var(--radius-2) 0 0 var(--radius-2);
+  cursor: pointer;
+}
+.ak-dock-tab:hover, .ak-dock-tab:focus-visible { color: var(--ink); }
+
+.ak-dock { position: fixed; inset: 0 0 0 auto; z-index: 41; pointer-events: none; }
+.ak-dock-panel {
+  pointer-events: auto;
+  width: min(30rem, 92vw);
+  height: 100%;
+  overflow-y: auto;
+  padding: 1.25rem 1.4rem;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-card);
+}
+.ak-dock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.ak-dock-title { margin: 0 0 0.75rem; font-size: var(--fs-lead); }
+.ak-dock-close {
+  font: inherit;
+  font-size: var(--fs-lead);
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.ak-dock-close:hover, .ak-dock-close:focus-visible { color: var(--ink); border-color: var(--panel-border); }
+
+/* INSIDE THE RAIL THE QUESTION BOX IS ONE COLUMN. The page version caps
+   its row at 62rem and puts the button beside the field; at 30rem there
+   is no beside, so the button goes under and takes the full width — a
+   target the thumb can reach on the phone, where this panel is nearly
+   the whole screen. */
+.ak-dock .ak-ask-row { max-width: none; }
+.ak-dock .ak-ask-in { flex: 1 1 100%; }
+.ak-dock .ak-ask-go { flex: 1 1 100%; }
+.ak-dock .ak-panel { padding: 0; border: 0; background: transparent; }
+.ak-dock .fc-panel-h { display: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ak-dock-panel { transition: transform 160ms var(--ease, ease); }
+  .ak-dock:not(.is-open) .ak-dock-panel { transform: translateX(100%); }
+}
+
+/* THE HEADLINE FIGURE. The reading is a number, and a desk product should
+   let the eye land on it before it lands on words. The label is mono and
+   small so it reads as a field name; the figure is large; the sentence
+   sits beneath at body size and is never omitted.
+
+   AN ABSENT FIGURE IS DIMMED AS WELL AS DASHED, so the em dash is not
+   mistaken at a glance for a minus sign in the same weight as a real
+   reading. It is the only place on this page where a value's absence is
+   set at headline size, which is exactly why it may not look like one. */
+.ak-fig { margin: 0 0 0.35rem; }
+.ak-fig-l {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.ak-fig-v {
+  margin: 0.1rem 0 0.25rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.ak-fig-n { font-size: var(--fs-mark); line-height: 1.05; }
+.ak-fig-n.is-absent { color: var(--ink-faint); }
+.ak-fig-sep { font-size: var(--fs-lead); color: var(--ink-faint); }
+.ak-fig-u {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.ak-fact.is-lead .ak-fig-n { font-size: calc(var(--fs-mark) * 1.35); }
+
+/* THE THREE SESSIONS SIT SIDE BY SIDE, WHICH IS WHAT MAKES THE FIGURE PAY.
+   Lifting a headline number out of each region costs vertical space and
+   buys nothing while the regions are stacked — measured: 2516px to 2745px,
+   worse than before. The figure earns its height only when the three
+   regions become three columns, because then the page is as tall as its
+   TALLEST region rather than the sum of all three, and the whole briefing
+   lands in about one screen.
+
+   YESTERDAY, TODAY, NEXT — LEFT TO RIGHT, and the order is chronological
+   rather than by importance on purpose: a reader scanning three columns
+   reads them as a sequence, and a sequence out of order is a harder thing
+   to hold than three paragraphs out of order.
+
+   76rem, WHICH IS A TIER THIS FILE ALREADY HAS. 92rem was the first
+   choice and it never fired where it was needed: a 1440px viewport is
+   90rem, so the layout this was written for was invisible on the width
+   most readers have. 76rem is 1216px, it is already a breakpoint here, and
+   it has no max-width partner — so reusing it neither invents an eleventh
+   width nor risks the 60/60 collision flows-motion.mjs caught. */
+@media (min-width: 76rem) {
+  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+  .ak-brief .ak-warns { grid-column: 1 / -1; }
+  .ak-region .ak-facts { grid-template-columns: 1fr; }
+  .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
+}
+
+/* THE DENOMINATOR UNDER THE PAIR — small, but never absent while the pair
+   is present. A figure this loud carries its own denominator or it does
+   not carry a pair. */
+.ak-fig-d {
+  margin: 0 0 0.15rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+}

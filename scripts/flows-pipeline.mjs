@@ -4483,7 +4483,28 @@ export function publishRetryDelay(attempt, {
   return spentMs + wait > budgetMs ? null : wait;
 }
 
+/**
+ * WHAT THIS RUN PUBLISHED, KEPT IN MEMORY.
+ *
+ * The briefing is assembled from the session's own output — the boards, the
+ * watch band, the calendar, the alerts, the sector lean — and every one of
+ * those objects already exists here at the moment it is written. Holding a
+ * reference costs nothing; re-reading them back out of the Worker afterwards
+ * would cost seven round trips to fetch bytes this process built.
+ *
+ * IT IS ALSO WHY THE BRIEFING CANNOT BE ASSEMBLED IN THE WORKER. readFlowsPayload
+ * hands back the payload STRING and passthrough() streams it without parsing,
+ * because parsing is "the one cost this design exists to avoid" — CPU there is
+ * metered and a board is hundreds of kilobytes. Here the same work is free.
+ *
+ * Captured before the dry-run branch on purpose: a --dry-run must exercise the
+ * briefing exactly as a live run does, or the one path nobody tests is the one
+ * that assembles the answer a reader is given.
+ */
+const publishedStore = Object.create(null);
+
 async function publish(key, payload) {
+  publishedStore[key] = payload;
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
     if (EMIT) {
@@ -8643,6 +8664,78 @@ async function main() {
     });
   } catch (error) {
     console.warn(`  meta: ${error.message}`);
+  }
+
+  /* THE BRIEFING, LAST, BECAUSE IT READS THE OTHERS.
+     buildBrief takes the six surfaces a reader would otherwise open five
+     routes to assemble, and it takes them under its OWN names rather than the
+     publish keys — so the mapping is written here, once, where both halves are
+     visible. Passing the publish-keyed store straight in would type-check
+     perfectly and produce six silences: a briefing that says nothing, in a
+     module whose entire job is to distinguish silence from emptiness.
+
+     Yesterday is not a seventh key. briefYesterday reads the prior-session
+     fields the board rows already carry, which is why a briefing survives a
+     morning when yesterday's own key has aged past the retention window.
+
+     Its failure must not fail the run, for the same reason meta's must not:
+     a job that published two boards and thirty-four cards has done its work,
+     and exiting non-zero over the summary of that work would report a
+     successful morning as a failure. */
+  try {
+    const { buildBrief, briefStoreFrom } = await import("../shared/flows-brief.js");
+    const { buildFactIndex } = await import("../shared/flows-ask.js");
+    const { assess, assessStoreFrom } = await import("../shared/flows-warnings.js");
+    /* THE SLOT RENAME IS NOT SPELLED HERE ANY MORE. It was, and
+       shared/flows-ask.js spelled it a second time — two copies of a
+       six-key mapping whose failure mode is not an exception but a
+       SILENCE. A briefing reporting six absent surfaces looks exactly
+       like a quiet market, so the drift would have read as the product
+       working. briefStoreFrom owns it now, in the module whose slot names
+       they are, and it is also what decides that a key this run did not
+       publish arrives as {status:"pending"} rather than as missing.
+
+       ONE KEY CARRIES BOTH SHAPES. The page draws three sections; the
+       question box selects from a flat index over every surface. Two
+       calls because they are two shapes, published together because a
+       reader who opens the page and then asks a question must not be
+       answered out of two different sessions. */
+    const index = buildFactIndex(publishedStore);
+    /* THE WARNINGS RIDE THE SAME KEY, AND THEY ARE MEASURED HERE FOR THE
+       SAME REASON THE INDEX IS: every one of them reads across two or more
+       payloads at once — a stamp against another stamp, a population
+       against the prior session's, a count against a vendor cap — and no
+       renderer holds more than one payload. The Worker could not do it
+       either without parsing ten keys under a metered CPU budget.
+
+       `checked` travels with them because a reader must be able to tell
+       "nothing is wrong" from "almost nothing was asked". A morning where
+       half the surfaces did not publish produces few warnings for the
+       uninteresting reason that few questions could be put. */
+    const alarm = assess(assessStoreFrom(publishedStore));
+    if (alarm.warnings.length) {
+      console.log(`  warnings: ${alarm.warnings.length} raised from ${alarm.checked} checks that could run`);
+      for (const w of alarm.warnings) console.log(`    [${w.severity}] ${w.say}`);
+    } else {
+      console.log(`  warnings: none, from ${alarm.checked} checks that could run`);
+    }
+    await publish("brief", {
+      generatedAt, sessionDate,
+      ...buildBrief(briefStoreFrom(publishedStore)),
+      facts: index.facts,
+      silences: index.silences,
+      warnings: alarm.warnings,
+      warningsChecked: alarm.checked,
+      /* AND THE DENOMINATOR TRAVELS WITH IT, because a numerator published
+         alone reads as the whole set — assess() returns `questions` for that
+         reason and this call site was dropping it. Without it a briefing
+         where four of thirteen questions could be asked reaches the page
+         indistinguishable from one where four is every question there is,
+         and the page can only report the count that ran. */
+      warningsQuestions: alarm.questions,
+    });
+  } catch (error) {
+    console.warn(`  brief: ${error.message}`);
   }
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;
