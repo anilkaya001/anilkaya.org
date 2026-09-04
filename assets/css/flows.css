@@ -6401,7 +6401,12 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .ak-prov { margin: 0.75rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); display: flex; gap: 0.5rem; }
 .ak-prov-mark { flex: 0 0 1em; font-family: var(--font-mono); }
 
-@media (max-width: 60rem) {
+/* 59.99 AND NOT 60: three min-width:60rem tiers already exist in this
+   file, and a 60/60 pair matches at exactly 60rem, applying both tiers at
+   once. tests/flows-motion.mjs enforces the .99 convention for precisely
+   this, and caught this rule — the collision is invisible at every width
+   but one. */
+@media (max-width: 59.99rem) {
   .ak-facts { grid-template-columns: 1fr; }
   .ak-region, .ak-askbox { padding: 1.1rem 1rem; }
 }

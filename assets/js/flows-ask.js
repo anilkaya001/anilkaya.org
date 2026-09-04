@@ -612,7 +612,7 @@
     return { used: used, published: published, code: code, calls: calls, model: model };
   }
 
-  function llmLine(block, fired) {
+  function llmLine(block, fired, guard) {
     var line = el("p", "ak-prov");
     /* A REFUSED ANSWER IS NOT THE MODEL'S WORDING, WHATEVER `llm` SAYS. The
        flag reports that a model was ASKED, and the guard reports whether what
@@ -637,9 +637,27 @@
     }
     if (block.used === true) {
       line.append(el("span", "ak-prov-mark", MARK_MODEL));
+      /* A SCAN THAT FOUND NOTHING TO SCAN IS NOT A SCAN THAT PASSED, and this
+         is the line where that matters most. answerHow() already refuses to
+         call an empty scan a verification, but it does so inside the
+         disclosure; this sentence sits in the open under the answer and is
+         the one a reader actually meets. It read "every figure it wrote was
+         checked" over an answer stating no figure at all — vacuously true
+         over an empty set, and awarded to the answer the guard did the least
+         work on, which is also the answer whose claims are least checkable:
+         prose carrying no number is prose the guard cannot touch. The count
+         is compared `=== null` before it is compared to 0, because a measured
+         0 is a real reading and here it is the interesting one. */
+      var scanned = guard && Array.isArray(guard.numerals) ? guard.numerals.length : null;
       line.append(text(" The wording above came back from a language model, which was given " +
-        "the measured facts and asked to restate them. Every figure it wrote was checked " +
-        "against those same facts before this page drew it."));
+        "the measured facts and asked to restate them. " + (scanned === null
+          ? "This page was not told whether the figures in it were checked against those " +
+            "facts, so it makes no claim that they were."
+          : scanned === 0
+            ? "It states no figure, so there was none for the guard to check: what you are " +
+              "reading is the model's prose over the facts listed below it."
+            : "Every figure it wrote was checked against those same facts before this page " +
+              "drew it.")));
       return line;
     }
     line.append(el("span", "ak-prov-mark", MARK_PLAIN));
@@ -843,6 +861,18 @@
     var box = el("section", "ak-warns fc-panel ak-panel");
     var list = brief && Array.isArray(brief.warnings) ? brief.warnings : null;
     var checked = brief && typeof brief.warningsChecked === "number" ? brief.warningsChecked : null;
+    /* THE DENOMINATOR, BECAUSE A NUMERATOR PRINTED ALONE READS AS THE WHOLE
+       SET. shared/flows-warnings.js:865 returns `questions` beside `checked`
+       for this exact reason and states it in those words: nothing in a bare
+       `checked: 4` says whether four is every question the module carries or
+       four of thirteen, so a store holding two keys renders the same clean
+       bill as a complete one. This page held only the numerator and printed
+       it as though it were both, which is the truncation that does not say it
+       truncated — in the panel drawn first because it changes how every
+       region below it is read. Where the total is absent the sentence says
+       the total is absent, rather than letting the count stand for it. */
+    var questions = brief && typeof brief.warningsQuestions === "number"
+      ? brief.warningsQuestions : null;
 
     if (list === null) {
       /* THE KEY PREDATES THE CHECKS, or the field did not survive the
@@ -856,20 +886,71 @@
     }
 
     if (!list.length) {
-      box.append(el("p", "ak-warns-none fc-note", checked === null
-        ? "No inconsistency was found across the published surfaces."
-        : "No inconsistency was found across the published surfaces, from " + checked + " " +
-          (checked === 1 ? "check that could run" : "checks that could run") + "."));
+      /* AN EMPTY LIST IS A CLEAN BILL ONLY WHERE A QUESTION WAS PUT, and
+         `checked` is on the wire for precisely this test.
+         shared/flows-warnings.js:860 says so in as many words — a check whose
+         inputs are absent "reports nothing and does not count itself as
+         having run", so that a caller printing "no warnings" beside a
+         `checked` of 0 can see it has printed nothing at all. This caller
+         printed it anyway, and a store where nothing had published yet — the
+         ordinary state before the session's first run — opened the page with
+         "No inconsistency was found across the published surfaces". That is
+         a measurement nobody took, standing where the strongest claim on the
+         page goes.
+
+         IT IS THE FIRST THING DRAWN, WHICH IS WHY IT MATTERS MORE HERE THAN
+         IT WOULD LOWER DOWN. The box is above the three regions BECAUSE it
+         changes how they are read; a reader who has just been told the
+         surfaces were compared and agree reads three regions of silences as
+         a session that was checked and found quiet, rather than as a
+         pipeline that has not run. That is the pending/quiet merge this page
+         exists to prevent, arriving through the one panel that is not itself
+         one of the three silences. */
+      if (checked === null) {
+        box.append(el("p", "ak-warns-none fc-note",
+          "No inconsistency is listed, and this briefing does not say how many of its " +
+          "checks could run — so this page cannot tell an empty list from an unasked " +
+          "question, and states nothing either way about whether these surfaces agree."));
+        return box;
+      }
+      if (checked === 0) {
+        box.append(el("p", "ak-warns-none fc-note",
+          "Not one consistency check had the inputs to run, so no two surfaces were " +
+          "compared and nothing is claimed about whether they agree. An empty list here " +
+          "is what a store with nothing in it produces, and it is a gap in what has been " +
+          "published rather than a clean bill."));
+        return box;
+      }
+      box.append(el("p", "ak-warns-none fc-note",
+        "No inconsistency was found across the published surfaces, from " + checked + " " +
+        (checked === 1 ? "check that could run" : "checks that could run") + "." +
+        (questions === null
+          ? " How many checks this briefing carries is not published, so that number is the " +
+            "count that ran and not the share of the sweep it covers."
+          : questions - checked === 0
+            ? " That is every check this briefing carries, so the sweep was complete."
+            : " This briefing carries " + questions + ", so " + (questions - checked) + " of " +
+              "them could not be asked at all — they are unanswered rather than clear, and " +
+              "nothing is claimed about what they would have found.")));
       return box;
     }
 
     box.append(el("h2", "fc-panel-h", list.length === 1
       ? "1 thing to know before reading the rest"
       : list.length + " things to know before reading the rest"));
+    /* "N OF THESE CHECKS" NAMED A FRACTION AND SUPPLIED NO DENOMINATOR. The
+       only enumerated set above this line is the warnings themselves, so
+       "4 of these checks had the inputs to run" sat under a heading counting
+       one warning and invited a reader to divide two numbers that share no
+       population. The count of checks that ran is stated as the count it is,
+       and the total is named only where the briefing published one. */
     box.append(el("p", "ak-sub fc-note", checked === null
       ? "Each was found by comparing two published surfaces against each other."
-      : "Found by comparing published surfaces against each other; " + checked + " of these " +
-        (checked === 1 ? "check" : "checks") + " had the inputs to run at all."));
+      : "Found by comparing published surfaces against each other. " + (questions === null
+        ? checked + " " + (checked === 1 ? "check" : "checks") + " had the inputs to run at " +
+          "all, out of a total this briefing does not publish."
+        : checked + " of the " + questions + " checks this briefing carries had the inputs " +
+          "to run at all.")));
 
     var ul = el("ul", "ak-warns-list");
     for (var i = 0; i < list.length; i++) {
@@ -1015,8 +1096,28 @@
          re-enable step after it, and re-enabling a form on a page that is
          leaving invites a second request nobody can answer. */
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
+      if (r.ok) return r.json();
+      /* THE ROUTE'S OWN SENTENCE SURVIVES ITS STATUS CODE, which is the rule
+         this file already states for the answer and did not keep for the
+         failure. worker.js:3448 answers a `brief` key that WAS published and
+         would not parse with a 500 and the words for it — "the briefing was
+         published and could not be read... a fault on this site rather than a
+         fact about the session" — and this handler reduced all of that to
+         "HTTP 500", which the caller below then explained as this page
+         failing to REACH its route. Those are two different unreadables and
+         the reader was handed the wrong one: told the transport had failed,
+         and told in the same breath that nothing was implied about what had
+         been published, on the one occasion when what was published is
+         exactly what is broken. apiError() words every one of these on
+         `error.message`; a body carrying none leaves the status, which stays
+         the honest answer for a failure nobody worded. */
+      return r.json().catch(function () { return null; }).then(function (body) {
+        var said = body && body.error && typeof body.error.message === "string" &&
+          body.error.message.trim() !== "" ? body.error.message.trim() : null;
+        var failure = new Error(said === null ? "HTTP " + r.status : said);
+        failure.said = said;
+        throw failure;
+      });
     });
   }
 
@@ -1081,7 +1182,7 @@
       paintAnswerText(answerHost, said);
     }
 
-    answerHost.append(llmLine(block, fired));
+    answerHost.append(llmLine(block, fired, guard));
 
     /* THE REFUSAL IS NEVER HIDDEN. A reader holding a deterministic answer
        that was silently swapped in for a refused one has been told less than
@@ -1174,9 +1275,23 @@
          name, so without the verdict this sentence reported "found every one
          of them already written in the facts it was given" inside the audit
          trail of an answer the guard had just thrown away. */
-      lines.push("The guard scanned " + guard.numerals.length + " figure" +
-        (guard.numerals.length === 1 ? "" : "s") + " in the answer above and found every one " +
-        "of them already written in the facts it was given.");
+      /* AND A SCAN THAT FOUND NOTHING TO SCAN IS NOT A SCAN THAT PASSED. An
+         answer stating no figure at all arrives here with an empty
+         `numerals`, and "found every one of them already written in the facts
+         it was given" is vacuously true over an empty set — so the audit
+         trail reported the strongest verification this page can offer for the
+         answer where the guard did the least work, in the same words it uses
+         for one where twelve figures were cleared. A measured 0 is a real
+         reading here as everywhere else on this page: it says the model wrote
+         prose and no number, which is worth telling a reader plainly rather
+         than dressing as a check that was performed and survived. */
+      lines.push(guard.numerals.length === 0
+        ? "The answer above states no figure, so there was nothing in it for the guard to " +
+          "check. That is not a verification it passed: it is an answer that carried no " +
+          "number for one to be performed on."
+        : "The guard scanned " + guard.numerals.length + " figure" +
+          (guard.numerals.length === 1 ? "" : "s") + " in the answer above and found every " +
+          "one of them already written in the facts it was given.");
     }
     lines.push("The scan is character-for-character against the sentences the answer was " +
       "handed, not against the field values behind them. That is stricter than it sounds: an " +
@@ -1203,11 +1318,26 @@
   }
 
   /* THE ANTI-TAMPER RECORD, FLATTENED INTO ONE SENTENCE PER FACT. Every fact
-     carries its numbers under names in `n`, and every numeral in its sentence
-     is one of those values — that is what makes the sentence checkable rather
-     than merely plausible. It is printed for the ANSWER's facts and not for
-     the briefing's, because the answer is the one place a model touched the
-     prose and so the one place a reader's need to verify is highest.
+     carries the measured fields its sentence was built from under names in
+     `n`, and printing them is what lets a reader confirm the sentence was
+     assembled from measurements rather than composed. It is printed for the
+     ANSWER's facts and not for the briefing's, because the answer is the one
+     place a model touched the prose and so the one place a reader's need to
+     verify is highest.
+
+     `n` IS NOT THE GUARD'S ALLOWED SET AND MAY NOT BE OFFERED AS ONE. The
+     guard scans the answer against `say` — the sentences the model was
+     handed — and `n` holds fewer values than those sentences hold numerals:
+     a ticker carries digits of its own, so the fact whose say is "the short
+     board's leading name is SYN35 at 58" has n {score:58} and a sentence
+     containing the numerals 35 and 58. This paragraph closed by asserting
+     that every figure in the prose above was one of these values, which is
+     false for that fact and for every fact naming a ticker or a date. A
+     reader auditing the answer against the list would have found a figure
+     missing from it and concluded the guard had let one through, when the
+     guard had checked it correctly against the sentence — the audit trail
+     accusing the check it exists to evidence. answerHow() states the real
+     rule one function above; this one now agrees with it.
 
      THE VALUES ARE NOT REFORMATTED. No thousands separator, no rounding, no
      currency mark: reformatting a measurement on the way to the page is the
@@ -1231,7 +1361,9 @@
     }
     if (!parts.length) return null;
     return "The fields each sentence was built from, named and quoted as published: " +
-      parts.join("; ") + ". Every figure in the prose above is one of these values.";
+      parts.join("; ") + ". These are the measured fields behind the sentences, not the whole " +
+      "set of figures written in them — a ticker or a date carries digits of its own — and " +
+      "the guard checks the answer against those sentences rather than against these values.";
   }
 
   function setAsking(on) {
@@ -1267,14 +1399,17 @@
     }).catch(function (error) {
       if (gated) return;
       answerHost.textContent = "";
-      /* THE REQUEST FAILED, AND THAT IS A FACT ABOUT THIS PAGE. It says
-         nothing at all about what the payloads hold, and a reader who took it
-         as an empty session would have been told the opposite of the truth by
-         a page that could not reach its own route. */
-      answerHost.append(emptyLine("unreadable",
-        "The question could not be sent: " + (error && error.message ? error.message : error) +
-        ". That is this page failing to reach its route, not a statement about what has been " +
-        "published — the briefing above was read separately and still stands."));
+      /* THE REQUEST FAILED, AND THAT IS A FACT ABOUT THIS PAGE — but only
+         where the route never answered. A route that DID answer and said why
+         is quoted verbatim instead, because the sentence below reassures a
+         reader that nothing is implied about what has been published, and
+         that reassurance is false for every failure the route worded: those
+         are failures about the published key itself. */
+      answerHost.append(emptyLine("unreadable", error && error.said
+        ? error.said
+        : "The question could not be sent: " + (error && error.message ? error.message : error) +
+          ". That is this page failing to reach its route, not a statement about what has " +
+          "been published — the briefing above was read separately and still stands."));
     }).then(function () {
       if (gated) return;
       setAsking(false);

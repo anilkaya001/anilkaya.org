@@ -8726,6 +8726,13 @@ async function main() {
       silences: index.silences,
       warnings: alarm.warnings,
       warningsChecked: alarm.checked,
+      /* AND THE DENOMINATOR TRAVELS WITH IT, because a numerator published
+         alone reads as the whole set — assess() returns `questions` for that
+         reason and this call site was dropping it. Without it a briefing
+         where four of thirteen questions could be asked reaches the page
+         indistinguishable from one where four is every question there is,
+         and the page can only report the count that ran. */
+      warningsQuestions: alarm.questions,
     });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
