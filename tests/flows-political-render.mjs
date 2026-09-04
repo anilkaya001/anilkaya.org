@@ -717,6 +717,49 @@ try {
     await p7.close();
   }
 
+  /* ---------- §10c the three sentences that were one ------------- */
+  {
+    /* A PAYLOAD PUBLISHED BEFORE THE ACCOUNT COUNTER SHIPPED. A missing key
+       and a counted zero both leave a running total at 0, and the note read
+       both as "the vendor stated an account on none of these filings" — a
+       claim about the vendor built from a field the vendor was never asked
+       for, which is what the page would have said on the morning after this
+       deploy while last night's payload was still the one being served. */
+    const stripped = (rows) => rows.map((r) => {
+      const o = { ...r };
+      delete o.ownerKnown; delete o.selfFiled; delete o.freshBuys;
+      return o;
+    });
+    await put("political", {
+      ...payload,
+      buyers: { ...payload.buyers, rows: stripped(payload.buyers.rows) },
+      /* The newest filing is AFTER the last completed session, which is the
+         ordinary case on any morning something is actually filed — and the
+         sentence used to call it "before". */
+      latestFiled: "2026-09-01",
+    });
+    const p8 = await browser.newPage();
+    await p8.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p8.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p8.waitForSelector("#plBuyers tbody tr");
+    const note = await p8.textContent("#plBuyersNote");
+    ok(/does not carry the executing account/.test(note || ""),
+      "a payload without the counter says the field is missing — got: " + note);
+    ok(!/stated an executing account on none/.test(note || ""),
+      "and does not turn that absence into a statement about what the vendor sent");
+
+    /* AND NOTHING DRAWN CARRIES THE NEWEST DATE, so the legend does not
+       introduce a glyph the reader will hunt for and never find. */
+    ok(/no row drawn here carries it/.test(note || ""),
+      "with the mark's legend replaced by the fact that nothing is marked");
+    ok(/after the last completed session on 2026-08-31/.test(note || ""),
+      "AND THE DATE IS PLACED CORRECTLY AGAINST THE SESSION. 2026-09-01 is after " +
+      "2026-08-31, and the note said 'before' for every date that merely differed");
+    ok(!/before the last completed session/.test(note || ""),
+      "so the sentence is not the one it used to print regardless of direction");
+    await p8.close();
+  }
+
   /* ---------- §11 the phone --------------------------------------- */
   {
     await put("political", payload);
@@ -747,4 +790,4 @@ console.log(`✓ flows-political-render: ${checks} assertions — a midpoint bar
   `fixed position, a card link built from the payload's own list of carded names with the ` +
   `symbol normalised before the lookup, a breadth block whose first row is third by ` +
   `dollars, the width of the read in the status line, a vendor that ignored pagination said out ` +
-  `loud, three silences in three sentences, a breadth block that draws its own silence rather than vanishing with the panel above it, a floor printed from the payload and never from a literal, and nothing overflowing at 320px`);
+  `loud, three silences in three sentences, a breadth block that draws its own silence rather than vanishing with the panel above it, a floor printed from the payload and never from a literal, an account share that says "not published" rather than "none stated", a newest filing placed AFTER the session it is after, and nothing overflowing at 320px`);
