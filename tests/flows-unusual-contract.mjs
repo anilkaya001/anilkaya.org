@@ -1408,6 +1408,68 @@ const rebuild = (em) => {
        "which is what it used to promise, indefinitely, about a payload that had already " +
        "come back broken");
     await broken.close();
+
+    /* ---- WHOSE CEILING THE COUNT HIT ---------------------------------
+       "Both tables show every row published" is TRUE and was doing the work of
+       a claim it cannot support. When the vendor returns exactly the number of
+       rows we asked for, the population above that line is unknown — so a
+       table of N under a caption about completeness reads as a complete market
+       read. The pipeline has published `vendorLimit` and `vendorTruncated`
+       since the leg shipped, with a comment explaining precisely why a reader
+       needs them, the worker carries them through the intraday merge on
+       purpose, and no browser file had ever read either.
+
+       THREE STATES, AND THE THIRD IS THE ONE THAT BITES. `vendorTruncated`
+       absent must not read as false: `!undefined` is `true`, so the naive form
+       would have the page state confidently that a read was NOT capped, about
+       a run that never measured it. */
+    const ceilingNote = async (alerts) => {
+      await put("flowalerts", alerts);
+      const p = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      await p.context().addCookies([{
+        name: "flows_session", value: session, url: server.baseURL,
+      }]);
+      await p.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+      await p.waitForSelector("#uaFilterNote");
+      const text = await p.evaluate(() =>
+        document.getElementById("uaFilterNote").textContent);
+      await p.close();
+      return text;
+    };
+    const alertRow = { t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", px: 1.2 };
+
+    const capped = await ceilingNote({
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
+      vendorLimit: 200, vendorTruncated: true,
+    });
+    ok(/vendor's own ceiling/.test(capped),
+       `a truncated read says whose ceiling it hit — got: ${capped}`);
+    ok(/200/.test(capped),
+       "and names the limit, because a ceiling without its height is not a measurement");
+    ok(/ceiling rather than a market/.test(capped),
+       "and says what that does to the count: comparing it with another session compares " +
+       "two ceilings, which is the sentence the pipeline's own comment asks for");
+
+    const fitted = await ceilingNote({
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
+      vendorLimit: 200, vendorTruncated: false,
+    });
+    ok(/under the vendor's ceiling/.test(fitted),
+       `a read that fitted says so rather than staying silent — got: ${fitted}`);
+    ok(!/ceiling rather than a market/.test(fitted),
+       "and does NOT carry the truncation caveat, which would make every read look capped");
+
+    const unstated = await ceilingNote({
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
+    });
+    ok(/was not recorded/.test(unstated),
+       `a payload predating the fields says the ceiling was not recorded — got: ${unstated}`);
+    ok(!/under the vendor's ceiling/.test(unstated),
+       "and specifically does NOT claim the read came in under it: `!undefined` is true, " +
+       "so the naive test would have stated a measurement this run never made");
+    ok(/may be a ceiling rather than a market/.test(unstated),
+       "it warns rather than reassures, because an unmeasured cap is closer to a cap than " +
+       "to a clean read for anyone deciding whether to trust the count");
   } finally {
     /* THE WORKER IS A CHILD PROCESS AND IT MUST BE STOPPED. Without this the
        suite prints its success line and then hangs forever holding a wrangler

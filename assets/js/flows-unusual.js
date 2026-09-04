@@ -659,6 +659,10 @@
      So resolution is tracked in its own tri-state, per feed, and only the
      "ok" state licenses a count. */
   let alertsState = "pending";       // "pending" | "ok" | "failed"
+  /* The vendor's own ceiling on the alerts read. `null` on both is "the
+     payload did not say", which is a third state and not a quiet "no". */
+  let alertVendorLimit = null;
+  let alertVendorTruncated = null;
   let feedState = "pending";
 
   /* The filter both tables honour. `side` is "all" | "C" | "P"; `both` narrows
@@ -771,12 +775,47 @@
   /* WHAT THE FILTER IS DOING, IN WORDS, so a narrowed table is never mistaken
      for a thin market. The counts are of rows actually drawn against rows
      published, which is the only pair a reader can check by eye. */
+  /* THE SENTENCE THIS PAGE OWED ITS READER, AND HAD NEVER SAID.
+
+     "Both tables show every row published" is true, and it was doing the work
+     of a claim it cannot support: that the flagged windows ARE the market's
+     flagged windows. When the vendor returns exactly the number of rows we
+     asked for, the population above that line is unknown — so a table of 200
+     under a caption about completeness reads as a complete market read, which
+     is the precise shape of the rule this repository states as "a list that
+     truncates without saying so reads as a population". Here the truncation is
+     not even ours.
+
+     ONLY ON THE ALERTS SIDE. The counter feed is our own ranking of a read we
+     took whole; its rows really are every row published. Attaching the caveat
+     to both tables would trade one wrong claim for another. */
+  function vendorCeilingSaid() {
+    if (alertsState !== "ok") return "";
+    if (alertVendorTruncated === true) {
+      return " The flagged windows hit the vendor's own ceiling" +
+        (alertVendorLimit === null ? "" : " of " + count(alertVendorLimit) + " rows") +
+        ", so how many it withheld above that line is unknown — this count is a " +
+        "ceiling rather than a market, and comparing it with another session's " +
+        "compares two ceilings.";
+    }
+    if (alertVendorTruncated === null) {
+      /* NOT THE SAME AS "IT FITTED". This payload predates the fields, so the
+         run never measured whether the vendor capped it. Saying nothing here
+         would let the completeness sentence stand unqualified on a read that
+         cannot support it. */
+      return " Whether the flagged windows hit the vendor's own ceiling was not " +
+        "recorded on this payload, so this count may be a ceiling rather than a market.";
+    }
+    return " The flagged windows came in under the vendor's ceiling, so this count is " +
+      "the read rather than a limit.";
+  }
+
   function syncFilterNote() {
     const note = document.getElementById("uaFilterNote");
     if (!note) return;
     if (filter.side === "all" && !filter.both) {
       note.textContent = "Both tables show every row published. Narrowing them is a filter " +
-        "on what is drawn and never a second read of the market.";
+        "on what is drawn and never a second read of the market." + vendorCeilingSaid();
       return;
     }
     const bits = [];
@@ -804,7 +843,8 @@
     note.textContent = "Filtered to " + bits.join(" and ") + ": " +
       tally(alertsState, alertRows, "exp", "flagged windows") + " and " +
       tally(feedState, feedRows, "expiry", "contracts") + ". " +
-      "Anything hidden is published and hidden, not absent from the read.";
+      "Anything hidden is published and hidden, not absent from the read." +
+      vendorCeilingSaid();
   }
 
   let feedRows = [];                 // [{ r, i }] in the published rank
@@ -1507,6 +1547,28 @@
       alertsPanel.hidden = false;
       return;
     }
+
+    /* WHOSE CEILING THIS COUNT HIT, captured here because the note below is
+       the only place the page states a population.
+
+       The pipeline publishes this and explains why in its own words: "`shed`
+       counts what OUR published cap removed from what we received; it says
+       nothing about what the vendor withheld before we saw it. When the
+       response length equals the requested limit the population above it is
+       unknown, and a reader comparing today's count to yesterday's is
+       comparing two ceilings rather than two markets." The run even logs it in
+       capitals. Nothing in any browser file had ever read either field.
+
+       ABSENT IS NOT FALSE, and this is the whole discipline of the capture. A
+       payload published before these fields shipped carries neither, and
+       `!undefined` is `true` — which would have the page state, confidently,
+       that the read was NOT truncated, about a run that never measured it.
+       That is the confident zero wearing a boolean. Three states: true, false,
+       and not stated. */
+    alertVendorLimit = isNum(alerts.vendorLimit);
+    alertVendorTruncated = typeof alerts.vendorTruncated === "boolean"
+      ? alerts.vendorTruncated
+      : null;
 
     alertsBody.textContent = "";
     alertRows = rows.map((r, i) => ({ r, i }));
