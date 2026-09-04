@@ -1076,11 +1076,27 @@ async function refreshFlowsIntraday(env) {
       const prev = JSON.parse(stored.payload);
       const raw = await uwFetch(env, "/api/option-trades/flow-alerts", { limit: 60 });
       /* The nightly run knew every name's place in the board funnel; this
-         handler does not re-derive that, it carries each name's last known
-         stage forward. A name the nightly run never saw is foreign — which
-         is what it would have been called last night too. */
+         handler does not re-derive that (that would be a second publisher of
+         the funnel), it carries each name's last known stage forward out of
+         the stored payload.
+
+         AND IT DECLARES THAT MAP PARTIAL, because the shaper's default turns
+         a miss into "foreign" and the page prints "foreign" as "the screener
+         never returned this name". That reading is true of the nightly's map,
+         which was built from the whole screened universe. It is false of this
+         one, which holds only the names the stored payload already carried —
+         sixty rows on the first cron of the day. A name flagged at 09:31 that
+         was not in last night's alerts missed this map for a reason that has
+         nothing to do with the screener, and it was being published as
+         evidence about the screener. The record then made the falsehood
+         stick: once a row is held, the next read reads its stage back out of
+         the row this one wrote. `stageComplete: false` is that difference,
+         stated, and it costs a dash instead of a claim. */
       const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
-      const alerts = buildFlowAlerts(raw, { stageOf: (t) => lastStage.get(t) || null });
+      const alerts = buildFlowAlerts(raw, {
+        stageOf: (t) => lastStage.get(t) || null,
+        stageComplete: false,
+      });
       /* A QUIET READ NEVER OVERWRITES A FEED THAT HAS DATA — the same guard
          the tide refresh below has always carried, and whose absence here
          cost the product its entire alerts feed every session.
