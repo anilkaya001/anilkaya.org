@@ -122,6 +122,18 @@ const payload = {
       { who: "Dev Patel", t: "MSFT", txnType: "Purchase", side: "buy",
         lo: 50_000_000, hi: null, mid: null,
         txnDate: "2026-06-01", filedDate: "2026-08-10", lagDays: 70 },
+      /* THE DOTTED SYMBOL, WHICH IS THE WHOLE REASON cardKey() EXISTS.
+
+         The disclosure feed spells this name "BRK.B" and the card store keys
+         it "BRKB", so a link built from the symbol as filed 404s on exactly
+         the largest names. `carded` below lists BRKB and no fixture row
+         carried a dot until this one — the normalisation was argued for in a
+         comment, asserted in a caption, and reachable by no test in the
+         suite. Seated LAST so every index the assertions above use is
+         unchanged. */
+      { who: "Eve Nakamura", t: "BRK.B", txnType: "Purchase", side: "buy",
+        lo: 15_001, hi: 50_000, mid: 32_500.5, executedBy: "self",
+        txnDate: "2026-06-01", filedDate: "2026-08-05", lagDays: 65 },
     ],
   },
   /* THE BREADTH ORDERING, AND IT DISAGREES WITH THE SIZE ORDERING ON PURPOSE.
@@ -439,6 +451,18 @@ try {
     eq(rows[0].href, "/flows/ticker/?t=NVDA", "to that name's card");
     eq(rows[2].link, "SPAN", "and a name it does not list is plain text, not a hopeful link");
 
+    /* THE DOT, WHICH IS WHAT THE NORMALISATION IS FOR. `carded` lists BRKB
+       and the filing spells it BRK.B; a lookup on the filed spelling misses,
+       and a link built on the filed spelling 404s. Both halves — the
+       membership test and the href — go through one function so they cannot
+       disagree, and this is the row that proves it. */
+    eq(rows[4].link, "A",
+      "a dotted symbol resolves against the carded list once it is normalised the way " +
+      "the card store keys it");
+    eq(rows[4].href, "/flows/ticker/?t=BRKB",
+      "and the href is built from the SAME normalisation, so the test that found the " +
+      "card and the link that opens it can never spell the name differently");
+
     const buyers = await page.evaluate(() =>
       [...document.querySelectorAll("#plBuyers tbody tr")].map((tr) => ({
         other: tr.children[6].textContent,
@@ -616,7 +640,81 @@ try {
       "while an absent feed is a fact about this deployment, not about the vendor");
     ok(!(await p3.textContent("body")).includes("undefined"),
       "and no silence leaks the word undefined onto the page");
+
+    /* THE BREADTH BLOCK OUTLIVES THE SIZE RANKING'S SILENCE. It used to be
+       painted at the tail of paintAssets, after an early return on exactly
+       this state — so the block that reports convergence vanished whenever
+       the panel it sits under had nothing to rank, and its own unavailable
+       branch could not be reached by any payload the pipeline can build. */
+    const clustersUnderQuiet = await p3.evaluate(() =>
+      [...document.querySelectorAll(".pl-clusters tbody tr .pl-tick")].map((n) => n.textContent));
+    eq(clustersUnderQuiet[0], "SPCX",
+      "the breadth block is drawn even when the size ranking beside it is quiet — the two " +
+      "read the same feed and answer different questions about it");
     await p3.close();
+  }
+
+  /* ---------- §10b the breadth block's own two silences ----------- */
+  {
+    /* THE UNAVAILABLE BRANCH, REACHED FOR THE FIRST TIME. buildPolitical marks
+       assets and clusters unavailable together, so this state is exactly what
+       a failed feed produces — and until the block was hoisted above the size
+       panel's early return, nothing could draw it. */
+    await put("political", {
+      ...payload,
+      assets: { status: "unavailable", reason: "HTTP 502" },
+      clusters: { status: "unavailable", reason: "HTTP 502" },
+    });
+    const p5 = await browser.newPage();
+    await p5.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p5.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p5.waitForSelector("#plBuyers tbody tr");
+    const gone = await p5.evaluate(() => {
+      const q = document.querySelector(".pl-clusters [data-empty]");
+      return q ? { kind: q.getAttribute("data-empty"), text: q.textContent } : null;
+    });
+    ok(gone, "a breadth feed the vendor did not answer for still draws its own block");
+    eq(gone.kind, "unavailable", "tagged unavailable rather than quiet");
+    ok(/HTTP 502/.test(gone.text || ""), "carrying the reason it was handed");
+    await p5.close();
+
+    /* AND A PAYLOAD THAT STATES NO FLOOR IS NOT GIVEN ONE. The quiet sentence
+       and the note under the table both used to print `minFilers || 3` — a
+       renderer asserting a constant the shaper owns, which is how two
+       spellings of one number drift apart. */
+    await put("political", {
+      ...payload,
+      clusters: { status: "quiet", rows: [], seen: 0, cap: 25, shed: 0 },
+    });
+    const p6 = await browser.newPage();
+    await p6.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p6.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p6.waitForSelector("#plBuyers tbody tr");
+    const quiet = await p6.textContent(".pl-clusters [data-empty]");
+    ok(/does not state what that floor was/.test(quiet || ""),
+      "a payload carrying no floor gets a sentence that names none — got: " + quiet);
+    ok(!/from 3 or more/.test(quiet || ""),
+      "and specifically not the literal 3 the renderer used to supply for it");
+    await p6.close();
+
+    /* WHILE A STATED FLOOR IS STILL PRINTED, so the fix did not trade one
+       silence for a permanently vaguer sentence. */
+    await put("political", {
+      ...payload,
+      clusters: { status: "quiet", rows: [], seen: 0, cap: 25, shed: 0,
+                  minFilers: 4, namesSeen: 11 },
+    });
+    const p7 = await browser.newPage();
+    await p7.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await p7.goto(url("/flows/political/"), { waitUntil: "networkidle" });
+    await p7.waitForSelector("#plBuyers tbody tr");
+    const stated = await p7.textContent(".pl-clusters [data-empty]");
+    ok(/from 4 or more separate filers/.test(stated || ""),
+      "THE PAYLOAD'S OWN NUMBER, not the renderer's — a shaper that moves its floor to " +
+      "4 moves this sentence with it, which is the property the literal destroyed");
+    ok(/across the 11 names that drew any/.test(stated || ""),
+      "with the population the floor was applied to beside it");
+    await p7.close();
   }
 
   /* ---------- §11 the phone --------------------------------------- */
@@ -649,4 +747,4 @@ console.log(`✓ flows-political-render: ${checks} assertions — a midpoint bar
   `fixed position, a card link built from the payload's own list of carded names with the ` +
   `symbol normalised before the lookup, a breadth block whose first row is third by ` +
   `dollars, the width of the read in the status line, a vendor that ignored pagination said out ` +
-  `loud, three silences in three sentences, and nothing overflowing at 320px`);
+  `loud, three silences in three sentences, a breadth block that draws its own silence rather than vanishing with the panel above it, a floor printed from the payload and never from a literal, and nothing overflowing at 320px`);

@@ -226,13 +226,28 @@
      vendor stated no account at all says so, in the same words the holders
      note uses. */
   function ownerNote(rows, unit) {
-    var known = 0, self = 0;
+    /* THREE STATES, AND THE FIRST DRAFT COLLAPSED TWO OF THEM. `known === 0`
+       was read as "the vendor stated an account on none of these filings" —
+       but it is equally what a payload published BEFORE this counter shipped
+       produces, since a missing key and a counted zero both leave the running
+       total at 0. On the morning after a deploy, when the last run's payload
+       is still the one being served, that sentence would have been a claim
+       about the vendor made from a field the vendor was never asked for. So
+       whether ANY row carried the counter is tracked separately from what the
+       counters said. */
+    var known = 0, self = 0, carried = false;
     for (var i = 0; i < rows.length; i++) {
       var k = isNum(rows[i].ownerKnown);
       if (k === null) continue;
+      carried = true;
       known += k;
       var sf = isNum(rows[i].selfFiled);
       if (sf !== null) self += sf;
+    }
+    if (!carried) {
+      return "This payload does not carry the executing account behind these " + unit +
+        ", so the share disclosed in a filer’s own name cannot be stated here. That is a " +
+        "gap in what was published, not a reading about the filings.";
     }
     if (!known) {
       return "The vendor stated an executing account on none of the filings behind these " +
@@ -250,17 +265,36 @@
      calendar rather than the disclosures. */
   function freshNote(p, drawn, subject) {
     if (!p.latestFiled) return "";
-    var sameDay = p.sessionDate && p.sessionDate === p.latestFiled;
+    /* WHERE THE NEWEST FILING SITS AGAINST THE SESSION, in the three ways it
+       can sit. The first draft said "before the last completed session"
+       whenever the two dates differed, which is false for a window whose `to`
+       runs to today: a filing dated after the last completed session is the
+       ordinary case on any morning something is actually filed, and it is
+       exactly the case a reader is looking for. */
+    var when = "";
+    if (p.sessionDate) {
+      when = p.sessionDate === p.latestFiled
+        ? ", which is the last completed session"
+        : (p.latestFiled < p.sessionDate
+          ? ", which is before the last completed session on " + p.sessionDate
+          : ", which is after the last completed session on " + p.sessionDate);
+    }
     /* THE SUBJECT DIFFERS BY PANEL AND SO DOES THE SENTENCE. On the tape a
        marked row IS the filing; on a ranked panel a marked row is an aggregate
        that CONTAINS one, and saying "filed on" there would date the total
        rather than the disclosure inside it. */
     var what = subject || "filed on";
+    /* A LEGEND FOR A MARK THAT IS NOT ON THE PAGE IS WORSE THAN NO LEGEND.
+       Nothing drawn carries the date — the cap kept older rows, or the day's
+       filings were all sales — so the sentence reports that, rather than
+       introducing a glyph the reader will hunt for and never find. */
+    if (!drawn) {
+      return "The newest disclosure date in this window is " + p.latestFiled + when +
+        ", and no row drawn here carries it, so nothing below is marked new.";
+    }
     return FRESH + " marks the " + drawn + " row" + (drawn === 1 ? "" : "s") +
       " " + what + " " + p.latestFiled + ", the newest disclosure date in this window" +
-      (sameDay ? ", which is the last completed session" :
-        (p.sessionDate ? ", which is before the last completed session on " + p.sessionDate : "")) +
-      ".";
+      when + ".";
   }
 
   /**
@@ -464,11 +498,25 @@
     panel.hidden = false;
     host.textContent = "";
     var feed = p.assets;
+    var carded = cardedSet(p);
+    /* THE BREADTH BLOCK IS DRAWN EVEN WHEN THE SIZE RANKING IS NOT.
+
+       It used to be painted at the bottom of this function, after an early
+       return that fires whenever `p.assets` is absent, unavailable or empty.
+       Both blocks come from one feed and buildPolitical marks them silent
+       together, so the branch inside paintClusters that reports an
+       unavailable breadth feed could never be reached by any payload the
+       pipeline can publish — a state handled in code and unreachable in
+       fact, which is this repository's most repeated mistake wearing a
+       renderer's clothes. Drawn first now, so each block states its own
+       silence in its own words. */
     if (silence(panel, host, feed,
-      "The window was read and no name in it drew a disclosed purchase.")) return;
+      "The window was read and no name in it drew a disclosed purchase.")) {
+      paintClusters(p, host, carded);
+      return;
+    }
 
     var rows = feed.rows;
-    var carded = cardedSet(p);
     var scale = 0;
     for (var i = 0; i < rows.length; i++) {
       scale = Math.max(scale, isNum(rows[i].boughtHi) || 0, isNum(rows[i].bought) || 0);
@@ -590,11 +638,22 @@
       /* MEASURED AND EMPTY, and the floor that measured it is named. "No
          clusters" without the floor beside it reads as a claim about the
          window rather than about the threshold applied to it. */
+      /* THE FLOOR IS READ, NEVER RESTATED. This said `isNum(feed.minFilers)
+         || 3`, which prints the sentence "from 3 or more separate filers" on
+         a payload that stated no floor at all — a renderer asserting a
+         constant the shaper owns, and the way two spellings of one number
+         drift apart. A payload without the field gets a sentence that does
+         not name one. */
+      var floor = isNum(feed.minFilers);
       box.append(tagged("p", "fc-q", "quiet",
-        "No name in this window drew disclosed purchases from " +
-        (isNum(feed.minFilers) || 3) + " or more separate filers" +
-        (isNum(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any"
-          : "") + ". The floor is not relaxed to fill the panel."));
+        floor === null
+          ? "No name in this window drew disclosed purchases from enough separate filers " +
+            "to clear the floor. This payload does not state what that floor was, so the " +
+            "emptiness cannot be read against it here."
+          : "No name in this window drew disclosed purchases from " + floor +
+            " or more separate filers" +
+            (isNum(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any"
+              : "") + ". The floor is not relaxed to fill the panel."));
       host.append(box);
       return;
     }
@@ -646,11 +705,18 @@
     table.append(body);
     wrap.append(table);
     box.append(wrap);
+    /* Same rule as the quiet sentence above: the floor printed here is the
+       one the payload states, and a payload that states none says so instead
+       of having a number invented for it. */
+    var shownFloor = isNum(feed.minFilers);
     box.append(el("p", "fc-note",
       countedNote(feed, "name", "drew fewer filers") + " " +
-      "The floor is " + (isNum(feed.minFilers) || 3) + " separate filers, stated rather " +
-      "than tuned: two is the smallest number that could be called convergence at all, " +
-      "and on a market-wide window a great many names collect two by coincidence. " +
+      (shownFloor === null
+        ? "This payload does not state the floor these rows cleared, so the ordering is " +
+          "drawn without it. "
+        : "The floor is " + shownFloor + " separate filers, stated rather than tuned: " +
+          "two is the smallest number that could be called convergence at all, and on a " +
+          "market-wide window a great many names collect two by coincidence. ") +
       "Nothing here blends breadth with size into a single figure — each key breaks ties " +
       "in the one before it, so the order can be checked by eye against the columns."));
     host.append(box);
