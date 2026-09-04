@@ -313,7 +313,88 @@ const v2Conv = await page.evaluate(() => {
   };
 });
 
+/* =============================================================
+   THE COLD BOARD'S SENTENCE, WHICH STOPPED HAVING ONE CAUSE.
+
+   Until this session a cold board meant exactly one thing — the prior board
+   could not be read — and this renderer hard-coded that sentence. The
+   pipeline now distinguishes four ways a memory can be refused: never
+   published, unreadable, read but naming no rows, and stamped for THIS run's
+   own session (a holiday or manual re-run, where the "prior" board is this
+   run's own output and holding names against it manufactures a stability
+   nothing measured). Only the publisher saw the prior payload, so only the
+   publisher can say which happened; the rows carry the same null `nw` in
+   every case.
+
+   So the sentence travels on the payload and this file draws it. The three
+   cases below are the ones that can actually reach a reader, and the middle
+   one is why this exists: a re-run described as an unreadable store sends
+   someone looking for an outage that did not happen.
+   ============================================================= */
+const coldBase = JSON.parse(JSON.stringify(currentBoard));
+coldBase.deep = 1;
+coldBase.rows = [{ ...currentBoard.rows[0], t: "COLDR", nw: null, r0: null, dr: null }];
+
+const SAME_SESSION_NOTE =
+  "The board published for this session was written by this run, so it is this run's own " +
+  "output rather than a previous session: no name here claims to be new and no rank move " +
+  "is drawn.";
+
+/* (a) A payload from before `memory` existed. The fallback is not a default
+       standing in for a missing value — it is the true sentence for exactly
+       this payload, which is the only one that can lack the field. */
+const coldNoField = JSON.parse(JSON.stringify(coldBase));
+delete coldNoField.memory;
+await post("board:long", coldNoField);
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const noFieldNote = await page.evaluate(() => {
+  const el = document.querySelector(".fb-memnote");
+  return { text: el.textContent.trim(), empty: el.dataset.empty };
+});
+
+/* (b) THE CASE THIS WAS BUILT FOR. A same-session refusal must read as a
+       re-run, never as a store that could not be reached. */
+const coldSameSession = JSON.parse(JSON.stringify(coldBase));
+coldSameSession.memory = {
+  status: "same-session", sessionDate: coldBase.sessionDate,
+  named: 36, incumbents: 0, note: SAME_SESSION_NOTE,
+};
+await post("board:long", coldSameSession);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const sameSessionNote = await page.evaluate(() =>
+  document.querySelector(".fb-memnote").textContent.trim());
+
+/* (c) A note that is present and empty. An empty string is not a sentence,
+       and drawing it leaves a blank paragraph where an explanation belongs —
+       the one outcome worse than either real sentence. */
+const coldEmptyNote = JSON.parse(JSON.stringify(coldBase));
+coldEmptyNote.memory = {
+  status: "unavailable", sessionDate: null, named: null, incumbents: 0, note: "   ",
+};
+await post("board:long", coldEmptyNote);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const emptyNote = await page.evaluate(() =>
+  document.querySelector(".fb-memnote").textContent.trim());
+
 const assertions = [
+  /* ---- the cold board says WHICH silence it is ---- */
+  [/could not be read/.test(noFieldNote.text),
+   `a board published before the memory field says the thing that is true of it ` +
+   `(got "${noFieldNote.text.slice(0, 60)}...")`],
+  [noFieldNote.empty === "unavailable",
+   "and it is unavailable rather than quiet, because nobody measured \"no names changed\""],
+  [sameSessionNote === SAME_SESSION_NOTE,
+   `a same-session refusal draws the PUBLISHER'S sentence verbatim, so the page cannot ` +
+   `describe a re-run as an unreachable store (got "${sameSessionNote.slice(0, 80)}...")`],
+  [!/could not be read/.test(sameSessionNote),
+   "and specifically does not reach for the old one-cause sentence, which is the defect " +
+   "this pairing exists to prevent"],
+  [emptyNote.length > 0 && /could not be read/.test(emptyNote),
+   `a note that is present but blank falls back to a real sentence rather than leaving an ` +
+   `empty paragraph (got "${emptyNote}")`],
   ["a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
    "between new assets and the next pipeline run must not dark the card reader",
    preDeepClickable],

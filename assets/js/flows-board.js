@@ -227,14 +227,25 @@
 
   /* ---------- the board's memory ------------------------------------
 
-     WHAT YESTERDAY'S BOARD SAYS ABOUT TODAY'S ROW. The pipeline reads the
-     previously published board on every run — it always did, for hysteresis —
-     and now keeps what it read: `nw` (new to this side today), `hy` (here on
-     incumbency: it did not clear the entry rank this session and sits inside
-     the exit band, so it is on its way off), `r0` (yesterday's rank) and `dr`
-     (places IMPROVED, signed at the source so up is good and no renderer has
-     to remember to negate a rank subtraction). `ed`/`edte` are the next
-     earnings date and the days to it.
+     WHAT THE PREVIOUSLY PUBLISHED BOARD SAYS ABOUT TODAY'S ROW. The pipeline
+     reads it on every run — it always did, for hysteresis — and now keeps what
+     it read: `nw` (new to this side today), `hy` (here on incumbency: it did
+     not clear the entry rank this session and sits inside the exit band, so it
+     is on its way off), `r0` (the rank it held on THAT board) and `dr` (places
+     IMPROVED, signed at the source so up is good and no renderer has to
+     remember to negate a rank subtraction). `ed`/`edte` are the next earnings
+     date and the days to it.
+
+     "YESTERDAY" IS A CLAIM THIS PAGE CANNOT MAKE, and the first version of
+     these marks made it in every sentence: "climbed 7 places since yesterday".
+     The board today's ranking was held against is the previously PUBLISHED
+     one, which on the Tuesday after a holiday is Friday's — and in the corpus
+     this pipeline emits right now it is the 2026-08-21 board under a 2026-08-24
+     session, three calendar days apart. The payload names it, in
+     `memory.sessionDate`, so the marks name it too and fall back to "the
+     previously published board" rather than to a weekday nobody measured.
+     A delta whose span is asserted rather than measured is the same defect the
+     score track's `gap` exists to prevent, one page over.
 
      Until this layer the board answered none of the questions an early-warning
      product exists for: which name is new, which is climbing, which is about
@@ -263,18 +274,20 @@
   const EARNINGS_SOON_DAYS = 20;
 
   /**
-   * THREE ANSWERS, NOT TWO, because these are three different silences:
+   * CAN THIS PAGE DRAW A MARK AT ALL — asked of the ROWS, which is the only
+   * evidence the marks are actually drawn from:
    *
    *   "absent" — no row carries `nw` at all. This board was published before
    *              the memory layer existed: new assets, old payload, the
    *              deploy window this file already designs for around `deep`.
-   *   "cold"   — the rows carry `nw: null`. The pipeline ran and could not
-   *              READ yesterday's board, so no name has an answer.
+   *   "cold"   — the rows carry `nw: null`. The comparison did not happen, so
+   *              no name has an answer. WHY it did not happen is not visible
+   *              here and is not guessed at: see readMemoryBlock().
    *   "warm"   — the comparison happened and the marks mean something.
    *
-   * Both silences draw the same thing (nothing); only the sentence differs,
-   * which is the whole point of separating them. The test is the same one the
-   * pipeline's own run log uses — a null `nw` on the rows is a cold read.
+   * Both silences draw the same thing (nothing). The sentence that explains
+   * them comes off the payload, not out of this function — this one only
+   * decides whether a mark has anything to say.
    */
   function memoryState(rows) {
     if (!Array.isArray(rows) || !rows.length) return "absent";
@@ -287,8 +300,60 @@
     return sawKey ? "cold" : "absent";
   }
 
-  // Set from the payload on every render, like legacyFamilies and knowsDeep.
-  let memory = "absent";
+  // All four set from the payload on every render, like legacyFamilies and
+  // knowsDeep. `rowMemory` is what the rows can support; the other three are
+  // what the publisher said about the same comparison.
+  let rowMemory = "absent";
+  let memoryStatus = null;    // "ok"|"undated"|"same-session"|"ahead"|"quiet"|"unavailable"|null
+  let memoryNote = null;      // the publisher's sentence, or null
+  let priorSession = null;    // the session the memory was measured against
+
+  /**
+   * WHAT THE MEMORY WAS MEASURED AGAINST, IN WORDS.
+   *
+   * Never "yesterday". The comparand is the previously PUBLISHED board, and
+   * the two coincide only on a week with no holiday in it and no re-run. When
+   * the publisher dated it, the date is said; when it could not (status
+   * "undated", where the memory was used anyway rather than thrown away over a
+   * missing stamp), the board is named without a date. Both are true; the
+   * weekday was neither.
+   */
+  function comparand() {
+    return priorSession ? "the " + priorSession + " board" : "the previously published board";
+  }
+
+  /**
+   * WHY THERE IS NO COMPARISON — TAKEN FROM THE PUBLISHER, NOT INVENTED HERE.
+   *
+   * THIS FILE USED TO WRITE ITS OWN COLD SENTENCE: "Yesterday's board could
+   * not be read on this run." That is one cause out of six, and it is FALSE on
+   * four of them. Upstream can tell an absent key from a read that failed from
+   * a board that was read and named no rows from one stamped with THIS run's
+   * own session (a re-run, refused on purpose so a second pass at one session
+   * cannot hold the whole board in place and report that as stability) from
+   * one stamped LATER than this run. A renderer sees `nw: null` on fifty rows
+   * and can tell none of them apart: the evidence is upstream and reaches the
+   * browser only as `memory.note`.
+   *
+   * IT IS NOT HYPOTHETICAL. The corpus this pipeline emits right now publishes
+   * a long board with status "ok" and a short board with status "same-session",
+   * and this page announced "could not be read" over the second one — about a
+   * board it had read successfully and discarded on purpose.
+   *
+   * `undated` is the one status that KEEPS the memory: the marks are drawn and
+   * the note is a caveat rather than an explanation of a blank. It is the
+   * reason this returns a status alongside the sentence.
+   */
+  function readMemoryBlock(payload) {
+    const block = payload && typeof payload.memory === "object" && payload.memory
+      ? payload.memory : null;
+    memoryStatus = block && typeof block.status === "string" ? block.status : null;
+    memoryNote = block && typeof block.note === "string" && block.note ? block.note : null;
+    /* A DATE OR NOTHING. String(x || "") would turn an absent stamp into "",
+       and "the  board" is a sentence with a hole in it. */
+    priorSession = block && typeof block.sessionDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(block.sessionDate) ? block.sessionDate : null;
+  }
 
   /**
    * WHERE THIS NAME WAS YESTERDAY, in a glyph and a number.
@@ -307,14 +372,34 @@
   function memoryMark(row) {
     if (!row) return null;
     if (row.nw === true) {
-      return { cls: "fb-mem is-new", glyph: "NEW", say: "new to this side today" };
+      return {
+        cls: "fb-mem is-new", glyph: "NEW",
+        say: "new to this side: it was not on " + comparand(),
+      };
     }
     const dr = isNum(row.dr);
     if (dr === null) return null;
     const places = (n) => n + (n === 1 ? " place" : " places");
-    if (dr > 0) return { cls: "fb-mem is-up", glyph: "▲" + dr, say: "climbed " + places(dr) + " since yesterday" };
-    if (dr < 0) return { cls: "fb-mem is-down", glyph: "▼" + Math.abs(dr), say: "fell " + places(Math.abs(dr)) + " since yesterday" };
-    return { cls: "fb-mem is-same", glyph: "=", say: "same rank as yesterday" };
+    /* BOTH ENDS OF THE MOVE WHERE BOTH ARE PUBLISHED. `r0` is the rank the
+       name held on that board and it sat unread in every row: a delta whose
+       endpoints are in the payload and withheld from the page is a number the
+       reader has to take on trust. Withheld together, never half — `r0` is
+       null on a name the prior board ranked but did not stamp a rank for, and
+       "from rank null" is worse than no clause at all. */
+    const from = isNum(row.r0);
+    const now = isNum(row.r);
+    const ends = from !== null && now !== null ? ", from rank " + from + " to rank " + now : "";
+    if (dr > 0) {
+      return { cls: "fb-mem is-up", glyph: "▲" + dr,
+               say: "climbed " + places(dr) + " since " + comparand() + ends };
+    }
+    if (dr < 0) {
+      return { cls: "fb-mem is-down", glyph: "▼" + Math.abs(dr),
+               say: "fell " + places(Math.abs(dr)) + " since " + comparand() + ends };
+    }
+    return { cls: "fb-mem is-same", glyph: "=",
+             say: "the same rank as on " + comparand() +
+               (now === null ? "" : ", still rank " + now) };
   }
 
   /**
@@ -1211,8 +1296,22 @@
    * only one of them means the store was unreachable. Both are `unavailable`
    * rather than `quiet`, because neither is a measured emptiness — nobody
    * measured "no names changed".
+   *
+   * A COLD BOARD NOW HAS FOUR CAUSES AND THIS FILE CANNOT TELL THEM APART.
+   * The rows say only that `nw` is null everywhere. WHY it is null — the prior
+   * board was never published, or was unreadable, or named no rows, or was
+   * stamped for this very session and refused as a re-run — is decided in the
+   * pipeline, which is the only place that saw the prior payload. So the
+   * publisher writes the sentence and this draws it: `memory.note` is used
+   * verbatim when the payload carries one.
+   *
+   * The hard-coded sentence stays as the fallback and it is NOT a default
+   * dressed up as one. It is the true sentence for a board published before
+   * `memory` existed, which is exactly the payload that lacks the field. What
+   * it must never do is describe a re-run as an unreadable store, and it no
+   * longer can: any payload that could have been a re-run carries the field.
    */
-  function setMemoryNote(state) {
+  function setMemoryNote(state, note) {
     const anchor = deck || tableWrap;
     if (state === "warm" || !anchor || !anchor.parentNode) {
       if (memNoteEl) { memNoteEl.remove(); memNoteEl = null; }
@@ -1224,6 +1323,13 @@
       anchor.parentNode.insertBefore(memNoteEl, anchor);
     }
     memNoteEl.dataset.empty = "unavailable";
+    /* PRESENT AND NON-EMPTY, tested before use. An empty string is not a
+       sentence, and falling through to the fallback says something true
+       rather than leaving the reader a blank paragraph. */
+    if (state === "cold" && typeof note === "string" && note.trim() !== "") {
+      memNoteEl.textContent = note;
+      return;
+    }
     memNoteEl.textContent = state === "cold"
       ? "Yesterday's board could not be read on this run, so no name here claims to be new " +
         "and no rank move is drawn. Every row's memory is null together — false would be an " +
@@ -1631,7 +1737,10 @@
          every mark and every sentence on the page is answering the same
          question with the same evidence. */
       memory = memoryState(rows);
-      setMemoryNote(memory);
+      /* The publisher's own sentence about WHY the memory is cold, drawn
+         rather than guessed. Absent on payloads older than the memory field,
+         which setMemoryNote handles by saying the thing that is true of them. */
+      setMemoryNote(memory, payload.memory && payload.memory.note);
       /* The controls are built HERE and not at boot: which orders this payload
          can produce depends on the payload, and a select offering "biggest
          climb" over a board with no memory is a control that does nothing and
