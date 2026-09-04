@@ -72,6 +72,16 @@ import {
    moves, and the card publishes it as the population the counts describe. */
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
 import { joinScoreToPrice } from "./flows-overlay.js";
+/* The vendor's envelope is ambiguous in its own specification — some routes
+   answer with a bare array and others nest it under `data` — and the market
+   pulse already owns the one reading of that ambiguity. A second copy here
+   would be a second place for the envelope rule to be corrected. */
+import { unwrapRows } from "./flows-pulse.js";
+/* Read for the same reason shapeOiChange reads it: the market-wide
+   open-interest rows are keyed on the CONTRACT, and `underlying_symbol` is
+   documented but has been absent on live rows before, so the option symbol is
+   the fallback the ticker is recovered from. */
+import { parseOptionSymbol } from "./flows-premium.js";
 export { HORIZON_SESSIONS };
 
 /** Parse to a finite number, or null. The counterpart to num()'s zero. */
@@ -1121,6 +1131,529 @@ export const COHORT_NOTES = Object.freeze({
     "to neither side, so they are counted apart rather than assigned to one.",
 });
 
+
+/* =============================================================
+   THE MARKET-WIDE JOIN — two feeds this run ALREADY PAYS FOR,
+   placed against one name.
+
+   WHAT IT ADDS THAT THE PER-NAME CALLS CANNOT. The card already
+   spends /api/darkpool/{ticker} and /api/stock/{ticker}/oi-change
+   on every deep name, and those two panels answer "did open
+   interest move in this name" and "did size print off-exchange in
+   this name". Neither can answer "compared with what": a per-name
+   response has no cross-section in it. The pulse leg fetches
+   /api/market/oi-change and /api/darkpool/recent ONCE for the
+   whole run, and those two responses are exactly the missing
+   cross-section. "This name's open-interest change ranks 14th
+   across the market today" is a different and stronger statement
+   than "this name's open interest changed", and it costs zero
+   additional vendor calls.
+
+   A SELECTION IS NOT A SUPERSET, AND THIS IS THE WHOLE DANGER.
+   The market-wide feeds are the vendor's top hundred and the
+   market's hundred most recent prints. A name that is absent from
+   them is NOT a name with no open-interest change and no
+   off-exchange activity — it is a name that did not make a
+   market-wide hundred. Reading absence as silence would turn "not
+   extreme today" into "nothing happened", which is the error the
+   capped-list rule exists to prevent, so the per-name calls stay
+   and the absence reading below names the cut it missed.
+
+   THE ABSENCE IS MEASURED, SO IT IS `quiet`. A name that is not
+   in a feed this run READ is a fact about the market, not a
+   failure: it gets the quiet arm and a sentence carrying the
+   value the last place actually held, so a reader can tell "just
+   missed" from "nowhere near". Only a feed that was never carried
+   in, or came back unreadable, is `unavailable`.
+
+   THE TIMING TRAP, WHICH IS NOT HYPOTHETICAL. The vendor's own
+   specification says /api/market/oi-change "updates once on
+   trading days at around 6:45am EST in the premarket". This
+   pipeline's cron fires at 05:15 ET. So at the moment of this
+   join the market-wide ranking is very likely to be the PREVIOUS
+   session's while the per-name legs carry today's — and a card
+   that printed a cross-sectional rank without its date would be
+   claiming yesterday's cross-section as today's. Every feed
+   therefore publishes the session IT describes, taken from its
+   own rows, beside the session the CARD describes. When the feed
+   states no date of its own, that is published as an unstated
+   date rather than assumed to be today: `sameSession` is null,
+   never a confident false.
+
+   NOTHING HERE IS ASSUMED FROM THE SPECIFICATION. This repository
+   has caught the vendor's documentation wrong five times, and the
+   OI-change schema is one of the places it is thinnest — half its
+   fields are marked "ToBeDone" and its example shows `oi_change`
+   carrying a RATIO ((curr-last)/last = 15.61) beside an
+   `oi_diff_plain` carrying the contract difference (33088), while
+   this repository's own fixture has always generated it as a
+   plain count. So the unit is MEASURED per run, against the two
+   snapshots the same rows publish, and the ordering is MEASURED
+   as well rather than taken from the sentence "default:
+   descending". A cut-off value is only a threshold if the list is
+   actually ordered, and that is checkable.
+   ============================================================= */
+
+/** How many rows of the feed's head a name's entry may cite. A cut, stated. */
+export const CROSS_ROWS = 3;
+
+/**
+ * The two feeds, and what each one is.
+ *
+ * `label` is prose the panel prints, so it lives beside the shaper rather
+ * than in a renderer: shared/ is never served to the browser, and a constant
+ * a renderer needs has to reach it on the payload.
+ */
+export const CROSS_FEEDS = Object.freeze(["oiChange", "darkpool"]);
+
+const CROSS_LABEL = Object.freeze({
+  oiChange: "the market-wide open-interest change feed",
+  darkpool: "the market-wide off-exchange print feed",
+});
+
+/**
+ * Is a list of numbers ordered, and which way?
+ *
+ * MEASURED RATHER THAN ASSERTED, because the whole value of a cut-off
+ * depends on it. The vendor documents /market/oi-change as "highest OI
+ * change (default: descending)"; if that is true, the last row's value is a
+ * threshold and a reader can tell a near miss from a name nowhere near it.
+ * If it is NOT true — the vendor changes a default, a caller passes
+ * `order`, or the documentation is wrong a sixth time — then the last row's
+ * value is just a number from the bottom of a list and calling it a cut-off
+ * would be an invented fact. Null is the honest answer for an unordered
+ * list, and the prose below says so instead of ranking against nothing.
+ *
+ * Ties do not break an ordering: a run of equal values is both
+ * non-increasing and non-decreasing, and a feed of identical values is
+ * reported as unordered rather than as descending, which is the reading
+ * that claims least.
+ */
+export function measureOrder(values) {
+  const nums = [];
+  for (const v of values) {
+    const n = numOrNull(v);
+    if (n === null) return null;   // a gap makes the sequence unjudgeable
+    nums.push(n);
+  }
+  if (nums.length < 2) return null;
+  let down = true, up = true, moved = false;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] > nums[i - 1]) down = false;
+    if (nums[i] < nums[i - 1]) up = false;
+    if (nums[i] !== nums[i - 1]) moved = true;
+  }
+  if (!moved) return null;
+  return down ? "descending" : up ? "ascending" : null;
+}
+
+/**
+ * What `oi_change` actually is on THIS run's rows.
+ *
+ * The vendor's example carries oi_change = 15.6149 with curr_oi 35207 and
+ * last_oi 2119, which is (35207 − 2119) / 2119 — a RATIO — while
+ * oi_diff_plain carries 33088, the difference in contracts. Rendering a
+ * ratio as "3 contracts" or a contract count as "+342%" are both confident
+ * wrong readings of a number that is right, and rule three of this file is
+ * that units travel with numbers. So the basis is reconciled against the
+ * two snapshots the same row publishes, on every row that carries all
+ * three, and a run where neither form reconciles publishes no unit at all
+ * rather than the more plausible-looking of two guesses.
+ *
+ * The tolerance is relative and loose (2%) because the vendor rounds and
+ * quotes several of these fields as strings; it is not a test of the
+ * vendor's arithmetic, it is a test of which quantity is in the field.
+ */
+export function measureOiBasis(rows) {
+  let ratio = 0, plain = 0, checked = 0;
+  for (const r of rows) {
+    const change = numOrNull(r && r.oi_change);
+    const curr = numOrNull(r && r.curr_oi);
+    const last = numOrNull(r && r.last_oi);
+    if (change === null || curr === null || last === null) continue;
+    const diff = curr - last;
+    checked++;
+    if (Math.abs(change - diff) <= Math.max(1, Math.abs(diff) * 0.02)) plain++;
+    if (last !== 0 && Math.abs(change - diff / last) <= Math.max(1e-6, Math.abs(diff / last) * 0.02)) ratio++;
+  }
+  if (!checked) return { basis: null, checked: 0, agreed: 0 };
+  /* Whichever form reconciles on a clear majority wins; a run where both do
+     (every row's last_oi being 1, say) or neither does resolves to null. */
+  if (plain > checked / 2 && plain > ratio) return { basis: "contracts", checked, agreed: plain };
+  if (ratio > checked / 2 && ratio > plain) return { basis: "ratio", checked, agreed: ratio };
+  return { basis: null, checked, agreed: Math.max(plain, ratio) };
+}
+
+/** The date half of an ISO stamp, or null. Never a coerced today. */
+const isoDay = (v) => {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(typeof v === "string" ? v : "");
+  return m ? m[1] : null;
+};
+
+/**
+ * A feed's own session, from its own rows.
+ *
+ * ONE DATE OR A REFUSAL. If every dated row agrees, that is the session the
+ * feed describes. If they disagree — the recent-print feed spans a midnight,
+ * a clearing feed mixes two snapshots — the newest is published WITH the
+ * count of distinct dates, so the panel can say the feed spans more than one
+ * session rather than picking one and calling it the answer.
+ */
+function feedSession(days) {
+  const seen = new Set();
+  for (const d of days) if (d) seen.add(d);
+  if (!seen.size) return { day: null, days: 0 };
+  const sorted = [...seen].sort();
+  return { day: sorted[sorted.length - 1], days: sorted.length };
+}
+
+/* An index feed that could not be measured at all. Carries no numbers, by
+   the same rule unavailable() holds everywhere else on this card. */
+const crossDark = (feed, reason) => ({
+  status: "unavailable", feed, label: CROSS_LABEL[feed], reason,
+  entries: null, coverage: null,
+});
+
+/**
+ * Index one market-wide feed by ticker, once per run.
+ *
+ * @param {string} feed         "oiChange" or "darkpool".
+ * @param {*}      raw          The vendor's response, `{__failed}` for a
+ *                              fetch that threw, or null/undefined for a
+ *                              feed that was never carried into this leg.
+ * @param {object} options
+ * @param {number} options.limit       The row limit this run ASKED for. A
+ *                                     population below it is a fact about
+ *                                     the feed, not about the request.
+ * @param {Array}  options.tickers     The deep names being carded, so the
+ *                                     coverage of the join is measured
+ *                                     against the population it is for.
+ * @param {string} options.sessionDate The session the CARDS describe.
+ */
+export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionDate = null } = {}) {
+  if (!CROSS_FEEDS.includes(feed)) {
+    return crossDark(feed, "no such market-wide feed is indexed by this build");
+  }
+  if (raw === null || raw === undefined) {
+    return crossDark(feed,
+      CROSS_LABEL[feed] + " was not carried into the card build this run, so this name " +
+      "could not be placed against the market. Nothing here is a reading about the name");
+  }
+  if (typeof raw === "object" && !Array.isArray(raw) && raw.__failed) {
+    return crossDark(feed,
+      CROSS_LABEL[feed] + " did not come back this run (" + String(raw.__failed) + "), so " +
+      "there is no cross-section to place this name inside");
+  }
+
+  const rows = unwrapRows(raw);
+  const shaped = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    if (feed === "oiChange") {
+      const oc = typeof r.option_symbol === "string" ? r.option_symbol : null;
+      const parsed = oc ? parseOptionSymbol(oc) : null;
+      const t = (typeof r.underlying_symbol === "string" && r.underlying_symbol)
+        || (parsed ? parsed.ticker : null);
+      const value = numOrNull(r.oi_change);
+      if (!t || value === null) continue;
+      shaped.push({ t: String(t).toUpperCase(), value, at: null, day: isoDay(r.curr_date), raw: r });
+    } else {
+      const t = typeof r.ticker === "string" && r.ticker ? r.ticker : null;
+      const value = numOrNull(r.premium);
+      const at = typeof r.executed_at === "string" && r.executed_at ? r.executed_at : null;
+      /* A print with neither a dollar size nor a timestamp cannot be ranked
+         on either statistic this index measures, so it is counted out of the
+         population rather than carried as a row with nothing in it. */
+      if (!t || (value === null && at === null)) continue;
+      shaped.push({ t: String(t).toUpperCase(), value, at, day: isoDay(at), raw: r });
+    }
+  }
+
+  const wanted = new Set((tickers || []).map((t) => String(t || "").toUpperCase()).filter(Boolean));
+
+  if (!shaped.length) {
+    /* MEASURED AND EMPTY. The feed answered; nothing in it could be placed.
+       That is the quiet arm, and every name gets the same sentence — none of
+       them "missed a cut", because there was no cut. */
+    return {
+      status: "quiet", feed, label: CROSS_LABEL[feed],
+      reason: CROSS_LABEL[feed] + " was read this run and carried no row that could be " +
+        "placed against a ticker, so no name in the board made it and none missed it",
+      population: 0, requested: numOrNull(limit), rowsSeen: rows.length,
+      entries: {}, coverage: { of: wanted.size, in: 0 },
+      asOf: null, asOfStated: false, asOfSessions: 0, sameSession: null,
+    };
+  }
+
+  /* THE ORDERING, MEASURED ON WHAT THE FEED ACTUALLY RETURNED. For the
+     open-interest feed the candidate statistic is the value itself; for the
+     print feed it is the execution time, because "recent" is what that
+     endpoint is documented to return and a recency rank has a completely
+     different cut-off — a TIME the window reaches back to, not a size. Both
+     are tried, and the one that holds is published under its own name. */
+  const byValue = measureOrder(shaped.map((s) => s.value));
+  const byTime = feed === "darkpool"
+    ? measureOrder(shaped.map((s) => (s.at ? Date.parse(s.at) : null)))
+    : null;
+
+  let ordered = null, orderedBy = null, cut = null, cutAt = null;
+  if (byTime) {
+    ordered = byTime;
+    orderedBy = byTime === "descending" ? "execution time, newest first" : "execution time, oldest first";
+    cutAt = shaped[shaped.length - 1].at;
+  } else if (byValue) {
+    ordered = byValue;
+    orderedBy = feed === "oiChange"
+      ? "the vendor's own open-interest change field"
+      : "the print's dollar size";
+    cut = shaped[shaped.length - 1].value;
+  }
+
+  const oi = feed === "oiChange" ? measureOiBasis(rows) : { basis: null, checked: 0, agreed: 0 };
+  /* THE UNIT, IN THREE PARTS, because a renderer needs a short one and a
+     reader needs the whole sentence. `unit`/`unitOne` are what goes beside
+     the number and must agree in number with it; `unitOf` is the rest of the
+     phrase, which is too long to sit in a 320px-wide reading and too
+     important to drop. A unit of null is a number this run could not name a
+     unit for, and the panel says that in words rather than printing a bare
+     figure that looks like contracts. */
+  const unit = feed === "darkpool"
+    ? { unit: "dollars", unitOne: "dollar", unitOf: null, kind: "money" }
+    : oi.basis === "contracts"
+      ? { unit: "contracts", unitOne: "contract", unitOf: null, kind: "count" }
+      : oi.basis === "ratio"
+        ? { unit: "%", unitOne: "%",
+            unitOf: "of the previous session's open interest", kind: "ratio" }
+        : { unit: null, unitOne: null, unitOf: null, kind: null };
+
+  /* HEAD-OF-FEED ENTRIES, BY TICKER. The BEST rank a name holds is the one
+     that answers the question — a name with three contracts in the top
+     hundred ranks where its strongest one does — and the count of its rows
+     is published beside it so "one line got there" and "the whole book did"
+     are not the same reading. */
+  const entries = {};
+  for (let i = 0; i < shaped.length; i++) {
+    const s = shaped[i];
+    const e = entries[s.t];
+    if (!e) {
+      entries[s.t] = { rank: i + 1, value: s.value, at: s.at, count: 1, rows: [i + 1] };
+      continue;
+    }
+    e.count++;
+    if (e.rows.length < CROSS_ROWS) e.rows.push(i + 1);
+  }
+
+  const session = feedSession(shaped.map((s) => s.day));
+  let present = 0;
+  for (const t of wanted) if (entries[t]) present++;
+
+  /* DID OUR OWN REQUEST DO THE CUTTING, OR DID THE VENDOR RUN OUT?
+  
+     A feed that answers 40 rows to a request for 100 was not truncated by
+     this run at all — it handed back everything it had, and a name missing
+     from it did not "miss a top hundred", it failed the vendor's own
+     inclusion rule for the list. Saying "did not make the cut" of a list
+     that never cut anything would be a stated threshold that does not
+     exist, which is the same defect as an unstated one pointing the other
+     way. The flag is published so the sentence can be right either way. */
+  const capped = numOrNull(limit) !== null && shaped.length >= limit;
+
+  return {
+    status: "ok", feed, label: CROSS_LABEL[feed],
+    population: shaped.length,
+    requested: numOrNull(limit),
+    capped,
+    rowsSeen: rows.length,
+    names: Object.keys(entries).length,
+    ordered, orderedBy, cut, cutAt,
+    ...unit,
+    oiBasis: feed === "oiChange" ? oi.basis : null,
+    oiBasisChecked: feed === "oiChange" ? oi.checked : null,
+    /* THE SESSION THE FEED DESCRIBES, from the feed's own rows, beside the
+       session the card describes. Never inferred from the clock. */
+    asOf: session.day,
+    asOfStated: session.day !== null,
+    asOfSessions: session.days,
+    /* NULL, NOT FALSE, WHEN THE FEED STATED NO DATE. "This ranking is from
+       another session" and "nobody said which session this ranking is from"
+       are different facts and the second must never render as the first. */
+    sameSession: session.day === null || !sessionDate ? null : session.day === sessionDate,
+    entries,
+    coverage: { of: wanted.size, in: present },
+  };
+}
+
+/**
+ * Index both feeds once, for a whole run.
+ *
+ * Returned as plain data rather than a closure so a contract test can build
+ * one by hand and so the pipeline can log the coverage before it spends a
+ * single card build on it.
+ */
+export function indexMarketCross({
+  oiChange, darkpool, limits = {}, tickers = [], sessionDate = null,
+} = {}) {
+  return {
+    sessionDate: sessionDate || null,
+    oiChange: indexCrossFeed("oiChange", oiChange,
+      { limit: limits.oiChange, tickers, sessionDate }),
+    darkpool: indexCrossFeed("darkpool", darkpool,
+      { limit: limits.darkpool, tickers, sessionDate }),
+  };
+}
+
+/* The fields a per-name reading carries whether or not the name is in the
+   feed. A reader who missed the cut still needs the population, the cut and
+   the feed's own session, or the absence is a shrug rather than a reading. */
+function crossFrame(f) {
+  return {
+    feed: f.feed, label: f.label,
+    population: numOrNull(f.population), requested: numOrNull(f.requested),
+    names: numOrNull(f.names),
+    capped: f.capped === null || f.capped === undefined ? null : !!f.capped,
+    ordered: f.ordered || null, orderedBy: f.orderedBy || null,
+    cut: numOrNull(f.cut), cutAt: f.cutAt || null,
+    unit: f.unit || null, unitOne: f.unitOne || null, unitOf: f.unitOf || null,
+    kind: f.kind || null,
+    asOf: f.asOf || null, asOfStated: !!f.asOfStated,
+    asOfSessions: numOrNull(f.asOfSessions), sameSession:
+      f.sameSession === null || f.sameSession === undefined ? null : !!f.sameSession,
+    coverage: f.coverage || null,
+  };
+}
+
+/**
+ * One name's reading out of one indexed feed.
+ *
+ * THREE ARMS AND THEY ARE NOT INTERCHANGEABLE:
+ *   unavailable — the feed was never carried in, or did not come back.
+ *   quiet       — the feed was READ and this name is not in it. A measured
+ *                 absence, carrying the cut it did not clear.
+ *   ok          — the name is in it, with its rank, the population that rank
+ *                 is inside, the value it ranked on and that value's unit.
+ */
+export function readCrossFeed(indexed, ticker) {
+  if (!indexed || typeof indexed !== "object") {
+    return { status: "unavailable", present: null,
+      reason: "this market-wide feed was not indexed for this run" };
+  }
+  if (indexed.status === "unavailable") {
+    return { status: "unavailable", present: null, feed: indexed.feed || null,
+      label: indexed.label || null, reason: indexed.reason };
+  }
+  const want = String(ticker || "").toUpperCase();
+  const frame = crossFrame(indexed);
+  if (indexed.status === "quiet" || !indexed.entries) {
+    return { status: "quiet", present: false, ...frame, reason: indexed.reason };
+  }
+  const e = want ? indexed.entries[want] : null;
+  if (!e) {
+    return {
+      status: "quiet", present: false, ...frame,
+      /* THE SENTENCE THAT SEPARATES A NEAR MISS FROM NOWHERE NEAR, and it
+         changes shape with whether anything was actually cut. The population
+         and the cut are both in the frame above; this reason states which
+         kind of absence it is, and the renderer prints the numbers beside
+         it. */
+      reason: "this name is not in " + indexed.label + " this run. The feed was read " +
+        "and held " + indexed.population +
+        (indexed.population === 1 ? " row" : " rows") + " covering " + indexed.names +
+        (indexed.names === 1 ? " name" : " names") + ", and this was not one of them. " +
+        (indexed.capped
+          ? "The feed filled the " + indexed.requested +
+            (indexed.requested === 1 ? " row" : " rows") + " this run asked for, so this " +
+            "name was below the cut rather than outside the request. "
+          : "The feed returned fewer rows than the " + indexed.requested +
+            " requested, so nothing was cut off by this run's own limit: the name is " +
+            "outside the vendor's selection for this list, not below a threshold we set. ") +
+        "Either way it is a fact about a market-wide selection, not about this name's own " +
+        "activity — the per-name feeds on this page are what measure that",
+    };
+  }
+  return {
+    status: "ok", present: true, ...frame,
+    rank: numOrNull(e.rank),
+    value: numOrNull(e.value),
+    at: e.at || null,
+    count: numOrNull(e.count),
+    rows: Array.isArray(e.rows) ? e.rows.slice(0, CROSS_ROWS) : [],
+    shown: Math.min(numOrNull(e.count) || 0, CROSS_ROWS),
+  };
+}
+
+/**
+ * The market-wide join, as one card panel.
+ *
+ * The panel is `unavailable` only when NEITHER feed could be measured — the
+ * same rule volContext holds for its two volatility feeds. One feed down and
+ * one read is an ordinary run and the reader gets the half that exists.
+ */
+export function buildMarketCross(index, ticker, { asOf = null } = {}) {
+  if (!index || typeof index !== "object") {
+    return {
+      status: "unavailable",
+      reason: "neither market-wide feed was carried into the card build this run, so this " +
+        "name could not be placed against the market's own cross-section",
+      notes: CROSS_NOTES,
+    };
+  }
+  const feeds = {};
+  for (const feed of CROSS_FEEDS) feeds[feed] = readCrossFeed(index[feed], ticker);
+  if (CROSS_FEEDS.every((f) => feeds[f].status === "unavailable")) {
+    return {
+      status: "unavailable",
+      reason: "neither market-wide feed could be read this run: " +
+        CROSS_FEEDS.map((f) => feeds[f].reason).join("; "),
+      notes: CROSS_NOTES,
+    };
+  }
+  /* THE COVERAGE OF THE JOIN, ON EVERY CARD THAT CARRIES IT.
+  
+     A join that reaches two of fifty names is telling a reader almost
+     nothing, and forty-eight cards each saying "did not make the cut" would
+     read as forty-eight findings rather than as one thin join. The panel
+     therefore carries the run-level count, so the sentence a card prints can
+     be sized by how much of the board the feed reached. */
+  const coverage = {};
+  for (const feed of CROSS_FEEDS) {
+    coverage[feed] = feeds[feed].coverage || null;
+  }
+  return ok({ feeds, coverage, notes: CROSS_NOTES }, asOf);
+}
+
+export const CROSS_NOTES = Object.freeze({
+  what:
+    "Both feeds here are market-wide reads this run already makes once for " +
+    "the market pulse. Membership is the reading: a name inside one of them " +
+    "is a name whose open-interest change or off-exchange print was large or " +
+    "recent enough to place in a market-wide list, which a per-name request " +
+    "cannot say because it has no cross-section in it.",
+  absence:
+    "These lists are SELECTIONS, not the whole market. A name that is not in " +
+    "one did not make a market-wide list; it is not a name with no " +
+    "open-interest change and no off-exchange prints. The per-name feeds on " +
+    "this page are what measure that, and they are read separately for every " +
+    "name on the board.",
+  timing:
+    "The vendor states that its market-wide open-interest feed updates once a " +
+    "trading day at about 06:45 Eastern, and this pipeline runs at 05:15 " +
+    "Eastern. The session each feed describes is therefore published from the " +
+    "feed's own rows, beside the session this card describes. Where a feed " +
+    "states no date of its own, that is said rather than assumed, and a rank " +
+    "from another session is never presented as today's.",
+  rank:
+    "A rank is the row's position in the feed as the vendor returned it, and " +
+    "it is meaningless without the population it sits inside, which is " +
+    "published beside it. Whether that order is an order at all is measured " +
+    "here rather than taken from the vendor's documentation.",
+  units:
+    "The open-interest feed's own change field is reconciled against the two " +
+    "clearing snapshots the same rows publish, because the vendor's example " +
+    "carries it as a ratio and this repository's fixtures have carried it as " +
+    "a contract count. Where neither reconciles, the number is published " +
+    "with no unit rather than with the more plausible of two guesses.",
+});
+
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   chain, generatedAt, sessionDate, weights,
@@ -1139,6 +1672,16 @@ export function buildCard({
      the track leg walks the dated archive and can be skipped or fail without
      costing any other panel. */
   scoreHistory = null,
+  /* THE RUN'S MARKET-WIDE INDEX, built once by indexMarketCross out of the
+     two pulse feeds and shared by every card in the loop.
+
+     Passed in already indexed rather than built here, for the same reason
+     `chain` is: the two vendor responses are market-wide, one per RUN, and
+     re-indexing a hundred rows fifty times would make fifty chances for the
+     same cross-section to be measured fifty slightly different ways. null
+     means the pulse leg did not reach the card build, which the panel
+     reports as an unavailability rather than as an absence of activity. */
+  marketCross = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -1335,6 +1878,10 @@ export function buildCard({
       }),
       context: contextPanel,
       congress: buildCongress(congress, { asOf: sessionDate }),
+      /* WHERE THIS NAME SITS IN THE MARKET'S OWN TWO LISTS, joined off feeds
+         the run already pays for. Zero marginal vendor calls: the pulse leg
+         fetches both once and this reads the same two responses. */
+      marketRank: buildMarketCross(marketCross, ticker, { asOf: sessionDate }),
       darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool),
       oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas),
       volContext: darkNull(termStructure) && darkNull(ivRank)

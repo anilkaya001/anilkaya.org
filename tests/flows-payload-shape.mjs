@@ -39,7 +39,7 @@
 
 import assert from "node:assert";
 import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -276,9 +276,165 @@ assert.deepEqual(missingReport, [],
      "actually published, so it can only be said once it is true");
 }
 
+/* ---------- the card panel, and the drawer that reads it ------------
+
+   THE SCAN ABOVE ONLY REACHES ROOT FIELDS OF WHOLE-PAYLOAD RENDERERS, and
+   the card is not one of those: /flows/ticker/ hands each drawer ONE panel
+   out of card.panels, so every field it reads is `panel.x` or `f.x` and none
+   of them is a root field of anything. That is a whole class of renderer
+   this suite could not see, and the class the sector bug belongs to.
+
+   marketRank is the newest member of it and the one with the most fields —
+   twenty-odd per feed, a third of them nullable — so it is checked the way
+   the root scans are: the reads are EXTRACTED FROM THE DRAWER'S OWN SOURCE
+   and held against the panel the pipeline actually emitted, rather than
+   against a fixture written by the same hand as the drawer.
+
+   THE QUIET ARM IS CHECKED SEPARATELY AND THAT IS THE POINT. A name that is
+   not in a feed still gets the population, the cut, the ordering and the
+   feed's own session — that is what makes the absence a reading instead of
+   a shrug — so the fields the drawer prints OUTSIDE its ok branch have to be
+   on the quiet arm too. A publisher that dropped them there would leave a
+   panel saying "not in the feed" with nothing to compare against, and every
+   assertion above would still pass. */
+{
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  ok(cardFiles.length > 0, "the pipeline emitted cards for the panel scan to read");
+  const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+
+  const withRank = cards.filter((c) => c.panels && c.panels.marketRank);
+  eq(withRank.length, cards.length,
+     "every emitted card carries a marketRank panel — a panel published on SOME cards is a " +
+     "renderer branch that only fails on the names nobody checked");
+
+  const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+  const start = src.indexOf("/* ===== marketRank");
+  ok(start !== -1,
+     "assets/js/flows-ticker.js still carries the marketRank drawer block — if it was " +
+     "renamed, this scan silently stopped checking it and the rename must update this suite");
+  const end = src.indexOf("const DRAW = {", start);
+  const code = src.slice(start, end)
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/([^:])\/\/[^\n]*/g, "$1");
+
+  const readsOf = (v) => {
+    const re = new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g");
+    const out = new Set();
+    let m;
+    while ((m = re.exec(code)) !== null) out.add(m[1]);
+    return out;
+  };
+
+  /* A card whose name is in BOTH feeds, and one whose name is in neither.
+     Both must exist in the corpus or one of the two arms below is checked
+     against nothing at all, which is the vacuous pass this file is about. */
+  const okCard = withRank.find((c) =>
+    c.panels.marketRank.status === "ok" &&
+    c.panels.marketRank.feeds.oiChange.status === "ok" &&
+    c.panels.marketRank.feeds.darkpool.status === "ok");
+  const quietCard = withRank.find((c) =>
+    c.panels.marketRank.status === "ok" &&
+    c.panels.marketRank.feeds.oiChange.status === "quiet");
+  ok(okCard, "an emitted card places in both market-wide feeds, so the ok arm is measurable");
+  ok(quietCard,
+     "and an emitted card places in neither, so the measured-absence arm is measurable too — " +
+     "a corpus where every name ranks would certify only half of this panel");
+
+  /* ANTI-VACUITY, the same guard the root scans carry. A regex that matches
+     nothing passes every assertion below it, which is how the defect this
+     file is named for survived a suite of fifty-eight assertions. */
+  ok(readsOf("f").size >= 10,
+     `the scan found the drawer's feed-field reads (${readsOf("f").size} of them) — zero ` +
+     "would mean the block moved and this whole section is checking nothing");
+  ok(readsOf("panel").size >= 3,
+     `and its panel-field reads (${readsOf("panel").size} of them)`);
+
+  const panelKeys = new Set(Object.keys(okCard.panels.marketRank));
+  /* `reason` is the union's other arm: an unavailable panel carries it and
+     an ok one never does. The drawer must read it — that is the whole
+     three-silences contract — so it is named here rather than allowed by a
+     blanket exemption. */
+  panelKeys.add("reason");
+  for (const field of [...readsOf("panel")].sort()) {
+    ok(panelKeys.has(field),
+       `the marketRank drawer reads panel.${field} and the emitted panel carries it ` +
+       `(it has: ${[...panelKeys].sort().join(", ")})`);
+  }
+
+  /* THE REFERENCE IS THE UNION OF THE ARMS, because a feed reading is a
+     tagged union and the drawer reads across all of them: `rank` and `value`
+     exist only where the name placed, `reason` only where it did not. Held
+     against one arm this would either reject the correct reads of the other
+     or, checked against the wider arm alone, pass a read that no arm carries.
+     Both arms come out of the EMITTED corpus, so neither is a fixture. */
+  const okFeed = okCard.panels.marketRank.feeds.oiChange;
+  const absentFeed = quietCard.panels.marketRank.feeds.oiChange;
+  const feedKeys = new Set([...Object.keys(okFeed), ...Object.keys(absentFeed)]);
+  for (const field of [...readsOf("f")].sort()) {
+    ok(feedKeys.has(field),
+       `the drawer reads f.${field} on a feed reading and the publisher writes it on some ` +
+       `arm of the union (they carry: ${[...feedKeys].sort().join(", ")})`);
+  }
+
+  /* THE FIELDS THE ABSENCE READING NEEDS, on the arm that reports an
+     absence. Named one by one because each carries a different half of the
+     sentence: the population a rank would have sat inside, the cut the name
+     did not clear, whether OUR OWN request did the cutting, the ordering
+     that makes a cut a cut at all, and the session the feed is from. */
+  const quietFeed = absentFeed;
+  eq(quietFeed.status, "quiet",
+     "a name the feed was READ without finding is quiet, not unavailable — it is a fact " +
+     "about a market-wide selection, and only the third silence makes a claim about the market");
+  eq(quietFeed.present, false, "and it says so as data, not only in prose");
+  for (const field of ["population", "names", "requested", "capped", "ordered", "orderedBy",
+                       "cut", "cutAt", "asOf", "asOfStated", "sameSession", "coverage",
+                       "unit", "unitOne", "kind", "reason"]) {
+    ok(Object.hasOwn(quietFeed, field),
+       "the absence reading still carries `" + field + "` — without it \"not in this feed\" " +
+       "is a shrug rather than a reading a trader can size");
+  }
+
+  /* THE COVERAGE OF THE JOIN, ON THE PAYLOAD. If it reached two names in
+     fifty, forty-eight cards will each say they are not in the feed; that is
+     one thin join and the payload has to be able to say so rather than
+     leaving forty-eight cards to read as forty-eight findings. */
+  for (const feed of ["oiChange", "darkpool"]) {
+    const cov = okCard.panels.marketRank.coverage[feed];
+    ok(cov && typeof cov.of === "number" && typeof cov.in === "number",
+       `the ${feed} join publishes its own coverage as counts, not as a claim`);
+    ok(cov.of > 0 && cov.in >= 0 && cov.in <= cov.of,
+       `and the counts partition sensibly (${cov.in} of ${cov.of})`);
+  }
+
+  /* THE TIMING TRAP, ON THE WIRE. The vendor states the market-wide
+     open-interest feed updates about 06:45 ET; this pipeline runs at 05:15
+     ET. The emitted corpus is built to reproduce that — its feed dates
+     itself to the session BEFORE the one the cards describe — so this
+     asserts the payload can actually tell a reader the rank is not today's. */
+  ok(okFeed.asOfStated === true && typeof okFeed.asOf === "string",
+     "the market-wide feed publishes the session IT describes, from its own rows");
+  eq(okFeed.sameSession, false,
+     "and the corpus really exercises the timing trap: a 05:15 run joins the PREVIOUS " +
+     "session's cross-section onto today's card, and the payload says so rather than " +
+     "letting the card imply the ranking is today's");
+  ok(okFeed.asOf < okCard.sessionDate,
+     `the feed's session (${okFeed.asOf}) is genuinely earlier than the card's ` +
+     `(${okCard.sessionDate})`);
+
+  /* A RANK WITH NO POPULATION IS NOT A RANK. */
+  ok(okFeed.rank >= 1 && okFeed.rank <= okFeed.population,
+     `the published rank sits inside the published population (${okFeed.rank} of ${okFeed.population})`);
+  ok(okFeed.unit !== null && okFeed.unitOne !== null,
+     "and the value it ranked on carries a unit in both numbers — the singular is not the " +
+     "plural with an s assumed off it");
+}
+
 rmSync(dir, { recursive: true, force: true });
 
 console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and the renderers ` +
   `checked against each other rather than against a fixture that agrees with both, every root ` +
   `field extracted from the renderer's own source so the two cannot drift, absences allowed ` +
-  `only with a written reason, and the sector regression pinned by name in both directions`);
+  `only with a written reason, the sector regression pinned by name in both directions, and ` +
+  `the card's panel-level renderers finally in scope: the market-wide join's drawer read ` +
+  `against the panel the pipeline emits, on BOTH arms of its union, with the coverage of the ` +
+  `join and the prior-session date of its ranking asserted on the wire`);

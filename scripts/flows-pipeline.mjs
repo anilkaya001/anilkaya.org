@@ -30,7 +30,9 @@ import {
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
   boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
 } from "../shared/flows-features.js";
-import { buildCard, SURFACE_EXPIRIES } from "../shared/flows-card.js";
+import {
+  buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
+} from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
@@ -273,6 +275,22 @@ export const SCREENER_PAGE_ROWS = 50;
  * the row says so rather than linking to a page that will not load.
  */
 export const DEEP_NAMES = 50;
+
+/**
+ * How many rows this run asks the two market-wide feeds for.
+ *
+ * ONE CONSTANT BECAUSE THE NUMBER IS PUBLISHED. The cards state the
+ * population a rank sits inside, and they state what this run REQUESTED
+ * beside it — a feed that answers 63 rows to a request for 100 is a fact
+ * about the feed, and a card that could not tell those apart would report a
+ * rank of 14 "out of 100" when the hundred never arrived.
+ *
+ * 100 is the vendor's own documented default on both routes (max 200), and
+ * raising it would not buy coverage where it is short: a name missing from
+ * the market's top hundred by open-interest change is missing because the
+ * market had a hundred larger ones, not because the page was too small.
+ */
+export const MARKET_CROSS_LIMIT = 100;
 
 /** The rule, in the words the board publishes it in. */
 export const DEEP_RULE =
@@ -1995,26 +2013,149 @@ function ret(closes, n) {
   return a > 0 ? xs[xs.length - 1] / a - 1 : null;
 }
 
+/** "3 names" / "1 name". A count without its noun is a number nobody can act on. */
+const nameCount = (n) => `${n} name${n === 1 ? "" : "s"}`;
+
 /**
- * The currently published board, for hysteresis AND for the board's memory.
+ * WHOSE BOARD IS THIS, AND MAY IT BE USED AS YESTERDAY.
  *
- * THIS USED TO RETURN TICKERS AND THREW AWAY THE RANKS IT HAD IN HAND. The
+ * The board's memory is one read of the LIVE `board:<side>` key — the very key
+ * this run is about to overwrite. That is correct exactly once a session and
+ * wrong the second time. On a market holiday, an early close, a manual re-run
+ * or a cron that fires twice, the second run reads ITS OWN OUTPUT: every name
+ * is then trivially its own incumbent, hysteresis holds the entire board in
+ * place, and the run reports names as `held` that were never tested against a
+ * prior session. The page then shows a stability manufactured by the re-read,
+ * on a surface whose whole promise is what changed since yesterday.
+ *
+ * So the prior board is asked which session it is FOR, and its membership is
+ * used only when it answers with a session other than the one this run is
+ * about to stamp. DATE AGAINST DATE, both of them `sessionDate` strings and
+ * both from the same origin: this file has already paid for the instant
+ * version of this comparison once — see daysToEarnings, MEASURED FROM A DATE,
+ * NOT FROM AN INSTANT, where a fixture read Date.now() while the gate counted
+ * from easternNow().date and every result silently changed across midnight.
+ * `sessionDate` is the last COMPLETED session and is the only session stamp a
+ * board payload carries; comparing it against a clock would compare the
+ * session to the morning the run happens, which at 05:15 Eastern is one to
+ * three calendar days later by construction.
+ *
+ * IT TAKES readStored()'s OWN RESULT, not just the payload, because "the key
+ * was never published" and "the read did not complete" are two of this
+ * product's three silences and fetchStoredPayload() throws the difference
+ * away. Both end in a cold board and both are `unavailable`, but they are not
+ * the same fact and they do not get the same sentence.
+ *
+ * THE RANKS ARE KEPT, which is why the memory is rows rather than tickers. The
  * read is one request either way; mapping it down to `r.t` cost nothing and
- * discarded the only copy of yesterday's ordering the run would ever hold.
- * With the ranks kept, a row can say it climbed from 31st to 4th — which is
- * the single most useful sentence a ranked list can print, and the one it
- * could not print because this function had already deleted the evidence.
+ * discarded the only copy of yesterday's ordering the run would ever hold —
+ * a row can say it climbed from 31st to 4th only because the rank survived.
  *
- * Non-fatal by design: if this cannot be read, the board is simply built with
- * no incumbents, which is exactly what shipped before hysteresis was wired up.
- * A stale-board read must never stop today's board from publishing — and an
- * empty result here reaches applyHysteresis as a COLD memory, which it
- * reports as such rather than calling every name new.
+ * NON-FATAL IN EVERY BRANCH. A memory that cannot be read, cannot be trusted
+ * or must be thrown away simply leaves the incumbent list empty, which
+ * applyHysteresis already reports as `cold` — it suppresses `entered` and
+ * `returning` rather than calling every name new. Nothing here can stop
+ * today's board from publishing.
+ *
+ * @param {{payload:object|null, absent?:boolean, failed?:boolean, status?:number}} read
+ *        readStored()'s result for `board:<side>`
+ * @param {string|null} runSessionDate  the sessionDate THIS run is about to stamp
+ * @returns {{status:"ok"|"same-session"|"ahead"|"undated"|"quiet"|"unavailable",
+ *            rows:Array, incumbents:number, named:number|null,
+ *            sessionDate:string|null, note:string}}
+ *          `rows` is what applyHysteresis should hold today's ranking against —
+ *          EMPTY whenever the memory was refused. `named` is how many rows the
+ *          prior board named, null when no prior board could be read at all:
+ *          a store that answered nothing is not a board that held nothing.
  */
-async function fetchPublishedRows(key) {
-  const body = await fetchStoredPayload(key);
-  if (!body || !Array.isArray(body.rows)) return [];
-  return body.rows.filter((r) => r && r.t);
+export function readBoardMemory(read, runSessionDate) {
+  const body = read && read.payload;
+  /* THE STAMP, TESTED FOR ABSENCE BEFORE IT IS COMPARED. String(x || "") would
+     turn a missing sessionDate into "", which sorts BELOW every real date and
+     would have this function report "an earlier session" about a payload that
+     named no session at all. */
+  const stamp = (v) => (typeof v === "string" && ARCHIVE_DATE_RE.test(v) ? v : null);
+  const prior = stamp(body && body.sessionDate);
+  const run = stamp(runSessionDate);
+  /* Null when there is no readable rows array, 0 when there is an empty one.
+     The difference is the third silence and survives all the way to the
+     payload. */
+  const rows = body && Array.isArray(body.rows) ? body.rows.filter((r) => r && r.t) : null;
+  const named = rows ? rows.length : null;
+  const answer = (status, keep, note) => ({
+    status,
+    rows: keep ? rows : [],
+    incumbents: keep ? rows.length : 0,
+    named,
+    sessionDate: prior,
+    note,
+  });
+
+  if (!rows) {
+    /* Two sentences for two silences under one tag, which is the whole point
+       of taking the read's outcome rather than its payload. */
+    return answer("unavailable", false, read && read.absent
+      ? "No board has ever been published under this key, so there is no earlier session to " +
+        "compare against and this board is a cold start: no row claims to be new, no rank move " +
+        "is drawn, and no name is held on incumbency. The comparison begins on the next run " +
+        "that finds a board here."
+      : "The published board could not be read on this run" +
+        (read && read.status ? ` (the store answered ${read.status})` : " (the read did not complete)") +
+        ", so this board is a cold start: no row claims to be new, no rank move is drawn, and " +
+        "no name is held on incumbency. Yesterday's board may well exist — this run could not " +
+        "see it, which is a fact about the store and not about the session.");
+  }
+  if (!rows.length) {
+    return answer("quiet", false,
+      "The published board was read and named no rows, so there was no membership to remember " +
+      "and this board is a cold start: no row claims to be new and no name is held on " +
+      "incumbency. A board that published nothing is a session that ranked nothing, which is " +
+      "not the same as a board that could not be read.");
+  }
+  if (prior === null || run === null) {
+    /* AN UNSTAMPED BOARD IS NOT A MATCHING ONE, and it must not be treated as
+       one. Discarding a real membership over a missing stamp would report a
+       cold start on a session that had a perfectly good yesterday — the
+       confident-zero move, in prose. The memory is used and the payload says
+       it could not be checked. */
+    const which = prior === null && run === null
+      ? "Neither the published board nor this run carries a session date"
+      : prior === null
+        ? "The published board carries no session date"
+        : "This run could not resolve a session date";
+    return answer("undated", true,
+      `${which}, so this run could not check whether the board it read was its own output from ` +
+      `an earlier run today. Its ${nameCount(rows.length)} were used as the memory anyway: ` +
+      "discarding a real membership over a missing stamp would report a cold start on a session " +
+      "that had one. Read the marks below as unverified rather than as a comparison against a " +
+      "named session.");
+  }
+  if (prior === run) {
+    return answer("same-session", false,
+      `The published board this run read is stamped ${prior}, the same session this run is ` +
+      `publishing, so it is this run's own output rather than a prior session. Its ` +
+      `${nameCount(rows.length)} were discarded and this board is a cold start: hysteresis ` +
+      "holds a name against YESTERDAY's board, and a second run against one session has no " +
+      "yesterday to hold against. Every row here was ranked on this session alone. Keeping the " +
+      "memory would have held the whole board in place and reported that as stability.");
+  }
+  if (prior > run) {
+    /* A BOARD FROM AHEAD OF THIS RUN IS NOT THIS RUN'S YESTERDAY EITHER. It
+       happens when a run resolves an older session than the one already live —
+       a stale tape, or a re-run pointed at an earlier day — and holding today's
+       names against a board from a later session is the same manufactured
+       stability, running backwards. */
+    return answer("ahead", false,
+      `The published board this run read is stamped ${prior}, a LATER session than the ${run} ` +
+      `this run is publishing, so it cannot be this run's yesterday. Its ${nameCount(rows.length)} ` +
+      "were discarded and this board is a cold start. A run publishing an earlier session than " +
+      "the board already live usually means a re-run against a stale tape, and that is worth " +
+      "understanding before the marks here are read as a comparison.");
+  }
+  return answer("ok", true,
+    `The published board this run read is stamped ${prior}, an earlier session than the ${run} ` +
+    `this run is publishing, so its ${nameCount(rows.length)} are the incumbents today's ` +
+    "ranking was held against.");
 }
 
 /**
@@ -2631,10 +2772,18 @@ function toRows(pool, screenerByTicker, previousRows, origin) {
   /* YESTERDAY'S RANK BY NAME. Read from the published row rather than from
      the array position, because the two are the same only while nothing has
      ever filtered the rows in between — and `num` rather than a bare read,
-     because a rank that arrives as a string would sort as one. */
+     because a rank that arrives as a string would sort as one.
+
+     `num(r.r, null)`, AND THE NULL IS THE WHOLE POINT. num() defaults its
+     fallback to 0, so a prior row carrying no `r` — an older payload, a row
+     the archive wrote before ranks were published — came back as rank ZERO,
+     passed the `v !== null` guard that was written to stop exactly that, and
+     published `dr = 0 - rank`: a name at rank 5 reported as having fallen five
+     places from a position no board ever put it in. Absence is tested here,
+     before the coercion, and a rank nobody published stays absent. */
   const rankBefore = new Map();
   for (const r of prior) {
-    const v = num(r.r);
+    const v = num(r.r, null);
     if (v !== null) rankBefore.set(r.t, v);
   }
   const entered = new Set(memo.entered);
@@ -4201,6 +4350,80 @@ function fakePriorUnusual(rows, sessionDate) {
   };
 }
 
+/**
+ * YESTERDAY'S BOARD, so the dry run exercises the board's memory rather than
+ * only its absence — and, on one side, exercises the guard that THROWS THE
+ * MEMORY AWAY.
+ *
+ * WITHOUT THIS THE FIXTURE COULD ONLY EVER REACH ONE BRANCH OF SIX. readStored
+ * answers every dry-run read as absent, so both sides came back "unavailable",
+ * every emitted row carried `nw: null`, and a suite over the corpus could
+ * certify the no-prior sentence and nothing else. It is the same trick
+ * fakePriorUnusual plays on the counter feed's memory, for the same reason.
+ *
+ * THE TWO SIDES ARE DELIBERATELY DIFFERENT SESSIONS, which is what makes the
+ * corpus able to prove a branch rather than assert around it:
+ *
+ *   long  — stamped with the previous weekday. The ordinary morning: the
+ *           memory is used and the rows carry `nw`, `r0` and `dr`.
+ *   short — stamped with THIS run's own session date. The market holiday, the
+ *           early close, the cron that fired twice: the memory is this run's
+ *           own output, readBoardMemory refuses it, and every row's memory is
+ *           null with the payload saying why.
+ *
+ * One dry run therefore emits a warm board and a same-session cold one side by
+ * side, and the contract asserts the DIFFERENCE between two real payloads.
+ *
+ * MEMBERSHIP IS DELIBERATELY UNCHANGED BY THIS FIXTURE. Incumbents are drawn
+ * only from today's top `boardSize` names, and hysteresis can only add names
+ * ranked between `boardSize` and 1.4x it — so no name is added, and the
+ * emitted board stays row-for-row the board the corpus already carried. Other
+ * suites measure shedding, the deep-name budget and the card count off those
+ * rows; a fixture that quietly widened the board would move numbers they are
+ * entitled to trust. A fixture that exercises the HELD branch would have to
+ * widen it, and that belongs in a unit test over toRows, where it is.
+ *
+ * DETERMINISTIC BY POSITION, no randomness anywhere.
+ */
+export function fakePriorBoard(side, pool, sessionDate) {
+  const ranked = (Array.isArray(pool) ? pool : []).slice(0, UNIVERSE.boardSize);
+  if (!ranked.length) return null;
+  /* Two names in three carried over, so both `nw: 0` and `nw: 1` are populated
+     on the side that keeps its memory. Yesterday's ranks are the surviving
+     names' positions in yesterday's list, not today's, so `dr` is a real move
+     for most rows instead of zero for all of them. */
+  const rows = ranked.filter((_, i) => i % 3 !== 0)
+    .map((r, i) => ({ t: r.ticker, r: i + 1 }));
+  /* NAMES THAT WERE ON YESTERDAY'S BOARD AND ARE NOT ON TODAY'S. A prior that
+     is a strict subset of today never exercises an incumbent lookup that
+     misses, which is most of a real morning. The GONE prefix cannot collide
+     with the fixture universe's SYN names, so these can never be added back by
+     hysteresis and can never move today's membership. */
+  for (let i = 0; i < 3; i++) rows.push({ t: "GONE" + i, r: rows.length + 1 });
+
+  /* THE PREVIOUS WEEKDAY, walked back over the weekend so the fixture's dates
+     are dates a real archive would hold — except on the side that is here to
+     be refused, which is stamped with this run's own session on purpose. */
+  let prior = null;
+  const base = Date.parse(String(sessionDate || "") + "T00:00:00Z");
+  if (Number.isFinite(base)) {
+    for (let back = 1; back <= 4; back++) {
+      const d = new Date(base - back * 86400000);
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      prior = d.toISOString().slice(0, 10);
+      break;
+    }
+  }
+  return {
+    v: BOARD_SCHEMA_VERSION,
+    side,
+    sessionDate: side === "short" ? sessionDate || null : prior,
+    generatedAt: (prior || "2026-01-01") + "T09:20:00.000Z",
+    rows,
+  };
+}
+
 function fakeFlowAlerts(tickers) {
   const rnd = mulberry(4177);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
@@ -4357,14 +4580,46 @@ function fakePulseRaws(tickers) {
     put_premium: String(Math.round(rnd() * 2.5e10)),
     put_volume: Math.round(rnd() * 2.5e7),
   })) };
+  /* THE OPEN-INTEREST FIXTURE OBEYS ITS OWN ARITHMETIC, AND ITS OWN CLOCK.
+
+     It used to draw curr_oi, last_oi and oi_change as three independent
+     randoms, so a "change" of +11,204 sat beside snapshots differing by
+     −38,116 — three numbers that cannot all be about the same contract. That
+     was harmless while nothing read more than one of them, and stopped being
+     harmless the moment the cards began reconciling the change field against
+     the two snapshots to decide what UNIT it is in (the vendor's own example
+     carries oi_change as a RATIO beside an oi_diff_plain in contracts; this
+     fixture has always carried it as a count). A fixture that reconciles to
+     neither certifies only the branch that gives up.
+
+     IT DATES ITSELF TO THE PREVIOUS SESSION, WHICH IS THE REAL SHAPE. The
+     vendor states this feed updates about 06:45 ET and this job runs at
+     05:15 ET, so a live run joins a PRIOR session's cross-section onto
+     today's per-name data. Dating the fixture to the session date would make
+     the corpus exercise only the reassuring branch of exactly the trap the
+     cards exist to disclose.
+
+     AND IT IS ORDERED, because the vendor documents this route as returning
+     the highest OI change "default: descending" and the cards measure that
+     order rather than assuming it. An unordered fixture can only ever
+     certify "the order could not be measured", which is the answer that
+     makes a cut-off value unpublishable. */
   const oiChange = { data: Array.from({ length: 40 }, (_, i) => {
     const t = pick();
+    /* last_oi is floored well above the largest possible decrease so that
+       curr_oi = last_oi + change never needs clamping — a clamp would break
+       the arithmetic this fixture exists to hold. */
+    const lastOi = 20000 + Math.round(rnd() * 60000);
+    const change = Math.round((rnd() - 0.3) * 40000);
     const row = {
       option_symbol: `${t}260918${rnd() > 0.5 ? "C" : "P"}${String(Math.round(40 + rnd() * 300) * 1000).padStart(8, "0")}`,
       underlying_symbol: t,
-      oi_change: String(Math.round((rnd() - 0.3) * 40000)),
-      curr_oi: Math.round(rnd() * 90000),
-      last_oi: Math.round(rnd() * 80000),
+      oi_change: String(change),
+      oi_diff_plain: change,
+      curr_oi: lastOi + change,
+      last_oi: lastOi,
+      curr_date: "2026-08-21",
+      last_date: "2026-08-20",
       volume: Math.round(rnd() * 50000),
       rnk: i,
     };
@@ -4372,7 +4627,7 @@ function fakePulseRaws(tickers) {
     if (i % 5 !== 4) row.avg_price = (rnd() * 40).toFixed(2);
     if (i % 6 !== 5) row.percentage_of_total = (rnd() * 0.2).toFixed(4);
     return row;
-  }) };
+  }).sort((a, b) => Number(b.oi_change) - Number(a.oi_change)) };
   const netImpact = Array.from({ length: 30 }, () => ({
     ticker: pick(), net_premium: Math.round((rnd() - 0.45) * 2e8),
   }));
@@ -4382,12 +4637,25 @@ function fakePulseRaws(tickers) {
     purchases_notional: String(Math.round(rnd() * 4e8)),
     sells_notional: String(Math.round(rnd() * 9e8)),
   })) };
+  /* THE PRINT FIXTURE RUNS NEWEST FIRST, because the route is documented as
+     "returns the latest darkpool trades" and the cards MEASURE that order to
+     decide what a rank inside it means. Under recency the cut-off is a TIME —
+     how far back the market-wide window reaches — not a dollar size, and the
+     old fixture's `10:00, 11:01, … 15:05, 10:06` cycle was monotone in
+     neither, so the whole recency reading was unreachable from the corpus.
+
+     One print per minute walking backwards from 15:59 on the PREVIOUS
+     session, for the same reason the open-interest rows carry the previous
+     session's date: a 05:15 ET run has no prints from the session it is
+     about to open. */
   const darkpool = { data: Array.from({ length: 45 }, (_, i) => {
     const px = 20 + rnd() * 400;
     const size = Math.round(1e4 + rnd() * 2e6);
+    const minute = 959 - i;
     const row = {
       ticker: pick(),
-      executed_at: `2026-08-24T${String(10 + (i % 6))}:0${i % 10}:00Z`,
+      executed_at: `2026-08-21T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
+        `${String(minute % 60).padStart(2, "0")}:00Z`,
       price: px.toFixed(2), size,
       premium: String(Math.round(px * size)),
       volume: Math.round(rnd() * 8e7),
@@ -4883,12 +5151,36 @@ async function main() {
   /* Hysteresis needs a yesterday. previousIds was a hardcoded [], so
      applyHysteresis had nothing to hold and the enrichPerSide buffer — 30 a
      side instead of 25, ten extra names of API cost every run — bought
-     nothing. Read the currently published board and pass its tickers. One
+     nothing. Read the currently published board and pass its rows. One
      request per side, and a failure is non-fatal: no incumbents simply means
-     the plain top-N, which is what shipped anyway. */
+     the plain top-N, which is what shipped anyway.
+
+     AND IT IS A YESTERDAY, NOT WHATEVER THE KEY HOLDS. The live key holds the
+     LAST run's board, which on a second run against one session is this run's
+     own output — see readBoardMemory, which compares that board's sessionDate
+     against the one this run is about to stamp and refuses a memory that turns
+     out to be the run's own reflection. */
   const previous = {};
+  const boardMemory = {};
   for (const side of ["long", "short"]) {
-    previous[side] = await fetchPublishedRows("board:" + side);
+    /* readStored rather than fetchStoredPayload: "never written" and "could
+       not be read" are two different sentences downstream, and only this
+       result carries the difference. In a dry run the store answers every read
+       as absent, so the prior board is synthesised for the same reason the
+       counter feed's is — otherwise the emitted corpus reaches one branch of
+       six and a suite over it certifies the silence and nothing else. */
+    let read;
+    if (DRY_RUN) {
+      const payload = fakePriorBoard(side, sides[side], sessionDate);
+      /* `absent` derived from the fixture rather than asserted: a side with no
+         pool to build a prior from really has no prior board, and saying
+         otherwise would put the wrong one of the two silences in the log. */
+      read = { payload, absent: !payload, status: 0 };
+    } else {
+      read = await readStored("board:" + side);
+    }
+    boardMemory[side] = readBoardMemory(read, sessionDate);
+    previous[side] = boardMemory[side].rows;
   }
 
   const published = {};
@@ -4899,16 +5191,24 @@ async function main() {
   }
   /* WHAT THE MEMORY SAW, IN THE LOG, because a board that quietly reports no
      arrivals every morning is indistinguishable from a store read that has
-     been failing for a week. */
+     been failing for a week — and, since the same-session guard, from a run
+     whose memory was its own output and was thrown away.
+
+     THE COLD BRANCH PRINTS THE PAYLOAD'S OWN SENTENCE rather than a shorter
+     one written here. There are four ways to reach a cold board and an
+     operator reading a job log needs to know WHICH; two sentences for one
+     fact is also how a log and a page start disagreeing. `status` leads the
+     line so a run can be grepped for `same-session` across a month. */
   for (const side of ["long", "short"]) {
     const rows = published[side];
-    const cold = rows.length && rows[0].nw === null;
+    const memory = boardMemory[side];
     console.log(
-      `  board:${side} memory: ` + (cold
-        ? `cold — yesterday's board could not be read, so no row claims to be new`
-        : `${rows.filter((r) => r.nw).length} new, ` +
-          `${rows.filter((r) => r.hy).length} held on incumbency, ` +
-          `of ${rows.length} (${previous[side].length} yesterday)`));
+      `  board:${side} memory: ${memory.status} — ` + (memory.incumbents
+        ? `${rows.filter((r) => r.nw).length} new, ` +
+          `${rows.filter((r) => r.hy).length} held on incumbency, of ${rows.length} ` +
+          `(${memory.incumbents} incumbent${memory.incumbents === 1 ? "" : "s"} from ` +
+          `${memory.sessionDate || "a board carrying no session date"})`
+        : memory.note));
   }
 
   /* WHICH ROWS HAVE A CARD, STAMPED ONTO THE ROW ITSELF.
@@ -4971,6 +5271,35 @@ async function main() {
          name with edte 11 is not. */
       gateOrigin: today,
       gateDays: EARNINGS_GATE_DAYS,
+      /* WHAT `nw`, `hy`, `r0` AND `dr` WERE MEASURED AGAINST — and, when they
+         are null across every row, WHY.
+
+         The renderer can see that a board is cold: all four memory fields are
+         null together. It cannot see whether yesterday's board was missing,
+         unreadable, empty, or read and then REFUSED because it turned out to
+         be this run's own output from earlier the same session. Those are four
+         different sentences to a reader deciding whether to trust a board that
+         claims nothing changed, and only the publisher knows which one is
+         true. shared/ is not served to the browser, so the sentence travels on
+         the payload or it does not travel at all.
+
+         `named` is how many rows the prior board held and `incumbents` is how
+         many of them were used, so a refusal is legible as a pair of numbers
+         and not only as prose: 50 named, 0 used, status "same-session".
+         `named` is null — never 0 — when no prior board could be read, because
+         a store that answered nothing is not a board that held nothing.
+
+         NOTE FOR THE RENDERER: assets/js/flows-board.js still prints its own
+         cold sentence, "Yesterday's board could not be read on this run",
+         which is now one cause of four and is simply wrong on a re-run. `note`
+         is the sentence it should draw. */
+      memory: {
+        status: boardMemory[side].status,
+        sessionDate: boardMemory[side].sessionDate,
+        named: boardMemory[side].named,
+        incumbents: boardMemory[side].incumbents,
+        note: boardMemory[side].note,
+      },
       universe: universe.length,
       enriched: enriched.length,
       /* WHAT THE SCORE MEANS, published beside it. The score is now a fixed
@@ -6234,6 +6563,22 @@ async function main() {
       "and are unaffected");
   }
 
+  /* THE TWO MARKET-WIDE FEEDS, HELD FOR THE CARDS.
+
+     Declared out here rather than inside the pulse leg's `try` because the
+     card loop four hundred lines below joins them onto every deep name, and
+     a `const` inside that block would be out of scope by the time the join
+     needs it. Null until the leg assigns, which is exactly the state the
+     panel reports as an unavailability: a pulse leg that never ran left no
+     cross-section behind, and that is not the same fact as a name being
+     absent from one.
+
+     THE FEEDS ARE ALREADY PAID FOR. /api/market/oi-change and
+     /api/darkpool/recent are fetched once each below for the pulse. Holding
+     the two responses costs nothing and buys the cards the one thing a
+     per-name request can never carry: the rest of the market. */
+  let crossRaws = null;
+
   /* 7g. THE MARKET PULSE — seven market-wide feeds, one call each, pooled
      under one key.
 
@@ -6256,10 +6601,10 @@ async function main() {
     const PULSE_FETCHES = {
       tide: ["/api/market/market-tide", { interval_5m: "true" }],
       totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
-      oiChange: ["/api/market/oi-change", { limit: 100 }],
+      oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
       netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
       insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: 100 }],
+      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
       seasonality: ["/api/seasonality/market", {}],
     };
     const raws = {};
@@ -6274,6 +6619,12 @@ async function main() {
         }
       }
     }
+    /* CAPTURED BEFORE THE SHAPERS RUN, and that is deliberate: buildPulse
+       caps oiChange at 20 rows and darkpool at 30 for the pulse PANEL, while
+       this run asked the vendor for 100 of each. The join wants the whole
+       hundred — a rank of 74 inside a hundred is a reading, and the same
+       contract dropped by a display cap would read as an absence. */
+    crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool };
     const pulse = buildPulse(raws);
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
@@ -6741,6 +7092,56 @@ async function main() {
     }
   }
 
+  /* THE MARKET-WIDE JOIN, INDEXED ONCE FOR THE WHOLE LOOP.
+
+     Both responses are market-wide: one per run, not one per name. Indexing
+     them here rather than inside buildCard means the hundred rows are read
+     once instead of fifty times, and — the reason that matters — the
+     cross-section every card is placed against is provably the SAME one,
+     measured once. The ordering check and the unit reconciliation inside
+     indexMarketCross are exactly the kind of measurement that must not be
+     able to come out differently on card 3 and card 47.
+
+     The coverage line below is the one that decides whether this panel is
+     worth reading at all. If two of fifty names appear, forty-eight cards
+     will each say "did not make the cut" — true of every one of them, and
+     collectively not a finding. The number is logged here and published on
+     every card so neither a reader nor the next run has to infer it. */
+  const marketCross = indexMarketCross({
+    oiChange: crossRaws ? crossRaws.oiChange : null,
+    darkpool: crossRaws ? crossRaws.darkpool : null,
+    limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
+    tickers: [...onBoard.keys()],
+    sessionDate,
+  });
+  for (const feed of CROSS_FEEDS) {
+    const f = marketCross[feed];
+    if (f.status !== "ok") {
+      console.warn(`  cross ${feed}: ${f.status} — ${f.reason}`);
+      continue;
+    }
+    console.log(
+      `  cross ${feed}: ${f.coverage.in} of ${f.coverage.of} deep name(s) appear in ` +
+      `${f.population} row(s) of ${f.requested} requested, covering ${f.names} name(s)` +
+      /* THE SESSION THE RANKING IS FROM, on the same line as the ranking.
+         /api/market/oi-change updates around 06:45 ET and this job runs at
+         05:15 ET, so the market-wide ranking is usually the PREVIOUS
+         session's while the per-name legs carry today's. A log line that
+         omitted this would make the two look like one session. */
+      (f.asOf
+        ? `; the feed dates itself ${f.asOf}` +
+          (f.sameSession === false ? ` — NOT this run's session (${sessionDate})` : "") +
+          (f.asOfSessions > 1 ? ` and spans ${f.asOfSessions} sessions` : "")
+        : "; the feed states no date of its own") +
+      `; order ${f.ordered ? f.ordered + " by " + f.orderedBy : "not measurable from the rows"}`);
+    if (f.coverage.of && f.coverage.in * 5 < f.coverage.of) {
+      console.warn(
+        `  cross ${feed}: this join reaches ${f.coverage.in} of ${f.coverage.of} deep names. ` +
+        "The other cards will say they did not make a market-wide selection, which is true " +
+        "of each of them and is not a finding about any of them.");
+    }
+  }
+
   let cardsBuilt = 0, cardsFailed = 0, cardsSkipped = 0;
   const gammaProfiles = [];
   // The surface shape is reported once per run, not once per card.
@@ -6869,6 +7270,8 @@ async function main() {
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
         darkpool: dpRaw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankRaw,
+        /* The run's one cross-section, shared by every card. */
+        marketCross,
       });
 
       /* A CARD THAT WILL NOT FIT SHEDS ITS CHEAPEST PANELS IN A STATED
@@ -6897,6 +7300,13 @@ async function main() {
         ["darkpool", "dropped to fit the payload cap"],
         ["oiDeltas", "dropped to fit the payload cap"],
         ["volContext", "dropped to fit the payload cap"],
+        /* LAST, AND NOT BECAUSE IT MATTERS LEAST. It is the smallest panel
+           on the card — two readings and their prose — so shedding it buys
+           the fewest kilobytes of any entry here, which makes it the worst
+           trade to make first. A ladder is ordered by what it BUYS as much
+           as by what it costs the reader. */
+        ["marketRank", "dropped to fit the payload cap — the market-wide feeds it joins are " +
+          "published whole on the market pulse page"],
       ];
       let body = JSON.stringify(card);
       const dropped = [];

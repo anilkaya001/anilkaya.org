@@ -19,9 +19,10 @@ import {
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts,
+  readBoardMemory, fakePriorBoard,
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
-  DEEP_NAMES, deepNames, publishRetryDelay,
+  DEEP_NAMES, deepNames, publishRetryDelay, MARKET_CROSS_LIMIT,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -1517,6 +1518,87 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the rule that chose them is published in words, not left to be inferred from which rows are clickable");
   }
 
+  /* ---------- the market-wide join: coverage that is a MEASUREMENT ------
+
+     The two feeds this joins are market-wide reads the pulse leg already
+     makes once a run, so the join costs no vendor call. What it can cost a
+     reader is a wrong impression, and the wrong impression has a shape: a
+     join that reaches three of fifty names leaves forty-seven cards each
+     saying "not in this feed", which reads as forty-seven findings and is
+     one thin join.
+
+     THE COVERAGE COUNT IS THEREFORE CHECKED AGAINST THE CARDS THEMSELVES —
+     two independently-derived numbers, the way the deep-set equality above
+     is. A coverage number computed from a different population than the one
+     the cards were built for would be a plausible integer on every card and
+     nothing would look wrong. */
+  {
+    const cardFiles = fs.readdirSync(path.dirname(prefix))
+      .filter((f) => /-card-.+\.json$/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+    ok(cardFiles.length > 0, `the dry run emitted ${cardFiles.length} cards to check the join on`);
+
+    for (const feed of ["oiChange", "darkpool"]) {
+      const withPanel = cardFiles.filter((c) => c.panels && c.panels.marketRank);
+      eq(withPanel.length, cardFiles.length,
+         `every emitted card carries the marketRank panel (${feed} pass)`);
+      const placed = withPanel.filter((c) =>
+        c.panels.marketRank.status === "ok" &&
+        c.panels.marketRank.feeds[feed].status === "ok").length;
+      const published = withPanel[0].panels.marketRank.coverage[feed];
+      eq(published.of, cardFiles.length,
+         `the ${feed} join states the population it was measured over, and it is the set of ` +
+         "names that actually got a card");
+      eq(published.in, placed,
+         `and the count it publishes (${published.in}) is the number of cards that really ` +
+         `place in that feed (${placed}) — a coverage figure computed over a different ` +
+         "population would be a plausible integer on every card with nothing looking wrong");
+      /* THE PANEL MUST BE ABLE TO SAY BOTH THINGS, or half of it is untested
+         wiring: at least one card in the feed and at least one outside it. */
+      ok(placed > 0 && placed < cardFiles.length,
+         `and the corpus exercises both arms: ${placed} of ${cardFiles.length} names place ` +
+         "in this feed, so neither the reading nor the measured absence is checked against " +
+         "an empty set");
+      /* Every card agrees about the cross-section, because there is exactly
+         one: the index is built once for the run. Fifty cards each indexing
+         a hundred rows could disagree about the ordering or the unit and no
+         single card would look wrong. */
+      for (const c of withPanel) {
+        const f = c.panels.marketRank.feeds[feed];
+        eq(f.coverage.in, published.in,
+           `${c.ticker}: every card reports the same ${feed} coverage, because the run ` +
+           "indexes the cross-section once — fifty cards each re-reading a hundred rows " +
+           "could disagree about the ordering or the unit with no single card looking wrong");
+        eq(f.population, withPanel[0].panels.marketRank.feeds[feed].population,
+           `${c.ticker}: and the same population, which is the denominator every rank on ` +
+           "every card is quoted against");
+      }
+    }
+
+    /* THE RANK IS FROM ANOTHER SESSION, AND THE RUN SAYS SO OUT LOUD. The
+       vendor updates /market/oi-change at about 06:45 ET and the cron fires
+       at 05:15 ET, so this is the ordinary case rather than an edge one. */
+    ok(/cross oiChange: \d+ of \d+ deep name/.test(runLog),
+       "the run reports the join's own reach once, rather than leaving it to be counted " +
+       "off fifty cards");
+    ok(/NOT this run's session/.test(runLog),
+       "and reports that the market-wide ranking it joined is from a different session than " +
+       "the per-name data it joined it onto — the log line that makes the timing trap " +
+       "visible in a job log rather than only on a card");
+
+    /* THE REQUESTED LIMIT IS THE PUBLISHED ONE. A card that says "14 of 100"
+       while the run asked for 40 is a fabricated denominator. */
+    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+    for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
+      ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
+         `${route} is fetched at the same constant the cards publish as \`requested\` — two ` +
+         "numbers for one limit is a denominator that will one day be wrong");
+    }
+    const anyFeed = cardFiles[0].panels.marketRank.feeds.oiChange;
+    eq(anyFeed.requested, MARKET_CROSS_LIMIT,
+       "and the card publishes that constant rather than restating it");
+  }
+
 
   /* THE POPULATION INVARIANT. Every name the movers band was handed is either
      ranked or explicitly counted as unrankable, and the total is the same
@@ -2584,6 +2666,229 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
+/* ---------- the board's memory, and whose session it came from ----
+
+   THE DEFECT: the memory is one read of the LIVE `board:<side>` key, which
+   holds whatever the last run wrote. Run the pipeline twice against one
+   session — a market holiday, an early close, a manual re-run, a cron that
+   fires twice — and the second run reads ITS OWN OUTPUT as yesterday. Every
+   name is then trivially its own incumbent, hysteresis holds the board in
+   place, and the run reports `held` for names that were never tested against a
+   prior session. The page then shows a stability manufactured by the re-read,
+   on the one surface whose whole promise is what changed since yesterday.
+
+   Four inputs and four different answers, and the differences ARE the fix: a
+   matching session date must not be treated as a memory, an earlier one must,
+   an unstamped prior board is neither, and a prior board that could not be
+   read has to keep behaving exactly as it did before this shipped. */
+{
+  const board = (sessionDate, rows) => ({ v: 4, side: "long", sessionDate, rows });
+  const yesterdayRows = [{ t: "AAA", r: 1 }, { t: "BBB", r: 2 }, { t: "CCC", r: 3 }];
+  const TODAY = "2026-08-25";
+
+  /* ---- 1. THE RE-RUN: a prior board stamped for the session being published ---- */
+  const same = readBoardMemory({ payload: board(TODAY, yesterdayRows) }, TODAY);
+  eq(same.status, "same-session",
+     "a published board stamped with the session this run is about to write is this run's own " +
+     "output, and is named as such rather than used as yesterday");
+  eq(same.rows.length, 0,
+     "THE FIX: the incumbent list handed to applyHysteresis is EMPTY, which is the only thing " +
+     "that stops a name from being its own incumbent");
+  eq(same.incumbents, 0, "and the payload says none were used");
+  eq(same.named, 3,
+     "while still saying how many were read — 0 used of 3 named is legible as a refusal, where " +
+     "a bare 0 would read as a board that held nothing");
+  ok(same.note.includes(TODAY),
+     `and the sentence names the session it refused (${same.note.slice(0, 60)}...)`);
+  ok(/cold start/.test(same.note) && /discarded/.test(same.note),
+     "and says the board is a cold start and why, which is a fact about the reading and not a " +
+     "glitch a reader should discount");
+
+  /* ---- 2. THE ORDINARY MORNING: a prior board from an earlier session ---- */
+  const warm = readBoardMemory({ payload: board("2026-08-22", yesterdayRows) }, TODAY);
+  eq(warm.status, "ok", "a board stamped for an earlier session IS the memory");
+  eq(warm.incumbents, 3, "all three names reach hysteresis");
+  assert.deepEqual(warm.rows, yesterdayRows,
+    "and they arrive as ROWS with their ranks intact — `r0` and `dr` exist only because the " +
+    "rank was not thrown away on the way in"); checks++;
+  eq(warm.sessionDate, "2026-08-22",
+     "the payload names the session the comparison was made against, so \"new\" has a denominator");
+
+  /* ---- 3. AN OLDER PAYLOAD, CARRYING NO SESSION DATE AT ALL ----
+
+     Not the same as a date that matches, and it must not be coerced into one.
+     Discarding a real membership over a missing stamp would report a cold
+     start on a session that had a perfectly good yesterday — the confident
+     zero, in prose. The memory is used and the payload says it is unverified. */
+  const undated = readBoardMemory({ payload: board(undefined, yesterdayRows) }, TODAY);
+  eq(undated.status, "undated",
+     "a prior board with NO session date is distinguished from one whose date matches");
+  ok(undated.status !== same.status && undated.note !== same.note,
+     "in both the status and the sentence — collapsing them would report a cold start on every " +
+     "board published before the stamp existed");
+  eq(undated.incumbents, 3, "its membership is still used, because absence of a stamp is not evidence of a re-run");
+  eq(undated.sessionDate, null, "and the missing stamp is published as missing rather than invented");
+  ok(/could not check/.test(undated.note) && /unverified/.test(undated.note),
+     "with a sentence that says the check could not be made rather than implying one was");
+
+  /* A STAMP THAT IS NOT A DATE IS NOT A DATE. String(x || "") would have made
+     "" of it, and "" sorts below every real date — reported as an earlier
+     session, which is the answer that keeps the memory. */
+  eq(readBoardMemory({ payload: board("yesterday", yesterdayRows) }, TODAY).status, "undated",
+     "a sessionDate that is not an ISO date is unusable rather than quietly earlier than today");
+  eq(readBoardMemory({ payload: board("", yesterdayRows) }, TODAY).sessionDate, null,
+     "and an empty stamp is published as no stamp, never as a session");
+
+  /* ---- 4. NO PRIOR BOARD AT ALL — the path that must not change ---- */
+  const absent = readBoardMemory({ payload: null, absent: true, status: 200 }, TODAY);
+  eq(absent.status, "unavailable", "a key that was never published leaves the board cold, as it always did");
+  eq(absent.rows.length, 0, "with no incumbents");
+  eq(absent.named, null,
+     "and `named` is NULL, never 0 — a store that answered nothing is not a board that held " +
+     "nothing, and Number(null) === 0 is this file's oldest defect");
+
+  const failed = readBoardMemory({ payload: null, failed: true, status: 503 }, TODAY);
+  eq(failed.status, "unavailable",
+     "a read that did not complete carries the same tag, because a reader can do nothing " +
+     "different about it");
+  ok(failed.note !== absent.note,
+     "THREE SILENCES, THREE SENTENCES: \"never published\" and \"could not be read\" share the " +
+     "unavailable tag and do not share a sentence");
+  ok(/503/.test(failed.note),
+     `and the failed read names what the store answered (${failed.note.slice(-60)}), which is the ` +
+     "half an operator can act on");
+
+  /* THE THIRD SILENCE: read, and empty. */
+  const quiet = readBoardMemory({ payload: board("2026-08-22", []) }, TODAY);
+  eq(quiet.status, "quiet", "a board that was read and named no rows is quiet, not unavailable");
+  eq(quiet.named, 0, "and its emptiness is a measured 0 where an unreadable board is a null");
+  ok(quiet.note !== absent.note && quiet.note !== failed.note,
+     "with its own sentence: a session that ranked nothing is not a store that answered nothing");
+
+  /* A PRIOR BOARD FROM A LATER SESSION IS NOT THIS RUN'S YESTERDAY EITHER. It
+     is what a re-run against a stale tape looks like from here, and holding
+     today's names against a board from ahead of them is the same manufactured
+     stability running backwards. */
+  const ahead = readBoardMemory({ payload: board("2026-08-26", yesterdayRows) }, TODAY);
+  eq(ahead.status, "ahead", "a board stamped for a LATER session is refused and named");
+  eq(ahead.incumbents, 0, "its membership does not reach hysteresis");
+  ok(ahead.note !== same.note, "and it says which of the two refusals happened");
+
+  /* THIS RUN WITHOUT A SESSION DATE. resolveSessionDate answers null when the
+     vendor sends no usable candle, and the board still publishes. The check
+     cannot be made, so it is reported as not made rather than as passed. */
+  const unstamped = readBoardMemory({ payload: board("2026-08-22", yesterdayRows) }, null);
+  eq(unstamped.status, "undated", "a run that could not resolve its own session cannot run the check");
+  eq(unstamped.incumbents, 3, "so it keeps the memory rather than manufacturing a cold start");
+  ok(/This run could not resolve a session date/.test(unstamped.note),
+     "and the sentence names which side of the comparison was missing");
+
+  /* ---- IT IS A COMPARISON OF DATES, NOT OF INSTANTS ----
+
+     daysToEarnings carries this lesson in capitals: MEASURED FROM A DATE, NOT
+     FROM AN INSTANT. A fixture that read Date.now() while the gate counted
+     from easternNow().date changed every result across midnight, silently.
+     The guard therefore reads no clock at all — it compares the stamp on the
+     prior payload with the stamp this run is about to write, which is the same
+     origin by construction. */
+  {
+    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+    const start = src.indexOf("export function readBoardMemory");
+    ok(start !== -1, "readBoardMemory is where this scan expects it — a rename must update this check");
+    const body = src.slice(start, src.indexOf("\n}\n", start));
+    ok(!/Date\.now\(|new Date\(|easternNow\(/.test(body),
+       "the guard reads no clock: two published session dates, compared as strings, so the " +
+       "answer cannot depend on the hour the run happens to start");
+    ok(/readBoardMemory\(read, sessionDate\)/.test(src),
+       "and the run checks against the very `sessionDate` it is about to stamp on the payload, " +
+       "not against easternNow().date — which at 05:15 Eastern is one to three days later");
+  }
+
+  /* ---- AND THE EMPTY LIST TRAVELS: the refusal reaches the rows ----
+
+     A guard that stops at the memory object would be decoration. These build
+     the same board twice from one pool: once against a real prior session and
+     once against that session's own output. */
+  const mk = (ticker, score) => ({
+    ticker, score, residual: score / 100,
+    conviction: 50, spot: 100, purity: 0.5, gRegime: "long", flipDist: 0.1,
+    fam: { F: score, P: 0, D: 0, O: 50, V: 40 },
+    closes: Array.from({ length: 60 }, (_, i) => 100 + i),
+    r5: 0.01, r21: 0.02, r42: 0.03,
+    week52Pos: 0.42, vrp: 0.03, ivRank: 0.61,
+    impliedMovePerc: 0.05, iv30: 0.4, rv30: 0.3,
+  });
+  const screener = new Map();
+  const ORIGIN = "2026-08-25";
+  const pool = Array.from({ length: 60 }, (_, i) => mk("W" + String(i).padStart(2, "0"), 100 - i));
+
+  /* The board a first run of this session publishes: no memory anywhere. */
+  const first = toRows(pool, screener, [], ORIGIN);
+  ok(first.length < pool.length,
+     `the fixture pool (${pool.length}) is wider than the board's entry rank (${first.length}), so ` +
+     "the hysteresis band is reachable — if the board ever grows past this pool the fixture must " +
+     "grow with it or these assertions stop measuring anything");
+
+  /* What that first run published, read back the way the second run reads it:
+     its own rows, its own ranks, and FIVE names that have since slipped just
+     past the entry rank — the ordinary drift hysteresis exists to absorb. Two
+     of today's top names are withheld from it so the warm board still has
+     arrivals to mark; a prior that is a superset of today marks nothing new
+     and would make the nulls below indistinguishable from a builder that never
+     marks anything. */
+  const held = 5;
+  const arrivals = ["W01", "W02"];
+  const priorRows = pool.slice(0, first.length + held)
+    .filter((r) => !arrivals.includes(r.ticker))
+    .map((r, i) => ({ t: r.ticker, r: i + 1 }));
+
+  const asYesterday = toRows(pool, screener, readBoardMemory(
+    { payload: board("2026-08-22", priorRows) }, ORIGIN).rows, ORIGIN);
+  eq(asYesterday.length, first.length + held,
+     "against a REAL prior session the five slipped names stay on the board — that is hysteresis " +
+     "working, and it is what the second run of one session was silently getting for free");
+  eq(asYesterday.filter((r) => r.hy === true).length, held,
+     `and all ${held} of them are marked as held on incumbency rather than passed off as ranked`);
+
+  const asItself = toRows(pool, screener, readBoardMemory(
+    { payload: board(ORIGIN, priorRows) }, ORIGIN).rows, ORIGIN);
+  assert.deepEqual(asItself.map((r) => r.t), first.map((r) => r.t),
+    "THE FIX, AT THE ROWS: a board held against its own session publishes exactly the board a " +
+    "first run of that session would have published — five names fewer, none of them kept by a " +
+    "comparison with themselves"); checks++;
+  ok(asItself.every((r) => r.nw === null && r.hy === null && r.r0 === null && r.dr === null),
+     "and every row's four memory fields are null TOGETHER, so no renderer can draw a rank move " +
+     "out of a comparison that was refused");
+  ok(asYesterday.some((r) => r.nw === false) && asYesterday.some((r) => r.nw === true),
+     "while the real comparison still answers both ways, which is what makes the null above a " +
+     "refusal rather than a builder that never marks anything");
+
+  /* A PRIOR ROW WITH NO RANK IS NOT A ROW AT RANK ZERO. num()'s fallback is 0,
+     so a prior row carrying no `r` — an older payload, an archive row written
+     before ranks were published — came back as rank 0, passed the `!== null`
+     guard written to stop exactly that, and published dr = 0 - rank: a name at
+     rank 1 reported as having fallen one place from a position no board ever
+     put it in. */
+  {
+    const rankless = toRows(pool.slice(0, 3), screener, [{ t: "W00" }, { t: "W01", r: 9 }], ORIGIN);
+    const noRank = rankless.find((r) => r.t === "W00");
+    eq(noRank.r0, null, "a prior row with no published rank yields no yesterday's rank");
+    eq(noRank.dr, null, "and no phantom fall — before this it published dr = -1 off a rank of zero");
+    eq(noRank.nw, false, "while the name is still correctly an incumbent: absence of a rank is not absence from the board");
+    eq(rankless.find((r) => r.t === "W01").dr, 7, "and a row that DID publish a rank still moves by it");
+  }
+
+  /* THE DRY-RUN FIXTURE'S INTENT, PINNED. The emitted corpus below can only
+     prove the refusal because one side of it is stamped for the run's own
+     session on purpose. */
+  eq(fakePriorBoard("short", pool, "2026-08-24").sessionDate, "2026-08-24",
+     "the fixture stamps the SHORT side with the run's own session — that is the market-holiday " +
+     "re-run, and it is deliberate");
+  ok(fakePriorBoard("long", pool, "2026-08-24").sessionDate < "2026-08-24",
+     "and the long side with an earlier weekday, so one dry run emits a used memory and a " +
+     "refused one side by side");
+}
+
 /* ---------- the emitted corpus, on the fields this pass added ------
 
    ITS OWN DRY RUN, in its own directory, and every path built from the
@@ -2656,6 +2961,76 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "column exists for, and proof the branch is reachable");
   }
 
+  /* ---- the board's memory, and the session it was checked against ----
+
+     THE COLD BRANCH RUNS IN THIS CORPUS RATHER THAN BEING ASSERTED AROUND.
+     readStored answers every dry-run read as absent, so before fakePriorBoard
+     both sides came back "unavailable", every row carried `nw: null`, and a
+     suite over this corpus could certify the no-prior sentence and nothing
+     else. The fixture now stamps `long` with the previous weekday and `short`
+     with THIS run's own session, so one emitted payload carries a memory that
+     was used and the other carries one that was read and REFUSED — and these
+     assertions are over the difference between two real payloads. */
+  {
+    const long = read("board:long");
+    const short = read("board:short");
+
+    eq(long.memory.status, "ok",
+       "the ordinary morning is reached: board:long compared against an earlier session");
+    ok(long.memory.sessionDate < long.sessionDate,
+       `and it really is earlier (${long.memory.sessionDate} against this run's ${long.sessionDate}), ` +
+       "compared as two dates and never as two instants");
+    ok(long.memory.incumbents > 0 && long.memory.incumbents === long.memory.named,
+       `all ${long.memory.named} names it read reached hysteresis`);
+    ok(long.rows.some((r) => r.nw === true) && long.rows.some((r) => r.nw === false),
+       "and the corpus reaches BOTH answers on the warm side, so the nulls on the other side " +
+       "are a refusal rather than a builder that never marks anything");
+
+    eq(short.memory.status, "same-session",
+       "THE SAME-SESSION BRANCH ACTUALLY RUNS in the emitted corpus, so these assertions are " +
+       "about a branch that runs rather than one that never fires");
+    eq(short.memory.sessionDate, short.sessionDate,
+       "the board it read was stamped for the very session it is publishing — the market " +
+       "holiday, the early close, the cron that fired twice");
+    ok(short.memory.named > 0,
+       `and the refused board really did name rows (${short.memory.named}) — a refusal of ` +
+       "nothing would prove nothing");
+    eq(short.memory.incumbents, 0, "none of which reached hysteresis");
+    ok(short.rows.every((r) => r.nw === null && r.hy === null && r.r0 === null && r.dr === null),
+       `so all four memory fields are null together on every one of the ${short.rows.length} rows — ` +
+       "the board claims nothing rather than claiming everything returned");
+    ok(short.rows.length > 0 && !short.rows.some((r) => r.hy === true),
+       "and no row is held on incumbency, which is exactly what the unguarded re-read was " +
+       "manufacturing");
+
+    /* THE PAYLOAD SAYS WHY, because the renderer cannot work it out: all four
+       fields are null in four different situations and shared/ is not served
+       to the browser, so the sentence travels on the payload or not at all. */
+    ok(typeof short.memory.note === "string" && short.memory.note.length > 120,
+       "the payload carries the reason as a sentence rather than leaving `same-session` to be " +
+       "decoded by a renderer that has never seen this file");
+    ok(/cold start/.test(short.memory.note) && /own output/.test(short.memory.note),
+       `and it names the cold start and its cause (${short.memory.note.slice(0, 70)}...)`);
+    ok(long.memory.note !== short.memory.note,
+       "and a board that used its memory does not print the sentence of one that refused it");
+    ok(!("rows" in short.memory),
+       "the memory travels as a status, two counts and a sentence — never as yesterday's rows, " +
+       "which would put a second board inside every board against a 128KB ingest cap");
+
+    /* IN THE LOG TOO. An operator reading a job log has no payload in front of
+       them, and "no comparison" every morning is how a store that has been
+       failing for a week goes unnoticed. */
+    ok(/board:long memory: ok — \d+ new, \d+ held on incumbency, of \d+ \(\d+ incumbents? from \d{4}-\d{2}-\d{2}\)/.test(runLog),
+       "the warm side reports its counts, its incumbent count and the session they came from");
+    const coldLine = /board:short memory: same-session — (.+)/.exec(runLog);
+    ok(coldLine && coldLine[1].length > 120,
+       "and the refused side leads with its status — greppable across a month of runs — then " +
+       "prints the payload's own sentence rather than a second, shorter one written beside it");
+    ok(coldLine && coldLine[1] === short.memory.note,
+       "the same sentence, byte for byte: two spellings of one fact is how a log and a page " +
+       "start disagreeing about what happened");
+  }
+
   /* ---- the counter feed's memory ---- */
   {
     const u = read("unusual");
@@ -2714,4 +3089,4 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, and a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them`);
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself`);

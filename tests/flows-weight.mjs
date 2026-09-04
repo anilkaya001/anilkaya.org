@@ -99,9 +99,32 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
    snugly to it — a ceiling set at today's number turns every subsequent commit
    into a budget negotiation. Tripping one is still not a failure to fix by
    raising it again: it is a prompt to ask whether the route needed what it
-   just gained. */
+   just gained.
+
+   RE-RATCHETED AGAIN 2026-09-04, when the ticker page's injected stylesheet
+   moved into flows.css:
+
+     route      before   after   what changed
+     ticker       422k    411k   236 lines of CSS stopped shipping as JS
+
+   Note the direction. A shed has to move the ceiling too, or the room the
+   ceiling was written with silently becomes room plus the shed, and the next
+   route to grow inherits headroom nobody decided to give it. 480 was set
+   against a 413k measurement — 67k of deliberate room — so 470 against 411k
+   keeps that same room rather than banking the saving.
+
+   POLITICAL WAS SITTING AT ITS CEILING EXACTLY, 45k against 45k. That ceiling
+   was set when the route measured 28k, and the route then gained its whole
+   render layer: a midpoint bar drawn inside its own whisker on a shared axis,
+   a holder table, an executing-account column, a breadth block. Nobody
+   re-examined the number, so it stopped being a ratchet and became a
+   tripwire — the next kilobyte on that route, from any commit, fails this
+   suite with a message about a budget rather than about whatever the commit
+   was doing. 55k restores the room this file's own rule asks for. That is the
+   one case where raising a ceiling is not absorbing an overrun: the route is
+   inside it, and the ceiling was left behind by work that already shipped. */
 const CEILING_KIB = {
-  tickerPage: 480,
+  tickerPage: 470,
   overviewPage: 300,
   sidePage: 300,
   watchPage: 240,
@@ -110,7 +133,7 @@ const CEILING_KIB = {
   marketPage: 95,
   unusualPage: 85,
   eventsPage: 85,
-  politicalPage: 45,
+  politicalPage: 55,
   historyPage: 45,
   loginPage: 12,
 };
