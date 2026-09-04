@@ -60,6 +60,9 @@
   const {
     el, svgEl, isNum, deadPanel, DASH, MINUS, AXIS_CH,
     neg, pct, px2, vol1, compact,
+    /* The fold and the lead, read from the module rather than restated here —
+       see the removal note below the width policy. */
+    appendMethod, leadReading,
   } = P;
 
   const statusEl = document.getElementById("ftStatus");
@@ -81,105 +84,58 @@
   const ftWidth = P.panelWidth;
 
   /* ---------- the four drawers this page adds ---------------------- */
-  /**
-   * Emit a panel's explanatory notes without burying the chart in them.
-   *
-   * THE PROBLEM IS PRESENTATION, NOT LENGTH. Every sentence these drawers
-   * write is load-bearing — what the shade means, that it is this chart's own
-   * quantile and not comparable between names, that a hollow cell is unknown
-   * rather than zero. Deleting any of it would leave a chart a reader can
-   * misread confidently, which is the failure this whole product is built
-   * against. But joined into one paragraph they arrived as four hundred words
-   * of unbroken prose UNDER a chart, and a rule nobody finishes reading is a
-   * rule nobody has been told.
-   *
-   * So: one paragraph each, and once the set is long enough to be a wall, it
-   * goes behind a disclosure that names what it is. The readings, the counts
-   * and the coverage line stay in the open; the decoder is one click away and
-   * still on the page, still selectable, still in the DOM for a find-in-page.
-   * Nothing is removed and nothing is summarised.
-   */
-  const NOTE_WALL_CHARS = 420;
 
+  /* THE FOLD AND THE LEAD MOVED TO assets/js/flows-panels.js.
+
+     A survey of the fourteen Flows renderers counted 101,768 characters of
+     prose in 1,736 strings, 42,151 of them on this route, and one ratio named
+     the defect: `.fc-note` — the METHOD paragraph — was emitted 87 times
+     against 4 emissions of `.fc-reading`, the FINDING. The four drawers below
+     were the first answer to it, and `appendNotes`, `appendMethod` and
+     `leadReading` were written here because this was the only page that had
+     them.
+
+     THE TWELVE RENDERERS THAT STILL LED WITH METHOD ARE NOT HERE. They are
+     flows-panels.js, drawn on FOUR routes — this one, side, overview and
+     watch — and the card dialog calls the same functions this page's grid
+     calls. Three ways to give them the fold: move it there, thread it in as a
+     parameter, or copy it. Copying is what flows-panels.js's own header
+     exists to refuse. Threading ends in the same place, because flows-card.js
+     would have to pass a copy it does not have, so the dialog would fold and
+     the page would not, or the reverse. So it moved, and this file now reads
+     it back out of `P` with the width policy and the formatters.
+
+     THE BYTE CONSEQUENCE, MEASURED, AND IT IS NOT A SAVING. flows-panels.js
+     is billed four times and this file once. 4,865 B of fold and lead left
+     here; over there they cost 3,288 B, and inverting the gamma profile onto
+     them cost 1,048 B more. So side, overview and watch each pay the whole
+     4,336 B for a fold and a promoted reading they did not have, and this
+     route pays that less whatever this note and the destructure above hand
+     back. A <details> is cheaper on a READER than an always-drawn paragraph
+     and DEARER on the wire, and the wire is what tests/flows-weight.mjs
+     counts. Side is the tightest of the four and is what this wave was
+     scoped against: 5,614 B of headroom under a 300k ceiling, 4,336 B spent,
+     1,278 B left — which is why eleven renderers still lead with method.
+
+     WHAT STAYED, AND WHY IT IS NOT A SECOND COPY. `appendNotes` is the
+     string-shaped adapter over the moved `appendMethod`. The eight call sites
+     below own plain prose and building their paragraphs at each of them would
+     be eight places for a stray ".." to reach a reader — a doubled full stop
+     in a panel whose whole claim is precision is worse than it sounds. It
+     holds no threshold and no disclosure of its own; both are one function,
+     over there.
+
+     THE SPLIT ITSELF IS DOCUMENTED BESIDE THE FOLD. In one line: a note that
+     could change WHAT THE READING MEANS stays in the open, a note explaining
+     HOW THE READING WAS MADE folds, and neither is ever deleted — a folded
+     paragraph is still in textContent. tests/flows-ticker-contract.mjs
+     asserts both halves panel by panel, because a rule with only the first
+     half is a rule that hides caveats. */
   function appendNotes(host, notes, summary) {
-    /* SOME CALLERS END THEIR SENTENCES AND SOME DO NOT, because the drawers
-       were written separately against a shared brief. Normalising here rather
-       than at eleven call sites is what stops a stray ".." reaching a reader —
-       and a doubled full stop in a panel whose whole claim is precision is
-       worse than it sounds. */
-    const list = (notes || [])
+    appendMethod(host, (notes || [])
       .filter((n) => n && String(n).trim())
-      .map((n) => String(n).trim().replace(/\.+$/, ""));
-    if (!list.length) return;
-    const total = list.reduce((n, t) => n + String(t).length, 0);
-    if (total <= NOTE_WALL_CHARS) {
-      for (const note of list) host.append(el("p", "fc-note", note + "."));
-      return;
-    }
-    const box = el("details", "ft-how");
-    box.append(el("summary", "ft-how-s", summary || "How to read this panel"));
-    for (const note of list) box.append(el("p", "fc-note", note + "."));
-    host.append(box);
-  }
-
-  /**
-   * The same disclosure, for method paragraphs that are already ELEMENTS.
-   *
-   * `appendNotes` takes strings and builds the paragraphs itself, which is
-   * right for a drawer that owns its prose. drawMarketRank does not: its
-   * three method lines come from fmrCutLine, fmrSessionLine and
-   * fmrCoverageLine, each picking between three and four sentences, two of
-   * them hanging a tooltip on the paragraph. Re-deriving them as strings
-   * would put those branches in two places. Same threshold, same classes.
-   */
-  function appendMethod(host, nodes, summary) {
-    const list = (nodes || []).filter(Boolean);
-    if (!list.length) return;
-    const total = list.reduce((n, node) => n + String(node.textContent || "").length, 0);
-    if (total <= NOTE_WALL_CHARS) {
-      for (const node of list) host.append(node);
-      return;
-    }
-    const box = el("details", "ft-how");
-    box.append(el("summary", "ft-how-s", summary || "How this reading was made"));
-    for (const node of list) box.append(node);
-    host.append(box);
-  }
-
-  /* ---------- the reading first, the method under it ----------------
-
-     A SURVEY OF THE FOURTEEN FLOWS RENDERERS COUNTED 101,768 CHARACTERS of
-     prose in 1,736 strings, 42,151 of them on this route, and one ratio
-     named the defect: `.fc-note` — the METHOD paragraph — was emitted 87
-     times against 4 emissions of `.fc-reading`, the FINDING.
-
-     NOTHING BELOW DELETES A CAVEAT. Every sentence is still on the page and
-     still found by a find-in-page; what changes is the ORDER OF DISCOVERY
-     and the VISUAL WEIGHT. The line between the halves is not "long":
-
-       A note that could change WHAT THE READING MEANS stays in the open — a
-       truncated chain, a ranking from another session, a column carrying no
-       level, a value whose unit could not be reconciled, the cut a name
-       outside a feed did not clear. A note explaining HOW THE READING WAS
-       MADE goes behind the disclosure `appendNotes` already argues for.
-
-     The contract asserts BOTH halves, panel by panel: a rule with only the
-     first half is a rule that hides caveats. */
-
-  /**
-   * The panel's finding, first, in the largest type the panel owns.
-   *
-   * `.fc-reading` already meant "the finding, as opposed to the method below
-   * it" — its own CSS comment says so — but was drawn at note size under a
-   * chart, above six paragraphs of decoder, where it read as one more
-   * caption. `.is-lead` is that element promoted: same class, same meaning,
-   * one modifier saying this is the sentence the panel exists to say.
-   */
-  function leadReading(host, text) {
-    const p = el("p", "fc-reading is-lead");
-    p.textContent = text;
-    host.append(p);
-    return p;
+      .map((n) => el("p", "fc-note", String(n).trim().replace(/\.+$/, "") + ".")),
+      summary || "How to read this panel");
   }
 
   /**

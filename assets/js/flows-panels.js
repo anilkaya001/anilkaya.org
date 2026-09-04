@@ -281,6 +281,74 @@
     return host;
   }
 
+  /* ---------- the reading first, the method behind a disclosure -------
+
+     THE SPLIT IS NOT BY LENGTH. A note that could change WHAT THE READING
+     MEANS stays open as `.fc-note.is-qualifier` — a band narrower than the
+     book, a ranking from another session, a column with no unit. A note
+     saying HOW THE READING WAS MADE folds, and NOTHING IS EVER DELETED: a
+     folded paragraph is still in textContent, so find-in-page still reaches
+     it. A rule with only the first half is a rule that hides caveats.
+
+     THE FOLD CAME FROM flows-ticker.js, where the removal note left in its
+     place carries the survey that prompted it, the argument for moving it and
+     its cost in bytes on each of the four routes this file is drawn on. */
+  const NOTE_WALL_CHARS = 420;
+
+  /**
+   * A panel's method paragraphs, behind a disclosure once they are a wall.
+   *
+   * NOT SHORTER, JUST NOT FIRST. Every sentence here is load-bearing — what a
+   * shade means, that a quantile is this chart's own and not comparable
+   * between names — and a chart whose marks are unexplained is one a reader
+   * misreads confidently. But four hundred words of unbroken prose under a
+   * chart is a rule nobody finishes, and a rule nobody finishes is a rule
+   * nobody was told. A SHORT SET STAYS OPEN: a one-line decoder behind a
+   * click is a click for nothing.
+   *
+   * IT TAKES ELEMENTS, NOT STRINGS, because several callers cannot supply
+   * strings — convictionArithmetic below hangs its own class on its paragraph
+   * — and re-deriving those branches as strings would put them in two places.
+   * flows-ticker.js's appendNotes is the string-shaped adapter over this, and
+   * it is the only one.
+   */
+  function appendMethod(host, nodes, summary) {
+    const list = (nodes || []).filter(Boolean);
+    if (!list.length) return;
+    /* THE COUNT IS OF THE TEXT A READER MEETS, punctuation included — the
+       wall is a reading-length judgement, not a measurement of the inputs. */
+    const chars = list.reduce((n, node) => n + String(node.textContent || "").length, 0);
+    if (chars <= NOTE_WALL_CHARS) {
+      for (const node of list) host.append(node);
+      return;
+    }
+    const box = el("details", "ft-how");
+    box.append(el("summary", "ft-how-s", summary || "How this reading was made"));
+    for (const node of list) box.append(node);
+    host.append(box);
+  }
+
+  /**
+   * The panel's finding, first, in the largest type the panel owns. The full
+   * argument for the modifier is on `.fc-reading.is-lead` in flows.css.
+   *
+   * AN ABSENCE LEADS TOO. A withheld reading is a finding about the book and
+   * is placed like one; demoting it would make a silence cheaper to ship than
+   * a number, which is the one incentive this product cannot afford.
+   */
+  function leadReading(host, text) {
+    const p = el("p", "fc-reading is-lead");
+    p.textContent = text;
+    host.append(p);
+    return p;
+  }
+
+  /* A note that qualifies the reading rather than explaining it. Deliberately
+     not a helper for the plain `.fc-note` too: four renderers already declare
+     a local `const note`, and a module-level one of that name would shadow
+     into them. */
+  const qualifier = (text) => el("p", "fc-note is-qualifier", text);
+
   /* ---------- the flagship: gamma profile -------------------------- */
 
   /**
@@ -395,7 +463,17 @@
        /flows/ticker/ passes the registry's question, read out of the panel's
        data-question attribute. Written this way rather than as a default
        parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+       chart is FOR, and moving it out of the function would separate the two.
+
+       STATED HERE ONCE FOR ALL TEN RENDERERS. This paragraph stood verbatim
+       above every one of them — ten copies of one rule, restating what the
+       file header's "THE CONTRACT WITH ITS CALLERS" already says. Nine of
+       them are a citation now. That is not the same act as shortening a
+       comment to fit a byte ceiling, which tests/flows-weight.mjs rightly
+       calls degrading the thing this codebase is strictest about: no
+       reasoning is lost when the ninth restatement of one rule goes, and
+       this file is billed on four routes, so the duplication cost four
+       times over. */
     const question = questionIn ||
       "Where does dealer hedging flip from damping moves to amplifying them, " +
       "and how far is that from spot?";
@@ -858,8 +936,6 @@
       (flip !== null ? `Gamma flip ${px2(flip)}. ` : "No gamma flip inside the drawn band. ") +
       `${panel.strikes} strikes drawn as ${bars.length} bars.`);
 
-    host.append(svg);
-
     /* THE SENTENCE IS DERIVED, NOT ASSERTED.
 
        This used to read "dealers are short gamma below X and long above it" as
@@ -881,52 +957,75 @@
     const amplifies = (side) => (side === "short"
       ? "hedging amplifies moves there"
       : "hedging damps them there");
-
-    const note = el("p", "fc-note");
-    const band = isNum(regime.bandMin) !== null && isNum(regime.bandMax) !== null
-      ? `Measured over strikes ${px2(regime.bandMin)}–${px2(regime.bandMax)} only, so this is net dealer gamma inside that band, not the whole book. `
-      : "";
     const sep = isNum(regime.flipSeparation);
-    note.textContent =
+
+    /* THE TWO READINGS FIRST, THE CHART AS THEIR EVIDENCE, THE METHOD FOLDED.
+       Where the flip is and how hard dealers are positioned at spot were
+       sentences one and two of a 1,400-character paragraph BELOW the drawing.
+       Nothing is deleted: the reasons a reading is WITHHELD travel with it as
+       open qualifiers, and only the decoder folds. */
+    leadReading(host,
       (flip !== null && !knowsSide
-        ? `The book changes sign at ${px2(flip)}. This card was built before the side of ` +
-          `that boundary was measured, so which way round it runs is not stated here — it ` +
-          `returns on the next published session. `
+        ? `The book changes sign at ${px2(flip)}.`
         : flip !== null
         ? `Dealers are ${below} gamma immediately below ${px2(flip)} — ${amplifies(below)} — ` +
-          `and ${above} immediately above it. ` +
-          (sep !== null
-            ? `The thinner of the two sides carries ${(sep * 100).toFixed(0)}% of the book's peak ` +
-              `exposure, so this is a ${sep < 0.15 ? "weak" : sep < 0.4 ? "moderate" : "strong"} boundary. `
-            : "") +
-          (isNum(regime.crossings) !== null && regime.crossings > 1
-            ? `The book crosses zero ${regime.crossings} times; this is the one separating the most exposure. `
-            : "")
-        : "Net gamma does not change sign materially inside the drawn band, so no flip level is published here. ") +
-      /* THE READING IN WORDS, because a share of a peak is not self-evidently
-         a position size. 0 is "spot sits where the running total is zero",
-         which is the flip itself; 1 is "spot sits at the most exposed rung the
-         ladder measured". Withheld rather than defaulted when spot lies
-         outside the measured band — the feature returns null there precisely
-         because clamping to the edge rung reported a confident +-1 for a stock
-         trading nowhere near the strikes on file. */
-      (atSpot !== null
-        ? `Dealer gamma AT SPOT is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
-          `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
-          `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"} ` +
-          `— a share, not a dollar figure, which is what makes it comparable across names. `
-        : `Where spot sits in the cumulative is not published on this card: spot lies outside ` +
-          `the measured strike band, and the edge rung would report a confident extreme for a ` +
-          `stock trading nowhere near the strikes on file. `) +
-      band +
+          `and ${above} immediately above it.`
+        : "Net gamma does not change sign materially inside the drawn band, so no flip " +
+          "level is published here.") +
+      (flip !== null && knowsSide && sep !== null
+        ? ` The thinner of the two sides carries ${(sep * 100).toFixed(0)}% of the book's peak ` +
+          `exposure, so this is a ${sep < 0.15 ? "weak" : sep < 0.4 ? "moderate" : "strong"} boundary.`
+        : ""));
+    /* THE READING IN WORDS, because a share of a peak is not self-evidently a
+       position size: 0 is spot sitting where the running total is zero, which
+       is the flip itself, and 1 is the most exposed rung the ladder measured.
+       Withheld rather than defaulted when spot lies outside the band — the
+       feature returns null there because clamping to the edge rung reported a
+       confident +-1 for a stock trading nowhere near the strikes on file —
+       and the absence LEADS exactly as a number would, so that a silence is
+       never the cheaper thing to ship. */
+    leadReading(host, atSpot !== null
+      ? `Dealer gamma AT SPOT is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
+        `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
+        `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"}.`
+      : "Where spot sits in the cumulative is not published on this card.");
+
+    host.append(svg);
+
+    /* THESE STAY IN THE OPEN, WITH NOTHING TO CLICK, because each changes
+       what the reading above it MEANS: which flip of several this is, that
+       the side was never measured, why the at-spot share is absent, and that
+       the picture is a band rather than the book. */
+    if (isNum(regime.crossings) !== null && regime.crossings > 1) {
+      host.append(qualifier(`The book crosses zero ${regime.crossings} times; this is the ` +
+        `one separating the most exposure.`));
+    }
+    if (flip !== null && !knowsSide) {
+      host.append(qualifier("This card was built before the side of that boundary was " +
+        "measured, so which way round it runs is not stated here — it returns on the next " +
+        "published session."));
+    }
+    if (atSpot === null) {
+      host.append(qualifier("Spot lies outside the measured strike band, and the edge rung " +
+        "would report a confident extreme for a stock trading nowhere near the strikes on " +
+        "file."));
+    }
+    if (isNum(regime.bandMin) !== null && isNum(regime.bandMax) !== null) {
+      host.append(qualifier(`Measured over strikes ${px2(regime.bandMin)}–${px2(regime.bandMax)} ` +
+        `only, so this is net dealer gamma inside that band, not the whole book.`));
+    }
+
+    appendMethod(host, [
       /* THE READER WHO ASSUMES A LINEAR AXIS MISREADS EVERY BAR, so the axis
-         names itself twice: once on the caption and once here, in the terms
-         that say what to do about it. "Symlog" was a word; this is an
-         instruction. */
-      `The gamma axis is LOGARITHMIC outside a narrow band around zero, so a bar twice as long ` +
-      `is nowhere near twice the gamma: read magnitude off the labelled ticks, which are round ` +
-      `numbers on a 1-2-5 ladder, and treat bar length as rank. ` +
-      `The widest bar is ${money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "")} Γ. ` +
+         names itself twice: once on the caption, in the open, and once here
+         in the terms that say what to do about it. "Symlog" was a word; this
+         is an instruction. */
+      el("p", "fc-note",
+        "The gamma axis is LOGARITHMIC outside a narrow band around zero, so a bar twice as " +
+        "long is nowhere near twice the gamma: read magnitude off the labelled ticks, which " +
+        "are round numbers on a 1-2-5 ladder, and treat bar length as rank. The widest bar is " +
+        money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "") +
+        " Γ."),
       /* THE CURVE AND THE BARS DO NOT SHARE A SCALE, and sharing the zero rule
          makes them look as though they do. A running total is the SUM of the
          bars, so it routinely exceeds the largest of them by an order of
@@ -936,11 +1035,13 @@
          it is where the crossing is the flip. Saying so is cheaper than a
          second axis nobody would read, but leaving it unsaid invites a reader
          to compare a curve height against a bar length, which means nothing. */
-      `The cumulative curve is normalised separately from the bars — only its ZERO CROSSING is ` +
-      `comparable to them, which is the flip. Read the curve for shape, not height. ` +
-      `σ is ATR(14).` +
-      (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "");
-    host.append(note);
+      el("p", "fc-note",
+        "The cumulative curve is normalised separately from the bars — only its ZERO CROSSING " +
+        "is comparable to them, which is the flip. Read the curve for shape, not height. The " +
+        "at-spot reading is a share of this ladder's peak rather than a dollar figure, which " +
+        "is what makes it comparable across names. σ is ATR(14)." +
+        (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "")),
+    ], "How this profile was drawn");
   }
 
   /* ---------- book displacement -------------------------------------- */
@@ -958,12 +1059,8 @@
    * so the direction is read off position rather than off a sign.
    */
   function renderDisplacement(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Is today's flow building dealer gamma where the book already is, or somewhere else?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1145,12 +1242,8 @@
   }
 
   function renderSurface(host, panel, card, questionIn, mount) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn ||
       "Where is dealer gamma concentrated, and when does it expire?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.grid) || !panel.grid.length) {
@@ -1517,12 +1610,8 @@
   }
 
   function renderCalendar(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "When does this dealer positioning expire, and what is left after it does?";
     if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
       return emptyPanel(host, question, panel);
@@ -1616,12 +1705,8 @@
    * premium, in the units a reader sizes in rather than in vol points.
    */
   function renderMove(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn ||
       "What move is priced over a fixed horizon, and is that band rich against " +
       "what this stock has actually been delivering?";
@@ -1749,12 +1834,8 @@
   /* ---------- price context ------------------------------------------ */
 
   function renderContext(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Where has this name been, before any of today's flow?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1821,12 +1902,8 @@
   /* ---------- level rail ------------------------------------------- */
 
   function renderLevels(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Where are the levels that matter, and how far is each in units I can size against?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1912,12 +1989,8 @@
    * rule of the same name still wins over an attribute.
    */
   function renderPath(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
       return emptyPanel(host, question, panel);
@@ -2142,12 +2215,8 @@
   /* ---------- congress ---------------------------------------------- */
 
   function renderCongress(host, panel, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Who in Congress disclosed a trade in this name, and how old is that information?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -2714,12 +2783,8 @@
   }
 
   function renderScore(host, card, questionIn) {
-    /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two. */
+    /* The caller's question wins; the hardcoded one is the fallback. Stated
+       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Why is this name on the board, and how much of the score came from where?";
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
@@ -2903,7 +2968,7 @@
 
     /* scaffolding */
     el, svgEl, isNum, fmtOr, polarity, deadPanel, quietPanel, emptyPanel, statList,
-    panelHead, panelWidth,
+    panelHead, panelWidth, appendMethod, leadReading,
     niceStep, quantileAbs, symlog, surfaceRamp,
     DASH, MINUS, neg, signed, pct, pct1, sigma, px2, vol1, money, compact,
     AXIS_CH,

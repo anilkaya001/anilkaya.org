@@ -17,7 +17,13 @@ import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
-import { rankChain, RANK_KEYS, crossesEarnings } from "./shared/flows-premium.js";
+/* numOrNull comes from the same module the desk prices with, rather than being
+   re-derived here. Number(null) is 0 and Number("") is 0, and this repository
+   has shipped that confident zero enough times that a second local copy of the
+   guard is a second place for it to come back. */
+import {
+  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
+} from "./shared/flows-premium.js";
 import { buildFlowAlerts, mergeAlerts } from "./shared/flows-alerts.js";
 import { shapeTide } from "./shared/flows-pulse.js";
 import { isRefreshWindow } from "./shared/flows-freshness.js";
@@ -1369,6 +1375,26 @@ async function cachedTickerInfo(env, ctx, ticker) {
        ETF/Index" — so an ETF having no earnings and a name whose date is merely
        unknown are different facts, and the page can say which. */
     issueType: typeof d.issue_type === "string" ? d.issue_type : null,
+    /* BETA WAS ON THE WIRE AND WAS BEING THROWN AWAY. This endpoint has carried
+       it since the desk started calling it, and the shape above read three
+       fields out of the response and dropped the rest — so every call already
+       paid for a number nothing published. The strategy tester needs it for a
+       beta-weighted delta, which is the one reading this section previously
+       had to refuse for want of an observable rather than for want of a
+       parameter.
+
+       READ THROUGH numOrNull BECAUSE THE VENDOR SENDS NUMBERS AS STRINGS, and
+       because a name with no beta (a fresh listing, an index) must come back
+       null rather than 0 — a beta of zero is a real and very different claim
+       about a stock than "the vendor does not have one".
+
+       A CACHED ENTRY WRITTEN BEFORE THIS LINE EXISTED HAS NO `beta` KEY. Those
+       entries live for INFO_TTL_SECONDS (six hours) after a deploy, so for a
+       fraction of a day this function can return an object whose `beta` is
+       undefined rather than null. Every reader below therefore tests for a
+       finite number rather than for `=== null`, which is the same discipline
+       the rest of this file applies to an absent field. */
+    beta: numOrNull(d.beta),
   };
   if (cache) {
     const store = new Response(JSON.stringify(out), {
@@ -1381,6 +1407,73 @@ async function cachedTickerInfo(env, ctx, ticker) {
     else await cache.put(key, store).catch(() => {});
   }
   return out;
+}
+
+/**
+ * Serve a live vendor read through the edge cache, with the refresh floor.
+ *
+ * TWO ROUTES NOW SPEND A METERED VENDOR KEY ON THE REQUEST PATH — the premium
+ * desk's chain and the strategy tester's two reads — and every line of this
+ * dance is a quota control rather than a nicety. It lives in one function
+ * because the second copy of it would be the place the floor was quietly
+ * dropped, or the cache key quietly built from a raw parameter.
+ *
+ * THE REFRESH FLOOR. The vendor key lives on a request path, so refresh has to
+ * actually refresh without also being an unmetered proxy to it. A first draft
+ * of the chain route let refresh=1 skip the cache read outright, which is
+ * exactly that: hold the button down and every press is a vendor call.
+ *
+ * So refresh skips the cache only once the copy is older than the floor. Below
+ * it the cached body is served and SAYS it was throttled, which bounds vendor
+ * traffic to one call per key per floor globally, no matter how many users
+ * press how hard. Stateless — no D1 write, whose budget is shared with the
+ * learning app and must not be spendable from an unauthenticated-adjacent path.
+ *
+ * `cacheKey` is the caller's, and every caller builds it from NORMALISED
+ * parameters rather than from the raw request: a gated response keyed by an
+ * attacker-shaped URL is how a cache turns into a bypass, and an unvalidated
+ * parameter in a cache key hands an authenticated reader unbounded distinct
+ * keys to fill the edge cache with — every miss of which is a vendor call.
+ */
+async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build }) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+
+  const hit = cache ? await cache.match(cacheKey) : null;
+  const storedAt = hit ? Number(hit.headers.get("X-Chain-Stored")) : NaN;
+  const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
+
+  const serveCached = hit && (wantsRefresh ? ageSeconds < CHAIN_REFRESH_FLOOR_SECONDS : true);
+  if (serveCached) {
+    const out = new Response(hit.body, hit);
+    out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
+    out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
+    /* The wrapper below forces no-store on every /api/ response, so this is
+       belt and braces rather than the enforcement. Set anyway: the stored
+       copy carries a real max-age and this is the line that says the copy
+       leaving here does not. */
+    out.headers.set("Cache-Control", "no-store");
+    return out;
+  }
+
+  const payload = await build();
+  const body = JSON.stringify(payload);
+
+  if (cache) {
+    const store = new Response(body, {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
+        "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
+      },
+    });
+    /* waitUntil so the caller is not waiting on the write. The synthetic
+       key never passes through the response wrapper, so the stored copy
+       keeps its max-age while every served copy gets no-store. */
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
+    else await cache.put(cacheKey, store);
+  }
+
+  return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
 }
 
 async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
@@ -1514,6 +1607,359 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     earnings: info
       ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
       : null,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/* =============================================================
+   THE STRATEGY TESTER'S TWO READS
+
+   /flows/strategy/ builds a position out of REAL listed contracts and
+   draws what it pays at expiry. That needs a different universe from
+   the premium desk, on the same endpoint, and the difference is the
+   whole reason this is a second builder rather than a parameter on
+   buildChainPayload():
+
+     the desk sends `maybe_otm_only` and `exclude_zero_oi_chains` and
+     then gates on spread, open interest and premium, because it is
+     screening for contracts somebody could SELL. A long in-the-money
+     call is unexpressible in that universe — it is filtered out
+     upstream, before any gate here could let it back in.
+
+   So this sends `expiry` and `option_type` instead, which are the
+   vendor's own documented query parameters on the same path, and it
+   filters nothing. A calculator that silently drops the strike the
+   reader wanted is worse than one that fails: the row is simply not
+   there, and nothing on the page says a row is missing.
+
+   TWO MODES, TWO CACHE KEYS, AND THE SPLIT IS DELIBERATE.
+
+     the CONTEXT read (`?t=`)  — one expiry-breakdown, one candle, one
+       live state, one cached /info. It answers "what expiries exist,
+       how big is each one, what is this trading at, what is its beta".
+     the EXPIRY read (`?t=&expiry=`) — the contracts of ONE expiry,
+       calls and puts as separate calls so a 12,000-contract expiry is
+       two 1,000-row reaches rather than one truncated 500.
+
+   The expiry read deliberately fetches NO PRICE. Spot arrives once, on
+   the context read, and the page prices everything against it and says
+   how old it is — rather than each expiry pick spending two more calls
+   on a shared vendor quota to re-learn a number the page already holds
+   and can timestamp. "Which price, and how old" is answered in one
+   place instead of once per pick.
+
+   THE 500-ROW CEILING IS THE HAZARD THIS ROUTE IS BUILT AROUND. The
+   vendor documents `limit` as maximum=500 and its own spec example
+   shows single expiries carrying 5,000 and 12,223 contracts. The desk
+   survives that by paging twice and publishing `truncated`; here the
+   count is also known IN ADVANCE, because expiry-breakdown reports
+   `chains` per expiry — so the picker can warn before the read rather
+   than the payload confessing after it.
+   ============================================================= */
+
+/* The reference index for a beta-weighted delta, NAMED because the
+   number means nothing without it: a delta weighted to SPY and one
+   weighted to QQQ are different readings of the same position, and a
+   page that prints one without saying which has published a number
+   whose definition it withheld. It travels in the payload so the
+   renderer cannot forget to say it. */
+const STRATEGY_INDEX = "SPY";
+
+/* An expiry is a date and nothing else. Validated before it reaches a cache
+   key for the same reason the ticker is: an unvalidated parameter in a cache
+   key hands an authenticated reader unbounded distinct keys to fill the edge
+   cache with, and every miss is a vendor call. */
+const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/* Pages per option type. Two, for the reason the desk gives at CHAIN_PAGE_SIZE:
+   a second page doubles the reach for one subrequest and about two
+   milliseconds, and a third starts eating a 10ms budget for a tail. Split by
+   `option_type` this is 1,000 calls and 1,000 puts rather than 1,000 of both
+   mixed, which is the split that makes two pages enough for almost every
+   listed name rather than merely most of them. */
+const STRATEGY_PAGES_PER_TYPE = 2;
+
+/**
+ * The index spot, on its own cache entry.
+ *
+ * SEPARATE FROM /info's SIX-HOUR ENTRY ON PURPOSE. Beta is a slow statistic
+ * and six hours of it costs nothing; the index PRICE is a quote, and a
+ * beta-weighted delta computed against a six-hour-old SPY is wrong by
+ * whatever SPY did since. It gets the chain's own 120-second life instead.
+ *
+ * Keyed on the index alone, not on the ticker, so every reader of every symbol
+ * shares one call per two minutes globally rather than one per name.
+ *
+ * Returns null on ANY failure, and the caller must render that as an ABSENCE
+ * rather than as a beta-weighted delta of zero. A position with 400 share-
+ * equivalents of delta and no index price has an unknown beta-weighted delta,
+ * which is not the same claim as a flat one.
+ */
+async function cachedIndexSpot(env, ctx) {
+  const key = new Request(`https://flows-index.internal/${STRATEGY_INDEX}`, { method: "GET" });
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (cache) {
+    const hit = await cache.match(key).catch(() => null);
+    if (hit) return hit.json().catch(() => null);
+  }
+  const raw = await uwFetch(env, `/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(() => null);
+  if (raw === null) return null;
+  const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
+  const close = numOrNull(d && d.close);
+  if (close === null || close <= 0) return null;
+  const out = {
+    symbol: STRATEGY_INDEX,
+    spot: close,
+    tapeTime: d && d.tape_time ? String(d.tape_time) : null,
+  };
+  if (cache) {
+    const store = new Response(JSON.stringify(out), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
+      },
+    });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    else await cache.put(key, store).catch(() => {});
+  }
+  return out;
+}
+
+/** The vendor's envelope is `data` on some endpoints and bare on others. */
+const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
+
+/**
+ * THE CONTEXT READ: what this name is trading at, and what it lists.
+ *
+ * FOUR SIMULTANEOUS CONNECTIONS OF SIX, which is the ceiling that actually
+ * binds a Workers Free invocation — eight times tighter than the 50-subrequest
+ * cap, and the number to watch when anything is added here is the WIDTH of the
+ * Promise.all rather than the total call count. The index spot is awaited
+ * afterwards rather than inside it: it is a cache hit almost always, and on the
+ * rare miss a fifth open connection is a cost paid once per two minutes for
+ * every reader of every symbol rather than once per request.
+ */
+async function buildStrategyContext(env, ctx, ticker) {
+  const t = encodeURIComponent(ticker);
+  const [breakdown, candles, state, info] = await Promise.all([
+    uwFetch(env, `/api/stock/${t}/expiry-breakdown`, {}).catch(() => null),
+    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
+    cachedTickerInfo(env, ctx, ticker),
+  ]);
+
+  const bars = unwrapRows(candles);
+  let dailyClose = null, dailyDate = null;
+  for (const b of bars) {
+    const close = numOrNull(b && (b.close ?? b.c));
+    const date = b && (b.date || b.start_time || b.timestamp);
+    if (close === null || close <= 0 || !date) continue;
+    const day = String(date).slice(0, 10);
+    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
+  }
+
+  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
+  const liveClose = numOrNull(live && live.close);
+  const useLive = liveClose !== null && liveClose > 0;
+  const spot = useLive ? liveClose : dailyClose;
+  /* SPOT IS NOT OPTIONAL AND IS NOT DEFAULTED. Every moneyness on the page,
+     the diagram's whole x-axis and the beta-weighted delta are measured from
+     it, so a missing spot makes every number wrong in a way that still
+     renders. It fails loudly, exactly as the desk's does. */
+  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
+
+  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
+  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
+  /* asOf DATES THE DAYS-TO-EXPIRY COUNT, so it is the trading session and not
+     the wall clock — the same reasoning, and the same fields, as the desk's. */
+  const asOf = tapeDay || dailyDate;
+  if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
+
+  /* THE EXPIRY LIST, AND ITS SIZE BEFORE IT IS READ. `chains` is the count of
+     listed contracts at that expiry, both types together, and it is the number
+     that decides whether a 500-row page can hold the expiry at all. Publishing
+     it lets the picker warn BEFORE the read rather than the payload confessing
+     after it — which on a calculator is the difference between "your strike is
+     not listed" and "your strike was cut off and nothing said so". */
+  const expiries = [];
+  for (const row of unwrapRows(breakdown)) {
+    const expiry = row && typeof row.expiry === "string" ? row.expiry.slice(0, 10) : null;
+    if (!expiry || !EXPIRY_RE.test(expiry)) continue;
+    expiries.push({
+      expiry,
+      chains: numOrNull(row.chains),
+      oi: numOrNull(row.open_interest),
+      volume: numOrNull(row.volume),
+    });
+  }
+  expiries.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
+
+  const index = await cachedIndexSpot(env, ctx);
+
+  return {
+    mode: "context",
+    ticker, spot, asOf,
+    spotSource: useLive ? "stock-state" : "daily-close",
+    marketTime: live && live.market_time ? String(live.market_time) : null,
+    tapeTime,
+    prevClose: numOrNull(live && live.prev_close) ?? dailyClose,
+    /* THREE SILENCES, THREE VALUES. `expiries: []` with status "unreadable"
+       is the request that did not come back; with status "quiet" it is an
+       endpoint that answered and listed nothing, which for a symbol with no
+       listed options is a READING. Sharing one empty array between them is
+       exactly the sentence this codebase refuses to let two silences share. */
+    expiries,
+    expiryStatus: breakdown === null ? "unreadable" : (expiries.length ? "ok" : "quiet"),
+    /* Beta is `undefined` on an /info entry cached before beta was read, and
+       null when the vendor has none. Both are absences and both must render as
+       one; neither is a beta of zero. */
+    beta: info && Number.isFinite(info.beta) ? info.beta : null,
+    /* The index the beta-weighted delta is weighted TO, and its price, so the
+       renderer states the choice rather than implying a universal one. Null
+       when the index quote did not come back — an unknown weighting, never a
+       flat one. */
+    index,
+    earnings: info
+      ? { date: info.nextEarningsDate, announceTime: info.announceTime, issueType: info.issueType }
+      : null,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * THE EXPIRY READ: every listed contract at one expiry, unfiltered.
+ *
+ * SHORT KEYS, AND THE LEGEND IS HERE. A 2,000-row payload with thirteen
+ * spelled-out key names on every row carries roughly ninety kilobytes of
+ * repeated strings; the same rows keyed `k`/`bid`/`dl` carry a fraction of
+ * that. The names are mnemonic rather than positional so a row is still
+ * readable in a devtools pane:
+ *
+ *   sym  option_symbol      k    strike        bid/ask  nbbo quote
+ *   iv   implied_volatility dl   delta         gm       gamma
+ *   th   theta              vg   vega          rh       rho
+ *   vol  volume             oi   open_interest
+ *
+ * EVERY GREEK IS `nullable: true, type: string` IN THE VENDOR'S OWN SPEC, and
+ * its own example carries a row with none of the five. So absence is a
+ * per-ROW fact, not a per-chain one, and each field is read through numOrNull
+ * independently — a contract with a delta and no vega keeps its delta.
+ */
+async function buildStrategyExpiry(env, ticker, expiry) {
+  const t = encodeURIComponent(ticker);
+  const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+    /* NOT maybe_otm_only, and NOT exclude_zero_oi_chains. Both are the desk's
+       filters and both are wrong here: a long in-the-money call is a position
+       a reader builds all the time, and a listed contract with no open
+       interest is still quoted and still purchasable. This read is the whole
+       book at one expiry, because the whole book is what a calculator is
+       allowed to be asked about. */
+    expiry,
+    option_type: optionType,
+    limit: CHAIN_PAGE_SIZE,
+    ...(n > 1 ? { page: n } : {}),
+  });
+
+  /* TWO OF SIX SIMULTANEOUS CONNECTIONS. The second page of each type, when it
+     is needed, is fetched after — a full first page is the only evidence that
+     a second exists, so asking for both up front would spend a call on every
+     small expiry to save a round trip on a large one. */
+  const [callsFirst, putsFirst] = await Promise.all([page("call", 1), page("put", 1)]);
+
+  const gather = async (optionType, first) => {
+    const rows = unwrapRows(first);
+    let truncated = false;
+    if (rows.length >= CHAIN_PAGE_SIZE) {
+      for (let n = 2; n <= STRATEGY_PAGES_PER_TYPE; n++) {
+        const next = unwrapRows(await page(optionType, n).catch(() => []));
+        for (const r of next) rows.push(r);
+        /* A FULL LAST PAGE MEANS THERE IS ANOTHER WE DID NOT ASK FOR. A short
+           one means the type ended inside it, which is the only case where the
+           rows in hand ARE the listed book at this expiry. */
+        truncated = next.length >= CHAIN_PAGE_SIZE;
+        if (!truncated) break;
+      }
+    }
+    return { rows, truncated };
+  };
+
+  const calls = await gather("call", callsFirst);
+  const puts = await gather("put", putsFirst);
+
+  /* THE IV CONVENTION IS DECIDED ONCE, FROM THE WHOLE EXPIRY. flows-premium.js
+     already owns this decision and its reasoning — a single contract at 0.42
+     is genuinely ambiguous, a population whose median is 0.42 is not — so it
+     is called rather than re-derived, and its `basis` string ships so the
+     answer is auditable instead of being a constant somebody has to trust. */
+  const ivRaw = [];
+  for (const r of calls.rows) ivRaw.push(r && r.implied_volatility);
+  for (const r of puts.rows) ivRaw.push(r && r.implied_volatility);
+  const iv = ivConvention(ivRaw);
+
+  let missingGreeks = 0;
+  let offExpiry = 0;
+  const shape = (raw, wantType) => {
+    const out = [];
+    for (const r of raw) {
+      if (!r || typeof r !== "object") continue;
+      const sym = typeof r.option_symbol === "string" ? r.option_symbol : null;
+      const parsed = sym ? parseOptionSymbol(sym) : null;
+      /* A SYMBOL THIS DOES NOT RECOGNISE IS DROPPED rather than guessed at, for
+         the reason flows-premium.js gives: a misparsed strike prices a trade
+         that does not exist, and on this page it would draw one too. */
+      if (!parsed) continue;
+      /* AND THE ROW MUST BE THE ROW THAT WAS ASKED FOR. `expiry` and
+         `option_type` are the vendor's filters, applied upstream, and this
+         payload's whole claim is that it is the book at ONE expiry — a row
+         from a different one filed under this heading would be picked up as a
+         leg whose own symbol says it expires elsewhere, and the position would
+         then be priced from a book it is not in. Counted rather than merely
+         dropped, because a non-zero count means a documented query parameter
+         stopped being honoured and the page should say so out loud. */
+      if (parsed.expiry !== expiry || (parsed.type === "C" ? "call" : "put") !== wantType) {
+        offExpiry++;
+        continue;
+      }
+      const rawIv = numOrNull(r.implied_volatility);
+      const dl = numOrNull(r.delta), gm = numOrNull(r.gamma);
+      const th = numOrNull(r.theta), vg = numOrNull(r.vega), rh = numOrNull(r.rho);
+      if (dl === null || gm === null || th === null || vg === null) missingGreeks++;
+      out.push({
+        sym, k: parsed.strike,
+        bid: numOrNull(r.nbbo_bid), ask: numOrNull(r.nbbo_ask),
+        iv: rawIv === null ? null : rawIv / iv.divisor,
+        dl, gm, th, vg, rh,
+        vol: numOrNull(r.volume), oi: numOrNull(r.open_interest),
+      });
+    }
+    out.sort((a, b) => a.k - b.k);
+    return out;
+  };
+
+  const callRows = shape(calls.rows, "call");
+  const putRows = shape(puts.rows, "put");
+
+  return {
+    mode: "expiry",
+    ticker, expiry,
+    calls: callRows, puts: putRows,
+    /* PER TYPE, because they were fetched per type and a truncated call side
+       says nothing about the put side. The page names which half was cut. */
+    callsTruncated: calls.truncated,
+    putsTruncated: puts.truncated,
+    pageSize: CHAIN_PAGE_SIZE,
+    pagesPerType: STRATEGY_PAGES_PER_TYPE,
+    ivBasis: iv.basis,
+    /* How many of the rows in hand are missing at least one of the four greeks
+       the projection needs. Published so the page can say "eleven of these 340
+       contracts carry no greeks" instead of the reader discovering it one leg
+       at a time. */
+    missingGreeks,
+    /* Rows the provider returned that are not at this expiry or not of the type
+       that was asked for. Zero on every honoured request; anything else is the
+       filter having stopped working, which the page reports rather than
+       absorbing. */
+    offExpiry,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2393,6 +2839,11 @@ async function route(request, env, url, ctx) {
     "/flows/market/": (u) => FLOWS_PAGES.marketPage({ username: u }),
     "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
     "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
+    /* Beside the desk in the rail and beside it here, because the two are the
+       same class of page: a name the reader types, priced live against a
+       metered vendor key on the request path. Every other route in this table
+       streams a blob the pipeline computed hours ago. */
+    "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
     /* Query parameter, never a path segment: dispatch here is
        Object.hasOwn(FLOWS_ROUTES, path), so /flows/ticker/NVDA would have to
        introduce a prefix match into a table whose exactness is the reason a
@@ -2431,7 +2882,8 @@ async function route(request, env, url, ctx) {
       || path === "/flows/watch" || path === "/flows/history"
       || path === "/flows/market" || path === "/flows/ticker"
       || path === "/flows/unusual" || path === "/flows/events"
-      || path === "/flows/track" || path === "/flows/political") {
+      || path === "/flows/track" || path === "/flows/political"
+      || path === "/flows/strategy") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
@@ -2798,71 +3250,58 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      /* NORMALISED BEFORE THEY REACH THE CACHE KEY. An unvalidated parameter in
-         a cache key hands an authenticated user unbounded distinct keys to fill
-         the edge cache with, and every miss is a vendor call. */
+      /* NORMALISED BEFORE THEY REACH THE CACHE KEY — see
+         serveCachedVendorRead() for why that is a security property and not
+         a tidiness one. */
       const rawStrategy = url.searchParams.get("strategy");
       const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
       const rawRank = url.searchParams.get("rank");
       const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
-      const wantsRefresh = url.searchParams.get("refresh") === "1";
 
-      const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
-      /* Built HERE from the normalised parameters, never from the raw request.
-         A gated response keyed by an attacker-shaped URL is how a cache turns
-         into a bypass. */
-      const cacheKey = new Request(
-        `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
-        { method: "GET" });
+      return serveCachedVendorRead({
+        ctx,
+        cacheKey: new Request(
+          `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
+          { method: "GET" }),
+        wantsRefresh: url.searchParams.get("refresh") === "1",
+        build: () => buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 }),
+      });
+    }
 
-      const hit = cache ? await cache.match(cacheKey) : null;
-      const storedAt = hit ? Number(hit.headers.get("X-Chain-Stored")) : NaN;
-      const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
+    if (path === "/api/flows/strategy") {
+      /* THE STRATEGY TESTER'S ONE ROUTE, TWO READS. `?t=` alone is the context
+         read — price, session date, beta, the index it is weighted to, and the
+         expiry list with each expiry's contract count. `?t=&expiry=` is the
+         book at one expiry.
 
-      /* THE REFRESH FLOOR, and it is the quota control rather than a nicety.
-         The vendor key now lives on a request path, so refresh has to actually
-         refresh without also being an unmetered proxy to it. A first draft let
-         refresh=1 skip the cache read outright, which is exactly that: hold the
-         button down and every press is a vendor call.
-
-         So refresh skips the cache only once the copy is older than the floor.
-         Below it the cached body is served and SAYS it was throttled, which
-         bounds vendor traffic to one call per ticker per floor globally, no
-         matter how many users press how hard. Stateless — no D1 write, whose
-         budget is shared with the learning app and must not be spendable from
-         an unauthenticated-adjacent path. */
-      const serveCached = hit && (wantsRefresh ? ageSeconds < CHAIN_REFRESH_FLOOR_SECONDS : true);
-      if (serveCached) {
-        const out = new Response(hit.body, hit);
-        out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
-        out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
-        /* The wrapper below forces no-store on every /api/ response, so this is
-           belt and braces rather than the enforcement. Set anyway: the stored
-           copy carries a real max-age and this is the line that says the copy
-           leaving here does not. */
-        out.headers.set("Cache-Control", "no-store");
-        return out;
+         ONE ROUTE RATHER THAN TWO because they are the same resource at two
+         depths and they share every quota control below. Two cache keys,
+         though: an expiry read must never be able to evict the context read
+         that priced it. */
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-
-      const payload = await buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 });
-      const body = JSON.stringify(payload);
-
-      if (cache) {
-        const store = new Response(body, {
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
-            "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
-          },
-        });
-        /* waitUntil so the caller is not waiting on the write. The synthetic
-           key never passes through the response wrapper, so the stored copy
-           keeps its max-age while every served copy gets no-store. */
-        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
-        else await cache.put(cacheKey, store);
+      const rawExpiry = url.searchParams.get("expiry");
+      /* A MALFORMED EXPIRY IS A 400, NOT A SILENT FALL-BACK TO THE CONTEXT
+         READ. Coercing it away would answer a question nobody asked with a
+         payload that looks entirely valid — the page would render an expiry
+         picker where the reader expected a chain, and nothing would say why. */
+      if (rawExpiry !== null && !EXPIRY_RE.test(rawExpiry)) {
+        throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
       }
+      const expiry = rawExpiry === null ? null : rawExpiry;
 
-      return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
+      return serveCachedVendorRead({
+        ctx,
+        cacheKey: new Request(
+          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}`,
+          { method: "GET" }),
+        wantsRefresh: url.searchParams.get("refresh") === "1",
+        build: () => (expiry
+          ? buildStrategyExpiry(env, ticker, expiry)
+          : buildStrategyContext(env, ctx, ticker)),
+      });
     }
 
     throw new HttpError(404, "not_found", "API route not found");

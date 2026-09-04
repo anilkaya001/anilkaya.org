@@ -911,6 +911,38 @@ try {
           plotTop: num(svg.querySelector(".gp-zero"), "y1"),
           plotBottom: num(svg.querySelector(".gp-zero"), "y2"),
           note: (host.querySelector(".fc-note") || {}).textContent || "",
+          /* THE PANEL'S SHAPE, not only its drawing. The reading, the notes
+             that qualify it, the method behind the disclosure and what a
+             find-in-page still sees with that disclosure shut. */
+          leads: Array.from(host.querySelectorAll(".fc-reading.is-lead"))
+            .map((n) => n.textContent.replace(/\s+/g, " ").trim()),
+          leadBeforeChart: (() => {
+            const lead = host.querySelector(".fc-reading.is-lead");
+            /* 4 === DOCUMENT_POSITION_FOLLOWING: the chart comes after it. */
+            return !!(lead && (lead.compareDocumentPosition(svg) & 4) === 4);
+          })(),
+          notes: Array.from(host.querySelectorAll(".fc-note")).map((n) => ({
+            text: n.textContent.replace(/\s+/g, " ").trim(),
+            qualifier: n.classList.contains("is-qualifier"),
+            inDetails: !!n.closest("details"),
+            open: n.closest("details") ? n.closest("details").open : true,
+          })),
+          howSummary: (host.querySelector("details.ft-how > summary") || {}).textContent || "",
+          /* THE DISCLOSURE ARRIVED ON THIS ROUTE WITH THIS CHANGE, and its
+             stylesheet did not move with it — .ft-how was written for
+             /flows/ticker/. If those rules were scoped to that page the
+             dialog would draw a <summary> with `list-style: none` and no
+             replacement marker: a control that opens on click and shows
+             nothing that says so. Read off the REAL flows.css, added at the
+             top of this file. */
+          howChrome: (() => {
+            const sm = host.querySelector("details.ft-how > summary");
+            if (!sm) return null;
+            const cs = getComputedStyle(sm);
+            return { marker: getComputedStyle(sm, "::before").content,
+                     cursor: cs.cursor, tab: sm.tabIndex, size: parseFloat(cs.fontSize) };
+          })(),
+          all: host.textContent.replace(/\s+/g, " "),
           /* How far the longest bar on each side of the zero rule reaches.
              Position IS magnitude on this axis, so no graduation may be drawn
              beyond it. */
@@ -1016,8 +1048,17 @@ try {
        flatters the wings, and the only place that was stated was four
        sentences into the note below the chart. */
     ok(/log/.test(gr.two.axis), `the axis caption names the scale (${gr.two.axis})`);
-    ok(/LOGARITHMIC/.test(gr.two.note) && /not off bar length|rank/.test(gr.two.note),
-       "and the note says what to do about it rather than only naming it");
+    /* SCOPED TO THE METHOD, NOT TO THE FIRST PARAGRAPH. This read
+       `host.querySelector(".fc-note")` and passed while the axis instruction
+       was sentence four of one 1,400-character note. The panel now leads on
+       its finding and folds the decoder, so the first `.fc-note` is a
+       QUALIFIER — the band, or the crossing count — and the instruction is a
+       paragraph further down. What must hold is unchanged: the instruction is
+       on the panel, in the terms that say what to do about it. */
+    const axisNote = gr.two.notes.find((n) => /LOGARITHMIC/.test(n.text));
+    ok(axisNote, "the axis instruction is still on the panel, in full");
+    ok(axisNote && /not off bar length|rank/.test(axisNote.text),
+       "and it says what to do about it rather than only naming the scale");
 
     /* SIGN SURVIVES GREYSCALE, AND SO DOES SIZE. A short bar was drawn as
        `fill: url(#gpNeg)` with nothing underneath — 45% coverage of diagonal
@@ -1079,6 +1120,82 @@ try {
       ok(tightest >= 11,
          `and no two prices are drawn on top of each other (closest pair ${tightest} units apart)`);
     }
+
+    /* ---------- THE READING LEADS, AND THE METHOD IS STILL THERE ------
+
+       THE SURVEY THAT PROMPTED THIS BLOCK counted 101,768 characters of prose
+       across the fourteen Flows renderers and found `.fc-note` — the METHOD
+       paragraph — emitted 87 times against 4 emissions of `.fc-reading`, the
+       FINDING. This panel was one of the twelve that stated no finding at all
+       above its chart: where the book flips and how hard dealers sit at spot
+       were sentences one and two of a 1,400-character paragraph underneath.
+
+       EVERY ASSERTION HERE IS A PAIR, and that is the point. The finding is
+       FIRST; the method is STILL PRESENT AND STILL REACHABLE. A suite that
+       asserted only the first half would pass on a renderer that fixed its
+       ordering by deleting its caveats, which is the one outcome this product
+       cannot survive — the honesty discipline is the whole value. */
+    eq(gr.two.leads.length, 2,
+       `the profile leads on its two findings, each in its own element (${gr.two.leads.length})`);
+    ok(/^Dealers are (long|short) gamma immediately below/.test(gr.two.leads[0] || ""),
+       `the flip regime is first, and still derived rather than asserted ("${
+         (gr.two.leads[0] || "").slice(0, 62)}")`);
+    ok(/^Dealer gamma AT SPOT is/.test(gr.two.leads[1] || ""),
+       `and how hard dealers sit at spot is second ("${(gr.two.leads[1] || "").slice(0, 48)}")`);
+    ok(gr.two.leadBeforeChart,
+       "and both come BEFORE the drawing in DOM order — the chart is the evidence for the " +
+       "reading rather than its preamble, and a sentence under a 220-unit canvas is below " +
+       "the fold on a phone");
+
+    /* THE METHOD, FOLDED AND WORD FOR WORD. The axis instruction is the
+       paragraph a reader who assumes a linear scale most needs; it may be one
+       click away and it may not be gone. */
+    ok(axisNote.inDetails,
+       "the axis instruction is behind the panel's own disclosure rather than in the open — " +
+       "1,400 characters of how-the-bars-were-drawn is a wall a reader scrolls past");
+    ok(!axisNote.open,
+       "and shut by default, which is the whole saving; an open <details> is a paragraph");
+    ok(/LOGARITHMIC/.test(gr.two.all),
+       "and STILL IN textContent with it shut, so a find-in-page and a screen reader's find " +
+       "both still reach it — folded is not hidden");
+    ok(/How this profile was drawn/.test(gr.two.howSummary),
+       `the disclosure names what is under it ("${gr.two.howSummary.trim()}") — a summary ` +
+       "that says nothing is a click a reader will not spend");
+    ok(/normalised separately from the bars/.test(gr.two.all) && /is ATR\(14\)/.test(gr.two.all),
+       "and the curve-scale and sigma sentences survived the move too, in full");
+
+    /* A DOOR THAT LOOKS LIKE ONE, ON A ROUTE THAT HAD NO DOORS. This panel is
+       drawn in the card dialog on /flows/long/, /flows/ and /flows/watch/,
+       none of which built a <details> before this change; the marker, the
+       pointer and the focus ring live in flows.css under bare `.ft-how-s`
+       selectors and are therefore inherited here. Asserted rather than
+       assumed, because `list-style: none` with a scoped ::before is a control
+       that opens on click and shows nothing that says it can be opened. */
+    ok(gr.two.howChrome, "the dialog's fold has a summary to operate");
+    ok(gr.two.howChrome && /\+/.test(gr.two.howChrome.marker),
+       `and a visible closed-state marker on it (${gr.two.howChrome
+         && gr.two.howChrome.marker}) — the default triangle is suppressed by the same rule ` +
+       "set, so a scoped replacement would leave nothing at all");
+    eq(gr.two.howChrome && gr.two.howChrome.cursor, "pointer",
+       "the pointer says it is a control");
+    eq(gr.two.howChrome && gr.two.howChrome.tab, 0,
+       "and it is one tab stop for the whole method set, which a <summary> is for free — " +
+       "the alternative this design refused was a tabindex on every explained element");
+
+    /* THE HALF THAT MAKES THIS AN ORDERING AND NOT A DELETION. A note that
+       changes WHAT THE READING MEANS may be moved and may not be folded: this
+       fixture is measured over strikes 60-80 only, so every number above it is
+       a statement about a band rather than about the book. */
+    const bandNote = gr.two.notes.find((n) => /not the whole book/.test(n.text));
+    ok(bandNote, "the band the profile was measured over is still stated");
+    ok(bandNote && bandNote.qualifier && !bandNote.inDetails,
+       "in the open and marked as a qualifier, with nothing to click — this is the line that " +
+       "says the picture may be a page of the book rather than the book");
+    for (const n of gr.two.notes) {
+      ok(!(n.qualifier && n.inDetails),
+         `no qualifier on this panel is folded ("${n.text.slice(0, 50)}") — the split is by ` +
+         "whether a note changes what the reading MEANS, never by how long it is");
+    }
   }
 
   /* ---------- HOW SHORT, NOT MERELY SHORT -----------------------
@@ -1108,6 +1225,11 @@ try {
         return {
           text: host.textContent,
           plate: Array.from(host.querySelectorAll(".gp-plate-s")).map((n) => n.textContent).join("|"),
+          leads: Array.from(host.querySelectorAll(".fc-reading.is-lead"))
+            .map((n) => n.textContent.replace(/\s+/g, " ").trim()),
+          quals: Array.from(host.querySelectorAll(".fc-note.is-qualifier"))
+            .map((n) => ({ text: n.textContent.replace(/\s+/g, " ").trim(),
+                           inDetails: !!n.closest("details") })),
         };
       };
       return { deep: draw(-0.93), shallow: draw(-0.05), absent: draw(null) };
@@ -1121,8 +1243,14 @@ try {
     ok(/0\.93 of/.test(shot.deep.plate),
        `the magnitude is on the spot rule itself (${shot.deep.plate})`);
     ok(/0\.05 of/.test(shot.shallow.plate), "for both readings");
-    ok(/0\.93 of this ladder's peak/.test(shot.deep.text),
-       "and the note states it as a share of the ladder's peak, which is what makes it comparable across names");
+    /* IN THE LEAD NOW, NOT IN THE NOTE. This sentence was the second half of
+       the paragraph under the chart; it is the panel's finding and reads as
+       one. The share, not a dollar figure, is what makes it comparable across
+       names, and that clause is method and folds with the rest. */
+    ok(/0\.93 of this ladder's peak/.test(shot.deep.leads[1] || ""),
+       `the at-spot magnitude LEADS the panel ("${(shot.deep.leads[1] || "").slice(0, 60)}")`);
+    ok(/share of this ladder's peak rather than a dollar figure/.test(shot.deep.text),
+       "and what makes it comparable across names is still said, in the folded method");
     /* The panel already says "short gamma immediately below the flip" on every
        card, so a bare /short/ here would pass under any mutation. The sign must
        be attached to THIS reading. */
@@ -1132,6 +1260,20 @@ try {
        "a card whose spot lies outside the measured band manufactures no reading");
     ok(/not published on this card/.test(shot.absent.text),
        "and says why the reading is missing");
+
+    /* AND THE ABSENCE LEADS EXACTLY AS A MEASURED READING DOES, with its
+       reason beside it rather than behind the disclosure. Demoting a withheld
+       reading to a footnote would make a silence cheaper to ship than a
+       number, which is the one incentive this product cannot afford. */
+    ok(/^Where spot sits in the cumulative is not published/.test(shot.absent.leads[1] || ""),
+       `the unmeasured at-spot share still LEADS ("${(shot.absent.leads[1] || "").slice(0, 52)}")`);
+    ok(!/\d/.test(shot.absent.leads[1] || ""),
+       `carrying no digit at all ("${shot.absent.leads[1]}") — a reader who sees a number ` +
+       "where a reason belongs has been told something the book never said");
+    const edge = shot.absent.quals.find((n) => /edge rung/.test(n.text));
+    ok(edge, "and the reason it was withheld is on the panel, verbatim");
+    ok(edge && !edge.inDetails,
+       "in the open, beside the absence it explains rather than behind a click");
   }
 
   /* ---------- THE TWO SUPPRESSION REASONS ------------------------ */

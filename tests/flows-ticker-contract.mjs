@@ -184,6 +184,48 @@ const pageHTML = FLOWS_PAGES.tickerPage({ username: "test" })
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
 const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
 
+/* ---------- ONE FOLD, ONE LEAD, ONE FILE --------------------------
+
+   THE DISCLOSURE AND THE PROMOTED READING WERE BORN HERE, in flows-ticker.js,
+   because /flows/ticker/ was the only page that had them. They now live in
+   flows-panels.js, which this route and three others load and which the card
+   dialog draws from — so the twelve renderers that led with their method can
+   fold it, and a panel cannot fold on the page while staying unfolded in the
+   dialog that draws the same function.
+
+   THIS IS A SOURCE-LEVEL ASSERTION ON PURPOSE, and it is the one thing the
+   runtime cannot show. A second `<details class="ft-how">` built in this file
+   would draw an identical panel and pass every rendering assertion below it,
+   and would then be a second answer to "how long is a wall" — the failure
+   flows-panels.js's own header was written against when 2,040 lines were
+   nearly copied rather than moved. A duplicate a test compares is a
+   projection; a duplicate a test cannot see is a drift. */
+{
+  ok(/class="ft-how"|"ft-how"/.test(panelsSrc),
+     "flows-panels.js builds the disclosure — it is the module both the ticker grid and the " +
+     "card dialog draw through, so the fold is available on all four routes that load it");
+  eq((tickerSrc.match(/el\("details", "ft-how"\)/g) || []).length, 0,
+     "and flows-ticker.js builds none of its own; it destructures appendMethod out of P " +
+     "instead, so the wall threshold is decided in exactly one place");
+  for (const name of ["appendMethod", "leadReading"]) {
+    ok(new RegExp("panelHead, panelWidth, [^\\n]*" + name).test(panelsSrc),
+       `flows-panels.js exports ${name} on window.FlowsPanels — an export that goes missing ` +
+       "fails here rather than only on the page that consumes it");
+  }
+  ok(/appendMethod, leadReading,\n  \} = P;/.test(tickerSrc),
+     "and flows-ticker.js reads both back out of the module rather than restating them");
+  /* THE ADAPTER IS ALLOWED AND THE COPY IS NOT. appendNotes stays here because
+     the eight drawers below own plain prose; it holds no threshold and no
+     <details> of its own, which is exactly what the two assertions above
+     measure. */
+  ok(/function appendNotes\(host, notes, summary\) \{\n\s*appendMethod\(/.test(tickerSrc),
+     "the string-shaped appendNotes that stayed is a four-line adapter over the moved " +
+     "appendMethod, not a second implementation of the fold");
+  ok(!/NOTE_WALL_CHARS/.test(tickerSrc),
+     "and the wall threshold itself is not restated in this file at all — two numbers named " +
+     "\"how long is too long\" is two answers a reader would have to reconcile");
+}
+
 /**
  * Mount the real page markup, stub the two fetches, and let the real
  * controller paint a real card.
