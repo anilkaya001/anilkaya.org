@@ -358,6 +358,37 @@ const CHECKS_ON_CLEAN = 13;
   eq(w.n.held, 5, "the rows the two boards hold now");
   eq(w.n.prior, 80, "against the rows the prior boards held, both counted as ROWS");
   eq(w.n.fellPct, 94, "and the fall stated as a percentage rather than left to the reader");
+
+  /* THE MEMORY MUST BE A PREVIOUS SESSION, AND IT IS NOT ALWAYS ONE.
+     A board re-run on the same day reads back its own earlier write and
+     stamps the memory `same-session` — flows-pipeline.mjs says so in as
+     many words: "it is this run's own output". Counting against that
+     compares the run to itself and reports a collapse that is an
+     artefact of having run twice, which is the confusion the
+     pipeline's own memory guard exists to prevent, reintroduced one
+     layer up. `named` survives on a refused memory (only `rows` is
+     emptied), so nothing else here would have stopped it. */
+  for (const status of ["same-session", "ahead", "undated", "quiet", "unavailable"]) {
+    const t = clean();
+    t.long.memory.named = 40; t.short.memory.named = 40;
+    t.long.memory.status = status; t.short.memory.status = status;
+    eq(byId(run(t), "population:shrank"), null,
+       `a memory stamped ${status} is not a previous board, so no fall is claimed against it`);
+  }
+
+  /* AND THE ONE-SIDED CASE. A memory refused on one side only must not
+     silently halve the comparand on the other: the side that still has
+     a clean memory is compared, the refused side contributes neither a
+     prior nor a held count, and the sentence names the side it read. */
+  const oneSided = clean();
+  oneSided.long.memory.named = 40;
+  oneSided.short.memory.status = "same-session";
+  oneSided.short.memory.named = 40;
+  const ow = byId(run(oneSided), "population:shrank");
+  ok(ow !== null, "one clean memory is still worth a comparison");
+  ok(/bullish board/.test(ow.say),
+     "and it says which side it read, rather than implying it counted both");
+  eq(ow.n.prior, 40, "counting only the side whose memory was a previous session");
   eq(w.n.priorSession, PRIOR, "with the board it is measured against named");
   assert.deepEqual(w.sources.slice().sort(), ["board:long", "board:short"],
     "and both sides cited, because the comparison is across the pair");

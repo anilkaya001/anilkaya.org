@@ -387,13 +387,31 @@ function checkPopulation(s) {
     const r = rowsOf(s[slot]);
     if (!p || !r) continue;
     const memory = p.memory && typeof p.memory === "object" ? p.memory : null;
-    const named = memory ? num(memory.named) : null;
+    /* THE MEMORY MUST BE A PREVIOUS SESSION, AND IT IS NOT ALWAYS ONE.
+       A board re-run on the same day reads back its OWN earlier write
+       and stamps the memory `same-session`, saying so in as many words:
+       "it is this run's own output". Counting against that compares the
+       run to itself, and the difference it reports is an artefact of
+       having run twice — the exact confusion the pipeline's memory
+       guard exists to prevent, reintroduced one layer up. Any status
+       other than a clean read of an earlier board stops this check
+       rather than clearing it. */
+    if (!memory || memory.status !== "ok") continue;
+    const named = num(memory.named);
     if (named === null) continue;
+    /* ROWS AGAINST ROWS, AND THE SYMMETRY IS THE POINT. `named` is
+       documented at flows-pipeline.mjs as "how many rows the prior
+       board named" — a page, not a pool. So `rows.length` is its
+       correct comparand and `cleared` is NOT: quoting today's pool
+       against yesterday's page would invent a rise on any morning the
+       cap binds, which is the population/page confusion running in the
+       opposite direction. Both numbers are pages and the sentence says
+       so. */
     prior += named;
     held += r.length;
     sides.push(word);
     sources.push(KEY[slot]);
-    if (priorSession === null && memory) priorSession = ymd(memory.sessionDate);
+    if (priorSession === null) priorSession = ymd(memory.sessionDate);
   }
   if (!sides.length) return null;
   if (prior === 0) return [];
