@@ -253,17 +253,17 @@
      had sat at the same rank for three weeks.
 
      NULL IS NOT FALSE, AND NOWHERE ON THIS PAGE DOES IT MATTER MORE. All four
-     memory fields are null TOGETHER when yesterday's board could not be read.
+     memory fields are null TOGETHER whenever the comparison did not happen.
      A renderer that drew null as false would announce all 44 names as new on a
      morning when the store was merely unreachable — a page-wide claim about
      the market manufactured out of a failed lookup. So a null memory draws
-     NOTHING AT ALL and the page says once, in prose, that there is no
-     yesterday to compare against.
+     NOTHING AT ALL and the page says once, in prose and in the publisher's own
+     words, that there was no prior board to compare against and why.
 
      THE EARNINGS COUNTDOWN IS NOT PART OF THE MEMORY. `ed`/`edte` come off
-     this morning's screener row, not off yesterday's board, so a cold read
-     must not silence them: on a board that cannot say what changed, "this
-     name reports in 13 days" is still measured and still true. */
+     this morning's screener row, not off the previously published board, so a
+     cold read must not silence them: on a board that cannot say what changed,
+     "this name reports in 13 days" is still measured and still true. */
 
   /* Inside this many days a board name is about to be taken off the board by
      the earnings gate rather than by its signal decaying. Every name here
@@ -350,7 +350,13 @@
     memoryStatus = block && typeof block.status === "string" ? block.status : null;
     memoryNote = block && typeof block.note === "string" && block.note ? block.note : null;
     /* A DATE OR NOTHING. String(x || "") would turn an absent stamp into "",
-       and "the  board" is a sentence with a hole in it. */
+       and "the  board" is a sentence with a hole in it. The shape is checked
+       rather than trusted for the same reason flows-ui.js checks it before
+       Date.parse: a malformed stamp that still reads like one would date the
+       comparison to a session nobody published. The literal is repeated rather
+       than imported because this controller must work with no shared module
+       loaded — it is a shape, not an arithmetic, and the two cannot drift into
+       different ANSWERS the way two copies of a computation can. */
     priorSession = block && typeof block.sessionDate === "string" &&
       /^\d{4}-\d{2}-\d{2}$/.test(block.sessionDate) ? block.sessionDate : null;
   }
@@ -657,8 +663,8 @@
 
        DRAWN ONLY WHEN THERE IS SOMETHING MEASURED TO SAY. On a cold memory
        every mark is null and the line is not emitted at all — the page says
-       once, in prose, that yesterday could not be read. Fifty cards each
-       shrugging in the same place is not an explanation. */
+       once, above the deck, which comparison did not happen and why. Fifty
+       cards each shrugging in the same place is not an explanation. */
     const memMarks = [memoryMark(row), ...tenureMarks(row)].filter(Boolean);
     if (memMarks.length) {
       const mem = document.createElement("div");
@@ -896,7 +902,7 @@
   const EXTRA_SORTS = [
     {
       key: "dr", virtual: true, kind: "num", first: "desc",
-      name: "Places climbed since yesterday",
+      name: "Places climbed since the previous board",
       get: (row) => isNum(row.dr),
       available: (rows) => !rows.length || rows.some((r) => r && isNum(r.dr) !== null),
     },
@@ -1173,7 +1179,7 @@
     { key: null,      dir: "desc", label: "Published rank" },
     { key: "s",       dir: "desc", label: "Score, strongest first" },
     { key: "cnv",     dir: "desc", label: "Conviction, highest first" },
-    { key: "dr",      dir: "desc", label: "Biggest climb since yesterday" },
+    { key: "dr",      dir: "desc", label: "Biggest climb since the previous board" },
     { key: "nw",      dir: "desc", label: "New to this side first" },
     { key: "edte",    dir: "asc",  label: "Closest to earnings first" },
     { key: "netPrem", dir: "desc", label: "Net premium, largest first" },
@@ -1225,6 +1231,20 @@
     sortSelectEl.value = want;
   }
 
+  /* ONE CAPPED ECHO OF WHAT WAS TYPED, USED BY BOTH LINES THAT QUOTE IT.
+
+     What the reader typed is already in the field; these lines repeat it only
+     to name what was matched. An uncapped echo of 40 typed characters is ONE
+     UNBREAKABLE WORD, and one unbreakable word wider than the content column
+     is a horizontal scrollbar at 320px — the invariant this repo tests.
+
+     It is a function rather than two literals because it was two literals: the
+     count line capped it and the no-match sentence did not, so the same
+     keystroke was quoted two different ways in two places on one screen, and
+     only one of them was safe at 320px. */
+  const typedEcho = () =>
+    "\u201c" + (filterText.length > 12 ? filterText.slice(0, 12) + "\u2026" : filterText) + "\u201d";
+
   /* HOW MANY OF HOW MANY. A filtered board that says "8 names" and nothing
      else has thrown away the denominator, which on a page whose whole subject
      is a ranked population is the more important half. Silent when no filter
@@ -1234,12 +1254,7 @@
     if (!countEl) return;
     if (!filterText) { countEl.hidden = true; countEl.textContent = ""; return; }
     countEl.hidden = false;
-    /* THE ECHO IS CAPPED. What the reader typed is already in the field; this
-       line repeats it only to name what was matched, and an uncapped echo of
-       40 typed characters is one unbreakable word at 320px — a horizontal
-       scrollbar on the page, which is a tested invariant here. */
-    const shownQ = filterText.length > 12 ? filterText.slice(0, 12) + "\u2026" : filterText;
-    countEl.textContent = shown + " of " + currentRows.length + " names match \u201c" + shownQ + "\u201d";
+    countEl.textContent = shown + " of " + currentRows.length + " names match " + typedEcho();
   }
 
   function buildControls() {
@@ -1276,7 +1291,7 @@
     /* A SIBLING OF .flows-controls, NOT A CHILD OF IT. As a child it is a flex
        item, and a flex item's min-width is auto — which for a box containing a
        native <select> is that select's WIDEST OPTION at 16px mono. At 320px
-       "Biggest climb since yesterday" is wider than the whole content column,
+       the longest order label is wider than the whole content column,
        and the page grew a horizontal scrollbar: measured at 352px against a
        320px viewport, which is the zero-overflow invariant this repo tests.
        In normal flow the row is constrained by the content column instead, and
@@ -1286,58 +1301,153 @@
     syncSortSelect();
   }
 
+  /* WHICH SILENCE A COLD MEMORY IS, per the three this product names.
+
+     "quiet" is the one that is a MEASUREMENT: the previously published board
+     was read and named no rows, which is a fact about that session rather than
+     about the store. The other refusals — never published, unreadable, this
+     run's own output, a board stamped LATER than this run — are comparisons
+     that are not AVAILABLE, and they share the tag because they do not share a
+     sentence: `memory.note` is what keeps them four answers instead of one.
+
+     "undated" is not in the taxonomy at all, because it is not a silence. The
+     memory was used and the marks are drawn; the note beside them says only
+     that the comparison could not be dated. It gets no data-empty, because a
+     board with fifty marks on it is not empty. */
+  const MEMORY_EMPTY = { quiet: "quiet", undated: null };
+
+  const PRE_MEMORY_SAID =
+    "This board was published before the board kept a memory, so it carries no answer to " +
+    "what changed since the previous session: its rows have no new-today, rank-move or " +
+    "earnings-countdown fields at all. The next pipeline run stamps them.";
+
+  /* THE FALLBACK NAMES NO CAUSE, WHICH IS THE WHOLE OF ITS CONTENT.
+
+     The sentence it replaces asserted "Yesterday's board could not be read on
+     this run". That is one cause out of six and it is false on most of them —
+     including a re-run the pipeline refuses ON PURPOSE, which this page then
+     reported to its reader as an outage to go and investigate.
+
+     Nor does this enumerate the causes instead, which was the next thing tried
+     and is only a quieter version of the same error: a list of four things
+     that might have happened, printed under a heading a reader takes as a
+     finding, is still the renderer talking about evidence it never saw. The
+     run that wrote the payload is the only place that saw the earlier board.
+     When it says nothing, the honest sentence is that nothing was said. */
+  const COLD_UNSTATED_SAID =
+    "No comparison with a previously published board is reflected here: no name claims to be " +
+    "new and no rank move is drawn, because every row's memory is null together and false " +
+    "would be an answer where there is none. This payload does not say why the comparison did " +
+    "not happen, and only the run that wrote it saw the earlier board — so nothing on this " +
+    "page will guess at a cause.";
+
+  /* A STATUS THAT ARRIVED WITHOUT ITS SENTENCE. Still not a second opinion:
+     the only thing this says beyond the fallback above is the publisher's own
+     status token, quoted, which is data the payload sent rather than prose
+     this file invented. One template rather than six hand-written sentences,
+     for the same reason the six are not here at all — two files wording one
+     outage is how it ends up worded two ways.
+
+     The token is clamped because it is payload, and a sentence is not the
+     place to discover that a field arrived as a paragraph. */
+  const statusOnlySaid = (status) =>
+    "The run that published this board reported the comparison as \u201c" +
+    String(status).slice(0, 32) + "\u201d and sent no sentence with it, so that one word is " +
+    "all this page has: no name here claims to be new and no rank move is drawn. It does not " +
+    "say why beyond that, and only the run that wrote it saw the earlier board.";
+
+  /* The one status that KEEPS the memory, arriving without its sentence. The
+     marks below it are real and the caveat on them is not optional, so this is
+     the one place a missing note still has to be answered in words. */
+  const UNDATED_UNSAID =
+    "This run could not date the board it compared against, and said no more than that. The " +
+    "marks here are a comparison against a board this page cannot name, rather than against a " +
+    "named session: read them as unverified.";
+
   /**
-   * THE ONE SENTENCE ABOUT YESTERDAY, said once for the page rather than fifty
-   * times in the rows.
+   * THE ONE SENTENCE ABOUT THE COMPARISON, said once for the page rather than
+   * fifty times in the rows.
    *
-   * TWO SILENCES, TWO SENTENCES, and they are not the same fact: a board that
-   * predates the memory layer never carried the fields, and a board whose
-   * memory is null carried them and could not fill them. Both draw no marks;
-   * only one of them means the store was unreachable. Both are `unavailable`
-   * rather than `quiet`, because neither is a measured emptiness — nobody
-   * measured "no names changed".
+   * A COLD BOARD HAS FIVE CAUSES AND THIS FILE CANNOT TELL THEM APART. The
+   * rows say only that `nw` is null everywhere. WHY it is null — no board was
+   * ever published, or the read failed, or the board read named no rows, or it
+   * was stamped for THIS session and refused as a re-run, or it was stamped for
+   * a LATER session — is decided in the pipeline, which is the only place that
+   * saw the prior payload. So the publisher writes the sentence and this draws
+   * it VERBATIM. There is deliberately no second set of five sentences here:
+   * two files wording one outage is how a reader concludes there are two
+   * outages, and it is the drift `memory.note` exists to prevent.
    *
-   * A COLD BOARD NOW HAS FOUR CAUSES AND THIS FILE CANNOT TELL THEM APART.
-   * The rows say only that `nw` is null everywhere. WHY it is null — the prior
-   * board was never published, or was unreadable, or named no rows, or was
-   * stamped for this very session and refused as a re-run — is decided in the
-   * pipeline, which is the only place that saw the prior payload. So the
-   * publisher writes the sentence and this draws it: `memory.note` is used
-   * verbatim when the payload carries one.
+   * THE STATUS DECIDES THE TAG, NOT THE PROSE. Every cold note used to be
+   * `data-empty="unavailable"`, which is wrong for "quiet" — a prior board that
+   * was read and held nothing is a measured emptiness, and this product spends
+   * a suite on keeping that distinct.
    *
-   * The hard-coded sentence stays as the fallback and it is NOT a default
-   * dressed up as one. It is the true sentence for a board published before
-   * `memory` existed, which is exactly the payload that lacks the field. What
-   * it must never do is describe a re-run as an unreadable store, and it no
-   * longer can: any payload that could have been a re-run carries the field.
+   * AND "undated" DRAWS A NOTE OVER A BOARD THAT HAS MARKS. It is the one
+   * status that KEEPS the memory: the publisher used a prior board it could not
+   * date rather than discarding a real membership over a missing stamp, and
+   * said so. The earlier version removed the note for any warm memory, so the
+   * marks appeared with the caveat stripped off them — a comparison presented
+   * as verified because the only thing that knew otherwise had been thrown away
+   * one branch earlier.
    */
-  function setMemoryNote(state, note) {
+  function memoryNoteFor() {
+    if (memoryStatus === "ok") return null;
+    /* PRESENT AND NON-EMPTY, TESTED BEFORE USE. An empty string is not a
+       sentence, and a blank paragraph where an explanation belongs is the one
+       outcome worse than a shorter sentence. */
+    const published = typeof memoryNote === "string" && memoryNote.trim() !== "" ? memoryNote : null;
+    if (memoryStatus !== null) {
+      const tag = MEMORY_EMPTY[memoryStatus];
+      const caveat = memoryStatus === "undated";
+      if (published) {
+        return {
+          status: memoryStatus, text: published, caveat,
+          tag: tag === undefined ? "unavailable" : tag,
+        };
+      }
+      /* NO SENTENCE ARRIVED WITH THE STATUS, so the fallback is chosen by
+         whether the MARKS are on the page rather than by the status word. A
+         status this file has never heard of — one added upstream after this
+         was written — must never put "no comparison is reflected here" over
+         fifty drawn marks. Silence is the safe answer for an unknown warm
+         status; the marks themselves still say what they measured. */
+      if (rowMemory === "warm") {
+        return caveat
+          ? { status: memoryStatus, text: UNDATED_UNSAID, tag: null, caveat: true }
+          : null;
+      }
+      return {
+        status: memoryStatus, text: statusOnlySaid(memoryStatus), caveat: false,
+        tag: tag === undefined ? "unavailable" : tag,
+      };
+    }
+    if (rowMemory === "warm") return null;
+    return rowMemory === "absent"
+      ? { status: "pre-memory", text: PRE_MEMORY_SAID, tag: "unavailable", caveat: false }
+      : { status: "unstated", text: COLD_UNSTATED_SAID, tag: "unavailable", caveat: false };
+  }
+
+  function setMemoryNote() {
     const anchor = deck || tableWrap;
-    if (state === "warm" || !anchor || !anchor.parentNode) {
+    const say = memoryNoteFor();
+    if (!say || !anchor || !anchor.parentNode) {
       if (memNoteEl) { memNoteEl.remove(); memNoteEl = null; }
       return;
     }
     if (!memNoteEl) {
       memNoteEl = document.createElement("p");
-      memNoteEl.className = "flows-empty fb-memnote";
       anchor.parentNode.insertBefore(memNoteEl, anchor);
     }
-    memNoteEl.dataset.empty = "unavailable";
-    /* PRESENT AND NON-EMPTY, tested before use. An empty string is not a
-       sentence, and falling through to the fallback says something true
-       rather than leaving the reader a blank paragraph. */
-    if (state === "cold" && typeof note === "string" && note.trim() !== "") {
-      memNoteEl.textContent = note;
-      return;
-    }
-    memNoteEl.textContent = state === "cold"
-      ? "Yesterday's board could not be read on this run, so no name here claims to be new " +
-        "and no rank move is drawn. Every row's memory is null together — false would be an " +
-        "answer and there is not one. The comparison returns with the next session that reads " +
-        "its predecessor."
-      : "This board was published before the board kept a memory, so it carries no answer to " +
-        "what changed since yesterday: its rows have no new-today, rank-move or " +
-        "earnings-countdown fields at all. The next pipeline run stamps them.";
+    memNoteEl.className = "flows-empty fb-memnote" + (say.caveat ? " is-caveat" : "");
+    /* WHICH ANSWER THIS IS, as an attribute as well as prose, for the same
+       reason `data-stale` carries its kind: a stylesheet and a test should not
+       have to parse a sentence to tell a refused re-run from a store that
+       could not be reached. */
+    memNoteEl.dataset.memory = say.status;
+    if (say.tag) memNoteEl.dataset.empty = say.tag;
+    else delete memNoteEl.dataset.empty;
+    memNoteEl.textContent = say.text;
   }
 
   function rowFor(row, index) {
@@ -1572,7 +1682,7 @@
        are still in `currentRows`, so clearing the field brings them straight
        back with no fetch. */
     if (!view.length) {
-      showMessage("No name on this board matches \u201c" + filterText + "\u201d. All " +
+      showMessage("No name on this board matches " + typedEcho() + ". All " +
         currentRows.length + " rows are still loaded — clear the field to see them.", "filtered");
       return;
     }
@@ -1736,11 +1846,14 @@
       /* WARM, COLD OR ABSENT, decided once per payload rather than per row, so
          every mark and every sentence on the page is answering the same
          question with the same evidence. */
-      memory = memoryState(rows);
-      /* The publisher's own sentence about WHY the memory is cold, drawn
-         rather than guessed. Absent on payloads older than the memory field,
-         which setMemoryNote handles by saying the thing that is true of them. */
-      setMemoryNote(memory, payload.memory && payload.memory.note);
+      rowMemory = memoryState(rows);
+      /* THE PUBLISHER'S OWN ACCOUNT OF THE COMPARISON: its status, the session
+         it was measured against, and the sentence naming which of six outcomes
+         this run had. Read BEFORE anything draws a mark — comparand() is used
+         by every one of them, and a mark that names the wrong board is worse
+         than a mark that names none. */
+      readMemoryBlock(payload);
+      setMemoryNote();
       /* The controls are built HERE and not at boot: which orders this payload
          can produce depends on the payload, and a select offering "biggest
          climb" over a board with no memory is a control that does nothing and
@@ -1798,23 +1911,31 @@
         parts.push(shed + " more cleared the band and did not fit" +
           (cleared === null ? "" : " (" + rows.length + " of " + cleared + " shown)"));
       }
-      /* WHAT CHANGED SINCE YESTERDAY, IN THE LINE THAT ALREADY RECONCILES THE
-         COUNTS — and never without its denominator, which is the row count
-         this same line opens with. "3 names are new" over an unstated
-         population is the defect this product replaced everywhere else.
+      /* WHAT CHANGED, IN THE LINE THAT ALREADY RECONCILES THE COUNTS — and
+         never without its denominator, which is the row count this same line
+         opens with. "3 names are new" over an unstated population is the
+         defect this product replaced everywhere else.
+
+         AND NEVER WITHOUT ITS SPAN EITHER, which is the other half of the same
+         rule and the half this line used to miss: it said "since yesterday"
+         about a comparison against the previously PUBLISHED board. Those are
+         the same board only on a week with no holiday in it. comparand() names
+         the session when the publisher dated it and names the board without a
+         date when it could not.
 
          A WARM MEMORY WITH NOTHING NEW IS A READING, not a silence, and it
          gets its own sentence: on a board that turns over daily, a session
          where nobody arrived is the interesting one. A cold memory says
          instead that the comparison did not happen; the note above the deck
-         carries the why. */
-      if (memory === "warm") {
+         carries the why, in the publisher's words. */
+      if (rowMemory === "warm") {
         const fresh = rows.filter((r) => r && r.nw === true).length;
         const incumbent = rows.filter((r) => r && r.hy === true).length;
-        parts.push(fresh === 0 ? "no new names on this side" : fresh + " new to this side");
+        parts.push((fresh === 0 ? "no new names on this side" : fresh + " new to this side") +
+          " since " + comparand());
         if (incumbent > 0) parts.push(incumbent + " held on incumbency");
       } else {
-        parts.push("no comparison with yesterday");
+        parts.push("no comparison with a previously published board");
       }
       if (isNum(payload.dispersion) !== null) {
         /* This is the 95th percentile of |composite| across the scored pool, not

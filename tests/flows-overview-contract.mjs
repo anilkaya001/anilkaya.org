@@ -1475,6 +1475,45 @@ try {
     eq(s.text, "", "with no sentence left behind in the slot");
     await stop();
 
+    /* ---- the two ways this function used to CLAIM freshness it had not
+       measured, asked of the function itself rather than through a page.
+
+       Both were "unknown" wearing "fresh". A `fresh` verdict marks nothing and
+       says nothing, so on either of these the reader saw a clean page — which
+       is the same pixels a genuinely current session produces, and the one
+       outcome a staleness guard exists to prevent. */
+    const verdicts = await page.evaluate(() => {
+      const S = window.FlowsUI.staleness;
+      const now = Date.parse("2026-09-04T12:00:00Z");
+      return {
+        /* A stamp of 0 is the epoch, which is 56 years stale — so it is
+           refused as a stamp. Refusing it must not then be read as passing. */
+        zeroStamp: S({ __updatedAt: 0 }, now).kind,
+        negStamp: S({ __updatedAt: -1 }, now).kind,
+        /* Date.parse("2026-09" + "T21:00:00Z") is FINITE in V8. A number that
+           parses is not a date that was measured. */
+        truncated: S({ sessionDate: "2026-09" }, now).kind,
+        prose: S({ sessionDate: "Thursday" }, now).kind,
+        /* And the readable ones still answer, or the fix would have bought
+           its honesty by refusing to measure anything. */
+        realFresh: S({ __updatedAt: now - 60000, sessionDate: "2026-09-04" }, now).kind,
+        realStaleSession: S({ __updatedAt: now - 60000, sessionDate: "2026-08-01" }, now).kind,
+        nothing: S({}, now).kind,
+      };
+    });
+    eq(verdicts.zeroStamp, "unknown",
+       "a write stamp of 0 is an absent stamp, and an absent stamp is not a passed test");
+    eq(verdicts.negStamp, "unknown", "and so is a negative one");
+    eq(verdicts.truncated, "unknown",
+       "a session date that is not a calendar day is not a date — Date.parse returning a " +
+       "finite number for \"2026-09\" is exactly why the shape is checked before the parse");
+    eq(verdicts.prose, "unknown", "and neither is prose");
+    eq(verdicts.realFresh, "fresh",
+       "while a payload carrying two readable dates that both pass still reports fresh");
+    eq(verdicts.realStaleSession, "session",
+       "and one whose session is five weeks old still raises the session warning");
+    eq(verdicts.nothing, "unknown", "and a payload with nothing datable claims nothing");
+
     /* THE WRITE-TIME BRANCH, REACHABLE ONLY BY READING THE HEADER. The
        session date is today's, so a page that checked only the payload body
        would see nothing wrong here. */

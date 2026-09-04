@@ -143,6 +143,8 @@
      comments, in six renderers. */
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  /* A session date is a calendar day and nothing else. See the parse below. */
+  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   /**
    * TWO INDEPENDENT WAYS A PUBLISHED PAYLOAD IS NOT TODAY'S, told apart
@@ -167,9 +169,11 @@
    *
    * staleness(payload, now, {subject}) → {kind, message}
    *   kind "write" | "session"  — message is the sentence to show
-   *   kind "fresh"              — the payload carried a timestamp and passed
-   *   kind "unknown"            — nothing datable arrived, so no claim is
-   *                               made either way. message is null
+   *   kind "fresh"              — the payload carried at least one READABLE
+   *                               date and it passed both tests
+   *   kind "unknown"            — nothing datable arrived (no stamp, or only
+   *                               a date that would not parse), so no claim
+   *                               is made either way. message is null
    *
    * IT ALWAYS RETURNS AN OBJECT. A bare null for "fresh" reads identically to
    * a bare null for "there was nothing to check", and those are not the same
@@ -193,9 +197,17 @@
        would be reported as fifty-six years stale. The copies this replaces
        wrote `Number(payload.__updatedAt) || null`, which survived only
        because `|| null` happened to catch the zero it had just manufactured.
-       A non-positive stamp is treated as absent for the same reason. */
-    const written = isNum(payload.__updatedAt);
-    if (written !== null && written > 0 && at - written > STALE_WRITE_MS) {
+
+       A NON-POSITIVE STAMP IS AN ABSENT ONE, AND IT IS TURNED INTO ONE HERE,
+       once, rather than tested at each use. The first version of this function
+       carried the `> 0` inside the stale branch and then asked
+       `written === null` at the bottom — so a payload whose only stamp was 0
+       skipped the stale branch as "not old" and fell through to "fresh": a
+       confident freshness claim manufactured out of the very absence the line
+       above it had just refused to trust. One normalisation, one variable. */
+    const stamped = isNum(payload.__updatedAt);
+    const written = stamped !== null && stamped > 0 ? stamped : null;
+    if (written !== null && at - written > STALE_WRITE_MS) {
       const hours = Math.floor((at - written) / 3600000);
       const days = Math.floor(hours / 24);
       /* The hour branch cannot fire while the threshold is 30 hours — every
@@ -212,21 +224,42 @@
       };
     }
 
-    if (payload.sessionDate) {
-      /* 21:00Z is after every US close, so a session date is aged from the
-         end of its own session rather than from its midnight. */
-      const session = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
-      if (Number.isFinite(session) && at - session > STALE_SESSION_MS) {
-        return {
-          kind: "session",
-          message: "These numbers describe the " + payload.sessionDate + " session, " +
-            "which is more than four days old. The pipeline is running but its " +
-            "data is not advancing.",
-        };
-      }
+    /* 21:00Z is after every US close, so a session date is aged from the end
+       of its own session rather than from its midnight.
+
+       TWO FIXES IN FOUR LINES, and they are the same defect twice.
+
+       THE SHAPE IS CHECKED BEFORE THE PARSE, because Date.parse is lenient
+       enough to be dangerous: "2026-09" + "T21:00:00Z" comes back FINITE in
+       V8 and dates a session to a day nobody published. A string that parses
+       is not the same as a date that was measured, and the difference here
+       either raises a stale banner over a current board or withholds one over
+       a dead feed. A session date is YYYY-MM-DD — the shape the publisher
+       validates on the way out — and anything else is not a date at all.
+
+       AND THE PARSE RESULT IS KEPT, not just tested. The bottom of this
+       function used to ask `!payload.sessionDate` — the PRESENCE of the key —
+       so a payload whose date was pure garbage ("Thursday") still reported
+       "fresh", on the strength of a string nothing could read. What did not
+       parse belongs with the silences, not with the measurements. */
+    let session = null;
+    if (ISO_DAY.test(String(payload.sessionDate || ""))) {
+      const parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
+      if (Number.isFinite(parsed)) session = parsed;
+    }
+    if (session !== null && at - session > STALE_SESSION_MS) {
+      return {
+        kind: "session",
+        message: "These numbers describe the " + payload.sessionDate + " session, " +
+          "which is more than four days old. The pipeline is running but its " +
+          "data is not advancing.",
+      };
     }
 
-    if (written === null && !payload.sessionDate) return { kind: "unknown", message: null };
+    /* NOTHING DATABLE AT ALL IS NOT A PASS. "unknown" says no claim was made;
+       "fresh" says a claim was made and it held. Only a payload that carried
+       at least one READABLE date gets the second. */
+    if (written === null && session === null) return { kind: "unknown", message: null };
     return { kind: "fresh", message: null };
   }
 

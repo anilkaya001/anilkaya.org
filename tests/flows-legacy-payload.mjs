@@ -340,20 +340,38 @@ const SAME_SESSION_NOTE =
   "output rather than a previous session: no name here claims to be new and no rank move " +
   "is drawn.";
 
-/* (a) A payload from before `memory` existed. The fallback is not a default
-       standing in for a missing value — it is the true sentence for exactly
-       this payload, which is the only one that can lack the field. */
-const coldNoField = JSON.parse(JSON.stringify(coldBase));
-delete coldNoField.memory;
-await post("board:long", coldNoField);
-await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
-const noFieldNote = await page.evaluate(() => {
+const readNote = () => page.evaluate(() => {
   const el = document.querySelector(".fb-memnote");
-  return { text: el.textContent.trim(), empty: el.dataset.empty };
+  return el ? {
+    text: el.textContent.trim(),
+    empty: el.dataset.empty || null,
+    status: el.dataset.memory || null,
+  } : { text: "", empty: null, status: null };
 });
 
-/* (b) THE CASE THIS WAS BUILT FOR. A same-session refusal must read as a
+/* (a) A board from BEFORE the memory layer: its rows carry no `nw` key at all.
+       Not the same as a board whose memory is null — that one carried the
+       field and could not fill it. */
+const preMemory = JSON.parse(JSON.stringify(coldBase));
+preMemory.rows = [{ ...currentBoard.rows[0], t: "PREMR" }];
+delete preMemory.rows[0].nw;
+delete preMemory.memory;
+await post("board:long", preMemory);
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const preMemoryNote = await readNote();
+
+/* (b) A board that HAS the fields, has them null, and does not say why. The
+       sentence must invent no cause: this payload genuinely carries none, and
+       "the store could not be read" would be a guess printed as a finding. */
+const coldUnstated = JSON.parse(JSON.stringify(coldBase));
+delete coldUnstated.memory;
+await post("board:long", coldUnstated);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const unstatedNote = await readNote();
+
+/* (c) THE CASE THIS WAS BUILT FOR. A same-session refusal must read as a
        re-run, never as a store that could not be reached. */
 const coldSameSession = JSON.parse(JSON.stringify(coldBase));
 coldSameSession.memory = {
@@ -363,12 +381,24 @@ coldSameSession.memory = {
 await post("board:long", coldSameSession);
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForSelector(".fb-memnote");
-const sameSessionNote = await page.evaluate(() =>
-  document.querySelector(".fb-memnote").textContent.trim());
+const sameSessionNote = await readNote();
 
-/* (c) A note that is present and empty. An empty string is not a sentence,
-       and drawing it leaves a blank paragraph where an explanation belongs —
-       the one outcome worse than either real sentence. */
+/* (d) A prior board that WAS read and named no rows: a measured emptiness.
+       Tagging it `unavailable` beside the two real absences would put three
+       different facts under one word. */
+const coldQuiet = JSON.parse(JSON.stringify(coldBase));
+coldQuiet.memory = {
+  status: "quiet", sessionDate: "2026-08-24", named: 0, incumbents: 0,
+  note: "The previously published board was read and named no rows, so there was nothing " +
+        "to hold this session's names against.",
+};
+await post("board:long", coldQuiet);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForSelector(".fb-memnote");
+const quietNote = await readNote();
+
+/* (e) A note present and empty. An empty string is not a sentence, and drawing
+       it leaves a blank paragraph where an explanation belongs. */
 const coldEmptyNote = JSON.parse(JSON.stringify(coldBase));
 coldEmptyNote.memory = {
   status: "unavailable", sessionDate: null, named: null, incumbents: 0, note: "   ",
@@ -376,35 +406,80 @@ coldEmptyNote.memory = {
 await post("board:long", coldEmptyNote);
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForSelector(".fb-memnote");
-const emptyNote = await page.evaluate(() =>
-  document.querySelector(".fb-memnote").textContent.trim());
+const emptyNote = await readNote();
 
 const assertions = [
-  /* ---- the cold board says WHICH silence it is ---- */
-  [/could not be read/.test(noFieldNote.text),
-   `a board published before the memory field says the thing that is true of it ` +
-   `(got "${noFieldNote.text.slice(0, 60)}...")`],
-  [noFieldNote.empty === "unavailable",
-   "and it is unavailable rather than quiet, because nobody measured \"no names changed\""],
-  [sameSessionNote === SAME_SESSION_NOTE,
-   `a same-session refusal draws the PUBLISHER'S sentence verbatim, so the page cannot ` +
-   `describe a re-run as an unreachable store (got "${sameSessionNote.slice(0, 80)}...")`],
-  [!/could not be read/.test(sameSessionNote),
-   "and specifically does not reach for the old one-cause sentence, which is the defect " +
-   "this pairing exists to prevent"],
-  [emptyNote.length > 0 && /could not be read/.test(emptyNote),
-   `a note that is present but blank falls back to a real sentence rather than leaving an ` +
-   `empty paragraph (got "${emptyNote}")`],
-  ["a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
-   "between new assets and the next pipeline run must not dark the card reader",
-   preDeepClickable],
-  ["on a board that publishes `deep`, a stamped row is still a button", deepSplit.deepIsButton],
-  ["an unstamped row on that same board still RENDERS — it is a real row with real numbers, " +
-   "not a hidden one", deepSplit.flatExists],
-  ["but it is not a button, so it cannot be clicked into a 404", !deepSplit.flatIsButton],
-  ["and it carries no data-t, which is what keeps it out of the click delegation rather than " +
-   "a class name two files have to agree about", !deepSplit.flatHasDataT],
-  ["and it tells a screen reader WHY there is nothing to open", deepSplit.flatSaysWhy],
+  /* ---- the cold board says WHICH silence it is ----
+
+     ASSERTED ON STRUCTURE, NOT ON PROSE. These sentences are being written and
+     rewritten as the four causes get named more precisely, and a test that
+     pins their wording either breaks on every improvement or gets loosened
+     until it means nothing. What must hold is that the four cases stay FOUR:
+     each carries its own status, the two that are absences are tagged apart
+     from the one that is a measurement, no case draws an empty paragraph, and
+     no case is ever handed another case's sentence. The one exact-text
+     assertion is the same-session note, and that text belongs to the
+     publisher rather than to this renderer — it is the whole point of the
+     pairing. */
+  [preMemoryNote.status === "pre-memory" && preMemoryNote.empty === "unavailable",
+   `a board whose rows never carried the fields is its own status and an absence ` +
+   `(got status=${preMemoryNote.status} empty=${preMemoryNote.empty})`],
+  [unstatedNote.status === "unstated" && unstatedNote.empty === "unavailable",
+   `a board carrying null fields and no explanation is a DIFFERENT status from one that ` +
+   `never carried them (got status=${unstatedNote.status})`],
+  [unstatedNote.text !== preMemoryNote.text && unstatedNote.text !== SAME_SESSION_NOTE,
+   "and is handed neither of the other sentences — an unexplained cold board described as " +
+   "a re-run sends a reader hunting a cause the payload never claimed"],
+  [sameSessionNote.text === SAME_SESSION_NOTE && sameSessionNote.status === "same-session",
+   `a same-session refusal draws the PUBLISHER'S sentence verbatim, because only the ` +
+   `publisher saw the prior payload (got "${sameSessionNote.text.slice(0, 60)}...")`],
+  [quietNote.empty === "quiet" && quietNote.status === "quiet",
+   `a prior board READ that named no rows is a MEASURED emptiness, tagged quiet rather ` +
+   `than unavailable — three different facts must not share one word (got ${quietNote.empty})`],
+  [emptyNote.text.trim().length > 0 && emptyNote.text !== SAME_SESSION_NOTE,
+   `a status whose note is blank still draws a real sentence rather than an empty ` +
+   `paragraph (got "${emptyNote.text.slice(0, 50)}...")`],
+  /* FOUR SENTENCES, FIVE STATUSES, AND THE ASYMMETRY IS CORRECT.
+
+     The four cases the renderer has distinct KNOWLEDGE about must say
+     distinct things. The fifth — a status of "unavailable" whose note came
+     back blank — legitimately shares the unstated sentence: "unavailable"
+     means the prior board was never written OR could not be read, which is
+     exactly what the unstated sentence already enumerates, and with no note
+     to draw there is no honest way to narrow it further. Demanding five
+     different sentences would force the renderer to invent a distinction it
+     cannot make. The distinction is not lost, it just is not prose:
+     `data-memory` still separates all five, which is why the status is on the
+     element at all. */
+  [new Set([preMemoryNote.text, unstatedNote.text,
+            sameSessionNote.text, quietNote.text]).size === 4,
+   "the four cases the page has distinct knowledge about say four distinct things"],
+  [new Set([preMemoryNote.status, unstatedNote.status, sameSessionNote.status,
+            quietNote.status, emptyNote.status]).size === 5,
+   "and all five carry a distinct status, so the one collapse in the prose is still " +
+   "recoverable by a stylesheet or a test without parsing a sentence"],
+  /* THESE SIX WERE WRITTEN [message, condition] INTO A LOOP THAT DESTRUCTURES
+     [passed, msg], SO THE CONDITION WAS THE MESSAGE. A non-empty string is
+     truthy, and every one of them passed on that alone — the six guarding the
+     deploy window where new assets meet a board published before `deep`
+     existed, which is the window this whole file is about. An instrument that
+     agrees with everything certifies everything. Order corrected; all six
+     still pass, and reverting the renderer makes them fail. */
+  [preDeepClickable,
+   "a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
+   "between new assets and the next pipeline run must not dark the card reader"],
+  [deepSplit.deepIsButton,
+   "on a board that publishes `deep`, a stamped row is still a button"],
+  [deepSplit.flatExists,
+   "an unstamped row on that same board still RENDERS — it is a real row with real numbers, " +
+   "not a hidden one"],
+  [!deepSplit.flatIsButton,
+   "but it is not a button, so it cannot be clicked into a 404"],
+  [!deepSplit.flatHasDataT,
+   "and it carries no data-t, which is what keeps it out of the click delegation rather than " +
+   "a class name two files have to agree about"],
+  [deepSplit.flatSaysWhy,
+   "and it tells a screen reader WHY there is nothing to open"],
   [fam.find((f) => f.k === "V").v === "—", "V is withheld on a v1 card"],
   [fam.find((f) => f.k === "O").v === "—", "O is withheld on a v1 card"],
   [fam.find((f) => f.k === "F").v === "−73", "F still renders, because its meaning did not change"],
