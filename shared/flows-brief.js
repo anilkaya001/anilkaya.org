@@ -59,8 +59,19 @@ const answered = (p) => (p && typeof p === "object" && p.status !== "pending" ? 
  * The store answers an unpublished key with {status:"pending"}, an
  * unreadable one with null, and a measured-empty one with rows: [].
  * Three different facts about the world; three different sentences.
+ *
+ * `list` NAMES THE ARRAY THE CALLER ACTUALLY LOOKED IN, and it exists
+ * because assuming `rows` cost this module a whole section in silence.
+ * sector:premium carries its eleven baskets under `sectors`, not
+ * `rows` — so the fact block found nothing, fell to the else, and
+ * silenceOf looked for `rows` too, found no array at all, and
+ * returned null. Not a fact and not a silence: the sector lean simply
+ * left the briefing, which is the one outcome every rule in this file
+ * exists to make impossible. A caller reading a differently-named
+ * array passes it, and the quiet branch judges the array that was
+ * really read. Omitted, the behaviour is what it always was.
  */
-export function silenceOf(payload, what) {
+export function silenceOf(payload, what, list) {
   if (payload === null || payload === undefined) {
     return { kind: "unreadable", what,
       say: "The " + what + " could not be read, so nothing about it is stated here. " +
@@ -75,10 +86,23 @@ export function silenceOf(payload, what) {
       say: "The " + what + " has not been published for this session yet. " +
            "Nothing has been measured, so nothing is claimed." };
   }
-  const r = rows(payload);
+  const r = list === undefined ? rows(payload) : (Array.isArray(list) ? list : null);
   if (r !== null && r.length === 0) {
     return { kind: "quiet", what,
       say: "The " + what + " was measured and holds nothing. That is a reading, not a gap." };
+  }
+  /* THE PAYLOAD ANSWERED AND THIS BRIEFING STILL FOUND NOTHING USABLE.
+     That is not one of the three silences — it is a fourth thing, and
+     it is always a fault here rather than a fact about the session:
+     the key was published, it parsed, and the shape this module
+     expected was not the shape it got. Saying so is what turns the
+     next field rename into a visible sentence instead of a section
+     that quietly stops appearing. */
+  if (r === null) {
+    return { kind: "unreadable", what,
+      say: "The " + what + " was published but this briefing could not find the " +
+           "readings inside it, so nothing about it is stated here. That is a fault " +
+           "on this page rather than a fact about the session." };
   }
   return null;
 }
@@ -151,23 +175,53 @@ export function briefToday(store) {
      not the price-momentum one: sector:premium and sector:trix are
      different quantities and a briefing that blurred them would be
      the drift both keys exist to keep apart. */
+  /* THE BASKETS ARE UNDER `sectors`, AND THE LEAN IS `leanRatio`. Both
+     names were guessed wrong when this was written and both guesses
+     failed silently, because a missing field reads as an absent
+     reading rather than as an error. They are asserted now against the
+     published payload's own vocabulary.
+
+     RANKED ON leanRatio, NEVER ON DOLLARS, and sector:premium's own
+     `lean.rejected` note says why: ranking the eleven on net premium
+     ranks them by sector size, and XLK clears roughly four orders of
+     magnitude more than XLB on a quiet day. The ratio is each basket
+     measured against its own gross, which is the only way "most
+     bullish" means what a reader thinks it means. */
   const sec = answered(s.sectorPremium);
-  const secRows = rows(s.sectorPremium);
+  const secRows = sec && Array.isArray(sec.sectors) ? sec.sectors : null;
   if (sec && secRows && secRows.length) {
     const scored2 = secRows
-      .map((r) => ({ t: r && r.t, lean: num(r && r.lean) }))
+      .map((r) => ({ t: (r && r.etf) || (r && r.sector), lean: num(r && r.leanRatio) }))
       .filter((r) => r.t && r.lean !== null)
       .sort((a, b) => b.lean - a.lean);
     if (scored2.length) {
       const hi = scored2[0], lo = scored2[scored2.length - 1];
+      /* THE DENOMINATOR IS THE BASKETS RETURNED, NOT THE ONES THAT READ.
+         Saying "across 8 sectors measured" while eleven were asked for
+         invites the reader to think eight is the universe. The payload
+         counts both, so the sentence carries both and the gap is the
+         reader's to interpret. */
+      const returned = num(sec.returned);
       facts.push(fact("sectors",
         "Sector premium leans most bullish in " + hi.t + " and most bearish in " + lo.t +
-        " across " + scored2.length + " " + plural(scored2.length, "sector", "sectors") + " measured.",
+        ", across " + scored2.length + " " + plural(scored2.length, "basket", "baskets") +
+        " with a readable lean" +
+        (returned !== null && returned !== scored2.length ? " of " + returned + " returned" : "") +
+        ".",
         { mostBullish: hi.t, mostBullishLean: hi.lean,
-          mostBearish: lo.t, mostBearishLean: lo.lean, measured: scored2.length }));
+          mostBearish: lo.t, mostBearishLean: lo.lean,
+          readable: scored2.length, returned }));
+    } else {
+      /* PUBLISHED, POPULATED, AND NOT ONE BASKET CARRIED BOTH SIDES OF
+         its premium — which is what leanRatio needs. That is a reading
+         about the tape, not a fault, so it is said rather than dropped. */
+      facts.push(fact("sectors",
+        "No sector basket returned both sides of its premium this session, so no lean " +
+        "is stated for any of the " + secRows.length + " returned.",
+        { returned: secRows.length, readable: 0 }));
     }
   } else {
-    const q = silenceOf(s.sectorPremium, "sector premium lean");
+    const q = silenceOf(s.sectorPremium, "sector premium lean", secRows);
     if (q) silences.push(q);
   }
 
@@ -319,33 +373,73 @@ export function briefNext(store, options) {
   const lr = rows(s.long), sr = rows(s.short);
   const board = [].concat(lr || [], sr || []);
 
-  /* SCHEDULED: who reports, and therefore who the gate removes.
-     `edte` is days to the report measured from the origin above. A
-     NEGATIVE count is a vendor date that has gone stale, not a
-     report due today, so it is withheld rather than read as
-     imminent — the same rule the board's own earnings mark uses. */
-  const soon = board
-    .map((r) => ({ t: r && r.t, edte: num(r && r.edte), ed: r && r.ed }))
-    .filter((r) => r.t && r.edte !== null && r.edte >= 0)
-    .sort((a, b) => a.edte - b.edte);
+  /* SCHEDULED: WHO REPORTS — READ OFF THE CALENDAR, BECAUSE THE BOARD
+     STRUCTURALLY CANNOT ANSWER IT.
 
-  const beforeNext = soon.filter((r) => r.edte <= 1);
-  if (beforeNext.length) {
-    facts.push(fact("reporting",
-      beforeNext.length + " ranked " + plural(beforeNext.length, "name reports", "names report") +
-      " before the next session: " + beforeNext.map((r) => r.t).join(", ") + ".",
-      { count: beforeNext.length, tickers: beforeNext.map((r) => r.t), origin }));
+     This block used to filter the board's own `edte`, and both facts
+     it built were unreachable on every session this product has run.
+     The earnings gate removes a name from scoring PRECISELY WHEN it
+     has a report inside the window, so a surviving board row's report
+     is always on the far side of the gate — the way a survivor of any
+     filter is. Measured on the emitted corpus: the smallest `edte`
+     across both sides is 13 against a 12-day gate, and there is no
+     session on which it could be otherwise. Asking the board who
+     reports before the next session asks the one population
+     guaranteed not to, and the answer — nothing — was then not even
+     printed, so the section's whole SCHEDULED half was silent by
+     construction while reading as a quiet calendar.
+
+     `events` is the key that holds them. It carries the gated names
+     by name, `dte` measured from the same origin, and `byStage`
+     counting how many the gate took. A NEGATIVE count is a vendor
+     date that has gone stale rather than a report due today, so it is
+     withheld rather than read as imminent — the same rule the board's
+     own earnings mark uses. */
+  const ev = answered(s.events);
+  const evRows = rows(s.events);
+  const due = (evRows || [])
+    .map((r) => ({ t: r && r.t, dte: num(r && r.dte) }))
+    .filter((r) => r.t && r.dte !== null && r.dte >= 0)
+    .sort((a, b) => a.dte - b.dte);
+
+  if (due.length) {
+    const beforeNext = due.filter((r) => r.dte <= 1);
+    if (beforeNext.length) {
+      facts.push(fact("reporting",
+        beforeNext.length + " " + plural(beforeNext.length, "name reports", "names report") +
+        " before the next session: " + beforeNext.map((r) => r.t).join(", ") + ".",
+        { count: beforeNext.length, tickers: beforeNext.map((r) => r.t), origin }));
+    } else {
+      /* THE ANSWER IS "NONE", AND IT IS PRINTED. Withholding it leaves
+         a reader unable to tell a clear calendar from a section that
+         did not look, which is the whole distinction this file keeps. */
+      const near = due[0];
+      facts.push(fact("reporting",
+        "No name on the calendar reports before the next session; the nearest of " +
+        due.length + " dated is " + near.t + " in " + near.dte + " " +
+        plural(near.dte, "session", "sessions") + ".",
+        { count: 0, dated: due.length, nearest: near.t, nearestDte: near.dte, origin }));
+    }
+  } else if (ev) {
+    silences.push({ kind: "quiet", what: "the earnings calendar",
+      say: "The earnings calendar was read and carries no dated report from this session " +
+           "onward, so nothing is scheduled. That is a reading, not a gap." });
+  } else {
+    const q = silenceOf(s.events, "earnings calendar", evRows);
+    if (q) silences.push(q);
   }
 
-  if (gateDays !== null) {
-    const gated = soon.filter((r) => r.edte <= gateDays);
-    if (gated.length) {
-      facts.push(fact("gate",
-        gated.length + " ranked " + plural(gated.length, "name sits", "names sit") +
-        " inside the " + gateDays + "-day earnings gate and leaves the board on the calendar " +
-        "rather than on its signal.",
-        { count: gated.length, gateDays, tickers: gated.map((r) => r.t), origin }));
-    }
+  /* WHO THE GATE TOOK, which is a fact about the BOARD a reader
+     cannot get from the board: those names are absent from it. The
+     count is the calendar's own, published under `byStage`, so this
+     reports it rather than re-deriving a number that already exists. */
+  const gatedCount = ev && ev.byStage ? num(ev.byStage.gated) : null;
+  if (gatedCount !== null && gateDays !== null) {
+    facts.push(fact("gate",
+      gatedCount + " " + plural(gatedCount, "name was", "names were") + " held out of scoring " +
+      "by the " + gateDays + "-day earnings gate, so " + plural(gatedCount, "it is", "they are") +
+      " absent from both boards on the calendar rather than on a signal.",
+      { count: gatedCount, gateDays, origin }));
   }
 
   /* THRESHOLD: who sits nearest the edge of the dead band. The watch

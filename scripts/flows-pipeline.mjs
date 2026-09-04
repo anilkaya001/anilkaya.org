@@ -4483,7 +4483,28 @@ export function publishRetryDelay(attempt, {
   return spentMs + wait > budgetMs ? null : wait;
 }
 
+/**
+ * WHAT THIS RUN PUBLISHED, KEPT IN MEMORY.
+ *
+ * The briefing is assembled from the session's own output — the boards, the
+ * watch band, the calendar, the alerts, the sector lean — and every one of
+ * those objects already exists here at the moment it is written. Holding a
+ * reference costs nothing; re-reading them back out of the Worker afterwards
+ * would cost seven round trips to fetch bytes this process built.
+ *
+ * IT IS ALSO WHY THE BRIEFING CANNOT BE ASSEMBLED IN THE WORKER. readFlowsPayload
+ * hands back the payload STRING and passthrough() streams it without parsing,
+ * because parsing is "the one cost this design exists to avoid" — CPU there is
+ * metered and a board is hundreds of kilobytes. Here the same work is free.
+ *
+ * Captured before the dry-run branch on purpose: a --dry-run must exercise the
+ * briefing exactly as a live run does, or the one path nobody tests is the one
+ * that assembles the answer a reader is given.
+ */
+const publishedStore = Object.create(null);
+
 async function publish(key, payload) {
+  publishedStore[key] = payload;
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
     if (EMIT) {
@@ -8643,6 +8664,51 @@ async function main() {
     });
   } catch (error) {
     console.warn(`  meta: ${error.message}`);
+  }
+
+  /* THE BRIEFING, LAST, BECAUSE IT READS THE OTHERS.
+     buildBrief takes the six surfaces a reader would otherwise open five
+     routes to assemble, and it takes them under its OWN names rather than the
+     publish keys — so the mapping is written here, once, where both halves are
+     visible. Passing the publish-keyed store straight in would type-check
+     perfectly and produce six silences: a briefing that says nothing, in a
+     module whose entire job is to distinguish silence from emptiness.
+
+     Yesterday is not a seventh key. briefYesterday reads the prior-session
+     fields the board rows already carry, which is why a briefing survives a
+     morning when yesterday's own key has aged past the retention window.
+
+     Its failure must not fail the run, for the same reason meta's must not:
+     a job that published two boards and thirty-four cards has done its work,
+     and exiting non-zero over the summary of that work would report a
+     successful morning as a failure. */
+  try {
+    const { buildBrief } = await import("../shared/flows-brief.js");
+    /* A KEY THIS RUN DID NOT PUBLISH IS `pending`, NOT MISSING — and the
+       difference is which sentence the reader gets. silenceOf() calls an
+       absent object "unreadable", whose text says the fault is on this page.
+       That would be a lie: nothing failed to read, the key was never written.
+       The Worker already answers an unwritten key with {status:"pending"}, so
+       handing the same shape here is what keeps the briefing's account of a
+       surface identical to the account that surface's own page gives. A
+       briefing that said "could not be read" beside a board page saying "not
+       published yet" would make the reader distrust the one that was right. */
+    const served = (key) => (
+      Object.hasOwn(publishedStore, key) ? publishedStore[key] : { status: "pending" }
+    );
+    await publish("brief", {
+      generatedAt, sessionDate,
+      ...buildBrief({
+        long: served("board:long"),
+        short: served("board:short"),
+        watch: served("board:watch"),
+        events: served("events"),
+        alerts: served("flowalerts"),
+        sectorPremium: served("sector:premium"),
+      }),
+    });
+  } catch (error) {
+    console.warn(`  brief: ${error.message}`);
   }
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;
