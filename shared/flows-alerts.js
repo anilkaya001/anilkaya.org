@@ -83,7 +83,10 @@ export const ALERTS_NOTES = Object.freeze({
     "would be a claim about a day that never made it. When the union outgrows " +
     "its ceiling the smallest premiums are shed first, in the same order the " +
     "list is ranked, and both the ceiling and what it removed are published " +
-    "beside it.",
+    "beside it \u2014 with a running count of everything that has entered the " +
+    "record today, because the ceiling compounds and the count of what the " +
+    "record still holds would otherwise stop growing at the moment it began " +
+    "to overflow.",
   refusals:
     "No intent and no identity: nothing here says who was active or why, " +
     "and no flag makes that observable. Rows are windows, not executions, " +
@@ -501,8 +504,14 @@ export function mergeAlerts(prev, next, {
     /* Unusable stays a fact about THIS read — rows the vendor sent that could
        not be shaped. Accumulating it would be meaningless: an unusable row
        has no identity, so the same one arriving twice cannot be recognised
-       and a running total would count the vendor's repetition as ours. */
-    unusable: next && Number.isFinite(next.unusable) ? next.unusable : 0,
+       and a running total would count the vendor's repetition as ours.
+
+       NULL, NOT ZERO, when the read carried no count of its own. A published
+       0 must mean "counted, and there were none"; handed junk instead of a
+       shaped read this function counted nothing, and saying so costs one
+       null. Number(null) === 0 is this repository's oldest scar and it does
+       not stop being one inside a fallback. */
+    unusable: next && Number.isFinite(next.unusable) ? next.unusable : null,
     shed,
     cap,
     coverage: coverageOf(rows),

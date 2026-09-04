@@ -166,7 +166,15 @@
   --fs-fine:  0.74rem;   /* dense cells, chips, marks                      */
   --fs-data:  0.80rem;   /* table bodies, controls, form text              */
   --fs-note:  0.86rem;   /* notes, captions, ledes — the reading size      */
-  --fs-body:  0.95rem;   /* running prose and buttons                      */
+  /* 0.90 AND NOT THE CLUSTER'S MIDPOINT, on purpose. `.flows-table` sits on
+     this step, and this file's own density note records that three percent of
+     extra advance width — the webfont, not a type change — was enough to push
+     the desk's fourteen-column table into a horizontal scroll it is built to
+     avoid, caught by the desk contract at exactly that width. So the step is
+     pinned to the value the tables already had and the four sizes above it
+     come DOWN onto it. A scale that widens a width-constrained table is not a
+     tidy-up, it is a regression with a nicer name. */
+  --fs-body:  0.90rem;   /* running prose, table bodies and buttons        */
   --fs-lead:  1.08rem;   /* sub-headings and the loudest single readings   */
   --fs-head:  1.30rem;   /* region titles                                  */
   --fs-mark:  1.50rem;   /* the identity glyph: a ticker, the brand        */

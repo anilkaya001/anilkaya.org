@@ -1137,6 +1137,7 @@ async function refreshFlowsIntraday(env) {
           read: alerts.rows.length, entered: merged.record.entered,
           again: merged.record.again, carried: merged.record.carried,
           kept: merged.record.kept, union: merged.record.union,
+          everEntered: merged.record.everEntered,
           shed: merged.record.shed, shedBy: merged.record.shedBy,
           bytes: merged.record.bytes, reset: merged.record.reset,
         }));

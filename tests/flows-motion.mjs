@@ -1,5 +1,6 @@
 /* =============================================================
-   flows-motion.mjs — the one surface in this section that moves.
+   flows-motion.mjs — the one surface in this section that moves,
+   and the stylesheet contracts that need a real browser to assert.
 
    The deck card has carried a hover transform since it shipped and
    the `prefers-reduced-motion` block never covered it: a reader who
@@ -12,6 +13,19 @@
    asserted on BOTH halves — the CSS must not animate and the JS
    must not even attach, because either alone leaves the other free
    to leak.
+
+   THEN EVERYTHING ELSE THAT NEEDS A COMPUTED STYLE. This is the only
+   suite that boots a real Worker, signs a real session and opens a
+   real browser on a Flows page, which makes it the only place a
+   claim about assets/css/flows.css can be checked against what a
+   browser actually computes rather than against the text of the
+   file. tests/regression.mjs asserts the 320px zero-overflow
+   invariant on the eleven public pages and on NO Flows route, so
+   base.css was covered and flows.css was not — which is how a
+   `minmax(19rem, 1fr)` track floor overflowed the market page by
+   three pixels with the whole battery green. That hole is closed
+   below, along with the four silences, table leading, the ticker
+   header and the footer's measured-rather-than-asserted hit rate.
    ============================================================= */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -367,7 +381,13 @@ try {
 
   console.log(`✓ flows-motion: ${checks} assertions — the deck card is the section's only ` +
     `moving surface, and under reduced motion BOTH halves stand down: the CSS does not ` +
-    `transform and the JS does not attach, so neither can leak past the other`);
+    `transform and the JS does not attach, so neither can leak past the other. Plus the ` +
+    `stylesheet's own contracts, which had nowhere else to be asserted: zero horizontal ` +
+    `overflow at 320px on all twelve gated routes (regression.mjs covers the public pages ` +
+    `and no Flows route), four visually distinct silences that stay distinct with every ` +
+    `colour removed, table cells leaded for figures rather than for prose, a ticker header ` +
+    `that survives a scroll, and a footer that no longer asserts a hit rate it does not ` +
+    `measure`);
 } finally {
   await browser.close();
   await server.stop();

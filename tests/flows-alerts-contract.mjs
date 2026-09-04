@@ -392,6 +392,30 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "which is the same order the list is ranked in — a cap that shed by a different " +
     "ordering than it displays would hide rows above the fold");
   eq(capped.seen, 12, "and `seen` still names the population the ceiling cut from");
+  eq(capped.record.everEntered, 12, "as does the day's running entry count");
+
+  /* THE CEILING COMPOUNDS, which is the reason `everEntered` exists at all:
+     the next read merges into the rows this one KEPT, so `union` can never
+     exceed cap + one read again however busy the session gets. A reader
+     watching `union` alone would see the day's population stop growing at the
+     exact moment it started overflowing. */
+  const more = [];
+  for (let i = 0; i < 4; i++) {
+    more.push(win("X" + i, "X" + i + "260918C00010000", T2, 2000 + i));
+  }
+  const compounded = mergeAlerts(
+    { ...capped, record: capped.record }, buildFlowAlerts(more),
+    { at: T2, sessionDate: D28, cap: 5 });
+  eq(compounded.record.union, 9,
+    "the second read unions against the five rows that SURVIVED the first cut, " +
+    "never against the twelve the vendor actually flagged");
+  eq(compounded.record.kept, 5, "and the ceiling holds again");
+  eq(compounded.record.everEntered, 16,
+    "BUT THE RUNNING ENTRY COUNT KEEPS MOVING — twelve windows plus four — so the " +
+    "day's population is still readable after the ceiling has started shedding");
+  eq(compounded.rows[0].t, "X3",
+    "with the new read's larger premiums at the top, because the union is re-ranked " +
+    "whole rather than appended to");
 
   const tight = mergeAlerts(null, buildFlowAlerts(wide),
     { at: T1, sessionDate: D28, cap: 500, byteCap: 900 });
