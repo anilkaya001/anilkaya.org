@@ -1122,7 +1122,10 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
    different fact. */
 .gts-bar.is-flat { fill: var(--ink-faint); }
 
-.gts-unit, .gts-sign, .gts-shed { max-width: var(--measure); }
+/* .fp-unit is the session path's version of the same sentence — the unit of
+   the two totals under its stat block, printed from the payload — so it is
+   measured to the same line length rather than run to the panel's full width. */
+.gts-unit, .gts-sign, .gts-shed, .fp-unit { max-width: var(--measure); }
 
 /* ---------- score over price --------------------------------------
 
@@ -1219,6 +1222,40 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   font-size: var(--fs-body);
   overflow-wrap: anywhere;
 }
+/* A WITHHELD FIGURE SAYS WHICH SILENCE IT IS. The em dash alone is the one
+   absence this product refuses: it reads the same whether the field was never
+   published, arrived in a unit this page cannot parse, or was measured empty.
+   statList's fourth slot puts the taxonomy's own word on data-empty and these
+   two rules give it the same GLYPH the block-level marks use — the dagger for
+   "published, and this field is not on it" and the cross for "published, and
+   these bytes did not read" — so the distinction survives a greyscale print
+   and a reader who never hovers. Faint ink is the second channel, never the
+   only one. */
+.fc-stats dd[data-empty] { color: var(--ink-faint); }
+.fc-stats dd[data-empty]::after {
+  font-family: var(--font-mono);
+  margin-left: 0.3em;
+  color: var(--ink-faint);
+}
+.fc-stats dd[data-empty="unavailable"]::after { content: "\2020"; }
+.fc-stats dd[data-empty="unreadable"]::after,
+.fc-stats dd[data-empty="failed"]::after { content: "\00d7"; color: var(--flow-down); }
+/* AND THE OTHER TWO KINDS, because a taxonomy that marks two of its four
+   words leaves the other two collapsed into the bare dash this block exists
+   to abolish — /flows/ticker/'s chain panel withholds its at-the-money level
+   as `quiet` whenever the surface measured the chain and levelled nothing.
+   Each takes the channel it already has at block level: dotted plus an
+   ellipsis for "still coming", and for "measured, and empty" a hairline and
+   NO glyph — quiet is a reading rather than a gap, and a glyph would make it
+   look like one. Both are a BORDER, so the four stay four on a greyscale
+   print where the faint ink is one ink. */
+.fc-stats dd[data-empty="quiet"],
+.fc-stats dd[data-empty="pending"] {
+  border-left: 1px solid var(--hairline);
+  padding-left: 0.35em;
+}
+.fc-stats dd[data-empty="pending"] { border-left: 2px dotted var(--ink-faint); }
+.fc-stats dd[data-empty="pending"]::after { content: "\2026"; }
 
 /* ---------- tables ------------------------------------------------- */
 
@@ -3306,9 +3343,28 @@ body.is-stale .flows-tablewrap {
 /* --- staleness, the same two channels the dialog uses ---------------- */
 /* Words in the band above, chrome here. NEVER opacity on a glyph: dimming a
    number drops it below the 4.5:1 floor and it is still read as a number.
-   Charts may take 0.72; text may not. */
+   Charts may take 0.72; text may not.
+
+   PAINT ONLY, FOR THE REASON THE LEAD TIER'S RAIL IS PAINT ONLY. This rail
+   was a 2px BORDER, and `is-stale` is put on the grid by the controller
+   AFTER the panels have drawn — so every chart on a stale card was measured
+   against a host one pixel wider than the host it ended up in, and
+   base.css's `svg { max-width: 100% }` then shrank all twenty-one drawings
+   to fit. Measured at 1280px: viewBox 958 rendered at 957.00, one viewBox
+   unit worth 0.9990 CSS pixels, on every panel, every time the card was a
+   session old. An inset box-shadow says the same thing in the same place
+   and lays nothing out, which is the rule the panel chrome above already
+   states and the rule this one had quietly become the exception to. */
 .ft-grid.is-stale .ft-panel {
-  border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
+  box-shadow: var(--shadow-card),
+    inset 2px 0 0 color-mix(in srgb, var(--flow-down) 55%, transparent);
+}
+/* AND THE LEAD TIER KEEPS ITS OWN RAIL WHEN BOTH APPLY. Two inset shadows on
+   one edge would paint the later one over the earlier; the staleness rail is
+   moved in by its own width so both are legible rather than one hidden. */
+.ft-grid.is-stale .ft-panel[data-tier="lead"] {
+  box-shadow: var(--shadow-card), inset 2px 0 0 var(--gold-harvest),
+    inset 4px 0 0 -2px color-mix(in srgb, var(--flow-down) 55%, transparent);
 }
 .ft-grid.is-stale .ft-panel svg { opacity: 0.72; }
 
@@ -5931,49 +5987,6 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    one that needs no emphasis. Anything above it means the name was ABSENT in
    between, which is a different reading and gets the ink back. */
 .fm-gap.is-wide { color: var(--ink-dim); font-weight: 600; }
-
-
-/* ==============================================================
-   THE RAIL'S NAME BLOCK — key stats where the section links are.
-
-   On /flows/ticker/ the 13rem sticky column spends its whole height
-   on twelve destinations and says nothing about the name the page is
-   about. This is the host for that: emitted empty and hidden by
-   shared/flows-pages.js, filled by the ticker controller from the
-   card it already holds. It is the only element on the page besides
-   the header that survives a scroll.
-
-   BELOW 60rem THE RAIL IS A HORIZONTAL STRIP and this block would
-   turn it into a wall, so it is not rendered there at all. The same
-   numbers are in the page's own panels; the rail is a convenience at
-   desk widths, never the only place a reading exists.
-   ============================================================== */
-.rail-stats { display: none; }
-
-@media (min-width: 60rem) {
-  .rail-stats {
-    display: block;
-    margin: 0.35rem 0 0.6rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--hairline);
-    font-family: var(--font-mono);
-    font-size: var(--fs-micro);
-  }
-  .rail-stats dl { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.4rem; margin: 0; }
-  .rail-stats dt { color: var(--ink-faint); letter-spacing: 0.06em; text-transform: uppercase; }
-  .rail-stats dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
-  .rail-stats dd .is-pos { color: var(--flow-up); }
-  .rail-stats dd .is-neg { color: var(--flow-down); }
-  /* An absent reading is the em dash at faint ink and NEVER a zero: every
-     value in this block is a number whose zero is a real measurement. */
-  .rail-stats dd.is-null { color: var(--ink-faint); cursor: help; }
-  .rail-stats .rail-stats-g {
-    margin: 0.5rem 0 0.15rem;
-    color: var(--gold-celadon);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-}
 
 
 /* ==============================================================

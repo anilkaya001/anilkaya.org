@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { buildSurface, buildPath, buildGammaProfile } from "../shared/flows-card.js";
 import { FLOWS_PAGES } from "../shared/flows-pages.js";
+import { TICKER_PANELS } from "../shared/flows-panels.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /* THE SUITE EMITS ITS OWN CARDS rather than depending on a directory some
@@ -399,6 +400,57 @@ try {
   {
     const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
     ok(emitted.length > 0, `the dry run emitted cards to sweep (${SCRATCH})`);
+
+    /* ---- THE DIALOG AND THE PAGE ASK THE SAME QUESTION ----------------
+
+       Both surfaces draw the SAME ten renderers — that is the whole reason
+       flows-panels.js exists — and each renderer takes the question from its
+       caller with a hardcoded fallback. /flows/ticker/ passed the registry's;
+       this dialog passed nothing, so all ten fell back and the two surfaces
+       headed one drawing with two different sentences. The priced move is the
+       plainest of them: the page asked "What move is the option market pricing
+       over the stated horizon?" and the dialog asked "What move is priced over
+       a fixed horizon, and is that band rich against what this stock has
+       actually been delivering?".
+
+       CHECKED AGAINST THE REGISTRY, NOT AGAINST A LIST HERE. shared/ is never
+       served, so the question reaches the browser as a data-question attribute
+       and this reads what was DRAWN back out of the dialog — a second list of
+       ten strings in this file would be the drift the registry exists to
+       close, one level up. */
+    {
+      const HOST_KEYS = [
+        ["fcGamma", "gamma"], ["fcSurface", "surface"], ["fcLevels", "levels"],
+        ["fcDisp", "displacement"], ["fcCal", "calendar"], ["fcMove", "pricedMove"],
+        ["fcCtx", "context"], ["fcPath", "path"], ["fcCongress", "congress"],
+        ["fcWhy", "__score"],
+      ];
+      const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
+      const drawn = await page.evaluate(({ card, hosts }) => {
+        const dlg = document.getElementById("flowsCard");
+        try { dlg.showModal(); } catch { /* measured below either way */ }
+        window.__paint(card, Date.now());
+        const out = {};
+        for (const id of hosts) {
+          const q = document.querySelector("#" + id + " .fc-q");
+          out[id] = q ? q.textContent : null;
+        }
+        return out;
+      }, { card, hosts: HOST_KEYS.map(([id]) => id) });
+
+      for (const [id, key] of HOST_KEYS) {
+        const entry = TICKER_PANELS.find((e) => e.key === key);
+        ok(entry && entry.question,
+           `the registry carries a question for "${key}" — the dialog reads the same list`);
+        ok(drawn[id], `${id}: the dialog panel drew a question at all`);
+        ok(!String(drawn[id]).includes("[object"),
+           `${id}: and it is a sentence, not a stringified object ("${
+             String(drawn[id]).slice(0, 48)}")`);
+        eq(drawn[id], entry.question,
+           `${id}: the dialog asks the registry's question, the same one /flows/ticker/ ` +
+           "puts over this drawing");
+      }
+    }
 
     /* SEVERAL CARDS, NOT ONE. Label length is a function of the DATA — the
        clipped sentence this sweep first caught was 334px wide only because

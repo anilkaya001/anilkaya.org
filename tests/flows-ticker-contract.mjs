@@ -309,15 +309,23 @@ function sweepPanels() {
     out.push({
       key: section.dataset.panel,
       question: section.dataset.question || "",
+      /* THE QUESTION THE DRAWER PRINTED, not the one the markup carries. The
+         two are different facts and only the second was ever read here: a
+         drawer handed the CARD where it expected the question stringifies it
+         into its own heading and the attribute stays perfect. */
+      drawnQ: host.querySelector(".fc-q") ? host.querySelector(".fc-q").textContent : "",
       dead: !!host.querySelector(".fc-dead"),
       empty: host.childElementCount === 0,
       wide: section.classList.contains("is-wide"),
       boxW: Math.round(section.getBoundingClientRect().width),
       minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
       clipped,
+      /* UNROUNDED. The assertion downstream is "within a pixel", so rounding
+         here would hand it a number already a half-pixel off and turn its own
+         tolerance into a second one. */
       scales: svgs.map((s) => {
         const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
-        return [Number(vb[2]), Math.round(s.getBoundingClientRect().width),
+        return [Number(vb[2]), s.getBoundingClientRect().width,
                 getComputedStyle(s).transform];
       }),
       labelled: svgs.every((s) => !!s.getAttribute("aria-label") && s.getAttribute("role") === "img"),
@@ -356,6 +364,22 @@ try {
          page, and it is exactly what an unhandled tagged-union branch makes. */
       ok(!p.empty, `${width}px ${p.key}: renders content or an explicit unavailable notice`);
       ok(p.question.length > 0, `${width}px ${p.key}: its question reached the DOM`);
+
+      /* NO PANEL HEADS ITSELF WITH A STRINGIFIED OBJECT.
+
+         DRAW calls every drawer as (host, panel, card, question, mount) on the
+         argument that "the widest signature is safe for all of them", which
+         holds only while every drawer DECLARES that order. renderOverlay was
+         declared (host, join, questionIn), so the CARD landed in the question
+         slot and "Score over price" printed "[object Object]" as its question
+         on every ticker page, for every name. The attribute was perfect
+         throughout, which is why the assertion above could not see it. */
+      ok(!p.drawnQ.includes("[object"),
+         `${width}px ${p.key}: the question it DREW is a sentence, not a stringified ` +
+         `object ("${p.drawnQ.slice(0, 56)}")`);
+      eq(p.drawnQ, p.question,
+         `${width}px ${p.key}: draws the registry's question verbatim — the one this ` +
+         "page's markup handed it, so the page and the card dialog ask the same thing");
       if (p.dead) continue;
 
       if (p.minText !== null) {
@@ -374,12 +398,21 @@ try {
       /* ONE VIEWBOX UNIT IS ONE CSS PIXEL. A viewBox fixed in absolute units
          under width:100% scales the type down with the drawing — 9px axis
          type became 4.6 CSS px on the card panels, silently, because nothing
-         overflows when everything shrinks together. */
+         overflows when everything shrinks together.
+
+         WITHIN A PIXEL, NOT WITHIN 15%. The old band let both known failures
+         through: the card dialog's 1.023 stretch, and a 0.940 SQUEEZE this
+         band was written over — panelWidth floored every drawing at 300 units
+         and a 320px viewport gives this page a 282px host, so all twelve
+         charts were shrunk by base.css's `svg { max-width: 100% }` and the
+         suite called it one-to-one. A tolerance wide enough to hold a defect
+         is not a measurement of the invariant it names. Subpixel either way
+         is layout rounding; anything more is a drawing at the wrong scale. */
       for (const [vb, rendered, transform] of p.scales) {
         ok(vb > 0, `${width}px ${p.key}: the chart declares a viewBox width`);
-        const ratio = rendered / vb;
-        ok(ratio > 0.85 && ratio < 1.15,
-           `${width}px ${p.key}: one viewBox unit is one CSS pixel (${ratio.toFixed(3)})`);
+        ok(Math.abs(rendered - vb) < 1,
+           `${width}px ${p.key}: one viewBox unit is one CSS pixel — drawn ${vb}, ` +
+           `rendered ${rendered.toFixed(2)} (${(rendered / vb).toFixed(4)})`);
         eq(transform, "none", `${width}px ${p.key}: the chart is drawn, never CSS-scaled`);
       }
     }
@@ -491,7 +524,15 @@ try {
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
 
-    for (const key of ["aggressor", "ivSurface"]) {
+    /* GAMMA AND PATH ARE HERE BECAUSE THEY WERE THE TWO THAT COULD NOT GROW.
+       Both sized themselves from the host before panelWidth existed, so each
+       carried its own inlined `Math.min(760, …)` — the dialog's old ceiling —
+       and neither was touched when that ceiling moved to 1900. A span-1 grid
+       host is ~456 units at 1280px, so the enlarged copy capped at 760 where
+       the assertion below asks for at least 912: the Convexity group's lead
+       and the session path both FAILED to double, on the control that exists
+       to make them bigger. Two keys in this list could never have caught it. */
+    for (const key of ["aggressor", "ivSurface", "gamma", "path"]) {
       const section = TICKER_PANELS.find((p) => p.key === key);
       const gridW = await page.evaluate((k) => {
         const s = document.querySelector('.ft-panel[data-panel="' + k + '"] svg');
@@ -505,7 +546,7 @@ try {
       const zoomed = await page.evaluate(() => {
         const s = document.querySelector("#ftZoomHost svg");
         const vb = Number((s.getAttribute("viewBox") || "0 0 0 0").split(/\s+/)[2]);
-        return { vb, rendered: Math.round(s.getBoundingClientRect().width),
+        return { vb, rendered: s.getBoundingClientRect().width,
                  transform: getComputedStyle(s).transform };
       });
 
@@ -526,14 +567,21 @@ try {
       ok(zoomed.vb >= gridW,
          `${width}px ${key}: enlarging never shrinks the drawing (${gridW} to ${zoomed.vb})`);
       /* showModal() on a display:none element gives clientWidth 0 in the same
-         tick, so a drawer called without the rAF floors to 300. */
-      ok(zoomed.vb > 400, `${width}px ${key}: the zoom draw did not floor to the 300 minimum`);
+         tick, so a drawer called without the rAF falls back to the
+         unmeasurable-host 560 and the enlarged panel is drawn at a width the
+         dialog does not have. */
+      ok(zoomed.vb > 600, `${width}px ${key}: the zoom draw measured a real host`);
       /* THE SPAN-INDEPENDENT ANTI-transform:scale() TEST. A scaled
          implementation gives a ratio near 2.6 and a non-none transform, and
-         passes every other assertion in this suite. */
-      const ratio = zoomed.rendered / zoomed.vb;
-      ok(ratio > 0.85 && ratio < 1.15,
-         `${width}px ${key}: the enlarged chart is redrawn, not scaled (${ratio.toFixed(3)})`);
+         passes every other assertion in this suite.
+
+         WITHIN A PIXEL, for the reason the grid sweep is: a 15% band holds
+         both known failures — the dialog's own 1.023 stretch, and the 0.999
+         squeeze a 2px staleness BORDER put on every panel after they had
+         been measured. */
+      ok(Math.abs(zoomed.rendered - zoomed.vb) < 1,
+         `${width}px ${key}: the enlarged chart is redrawn at its host's width, not ` +
+         `scaled — drawn ${zoomed.vb}, rendered ${zoomed.rendered.toFixed(2)}`);
       eq(zoomed.transform, "none", `${width}px ${key}: no CSS transform on the enlarged chart`);
 
       /* EVERY <defs> ID IS UNIQUE WHILE BOTH COPIES EXIST. url(#id) resolves
@@ -3094,6 +3142,116 @@ try {
       await page.close();
     }
 
+    /* --- 7c-ii. A WITHHELD FIGURE IN THE STAT BLOCK NAMES ITS SILENCE ----
+
+       The two scalars above lead the panel in prose. The three figures under
+       the chart do not: they are an em dash in a definition list, and an em
+       dash on its own is the one absence this product refuses — it reads the
+       same whether the card never carried the field, carried it empty, or
+       carried bytes this page could not read as a number.
+
+       THE THREE KINDS ARE STAGED ONTO ONE CARD, because the renderer decides
+       between them from the SHAPE of the field and nothing else, and a suite
+       that exercised one arm would pass on a renderer that hardcoded that
+       arm's word. The at-the-money level is nulled with its reason (a chain
+       that was measured and levelled nothing — `quiet`), the moneyness band
+       is deleted outright (`unavailable`), and then a second page is drawn
+       with the level as a string the chain would never publish
+       (`unreadable`).
+
+       MEASURED OFF THE RENDERED PAGE, mark included: `content` on ::after is
+       read through getComputedStyle, so a kind whose word ships without a
+       CSS rule fails here rather than shipping as faint ink alone. */
+    {
+      const STATS = `(() => {
+        const host = document.querySelector('.ft-panel[data-panel="skewTerm"] > div');
+        if (!host) return { missing: true };
+        return {
+          pairs: [...host.querySelectorAll(".fc-stats .fc-stat")].map((s) => {
+            const dd = s.querySelector("dd");
+            const cs = getComputedStyle(dd);
+            return {
+              term: (s.querySelector("dt").textContent || "").trim(),
+              value: (dd.textContent || "").replace(/\\s+/g, " ").trim(),
+              empty: dd.getAttribute("data-empty"),
+              why: dd.getAttribute("title"),
+              mark: getComputedStyle(dd, "::after").content,
+              rule: cs.borderLeftStyle + " " + cs.borderLeftWidth,
+              folded: !!dd.closest("details"),
+            };
+          }),
+        };
+      })()`;
+      const base = withChain.find((c) => c.panels && c.panels.skewTerm &&
+        c.panels.skewTerm.status === "ok");
+      ok(base, "an emitted card carries a drawn chain panel to withhold figures from");
+
+      const card = JSON.parse(JSON.stringify(base));
+      card.panels.skewTerm.atmIv = null;
+      card.panels.skewTerm.atmReason =
+        "no expiry past the floor carried an at-the-money contract that traded today";
+      delete card.panels.skewTerm.atmBand;
+
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker });
+      const st = await page.evaluate(STATS);
+
+      const lvl = st.pairs.find((p) => /^At-the-money level/.test(p.term));
+      ok(lvl, "the chain panel states its headline at-the-money level as a labelled figure");
+      eq(lvl && lvl.value, "—",
+         "and withholds it on a card whose chain levelled nothing");
+      eq(lvl && lvl.empty, "quiet",
+         `naming the silence it is — measured, and empty (${lvl && lvl.empty}) — where a bare ` +
+         "dash would read the same as a field this card never carried");
+      eq(lvl && lvl.why, card.panels.skewTerm.atmReason,
+         "carrying the chain's own reason verbatim rather than a second wording of it");
+      ok(lvl && /solid/.test(lvl.rule) === true,
+         `and a hairline rule beside it (${lvl && lvl.rule}) — quiet is the one kind that ` +
+         "takes no glyph, so without a rule it would be faint ink alone and faint ink is " +
+         "one ink in greyscale");
+      ok(lvl && !lvl.folded,
+         "in the open: a withholding is never folded behind a disclosure");
+
+      const band = st.pairs.find((p) => /^Moneyness band/.test(p.term));
+      ok(band, "the band the level was taken inside is stated beside it");
+      eq(band && band.empty, "unavailable",
+         `and a card that never published that constant says so (${band && band.empty}), ` +
+         "which is a different fact from a chain that measured and found nothing");
+      eq(band && band.mark, '"†"',
+         `wearing the dagger this site gives that kind (${band && band.mark}) — the mark, ` +
+         "not the colour, is what separates it from the level above it");
+      ok(band && band.why && band.why.length > 40,
+         `with the sentence that says what is missing ("${(band && band.why || "").slice(0, 48)}")`);
+      eq(errors.length, 0, "the withheld-figure card draws without throwing");
+      await page.close();
+
+      /* AND THE THIRD KIND, which is not the same fact as either of the two
+         above: the field IS on the card, and what is on it is not a number. */
+      const odd = JSON.parse(JSON.stringify(base));
+      odd.panels.skewTerm.atmIv = "n/a";
+      odd.panels.skewTerm.atmReason = null;
+      const p2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const errs2 = [];
+      p2.on("pageerror", (e) => errs2.push(String(e)));
+      await mount(p2, odd, { ticker: odd.ticker });
+      const st2 = await p2.evaluate(STATS);
+      const lvl2 = st2.pairs.find((p) => /^At-the-money level/.test(p.term));
+      eq(lvl2 && lvl2.value, "—",
+         "a level that is not a number is withheld rather than printed");
+      eq(lvl2 && lvl2.empty, "unreadable",
+         `and says the bytes did not read (${lvl2 && lvl2.empty}) rather than that the field ` +
+         "was absent, which is the fact that would send a reader to the wrong place");
+      eq(lvl2 && lvl2.mark, '"×"',
+         `wearing the cross (${lvl2 && lvl2.mark}), so it is not the dagger in greyscale`);
+      ok(lvl2 && lvl2.why && lvl2.why.length > 40,
+         `and still carries a sentence with no reason on the payload to borrow ` +
+         `("${(lvl2 && lvl2.why || "").slice(0, 48)}")`);
+      eq(errs2.length, 0, "the unreadable-level card draws without throwing");
+      await p2.close();
+    }
+
     /* --- 7d. the market-wide standing leads on where it places ---------- */
     {
       const base = withChain.find((c) =>
@@ -3361,6 +3519,128 @@ try {
     }
   }
 
+  /* ---------- 12. units that travel, and one that must not be guessed ----
+
+     TWO FIGURES AND ONE FRACTION, each measured against the payload that
+     produced it. Both are honesty defects rather than layout defects, so both
+     are read out of the rendered text rather than out of the source. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const card = withChain.find((c) => c.panels.path && c.panels.path.status === "ok") ||
+      withChain[0];
+    await mount(page, card, { ticker: card.ticker });
+
+    /* THE SESSION PATH'S TWO TOTALS ARE A CONTRACT COUNT AND A DOLLAR SUM IN
+       ONE STAT BLOCK. buildPath published both with no unit anywhere on the
+       panel — shared/flows-ask.js refuses to quote netDelta for exactly that
+       reason, in those words — so a reader taking "Net delta 39.0K" for
+       dollars misread the panel by three orders of magnitude. The units are
+       the PAYLOAD'S and the renderer prints them; this asserts the published
+       strings reach the page, not that a sentence of some kind is there. */
+    const pathPanel = card.panels.path;
+    if (pathPanel && pathPanel.status === "ok") {
+      ok(typeof pathPanel.netDeltaUnit === "string" && pathPanel.netDeltaUnit.length > 0,
+         `the emitted card publishes a unit for path.netDelta ("${pathPanel.netDeltaUnit}")`);
+      ok(typeof pathPanel.netPremiumUnit === "string" && pathPanel.netPremiumUnit.length > 0,
+         `and one for path.netPremium ("${pathPanel.netPremiumUnit}")`);
+      const drawn = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="path"] > div');
+        const unit = host.querySelector(".fp-unit");
+        return {
+          text: host.textContent.replace(/\s+/g, " "),
+          unit: unit ? unit.textContent.replace(/\s+/g, " ") : null,
+          aria: (host.querySelector("svg[role=img]") || {}).getAttribute
+            ? host.querySelector("svg[role=img]").getAttribute("aria-label") : "",
+        };
+      });
+      ok(drawn.unit, "the session path prints a unit sentence under its stat block");
+      ok(drawn.unit.includes(pathPanel.netDeltaUnit),
+         `and it is the payload's own unit for net delta, verbatim ("${drawn.unit}")`);
+      ok(drawn.unit.includes(pathPanel.netPremiumUnit),
+         "and the payload's own unit for net premium, verbatim");
+      ok(drawn.aria.includes(pathPanel.netDeltaUnit),
+         "and the chart's aria-label — the whole panel, to a screen reader — carries the " +
+         "delta unit beside the total it labels");
+    }
+    eq(errors.length, 0, `the unit sweep throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 13. an IV rank in the wrong unit is withheld, not printed ---
+
+     THE FIXTURE IS AN EMITTED CARD WITH ONE NAMED FIELD MUTATED, and the
+     mutation is the point: pricedMove.ivRank is published as a 0-1 fraction
+     by ivRankFraction, which itself divides by 100 whenever the vendor answers
+     above 1 — a defence written after a rank arrived at 1352. The renderer
+     trusted that convention silently and multiplied by 100, so a rank reaching
+     it in the OTHER unit this card carries (volContext.ivRank publishes 0-100
+     and says so in a rankUnit field) prints "5215% of its year". */
+  {
+    const base = withChain.find((c) => c.panels.pricedMove &&
+      c.panels.pricedMove.status === "ok" && typeof c.panels.pricedMove.ivRank === "number");
+    ok(base, "an emitted card publishes a numeric pricedMove.ivRank to mutate");
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    const readRank = () => page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="pricedMove"] > div');
+      for (const stat of host.querySelectorAll(".fc-stat")) {
+        const dt = stat.querySelector("dt"), dd = stat.querySelector("dd");
+        if (!/IV rank/i.test(dt.textContent)) continue;
+        return { label: dt.textContent, value: dd.textContent.trim(),
+                 empty: dd.getAttribute("data-empty"), why: dd.getAttribute("title") || "" };
+      }
+      return null;
+    });
+
+    /* THE FRACTION ARM: the unit and the population are in the label, and the
+       figure is stated out of the 100 it is a percentile of. */
+    const ok1 = JSON.parse(JSON.stringify(base));
+    ok1.panels.pricedMove.ivRank = 0.5215;
+    await mount(page, ok1, { ticker: ok1.ticker });
+    const good = await readRank();
+    ok(good, "the priced move panel carries an IV rank stat");
+    ok(/percentile of its own year/.test(good.label),
+       `its label states the unit and the population ("${good.label}") — "% of its year" ` +
+       "over a bare 52 says neither, and the card carries a second IV rank in the other unit");
+    eq(good.value, "52 of 100", "and the figure is stated out of the 100 it is a percentile of");
+    eq(good.empty, null, "a reading in the unit this line reads is not marked as a silence");
+
+    /* THE OTHER-UNIT ARM: 52.15 is not a fraction. It must be WITHHELD with
+       the cross the taxonomy gives "published bytes this page could not
+       parse", never multiplied into a percentage no year can hold. */
+    const bad = JSON.parse(JSON.stringify(base));
+    bad.panels.pricedMove.ivRank = 52.15;
+    await mount(page, bad, { ticker: bad.ticker });
+    const wrong = await readRank();
+    ok(wrong, "the panel still draws its IV rank stat on the mutated card");
+    ok(!/5215|521[0-9]%/.test(wrong.value),
+       `a 0-100 rank never reaches the fraction formatter (got "${wrong.value}")`);
+    eq(wrong.value, "\u2014", "it is withheld as an em dash rather than printed");
+    eq(wrong.empty, "unreadable",
+       "and marked unreadable — the field IS published, and these are bytes this page " +
+       "could not parse in the unit the line reads. Absent would be `unavailable`, " +
+       "which is a different fact and gets a different mark");
+    ok(wrong.why.length > 20 && /unit/.test(wrong.why),
+       `with the sentence that says which silence it is ("${wrong.why.slice(0, 60)}")`);
+
+    /* AND THE ABSENT ARM IS THE OTHER SILENCE, so the two cannot collapse. */
+    const gone = JSON.parse(JSON.stringify(base));
+    delete gone.panels.pricedMove.ivRank;
+    await mount(page, gone, { ticker: gone.ticker });
+    const absent = await readRank();
+    eq(absent.value, "\u2014", "an absent rank is an em dash too");
+    eq(absent.empty, "unavailable",
+       "but marked unavailable, not unreadable: no rank at all and a rank in the wrong " +
+       "unit are two different facts about the payload");
+
+    eq(errors.length, 0, `the IV rank arms throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
 } finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
@@ -3385,4 +3665,10 @@ console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup,
   `method folded under it — measured flat told from unmeasured in both directions, ` +
   `every qualifier still in the open with nothing to click, every folded sentence still ` +
   `in textContent for a find-in-page, and every explained element wearing a visible mark ` +
-  `whose explanation a keyboard and a thumb can open without adding one tab stop`);
+  `whose explanation a keyboard and a thumb can open without adding one tab stop, ` +
+  `a question DRAWN rather than merely attributed so a drawer handed the card where it ` +
+  `expected the question cannot head a panel with a stringified object, an enlarge ` +
+  `checked on the two panels that used to cap at the old modal's width, the session ` +
+  `path's contract count and dollar sum each carrying the unit the payload publishes ` +
+  `for it, and an IV rank in the wrong unit withheld under its own mark rather than ` +
+  `multiplied into a percentage no year can hold`);

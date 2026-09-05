@@ -673,10 +673,32 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
   const moved = rows.reduce((a, r) => a + Math.abs(r.d), 0);
   const sig = moved > 0 ? pathSignature(tickRows) : null;
 
+  /* THE TWO FIGURES THIS PANEL LEADS ON WERE PUBLISHED WITH NO UNIT.
+
+     Every other quantity the card ships beside a number ships the number's
+     unit with it: shared/flows-features.js's GREEK_UNITS gives vanna, charm
+     and dealer delta a sentence apiece, buildVolContext publishes rankUnit
+     because "this vendor's rank fields have burned a '1352% of its year'
+     once already". These two did not, and they are a CONTRACT COUNT and a
+     DOLLAR SUM sharing one stat block — the exact pair house rule 3 names.
+     The assistant index already refuses to quote netDelta for this reason
+     (shared/flows-ask.js: "the payload publishes no unit for it and a number
+     without a unit is not a reading this index will state").
+
+     NAMED FROM THE ARITHMETIC ABOVE, not from what the field sounds like.
+     `cumD` is the running sum of each tick's `net_delta`, which the vendor
+     reports per tick as the ask side less the bid side, delta-weighted — so
+     it is contracts weighted by delta and signed by which side lifted, and
+     the panel's own legend has said "contracts" since it was drawn. `cumP`
+     is the running sum of `net_call_premium - net_put_premium`: dollars,
+     with put buying entering negative, which is why it is side-signed too
+     and not a gross spend. */
   return ok({
     series,
     netDelta: Math.round(cumD),
+    netDeltaUnit: "delta-weighted contracts, side-signed",
     netPremium: Math.round(cumP),
+    netPremiumUnit: "US dollars, net premium, side-signed",
     minutes: rows.length,
     startedAt: new Date(first).toISOString(),
     // Share of minutes moving WITH the day's net direction. 0.5 is a
