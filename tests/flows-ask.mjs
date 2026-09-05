@@ -800,6 +800,35 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   const dig = tickerCoverage(digits.picked, qd);
   ok(dig.miss.length === 1 && dig.missSaid.length === 0,
      "and a name with a digit is in `miss` but not in `missSaid`, the printable subset");
+
+  /* "I" AND "A" ARE PRONOUN AND ARTICLE BEFORE THEY ARE SYMBOLS. The
+     ticker pattern matches them, and before this rule "Should I buy
+     SYN46" led with "None of the readings below is about I" — a
+     withholding about a pronoun, printed ahead of the readings that
+     answered the question. An uncovered one is dropped from `miss`; a
+     covered one is a hit; every other single letter keeps its honest
+     withholding, because F and X are names. */
+  const pronoun = "Should I buy SYN46";
+  const pc = tickerCoverage(selectFacts(INDEX, pronoun).picked, pronoun);
+  ok(pc.hit.includes("syn46") && pc.miss.length === 0,
+     "an uncovered I is not withheld: the covered name is the hit and `miss` is empty");
+  const plainLead = renderFactsPlain(selectFacts(INDEX, pronoun).picked, pronoun);
+  ok(/^These are the published readings that bear on what you asked\./.test(plainLead) &&
+     !/about I\b/.test(plainLead),
+     "so the plain lead is the covered lead, with no sentence about I");
+  const article = "A read on PLTR";
+  const ac = tickerCoverage(selectFacts(INDEX, article).picked, article);
+  ok(!ac.miss.includes("a") && ac.miss.includes("pltr"),
+     "an uncovered A is dropped while the uncovered name beside it stays withheld");
+  const covA = tickerCoverage([{ topic: ["a"], say: "Agilent holds rank 3." }], "is A a buy");
+  ok(covA.hit.includes("a") && covA.miss.length === 0,
+     "a covered A is a hit — Agilent trades as A, and a fact about it is about it");
+  const ford = tickerCoverage([], "what about F today");
+  ok(ford.miss.length === 1 && ford.miss[0] === "f",
+     "F stays withheld: the rule is the two English letters and no wider");
+  const onlyI = tickerCoverage([], "Should I");
+  ok(onlyI.hit.length === 0 && onlyI.miss.length === 0,
+     "a question naming nothing but I names nothing");
 }
 
 /* ---------- 7. THE FALLBACK PASSES ITS OWN GUARD ---------------- */

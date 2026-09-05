@@ -1473,7 +1473,23 @@ export function guardAnswer(answer, picked, options) {
  * to the name, is the one that cannot disagree with the guard. A name
  * that fails it is referred to, not printed — `hitSaid` and `missSaid`
  * are the printable subsets.
+ *
+ * "I" AND "A" ARE NOT WITHHELD. The ticker pattern is one capital and up
+ * to four more, and the two capitals that are also English words match
+ * it: "Should I buy NVDA" names I, "A read on NVDA" names A. A
+ * withholding is a claim — "None of the readings below is about I" — and
+ * for those two letters the claim is far more often about a pronoun or
+ * an article than about a symbol, so an UNCOVERED one is dropped from
+ * `miss` rather than announced. A covered one is still a hit: Agilent
+ * trades as A, and a fact that carries the letter as a topic is about it.
+ * The rule is those two letters and no wider, because F, T, X, V and C
+ * are names people ask about, and a withholding on one of them is true.
+ * The cost is one honest silence: "is A a buy" with Agilent uncovered
+ * falls to the generic lead instead of a withholding, and the generic
+ * lead claims nothing false.
  */
+const ENGLISH_LETTERS = new Set(["i", "a"]);
+
 export function tickerCoverage(picked, question) {
   const facts = Array.isArray(picked) ? picked : [];
   const tickers = questionTickers(question);
@@ -1490,7 +1506,7 @@ export function tickerCoverage(picked, question) {
   const printable = (t) => numeralsIn(t).every((n) => allowed.has(n));
   const said = (list) => list.filter(printable).map((t) => t.toUpperCase());
   const hit = tickers.filter((t) => covered.has(t));
-  const miss = tickers.filter((t) => !covered.has(t));
+  const miss = tickers.filter((t) => !covered.has(t) && !ENGLISH_LETTERS.has(t));
   return { hit, miss, wordHit, hitSaid: said(hit), missSaid: said(miss) };
 }
 

@@ -27,10 +27,22 @@
 
 /* ---------- numeric hygiene ------------------------------------ */
 
-/** UW returns numbers as JSON strings. Parse defensively; never NaN out. */
+/**
+ * UW returns numbers as JSON strings. Parse defensively; never NaN out.
+ *
+ * A BLANK STRING IS AN ABSENT READING, NOT A ZERO. `Number(" ")` is 0,
+ * so a whitespace-only field — the vendor's way of writing "no value"
+ * on some rows — used to reach every caller as a measured 0 and the
+ * empty test above it caught only the zero-length spelling. Trimming
+ * before that test sends blanks to `fallback`, which is 0 for the
+ * callers that always wanted a number and NaN for the ones that ask
+ * for NaN precisely so an absent reading stays absent: an IV rank of
+ * "" published as 0 read as the cheapest vol of the year. `Number()`
+ * trims on its own, so "  5 " still parses to 5.
+ */
 export function num(value, fallback = 0) {
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value !== "string" || value === "") return fallback;
+  if (typeof value !== "string" || value.trim() === "") return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
