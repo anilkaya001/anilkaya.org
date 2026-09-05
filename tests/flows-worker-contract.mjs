@@ -675,6 +675,36 @@ try {
     ok(Array.isArray(payload.rows), "the payload carries a rows array");
     ok(payload.status === "pending" || payload.generatedAt !== undefined,
        "an unpublished board reports pending rather than inventing data");
+    ok(!("reason" in payload),
+       "and a key the pipeline has never written carries NO reason: the SELECT ran and found no " +
+       "row, and “read-failed” on it would report a fault the store did not have");
+
+    /* THE OTHER NULL. readFlowsPayload answers null for an absent row AND for
+       a SELECT that threw, and the board route used to hand both to the reader
+       as the same bytes — so /flows/long/ said “either never published or the
+       store could not be read” and could never say which. The read is made to
+       throw here by hiding the column it selects; the table, its rows and the
+       Worker's schema flag are untouched, and the column is put back before
+       anything else reads, so no block after this one sees a difference. */
+    await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
+    const broken = await get("/api/flows/board?side=long", {
+      headers: { Cookie: "flows_session=" + token },
+    });
+    const brokenBody = await broken.json();
+    await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
+    eq(broken.status, 200,
+       "a board read that threw still answers 200 with the pending shape every board renderer " +
+       "already understands — a 500 here would be a renderer-side “could not reach the service” " +
+       "over a store that answered");
+    eq(brokenBody.status, "pending", "and the shape is the same pending envelope");
+    eq(brokenBody.reason, "read-failed",
+       "but it carries reason: “read-failed”, which is what lets the page mark the deck unreadable " +
+       "(×) rather than pending (…) — the one bit the two envelopes used to lack");
+    const healed = await (await get("/api/flows/board?side=long", {
+      headers: { Cookie: "flows_session=" + token },
+    })).json();
+    eq(healed.status, "pending", "with the column back the same key answers pending again");
+    ok(!("reason" in healed), "and with no reason, because this time the read ran and found nothing");
 
     // Sign-out clears the cookie.
     const out = await fetch(url("/flows/logout"), {

@@ -692,6 +692,44 @@ p.fb-empty {
   line-height: 1.6;
 }
 
+/* WHICH SILENCE, ON THE BOARD'S OWN MESSAGE. showMessage() stamps data-empty
+   on this paragraph and on the table's cell — quiet, pending, unreadable,
+   unavailable — but THE THREE SILENCES, IN PIXELS scopes its marks with
+   :is(.flows-empty, .cc-quiet, .ft-quiet), and .fb-empty is in neither list.
+   Measured on the emitted corpus: a short side that scored 100 names and
+   placed none, and a long side the store had never held, were the same
+   centred grey sentence, distinguishable only by reading it.
+
+   The marks are restated here, in this route's section, rather than by
+   widening the shared list: the paragraph is centred and 46rem wide, so a
+   left-edge bar on it would float mid-grid, and the marked message is set
+   flush left as part of the same rule — a layout that belongs beside
+   .fb-empty. Same four shapes, same glyphs, same widths as the shared block,
+   so a monochrome printout separates them by edge alone. `filtered` is not a
+   silence (the rows are here, the reader hid them) and gets no edge. */
+.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
+             [data-empty="unreadable"], [data-empty="unavailable"]) {
+  text-align: left;
+  border-left: 1px solid var(--hairline);
+}
+p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
+              [data-empty="unreadable"], [data-empty="unavailable"]) {
+  justify-self: start;
+}
+.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
+             [data-empty="unreadable"], [data-empty="unavailable"])::before {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-right: 0.4rem;
+  color: var(--ink-faint);
+}
+.fb-empty[data-empty="pending"] { border-left: 2px dotted var(--ink-faint); }
+.fb-empty[data-empty="pending"]::before { content: "\2026"; }
+.fb-empty[data-empty="unavailable"] { border-left: 2px dashed var(--ink-faint); }
+.fb-empty[data-empty="unavailable"]::before { content: "\2020"; }
+.fb-empty[data-empty="unreadable"] { border-left: 3px solid var(--flow-down); }
+.fb-empty[data-empty="unreadable"]::before { content: "\00d7"; color: var(--flow-down); }
+
 .flows-foot {
   margin-top: 1.4rem;
   max-width: var(--measure);
@@ -2987,6 +3025,14 @@ body.is-stale .flows-tablewrap {
 }
 .mk-sector + .mk-sector { border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent); }
 .mk-sector-k { flex: 0 0 9.5rem; font-size: var(--fs-note); }
+/* The ETF the row IS, beside the name it is called by: the unit of the label
+   stated on the label, not in a basis sentence five rows below it. */
+.mk-sector-etf { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-faint); }
+/* A sector the payload could not settle keeps its row and its name and holds
+   the payload's own reason where the bar would be, under the unavailable
+   mark — so ten bars of eleven never read as a list of ten. */
+.mk-sector.is-unsettled { align-items: baseline; }
+.mk-sector.is-unsettled .flows-empty { flex: 1 1 auto; min-width: 0; margin: 0; }
 .mk-sector-v {
   flex: 0 0 4.5rem; text-align: right;
   font-family: var(--font-mono); font-size: var(--fs-note);
@@ -3000,6 +3046,10 @@ body.is-stale .flows-tablewrap {
   margin: 0 0 0.4rem; font-size: var(--fs-data); font-weight: 600;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim);
 }
+/* "8 of 15": the column's count and its denominator, set apart from the
+   title by weight and case rather than by a second hue. */
+.mk-movers-n { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
+.mk-movers-pop { margin: var(--space-2) 0 0; }
 .mk-movers { margin: 0; padding: 0; list-style: none; }
 .mk-movers li {
   display: flex; justify-content: space-between; gap: 0.6rem;
@@ -4974,6 +5024,32 @@ body.is-stale .flows-tablewrap {
 .cc-tile-v.is-neg { color: var(--flow-down); }
 .cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
 
+/* THE FOUR SILENCES, ON A TILE. flows-overview.js sets data-empty on a
+   verdict tile whose number is an em dash, with the same four kinds the
+   region silences carry (pending, unavailable, unreadable, empty), and the
+   marks are the ones the region rules further down draw — dotted for
+   "still coming", dashed with a dagger for "not on this payload", a solid
+   signed-down bar with a cross for "the request broke", a hairline and no
+   glyph for "measured, and empty". Without them the seven tiles printed one
+   em dash for four facts, told apart only by a sub-label at the label
+   step. The bar sits on the tile's own left edge, inside the 1px grid gap
+   that draws the dividers, and the glyph leads the sub-label — a shape and
+   a glyph, never a hue, so the four survive a monochrome printout. */
+.cc-tile[data-empty] { border-left: 1px solid var(--hairline); }
+.cc-tile[data-empty] .cc-tile-s::before {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-right: 0.4rem;
+  color: var(--ink-faint);
+}
+.cc-tile[data-empty="pending"] { border-left: 2px dotted var(--ink-faint); }
+.cc-tile[data-empty="pending"] .cc-tile-s::before { content: "\2026"; }
+.cc-tile[data-empty="unavailable"] { border-left: 2px dashed var(--ink-faint); }
+.cc-tile[data-empty="unavailable"] .cc-tile-s::before { content: "\2020"; }
+.cc-tile[data-empty="unreadable"] { border-left: 3px solid var(--flow-down); }
+.cc-tile[data-empty="unreadable"] .cc-tile-s::before { content: "\00d7"; color: var(--flow-down); }
+.cc-tile[data-empty="empty"] { border-left: 1px solid var(--hairline); }
+
 /* ---------- a region ---------- */
 
 .cc-region {
@@ -5129,6 +5205,11 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-rank { color: var(--ink-faint); width: 1.6rem; }
 .cc-t { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .cc-dim { color: var(--ink-faint); font-size: var(--fs-fine); }
+/* The crossing tag and the earnings mark follow the ticker inside one cell
+   with no text node between them, so without a margin they rendered as one
+   token — "SYN132cleared", "SYN182⚠38d" — at a gap of 0px, and a number
+   with a unit was glued to a name. */
+.cc-cross, .cc-ern { margin-left: 0.4rem; }
 
 /* SCOPED TO .cc RATHER THAN DECLARED BARE. `is-pos` is a class fifteen other
    rules in this file already qualify; a global colour on it would reach
@@ -5145,8 +5226,23 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    would hand this width rule to the drawing — and flows-ui.js's whole
    geometry contract is that one viewBox unit is one CSS pixel, which a
    stylesheet width silently rescales. The cell is .cc-trk; .cc-strip below
-   belongs to the library. */
-.cc-trk { width: 156px; padding-right: 0.6rem; }
+   belongs to the library.
+
+   AND THE CELL IS SIZED FROM THE DRAWING, NOT THE OTHER WAY ROUND. The
+   strip is drawn 150 units wide (flows-overview.js, sideTable). This cell
+   was 156px, and Chromium lays a table cell's `width` out as its border
+   box, so after the 0.52rem left pad the table sets and the 0.6rem right
+   pad here the content box was ~138px — and base.css's `svg { max-width:
+   100% }` shrank the 150-unit drawing into it: measured 139.375px rendered
+   for width="150" on every ranked row, 0.93 CSS px per viewBox unit, the
+   exact rescale the paragraph above says this cell exists to prevent. The
+   width is now the drawing plus both pads, with the box model stated so
+   the arithmetic holds whichever way a table cell's width is read. */
+.cc-trk {
+  box-sizing: border-box;
+  width: calc(150px + var(--tbl-pad-x) + 0.6rem);
+  padding-right: 0.6rem;
+}
 
 /* ---------- the ticker, as an opener ----------
    A BUTTON, NOT A LINK. The tiles this replaced were <a href="?t=SYM">, so

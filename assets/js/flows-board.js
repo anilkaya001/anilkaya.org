@@ -327,13 +327,9 @@
    *
    * THIS FILE USED TO WRITE ITS OWN COLD SENTENCE: "Yesterday's board could
    * not be read on this run." That is one cause out of six, and it is FALSE on
-   * four of them. Upstream can tell an absent key from a read that failed from
-   * a board that was read and named no rows from one stamped with THIS run's
-   * own session (a re-run, refused on purpose so a second pass at one session
-   * cannot hold the whole board in place and report that as stability) from
-   * one stamped LATER than this run. A renderer sees `nw: null` on fifty rows
-   * and can tell none of them apart: the evidence is upstream and reaches the
-   * browser only as `memory.note`.
+   * four of them — memoryNoteFor() lists them. A renderer sees `nw: null` on
+   * fifty rows and can tell none of them apart: the evidence is upstream and
+   * reaches the browser only as `memory.note`.
    *
    * IT IS NOT HYPOTHETICAL. The corpus this pipeline emits right now publishes
    * a long board with status "ok" and a short board with status "same-session",
@@ -753,15 +749,30 @@
        that reason. */
     const move = document.createElement("span");
     move.className = "fd-move";
-    move.textContent = isNum(row.hm) === null ? "" : "\u00b1" + (row.hm * 100).toFixed(1) + "% priced";
-    if (isNum(row.hm) !== null) {
+    const hmN = isNum(row.hm);
+    if (hmN === null) {
+      /* AN UNPRICED ROW PRINTS ITS ABSENCE, NOT NOTHING. This slot was "" on
+         a null `hm`, and one tile on the emitted long board (SYN168, no usable
+         30-day implied volatility to scale) showed an empty foot: the same
+         appearance as a board published before the field existed. The em dash
+         is this tile's mark for every absence; the plus-minus says which slot,
+         the attribute which silence (published, and not on this row). */
+      move.textContent = "\u00b1" + DASH;
+      move.dataset.empty = "unavailable";
+      move.title = "No priced move on this row: the run had no usable 30-day implied " +
+        "volatility for this name to scale to the board's horizon.";
+    } else {
+      move.textContent = "\u00b1" + (hmN * 100).toFixed(1) + "% priced";
       move.title = horizonSessions
-        ? `The option market prices ±${(row.hm * 100).toFixed(1)}% over ${horizonSessions} trading sessions` +
+        ? `The option market prices ±${(hmN * 100).toFixed(1)}% over ${horizonSessions} trading sessions` +
           (isNum(row.hr) !== null ? `; this name has delivered ±${(row.hr * 100).toFixed(1)}% over the same horizon.` : ".")
         : "";
     }
+    /* NO TONE ON THE REGIME. fb-neg is this board's bearish red, and a short
+       gamma regime is a dealer-hedging state, not a lean: 36 of 44 tiles on
+       the emitted BULLISH board ended in red "short Γ". rowFor() refuses the
+       same colouring on 52w, VRP, IVR and this cell, for this reason. */
     const reg = document.createElement("span");
-    reg.className = row.gRegime === "short" ? "fb-neg" : "";
     reg.textContent = regimeText(row.gRegime);
     foot.append(conv, move, reg);
     card.append(foot);
@@ -774,8 +785,8 @@
       (isNum(row.agr) === null || isNum(row.bth) === null
         ? ". "
         : `, with ${row.agr} of ${row.bth} signed axes agreeing. `) +
-      (isNum(row.hm) === null ? ""
-        : `The option market prices plus or minus ${(row.hm * 100).toFixed(1)} percent over ` +
+      (hmN === null ? `Priced move unavailable. `
+        : `The option market prices plus or minus ${(hmN * 100).toFixed(1)} percent over ` +
           `${horizonSessions || 10} trading sessions. `) +
       /* THE MEMORY IS READ OUT TOO. The marks above are role="img" inside the
          card, and a card is one tab stop whose accessible name is this string
@@ -1550,7 +1561,9 @@
        renderer shows a number whose definition silently moved. Withheld for the
        same reason fam.V and fam.O are. */
     tr.append(cell(legacyFamilies ? DASH : fmtRatio(row.purity), "c-num"));
-    tr.append(cell(regimeText(row.gRegime), "c-num " + (row.gRegime === "short" ? "fb-neg" : "fb-flat")));
+    /* Uncoloured, like the three cells after it: a hedging state is not a
+       bearish lean. See deckCard. */
+    tr.append(cell(regimeText(row.gRegime), "c-num fb-flat"));
     tr.append(cell(row.gFlipDist == null ? DASH : fmtPct(row.gFlipDist, 1), "c-num"));
     tr.append(cell(fmtMoney(row.netPrem), "c-num " + toneClass(row.netPrem)));
 
@@ -1759,6 +1772,8 @@
 
   function render(which) {
     statusEl.textContent = "Loading the " + which + " board…";
+    // A silence stamped on the last outcome must not outlive it.
+    delete statusEl.dataset.empty;
 
     /* Clear the table whenever the side being requested is not the one on
        screen. The side is now fixed by the route, so within one page load this
@@ -1794,48 +1809,37 @@
       const slot = document.querySelector('[data-rail-count="' + which + '"]');
       /* AND IT FILLS ONLY WHAT IT MEASURED. This wrote String(rows.length)
          unconditionally, so a pending payload — rows.length 0 by construction —
-         put a "0" in the rail beside a page that was about to say "No board is
-         available for this side. Either the pipeline has not published its
-         first session yet, or the store could not be read." The rail states the
-         rule itself, in shared/flows-pages.js: "A badge that says nothing until
-         the data lands is honest; a badge that says 0 while the fetch is in
-         flight is not."
+         put a "0" in the rail beside a page saying no board had been
+         published. The rail states the rule itself, in shared/flows-pages.js:
+         "A badge that says nothing until the data lands is honest; a badge
+         that says 0 while the fetch is in flight is not."
 
-         NOT THE GUARD THE SIBLINGS USE. flows-watch.js:434 and
-         flows-events.js:1142 write `if (slot && rows.length)`, which is right
-         for them and wrong here: on a board a zero can be a MEASUREMENT — a
-         side where names were scored and none cleared the dead band — and
-         suppressing that would collapse a working quiet day into an outage,
-         which is the other half of the same rule. `scored` is what separates
-         them, exactly as the block directly below already uses it for the
-         sentence it prints. It is hoisted because it now answers for this
-         guard and for both the branch and the sentence at :1852 — one field
-         read three times across ten lines, beside `legacyFamilies`,
-         `horizonSessions` and `knowsDeep`, which are hoisted for this reason.
+         NOT THE GUARD THE SIBLINGS USE. flows-watch.js and flows-events.js
+         write `if (slot && rows.length)`, right for them and wrong here: on a
+         board a zero can be a MEASUREMENT — names were scored and none cleared
+         the dead band — and suppressing it would collapse a working quiet day
+         into an outage. `scored` is what separates them, hoisted because the
+         branch and the sentence below read it too.
 
          AND THE NUMBER IT PRINTS IS THE POPULATION, NOT THE PAGE.
-         `rows.length` is post-cap. The publisher derives both counts from one
-         list — `cleared` is the side's whole pool and `shed` is what did not
-         fit (flows-pipeline.mjs:5687) — and the line at :1960 already prints
-         "4 more cleared the band and did not fit (93 of 97 shown)". Filling
-         this slot from `rows.length` put 93 in the rail directly above a
-         sentence saying 97 of them existed: the same defect flows-events.js:1126
-         records for the calendar badge, and its reason applies twice over here.
-         "Two routes wording one quantity differently is how a reader concludes
-         there are two quantities" — and two ELEMENTS on one page are no better
-         than two routes. /flows/ fills this same slot (flows-overview.js:1679),
-         so both move together or the fix recreates the split it is closing.
+         `rows.length` is post-cap. The publisher derives `cleared` (the side's
+         whole pool) and `shed` (what did not fit) from one list, and the
+         status line already prints "4 more cleared the band and did not fit
+         (93 of 97 shown)"; filling this slot from `rows.length` put 93 in the
+         rail directly above a sentence saying 97 existed — one page, one
+         quantity, two numbers, the defect flows-events.js records for the
+         calendar badge. /flows/ fills this same slot (flows-overview.js), so
+         both move together or the fix recreates the split it is closing.
          `rows.length` remains the fallback for a board published before
-         `cleared` existed, where the page has nothing else to state.
+         `cleared` existed.
 
-         THE THREE CASES THE GUARD STILL HAS TO KEEP APART, which is why it is
-         unchanged. A pending envelope carries neither `scored` nor `cleared`,
-         so it fails the guard and prints nothing. A measured-quiet side
-         publishes `scored` > 0 and `cleared` 0, so it passes and prints that
-         zero — the reading, not a silence. An ordinary side publishes
-         `cleared` >= rows.length and prints the pool. `cleared` is never
-         published without `scored` beside it, so admitting it to the guard
-         would widen nothing and would only give the guard a second key. */
+         THE THREE CASES THE GUARD KEEPS APART. A pending envelope carries
+         neither `scored` nor `cleared`, fails the guard and prints nothing. A
+         measured-quiet side publishes `scored` > 0 and `cleared` 0, passes,
+         and prints that zero — the reading, not a silence. An ordinary side
+         publishes `cleared` >= rows.length and prints the pool. `cleared` is
+         never published without `scored`, so keying the guard on it would
+         widen nothing. */
       const scoredN = isNum(payload.scored);
       if (slot && (rows.length || scoredN > 0)) {
         const clearedN = isNum(payload.cleared);
@@ -1850,39 +1854,59 @@
          published `scored` count separates the two: a board that scored names
          and placed none here is a reading, not a failure. */
       if (!rows.length && scoredN > 0) {
+        /* THE COUNTS, AND NO VERDICT ON THEM. This ended "which is what a
+           quiet session looks like" whatever the numbers were — with the
+           emitted corpus's 3 neutral of 100 scored, over 97 names past the
+           band on the other side. And an absent `neutral` printed "all of
+           them landed inside the band": a census from a field that was not
+           there. The band and the count are named only when published. */
+        const neutralN = isNum(payload.neutral);
+        const bandN = isNum(payload.deadBand);
         showMessage(
-          "No name on this side cleared the ±" + (payload.deadBand ?? "") + " band this session. " +
-          (scoredN + " names were scored; " +
-           (isNum(payload.neutral) ?? "all") + " of them landed inside the band, which is what a " +
-           "quiet session looks like. The other side may still have candidates."),
-          /* MEASURED AND EMPTY, which is the one silence of the three that is a
+          "No name on this side cleared " +
+          (bandN === null ? "the dead band" : "the ±" + bandN + " band") + " this session. " +
+          scoredN + " names were scored" +
+          (neutralN === null ? "" : ", " + neutralN + " of them inside the band") +
+          "; the other side may hold the rest.",
+          /* MEASURED AND EMPTY, which is the one silence of the four that is a
              reading about the market rather than about the plumbing. */
           "quiet",
         );
         statusEl.textContent =
           "No " + which + " candidates this session · session " +
           (payload.sessionDate || "unknown") + ".";
+        statusEl.dataset.empty = "quiet";
         setStale(assessAge(payload));
         painted = which;
         return;
       }
 
       if (payload.status === "pending" || !rows.length) {
-        /* "pending" from the API means the row is genuinely absent. It is also
-           what the Worker returns when the D1 read THREW — the catch there
-           falls back to the same shape — so this message has to cover a
-           database fault too rather than confidently asserting that nothing
-           has ever been published. */
+        /* THREE SILENCES THAT SHARED ONE DAGGER. The Worker answers a
+           never-published key and a D1 read that THREW with the same pending
+           envelope, and this page tagged both — and a published board with no
+           rows and no scored count — "unavailable", one sentence hedged across
+           two causes. The catch path now stamps `reason: "read-failed"`
+           (worker.js, the board route), so each gets the taxonomy's own word:
+           pending, not published yet; unreadable, the store could not be
+           read; unavailable, published without the field that would explain
+           it. A failed read is never "unavailable". */
+        const kind = payload.reason === "read-failed" ? "unreadable"
+          : payload.status === "pending" ? "pending" : "unavailable";
         showMessage(
-          "No board is available for this side. Either the pipeline has not "
-          + "published its first session yet, or the store could not be read. "
-          + "If this persists past the next trading morning, check the Actions tab.",
-          /* Never published or unreadable: the Worker answers both with the
-             same pending envelope, which is why this one sentence covers two
-             causes and says so. */
-          "unavailable",
+          kind === "unreadable"
+            ? "The store could not be read for this side, so whether a board is published " +
+              "is unknown. Refresh to try again."
+            : kind === "pending"
+              ? "No board has been published for this side yet. The first pipeline run stamps it."
+              : "This side's board was published with no rows and no scored population to " +
+                "explain them, so this page cannot say whether the session was quiet or the " +
+                "run measured nothing.",
+          kind,
         );
-        statusEl.textContent = "No published session available.";
+        statusEl.textContent = kind === "unreadable" ? "The board store could not be read."
+          : kind === "pending" ? "No board published yet." : "A board with no rows and no count.";
+        statusEl.dataset.empty = kind;
         setStale(null);
         return;
       }
@@ -1983,23 +2007,33 @@
         parts.push((fresh === 0 ? "no new names on this side" : fresh + " new to this side") +
           " since " + comparand());
         if (incumbent > 0) parts.push(incumbent + " held on incumbency");
-      } else {
-        parts.push("no comparison with a previously published board");
       }
+      /* NO COLD CLAUSE. This line used to add "no comparison with a previously
+         published board" on every non-warm memory, 200px above the note
+         setMemoryNote() draws from the publisher's own sentence: one silence
+         worded twice, which reads as two outages. The note is the statement. */
       if (isNum(payload.dispersion) !== null) {
-        /* This is the 95th percentile of |composite| across the scored pool, not
-           a standard deviation, so it does not get a sigma suffix — a quantile
-           wearing a σ invites a reader to reach for a normal table that does not
-           apply to it. */
-        parts.push("spread " + payload.dispersion.toFixed(2) + " (95th pct)");
+        /* THE UNIT TRAVELS WITH THE NUMBER. This is the 95th percentile of
+           |residual| across the scored pool, in the residual's composite
+           units; the score beside it is 100·tanh of that residual times a
+           scale the payload does not carry, so 0.71 here shares no scale with
+           the +59 there and must say so or read as a small score. Not a
+           standard deviation either, so no sigma suffix — a quantile wearing
+           a σ invites a normal table that does not apply. */
+        parts.push("spread " + payload.dispersion.toFixed(2) +
+          " composite units (95th pct of |residual|, not the score's scale)");
       }
       parts.push("built " + when);
       statusEl.textContent = parts.join(" · ") + ".";
       setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;
-      showMessage("The board could not be loaded. Refresh to try again.", "unavailable");
+      /* A FETCH THAT FAILED IS NOT "UNAVAILABLE". That tag means "published,
+         and this field is not on it"; nothing was read here at all, which is
+         the silence the × marks and the only one whose remedy is "refresh". */
+      showMessage("The board could not be loaded. Refresh to try again.", "unreadable");
       statusEl.textContent = "Could not reach the board service.";
+      statusEl.dataset.empty = "unreadable";
     }).finally(() => {
       body.removeAttribute("aria-busy");
     });
