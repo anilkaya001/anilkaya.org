@@ -4081,7 +4081,15 @@ body.is-stale .flows-tablewrap {
    reason: on a greyscale print, or to a reader who cannot separate gold
    from ink, the hatch is what still says "this region is different". */
 
-.ew { display: block; width: 100%; }
+/* NO `width` HERE, AND THAT IS THE RULE RATHER THAN AN OMISSION. The svg
+   carries a pixel width MEASURED FROM THIS HOST (flows-events.js,
+   chartWidth) and a viewBox of the same number, so one viewBox unit is one
+   CSS pixel. `width: 100%` overrode that attribute and handed the browser
+   permission to scale — at the 2560 canvas tier a 1900-unit viewBox was
+   stretched into a 1,998px host at 1.052 px per unit, every 9.5px tick
+   rendered at 10px, and the chart still looked like a chart. A width put
+   back here would put that back with it. */
+.ew { display: block; }
 
 .ew-bandbg { fill: color-mix(in srgb, var(--gold-mystic) 8%, transparent); }
 /* NO `fill` RULE ON .ew-band. Its fill is the hatch pattern, set as a
@@ -4125,7 +4133,12 @@ body.is-stale .flows-tablewrap {
 }
 .ew-lane.is-gated { fill: var(--gold-harvest); }
 
-/* The three mark shapes. Legible with the colours removed. */
+/* THE MARK SHAPES. Legible with every colour removed — which is the test
+   the board lane used to fail: long and short were one diamond path and
+   differed only in the two `fill` rules below, so in greyscale the direction
+   the board holds was gone. The shape now carries it (apex up long, apex
+   down short, diamond only where the payload states no side), and these two
+   fills are the redundant third channel they were always meant to be. */
 .ew-m.is-gated {
   fill: var(--gold-harvest);
   stroke: var(--bg-deep);
@@ -4168,11 +4181,25 @@ body.is-stale .flows-tablewrap {
 
 .ev-priced { color: var(--ink); }
 
-/* THE TWO KINDS OF EM DASH, WHICH MUST NOT LOOK LIKE A NUMBER. A missing
-   reading is dimmed and carries the help cursor, so the title that says
-   WHICH absence it is announces itself as worth reading. It is never a
-   zero and it is never styled like one. */
+/* THE THREE ABSENCES IN THE PRICED COLUMN, WHICH MUST NOT LOOK LIKE A
+   NUMBER AND MUST NOT LOOK LIKE EACH OTHER.
+
+   All three used to print one em dash and differ only in a hover title,
+   which is no difference at all on a phone or on paper. The glyph now
+   carries it — "0s" for a measured horizon of zero SESSIONS (a reading
+   about this name's calendar, with its unit attached so it can never be
+   read as a zero move), "†" for an iv30 the payload does not carry for this
+   name, "—" for a row that simply published none — and this rule keeps all
+   three at the ink of a withholding rather than the ink of a reading, with
+   the help cursor that says the title is worth opening.
+
+   NO FONT RULE IS NEEDED FOR THE TWO NEW GLYPHS: the cells are `.c-num`,
+   which is already set in the mono face with tabular figures at the top of
+   this file, so "0s" and the dagger sit on the same column as the
+   percentages above and below them without a second declaration. */
 .ev-priced.is-none,
+.ev-priced.is-zero-horizon,
+.ev-priced.is-unavailable,
 .ev-rv.is-none {
   color: var(--ink-faint);
   cursor: help;
@@ -6052,8 +6079,27 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* The status line carries data-empty the way every renderer's empty state
    does, so which silence the page is in is visible and not only readable.
-   Same four shapes, same glyphs, same reasoning as THE THREE SILENCES block
-   above — a bar and a glyph rather than a hue. */
+   Same shapes, same glyphs, same reasoning as THE THREE SILENCES block
+   above — a bar and a glyph rather than a hue.
+
+   `failed` IS NAMED BESIDE `unreadable` HERE FOR THE SAME REASON IT IS
+   NAMED BESIDE IT UP THERE, and it was absent until a route first put that
+   kind on a strip. The events renderer marks the strip when the request
+   never came back; with only the four arms below, that state fell through
+   to the base rule and drew a 2px solid bar in the hairline ink with no
+   glyph at all — one CSS pixel of border width, and nothing else, away
+   from quiet's 1px hairline, which is the same mark in greyscale. Measured
+   at 1440 against a 503: strip `2px solid rgba(201,198,172,0.14)`, no
+   ::before, while the region three lines below it wore `3px solid
+   var(--flow-down)` and the × at the same instant — the page disagreeing
+   with itself about which silence it was in. The two kinds share the MARK
+   because a reader scanning for trouble needs one shape to find, and they
+   are told apart by the sentence, which is where their remedies part:
+   `failed` says the request did not come back and asks for a reload;
+   `unreadable` says the bytes are in the store and do not parse, and
+   refuses to ask for one, because reloading fetches the same bytes
+   (flows-events.js, the unreadable sentence). An earlier draft of this
+   comment claimed they shared the remedy; they never did. */
 .flows-status[data-empty] { border-left: 2px solid var(--hairline); padding-left: 0.6rem; }
 .flows-status[data-empty]::before {
   font-family: var(--font-mono);
@@ -6065,11 +6111,13 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .flows-status[data-empty="pending"]::before { content: "\2026"; }
 .flows-status[data-empty="unavailable"] { border-left-style: dashed; }
 .flows-status[data-empty="unavailable"]::before { content: "\2020"; }
-.flows-status[data-empty="unreadable"] {
+.flows-status[data-empty="unreadable"],
+.flows-status[data-empty="failed"] {
   border-left-width: 3px;
   border-left-color: var(--flow-down);
 }
-.flows-status[data-empty="unreadable"]::before { content: "\00d7"; }
+.flows-status[data-empty="unreadable"]::before,
+.flows-status[data-empty="failed"]::before { content: "\00d7"; }
 .flows-status[data-empty="quiet"] { border-left-width: 1px; }
 
 /* ---------- the symbol entry ---------------------------------- */
