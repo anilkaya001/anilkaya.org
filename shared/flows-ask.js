@@ -1175,6 +1175,64 @@ export function guardAnswer(answer, picked, options) {
  * tests/flows-ask.mjs: a fallback that violated its own rule would
  * be a guard that fires on its own output.
  */
+/* ---------- which names the facts actually cover ----------------- */
+
+/**
+ * Which tickers in the question the facts cover, and which they do not.
+ *
+ * ONE BOOLEAN WAS TWO FACTS WEARING ONE COAT. renderFactsPlain asked a
+ * single `touched` — did ANY word or ticker in the question match ANY
+ * fact — and led with "these are the published readings that bear on
+ * what you asked" whenever it was true. A question naming NVDA beside
+ * the word "calls" set it true through "calls", which matched the
+ * market-wide put/call fact, while NVDA itself matched nothing; the page
+ * then told a reader that a ratio over 668 names bore on the one name
+ * they had asked about. The owner saw it on the live site.
+ *
+ * Split into the facts it always was: the names the facts cover
+ * (`hit`), the names they do not (`miss`), and whether a topic word
+ * matched at all (`wordHit`). A name is covered when some fact's topic
+ * carries it — the same test selectFacts scores on, so the two can never
+ * disagree about what "matched" means.
+ *
+ * NAMES ARE HANDED BACK UPPERCASE, AND PRINTABLE BY THE GUARD'S OWN RULE.
+ * renderFactsPlain is asserted to pass the guard it exists to satisfy,
+ * and the guard scans numerals against the union of the picked facts'
+ * sentences. So a name may be printed into the lead exactly when every
+ * numeral it carries is already in that set — which a covered name's
+ * always are, since the fact that covers it names it, and an uncovered
+ * name's usually are not. A digit-free rule was tried first and blanked
+ * SYN46 on the very question it was covered in; the guard's rule, applied
+ * to the name, is the one that cannot disagree with the guard. A name
+ * that fails it is referred to, not printed — `hitSaid` and `missSaid`
+ * are the printable subsets.
+ */
+export function tickerCoverage(picked, question) {
+  const facts = Array.isArray(picked) ? picked : [];
+  const tickers = questionTickers(question);
+  const words = questionWords(question);
+  const covered = new Set();
+  let wordHit = false;
+  for (const f of facts) {
+    const topic = new Set(f && Array.isArray(f.topic) ? f.topic : []);
+    for (const t of tickers) if (topic.has(t)) covered.add(t);
+    for (const w of words) if (topic.has(w)) wordHit = true;
+  }
+  const allowed = new Set();
+  for (const f of facts) for (const n of numeralsIn(f && typeof f.say === "string" ? f.say : "")) allowed.add(n);
+  const printable = (t) => numeralsIn(t).every((n) => allowed.has(n));
+  const said = (list) => list.filter(printable).map((t) => t.toUpperCase());
+  const hit = tickers.filter((t) => covered.has(t));
+  const miss = tickers.filter((t) => !covered.has(t));
+  return { hit, miss, wordHit, hitSaid: said(hit), missSaid: said(miss) };
+}
+
+/* "NVDA", "NVDA or AMD", "NVDA, AMD or TSLA". */
+function nameList(names) {
+  if (names.length <= 1) return names.join("");
+  return names.slice(0, -1).join(", ") + " or " + names[names.length - 1];
+}
+
 export function renderFactsPlain(picked, question) {
   const facts = Array.isArray(picked) ? picked : [];
   if (!facts.length) {
@@ -1195,19 +1253,43 @@ export function renderFactsPlain(picked, question) {
       "statement about the market.";
   }
 
-  const words = questionWords(question);
-  const tickers = questionTickers(question);
-  let touched = false;
-  for (const f of facts) {
-    const topic = new Set(f.topic || []);
-    for (const t of tickers) if (topic.has(t)) touched = true;
-    for (const w of words) if (topic.has(w)) touched = true;
-  }
+  /* THE LEAD IS A CLAIM ABOUT COVERAGE, SO IT IS BUILT FROM COVERAGE.
+     Five cases, and the ones that matter are the two in the middle: a
+     name asked about that no fact here is about. That is a withholding
+     and it goes in the open, ahead of every reading, because a reader
+     who sees market-wide figures under "these bear on what you asked"
+     attaches them to the name they typed.
 
-  const lead = touched
-    ? "These are the published readings that bear on what you asked."
-    : "Nothing in the question matched a name or a topic the published payloads carry, " +
+     IT CLAIMS ONLY WHAT IT CAN SEE. This function is handed `picked` and
+     never the index, so "no reading this index holds" would assert
+     something it cannot check — a fact cut by the cap is held and not
+     here. "None of the readings below" is exactly what it knows. WHY the
+     name has no reading — on a board with no per-name facts indexed,
+     screened only, never heard of — is a diagnosis, and it belongs to
+     the roster that can make it; this sentence does not guess, and it
+     never says "nothing published", because the name may well be on a
+     board and hold a card. */
+  const cov = tickerCoverage(facts, question);
+  const one = cov.miss.length === 1;
+  const missPhrase = cov.missSaid.length ? nameList(cov.missSaid)
+    : (one ? "the name you asked about" : "the names you asked about");
+  const withheld = "None of the readings below is about " + missPhrase + ".";
+
+  let lead;
+  if (cov.miss.length === 0 && (cov.hit.length > 0 || cov.wordHit)) {
+    lead = "These are the published readings that bear on what you asked.";
+  } else if (cov.miss.length > 0 && cov.hit.length > 0) {
+    const hitPhrase = cov.hitSaid.length ? nameList(cov.hitSaid) : "the name it does cover";
+    lead = "These are the published readings that bear on " + hitPhrase + ". " + withheld;
+  } else if (cov.miss.length > 0 && cov.wordHit) {
+    lead = withheld + " They are the session's readings on the other words in the question.";
+  } else if (cov.miss.length > 0) {
+    lead = withheld + " Nothing else in the question matched a topic the published payloads " +
+      "carry, so these are the session's headline readings.";
+  } else {
+    lead = "Nothing in the question matched a name or a topic the published payloads carry, " +
       "so these are the session's headline readings.";
+  }
   const body = facts.map((f) => "- " + f.say).join("\n");
   return lead + "\n\n" + body + "\n\n" +
     "Every figure above is quoted from a payload this pipeline published; none of it " +
@@ -1257,12 +1339,34 @@ export function promptFor(picked, question) {
       "back at a vendor's limit, keep that qualification in your answer.",
     "6. If the supplied facts do not answer the question, say so plainly and say what " +
       "they do cover. A short honest answer is the goal.",
+    "7. If a COVERAGE line says a name in the question has no reading among the facts, " +
+      "never attach a figure to that name. A market-wide figure is not a reading for one " +
+      "name, and writing one beside it is the same as inventing it.",
     "",
     "Write two or three plain sentences. No lists, no headings, no markdown, and do " +
       "not refer to the facts by number or position.",
   ].join("\n");
 
+  /* THE MODEL IS TOLD WHAT THE PAGE IS TOLD. Rule 6 asks it to say when
+     the facts do not answer the question, but it cannot know that NVDA
+     matched nothing: it sees a put/call ratio and the name in the
+     question, and "for NVDA, the put/call ratio is 0.5546" passes the
+     guard because the figure IS in a fact. A market-wide number attached
+     to one name is the one fabrication the numeral scan cannot see, so
+     the coverage is stated to the model in the same terms the plain
+     reading states it to the reader. */
+  const cov = tickerCoverage(facts, question);
+  const coverage = cov.miss.length
+    ? "\n\nCOVERAGE: the question names " +
+      (cov.missSaid.length ? nameList(cov.missSaid) : "a symbol") +
+      ", and none of the facts below is a reading for " +
+      (cov.miss.length === 1 ? "that name" : "those names") +
+      ". Do not attribute any figure to " + (cov.miss.length === 1 ? "it" : "them") +
+      "; say that no reading for " + (cov.miss.length === 1 ? "it" : "them") +
+      " was supplied."
+    : "";
   const user = "Question: " + (typeof question === "string" ? question.trim() : "") +
+    coverage +
     "\n\nFacts measured for this session:\n" +
     facts.map((f) => "- " + f.say).join("\n");
 

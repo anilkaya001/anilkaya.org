@@ -389,14 +389,32 @@ try {
     const courseContext = await browser.newContext();
     const coursePage = await courseContext.newPage();
     await coursePage.goto(BASE + "/lab/challenge/?course=ols", { waitUntil: "load" });
+    // The bank is static, so it is fetched once rather than seven times.
+    const olsItems = await coursePage.evaluate(async () => {
+      const payload = await (await fetch(`/assets/data/challenge-bank.json?v=${document.documentElement.dataset.assetVersion}`)).json();
+      return payload.items.filter((item) => item.courseId === "ols").map((item) => ({ prompt: item.prompt, answer: item.answer }));
+    });
+    // THE PROMPT IS WAITED FOR, NOT READ. challenge.js rebuilds the whole
+    // question article through innerHTML when the reader advances, so the
+    // instant after the advance click the old prompt is torn down and the new
+    // one is not yet attached. A plain evaluate() in that window found no
+    // element, matched nothing, and failed the assertion below on a slow CI
+    // runner while passing on every fast machine — a race that shipped green
+    // for months and went red on a PR that never touched the Lab. The wait
+    // resolves only once a prompt is attached, is not the one just answered,
+    // and matches a fixture, which is the state the loop body assumes.
+    let previousPrompt = null;
     for (let index = 0; index < 7; index++) {
-      const answer = await coursePage.evaluate(async () => {
-        const payload = await (await fetch(`/assets/data/challenge-bank.json?v=${document.documentElement.dataset.assetVersion}`)).json();
+      const handle = await coursePage.waitForFunction(({ items, previous }) => {
         const prompt = document.querySelector(".review-question__prompt")?.textContent;
-        return payload.items.find((item) => item.courseId === "ols" && item.prompt === prompt)?.answer;
-      });
-      assert(Number.isInteger(answer), "course challenge answer fixture could not match the rendered prompt");
-      await coursePage.locator(`.review-form input[name="answer"][value="${answer}"]`).check();
+        if (!prompt || prompt === previous) return null;
+        const hit = items.find((item) => item.prompt === prompt);
+        return Number.isInteger(hit?.answer) ? { prompt, answer: hit.answer } : null;
+      }, { items: olsItems, previous: previousPrompt });
+      const matched = await handle.jsonValue();
+      assert(matched && Number.isInteger(matched.answer), "course challenge answer fixture could not match the rendered prompt");
+      previousPrompt = matched.prompt;
+      await coursePage.locator(`.review-form input[name="answer"][value="${matched.answer}"]`).check();
       await coursePage.locator('.review-form button[type="submit"]').click();
       await coursePage.locator("#challengeFeedback.is-correct").waitFor();
       await coursePage.locator('.review-form button[type="submit"]').click();
