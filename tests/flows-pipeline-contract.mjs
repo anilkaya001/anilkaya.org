@@ -3431,11 +3431,46 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and the detached archive walk was awaited in time for the record to score it");
 
   /* ---- nothing this pass added pushed a payload at the ingest cap ---- */
+  /* THE BRIEF HAS ITS OWN CEILING, AND RAISING IT WAS A DECISION. The
+     100KB below is the card shedder's target, applied to every payload
+     as a regression guard. The brief now carries five readings for each
+     of the fifty carded names — 430 bytes a fact, 121KB for the whole
+     key on this corpus — and holding it to 100KB would shed nine names
+     every ordinary morning, the bottom of the short board, for a margin
+     the key does not need: its publish is guarded by a shed that
+     measures the exact serialized body against 120KB, so the 128KB
+     ingest cap is unreachable at any morning's card size, and the
+     Worker's parse of it on every question is ~1.7ms + 1ms per 108KB,
+     which 120KB moves by a fifth of a millisecond. Two assertions
+     replace the one: the ceiling, and a tripwire on the run log that
+     fires the first morning the shed drops a name from this corpus, so
+     a card that grows shows up as lost COVERAGE rather than as a byte
+     count nobody reads. */
   for (const name of emitted) {
     const bytes = fs.statSync(path.join(dir, name)).size;
+    if (name === "w-brief.json") {
+      ok(bytes <= 120 * 1024,
+         `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the brief's own 120KB ceiling ` +
+         "(the ingest route accepts 128KB; the shed in the pipeline measures against 120KB)");
+      continue;
+    }
     ok(bytes <= 100 * 1024,
        `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts ` +
        "(and inside the 100KB the card shedder targets)");
+  }
+  {
+    const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names(?: \((\d+) shed)?/.exec(runLog);
+    ok(m !== null, "the run log states how many carded names the brief indexed, against how many were carded");
+    if (m !== null) {
+      const [, , perName, indexed, of, shed] = m;
+      eq(Number(indexed), Number(of),
+         `every carded name is indexed on this corpus (${indexed} of ${of}); a shed here means ` +
+         "the cards grew past the brief's 120KB and the least-read names lost their readings — " +
+         "raise the ceiling as a decision or trim a fact, but do not let coverage fall in silence");
+      ok(shed === undefined, "and the log prints no shed clause when nothing was shed");
+      ok(Number(perName) >= 4 * Number(of),
+         `at least four readings per carded name reached the brief (${perName} over ${of})`);
+    }
   }
 }
 

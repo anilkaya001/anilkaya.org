@@ -8719,10 +8719,22 @@ async function main() {
     } else {
       console.log(`  warnings: none, from ${alarm.checked} checks that could run`);
     }
-    await publish("brief", {
+    /* THE PER-NAME FACTS ARE SHED BY SIZE, WHOLE NAMES AT A TIME. The
+       index now carries up to five readings for every carded name, and
+       fifty cards of them is the one thing that can push this key past
+       the ingest route's FLOWS_MAX_PAYLOAD_BYTES (128KB, worker.js). The
+       budget below is the SERIALIZED size of the whole key, measured on
+       the exact object that will be posted, with 8KB left under the cap
+       for the route's own bounded read (measured 115.6KB on the emit corpus with all fifty names). Names go from the least-read end
+       — cardFacts() orders them long board by rank, then short, then
+       unboarded — and the count that survives is published WITH its
+       denominator, so the page can print "readings indexed for 38 of 50
+       carded names" rather than a bare 38 that reads as all of them. */
+    const BRIEF_BYTE_BUDGET = 120 * 1024;
+    const { shedCardFacts } = await import("../shared/flows-ask.js");
+    const base = {
       generatedAt, sessionDate,
       ...buildBrief(briefStoreFrom(publishedStore)),
-      facts: index.facts,
       silences: index.silences,
       warnings: alarm.warnings,
       warningsChecked: alarm.checked,
@@ -8733,7 +8745,14 @@ async function main() {
          indistinguishable from one where four is every question there is,
          and the page can only report the count that ran. */
       warningsQuestions: alarm.questions,
-    });
+    };
+    const over = (facts) => JSON.stringify({ ...base, facts }).length - BRIEF_BYTE_BUDGET;
+    const shed = shedCardFacts(index.facts, index.cardNames || [], over);
+    const cardCount = shed.facts.filter((f) => typeof f.source === "string" && f.source.startsWith("card:")).length;
+    console.log(`  brief: ${shed.facts.length} facts, ${cardCount} of them per-name over ` +
+      `${shed.namesIndexed.indexed} of ${shed.namesIndexed.of} carded names` +
+      (shed.namesIndexed.shed ? ` (${shed.namesIndexed.shed} shed to stay under ${BRIEF_BYTE_BUDGET} bytes)` : ""));
+    await publish("brief", { ...base, facts: shed.facts, namesIndexed: shed.namesIndexed });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
   }
