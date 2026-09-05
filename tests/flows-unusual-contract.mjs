@@ -1470,6 +1470,402 @@ const rebuild = (em) => {
     ok(/may be a ceiling rather than a market/.test(unstated),
        "it warns rather than reassures, because an unmeasured cap is closer to a cap than " +
        "to a clean read for anyone deciding whether to trust the count");
+
+    /* ---- §17 THE FOUR SILENCES, EACH WITH ITS OWN MARK AND ITS OWN
+       SENTENCE, AND NONE OF THEM WEARING A COUNT ------------------------
+
+       Everything above this point tests a page that ANSWERED. What follows
+       tests the four ways it cannot, which on this route were rendered as one
+       thing: an identical dim paragraph, and — twice — an identical set of
+       zeros. A payload with no `contracts` block printed "0 contracts from 0
+       names · the payload did not say which cap bound this list" and a caption
+       reading "0 of 0 contracts that cleared the floors"; a payload with no
+       `names` block printed the QUIET sentence, which is a finding about the
+       screened universe. Both are counts taken off an absence.
+
+       The marks are asserted as `data-empty`, never as prose, because an
+       assertion that matches on wording certifies the wording and would pass
+       on four paragraphs that still look identical to a reader. */
+    const read = async (unusual, alerts, options, press) => {
+      if (unusual !== null) await put("unusual", unusual);
+      if (alerts !== null) await put("flowalerts", alerts);
+      const p = await browser.newPage(Object.assign(
+        { viewport: { width: 1280, height: 900 } }, options || {}));
+      await p.context().addCookies([{
+        name: "flows_session", value: session, url: server.baseURL,
+      }]);
+      await p.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+      await p.waitForSelector("#uaStatus");
+      /* The filter note states its tallies only while a filter is on, which is
+         where the displayed zero used to live. */
+      if (press) await p.click(press);
+      const out = await p.evaluate(() => {
+        const txt = (sel) => {
+          const n = document.querySelector(sel);
+          return n ? n.textContent : null;
+        };
+        const mark = (sel) => {
+          const n = document.querySelector(sel);
+          return n ? n.getAttribute("data-empty") : null;
+        };
+        return {
+          status: txt("#uaStatus"), statusMark: mark("#uaStatus"),
+          feedEmpty: txt("#uaFeedBody .flows-empty"),
+          feedMark: mark("#uaFeedBody .flows-empty"),
+          nameEmpty: txt("#uaNameBody .flows-empty"),
+          nameMark: mark("#uaNameBody .flows-empty"),
+          alertMark: mark("#uaAlertsBody .flows-empty"),
+          feedCap: txt("#uaFeedCap"), nameCap: txt("#uaNameCap"),
+          alertsCap: txt("#uaAlertsCap"), alertsNote: txt("#uaAlertsNote"),
+          stamp: txt("#uaAlertsStamp"), filterNote: txt("#uaFilterNote"),
+        };
+      });
+      await p.close();
+      return out;
+    };
+
+    const BASIS = { unit: "A contract counter, and not a trade.",
+                    date: "no date parameter, the span is unobserved" };
+    const LIVE_ALERTS = {
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
+      seen: 4, shed: 0, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200,
+        exp: "2026-09-18", prem: 1000, size: 5, trades: 1 }],
+    };
+
+    /* ---- the contracts block that is not on the payload ---- */
+    const noContracts = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 2,
+      coverage: [{ t: "AAA", rows: 400 }],
+      names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0 },
+      basis: BASIS,
+    }, LIVE_ALERTS);
+
+    eq(noContracts.statusMark, "unavailable",
+       "A PAYLOAD WITH NO `contracts` BLOCK IS THE FOURTH SILENCE, and the strip wears the " +
+       "dagger that says so. It used to wear no mark at all, which left the reader the " +
+       "prose and nothing else to tell a missing field from a measurement");
+    ok(!/\d/.test(noContracts.status),
+       `AND IT CARRIES NO DIGIT. "0 contracts from 0 names, of 0 that cleared the floors" ` +
+       `is three counts taken off a block that is not on the wire — a zero nobody counted, ` +
+       `which is Number(null) === 0 with a denominator attached — got: ${noContracts.status}`);
+    eq(noContracts.feedMark, "unavailable",
+       "and the feed's own empty row carries the same mark rather than the quiet hairline");
+    ok(!/\bfloors\b/.test(String(noContracts.feedCap)),
+       `with no caption counting a population that was never published — got: ` +
+       `${noContracts.feedCap}`);
+    /* THE FOLD RULE, ON THE SCREEN THE READER LANDS ON. Reassurance may fold;
+       a withholding never may — and the default note is the one nobody has to
+       press anything to reach. */
+    ok(!/Both tables show every row published/.test(String(noContracts.filterNote)),
+       `THE REASSURANCE MAY NOT OUTLIVE THE FEED IT REASSURES ABOUT. "Both tables show ` +
+       `every row published" stood two elements under a feed cell reading "the contract ` +
+       `rows are not on this payload", in the DEFAULT view, with the honest sentence ` +
+       `reachable only by pressing a pill — got: ${noContracts.filterNote}`);
+    ok(/contracts are not on this payload/.test(String(noContracts.filterNote)),
+       `and the unpressed note names the silence in the same words the filtered one uses, ` +
+       `off the same tally, so the two sentences cannot disagree — got: ` +
+       `${noContracts.filterNote}`);
+    /* The note states its tallies only while a filter is on, which is where
+       the displayed zero lived: the same payloads, read again with Calls
+       pressed. */
+    const noContractsFiltered = await read(null, null, null,
+      "#uaFilters button:nth-child(2)");
+    ok(/contracts are not on this payload/.test(String(noContractsFiltered.filterNote)),
+       `and the filter note names the absence rather than reporting "0 of 0 contracts are ` +
+       `drawn" from it — got: ${noContractsFiltered.filterNote}`);
+    ok(!/of 0 contracts are drawn/.test(String(noContractsFiltered.filterNote)),
+       "which is the same displayed zero the alerts side already refuses");
+    ok(!/could not be read/.test(String(noContractsFiltered.filterNote)),
+       "and it is NOT the broken-read sentence either: this payload arrived intact and " +
+       "parsed, and the two silences have to stay two");
+    eq(noContractsFiltered.feedMark, "unavailable",
+       "AND PRESSING A PILL DOES NOT ERASE THE WITHHOLDING. paintFeedRows blanks the body " +
+       "before it redraws, so over a feed with no published rows it wiped the cell that " +
+       "said why and left a blank table under a caption — which is worse than any of the " +
+       "four silences, because it says nothing at all");
+
+    /* ---- the contracts block that IS on the payload, carrying no rows ----
+
+       THE GUARD READS `rows`, SO THE SENTENCE MAY SPEAK ONLY OF `rows`. Three
+       shapes reach that branch — no `contracts` key, a block with no `rows`,
+       and a block whose `rows` is not an array — and one dagger over all three
+       told the reader, as a fact about the wire, that a block they can find in
+       the payload with `shown: 50` and `eligible: 5953` on it is not on it.
+       paintAlerts calls this exact shape UNREADABLE on the alerts feed, so the
+       fix for a collapse of the four silences had collapsed two of them. */
+    const brokenContracts = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 2,
+      contracts: { shown: 50, eligible: 5953, cap: 50, perName: 2,
+                   capBound: "rows", rows: null },
+      coverage: [{ t: "AAA", rows: 400 }],
+      names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0 },
+      basis: BASIS,
+    }, LIVE_ALERTS);
+
+    eq(brokenContracts.statusMark, "unreadable",
+       "A CONTRACTS BLOCK ON THE PAYLOAD WITH NO ROWS ARRAY IS THE CROSS, NOT THE DAGGER: " +
+       "published bytes this page could not parse, which is exactly what paintAlerts " +
+       "prints for the identical shape one panel above");
+    eq(brokenContracts.feedMark, "unreadable",
+       "and the feed's own empty row carries the same cross rather than the dagger that " +
+       "says a field is missing from the payload");
+    ok(brokenContracts.statusMark !== noContracts.statusMark,
+       "which is the whole point: the two shapes are two silences and wore one mark");
+    ok(!/carries no contracts block/.test(String(brokenContracts.status)),
+       `AND THE STRIP STATES NO FALSEHOOD ABOUT THE WIRE. The block is on this payload — ` +
+       `a reader can see the shown and the eligible on it — so "this payload carries no ` +
+       `contracts block" asserts something the guard never tested — got: ` +
+       `${brokenContracts.status}`);
+    ok(/no rows array/.test(String(brokenContracts.status)),
+       `it says what was read instead — got: ${brokenContracts.status}`);
+    ok(!/\d/.test(String(brokenContracts.status)),
+       `and still carries no digit: an unreadable list is not a licence to print the ` +
+       `counts beside it as though they described a drawn table — got: ` +
+       `${brokenContracts.status}`);
+    const brokenFiltered = await read(null, null, null, "#uaFilters button:nth-child(2)");
+    ok(/contracts could not be read/.test(String(brokenFiltered.filterNote)),
+       `and the filter note words it as the broken read it is — got: ` +
+       `${brokenFiltered.filterNote}`);
+    ok(!/contracts are not on this payload/.test(String(brokenFiltered.filterNote)),
+       "and never as the absence, which is the other half of the same collapse");
+
+    /* ---- the names block that is not on the payload ---- */
+    const noNames = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 1,
+      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")],
+                   shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
+      coverage: [{ t: "AAA", rows: 400 }],
+      basis: BASIS,
+    }, LIVE_ALERTS);
+
+    eq(noNames.nameMark, "unavailable",
+       "A MISSING NAME PANEL IS UNAVAILABLE, NOT QUIET. The panel used to print “No name " +
+       "carried both a call and a put thirty-day average, so none could be ranked” off a " +
+       "`names` block that is not on the payload — a finding about every screened name, " +
+       "published from an absence");
+    ok(!/thirty-day average/.test(String(noNames.nameEmpty)),
+       `so the quiet sentence specifically does not appear — got: ${noNames.nameEmpty}`);
+    ok(!/\d/.test(String(noNames.nameCap)),
+       `and no caption ranks 0 of 0 names — got: ${noNames.nameCap}`);
+    eq(noNames.statusMark, null,
+       "while the strip, whose contracts DID arrive, carries no mark at all: one silence " +
+       "does not spread to a panel that measured something");
+    ok(/\b1 contracts? from 1 name\b/.test(String(noNames.status)),
+       `and still states its own count — got: ${noNames.status}`);
+    ok(!/No name was ranked/.test(String(noNames.nameEmpty)),
+       `AND THE REPLACEMENT SENTENCE ASSERTS ONLY WHAT THE GUARD READ. "No name was ` +
+       `ranked and none was found unrankable" is a claim about the RUN, made off a guard ` +
+       `that tested \`rows\` — it is a second finding published from an absence, in the ` +
+       `place the first one was removed from — got: ${noNames.nameEmpty}`);
+    ok(/Both tables show every row published/.test(String(noNames.filterNote)),
+       "while a page whose two TABLES both answered keeps its reassurance: the name panel " +
+       "is not one of them, and gating that sentence on every panel would trade a false " +
+       "reassurance for a false alarm");
+
+    /* ---- the name panel that IS on the payload, carrying no rows ---- */
+    const brokenNames = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 1,
+      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")],
+                   shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
+      coverage: [{ t: "AAA", rows: 400 }],
+      names: { ranked: 40, universe: 420, unranked: 0, shown: 40, rows: null },
+      basis: BASIS,
+    }, LIVE_ALERTS);
+
+    eq(brokenNames.nameMark, "unreadable",
+       "A NAME PANEL WHOSE ROWS COULD NOT BE READ IS THE CROSS, NOT THE DAGGER — the same " +
+       "split the feed above makes, because the payload states 40 of 420 names ranked and " +
+       "the panel is not entitled to call that missing");
+    ok(!/No name was ranked/.test(String(brokenNames.nameEmpty)),
+       `and specifically does not report the run: this payload says 40 were ranked and 0 ` +
+       `were unrankable — got: ${brokenNames.nameEmpty}`);
+    ok(/no rows array/.test(String(brokenNames.nameEmpty)),
+       `it names what could not be read instead — got: ${brokenNames.nameEmpty}`);
+
+    /* ---- measured, and empty ---- */
+    const quiet = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "quiet", namesSeen: 2,
+      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30,
+                   capBound: "eligible" },
+      coverage: [{ t: "AAA", rows: 400 }],
+      names: { rows: [], universe: 2, ranked: 0, unranked: 2, shown: 0 },
+      basis: BASIS,
+    }, LIVE_ALERTS);
+
+    eq(quiet.statusMark, "quiet",
+       "A CHAIN THAT CLEARED NOTHING IS THE ONE SILENCE THAT IS A READING, and it gets the " +
+       "hairline: no glyph, no colour, because it is a fact about the market and not about " +
+       "the payload or about this page");
+    eq(quiet.feedMark, "quiet", "and so does the feed's empty row");
+    eq(quiet.nameMark, "quiet",
+       "and the name panel's, where every count IS measured and every one of them is zero");
+    ok(/cleared both floors/.test(String(quiet.feedEmpty)),
+       `with the sentence that says whose chains those were — got: ${quiet.feedEmpty}`);
+
+    /* AND THE EMPTINESS IS WHAT MAKES IT QUIET, NOT THE PAYLOAD'S OWN LABEL.
+       The same block with no rows and no `status: "quiet"` is the same reading:
+       the array exists and holds nothing. The strip's gate also tested the
+       label, so this state left the strip bare while the feed cell below it
+       drew the hairline — one state, two elements, two marks, and the strip's
+       prose identical either way, since the counts it prints never read
+       `status`. The feed's sentence is where the two are told apart. */
+    const unlabelled = await read({
+      v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
+      readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 2,
+      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30,
+                   capBound: "eligible" },
+      coverage: [{ t: "AAA", rows: 400 }],
+      names: { rows: [], universe: 2, ranked: 0, unranked: 2, shown: 0 },
+      basis: BASIS,
+    }, LIVE_ALERTS);
+    eq(unlabelled.statusMark, "quiet",
+       "an empty rows array is the measured emptiness whether or not the payload also " +
+       "stamped itself quiet: the rows are the reading, the label is a weaker second " +
+       "assertion about the same fact");
+    eq(unlabelled.statusMark, quiet.statusMark,
+       "so the strip wears one mark for one state, rather than two for a sentence it " +
+       "prints identically either way");
+    eq(unlabelled.feedMark, "quiet",
+       "and the feed cell agrees with the strip above it, which is what disagreed before");
+    ok(/did not report the read as quiet/.test(String(unlabelled.feedEmpty)),
+       `while the SENTENCE still separates the two — got: ${unlabelled.feedEmpty}`);
+
+    /* ---- the alerts side, three states, three marks ---- */
+    const alertsPending = await read(null, { v: 2, status: "pending" });
+    eq(alertsPending.alertMark, "pending",
+       "AN UNPUBLISHED KEY IS PENDING: the dotted rule and the ellipsis, which is the only " +
+       "one of the four that says “come back”");
+
+    const alertsBroken = await read(null,
+      { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
+    eq(alertsBroken.alertMark, "unreadable",
+       "a payload that arrived and carries no rows array is UNREADABLE — the cross and the " +
+       "widest rule, the one silence with a remedy the reader can act on");
+
+    const alertsQuiet = await read(null,
+      { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
+        seen: 0, shed: 0, cap: 50, rows: [] });
+    eq(alertsQuiet.alertMark, "quiet",
+       "and a read the vendor's rules flagged nothing in is QUIET, not broken: the three " +
+       "states shared one paragraph and now differ by a rule and a glyph as well as by " +
+       "their sentence");
+    const alertsQuietFiltered = await read(null, null, null,
+      "#uaFilters button:nth-child(2)");
+    eq(alertsQuietFiltered.alertMark, "quiet",
+       "AND PRESSING A PILL DOES NOT ERASE THE ALERTS SIDE'S SENTENCE EITHER. repaint() " +
+       "calls paintAlertRows on every press and paintAlertRows blanks the body before it " +
+       "redraws, so without the same empty-list guard the feed has, a reader who presses " +
+       "Calls over a quiet — or pending, or unreadable — alerts read is left with a blank " +
+       "table and no sentence at all, which is worse than any of the four silences");
+
+    /* ---- the key that has not been published yet ---- */
+    const unusualPending = await read({ v: 2, status: "pending" }, LIVE_ALERTS);
+    eq(unusualPending.statusMark, "pending",
+       "THE STORE'S ORDINARY FIRST STATE IS THE DOTTED RULE AND THE ELLIPSIS, on this " +
+       "key exactly as on the alerts key: a run that has not happened yet is the one " +
+       "silence of the four that tells the reader to come back");
+
+    /* ---- the two fetches that never answered ----
+
+       A FETCH THAT FAILED IS UNREADABLE, NEVER UNAVAILABLE. It is the only one
+       of the four silences this page owns rather than reports, and the only
+       one with a remedy the reader can act on; wearing the dagger would hand
+       the payload the blame for a request that never arrived. Both endpoints
+       are answered with a 500 rather than aborted, because that is the shape
+       the worker can actually produce. */
+    const dead = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await dead.context().addCookies([{
+      name: "flows_session", value: session, url: server.baseURL,
+    }]);
+    await dead.route("**/api/flows/unusual", (route) =>
+      route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+    await dead.route("**/api/flows/flowalerts", (route) =>
+      route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+    await dead.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+    await dead.waitForSelector("#uaFeedBody .flows-empty");
+    const broke = await dead.evaluate(() => {
+      const mark = (sel) => {
+        const n = document.querySelector(sel);
+        return n ? n.getAttribute("data-empty") : null;
+      };
+      return {
+        statusMark: mark("#uaStatus"),
+        feedMark: mark("#uaFeedBody .flows-empty"),
+        nameMark: mark("#uaNameBody .flows-empty"),
+        basisMark: mark("#uaBasis .flows-empty"),
+        alertMark: mark("#uaAlertsBody .flows-empty"),
+        filterNote: (document.getElementById("uaFilterNote") || {}).textContent,
+      };
+    });
+    await dead.close();
+
+    eq(broke.statusMark, "unreadable", "the strip wears the cross when the fetch died");
+    eq(broke.feedMark, "unreadable", "and so does the contract feed's empty row");
+    eq(broke.nameMark, "unreadable", "and the name panel's");
+    eq(broke.basisMark, "unreadable",
+       "and the basis, which is the page's own account of its method and must not read " +
+       "as though the method were withheld");
+    eq(broke.alertMark, "unreadable",
+       "and the alerts panel, whose own fetch failed separately — one payload's failure " +
+       "is not the other's, and both are this page's to own");
+    ok(/flagged windows could not be read/.test(String(broke.filterNote)) &&
+       /contracts could not be read/.test(String(broke.filterNote)),
+       `while the filter note counts neither table — got: ${broke.filterNote}`);
+
+    /* ---- one clock, in the unit the rest of the panel is in ---- */
+    const NY = await read(null, LIVE_ALERTS, { timezoneId: "America/New_York" });
+    ok(/^Read 2026-09-01 06:00 UTC/.test(String(NY.stamp)),
+       `THE STAMP IS THE READ INSTANT IN UTC. It went through toLocaleTimeString, so a New ` +
+       `York reader saw "Read 02:00" above a note that printed the same instant as ` +
+       `"2026-09-01 06:00 UTC" and beside a Window column headed UTC — and an Istanbul ` +
+       `reader saw a different calendar day — got: ${NY.stamp}`);
+    ok(!/\b02:00\b/.test(String(NY.stamp)),
+       "and specifically not the local wall clock, which is a fourth number on a panel " +
+       "that already carries three readings of one instant");
+    ok(!/Read /.test(String(NY.alertsNote)),
+       `while the note below no longer repeats it: two "Read …" lines on one panel invite ` +
+       `the reading that they are two reads — got: ${NY.alertsNote}`);
+    ok(/vendor's own stated span/.test(String(NY.alertsNote)),
+       "keeping the fact the note owed the reader, which is the unit those spans are in");
+
+    /* ---- what the row cap shed, and what nobody counted ---- */
+    const shedNone = await read(null, {
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, shed: 0, cap: 50,
+      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
+    });
+    const shedUnknown = await read(null, {
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, cap: 50,
+      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
+    });
+    ok(/not recorded on this payload/.test(String(shedUnknown.alertsCap)),
+       `AN UNCOUNTED SHED SAYS SO. \`isNum(alerts.shed) ?? 0\` turned an absent count into ` +
+       `a measured zero, so a payload published before \`shed\` shipped printed the caption ` +
+       `of a read the cap did not touch — got: ${shedUnknown.alertsCap}`);
+    ok(!/not recorded on this payload/.test(String(shedNone.alertsCap)),
+       `while a read the cap genuinely did not touch stays silent about it — got: ` +
+       `${shedNone.alertsCap}`);
+    ok(shedNone.alertsCap !== shedUnknown.alertsCap,
+       "which is the whole point: the two captions were byte-identical, and one of them " +
+       "was reporting a measurement nobody made");
+
+    /* ---- a vendor ceiling is not a census ---- */
+    const atCeiling = await read(null, {
+      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 200, shed: 199, cap: 50,
+      vendorLimit: 200, vendorTruncated: true,
+      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
+    });
+    ok(/of at least 200 flagged windows/.test(String(atCeiling.alertsCap)),
+       `THE DENOMINATOR IS A FLOOR WHEN THE READ HIT THE VENDOR'S LIMIT. "1 of 200" reads ` +
+       `as a market; the population above that line is unknown and the caption prints the ` +
+       `bound it actually has — got: ${atCeiling.alertsCap}`);
+    ok(!/of at least/.test(String(shedNone.alertsCap)),
+       "while a read that did not hit the ceiling keeps its exact denominator — the floor " +
+       "is a qualification of one measurement, not a hedge on every one");
   } finally {
     /* THE WORKER IS A CHILD PROCESS AND IT MUST BE STOPPED. Without this the
        suite prints its success line and then hangs forever holding a wrangler
@@ -1494,4 +1890,17 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `fires on exactly the one contract both selections chose, a filter group both tables ` +
   `honour whose note keeps a narrowed table from reading as a thin market, and an alerts ` +
   `table that finally ranks, announces its ranking, and gives the vendor's order back, ` +
-  `and a filter note that says which table could not be read rather than counting it as zero`);
+  `and a filter note that says which table could not be read rather than counting it as zero, ` +
+  `and the four silences kept four: a payload with no contracts block marked unavailable and ` +
+  `carrying no digit rather than "0 contracts from 0 names", a missing name panel that is not ` +
+  `a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's ` +
+  `pending, unreadable and quiet states each with its own mark, one read instant stamped once ` +
+  `in UTC rather than three clocks on one panel, an uncounted row-cap shed that says so ` +
+  `instead of printing a zero, a denominator that prints as a floor when the read hit the ` +
+  `vendor's own ceiling, a contracts block and a name panel each split between the field ` +
+  `that is not on the payload and the one whose rows could not be read — so the dagger and ` +
+  `the cross never stand in for one another and no sentence claims more than its guard ` +
+  `tested — a reassurance that does not outlive the feed it reassures about, on the default ` +
+  `screen and not behind a pill, two painters whose sentence survives a pill press, and ` +
+  `a fetch that never answered wearing the cross on the strip, on both tables, on the ` +
+  `basis and on the alerts panel rather than any of them going quiet`);
