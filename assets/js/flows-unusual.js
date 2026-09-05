@@ -7,14 +7,14 @@
    counter, an open interest, a previous open interest and a
    two-sided quote. There is no size, no timestamp, no execution
    price and no counterparty anywhere in it. shared/flows-unusual.js
-   states the two refusals that follow from that, and this file is
-   the surface that has to keep them in front of a reader.
+   states the two refusals that follow; this file is the surface
+   that keeps them in front of a reader.
 
    REFUSAL 1 — THE UNIT. The counter is every contract that changed
-   hands at that strike, summed. It is not one event. So the words a
+   hands at that strike, summed. It is not one event, so the words a
    per-execution feed uses are not available to any string this file
-   writes. The payload's own prose is a separate question with a
-   separate answer — see the note above basisItem.
+   writes — worked out at the vocabulary note below, which also says
+   why the payload's own prose is a separate case.
 
    REFUSAL 2 — THE DATE, and it is the load-bearing one. The
    endpoint accepts no date and returns none, and the pipeline reads
@@ -26,12 +26,11 @@
    the expiry horizon, and it is anchored to `dteAnchor` in writing.
 
    THE MISSING-VALUE TEST COMES BEFORE THE COERCION, everywhere.
-   Number(null) is 0 and 0 is finite, so the naive shape turns an
-   absent reading into a confident zero. On this page that would
-   print a balanced split where the vendor classified nothing, an
-   unchanged open interest where no previous open interest was
-   reported, and a notional of zero where no quote existed. Five
-   shipped defects in this repo have had exactly that shape.
+   Number(null) is 0 and 0 is finite, so the naive shape prints a
+   balanced split where the vendor classified nothing, an unchanged
+   open interest where none was reported, and a notional of zero
+   where no quote existed. Five shipped defects in this repo have
+   had exactly that shape.
 
    HUE IS THE LAST CHANNEL, NEVER THE ONLY ONE. Every signed number
    here carries its sign in a glyph — U+2191/U+2193 for a price move,
@@ -39,11 +38,9 @@
    tint. U+25B2/U+25BC are NOT in the mono webfont subset and would
    drop to the system stack mid-column, so they are not used.
 
-   NO BAR BEHIND vol/oi. It is the ranking key and the temptation is
-   obvious, but on a live chain it spans several powers of ten: a
-   fixed axis flattens most of the column to nothing and an axis
-   scaled to the visible rows redraws itself every time the list is
-   re-ranked. The number is the reading.
+   NO BAR BEHIND vol/oi: the ranking key spans several powers of
+   ten on a live chain, so any fixed scale flattens most of the
+   column into nothing. The feed's own note tells the reader so.
    ============================================================= */
 (() => {
   "use strict";
@@ -125,12 +122,11 @@
   /**
    * volume / open interest, across a range no fixed precision fits.
    *
-   * The published field is rounded to three decimals, and on a quiet chain
-   * the whole column sits between 0.4 and 0.5 — two decimals would collapse
-   * the ranking into three distinct values. On a live one the same column
+   * On a quiet chain the whole column sits between 0.4 and 0.5, where two
+   * decimals collapse the ranking into three distinct values; on a live one it
    * reaches into the hundreds, where three decimals is six characters of
-   * noise. So the precision follows the magnitude, and the column is the one
-   * place on the page where decimals are allowed to vary between rows.
+   * noise. So the precision follows the magnitude, and this is the one column
+   * whose decimals may vary between rows.
    */
   function ratio(v) {
     const n = isNum(v);
@@ -177,56 +173,24 @@
      REFUSAL 1 IN PRACTICE. The source is a contract counter, so the words a
      per-execution feed lives on — print, trade, block, sweep, bought, sold,
      paid, and every "smart money" flourish built on them — assert something
-     it cannot support. None of them appears in a single string this file
-     writes: not in the status strip, not in a caption, not in a note, not in
-     a column title, not in an attribute. That is the copy a reader takes a
-     reading from.
+     it cannot support. None appears in a single string this file writes: not
+     in the strip, a caption, a note, a column title or an attribute. That is
+     the copy a reader takes a reading from.
 
-     THE PAYLOAD'S OWN PROSE IS A DIFFERENT CASE and renders as sent — see
-     the note above basisItem for why. The guard that used to sit here, and
-     paraphrase it, cost the page its clearest sentence and gave one relation
-     two spellings.
+     THE BAN IS ON THE CLAIM, NOT ON THE WORD, which is why the PAYLOAD'S own
+     prose renders as sent. Five of the twelve basis entries carry a banned
+     token legitimately: two of them ARE the refusals, and a page cannot
+     refuse a vocabulary without naming it; one is the vendor's relation
+     harvested verbatim, where a paraphrase would be the second spelling that
+     harvest exists to prevent; the other two define what the vendor
+     classified. The guard that used to paraphrase them cost the page its
+     clearest sentence and gave one relation two spellings. The test names
+     all five.
 
-     The tripwire lives in tests/flows-unusual-contract.mjs instead: it runs
-     the ban over the payload with four phrase-pinned exceptions, and fails if
-     one of those exceptions ever goes dead. A word that reaches the prose by
-     accident fails a test rather than reaching a reader, which is where a
-     check like this belongs — a filter at the render boundary can only hide
-     the problem, and hid it well enough to make the page worse. */
-
-  /**
-   * THE BAN IS ON THE CLAIM, NOT ON THE WORD, and this is where that
-   * distinction earns its keep.
-   *
-   * Five of the twelve basis entries carry a banned token, and every one of
-   * them carries it legitimately:
-   *
-   *   unit      — "A contract counter, NOT A TRADE … no sweep flag."
-   *   refusals  — "No 'bullish bet' … no 'smart money'."
-   *   aggr      — the vendor's own relation, harvested VERBATIM from
-   *               buildTopContracts so the page and the payload cannot end up
-   *               with two spellings of one definition.
-   *   lift      — defines a share of what the vendor classified.
-   *   names     — states what the two panels can and cannot see.
-   *
-   * The first two ARE the refusals. A page cannot refuse a vocabulary without
-   * naming it, and paraphrasing them costs the strongest sentence on the page:
-   * "not a trade" is this product's whole thesis about its own source, and any
-   * restatement that avoids the word necessarily says it less clearly.
-   *
-   * The third would be worse still. `basis.aggr` is taken verbatim from the
-   * builder precisely so that one relation has one wording; a second spelling
-   * here is exactly the divergence the verbatim harvest exists to prevent.
-   *
-   * So the payload's prose renders as sent. What the ban governs is the copy
-   * THIS FILE writes — the status strip, the captions, the notes, the column
-   * titles — where a banned word could only ever be a claim. That is the half
-   * a reader takes a reading from, and it carries none of them.
-   *
-   * The tripwire is a TEST, not a filter: the suite runs the ban over the
-   * payload with four phrase-pinned exceptions, so the day someone adds
-   * "smart money" to a note it fails a build rather than reaching a page.
-   */
+     The tripwire is a TEST, not a filter: the contract suite runs the ban
+     over the payload with four phrase-pinned exceptions and fails if one goes
+     dead, so a banned word fails a build rather than reaching a reader, where
+     a filter could only hide it. */
 
   /* ---------- the contract feed -----------------------------------
 
@@ -257,12 +221,10 @@
    *
    * AN UNMEASURED VALUE NEVER WINS A RANKING, in either direction. The naive
    * shape multiplies the whole comparison by the direction, which lands every
-   * withheld row at the top the moment a reader reverses the column — and a
-   * page whose first screen is nine em dashes has answered a question about
-   * the vendor's reporting with a table that looks like a ranking. Ties fall
-   * through to the published rank, so a column of equal values keeps the
-   * order the pipeline gave it rather than the order the sort happened to
-   * leave it in.
+   * withheld row at the top the moment a reader reverses the column: a first
+   * screen of em dashes, answering a question about the vendor's reporting
+   * with a table that looks like a ranking. Ties fall through to the published
+   * rank, so equal values keep the order the pipeline gave them.
    */
   function compare(a, b, col, dir) {
     const x = col.val(a.r), y = col.val(b.r);
@@ -365,10 +327,9 @@
    *
    * A NAME IS LINKED ONLY IF ITS CHAIN WAS READ. /flows/ticker/ draws panels
    * out of a published card, and a card exists for exactly the names whose
-   * chain the pipeline bought — which is what `coverage` enumerates. Every
-   * row in this feed came from one of those chains, so the feed links all of
-   * them; the name panel below is drawn from the whole screened universe,
-   * where most names have no card and a link would usually lead nowhere.
+   * chain the pipeline bought — which is what `coverage` enumerates. Every row
+   * in this feed came from one of those chains; the name panel below is drawn
+   * from the whole screened universe, where a link would usually lead nowhere.
    */
   function nameCell(row, covered, marked) {
     const th = el("th", "fb-tk");
@@ -393,18 +354,13 @@
         "subset, or how large the rest is.";
       th.append(sup);
     }
-    /* WHERE THE BOARD PUT THIS NAME, when the payload says.
-
-       The alerts table above has carried a Stage column since it shipped and
-       this feed carried none, so its Name column was a bare link: a forty-times
+    /* WHERE THE BOARD PUT THIS NAME, when the payload says. A forty-times
        volume-over-open-interest on a name the board ranks LONG and the same
-       ratio on a name it scored into the dead band are different facts, and the
-       page could not tell them apart. Drawn INSIDE the name cell rather than as
-       an eleventh column, because the <thead> is markup this file does not
-       write; the reading is the same and the table's shape is unchanged.
-
-       The key is absent on a payload published before the field shipped, which
-       draws nothing — an absence, not a name with no stage. */
+       ratio on one it scored into the dead band are different facts, and this
+       column was a bare link. Drawn INSIDE the name cell because the <thead>
+       is markup this file does not write; absent on a payload published before
+       the field shipped, which draws nothing — an absence, not a name with no
+       stage. */
     const stage = typeof row.st === "string" && row.st ? row.st : null;
     if (stage) {
       const badge = el("span", "ua-stage", stage);
@@ -422,9 +378,8 @@
     const name = nameCell(row, ctx.covered.has(ticker), isNum(row.p) === 1);
     /* THE CORROBORATION, MARKED WHERE THE READER IS ALREADY LOOKING. This
        contract cleared this page's own floors AND the vendor's rules flagged a
-       window on it — two independent selections agreeing, which is the single
-       strongest reading this page can produce and was, until now, available
-       only by scanning one table against the other by hand. */
+       window on it — the two independent selections of the section head above,
+       agreeing on one line. */
     const key = joinKey(row.t, row.cp, row.k, row.expiry);
     if (key && alertKeys && alertKeys.has(key)) {
       const a = alertKeys.get(key);
@@ -475,11 +430,10 @@
     /* TWO PUBLISHED FIELDS WITH NO COLUMN, and they have none for the same
        reason: both read DOWN a name rather than ACROSS a table that mixes
        many. Implied volatility sits on a per-chain convention, and
-       log-moneyness is measured against a spot that was read once per chain.
-       Given a column they would be sortable, and a sortable column is an
-       invitation to compare two rows that are not comparable. On the row's
-       title they are readable and nothing else. Undrawn published fields are
-       this product's recurring defect; a tooltip is the honest middle. */
+       log-moneyness is measured against a spot read once per chain. Given a
+       column they would be sortable, and a sortable column invites comparing
+       two rows that are not comparable. Undrawn published fields are this
+       product's recurring defect; a tooltip is the honest middle. */
     const iv = isNum(row.iv);
     const m = isNum(row.m);
     const cov = ctx.coverage.get(ticker);
@@ -501,27 +455,18 @@
 
   /* ---------- sorting ----------------------------------------------
 
-     A REAL <button> INSIDE THE <th>, following flows-board.js: it buys
-     keyboard operability and a focus ring for free and states honest
-     semantics, where a click handler on a header cell is unreachable by
-     keyboard and announces nothing. The header's own children — including the
-     <abbr> that explains what the column means — move INTO the button, so
-     being able to sort a column never costs the reader its explanation. */
+     A REAL <button> INSIDE THE <th>, following flows-board.js: keyboard
+     operability, a focus ring and honest semantics for free, where a click
+     handler on a header cell is unreachable by keyboard and announces nothing.
+     The header's own children — including the <abbr> that explains the column
+     — move INTO the button, so sorting never costs the reader its
+     explanation. */
 
   /**
-   * One sortable table's controller, closing over its own state.
-   *
-   * THIS USED TO BE FIVE MODULE-LEVEL BINDINGS SERVING ONE TABLE. The counter
-   * feed had columns, a comparator, a click cycle and the aria-sort discipline
-   * below; the alerts table above it — newer data, on the same page, from the
-   * vendor's own selection — had none of it, because wireHeads opened with
-   * `if (!feedTable) return;` and every helper named the feed's own globals.
-   * A reader could rank the stale feed by seven columns and could not rank the
-   * fresh one by any.
-   *
-   * The controller is per-table, so a second table costs a column descriptor
-   * and one call. It belongs in a shared module beside scoreStrip eventually;
-   * it is here for now because assets/js/flows-ui.js is not this file.
+   * One sortable table's controller, closing over its own state — so a second
+   * table costs a column descriptor and one call, where the module-level
+   * bindings this replaced left the fresher alerts table sortable by nothing.
+   * It belongs in a shared module beside scoreStrip eventually.
    */
   function sortableTable(table, cols, repaint) {
     const sort = { key: null, dir: "desc" };
@@ -613,20 +558,16 @@
      contracts that cleared this desk's own volume and open-interest floors on
      chains the pipeline had already read. Each row of each carries the same
      four-tuple — name, call or put, strike, expiry — parsed by the same
-     parseOptionSymbol, and until now the only way to find a contract in BOTH
-     was to read sixty rows against fifty by hand.
+     parseOptionSymbol, and finding a contract in BOTH meant reading sixty rows
+     against fifty by hand. That intersection is the strongest reading this
+     page can produce, because the two selections are independent: one is the
+     vendor's model of what is worth flagging, the other is arithmetic on a
+     chain.
 
-     A contract that the vendor's rules flagged AND that clears the floors with
-     a high volume-over-open-interest is the strongest reading this page can
-     produce, because the two selections are independent: one is the vendor's
-     model of what is worth flagging, the other is arithmetic on a chain.
-
-     NO SHARED FATE. The two fetches stay independent — either can fail without
-     the other — so the marking is gated on both having RESOLVED rather than on
-     both succeeding. `alertKeys` and `feedKeys` are null until their fetch has
-     produced readable rows; a null means "not resolved yet" and nothing is
-     marked, which is a different state from an empty set, and only the empty
-     set is a statement that nothing matched.
+     NO SHARED FATE. Either fetch can fail without the other, so the marking is
+     gated on both having RESOLVED rather than on both succeeding: the two key
+     sets stay null until their fetch produced readable rows, and only an empty
+     set — never a null — states that nothing matched.
      ================================================================ */
 
   /** name|call-or-put|strike|expiry, or null when the row cannot be identified. */
@@ -638,31 +579,29 @@
 
   let alertKeys = null;      // Map key -> the alert row, or null until resolved
   let feedKeys = null;       // Set of keys, or null until resolved
-  /* Declared HERE rather than beside the alerts painter three hundred lines
-     down, because the filter note and the join both read it and a `let` is in
-     its temporal dead zone until its own declaration runs. */
+  /* Declared HERE, not beside the alerts painter three hundred lines down:
+     the filter note and the join both read it, and a `let` is in its temporal
+     dead zone until its own declaration runs. */
   let alertRows = [];        // [{ r, i }] in the vendor's published order
 
   /* WHY THE JOIN'S NULL IS NOT ENOUGH FOR THE FILTER NOTE.
 
      `alertKeys === null` answers "may this row be marked", and null is the
-     right answer for a fetch that has not returned AND for one that failed —
-     neither can corroborate anything. But the NOTE has to say which of those
-     two it is, and it cannot say either from a null: a table whose payload
-     never arrived was reporting "0 of 0 contracts are drawn", which is a
-     displayed zero standing in for "not sent" — the oldest defect in this
-     repository, in the one sentence on the page whose whole job is to keep a
-     narrowed table from reading as a thin market. Worse, the "Both feeds"
-     pill went on promising resolution "until both payloads have loaded" after
-     a failure that will never load one.
-
-     So resolution is tracked in its own tri-state, per feed, and only the
-     "ok" state licenses a count. */
+     right answer both for a fetch that has not returned and for one that
+     failed — neither can corroborate anything. The NOTE has to say WHICH, and
+     cannot from a null: a table whose payload never arrived reported "0 of 0
+     contracts are drawn", a displayed zero standing in for "not sent" in the
+     one sentence whose whole job is to keep a narrowed table from reading as a
+     thin market. So resolution is tracked per feed, and only "ok" licenses a
+     count. */
   let alertsState = "pending";       // "pending" | "ok" | "failed"
-  /* The vendor's own ceiling on the alerts read. `null` on both is "the
-     payload did not say", which is a third state and not a quiet "no". */
+  /* The vendor's own ceiling on the alerts read; `null` is "the payload did
+     not say", argued in full where they are captured. */
   let alertVendorLimit = null;
   let alertVendorTruncated = null;
+  /* "pending" | "ok" | "failed" | "absent" — "failed" is a dead fetch OR a
+     block whose rows could not be read; "absent" is a payload that arrived
+     with no contracts block at all, and is worded as neither. */
   let feedState = "pending";
 
   /* The filter both tables honour. `side` is "all" | "C" | "P"; `both` narrows
@@ -699,10 +638,8 @@
      way the mark can appear on whichever table drew first.
 
      THE ARGUMENT NAMES WHICH SIDE JUST RESOLVED, and only the OTHER table is
-     repainted. Repainting both meant the table that had just finished
-     painting itself two statements earlier was rebuilt row by row for no
-     reason on every single load — sixty rows of DOM created and discarded to
-     re-derive marks that were already on them. */
+     repainted: repainting both rebuilds sixty rows of DOM to re-derive marks
+     already on them. */
   function joinResolved(side) {
     if (side !== "feed" && alertKeys !== null && feedRows.length) paintFeedRows();
     if (side !== "alerts" && feedKeys !== null && alertRows.length) paintAlertRows();
@@ -720,11 +657,10 @@
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", "Narrow both tables");
     /* WRAPPED HERE RATHER THAN IN THE SHARED RULE. `.flows-views` is a
-       non-wrapping flex row, which is correct for the board's three short
-       pills and overflows at 320px with this group's four. Zero horizontal
-       overflow at 320px is a tested invariant of this site, and widening a
-       rule three other pages depend on to satisfy one of them is the change
-       that breaks the other two. */
+       non-wrapping flex row — right for the board's three short pills, an
+       overflow at 320px with this group's four. Zero horizontal overflow at
+       320px is a tested invariant, and widening a rule three other pages
+       depend on to satisfy one of them breaks the other two. */
     group.style.flexWrap = "wrap";
 
     const buttons = [];
@@ -780,15 +716,12 @@
      "Both tables show every row published" is true, and it was doing the work
      of a claim it cannot support: that the flagged windows ARE the market's
      flagged windows. When the vendor returns exactly the number of rows we
-     asked for, the population above that line is unknown — so a table of 200
-     under a caption about completeness reads as a complete market read, which
-     is the precise shape of the rule this repository states as "a list that
-     truncates without saying so reads as a population". Here the truncation is
-     not even ours.
+     asked for, the population above that line is unknown, and that truncation
+     is not even ours.
 
      ONLY ON THE ALERTS SIDE. The counter feed is our own ranking of a read we
-     took whole; its rows really are every row published. Attaching the caveat
-     to both tables would trade one wrong claim for another. */
+     took whole; its rows really are every row published, and attaching the
+     caveat to both tables would trade one wrong claim for another. */
   function vendorCeilingSaid() {
     if (alertsState !== "ok") return "";
     if (alertVendorTruncated === true) {
@@ -813,33 +746,51 @@
   function syncFilterNote() {
     const note = document.getElementById("uaFilterNote");
     if (!note) return;
+    /* A COUNT ONLY FROM A TABLE THAT ANSWERED — the displayed zero narrated
+       where the states are declared. */
+    const tally = (state, rows, expiryKey, plural) => {
+      if (state === "pending") return "the " + plural + " have not been read yet";
+      if (state === "failed") return "the " + plural + " could not be read";
+      /* THE FOURTH STATE, NOT THE THIRD: "could not be read" is this page
+         failing on bytes it received, and collapsing the two would put a broken
+         fetch's sentence over a payload that arrived intact. */
+      if (state === "absent") return "the " + plural + " are not on this payload";
+      const shown = rows.filter((e) => passesFilter(e.r, expiryKey)).length;
+      return count(shown) + " of " + count(rows.length) + " " + plural + " are drawn";
+    };
     if (filter.side === "all" && !filter.both) {
-      note.textContent = "Both tables show every row published. Narrowing them is a filter " +
-        "on what is drawn and never a second read of the market." + vendorCeilingSaid();
+      /* THE REASSURANCE IS A CLAIM ABOUT TWO TABLES AND MAY NOT OUTLIVE
+         EITHER. "Both tables show every row published" is the DEFAULT view —
+         nobody presses anything to reach it — and it stood two elements under
+         a feed cell reading "the contract rows are not on this payload", the
+         honest sentence reachable only by pressing a pill. So tally() states
+         both feeds whenever either has something other than rows to report,
+         on the numbers the filtered note prints. */
+      note.textContent = (alertsState === "ok" && feedState === "ok"
+        ? "Both tables show every row published."
+        : "No filter is on: " + tally(alertsState, alertRows, "exp", "flagged windows") +
+          " and " + tally(feedState, feedRows, "expiry", "contracts") + ".") +
+        " Narrowing either is a filter on what is drawn and never a second read of the " +
+        "market." + vendorCeilingSaid();
       return;
     }
     const bits = [];
     if (filter.side !== "all") bits.push(filter.side === "C" ? "calls only" : "puts only");
     if (filter.both) {
-      /* THREE STATES, THREE CLAUSES. "Not yet" and "not at all" are different
-         facts about the join and only one of them is going to change. */
+      /* FOUR STATES, FOUR CLAUSES. "Not yet" is a load in progress and will
+         change on its own; "not on this payload" and "could not be read" are
+         both final, and are not the same fact about the wire. */
       bits.push(alertsState === "ok" && feedState === "ok"
         ? "contracts in both feeds"
-        : (alertsState === "failed" || feedState === "failed"
-          ? "contracts in both feeds — which cannot be resolved at all, because one of " +
-            "the two payloads could not be read"
-          : "contracts in both feeds, which cannot be resolved until both payloads " +
-            "have loaded"));
+        : (feedState === "absent"
+          ? "contracts in both feeds — which cannot be resolved at all, because the " +
+            "contract rows are not on this payload"
+          : (alertsState === "failed" || feedState === "failed"
+            ? "contracts in both feeds — which cannot be resolved at all, because one of " +
+              "the two payloads could not be read"
+            : "contracts in both feeds, which cannot be resolved until both payloads " +
+              "have loaded")));
     }
-    /* A COUNT ONLY FROM A TABLE THAT ANSWERED. "0 of 0 are drawn" from a feed
-       that never returned is a measurement of nothing, printed as a
-       measurement of the market. */
-    const tally = (state, rows, expiryKey, plural) => {
-      if (state === "pending") return "the " + plural + " have not been read yet";
-      if (state === "failed") return "the " + plural + " could not be read";
-      const shown = rows.filter((e) => passesFilter(e.r, expiryKey)).length;
-      return count(shown) + " of " + count(rows.length) + " " + plural + " are drawn";
-    };
     note.textContent = "Filtered to " + bits.join(" and ") + ": " +
       tally(alertsState, alertRows, "exp", "flagged windows") + " and " +
       tally(feedState, feedRows, "expiry", "contracts") + ". " +
@@ -852,6 +803,10 @@
   const feedSorter = sortableTable(feedTable, FEED_COLS, () => paintFeedRows());
 
   function paintFeedRows() {
+    /* A TABLE WITH NO PUBLISHED ROWS HAS NOTHING TO REPAINT, and repainting it
+       emptied the cell that said why: a pill pressed over a quiet — or an
+       absent — feed wiped the sentence and left a blank table. */
+    if (!feedRows.length) return;
     const view = feedSorter.view(feedRows).filter((e) => passesFilter(e.r, "expiry"));
     feedBody.textContent = "";
     if (!view.length && feedRows.length) {
@@ -877,9 +832,8 @@
    * THE ARROW IS THE SIGN GLYPH, and it is the only one. Writing U+2212 as
    * well would spell the sign twice on the falling side and once on the
    * rising side, which reads as a difference between the two columns rather
-   * than as emphasis. A measured zero gets neither arrow nor sign: no
-   * direction is true at zero, and drawing one there would be the same
-   * confident claim an absent reading gets a dash to avoid.
+   * than as emphasis. A measured zero gets neither: no direction is true at
+   * zero.
    */
   function changeCell(v) {
     const n = isNum(v);
@@ -924,16 +878,16 @@
 
   /* ---------- the basis panel --------------------------------------
 
-     THE PAGE'S HONESTY, AND NOT AN APPENDIX. Every methodological decision
-     the feed makes is published in the payload beside the arithmetic that
-     produced it, which is what stops a renderer rewording a caption into a
-     claim the numbers do not support. It is rendered here in full.
+     THE PAGE'S HONESTY, AND NOT AN APPENDIX. Every methodological decision is
+     published in the payload beside the arithmetic that produced it — which is
+     what stops a renderer rewording a caption into a claim the numbers do not
+     support — and is rendered here in full.
 
      THE TWO REFUSALS STAY IN THE OPEN and everything else sits behind a
-     disclosure. Not to hide it — it is in the DOM, selectable, and found by a
-     find-in-page — but because eight hundred words of unbroken prose under
-     two tables is a rule nobody finishes reading, and a rule nobody finishes
-     is a rule nobody was told. */
+     disclosure — not hidden (in the DOM, selectable, found by a find-in-page)
+     but folded, because eight hundred words of unbroken prose under two tables
+     is a rule nobody finishes, and a rule nobody finishes is a rule nobody was
+     told. */
 
   const BASIS_LABELS = {
     unit: "The unit",
@@ -978,12 +932,12 @@
   /**
    * A LABELLED CHOICE, drawn to look unlike a statement.
    *
-   * `choice: true` on the wire means the pipeline is telling the reader that
-   * this could defensibly have been decided otherwise — the ranking key could
-   * have been the notional bracket or raw volume, and the floors are the
-   * boundary of a population rather than a threshold on a measurement.
-   * Rendering that as one more paragraph of method would bury the single most
-   * arguable thing on the page in the least arguable-looking place.
+   * `choice: true` on the wire means the pipeline is telling the reader this
+   * could defensibly have been decided otherwise — the ranking key could have
+   * been the notional bracket, and the floors bound a population rather than
+   * thresholding a measurement. Rendering that as one more paragraph of method
+   * would bury the most arguable thing on the page in the least
+   * arguable-looking place.
    */
   function basisChoice(key, obj) {
     const box = el("div", "ua-choice");
@@ -1071,13 +1025,29 @@
 
   /* ---------- states ------------------------------------------------ */
 
-  function emptyRow(body, columns, text) {
+  /* WHICH SILENCE THIS IS, AS AN ATTRIBUTE AND NOT ONLY AS PROSE. All four
+     this page can be in — never published, read and unreadable, measured and
+     empty, not on the payload — were one dim sentence in one dim cell.
+     flows.css draws all four off `[data-empty]` and ten other renderers set it;
+     this one opted out. `kind` is passed at each call site rather than inferred
+     from the sentence: a mark derived from prose certifies the prose. */
+  function emptyRow(body, columns, text, kind) {
     body.textContent = "";
     const tr = document.createElement("tr");
     const td = el("td", "flows-empty", text);
+    if (kind) td.dataset.empty = kind;
     td.colSpan = columns;
     tr.append(td);
     body.append(tr);
+  }
+
+  /* The strip carries the same four marks (.flows-status[data-empty]). A
+     SUCCESSFUL PAINT CLEARS IT: the strip is repainted in place, and a leftover
+     dagger would mark a full table as a missing field. */
+  function say(text, kind) {
+    statusEl.textContent = text;
+    if (kind) statusEl.dataset.empty = kind;
+    else delete statusEl.dataset.empty;
   }
 
   /**
@@ -1089,15 +1059,19 @@
    * so each can carry the failure.
    */
   function failEverywhere(what) {
-    statusEl.textContent = what;
-    emptyRow(feedBody, FEED_COLUMNS, what);
-    emptyRow(nameBody, NAME_COLUMNS, what);
+    /* The one silence that is this page's own fault: the cross, and the only
+       one of the four with a remedy the reader can act on. */
+    say(what, "unreadable");
+    emptyRow(feedBody, FEED_COLUMNS, what, "unreadable");
+    emptyRow(nameBody, NAME_COLUMNS, what, "unreadable");
     if (feedCap) feedCap.textContent = "No contract could be listed.";
     if (nameCap) nameCap.textContent = "No name could be listed.";
     if (feedNote) feedNote.textContent = "";
     if (nameNote) nameNote.textContent = "";
     basisHost.textContent = "";
-    basisHost.append(el("p", "fc-note", what));
+    const broken = el("p", "flows-empty", what);
+    broken.dataset.empty = "unreadable";
+    basisHost.append(broken);
     if (feedPanel) feedPanel.hidden = false;
     if (namePanel) namePanel.hidden = false;
     if (basisPanel) basisPanel.hidden = false;
@@ -1107,11 +1081,16 @@
   /* ---------- paint -------------------------------------------------- */
 
   function paint(payload) {
+    /* AN ABSENT BLOCK IS NULL HERE, NOT AN EMPTY ONE. The `{}` and `[]`
+       fallbacks these replace turned a payload that never carried a contracts
+       block into a MEASUREMENT: "0 contracts from 0 names", "0 of 0 contracts
+       that cleared the floors", "0 names ranked". Every one of those zeros was
+       counted off an absence — Number(null) === 0 wearing a denominator. */
     const contracts = payload.contracts && typeof payload.contracts === "object"
-      ? payload.contracts : {};
-    const names = payload.names && typeof payload.names === "object" ? payload.names : {};
-    const rows = Array.isArray(contracts.rows) ? contracts.rows : [];
-    const nameRows = Array.isArray(names.rows) ? names.rows : [];
+      ? payload.contracts : null;
+    const names = payload.names && typeof payload.names === "object" ? payload.names : null;
+    const rows = contracts && Array.isArray(contracts.rows) ? contracts.rows : null;
+    const nameRows = names && Array.isArray(names.rows) ? names.rows : null;
     const coverage = new Map();
     /* THE CHAINS' OWN ROW COUNTS, SUMMED, because `eligible` is the population
        AFTER the two floors and the difference between the two numbers is
@@ -1142,196 +1121,267 @@
         "changed hands there, summed. It carries no date — " + reason + ".",
     };
 
-    /* ---- the status strip ---- */
-    const shown = isNum(contracts.shown);
-    const eligible = isNum(contracts.eligible);
-    const cap = isNum(contracts.cap);
-    const perName = isNum(contracts.perName);
-    const distinct = new Set(rows.map((r) => String(r.t || ""))).size;
-    const namesSeen = isNum(payload.namesSeen);
-    const truncated = isNum(payload.namesTruncated);
-    const complete = isNum(payload.namesComplete);
+    /* ---- the status strip and the contract feed, or the sentence that says
+       what this payload carries instead ----
 
-    /* WHICH CAP BOUND THE LIST, NAMED. A reader looking at "50 shown" against
-       "50 eligible" cannot tell whether the list stopped because it filled,
-       because one name was not allowed to contribute more, or because that is
-       simply every contract that cleared the floors. The payload settles it
-       and the strip says which. */
-    let bound;
-    if (contracts.capBound === "rows") {
-      bound = "the " + (cap === null ? "row" : count(cap) + "-row") +
-        " cap is what bound this list" +
-        (perName === null ? "" : ", with at most " + count(perName) + " from any one name");
-    } else if (contracts.capBound === "perName") {
-      bound = "the per-name allowance of " + (perName === null ? "one" : count(perName)) +
-        " is what bound this list; the " + (cap === null ? "row cap" : count(cap) + "-row cap") +
-        " was never reached";
-    } else if (contracts.capBound === "eligible") {
-      bound = "neither cap bound this list: it is every contract that cleared the floors";
+       TWO SHAPES LAND HERE AND THEY ARE TWO SILENCES. No `contracts` key is
+       UNAVAILABLE: the field is not on the payload. A block that IS on it
+       carrying something other than an array under `rows` is bytes this page
+       could not parse — UNREADABLE, the cross, which is what paintAlerts()
+       prints for that identical shape. One dagger over both asserted, as a
+       fact about the wire, that a block the reader can find in the payload is
+       not there. The guard reads `rows`, so the sentence says only `rows`.
+
+       NEITHER CARRIES A DIGIT. Without this branch an absent block printed
+       "0 contracts from 0 names" over "0 of 0 contracts that cleared the
+       floors": numbers nobody counted. */
+    if (rows === null) {
+      const gone = contracts === null;
+      const what = gone
+        ? "this payload carries no contracts block"
+        : "the contracts block on this payload carries no rows array, so it could not " +
+          "be read as a feed";
+      const kind = gone ? "unavailable" : "unreadable";
+      say("Published, but " + what + ", and no count of contracts, of names or of " +
+        "chains is taken from it. This is a gap in the payload and not a chain that " +
+        "cleared no floors.", kind);
+      if (feedCap) feedCap.textContent = "";
+      if (feedNote) feedNote.textContent = "";
+      emptyRow(feedBody, FEED_COLUMNS, "Published, but " + what + ".", kind);
+      feedRows = [];
+      /* NOT RESOLVED, AND NOT EMPTY: an empty Set would license the join to
+         report every flagged window as absent from a feed never on the wire. */
+      feedKeys = null;
+      /* THE UNREADABLE SHAPE TAKES THE STATE WHOSE TALLY SAYS "could not be
+         read"; "absent" words itself "are not on this payload", which is the
+         one thing a block on the payload must not be called. */
+      feedState = gone ? "absent" : "failed";
+      syncFilterNote();
+      if (feedPanel) feedPanel.hidden = false;
     } else {
-      bound = "the payload did not say which cap bound this list";
+      /* ---- the status strip ---- */
+      const shown = isNum(contracts.shown);
+      const eligible = isNum(contracts.eligible);
+      const cap = isNum(contracts.cap);
+      const perName = isNum(contracts.perName);
+      const distinct = new Set(rows.map((r) => String(r.t || ""))).size;
+      const namesSeen = isNum(payload.namesSeen);
+      const truncated = isNum(payload.namesTruncated);
+      const complete = isNum(payload.namesComplete);
+
+      /* WHICH CAP BOUND THE LIST, NAMED. A reader looking at "50 shown" against
+         "50 eligible" cannot tell whether the list stopped because it filled,
+         because one name was not allowed to contribute more, or because that is
+         simply every contract that cleared the floors. The payload settles it
+         and the strip says which. */
+      let bound;
+      if (contracts.capBound === "rows") {
+        bound = "the " + (cap === null ? "row" : count(cap) + "-row") +
+          " cap is what bound this list" +
+          (perName === null ? "" : ", with at most " + count(perName) + " from any one name");
+      } else if (contracts.capBound === "perName") {
+        bound = "the per-name allowance of " + (perName === null ? "one" : count(perName)) +
+          " is what bound this list; the " + (cap === null ? "row cap" : count(cap) + "-row cap") +
+          " was never reached";
+      } else if (contracts.capBound === "eligible") {
+        bound = "neither cap bound this list: it is every contract that cleared the floors";
+      } else {
+        bound = "the payload did not say which cap bound this list";
+      }
+
+      const strip = [];
+      strip.push((shown === null ? count(rows.length) : count(shown)) + " contracts from " +
+        count(distinct) + (distinct === 1 ? " name" : " names") +
+        (eligible === null ? "" : ", of " + count(eligible) + " that cleared the floors"));
+      strip.push(bound);
+      if (namesSeen !== null) {
+        strip.push(count(namesSeen) + (namesSeen === 1 ? " chain read" : " chains read") +
+          (truncated === null ? "" : truncated === 0
+            ? ", all of them whole"
+            : ", " + count(truncated) + " of them cut short by the vendor"));
+      }
+      strip.push(readAt
+        ? "chain read " + readAt + ", and the counter carries no date of its own"
+        : "the payload published no read time, which is the one stamp this page has");
+      /* A strip over an empty read is still a measurement: the quiet hairline,
+         not one of the three marks that say something went missing. The
+         EMPTINESS is what makes it so, not the payload's own word for it —
+         this also tested `status === "quiet"`, so a block holding no rows
+         without that stamp left the strip bare while the feed cell below
+         drew the hairline for the same state. One state, two marks, and the
+         strip's prose identical either way: its counts never read `status`.
+         The feed's sentence is where the two part. */
+      say(strip.join(" · ") + ".", rows.length ? null : "quiet");
+
+      /* ---- the contract feed ---- */
+      const aggrReported = isNum(contracts.aggressorReported);
+      const notionalReported = isNum(contracts.notionalReported);
+      const floors = payload.basis && payload.basis.floors ? payload.basis.floors : {};
+      const minVolume = isNum(floors.minVolume);
+      const minOi = isNum(floors.minOi);
+      const conventions = isNum(payload.ivConventionsSeen);
+
+      const capParts = [];
+      capParts.push((shown === null ? count(rows.length) : count(shown)) +
+        (eligible === null ? " contracts" : " of " + count(eligible) + " contracts") +
+        " that cleared the floors" +
+        (minVolume === null || minOi === null ? "" :
+          " — a volume counter of at least " + count(minVolume) + " and an open interest of " +
+          "at least " + count(minOi) + ", both choices and both stated below") + ".");
+      if (namesSeen !== null) {
+        capParts.push("Drawn from " + count(namesSeen) +
+          (namesSeen === 1 ? " chain" : " chains") +
+          (complete === null || truncated === null ? "" :
+            ": " + count(complete) + " the vendor returned whole and " + count(truncated) +
+            " it cut short at its page limit") + ".");
+      }
+      if (listed !== null && eligible !== null && listed > eligible) {
+        capParts.push("Those chains listed " + count(listed) + " strikes between them; the " +
+          count(listed - eligible) + " that did not clear the floors are not in the " +
+          "population above and nothing is claimed about them.");
+      }
+      if (aggrReported !== null && shown !== null) {
+        capParts.push(count(aggrReported) + " of " + count(shown) +
+          " carry a classified offer-and-bid split" +
+          (notionalReported === null ? "" :
+            " and " + count(notionalReported) + " of " + count(shown) + " quoted both sides") + ".");
+      }
+      /* THE CONVENTION WARNING FIRES FROM THE PAYLOAD, not from an assumption
+         that one run's chains agreed: two conventions in one feed means the
+         implied volatility on the row titles cannot be compared between names,
+         and that is handed to the reader rather than left in coverage. */
+      if (conventions !== null && conventions > 1) {
+        capParts.push(count(conventions) + " implied-volatility conventions appear across " +
+          "these chains, so that reading cannot be compared between names; each name's " +
+          "divisor is in the payload's coverage list.");
+      }
+      if (feedCap) feedCap.textContent = capParts.join(" ");
+
+      if (feedNote) {
+        feedNote.textContent =
+          MARK + " marks a contract from a chain the vendor cut short at its page limit: " +
+          "that name's contribution is a subset of its own book, and nothing here says " +
+          "which subset. An em dash is a value the vendor did not report and never a " +
+          "zero — a withheld offer-side share is not a balanced split, and a withheld " +
+          "open-interest change is not an unchanged open interest. Notional is a bracket " +
+          "between the volume counter times each side of the quote; both ends are " +
+          "present or neither is, and the column ranks on the low end. Vol/OI is shown " +
+          "as a number with no bar behind it: on a live chain it spans several powers of " +
+          "ten and any fixed scale would flatten most of the column into nothing. " +
+          "Ranking by a heading re-ranks the list; a third activation returns it to the " +
+          "rank the pipeline published. A row marked \u201cboth\u201d is a contract the " +
+          "vendor's rules also flagged a window on, matched on name, side, strike and " +
+          "expiry — two independent selections agreeing, and the only corroboration this " +
+          "page can offer. An unmarked row is not a contradiction: the two feeds are read " +
+          "at different times from different endpoints, and absence from one says nothing " +
+          "about the other.";
+      }
+
+      feedRows = rows.map((r, i) => ({ r, i }));
+      /* Resolved, even when empty — see the alerts side for why an empty set and
+         a null are different states. */
+      feedKeys = new Set();
+      for (const r of rows) {
+        const key = joinKey(r.t, r.cp, r.k, r.expiry);
+        if (key) feedKeys.add(key);
+      }
+      if (!rows.length) {
+        /* MEASURED, AND EMPTY — the hairline and no glyph, because this is the
+           one silence of the four that is a reading of the market rather than
+           a fact about the payload or about this page. */
+        emptyRow(feedBody, FEED_COLUMNS,
+          payload.status === "quiet"
+            ? "No contract cleared both floors on the chains that were read. That is a " +
+              "statement about this run's chains, not about the market."
+            : "This payload carries a contracts block with no rows in it, and did not " +
+              "report the read as quiet.", "quiet");
+      } else {
+        feedSorter.wire();
+        paintFeedRows();
+      }
+      feedState = "ok";
+      joinResolved("feed");
+      syncFilterNote();
+      if (feedPanel) feedPanel.hidden = false;
     }
 
-    const strip = [];
-    strip.push((shown === null ? count(rows.length) : count(shown)) + " contracts from " +
-      count(distinct) + (distinct === 1 ? " name" : " names") +
-      (eligible === null ? "" : ", of " + count(eligible) + " that cleared the floors"));
-    strip.push(bound);
-    if (namesSeen !== null) {
-      strip.push(count(namesSeen) + (namesSeen === 1 ? " chain read" : " chains read") +
-        (truncated === null ? "" : truncated === 0
-          ? ", all of them whole"
-          : ", " + count(truncated) + " of them cut short by the vendor"));
-    }
-    strip.push(readAt
-      ? "chain read " + readAt + ", and the counter carries no date of its own"
-      : "the payload published no read time, which is the one stamp this page has");
-    statusEl.textContent = strip.join(" · ") + ".";
+    /* ---- the name panel ----
 
-    /* ---- the contract feed ---- */
-    const aggrReported = isNum(contracts.aggressorReported);
-    const notionalReported = isNum(contracts.notionalReported);
-    const floors = payload.basis && payload.basis.floors ? payload.basis.floors : {};
-    const minVolume = isNum(floors.minVolume);
-    const minOi = isNum(floors.minOi);
-    const conventions = isNum(payload.ivConventionsSeen);
+       A MISSING PANEL IS NOT A MARKET WITH NOTHING IN IT. With `names`
+       defaulted to `{}` a payload that never carried the block reached the
+       QUIET sentence — "No name carried both a call and a put thirty-day
+       average" — a finding about hundreds of screened names, published off a
+       field that is not on the wire.
 
-    const capParts = [];
-    capParts.push((shown === null ? count(rows.length) : count(shown)) +
-      (eligible === null ? " contracts" : " of " + count(eligible) + " contracts") +
-      " that cleared the floors" +
-      (minVolume === null || minOi === null ? "" :
-        " — a volume counter of at least " + count(minVolume) + " and an open interest of " +
-        "at least " + count(minOi) + ", both choices and both stated below") + ".");
-    if (namesSeen !== null) {
-      capParts.push("Drawn from " + count(namesSeen) +
-        (namesSeen === 1 ? " chain" : " chains") +
-        (complete === null || truncated === null ? "" :
-          ": " + count(complete) + " the vendor returned whole and " + count(truncated) +
-          " it cut short at its page limit") + ".");
-    }
-    if (listed !== null && eligible !== null && listed > eligible) {
-      capParts.push("Those chains listed " + count(listed) + " strikes between them; the " +
-        count(listed - eligible) + " that did not clear the floors are not in the " +
-        "population above and nothing is claimed about them.");
-    }
-    if (aggrReported !== null && shown !== null) {
-      capParts.push(count(aggrReported) + " of " + count(shown) +
-        " carry a classified offer-and-bid split" +
-        (notionalReported === null ? "" :
-          " and " + count(notionalReported) + " of " + count(shown) + " quoted both sides") + ".");
-    }
-    /* THE CONVENTION WARNING FIRES FROM THE PAYLOAD, not from an assumption
-       that one run's chains agreed. Two conventions in one feed means the
-       implied volatility on the row titles cannot be compared between names,
-       which is a caveat the reader has to be handed rather than left to
-       discover in coverage. */
-    if (conventions !== null && conventions > 1) {
-      capParts.push(count(conventions) + " implied-volatility conventions appear across " +
-        "these chains, so that reading cannot be compared between names; each name's " +
-        "divisor is in the payload's coverage list.");
-    }
-    if (feedCap) feedCap.textContent = capParts.join(" ");
-
-    if (feedNote) {
-      feedNote.textContent =
-        MARK + " marks a contract from a chain the vendor cut short at its page limit: " +
-        "that name's contribution is a subset of its own book, and nothing here says " +
-        "which subset. An em dash is a value the vendor did not report and never a " +
-        "zero — a withheld offer-side share is not a balanced split, and a withheld " +
-        "open-interest change is not an unchanged open interest. Notional is a bracket " +
-        "between the volume counter times each side of the quote; both ends are " +
-        "present or neither is, and the column ranks on the low end. Vol/OI is shown " +
-        "as a number with no bar behind it: on a live chain it spans several powers of " +
-        "ten and any fixed scale would flatten most of the column into nothing. " +
-        "Ranking by a heading re-ranks the list; a third activation returns it to the " +
-        "rank the pipeline published. A row marked \u201cboth\u201d is a contract the " +
-        "vendor's rules also flagged a window on, matched on name, side, strike and " +
-        "expiry — two independent selections agreeing, and the only corroboration this " +
-        "page can offer. An unmarked row is not a contradiction: the two feeds are read " +
-        "at different times from different endpoints, and absence from one says nothing " +
-        "about the other.";
-    }
-
-    feedRows = rows.map((r, i) => ({ r, i }));
-    /* Resolved, even when empty — see the alerts side for why an empty set and
-       a null are different states. */
-    feedKeys = new Set();
-    for (const r of rows) {
-      const key = joinKey(r.t, r.cp, r.k, r.expiry);
-      if (key) feedKeys.add(key);
-    }
-    if (!rows.length) {
-      emptyRow(feedBody, FEED_COLUMNS,
-        payload.status === "quiet"
-          ? "No contract cleared both floors on the chains that were read. That is a " +
-            "statement about this run's chains, not about the market."
-          : "This payload carried no contract rows.");
+       AND THE REPLACEMENT MAY SAY ONLY WHAT THE GUARD READ. "No name was
+       ranked and none was found unrankable" is a claim about the RUN, and over
+       a block carrying `ranked: 40` of a 420-name universe with a broken
+       `rows` it was flatly false. Split as the feed above splits it. */
+    if (nameRows === null) {
+      const goneNames = names === null;
+      if (nameCap) nameCap.textContent = "";
+      emptyRow(nameBody, NAME_COLUMNS, "Published, but the name panel " + (goneNames
+        ? "is not on this payload"
+        : "on this payload carries no rows array, so it could not be read as a ranking") +
+        ". No count of ranked or unranked names is taken from it.",
+        goneNames ? "unavailable" : "unreadable");
     } else {
-      feedSorter.wire();
-      paintFeedRows();
-    }
-    feedState = "ok";
-    joinResolved("feed");
-    syncFilterNote();
-    if (feedPanel) feedPanel.hidden = false;
+      const ranked = isNum(names.ranked);
+      const universe = isNum(names.universe);
+      const unranked = isNum(names.unranked);
+      const gated = isNum(names.earningsGated);
+      const nShown = isNum(names.shown);
 
-    /* ---- the name panel ---- */
-    const ranked = isNum(names.ranked);
-    const universe = isNum(names.universe);
-    const unranked = isNum(names.unranked);
-    const gated = isNum(names.earningsGated);
-    const nShown = isNum(names.shown);
+      const nameParts = [];
+      nameParts.push((nShown === null ? count(nameRows.length) : count(nShown)) +
+        (ranked === null ? " names" : " of " + count(ranked) + " names") +
+        " ranked by call and put volume together against the sum of the same two " +
+        "thirty-day averages.");
+      if (universe !== null) {
+        /* A NAME WITH NO MEASURED RATIO IS NOT A NAME WITH A RATIO OF ZERO, and
+           the count of those is published rather than quietly dropped: a panel
+           that ranks 420 of 460 and says "420 names" has hidden forty names
+           behind a number that looks like the whole population. */
+        nameParts.push("The population is every eligible name the screener returned — " +
+          count(universe) + " of them" +
+          (unranked === null ? "" : ", " + count(unranked) + " of which had no measurable " +
+            "ratio and " + (unranked === 1 ? "was" : "were") + " left unranked rather than " +
+            "ranked at zero") + ".");
+      }
+      /* THE EARNINGS GATE IS THE BOARD'S, NOT THIS PANEL'S: the gate keeps
+         event-driven noise out of a predictive composite, and this panel is
+         descriptive. Hiding a gated name here would misdescribe what was
+         counted. */
+      if (gated !== null && gated > 0) {
+        nameParts.push(count(gated) + " of them report earnings inside the horizon the " +
+          "board's gate excludes. This panel keeps them, because it describes what was " +
+          "counted rather than predicting anything from it — but a ratio on one of those " +
+          "names is the least surprising number on the page.");
+      }
+      if (nameCap) nameCap.textContent = nameParts.join(" ");
 
-    const nameParts = [];
-    nameParts.push((nShown === null ? count(nameRows.length) : count(nShown)) +
-      (ranked === null ? " names" : " of " + count(ranked) + " names") +
-      " ranked by call and put volume together against the sum of the same two " +
-      "thirty-day averages.");
-    if (universe !== null) {
-      /* A NAME WITH NO MEASURED RATIO IS NOT A NAME WITH A RATIO OF ZERO, and
-         the count of those is published rather than quietly dropped: a panel
-         that ranks 420 of 460 and says "420 names" has hidden forty names
-         behind a number that looks like the whole population. */
-      nameParts.push("The population is every eligible name the screener returned — " +
-        count(universe) + " of them" +
-        (unranked === null ? "" : ", " + count(unranked) + " of which had no measurable " +
-          "ratio and " + (unranked === 1 ? "was" : "were") + " left unranked rather than " +
-          "ranked at zero") + ".");
-    }
-    /* THE EARNINGS GATE IS THE BOARD'S, NOT THIS PANEL'S, and the difference
-       is worth a sentence: the gate exists to keep event-driven noise out of
-       a predictive composite, and this panel is descriptive. A volume surprise
-       on a name that reports next week is the least surprising surprise there
-       is, and hiding it would be misdescribing the tape. */
-    if (gated !== null && gated > 0) {
-      nameParts.push(count(gated) + " of them report earnings inside the horizon the " +
-        "board's gate excludes. This panel keeps them, because it describes what was " +
-        "counted rather than predicting anything from it — but a ratio on one of those " +
-        "names is the least surprising number on the page.");
-    }
-    if (nameCap) nameCap.textContent = nameParts.join(" ");
+      if (nameNote) {
+        nameNote.textContent =
+          "Both, Calls and Puts are ratios against this name's own thirty-day averages: " +
+          "1.00× is that average and 2.00× is twice it. They compare a name with itself " +
+          "and with no other name, so the same 2.00× on a name that lists two hundred " +
+          "contracts and on the largest name in the universe are the same number and not " +
+          "the same event. Both is withheld when either average is missing, because a " +
+          "zero on one side would inflate the ratio without saying so. P/C is the " +
+          "vendor's own put/call ratio, passed through. These names are not the feed's: " +
+          "this panel sees every eligible name, the feed above only the ones whose chain " +
+          "was read, which is why a name here is usually not a link.";
+      }
 
-    if (nameNote) {
-      nameNote.textContent =
-        "Both, Calls and Puts are ratios against this name's own thirty-day averages: " +
-        "1.00× is that average and 2.00× is twice it. They compare a name with itself " +
-        "and with no other name, so the same 2.00× on a name that lists two hundred " +
-        "contracts and on the largest name in the universe are the same number and not " +
-        "the same event. Both is withheld when either average is missing, because a " +
-        "zero on one side would inflate the ratio without saying so. P/C is the " +
-        "vendor's own put/call ratio, passed through. These names are not the feed's: " +
-        "this panel sees every eligible name, the feed above only the ones whose chain " +
-        "was read, which is why a name here is usually not a link.";
-    }
-
-    if (!nameRows.length) {
-      emptyRow(nameBody, NAME_COLUMNS,
-        "No name carried both a call and a put thirty-day average, so none could be ranked.");
-    } else {
-      const frag = document.createDocumentFragment();
-      for (const r of nameRows) frag.append(nameRow(r, feedCtx.covered));
-      nameBody.append(frag);
+      if (!nameRows.length) {
+        emptyRow(nameBody, NAME_COLUMNS,
+          "No name carried both a call and a put thirty-day average, so none could be " +
+          "ranked.", "quiet");
+      } else {
+        const frag = document.createDocumentFragment();
+        for (const r of nameRows) frag.append(nameRow(r, feedCtx.covered));
+        nameBody.append(frag);
+      }
     }
     if (namePanel) namePanel.hidden = false;
 
@@ -1360,11 +1410,9 @@
 
   /* ---------- the vendor's flow alerts -------------------------------
 
-     A SEPARATE PAYLOAD, A SEPARATE FETCH, AND DELIBERATELY NO SHARED FATE:
-     the counter feed above is built from chains the pipeline always reads,
-     while this one rests on a single market-wide call that has failed for
-     months and only recently answered — so either can arrive without the
-     other, and a failure here says so in this panel and nowhere else.
+     A SEPARATE PAYLOAD AND A SEPARATE FETCH: the counter feed rests on chains
+     the pipeline always reads, this one on a single market-wide call, so a
+     failure here says so in this panel and nowhere else.
 
      THE VARIABLE IS `alerts`, NEVER `payload`: the payload-shape suite
      scans this file's `payload.` reads against the unusual payload and its
@@ -1380,12 +1428,9 @@
 
   /* THE ALERTS TABLE'S COLUMNS, in the <thead>'s order in flows-pages.js —
      the same contract the counter feed's FEED_COLS keeps, for the same reason:
-     a column that moves in the markup moves here and nowhere else.
-
-     This table was the newer, richer and fresher of the two on this page and
-     was the one a reader could not rank at all. Every value below is read
-     through isNum or String so an unmeasured cell sorts to the BOTTOM in both
-     directions, which is what compare() enforces. */
+     a column that moves in the markup moves here and nowhere else. Every value
+     below is read through isNum or String so an unmeasured cell sorts to the
+     BOTTOM in both directions, which is what compare() enforces. */
   const ALERT_COLS = [
     { key: "t", name: "Name", first: "asc",
       val: (r) => (r.t === null || r.t === undefined ? null : String(r.t)) },
@@ -1419,7 +1464,7 @@
      paintAlerts so a later resolution of the OTHER feed can repaint this one
      without re-reading the payload. */
   function paintAlertRows() {
-    if (!alertsBody) return;
+    if (!alertsBody || !alertRows.length) return;   // see paintFeedRows
     const view = alertsSorter.view(alertRows).filter((e) => passesFilter(e.r, "exp"));
     alertsBody.textContent = "";
     if (!view.length && alertRows.length) {
@@ -1499,22 +1544,25 @@
   }
 
   /* THE FRESHNESS STAMP, worded by who wrote the read: the nightly pipeline
-     publishes this key and the worker cron re-reads it during the session,
-     flipping `refreshed` to "intraday" — so the stamp says which read the
-     table below is, and how it moves. Takes the two fields, never the
-     payload, so the shape scan sees the real `alerts.` reads at the call. */
+     publishes this key and the worker cron re-reads it in session, flipping
+     `refreshed` to "intraday". Takes the two fields, never the payload, under
+     the naming rule above.
+
+     IN UTC, THROUGH instant(). toLocaleTimeString with no zone printed put
+     three clocks on one panel: "Read 17:17" in New York over a note reading
+     "Read 2026-09-04 21:17 UTC" for that same instant, over a Window column
+     headed UTC — and a different calendar day in Istanbul. The note no longer
+     repeats the instant either. */
   function alertsStamp(readAt, refreshed) {
-    if (typeof readAt !== "string") return "";
-    const t = new Date(readAt);
-    if (Number.isNaN(t.getTime())) return "";
-    const hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const at = instant(readAt);
+    if (!at) return "";
     if (refreshed === "intraday") {
-      return "Read " + hm + " (refreshes about every 15 minutes during market hours).";
+      return "Read " + at + " (refreshes about every 15 minutes during market hours).";
     }
     if (refreshed === "nightly") {
-      return "Read " + hm + " with the nightly build (refreshes intraday during market hours).";
+      return "Read " + at + " with the nightly build (refreshes intraday during market hours).";
     }
-    return "Read " + hm + ".";
+    return "Read " + at + ".";
   }
 
   function paintAlerts(alerts) {
@@ -1527,7 +1575,7 @@
       emptyRow(alertsBody, ALERT_COLUMNS,
         "The pipeline has not published this key yet. The alerts feed costs one " +
         "market-wide call a run and appears with the first pipeline run after it " +
-        "shipped.");
+        "shipped.", "pending");
       if (alertsCap) alertsCap.textContent = "Nothing has been published under this key.";
       alertsPanel.hidden = false;
       return;
@@ -1537,29 +1585,21 @@
     if (!rows) {
       emptyRow(alertsBody, ALERT_COLUMNS,
         "This payload could not be read as an alerts feed: it carries no rows " +
-        "array. That is a gap in the payload, not a quiet market.");
+        "array. That is a gap in the payload, not a quiet market.", "unreadable");
       /* AN UNREADABLE PAYLOAD IS ANSWERED-AND-UNUSABLE, not still-loading. The
-         filter note's three states are the page's three silences and this is
-         the second of them; leaving it as "pending" would have the note
-         promise a table that has already come back broken. */
+         filter note keeps one state per silence and this is the broken-read
+         one; leaving it as "pending" would have the note promise a table that
+         has already come back broken. */
       alertsState = "failed";
       syncFilterNote();
       alertsPanel.hidden = false;
       return;
     }
 
-    /* WHOSE CEILING THIS COUNT HIT, captured here because the note below is
-       the only place the page states a population.
+    /* WHOSE CEILING THIS COUNT HIT. The pipeline publishes both fields and
+       argues them at the publish site; vendorCeilingSaid() above spends them.
 
-       The pipeline publishes this and explains why in its own words: "`shed`
-       counts what OUR published cap removed from what we received; it says
-       nothing about what the vendor withheld before we saw it. When the
-       response length equals the requested limit the population above it is
-       unknown, and a reader comparing today's count to yesterday's is
-       comparing two ceilings rather than two markets." The run even logs it in
-       capitals. Nothing in any browser file had ever read either field.
-
-       ABSENT IS NOT FALSE, and this is the whole discipline of the capture. A
+       ABSENT IS NOT FALSE, and that is the whole discipline of the capture. A
        payload published before these fields shipped carries neither, and
        `!undefined` is `true` — which would have the page state, confidently,
        that the read was NOT truncated, about a run that never measured it.
@@ -1586,7 +1626,7 @@
         "The vendor's rules flagged nothing in this read. The read is stamped " +
         "below — a pre-open read of a feed that fills intraday is expected to " +
         "be thin — and absence from the vendor's selection is not evidence of " +
-        "a quiet market.");
+        "a quiet market.", "quiet");
     } else {
       alertsSorter.wire();
       paintAlertRows();
@@ -1596,17 +1636,33 @@
     syncFilterNote();
 
     const seen = isNum(alerts.seen);
-    const shed = isNum(alerts.shed) ?? 0;
+    /* NOT `?? 0`, which read an absent count as a measured zero: one caption
+       served two payloads — a cap that removed nothing, and a payload from
+       before `shed` existed, where nobody counted what it removed. The second
+       says so now, and only where it shows: a read whose `seen` already stands
+       above the rows drawn. */
+    const shed = isNum(alerts.shed);
     const cov = alerts.coverage && typeof alerts.coverage === "object" ? alerts.coverage : {};
     if (alertsCap) {
+      const shedSaid = shed === null
+        ? (seen !== null && seen > rows.length
+          ? ", and what the row cap shed was not recorded on this payload" : "")
+        : shed
+          ? ", the largest premiums kept and " + count(shed) + " shed by the row cap"
+          : "";
+      /* A VENDOR CEILING IS NOT A CENSUS. At the vendor's own limit the
+         population above that line is unknown, so this denominator is a floor
+         and prints as one: "60 of 200" reads as a market, "60 of at least 200"
+         is the measurement. */
       alertsCap.textContent = count(rows.length) +
-        (seen === null ? " windows" : " of " + count(seen) + " flagged windows") +
-        (shed ? ", the largest premiums kept and " + count(shed) + " shed by the row cap" : "") +
+        (seen === null ? " windows" : " of " +
+          (alertVendorTruncated === true ? "at least " : "") + count(seen) +
+          " flagged windows") +
+        shedSaid +
         " \u00b7 ranked by the vendor's own premium, inside the vendor's own selection.";
     }
     if (alertsNote) {
       const bits = [];
-      const readAt = instant(alerts.readAt);
       bits.push("The population is what the vendor's rules chose to flag — the rules " +
         "are named per row, their definitions are the vendor's own, and absence from " +
         "this list is not evidence of quiet.");
@@ -1616,13 +1672,14 @@
           (isNum(cov.calls) !== null && isNum(cov.puts) !== null
             ? " (" + count(cov.calls) + " calls, " + count(cov.puts) + " puts)" : "") + ".");
       }
-      if (readAt) bits.push("Read " + readAt + "; each row also carries the vendor's own span.");
+      /* THE READ INSTANT IS STAMPED ONCE, above the table: two "Read …" lines
+         on one panel invite the reading that they are two reads. */
+      bits.push("Each row carries the vendor's own stated span, in UTC.");
       alertsNote.textContent = bits.join(" ");
     }
 
-    /* The stamp line sits at the top of the section, under the heading,
-       created here because the markup half predates it. One element,
-       repainted in place on any later paint. */
+    /* The stamp line sits under the section's heading, created here because
+       the markup half predates it. One element, repainted in place. */
     let stampEl = document.getElementById("uaAlertsStamp");
     if (!stampEl) {
       stampEl = el("p", "fc-note");
@@ -1664,7 +1721,7 @@
     emptyRow(alertsBody, ALERT_COLUMNS,
       "The alerts feed could not be loaded (" + (error && error.message
         ? error.message : "no message") + "). The counter feed below is a separate " +
-      "payload and stands on its own.");
+      "payload and stands on its own.", "unreadable");
     if (alertsCap) alertsCap.textContent = "No window could be listed.";
     alertsPanel.hidden = false;
   });
@@ -1692,9 +1749,9 @@
        nothing to say in them, and an empty table with a caption reads as a
        measurement that came back empty. */
     if (payload.status === "pending") {
-      statusEl.textContent = "The pipeline has not published this key yet. This feed is " +
+      say("The pipeline has not published this key yet. This feed is " +
         "built from the option chains the run already reads for each board name, so it " +
-        "appears with the first pipeline run after it shipped.";
+        "appears with the first pipeline run after it shipped.", "pending");
       return;
     }
 
