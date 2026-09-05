@@ -216,12 +216,11 @@
      drawIvSurface — the implied-volatility surface, panels.ivSurface
 
      WHAT THE PICTURE IS. One rectangle per (moneyness band × expiry).
-     Rows are `surface.rows`, log-moneyness band centres, HIGH STRIKES
-     AT THE TOP, because that is the order a price ladder is read in and
-     it is the order the emitter already built them in
-     (`flows-premium.js`: `for (let k = rowHi; k >= rowLo; k--)`).
-     Columns are `surface.expiries` in the order published, nearest
-     first.
+     Rows are `surface.rows`, log-moneyness band centres, HIGH STRIKES AT
+     THE TOP — the order a price ladder is read in, and the order the
+     emitter built them in (`flows-premium.js`: `for (let k = rowHi;
+     k >= rowLo; k--)`). Columns are `surface.expiries` as published,
+     nearest first.
 
      WHAT A CELL ENCODES, AND IN WHICH CHANNEL. Four channels, and the
      hue is not one of them:
@@ -234,50 +233,45 @@
        3. BORDER   — provenance. THREE appearances, one per state of
                      `traded`: solid is a print from today, `3 2` did
                      not trade today, `1 2` carries no volume field at
-                     all. The solid state has to be a DRAWN solid edge,
-                     not the absence of one: the shipped desk renderer
-                     (`flows-desk.js`) writes `stroke:"none"` for
-                     `traded === true` and therefore ships two
-                     appearances for a tri-state, which reads as "two
-                     kinds of odd cell and a normal one" instead of as
+                     all. The solid state has to be a DRAWN edge, not the
+                     absence of one: `flows-desk.js` writes
+                     `stroke:"none"` for `traded === true` and so ships
+                     two appearances for a tri-state, which reads as "two
+                     kinds of odd cell and a normal one" rather than as
                      three measured facts. Every cell here has a border.
        4. NUMBER   — the contract's own quoted implied volatility, as a
                      percent, printed inside the cell when the cell can
                      hold it.
 
      THERE IS NO SECOND HUE ON THIS GRID. `.fts-cell` carries one fill
-     and the sign lives entirely in the hatch, so nothing at all is lost
-     in greyscale. That is deliberately stricter than the gamma surface,
-     which tints `is-pos` and `is-neg` and uses the hatch as
-     reinforcement.
+     and the sign lives entirely in the hatch, so nothing is lost in
+     greyscale — stricter than the gamma surface, which tints `is-pos`
+     and `is-neg` and uses the hatch as reinforcement.
 
      ---------------------------------------------------------------
      THE LABELLED CHOICES, all of which the panel states in words:
 
      CHOICE 1 — the opacity ramp is `0.12 + 0.46 · min(1, |skew|/cap)`.
-     The 0.12 floor exists so that a small-but-real skew is still
-     visibly a cell: zero opacity and "nothing here" must never look
-     alike, and this grid has a separate mark for "nothing here". The
-     0.58 ceiling exists because the quoted volatility is printed ON TOP
-     of the fill and has to stay legible against it.
+     The 0.12 floor keeps a small-but-real skew visibly a cell: zero
+     opacity and "nothing here" must never look alike, and this grid has
+     a separate mark for "nothing here". The 0.58 ceiling exists because
+     the quoted volatility is printed ON TOP of the fill.
 
      CHOICE 2 — `skewCap` is a 0.9 quantile of |skew| ON THIS CHART
-     (`SKEW_CAP_QUANTILE`, floored at `SKEW_CAP_FLOOR = 0.01`). It is
-     not a constant and it is not shared. THE SHADING IS THEREFORE NOT
-     COMPARABLE BETWEEN TWO NAMES and the note says so in those words —
-     measured across the emitted corpus the cap ranges 0.0945 to 0.1972,
-     a factor of 2.1, so the same shade means twice the skew on one card
-     as on another.
+     (`SKEW_CAP_QUANTILE`, floored at `SKEW_CAP_FLOOR = 0.01`): not a
+     constant and not shared. THE SHADING IS THEREFORE NOT COMPARABLE
+     BETWEEN TWO NAMES and the note says so — measured across the emitted
+     corpus the cap ranges 0.0945 to 0.1972, a factor of 2.1, so the same
+     shade means twice the skew on one card as on another.
 
      CHOICE 3 — row labels are `ln(K/S)` to two decimals, NOT a
-     percentage. A row at 0.50 is a strike 64.9% above spot, and the
-     emitter really does build rows out to ±0.5 on a wide chain, so a
-     "+50.0%" label would be wrong by 14.9 percentage points at the
-     extreme. Two decimals separates every row on the step ladder the
-     emitter actually uses (0.05 and 0.10, measured); the two finest
-     rungs of `SURFACE_ROW_STEPS` (0.005, 0.01) would collide at two
-     decimals, so the decimal count is taken from `step` and is two
-     unless `step` itself is finer than a hundredth. See the notes.
+     percentage. A row at 0.50 is a strike 64.9% above spot and the
+     emitter does build rows out to ±0.5 on a wide chain, so a "+50.0%"
+     label would be wrong by 14.9 percentage points at the extreme. Two
+     decimals separates every row on the step ladder the emitter uses
+     (0.05 and 0.10, measured); the two finest rungs of
+     `SURFACE_ROW_STEPS` (0.005, 0.01) would collide at two decimals, so
+     the decimal count is taken from `step`.
 
      CHOICE 4 — columns are evenly spaced by LISTED EXPIRY, not by
      elapsed time. The tenor is printed under each head so the reader
@@ -301,11 +295,11 @@
      flat, and `fill-opacity: 0` would say flat.
 
      THIS IS THE ONE MARK ON THE PAGE THAT CAN TEACH A READER A FALSE
-     FACT ABOUT A DIFFERENT PANEL. The gamma surface, in the same grid
-     idiom on the same card, styles `.gs-cell.is-zero { fill: none }` —
-     and there hollow means MEASURED EXACTLY ZERO. Two hollow cells, two
-     opposite meanings, one screen. The key names this one explicitly
-     and the note spells the difference out; do not shorten either.
+     FACT ABOUT A DIFFERENT PANEL. The gamma surface, same grid idiom,
+     same card, styles `.gs-cell.is-zero { fill: none }` — and there
+     hollow means MEASURED EXACTLY ZERO. Two hollow cells, two opposite
+     meanings, one screen. The key names this one explicitly and the note
+     spells the difference out; do not shorten either.
 
      No cell at all — `.fts-void`, an EXPLICIT FILLED rectangle, never a
      gap. A band with no listed contract and a band whose contract is
@@ -316,12 +310,11 @@
      `serialiseSurface()` keeps FOUR fields per cell — `iv`, `skew`,
      `traded`, `strike` — and DROPS `type`, `volume`, `oi`, `crowd` and
      `m`; `atmType` is dropped from the expiry too. Verified against all
-     65 emitted cards. The desk's `cellTitle()` reads `cell.type`,
-     `cell.m`, `cell.crowd`, `cell.volume` and `cell.oi` and CANNOT be
-     reused here — every one of those would render as `undefined` or, if
-     coerced, as a confident zero. In particular: do NOT infer "below
-     spot, therefore a put". The band centre `rows[i]` is a stated band
-     centre, not the contract's own moneyness, and the note says so.
+     65 emitted cards. The desk's `cellTitle()` reads five of the dropped
+     fields and CANNOT be reused here: each would render as `undefined`
+     or, coerced, as a confident zero. In particular do NOT infer "below
+     spot, therefore a put" — `rows[i]` is a stated band centre, not the
+     contract's own moneyness, and the note says so.
      ============================================================= */
 
 
@@ -1097,26 +1090,23 @@
      THE LABELLED CHOICES THIS RENDERER MAKES, all named on the panel:
 
      1. THE Y AXIS RUNS FROM ZERO TO THE NEXT ROUND VOLATILITY POINT
-        STRICTLY ABOVE THE LARGEST LEVEL DRAWN. The spec offered
-        `1.08 × max(atmIv)` or "the next round volatility point above the
-        maximum, which is the better option if you can do it cleanly".
-        This takes the second: 1.08 is a multiplier nobody chose for a
-        reason, and it lands the axis top on a number no tick would ever
-        print — on the measured fixture, 1.08 × 0.328 = 0.35424. The round
-        rule reuses the codebase's own `niceStep` against max/4, which
-        gives a top of 35.0% on a 5-point ladder. STRICTLY above, so a
-        maximum that is already an exact multiple of the step gets one
-        more step and the tallest bar never touches the frame. The top,
-        the ladder and the maximum are all printed.
+        STRICTLY ABOVE THE LARGEST LEVEL DRAWN. The alternative was
+        `1.08 × max(atmIv)`: a multiplier nobody chose for a reason, and
+        it lands the axis top on a number no tick would print — on the
+        measured fixture, 1.08 × 0.328 = 0.35424. The round rule reuses
+        the codebase's own `niceStep` against max/4, giving a top of
+        35.0% on a 5-point ladder. STRICTLY above, so a maximum already
+        an exact multiple of the step gets one more and the tallest bar
+        never touches the frame. Top, ladder and maximum are printed.
 
      2. ORIGIN AT ZERO, AND WHY THE BARS LOOK ALIKE. `atmIv` is an
-        unsigned LEVEL, so it grows from a baseline that means zero
-        implied volatility and gets no zero tick — there is no "no change"
-        reading to draw a rule at. The cost is real and is stated: eight
-        levels between 21% and 34% render as eight bars of similar height.
-        The POLYLINE is what carries the shape. A truncated axis would
-        make every term structure look dramatic by construction, which is
-        the trade being refused here rather than taken quietly.
+        unsigned LEVEL, so it grows from a baseline meaning zero implied
+        volatility and gets no zero tick — there is no "no change" reading
+        to rule. The cost is stated: eight levels between 21% and 34%
+        render as eight bars of similar height, and the POLYLINE carries
+        the shape. A truncated axis would make every term structure look
+        dramatic by construction, which is the trade refused here rather
+        than taken quietly.
 
      3. COLUMNS ARE EVENLY SPACED BY LISTED EXPIRY, NOT BY ELAPSED TIME.
         Stated verbatim in the note, exactly as the surface above states
@@ -1134,17 +1124,14 @@
         measured — the break is `renderPath`'s, `flows-panels.js:1707-1715`.
 
      5. THE TWO SCALARS ARE TEXT, NOT MARKS, AND CARRY NO HUE. `skew` has
-        polarity −1 (`shared/flows-card.js`: put iv − call iv, the SAME
-        construction as `riskReversal`; puts bid is BEARISH), so a
-        POSITIVE skew tinted by its sign rather than by a polarity lookup
-        would be tinted UP — the classic error on this field, and the
-        reason the spec prescribes words. Direction is given IN WORDS
-        beside the signed number, which survives a monochrome print and a
-        reader who cannot separate the two hues. `polarityOf()` lives in
-        `shared/`, which is in `.assetsignore` and never reaches the
-        browser, so a hue here could only come from a SECOND copy of the
-        polarity table — a second answer to the same question. There is
-        no hue on this panel at all.
+        polarity −1 (put iv − call iv, the same construction as
+        `riskReversal`; puts bid is BEARISH), so a POSITIVE skew tinted by
+        its sign rather than by a polarity lookup would be tinted UP — the
+        classic error on this field. Direction is given IN WORDS beside
+        the signed number, which survives a monochrome print and a reader
+        who cannot separate the hues. `polarityOf()` lives in `shared/`
+        and never reaches the browser, so a hue here could only come from
+        a SECOND copy of the polarity table. There is no hue at all.
 
      6. THE COLUMN GRID IS BORROWED FROM THE SIBLING SURFACE WHEN THE TWO
         PANELS AGREE ABOUT WHICH EXPIRIES EXIST. `skewTerm` is `span: 2`
@@ -1825,21 +1812,17 @@
      drawTopContracts — panels.topContracts, the day's most-traded
      option contracts, as a sortable table.
 
-     NOT A CHART, AND DELIBERATELY NOT ONE. Every other panel on this
-     page answers a question about a SHAPE — where gamma sits, what the
-     smile does with tenor, which side of the book is being lifted — and
-     a shape is what a chart is for. This panel answers "which single
-     lines carried the volume", and the answer is ten rows of nine
-     quantities that are not commensurable with each other: a strike is
-     a price, a volume is a count, an expiry is a date. Any encoding
-     that put them on a shared visual scale would be inventing a
-     comparison the data does not contain. A table prints each number in
-     its own units and lets the reader do the comparing, which is the
-     honest form here.
+     NOT A CHART, AND DELIBERATELY NOT ONE. Every other panel here
+     answers a question about a SHAPE, which is what a chart is for.
+     This one answers "which single lines carried the volume", and the
+     answer is ten rows of nine quantities that are not commensurable: a
+     strike is a price, a volume is a count, an expiry is a date. Any
+     shared visual scale would invent a comparison the data does not
+     contain. A table prints each number in its own units.
 
-     IDENTIFICATION. Nothing on this panel is estimated. Every column is
-     a vendor observable or a difference of two of them, and the two
-     differences are named beside the table:
+     IDENTIFICATION. Nothing here is estimated. Every column is a vendor
+     observable or a difference of two of them, and the two differences
+     are named beside the table:
 
        Strike   option_symbol strike field / 1000
        Expiry   option_symbol expiry field, as an ISO date
@@ -1852,101 +1835,88 @@
        Net aggr ask_volume - bid_volume          <- a DIFFERENCE, in contracts
 
      There is no free parameter here: no rate, no dividend, no
-     interpolation, no volatility model. The one derived number that
-     does not come off the wire is the day count in the Expiry title,
-     which is calendar days between the card's own sessionDate and the
-     contract's expiry — stated as a CHOICE below, because "days" could
-     equally have meant trading days and the two differ by a third.
+     interpolation, no volatility model. The one derived number not off
+     the wire is the day count in the Expiry title — calendar days
+     between the card's own sessionDate and the contract's expiry,
+     stated as a CHOICE below because "days" could equally have meant
+     trading days and the two differ by a third.
 
      THE CHOICES THIS PANEL MAKES, each labelled where it is made:
 
-     CHOICE 1 - NO MID COLUMN. (bid + ask) / 2 is the single most
-     requested column on a table like this one and it is refused.
-     A midpoint is a basis choice: it asserts that the true price sits
-     exactly halfway across a spread that may be a penny wide or a
-     dollar wide, and on the deep out-of-the-money lines that make this
-     table interesting it is routinely neither. Bid and Ask are two
-     adjacent columns, as quoted, and the reader who wants a midpoint
-     can see exactly what they would be averaging. Refused upstream too,
-     for the same reason: shared/flows-chain.js publishes bidPx and
-     askPx and no mid.
+     CHOICE 1 - NO MID COLUMN. (bid + ask) / 2 is the most requested
+     column on a table like this and it is refused: a midpoint asserts
+     that the true price sits exactly halfway across a spread that may
+     be a penny or a dollar wide, and on the deep out-of-the-money lines
+     that make this table interesting it is routinely neither. Bid and
+     Ask are adjacent, as quoted, so a reader who wants a midpoint can
+     see what they would be averaging. Refused upstream for the same
+     reason: shared/flows-chain.js publishes bidPx and askPx and no mid.
 
      CHOICE 2 - NET AGGR IS IN CONTRACTS AND THE UNIT IS IN THE HEADER.
      A dollarised flow would need a price basis, which is CHOICE 1 again
-     wearing a hat. The header reads "Net aggr (contracts)" so the unit
-     cannot come apart from the number when the column is read on its
-     own.
+     wearing a hat. "Net aggr (contracts)" keeps the unit from coming
+     apart from the number when the column is read on its own.
 
      CHOICE 3 - THE SIGN OF NET AGGR IS CARRIED BY A GLYPH FIRST AND BY
-     HUE LAST. U+2191 / U+2193 lead the number, U+2212 marks negatives,
-     and only then does a class hand CSS the flow palette. A reader who
-     cannot separate red from green still gets the sign. The arrows are
-     U+2191 and U+2193 and NOT U+25B2 / U+25BC: assets/css/base.css
-     lists U+2191, U+2193 and U+2212 in the JetBrains Mono latin subset
-     and does not list the triangles, so a triangle would fall through
-     to the system stack and change the character advance halfway down a
-     tabular-numeric column.
+     HUE LAST: U+2191 / U+2193 lead the number, U+2212 marks negatives,
+     and only then does a class hand CSS the flow palette. Not U+25B2 /
+     U+25BC: assets/css/base.css lists the arrows and U+2212 in the
+     JetBrains Mono latin subset and does not list the triangles, so a
+     triangle would fall through to the system stack and change the
+     character advance halfway down a tabular-numeric column.
 
      CHOICE 4 - IMPLIED VOLATILITY IS IN THE STRIKE CELL'S TITLE, NOT IN
-     A TENTH COLUMN. The alternative the spec allows is a tenth column
-     shown only at >= 76rem, and it is rejected here for a mechanical
-     reason: this panel is drawn ONCE per mount and is not redrawn when
-     the viewport crosses a breakpoint (assets/js/flows-ticker.js
-     redraws on resize, but a drawer that decided its own column count
-     from matchMedia at draw time would be one debounce behind the
-     layout, and a column that is present-but-wrong is worse than one
-     that is absent). The title also keeps ln(K/S) and the volatility
-     together, which is where they belong: they are the two facts that
-     place a strike on the smile.
+     A TENTH COLUMN. The alternative — a tenth column shown only at
+     >= 76rem — is rejected mechanically: this panel is drawn ONCE per
+     mount, so a drawer deciding its column count from matchMedia at
+     draw time would be one debounce behind the layout, and a column
+     that is present-but-wrong is worse than one that is absent. The
+     title also keeps ln(K/S) and the volatility together, which is
+     where they belong: they place a strike on the smile.
 
      CHOICE 5 - dOI GETS NO DIRECTIONAL HUE. shared/flows-card.js's
-     POLARITY table has no `doi` entry, and polarityOf() returns 0 for a
-     key it does not know. That is not an omission to be patched here: a
+     POLARITY table has no `doi` entry and polarityOf() returns 0 for a
+     key it does not know. That is not an omission to patch here: a
      rising open interest is not bullish and a falling one is not
-     bearish, and tinting the column green and red would be inventing a
-     direction for a quantity that has none. `aggr` IS in that table at
-     +1 (calls lifted at the offer are bullish), so the Net aggr column
-     is the ONE column on this panel that earns the flow palette.
+     bearish, and tinting the column would invent a direction the
+     quantity does not have. `aggr` IS in that table at +1, so Net aggr
+     is the one column here that earns the flow palette.
 
      THE FOUR ABSENCES THAT WOULD BECOME LIES IF PRINTED AS ZERO:
 
-     1. aggr === null is U+2014, never 0. "The vendor reported no
-        aggressor split" and "the split was reported and it was
-        balanced" are different facts and only one of them is a reading.
-        A measured zero prints "0" with no arrow, because neither arrow
-        is true at zero. The panel foot states how many of the rows
-        shown carried a split at all.
+     1. aggr === null is U+2014, never 0. "No aggressor split was
+        reported" and "the split was reported and balanced" are
+        different facts and only one is a reading. A measured zero
+        prints "0" with no arrow, neither arrow being true at zero. The
+        foot states how many rows shown carried a split at all.
      2. doi === null is U+2014, never 0. An open_interest present with
-        prev_oi absent is NOT "no change" - it is "the change is not
+        prev_oi absent is not "no change", it is "the change is not
         computable". An unchanged open interest prints 0.
      3. bidPx / askPx / iv / oi are each independently U+2014.
-     4. Sort puts null LAST in both directions. Reversing a sort is
-        where this is easiest to lose: negate the comparator wholesale
-        and every unmeasured row floats to the top, where position reads
-        as ranking. Unmeasured never wins a ranking - the rule
-        assets/js/flows-board.js:531-554 and assets/js/flows-watch.js:
-        205-211 already state, applied to a third table so there is one
-        rule and not three.
+     4. Sort puts null LAST in both directions. Reversing is where this
+        is easiest to lose: negate the comparator wholesale and every
+        unmeasured row floats to the top, where position reads as
+        ranking. Unmeasured never wins a ranking — the rule flows-board
+        .js and flows-watch.js already state, applied to a third table
+        so there is one rule and not three.
 
      COVERAGE IS ALWAYS STATED, in both directions. The vendor's chain
-     page tops out and a wide name has more contracts than fit on it, so
-     `coverage.truncated` is a fact about the SAMPLE and it is printed
-     whether it is true or false. What truncation means HERE is
-     different from what it means on the surface panels, and the panel
-     says which: the rows are not damaged - every line below is a
-     contract that really traded, at the volume the vendor reported for
-     it - but the SUPERLATIVE is. "The day's most-traded" is a claim
-     about a ranking over the whole book, and a ranking over an
-     arbitrary subset of the book is not that claim. So the rows stand
-     and the headline is withdrawn, explicitly, in words.
+     page tops out, so `coverage.truncated` is a fact about the SAMPLE
+     and is printed whether true or false. What truncation means HERE
+     differs from the surface panels and the panel says which: the rows
+     are not damaged — every line is a contract that really traded, at
+     the volume reported for it — but the SUPERLATIVE is. "The day's
+     most-traded" is a claim about a ranking over the whole book, and a
+     ranking over an arbitrary subset is not that claim, so the rows
+     stand and the headline is withdrawn in words.
 
-     THE MOUNT TAG. This drawer emits no <svg>, no <defs> and no `id`
-     attribute at all, so the document-global id collision the mount tag
-     exists to prevent cannot arise here - and NOTHING BELOW MAY EMIT AN
-     id WITHOUT SUFFIXING IT. `mount` is still load-bearing: it keys the
-     per-mount sort state, so that the grid copy and the enlarged copy
-     sort independently, and so that neither loses the reader's chosen
-     order when flows-ticker.js redraws them on a resize.
+     THE MOUNT TAG. This drawer emits no <svg>, no <defs> and no `id` at
+     all, so the document-global id collision the tag exists to prevent
+     cannot arise — and NOTHING BELOW MAY EMIT AN id WITHOUT SUFFIXING
+     IT. `mount` is still load-bearing: it keys the per-mount sort
+     state, so the grid copy and the enlarged copy sort independently
+     and neither loses the reader's order when the page redraws them on
+     a resize.
      ============================================================= */
 
   /* The verbatim coverage sentence. It is quoted, not composed, because

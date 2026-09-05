@@ -506,6 +506,109 @@ try {
         { method: "DELETE", redirect: "manual", headers: auth });
       eq(methodDenied.status, 405, "and only POST is allowed");
 
+      /* THE NAME THE PAGE THE READER IS ON IS ABOUT, POSTED BESIDE THE
+         QUESTION. The assistant is docked on every gated route, including
+         /flows/ticker/?t=SYN046, and until this field existed it answered a
+         reader who typed "what changed" over one name with market-wide
+         readings — nothing they typed named a ticker, and nothing else told
+         the selection which name they meant.
+
+         THE NAME BELOW IS SIX CHARACTERS AND THAT IS NOT INCIDENTAL. Every
+         card the pipeline emits is SYN0## — 93 of them in the dry-run
+         corpus, none of them five — so a bound of /^[A-Z][A-Z0-9]{0,4}$/
+         passes a suite written around "SYN46" while dropping every name
+         this route is ever posted. The shape here is the one readTicker()
+         serves and subjectTickers() accepts: /^[A-Z][A-Z0-9.-]{0,9}$/.
+
+         THE ROUTE DOES NOT DECIDE WHETHER TO USE IT, AND THAT IS THE POINT.
+         shared/flows-ask.js consults `subject` only when the question names
+         no ticker of its own, so a reader who does name one is never
+         answered about the page instead. Deciding it here, or in the
+         browser, would be a second copy of that rule in a file that does not
+         own it — and the two would disagree the first time either moved. */
+      const briefWithName = await fetch(url("/api/flows/ingest?key=brief"), {
+        method: "POST", redirect: "manual",
+        headers: { Authorization: "Bearer " + INGEST_TOKEN, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generatedAt: "2026-09-04T08:00:00.000Z", sessionDate: "2026-09-03",
+          today: { facts: [], silences: [] },
+          yesterday: { facts: [], silences: [] },
+          next: { facts: [], silences: [], isForecast: false },
+          facts: [
+            { id: "t/tilt", topic: ["today", "lean"], source: "brief",
+              at: "2026-09-04T08:00:00.000Z",
+              say: "44 names lean bullish and 53 lean bearish out of 100 scored.",
+              n: { bullish: 44, bearish: 53, scored: 100 } },
+            { id: "card:SYN046/standing", topic: ["syn046"], source: "card:SYN046",
+              at: "2026-09-04T08:00:00.000Z",
+              say: "SYN046 is rank 1 of 2 on the long board, conviction 96 of 100.",
+              n: { boardRank: 1, boardRows: 2, convictionOf100: 96 } },
+          ],
+          silences: { pending: [], unreadable: [], quiet: [] },
+        }),
+      });
+      eq(briefWithName.status, 200, "a briefing carrying a per-name reading is ingested");
+
+      const onPage = await (await ask({ question: "what changed", subject: "syn046" }, auth)).json();
+      eq(onPage.subjectApplied, true,
+         "a SIX-character name that names no ticker in the question, posted from a page " +
+         "that does, is selected with the page's name — lowercase on the wire and shaped " +
+         "like a symbol is enough, and every card this pipeline publishes is six " +
+         "characters, so a bound narrower than the route's own drops all of them and says " +
+         "nothing about having done it");
+      eq(onPage.subject, "SYN046",
+         "and the name is echoed back so the page can say in the open which symbol it " +
+         "added, rather than leaving a reader to work out where the readings came from");
+      ok(onPage.facts.some((f) => f.source === "card:SYN046"),
+         "the per-name reading is what gets selected, which is the whole defect: the same " +
+         "question without the field is answered from the market-wide surfaces");
+      ok(/SYN046/.test(onPage.answer),
+         "and the answer names it, because the question the wording is built from carries " +
+         "the page's name once selection has used it — otherwise a per-name answer opens " +
+         "with 'nothing in the question matched a name'");
+
+      const shareClass = await (await ask(
+        { question: "what changed", subject: "brk.b" }, auth)).json();
+      eq(shareClass.subjectApplied, true,
+         "a share-class symbol carrying a dot is a name here too, and a hyphenated one " +
+         "likewise: BRK.B and RDS-A are quoted by the vendor and served by /flows/ticker, " +
+         "so a route that refuses them answers market-wide about a page that is not");
+      eq(shareClass.subject, "BRK.B",
+         "echoed back uppercased and whole, punctuation included");
+
+      const typedOwn = await (await ask(
+        { question: "what is the lean", subject: "syn046" }, auth)).json();
+      eq(typedOwn.subjectApplied, true,
+         "a question with no ticker still takes the page's name");
+      const otherName = await (await ask(
+        { question: "what is the lean for ZZZQ", subject: "syn046" }, auth)).json();
+      eq(otherName.subjectApplied, false,
+         "while a question that names a ticker of its own overrides the page outright, and " +
+         "the route reports that rather than claiming a name it did not use");
+      eq(otherName.subject, null,
+         "with no symbol echoed back, so the page states nothing about a name that was not " +
+         "applied");
+      ok(typeof otherName.withheld === "string" &&
+         /^Nothing indexed is about ZZZQ/.test(otherName.withheld),
+         "and the withholding travels as its own field, separate from `why`: `why` is the " +
+         "audit trail and folds into the page's method disclosure, this is the caveat and " +
+         "may not — the fold rule is asymmetric, and on the branch where a model writes the " +
+         "prose this sentence is the only thing on the page saying the name has no reading " +
+         "behind it. It is a field rather than a substring so the page is not matching on " +
+         "wording to find it");
+      ok(!/Picked /.test(otherName.withheld),
+         "carrying none of the accounting, which is the half that is allowed to fold");
+      eq(onPage.withheld, null,
+         "and a question every name of which is covered withholds nothing, stated as null " +
+         "rather than as an empty string a page would have to test the length of");
+
+      const junkSubject = await (await ask(
+        { question: "what changed", subject: "not a symbol" }, auth)).json();
+      eq(junkSubject.subjectApplied, false,
+         "a `subject` that is not shaped like a symbol is dropped before selection sees it: " +
+         "the value comes off a query string a reader can type into, and it is bounded here, " +
+         "again in the module, and never trusted by either alone");
+
       /* THE MODEL BUDGET, ON ITS OWN GET ROUTE. It is not a published key
          and so it is not under the passthrough convention every other path
          here follows — it is computed from D1 and named for what it

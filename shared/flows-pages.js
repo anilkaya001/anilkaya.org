@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "113";
+export const ASSET_VERSION = "114";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -155,7 +155,15 @@ const rail = (active) => {
  *
  * A question box at one route is a destination: a reader looking at the
  * bearish board and wondering what changed has to leave the board to ask.
- * This puts the same box on the right edge of every page, one key away.
+ * This puts the same box on the right edge of every page, behind the tab
+ * or behind the "?" key.
+ *
+ * THE KEY IS PRINTED ON THE TAB, because a shortcut nobody is told about
+ * is not an affordance — the same rule assets/js/flows-ask.js applies to
+ * the Enter hint inside the question field's own label. The glyph is
+ * aria-hidden and `aria-keyshortcuts` carries the same fact to assistive
+ * technology in the form it reads, so the key is announced once rather
+ * than as a stray "?" in the middle of the button's name.
  *
  * NOT ON /flows/ask, WHERE THE PAGE IS THE ASSISTANT. Two mounts would
  * collide on `#askApp` — one id, two elements, and the renderer takes
@@ -174,8 +182,10 @@ const rail = (active) => {
  */
 const dock = (active) => (active === "ask" ? "" : `
 <button type="button" class="ak-dock-tab" id="askDockTab"
-        aria-expanded="false" aria-controls="askDockPanel">
+        aria-expanded="false" aria-controls="askDockPanel"
+        aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">
   <span class="ak-dock-tab-l">Ask</span>
+  <span class="ak-dock-tab-k" aria-hidden="true">?</span>
 </button>
 <aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"

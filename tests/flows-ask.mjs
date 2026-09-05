@@ -1098,7 +1098,14 @@ import { readFile } from "node:fs/promises";
     setAttribute(k, v) { this.attrs.set(k, String(v)); }
     getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
     removeAttribute(k) { this.attrs.delete(k); }
-    addEventListener(type, fn) { submits.push({ type, fn }); }
+    /* THE LISTENER IS REMEMBERED ON THE NODE AS WELL AS IN THE FLAT LIST.
+       The box now carries buttons — three examples and, on a page about a
+       name, one that inserts the symbol — and a flat list cannot say which
+       button a click belongs to. */
+    addEventListener(type, fn) {
+      submits.push({ type, fn });
+      (this.on || (this.on = [])).push({ type, fn });
+    }
     focus() {}
     get textContent() {
       return this.own + this.children.map((c) => c.textContent).join("");
@@ -1113,14 +1120,25 @@ import { readFile } from "node:fs/promises";
     createTextNode: (s) => new TextNode(s),
     getElementById: (id) => byId.get(id) || null,
   };
-  const loc = { replace() {} };
+  /* THE STUBBED LOCATION CARRIES AN href NOW, because the renderer reads
+     the page's own `?t=` off it to learn which name the page under the
+     docked rail is about. `replace` stays: a 401 navigates. */
+  const loc = { href: "https://x.test/flows/side/", replace() {} };
 
   let briefBody = null;
   let askBody = null;
-  const fetchStub = (path, init) => Promise.resolve({
-    ok: true, status: 200,
-    json: () => Promise.resolve(init && init.method === "POST" ? askBody : briefBody),
-  });
+  /* WHAT WAS ACTUALLY SENT, kept so the suite can assert on the request
+     rather than only on the answer. The page's own name travels as a
+     `subject` field beside the question, and a page that stopped sending
+     it would still render every sentence below correctly. */
+  let sentBody = null;
+  const fetchStub = (path, init) => {
+    if (init && init.method === "POST") sentBody = JSON.parse(init.body);
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve(init && init.method === "POST" ? askBody : briefBody),
+    });
+  };
 
   const run = new Function("document", "fetch", "location", SRC);
   const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -1137,9 +1155,33 @@ import { readFile } from "node:fs/promises";
   const marks = (root) => walk(root)
     .map((n) => n.getAttribute("data-empty")).filter((v) => v !== null);
 
-  const mount = () => {
-    submits.length = 0; byId.clear();
+  /* THE TEXT A READER SEES WITHOUT OPENING ANYTHING. A <details> is shut
+     until it is clicked, so text inside one is not on the page in the sense
+     the fold rule means — and every assertion about a withholding has to be
+     made against this rather than against textContent, which reads the
+     folded audit trail as though it were on screen. */
+  const openText = (node) => {
+    let out = node.own || "";
+    for (const c of node.children || []) {
+      if (c instanceof El) {
+        if (String(c.tagName).toLowerCase() === "details") continue;
+        out += openText(c);
+      } else out += c.textContent;
+    }
+    return out;
+  };
+
+  /* THE FIRST THING A READER MEETS, as the class of the element carrying
+     it. Used to assert what the rail opens ONTO, which is a claim about
+     order and cannot be made from a substring test over the whole panel. */
+  const firstSaying = (root) => walk(root)
+    .find((n) => String(n.own || "").trim() !== "" && n.tagName !== "details");
+
+  const mount = (mode, href) => {
+    submits.length = 0; byId.clear(); sentBody = null;
+    loc.href = href || "https://x.test/flows/side/";
     const app = new El("div");
+    if (mode) app.setAttribute("data-mode", mode);
     byId.set("askApp", app);
     run(doc, fetchStub, loc);
     return app;
@@ -1152,7 +1194,12 @@ import { readFile } from "node:fs/promises";
   const ask = async (app, payload, question) => {
     askBody = payload;
     byClass(app, "ak-ask-in").value = question;
-    submits[submits.length - 1].fn({ preventDefault() {} });
+    /* THE SUBMIT HANDLER BY ITS TYPE, not by being the last listener
+       registered. The example buttons above the field register clicks of
+       their own, and one of them is rebuilt after an answer arrives — so
+       "the last thing that called addEventListener" stopped being the form
+       the moment the box gained a control that is used after a question. */
+    submits.filter((s) => s.type === "submit").pop().fn({ preventDefault() {} });
     await tick(); await tick();
     return byClass(app, "ak-answer");
   };
@@ -1366,6 +1413,325 @@ import { readFile } from "node:fs/promises";
     ok(/2 things to know before reading the rest/.test(brief.textContent),
        "while the heading keeps counting both, because a warning that arrived is a " +
        "warning that arrived");
+  }
+
+  /* ---------- the answer is not the fact list twice ----------------
+
+     THE DEFECT: on every fallback branch — a fired guard, a spent
+     allowance, no model configured — the served answer IS
+     renderFactsPlain, whose body is one dash-prefixed line per fact.
+     The block below it then drew the same facts again with the same
+     sentences, so a reader met every reading on the page twice, once as
+     an answer and once as evidence for it. */
+  {
+    const app = mount(); await tick();
+    const facts = [
+      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
+        source: "brief", at: STAMP2 },
+      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [],
+        source: "brief", at: STAMP2 },
+    ];
+    const plainAnswer = "These are the published readings that bear on what you asked.\n\n" +
+      "- The long board cleared 44 names.\n" +
+      "- The short board cleared 53 names.\n\n" +
+      "Every figure above is quoted from a payload this pipeline published; none of it " +
+      "was computed for this answer.";
+    const host = await ask(app, {
+      answer: plainAnswer, llm: false, guard: null, capped: false, facts,
+      silences: null, why: "", model: null,
+      note: "No model is configured for this site, so the reading below is the pipeline's " +
+        "own wording. Every figure in it was measured.",
+    }, "what cleared?");
+    const said = host.textContent;
+    const times = (hay, needle) => hay.split(needle).length - 1;
+
+    eq(times(said, "The long board cleared 44 names."), 1,
+       "when the answer IS the fact list, each sentence is printed ONCE. The deterministic " +
+       "answer's dashed lines become the answer's own list and the block below them used to " +
+       "restate every one of them, so the page said everything it had to say twice — and " +
+       "the second copy wore the authority of evidence for the first");
+    eq(times(said, "The short board cleared 53 names."), 1, "and so is the second");
+    ok(/2 facts were handed to the answer above\. All of them come from the brief key, built /
+       .test(said),
+       "what is left below is the provenance, stated once with its denominator: the key and " +
+       "the stamp both facts share, in one sentence rather than under each of them");
+    ok(/Their sentences are the lines in the answer above, and are not repeated here\./.test(said),
+       "and the count line says where the sentences went, so a reader is not left wondering " +
+       "whether a list went missing");
+    eq(times(said, "built "), 1,
+       "the stamp is printed exactly once. paintAnswer passed null for both provenance " +
+       "defaults, which switched off the 'only where it differs' rule this file argues for " +
+       "— nothing equals null — so 'built <stamp>' was drawn under every one of up to " +
+       "fourteen sentences that all came from the same run");
+    eq(allClass(host, "ak-fact-say").length, 0,
+       "no fact draws a sentence on this branch, because the sentence is above it");
+  }
+
+  /* ---------- the model's prose is NOT the fact list ---------------- */
+  {
+    const app = mount(); await tick();
+    const facts = [
+      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
+        source: "brief", at: STAMP2 },
+      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [],
+        source: "market", at: "2026-09-04T09:31:00.000Z" },
+    ];
+    const host = await ask(app, {
+      answer: "The session leans long, and the short side is the wider of the two.",
+      llm: true, capped: false, facts, silences: null, why: "", model: "m", note: null,
+      guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
+    }, "how does the session lean?");
+    const said = host.textContent;
+    eq(allClass(host, "ak-fact-say").length, 2,
+       "where the answer is the model's prose the facts still carry their sentences: the " +
+       "dedupe is measured against the served text, never assumed from the `llm` flag, " +
+       "which reports whether a model was ASKED and not whose wording is served");
+    ok(/1 of them comes from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./
+       .test(said),
+       "and where the facts do NOT share one origin the count line says so with both " +
+       "numbers over the same population, rather than naming a majority as though it were " +
+       "all of them — AND BOTH HALVES AGREE WITH THEIR OWN COUNT. One market-wide reading " +
+       "beside one card reading is the commonest split this page draws, and it is the only " +
+       "shape that fires both singulars: '1 of them come ... the other 1 name their own " +
+       "key' is prose a reader can see was assembled, on a page whose whole claim is that " +
+       "it can be told apart from a model's — " + said.slice(said.indexOf("2 facts were handed"), said.indexOf("2 facts were handed") + 180));
+    eq(allClass(host, "ak-fact-src").length, 1,
+       "exactly one fact draws its own provenance line: the one that disagrees with the " +
+       "origin the sentence above already stated");
+    ok(/market/.test(allClass(host, "ak-fact-src")[0].textContent),
+       "and it is the one from the other key");
+
+    /* THE TWO HALVES ARE DECIDED SEPARATELY, and a 2-and-1 split is what
+       proves it: one plural verb and one singular in the same sentence. A
+       single count driving both would have to be wrong on one of them. */
+    const mixed = await ask(app, {
+      answer: "The session leans long.",
+      llm: true, capped: false, silences: null, why: "", model: "m", note: null,
+      guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
+      facts: [
+        { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
+          source: "brief", at: STAMP2 },
+        { id: "b", say: "The session tilts long.", n: {}, topic: [],
+          source: "brief", at: STAMP2 },
+        { id: "c", say: "The short board cleared 53 names.", n: {}, topic: [],
+          source: "market", at: "2026-09-04T09:31:00.000Z" },
+      ],
+    }, "how does the session lean?");
+    ok(/2 of them come from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./
+       .test(mixed.textContent),
+       "two from one key and one from another puts a plural verb and a singular in the " +
+       "same sentence, which is the case that proves the halves are agreed with their own " +
+       "counts rather than with each other");
+  }
+
+  /* ---------- a withholding never folds ----------------------------
+
+     `why` carries an accounting AND, when there is one, a withholding.
+     The whole string is printed inside the method disclosure. On the
+     branch where a model wrote the prose that left "nothing indexed is
+     about the name you asked about" as the only statement of its kind
+     on the page, one click away, under a summary reading "How this
+     answer was assembled". */
+  {
+    const app = mount(); await tick();
+    const facts = [{ id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
+      source: "brief", at: STAMP2 }];
+    const withheld = "Nothing indexed is about ZZZ, so no reading below is about it.";
+    const host = await ask(app, {
+      answer: "The long side is the busier of the two today.", llm: true, capped: false,
+      facts, silences: null, model: "m", note: null, withheld,
+      why: "Nothing indexed is about ZZZ. Picked 1 of the 1 fact that matched the words board.",
+      guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
+    }, "what about ZZZ");
+
+    ok(/Nothing indexed is about ZZZ/.test(openText(host)),
+       "the withholding is ABOVE the fold on the model-worded branch, where nothing else " +
+       "says it: the model's prose is about the market and a reader takes it for an answer " +
+       "to the name they typed unless told otherwise");
+    ok(/Nothing indexed is about ZZZ\. Picked /.test(host.textContent),
+       "and the audit trail still holds `why` entire, because a record with a hole cut in " +
+       "it is worse than a sentence read twice");
+
+    /* THE CONTROL. On the fallback branch renderFactsPlain's own lead is a
+       coverage claim in the open already, so lifting this one too would
+       state the same withholding twice in eight lines. */
+    const plain = await ask(app, {
+      answer: "None of the readings below is about ZZZ. Nothing else in the question " +
+        "matched a topic the published payloads carry, so these are the session's " +
+        "headline readings.\n\n- The long board cleared 44 names.",
+      llm: false, guard: null, capped: false, facts, silences: null, model: null,
+      note: "No model is configured for this site.", withheld,
+      why: "Nothing indexed is about ZZZ. Picked 1 of the 1 fact that matched the words board.",
+    }, "what about ZZZ");
+    ok(!/Nothing indexed is about ZZZ/.test(openText(plain)),
+       "while the deterministic answer's own lead carries it, so it is not lifted a second " +
+       "time — the rule is that a withholding is in the open, not that it is printed twice");
+    ok(/None of the readings below is about ZZZ/.test(openText(plain)),
+       "and the control that keeps that assertion from passing against a page which simply " +
+       "stopped saying it: the coverage claim is there, in the answer's own words");
+  }
+
+  /* ---------- the docked mount is worded for the mount it is on ---- */
+  {
+    const app = mount("dock"); await tick();
+    const host = byClass(app, "ak-answer");
+    byClass(app, "ak-ask-in").value = "";
+    submits.filter((x) => x.type === "submit").pop().fn({ preventDefault() {} });
+    ok(!/briefing above/.test(host.textContent),
+       "the rail never points at 'the briefing above': paintBrief is skipped when docked, " +
+       "so on twelve of the thirteen routes this box appears on that sentence directed a " +
+       "reader to a page region that is not on the page");
+    ok(/\/flows\/ask\//.test(host.textContent),
+       "it points at the route the briefing is actually on");
+
+    const page = mount(); await tick();
+    const pageHost = byClass(page, "ak-answer");
+    byClass(page, "ak-ask-in").value = "";
+    submits.filter((x) => x.type === "submit").pop().fn({ preventDefault() {} });
+    ok(/briefing above/.test(pageHost.textContent),
+       "while on /flows/ask, where the briefing IS above, the sentence keeps saying so — " +
+       "the control that stops the fix from being 'delete the reference everywhere'");
+  }
+
+  /* ---------- what the rail opens onto -----------------------------
+
+     THE DEFECT: opened, the dock presented 335 characters of guarantee
+     and then the credit meter — 469 characters of chrome — above an
+     empty field. Every word survives; the guarantee is reassurance and
+     the fold rule allows reassurance to fold. */
+  {
+    const app = mount("dock"); await tick();
+    const first = firstSaying(app);
+    ok(first && /^ak-example/.test(String(first.className)),
+       "the first thing a reader meets in the rail is the examples, not a paragraph: what " +
+       "was there was a 335-character guarantee, which answered 'what can I ask this?' in " +
+       "prose where three buttons answer it in three lines — first said was " +
+       (first ? String(first.className) + ": " + first.own : "nothing"));
+    ok(!/It reads nothing live/.test(openText(app)),
+       "the guarantee is folded, because it is reassurance about what the box will NOT do " +
+       "and nothing in it changes what a visible number means");
+    ok(/It reads nothing live/.test(app.textContent),
+       "and it is folded rather than deleted: every word of it is still on the page, one " +
+       "click below the field it constrains");
+    ok(/model credits left today|could not read what has been spent/.test(openText(app)),
+       "while the meter stays OPEN, because its numbers are a withholding about capacity " +
+       "rather than a reassurance — a budget you can only see after spending from it is a " +
+       "receipt");
+    eq(allClass(app, "ak-example").length, 3, "three examples are offered");
+    ok(allClass(app, "ak-example").every((b) => !/SYN|NVDA|AAPL/.test(b.own)),
+       "and not one of them names a ticker before a payload has said which names this " +
+       "session holds readings for: a symbol written into the renderer would go stale the " +
+       "first session the roster changed, and it would go stale looking like an offer");
+
+    const b = allClass(app, "ak-example")[1];
+    b.on.find((l) => l.type === "click").fn({ preventDefault() {} });
+    eq(byClass(app, "ak-ask-in").value, b.own,
+       "pressing one fills the field with it");
+    eq(byClass(app, "ak-answer").textContent, "",
+       "and sends nothing: a button that spent a model call on one click would spend it " +
+       "out of the allowance the meter above it exists to show a reader before they decide");
+  }
+
+  /* ---------- the rail knows the name of the page it is docked to --
+
+     THE NAME HERE IS SIX CHARACTERS ON PURPOSE. Every card the pipeline
+     emits is SYN0## — 93 of them in the dry-run corpus, not one of them
+     five characters — so a bound of /^[A-Z][A-Z0-9]{0,4}$/ passes a suite
+     written around "SYN46" and drops every name the site actually
+     publishes. The shape asserted below is readTicker()'s own. */
+  {
+    const app = mount("dock", "https://x.test/flows/ticker/?t=syn046"); await tick();
+    ok(/Asking about SYN046 — the name on this page/.test(app.textContent),
+       "the rail reads `?t=` off the page it is mounted on and says which name that is, " +
+       "for a SIX-character name — docked on every gated route, it knew neither the route " +
+       "nor the name, so a reader who opened it on one name's page and typed 'what " +
+       "changed' was answered about the market; and a bound narrower than the one " +
+       "/flows/ticker itself accepts drops SYN046 silently, which is every card this " +
+       "pipeline emits");
+    eq(byClass(app, "ak-ask-in").value || "", "",
+       "and it prefills NOTHING — a field that opened already holding a symbol puts words " +
+       "in a reader's question that the reader did not write");
+
+    const insert = byClass(app, "ak-onpage-go");
+    insert.on.find((l) => l.type === "click").fn({ preventDefault() {} });
+    eq(byClass(app, "ak-ask-in").value, "SYN046",
+       "the button inserts the symbol into the field, for a reader who wants it inside a " +
+       "question of their own");
+
+    const facts = [{ id: "a", say: "SYN046 is rank 1 of 2 on the long board.", n: {},
+      topic: ["syn046"], source: "card:SYN046", at: STAMP2 }];
+    const host = await ask(app, {
+      answer: "SYN046 leads the long board.", llm: false, guard: null, capped: false,
+      facts, silences: null, why: "", model: null, subject: "SYN046", subjectApplied: true,
+      note: "No model is configured for this site.",
+    }, "what changed");
+    eq(sentBody.subject, "SYN046",
+       "and the name travels to the route as its own field beside the question, because " +
+       "whether to use it depends on whether the reader named a ticker themselves and " +
+       "shared/flows-ask.js is the module that decides that");
+    ok(/the name on the page this was asked from/.test(openText(host)),
+       "the answer says in the open that the page's name was added, because a reader who " +
+       "typed no symbol and is handed readings about one is owed where it came from");
+    ok(/What is new for SYN046\?/.test(app.textContent),
+       "and the examples above the field are rebuilt from the names this answer proves the " +
+       "index holds readings for, rather than from a list written into the renderer");
+  }
+
+  /* ---------- and it reads the share-class symbols the vendor quotes -- */
+  {
+    const dotted = mount("dock", "https://x.test/flows/ticker/?t=brk.b"); await tick();
+    ok(/Asking about BRK\.B — the name on this page/.test(dotted.textContent),
+       "a share-class symbol carrying a dot is a name, not a malformed token: readTicker() " +
+       "in flows-ticker.js accepts /^[A-Z][A-Z0-9.-]{0,9}$/ and hands `?t=BRK.B` a page, " +
+       "so a rail docked to that page that refuses the same string answers about the " +
+       "market and says nothing about having ignored it");
+
+    const hyphen = mount("dock", "https://x.test/flows/ticker/?t=rds-a"); await tick();
+    ok(/Asking about RDS-A — the name on this page/.test(hyphen.textContent),
+       "and so is one carrying a hyphen — the two punctuation marks a symbol is allowed, " +
+       "and the two the first version of this bound rejected");
+
+    const junk = mount("dock", "https://x.test/flows/ticker/?t=not%20a%20symbol");
+    await tick();
+    ok(!/the name on this page/.test(junk.textContent),
+       "while a value that is not shaped like a symbol at all draws no sentence: the bound " +
+       "is widened to the route's own shape, not removed, because `?t=` is a query string " +
+       "anybody can type into");
+  }
+
+  /* ---------- on the page, the examples come out of the briefing --- */
+  {
+    briefBody = {
+      generatedAt: STAMP2, sessionDate: "2026-09-04", warningsChecked: 4,
+      warningsQuestions: 4, warnings: [], today: null, yesterday: null, next: null,
+      facts: [
+        { id: "brief/tilt", say: "The session tilts long.", n: {}, topic: [],
+          source: "brief", at: STAMP2 },
+        { id: "card:SYN46/standing", say: "SYN46 is rank 1 of 2 on the long board.",
+          n: {}, topic: ["syn46"], source: "card:SYN46", at: STAMP2 },
+      ],
+      silences: { pending: [], unreadable: [], quiet: [] },
+    };
+    const app = mount(); await tick(); await tick();
+    ok(/What is new for SYN46\?/.test(app.textContent),
+       "on /flows/ask, where the briefing IS fetched, the first example names a name the " +
+       "index has just proved it holds readings for — a `card:` source is a per-name " +
+       "reading, so the offer is measured rather than written into the renderer");
+    ok(allClass(app, "ak-example").every((b) => !/SYN46/.test(b.own) || /new for SYN46/.test(b.own)),
+       "and only that one: the other two stay topic questions, because two of the three " +
+       "offers are about the session rather than about any name");
+    briefBody = null;
+  }
+
+  /* ---------- and a page with no name in its URL claims none ------- */
+  {
+    const app = mount("dock", "https://x.test/flows/side/?side=long"); await tick();
+    ok(!byClass(app, "ak-onpage"),
+       "a route whose URL names no ticker draws no hint about one");
+    await ask(app, { answer: "A reading.", llm: false, guard: null, capped: false,
+      facts: [], silences: null, why: "", model: null, note: null }, "what changed");
+    eq(sentBody.subject, null,
+       "and sends none, so the selection is never handed a name nobody is looking at");
   }
 }
 
@@ -1648,6 +2014,55 @@ import { readFile } from "node:fs/promises";
   ok(/^Nothing indexed is about XYZ\. Picked /.test(miss.why),
      "a typed name with no fact opens the sentence, before the counts — " + miss.why);
 
+  /* AND IT IS PUBLISHED AS ITS OWN FIELD, BECAUSE ONE OF THESE TWO
+     SENTENCES FOLDS AND THE OTHER MAY NOT. `why` is the audit trail: how
+     many of what matched were served, and out of how many. That belongs
+     behind a disclosure. The clause in front of it is a WITHHOLDING —
+     nothing indexed is about the name you asked about — and the fold rule
+     is asymmetric: reassurance may fold, a withholding never may. The page
+     printed the whole string in the method box, so on the branch where a
+     model wrote the prose the withholding was the only sentence of its
+     kind on the page and it was one click away. Splitting it in the module
+     rather than letting the page find it inside `why` by matching on
+     wording is what stops the lift from silently ending the first time
+     either sentence is rephrased. */
+  ok(/^Nothing indexed is about XYZ, so no reading below is about it\.$/.test(miss.withheld),
+     "the withholding travels as its own field, whole, and claims only what this module " +
+     "can see — the index, which is what it holds — " + miss.withheld);
+  ok(!/Picked /.test(miss.withheld),
+     "and it carries none of the accounting, which is the half that folds");
+  eq(selectFacts(idx, "what is new for SYN46 calls").withheld, null,
+     "a question whose every name is covered withholds nothing and says so with null " +
+     "rather than with an empty string: there is no sentence here, not a sentence with no " +
+     "words in it");
+  const nothingMatched = selectFacts(idx, "zqx qqq");
+  ok(/Nothing in the question matched a ticker or a topic word in the index/
+     .test(nothingMatched.withheld) &&
+     /rather than an answer to what was asked/.test(nothingMatched.withheld),
+     "and the other withholding this module makes — nothing matched at all, so what is " +
+     "served is the session's headline readings — says in the open that it is not an " +
+     "answer to the question, which is the whole of what a reader needs to know about it");
+
+  /* IT RESTATES `why`, IT IS NOT CUT OUT OF IT — pinned here because the
+     wire said the opposite in prose for a wave. worker.js described this
+     field as "a substring of `why`", which is false on BOTH branches the
+     module can take, and a page written to that description would go
+     looking for the caveat inside the audit trail and find nothing. The
+     duplication is the design: `why` is the record and folds whole, this is
+     the caveat and does not, and each is worded for the place it is read
+     in. Asserting NOT-a-substring is what keeps the two free to be worded
+     separately — the moment one is derived from the other by slicing, this
+     fails and the fold rule has a hidden coupling in it. */
+  ok(!miss.why.includes(miss.withheld),
+     "the withholding is not a substring of the audit trail it duplicates: `why` says " +
+     "\"Nothing indexed is about XYZ. Picked …\" and the field says \"Nothing indexed is " +
+     "about XYZ, so no reading below is about it.\" — two sentences for two places, and " +
+     "neither found inside the other — why: " + miss.why + " | withheld: " + miss.withheld);
+  ok(!nothingMatched.why.includes(nothingMatched.withheld),
+     "and the same on the branch where nothing matched at all, where `why` counts what was " +
+     "served out of what exists and the field says these are headline readings rather than " +
+     "an answer — why: " + nothingMatched.why + " | withheld: " + nothingMatched.withheld);
+
   /* THE PAGE'S OWN NAME. */
   const onPage = selectFacts(idx, "what is new for calls", { subject: { tickers: ["SYN46"] } });
   eq(onPage.subjectApplied, true, "with no name typed, the page's name is applied");
@@ -1707,4 +2122,11 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `counts what it kept against what it was handed; and a selection whose topics are names ` +
   `and never the words that describe a reading, that serves the market-wide reading before ` +
   `four names' copies of it, deals two names evenly, reads the page's own name below a ` +
-  `typed one, and says in one sentence every name it found and every name it did not`);
+  `typed one, and says in one sentence every name it found and every name it did not; ` +
+  `and a renderer that prints each selected sentence once rather than as an answer and ` +
+  `again as evidence for itself, states the key and the stamp its facts share once with ` +
+  `their denominator instead of under every one of them, lifts a withholding out of the ` +
+  `method disclosure on the branch where nothing else carries it, words the two sentences ` +
+  `about the briefing for the mount they are drawn on, opens the docked rail onto three ` +
+  `examples built from names a payload named rather than onto a folded guarantee, and ` +
+  `reads the name of the page it is docked to off that page's own URL`);

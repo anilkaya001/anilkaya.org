@@ -551,6 +551,246 @@ ok(composed.after === composed.before,
 
 await page.unroute("**/api/flows/ask");
 
+
+/* ---------- 7. the docked rail, measured in a browser -------------
+
+   EVERY ASSERTION BELOW NEEDS A REAL LAYOUT AND A REAL KEYBOARD, which
+   is why they are here and not in tests/flows-ask.mjs's node stub. A
+   grid track that overflows its host is a computed width; a shortcut
+   that opens a panel is a keydown the document has to be listening for;
+   and "what a reader meets first" is an order in the DOM, not a
+   substring of it.
+
+   THE ROUTE IS /flows/history/ BECAUSE IT IS THE LIGHTEST PAGE THE RAIL
+   IS MOUNTED ON — 49k against the ticker's 470k — and what is under
+   test is the rail, which is byte-for-byte the same on all twelve. The
+   `?t=` the last block reads is the query the ticker route uses for the
+   name it is showing; the rail reads it off whatever page it is docked
+   to, so the mechanism is the same wherever it is exercised. */
+{
+  const DOCK_FACTS = [
+    { id: "board:short/lead", topic: ["short", "board"], source: "board:short", at: STAMP,
+      say: "The short board's leading name is SYN35 at 58.", n: { score: 58 } },
+    { id: "board:long/tilt", topic: ["long", "board"], source: "board:long", at: STAMP,
+      say: "The long board cleared 44 of 118 names.", n: { cleared: 44, scored: 118 } },
+  ];
+  const dockAnswer = (over) => ({
+    answer: "These are the published readings that bear on what you asked.\n\n" +
+      DOCK_FACTS.map((f) => "- " + f.say).join("\n") + "\n\n" +
+      "Every figure above is quoted from a payload this pipeline published; none of it " +
+      "was computed for this answer.",
+    llm: false, model: null, capped: false, guard: null, silences: null,
+    why: "Picked 2 of the 2 facts that matched the words board.",
+    note: "No model is configured for this route.", facts: DOCK_FACTS, ...(over || {}),
+  });
+
+  let posted = null;
+  await page.route("**/api/flows/ask", (route) => {
+    posted = route.request().postData();
+    route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify(dockAnswer(JSON.parse(posted).subject
+        ? { subject: JSON.parse(posted).subject, subjectApplied: true } : null)) });
+  });
+
+  /* ---- the key, and where the caret lands ---- */
+  await page.goto(url("/flows/history/"), { waitUntil: "networkidle" });
+  await page.evaluate(() => document.body.focus());
+  await page.keyboard.press("?");
+  /* EACH WAIT IS TURNED INTO A BOOLEAN AND THEN ASSERTED, rather than left
+     to throw its own timeout. A suite that fails by hanging for five seconds
+     and reporting `TimeoutError` has caught the defect and then described it
+     as an infrastructure problem; the sentence beside each `ok` is the whole
+     point of the assertion. */
+  const opened = await page.waitForSelector("#askQ", { timeout: 5000 })
+    .then(() => true, () => false);
+  ok(opened,
+     "one press of \"?\" opens the rail. flows-dock.js said the box was \"one key away\" from " +
+     "the day it shipped and registered no shortcut of any kind — the sentence describing " +
+     "the affordance was the whole of the affordance");
+  const caret = await page.waitForFunction(
+    () => document.activeElement && document.activeElement.id === "askQ", null,
+    { timeout: 5000 }).then(() => true, () => false);
+  ok(caret,
+     "and the caret is in the field on the FIRST open, when the renderer was still in " +
+     "flight at the moment the panel appeared: setOpen focuses whatever exists then, which " +
+     "is the panel, and a reader who reached for a key to ask a question was left with the " +
+     "caret nowhere and a mouse to pick back up");
+  ok(await page.evaluate(() => document.getElementById("askDock").classList.contains("is-open")),
+     "and the panel is marked open, which is what the tab's aria-expanded is read from");
+  ok(await page.evaluate(() =>
+       document.getElementById("askDockTab").getAttribute("aria-keyshortcuts") === "?" &&
+       /\?/.test(document.querySelector(".ak-dock-tab-k").textContent)),
+     "and the key is printed on the tab and announced on it, because a shortcut nobody is " +
+     "told about is not an affordance — the same rule the question field's own label " +
+     "applies to Enter");
+
+  /* ---- what the rail opens onto ---- */
+  const opensOnto = await page.evaluate(() => {
+    const app = document.getElementById("askApp");
+    const walk = document.createTreeWalker(app, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walk.nextNode())) {
+      if (!node.textContent.trim()) continue;
+      if (node.parentElement.closest("details")) continue;
+      return { said: node.textContent.trim().slice(0, 48),
+               inExamples: !!node.parentElement.closest("#askExamples") };
+    }
+    return null;
+  });
+  ok(opensOnto && opensOnto.inExamples,
+     "the first thing a reader meets in the opened rail is the examples: it used to be 335 " +
+     "characters of guarantee and then the credit meter, 469 characters of chrome above an " +
+     "empty box — first said was " + (opensOnto ? JSON.stringify(opensOnto.said) : "nothing"));
+  ok(await page.evaluate(() => {
+       const d = [...document.querySelectorAll("#askApp details")]
+         .find((x) => /It reads nothing live/.test(x.textContent));
+       return !!d && !d.open;
+     }),
+     "the guarantee is kept, whole, inside a closed disclosure: it is reassurance about " +
+     "what the box will NOT do, and the fold rule allows reassurance to fold");
+  ok(await page.evaluate(() => {
+       const meter = document.querySelector("#askMeter");
+       return !!meter && !meter.closest("details") && meter.textContent.trim().length > 0;
+     }),
+     "while the meter stays open, because its numbers are a withholding about capacity: a " +
+     "budget you can only see after spending from it is a receipt");
+
+  /* ---- the fact list fits the rail it is drawn in ----
+
+     `.ak-facts` floors its tracks at 30rem and `.ak-dock-panel` is
+     `width: min(30rem, 92vw)` with 1.4rem of padding a side, so the
+     content box is 27.2rem and every fact hung 2.8rem past the panel
+     edge on every desktop. A minimum is a floor a track may not go
+     under; `min(30rem, 100%)` makes it "30rem, or the host if the host
+     is smaller". */
+  await page.fill("#askQ", "what leads the short board");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".ak-dock .ak-facts", { timeout: 5000 });
+  const fit = await page.evaluate(() => {
+    const ul = document.querySelector(".ak-dock .ak-facts");
+    const panel = document.querySelector(".ak-dock-panel");
+    const cs = getComputedStyle(panel);
+    const content = panel.clientWidth -
+      parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const tracks = getComputedStyle(ul).gridTemplateColumns
+      .split(" ").map(parseFloat).filter((n) => !Number.isNaN(n));
+    return { content, track: Math.max(...tracks), rows: tracks.length,
+             overflow: ul.scrollWidth - ul.clientWidth,
+             pageOverflow: document.documentElement.scrollWidth -
+               document.documentElement.clientWidth };
+  });
+  ok(fit.track <= fit.content + 0.5,
+     "the widest grid track is " + fit.track.toFixed(1) + "px inside a " +
+     fit.content.toFixed(1) + "px content box, so the evidence list fits the rail it is " +
+     "drawn in. A bare minmax(30rem, 1fr) is a floor the track may not go under, and in a " +
+     "27.2rem host it stayed 30rem and overflowed — on every desktop, on every answer");
+  ok(fit.overflow <= 0.5,
+     "and the list scrolls nothing horizontally inside itself (" +
+     fit.overflow.toFixed(1) + "px)");
+  ok(fit.pageOverflow <= 0.5,
+     "nor does it push the document sideways (" + fit.pageOverflow.toFixed(1) + "px), which " +
+     "is what an overflowing fixed rail does to the page it is pinned to");
+
+  /* ---- and the sentences are printed once ---- */
+  const dockSaid = await page.evaluate(() =>
+    document.querySelector(".ak-dock #askAnswer").textContent);
+  ok(dockSaid.split("The long board cleared 44 of 118 names.").length - 1 === 1,
+     "each selected sentence appears exactly once in the answer region: on this branch the " +
+     "answer IS the fact list, and the block below it used to print every sentence again");
+  ok(/All of them come from the board:short key, built /.test(dockSaid) === false,
+     "with two facts from two different keys the count line names no single origin for all " +
+     "of them");
+  ok(/1 of them comes from the board:/.test(dockSaid) &&
+     /the other 1 names its own key and stamp under itself\./.test(dockSaid),
+     "it states the majority origin with its denominator instead, and BOTH HALVES AGREE " +
+     "WITH THEIR OWN COUNT at the 1-and-1 split this branch actually draws: \"1 of them " +
+     "come ... the other 1 name their own key\" is prose a reader can see was assembled, " +
+     "on a page whose whole claim is that a machine's wording can be told from the site's " +
+     "own — " + dockSaid.slice(dockSaid.indexOf("2 facts were handed"),
+       dockSaid.indexOf("2 facts were handed") + 200));
+
+  /* ---- the name of the page the rail is docked to ----
+
+     SIX CHARACTERS, IN A REAL BROWSER, ON A REAL ROUTE. Every card the
+     pipeline emits is SYN0## and not one is five characters, so a bound
+     narrower than readTicker()'s own passes a suite written around "SYN35"
+     and draws no `.ak-onpage` at all on every page this site publishes —
+     silently, with the rail then answering market-wide. */
+  await page.goto(url("/flows/history/?t=syn035"), { waitUntil: "networkidle" });
+  await page.click("#askDockTab");
+  await page.waitForSelector("#askQ", { timeout: 5000 });
+  ok(await page.evaluate(() => {
+       /* NULL-SAFE ON PURPOSE. A bound narrower than the route's draws NO
+          `.ak-onpage` at all, which is the silent half of the defect; read
+          through a bare querySelector it arrives as a TypeError about
+          textContent instead of as this sentence about the rail. */
+       const p = document.querySelector(".ak-onpage");
+       return p !== null && /Asking about SYN035 — the name on this page/.test(p.textContent);
+     }),
+     "the rail reads the name the page is showing off that page's own URL and says which " +
+     "it is, for a SIX-character name: docked on every gated route, it knew neither the " +
+     "route nor the name, so a reader who opened it over one name and typed \"what " +
+     "changed\" was answered about the market — and a five-character bound would fail this " +
+     "the same silent way, by rendering nothing");
+  ok((await page.inputValue("#askQ")) === "",
+     "and prefills nothing, because a field that opens holding a symbol has put words in a " +
+     "reader's question that the reader did not write");
+  await page.click(".ak-onpage-go");
+  ok((await page.inputValue("#askQ")) === "SYN035",
+     "the button inserts the symbol, for a reader who wants it inside a question of their own");
+
+  await page.fill("#askQ", "what changed");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#askAnswer .ak-asked", { timeout: 5000 });
+  ok(posted !== null && JSON.parse(posted).subject === "SYN035",
+     "the page's name travels to the route as its own field beside the question — not glued " +
+     "onto the question here, because whether to use it depends on whether the reader named " +
+     "a ticker themselves and shared/flows-ask.js is the module that decides that");
+  ok(await page.evaluate(() => {
+       const host = document.getElementById("askAnswer");
+       const said = [...host.children]
+         .filter((n) => !n.matches("details")).map((n) => n.textContent).join(" ");
+       return /the name on the page this was asked from/.test(said);
+     }),
+     "and the answer says in the open that the page's name was added, because a reader who " +
+     "typed no symbol and is handed readings selected by one is owed where it came from");
+
+  /* ---- and the punctuation a real symbol is allowed ---- */
+  await page.goto(url("/flows/history/?t=brk.b"), { waitUntil: "networkidle" });
+  await page.click("#askDockTab");
+  await page.waitForSelector("#askQ", { timeout: 5000 });
+  ok(await page.evaluate(() => {
+       const p = document.querySelector(".ak-onpage");
+       return p !== null && /Asking about BRK\.B — the name on this page/.test(p.textContent);
+     }),
+     "a share-class symbol carrying a dot is a name here too: /flows/ticker serves ?t=BRK.B " +
+     "and the rail is docked to that page, so a rail that refuses the string the route " +
+     "accepted answers about the market and says nothing about having ignored the name");
+
+  /* ---- the same `?t=`, undocked, means something else ----
+
+     THE PAGE THAT IS THE ASSISTANT HAS NO NAME ON IT. Both mounts read one
+     `?t=` and both apply it as the subject, so neither may stay silent about
+     it — but "the name on this page" is a fact a reader standing on the
+     ticker route can check and a claim about nothing at /flows/ask/, where
+     the symbol arrived in the link and no card is drawn. The disclosure is
+     required; the wording is not the same disclosure. */
+  await page.goto(url("/flows/ask/?t=syn035"), { waitUntil: "networkidle" });
+  await page.waitForSelector("#askQ", { timeout: 5000 });
+  ok(await page.evaluate(() => document.getElementById("askDockTab") === null),
+     "the ask route draws no dock tab, so this is the undocked mount and not a second one");
+  ok(await page.evaluate(() => {
+       const p = document.querySelector(".ak-onpage");
+       return p !== null && /Asking about SYN035 — the name this link carried\./.test(p.textContent)
+         && !/the name on this page/.test(p.textContent);
+     }),
+     "and it discloses the subject in wording that is true where it is drawn: undocked the " +
+     "symbol came from the URL, not from a page showing SYN035, and the docked sentence " +
+     "would point the reader at a card that is not on the screen");
+
+  await page.unroute("**/api/flows/ask");
+}
+
 ok(errors.length === 0,
    "and the renderer threw nothing across every branch above — including the two that hand " +
    "it a failed request, which is where a page that words its own failures is most likely " +
@@ -567,4 +807,10 @@ console.log(`✓ flows-ask-render: ${checks} assertions — a consistency report
   `connection, and a model budget whose condition never folds, whose bar is never the ` +
   `reading, and which tells a measured zero spend from a spend it could not measure in ` +
   `both directions, and a question field where Enter sends, Shift-Enter breaks the line, ` +
-  `and an input method editor's composing Enter does neither`);
+  `and an input method editor's composing Enter does neither; plus the docked rail ` +
+  `measured in a browser: "?" opens it and the caret lands in the field on the first ` +
+  `open, it opens onto three examples rather than onto 469 characters of chrome, the ` +
+  `guarantee is folded whole and the credit meter is not, the evidence list fits inside ` +
+  `the 27.2rem panel instead of hanging 2.8rem past its edge, each selected sentence is ` +
+  `printed once, and the name the page is showing reaches the route as its own field and ` +
+  `is declared in the open when the selection used it`);

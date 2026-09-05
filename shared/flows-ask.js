@@ -1465,6 +1465,23 @@ export function selectFacts(index, question, options) {
   const pageNote = (t) => (subject.includes(t)
     ? (subject.length === 1 ? ", the name on this page" : ", a name on this page") : "");
 
+  /* THE WITHHOLDING IS PUBLISHED SEPARATELY FROM THE ACCOUNTING, and
+     that split is the whole point of this field. `why` is one string
+     carrying two different kinds of sentence: a withholding — "Nothing
+     indexed is about NVDA" — and an accounting of what was served out
+     of what matched. The page folds `why` into its method disclosure,
+     which is correct for the accounting and wrong for the withholding:
+     on the branch where a model wrote the prose, the only statement
+     that the name a reader typed has no reading behind it lived one
+     click away, under a summary reading "How this answer was
+     assembled". A caveat folded is a caveat unread.
+     assets/js/flows-ask.js prints THIS field in the open, above the
+     fold, and it is a separate field rather than a substring of `why`
+     because a page that matched on wording would silently stop lifting
+     the withholding the first time one of these sentences was
+     rephrased. `why` keeps the same text so nothing that reads it
+     loses anything. */
+  let withheld = null;
   let why;
   if (matched.length) {
     const clauses = [];
@@ -1486,11 +1503,27 @@ export function selectFacts(index, question, options) {
         wordsPhrase + ", one each from " + served + " of the " + wordOnlyNames.size +
         " name" + (wordOnlyNames.size === 1 ? "" : "s") + " that carry one");
     }
+    if (missing.length) {
+      withheld = "Nothing indexed is about " +
+        joinClauses(missing.map((t) => upper(t) + pageNote(t))) +
+        ", so no reading below is about " + (missing.length === 1 ? "it" : "them") + ".";
+    }
     why = (missing.length
       ? "Nothing indexed is about " + joinClauses(missing.map((t) => upper(t) + pageNote(t))) + ". "
       : "") +
       "Picked " + joinClauses(clauses) + (capped ? ", cut at the cap of " + max + "." : ".");
   } else {
+    /* NOTHING MATCHED AT ALL, WHICH IS ALSO A WITHHOLDING and is the
+       more common one. The readings served are the session's headline
+       facts in the briefing's order; they are not an answer to what
+       was asked, and a reader who is not told that reads them as one. */
+    withheld = (subject.length
+      ? "Nothing indexed is about " + joinClauses(subject.map(upper)) +
+        (subject.length === 1 ? ", the name on this page. " : ", the names on this page. ")
+      : "") +
+      "Nothing in the question matched a ticker or a topic word in the index, so the " +
+      "readings below are the session's headline facts in the order the briefing states " +
+      "them rather than an answer to what was asked.";
     why = (subject.length
       ? "Nothing indexed is about " + joinClauses(subject.map(upper)) +
         (subject.length === 1 ? ", the name on this page. " : ", the names on this page. ")
@@ -1501,7 +1534,7 @@ export function selectFacts(index, question, options) {
       (capped ? ", cut at the cap." : ".");
   }
 
-  return { picked, capped, why, subjectApplied: subject.length > 0 };
+  return { picked, capped, why, withheld, subjectApplied: subject.length > 0 };
 }
 
 /* ---------- the guard -------------------------------------------- */
