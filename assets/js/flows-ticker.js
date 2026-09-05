@@ -90,47 +90,28 @@
      A survey of the fourteen Flows renderers counted 101,768 characters of
      prose in 1,736 strings, 42,151 of them on this route, and one ratio named
      the defect: `.fc-note` — the METHOD paragraph — was emitted 87 times
-     against 4 emissions of `.fc-reading`, the FINDING. The four drawers below
-     were the first answer to it, and `appendNotes`, `appendMethod` and
-     `leadReading` were written here because this was the only page that had
-     them.
+     against 4 emissions of `.fc-reading`, the FINDING.
 
-     THE TWELVE RENDERERS THAT STILL LED WITH METHOD ARE NOT HERE. They are
-     flows-panels.js, drawn on FOUR routes — this one, side, overview and
-     watch — and the card dialog calls the same functions this page's grid
-     calls. Three ways to give them the fold: move it there, thread it in as a
-     parameter, or copy it. Copying is what flows-panels.js's own header
-     exists to refuse. Threading ends in the same place, because flows-card.js
-     would have to pass a copy it does not have, so the dialog would fold and
-     the page would not, or the reverse. So it moved, and this file now reads
-     it back out of `P` with the width policy and the formatters.
+     THEY MOVED RATHER THAN BEING COPIED OR THREADED. flows-panels.js is drawn
+     on four routes and the card dialog calls the same functions this page's
+     grid calls, so a copy is what that file's header exists to refuse, and
+     threading would leave the dialog folding while the page did not, or the
+     reverse. This file reads them back out of `P` with the width policy and
+     the formatters. It is not a byte saving: a <details> is cheaper on a
+     READER than an always-drawn paragraph and DEARER on the wire, and three
+     routes now pay for a fold they did not have — which is the trade
+     tests/flows-weight.mjs measures and the reason several renderers on those
+     routes still lead with method.
 
-     THE BYTE CONSEQUENCE, MEASURED, AND IT IS NOT A SAVING. flows-panels.js
-     is billed four times and this file once. 4,865 B of fold and lead left
-     here; over there they cost 3,288 B, and inverting the gamma profile onto
-     them cost 1,048 B more. So side, overview and watch each pay the whole
-     4,336 B for a fold and a promoted reading they did not have, and this
-     route pays that less whatever this note and the destructure above hand
-     back. A <details> is cheaper on a READER than an always-drawn paragraph
-     and DEARER on the wire, and the wire is what tests/flows-weight.mjs
-     counts. Side is the tightest of the four and is what this wave was
-     scoped against: 5,614 B of headroom under a 300k ceiling, 4,336 B spent,
-     1,278 B left — which is why eleven renderers still lead with method.
-
-     WHAT STAYED, AND WHY IT IS NOT A SECOND COPY. `appendNotes` is the
-     string-shaped adapter over the moved `appendMethod`. The eight call sites
-     below own plain prose and building their paragraphs at each of them would
-     be eight places for a stray ".." to reach a reader — a doubled full stop
-     in a panel whose whole claim is precision is worse than it sounds. It
-     holds no threshold and no disclosure of its own; both are one function,
-     over there.
-
-     THE SPLIT ITSELF IS DOCUMENTED BESIDE THE FOLD. In one line: a note that
-     could change WHAT THE READING MEANS stays in the open, a note explaining
-     HOW THE READING WAS MADE folds, and neither is ever deleted — a folded
-     paragraph is still in textContent. tests/flows-ticker-contract.mjs
-     asserts both halves panel by panel, because a rule with only the first
-     half is a rule that hides caveats. */
+     WHAT STAYED IS NOT A SECOND COPY. `appendNotes` is the string-shaped
+     adapter over the moved `appendMethod`: the eight call sites below own
+     plain prose, and building their paragraphs at each site would be eight
+     places for a stray ".." to reach a reader. It holds no threshold and no
+     disclosure of its own; both are one function, over there — where the
+     split is stated in one line: a note that could change WHAT THE READING
+     MEANS stays open, a note explaining HOW IT WAS MADE folds, and neither is
+     ever deleted, because a folded paragraph is still in textContent.
+     tests/flows-ticker-contract.mjs asserts both halves panel by panel. */
   function appendNotes(host, notes, summary) {
     appendMethod(host, (notes || [])
       .filter((n) => n && String(n).trim())
@@ -1276,14 +1257,17 @@
     }
     leadReading(host, termSaid);
 
-    /* [300, 1900]. The floor is the chart floor the 30rem panel rule protects
-       (measured: a 320px viewport gives a 284.8px host). The ceiling binds only
-       in the enlarge dialog on a very wide screen: at min(96rem, 96vw) less
-       2×1.7rem the host reaches 1481px; the binding case is now a full-row
-       .is-wide at the three-column tier (1823px), and 1900 clears it — see
-       the policy note on panelWidth in flows-panels.js. The old 1200 is
-       stated as a choice rather than described as inert. */
-    const W = Math.max(300, Math.min(1900, Math.round(host && host.clientWidth) || 560));
+    /* THROUGH ftWidth, LIKE THE OTHER THREE DRAWERS HERE. This was a fourth
+       answer to "how wide is this chart", and it recorded the measurement
+       that condemns it — "a 320px viewport gives a 284.8px host" — then
+       floored at 300 anyway, shrinking a 300-unit chart into a 282px box on
+       every phone at 0.940 px per unit.
+
+       THE ALIGNMENT INVARIANT MAKES IT MANDATORY, NOT TIDY: the rule stated
+       with the stylesheet below is that this panel's j-th bar centre lands on
+       the surface's j-th column centre, an equality between two host widths
+       that two width functions hold only by coincidence. */
+    const W = ftWidth(host);
 
     /* ---------- geometry, shared verbatim with the surface above ------ */
 
@@ -1568,22 +1552,51 @@
        is what a reader is looking at; `panel.levelled` counts the panel's own
        points, and the two differ exactly when the grid was borrowed — see
        `termColumns`. */
+    /* EVERY DASH IN THIS BLOCK SAYS WHICH SILENCE IT IS, through statList's
+       fourth and fifth slots: the taxonomy's own word on `data-empty`, which
+       flows.css draws as the dagger, the cross or the quiet hairline, and the
+       sentence on `title`.
+
+       WHICH WORD IS READ OFF THE SHAPE OF THE FIELD, not guessed. A key this
+       card never carried is `unavailable`; a key carrying an explicit null is
+       a measurement that came back empty, which is `quiet`; anything else that
+       fails isNum is bytes this line could not read as a number, which is
+       `unreadable`. Collapsing the three into one em dash tells a reader only
+       that the number is absent, which is the one thing the dash already said.
+
+       THE REASON IS THE PAYLOAD'S, VERBATIM. shared/flows-chain.js decided the
+       refusal and says why — past the IV ceiling it will vouch for, no listed
+       expiry reaching the day floor, or nothing at the money that traded today
+       — and restating that here would be a second answer to the same question,
+       drifting the day the chain's own wording changes.
+
+       THIS USED TO BE `stats.querySelector("dd").title` AFTER THE FACT, which
+       reaches the FIRST pair and no other: the level got a tooltip and no mark
+       at all, and the moneyness band two rows down was a bare dash however it
+       went missing. The band is also read through isNum before it is
+       formatted, because `panel.atmBand.toFixed` on the numeric STRING isNum
+       accepts is a TypeError inside a drawer. */
+    const silence = (key) =>
+      (key in panel ? (panel[key] === null ? "quiet" : "unreadable") : "unavailable");
     const atm = isNum(panel.atmIv);
-    const stats = statList([
+    const band = isNum(panel.atmBand);
+    host.append(statList([
       ["At-the-money level", atm === null ? DASH
-        : vol1(atm) + (panel.atmExpiry ? " at " + panel.atmExpiry : "")],
+        : vol1(atm) + (panel.atmExpiry ? " at " + panel.atmExpiry : ""),
+        atm === null ? "is-null" : null,
+        atm === null ? silence("atmIv") : null,
+        atm === null ? panel.atmReason ||
+          "This card's chain panel carries no at-the-money level and no reason for it." : null],
       ["Expiries levelled", `${measured.length} of ${cols.length} drawn`],
-      ["Moneyness band", isNum(panel.atmBand) === null ? DASH
-        : "±" + panel.atmBand.toFixed(2) + " ln(K/S)"],
-    ]);
-    /* THE DASH CARRIES ITS REASON. `statList` takes strings, so the title goes
-       on afterwards rather than through a second copy of the helper — a missing
-       level with no reason attached is exactly the state house rule 1 forbids. */
-    if (atm === null && panel.atmReason) {
-      const dd = stats.querySelector("dd");
-      if (dd) dd.title = panel.atmReason;
-    }
-    host.append(stats);
+      ["Moneyness band", band === null ? DASH : "±" + band.toFixed(2) + " ln(K/S)",
+        band === null ? "is-null" : null,
+        band === null ? silence("atmBand") : null,
+        band === null
+          ? "The band a quote must sit inside to be counted at the money is this surface's " +
+            "own constant, and this card does not state it, so the level above cannot be " +
+            "read against the window it was taken from."
+          : null],
+    ]));
 
     /* ---------- the notes, split by whether they change the reading ---
 
@@ -1739,25 +1752,22 @@
    * `ivSurface.expiries[j].expiry` for every j and the two panels cannot
    * disagree about which columns exist.
    *
-   * THE MEASUREMENT. That holds for 48 of 50 emitted cards. On the two TRUNCATED
-   * ones it is FALSE, and truncation is the case this page was designed for: the
-   * pipeline spends a second, expiry-filtered call when the first page fills,
-   * then splices the scalars AND the whole `skewTerm` panel out of the narrow
-   * read while `ivSurface` keeps the broad one
-   * (`scripts/flows-pipeline.mjs:3941-3949`). Measured on a freshly emitted
+   * THE MEASUREMENT. That holds for 48 of 50 emitted cards and is FALSE on the
+   * two TRUNCATED ones — the case this page was designed for. The pipeline
+   * spends a second, expiry-filtered call when the first page fills, then
+   * splices the scalars AND the whole `skewTerm` panel out of the narrow read
+   * while `ivSurface` keeps the broad one. Measured on a freshly emitted
    * SYN212 and SYN306: `ivSurface.expiries.length === 8` against
-   * `points.length === 1`. The two panels are stacked one above the other and
-   * their columns do not line up.
+   * `points.length === 1`, two stacked panels whose columns do not line up.
    *
    * WHAT THIS DOES ABOUT IT. When every published point's expiry is found among
-   * the surface's, the grid is the SURFACE'S columns and each point is placed in
-   * the column it belongs to. The alignment invariant then holds on the
-   * truncated card as well as the clean one — the single narrow level lands
-   * under the surface column of the same expiry — and the columns the term line
-   * does not cover are drawn as what they are: columns with no reading, on the
-   * miss rail, with the reason stated. The alternative, one lonely bar centred
-   * across a 900px plot beneath an eight-column surface, is a chart that lies
-   * about which expiry it is describing.
+   * the surface's, the grid is the SURFACE'S columns and each point sits in the
+   * column it belongs to, so the alignment invariant holds on the truncated
+   * card too; the columns the term line does not cover are drawn as what they
+   * are — columns with no reading, on the miss rail, with the reason stated.
+   * The alternative, one lonely bar centred across a 900px plot beneath an
+   * eight-column surface, is a chart that lies about which expiry it
+   * describes.
    *
    * IT DOES NOT BORROW THE SURFACE'S LEVELS, only its column positions. A level
    * this panel never published stays undrawn; reading `atmIv` off the sibling
@@ -2837,11 +2847,12 @@
      ============================================================= */
 
 
-  /* Mono advance in px for a string at a given font size. AXIS_CH is 6, the
-     measured 5.81 at 10px rounded up so every estimate errs WIDE — a label
-     estimated too narrow collides or leaves the canvas, one estimated too wide
-     costs a few pixels. The .gp-axis rule carries letter-spacing: 0.04em, which
-     is exactly the gap between 5.81 and 6. */
+  /* Mono advance in px for a string at a given font size, off the one
+     text-metric constant this page has. flows-panels.js measured AXIS_CH in
+     Chromium on a real caption in the shipped webfont and rounds it up, so
+     every estimate errs WIDE — a label estimated too narrow collides or
+     leaves the canvas, one estimated too wide costs a few pixels. The number
+     is NOT restated here: it has already moved once, from 6 to 6.5. */
   function faTextW(s, fontPx) {
     return String(s).length * window.FlowsPanels.AXIS_CH * (fontPx / 10);
   }
@@ -2983,23 +2994,21 @@
        no transfer function here at all — `net` goes straight to pixels — which
        is the whole difference from the panel above.
 
-       THE 0 SEED IS LOAD-BEARING. Math.min(...nets, 0) and Math.max(...nets, 0)
-       admit zero as a bound even when no bar has that sign. Without it a
-       one-signed book — every strike net long calls, say — produces
-       fMin = +2 and fMax = +5000, so `share` is 2/5002, the zero rule is
-       clamped hard to 18%, and `negW / |fMin|` is a pixels-per-contract rate
-       computed against a bound that is on the WRONG SIDE of zero. The scale
-       comes out nonsense and every bar on the panel is wrong together, which
-       is the failure mode nobody catches by looking.
+       THE 0 SEED IS LOAD-BEARING. Math.min(...nets, 0) admits zero as a bound
+       even when no bar has that sign. Without it a one-signed book — every
+       strike net long calls — gives fMin = +2 and fMax = +5000, so `share` is
+       2/5002, the zero rule clamps hard to 18%, and `negW / |fMin|` is a rate
+       computed against a bound on the WRONG SIDE of zero: the scale comes out
+       nonsense and every bar is wrong together, which nobody catches by
+       looking.
 
        ONE RATE ACROSS THE ZERO RULE. Each side normalised against its own
        extreme would draw the largest bar on each side at that side's full
-       width no matter what it was worth: a book whose short side is 1% of its
-       long side would draw that 1% at 22% of the ink, and the reader's first
-       impression of the balance of the book — which is the entire reading of
-       this panel — would be manufactured by the renderer. `rate` is the
-       largest pixels-per-contract that fits BOTH sides inside their halves,
-       so the two are directly comparable and neither overflows.
+       width whatever it was worth — a short side 1% of the long one drawn at
+       22% of the ink — so the reader's first impression of the BALANCE of the
+       book, which is this panel's entire reading, would be manufactured by
+       the renderer. `rate` is the largest pixels-per-contract fitting BOTH
+       sides inside their halves.
 
        THE Number.isFinite FALLBACK IS LOAD-BEARING TOO. When every net is
        exactly zero both branches of the Math.min are Infinity, Infinity is
@@ -3041,46 +3050,34 @@
 
     /* ---------- the hatch ---------------------------------------------
 
-       THIS PANEL EMITS ITS OWN PATTERN, AND THE DECISION WAS WORKED OUT
-       RATHER THAN ASSUMED.
-
-       The obvious reading of "do not define a second identical pattern" is to
-       write fill="url(#gpNeg)" and lean on the copy renderGamma already put in
-       this document. That is wrong here, for two reasons that are both real on
-       this page rather than hypothetical:
+       THIS PANEL EMITS ITS OWN PATTERN RATHER THAN REUSING renderGamma's
+       #gpNeg, and the two reasons are both real on this page:
 
        1. renderGamma EMITS #gpNeg ONLY WHEN IT DRAWS. It returns through
-          deadPanel — before ever reaching its <defs> — whenever the gamma
-          panel is unavailable, and the gamma panel is shed independently of
-          this one by the pipeline's payload ladder and dies on its own when
-          the gamma source did not return. On such a card `url(#gpNeg)`
-          resolves to nothing, a browser paints an unresolvable paint server as
-          no paint at all, and the hatch — the SECOND sign channel, the one
-          that has to survive a greyscale render — vanishes with no error. The
-          panel still looks finished.
+          deadPanel before reaching its <defs> whenever the gamma panel is
+          unavailable, and that panel is shed independently of this one by the
+          pipeline's payload ladder. On such a card `url(#gpNeg)` resolves to
+          nothing, a browser paints an unresolvable paint server as no paint
+          at all, and the hatch — the SECOND sign channel, the one that has to
+          survive a greyscale render — vanishes with no error while the panel
+          still looks finished.
 
-       2. THE ENLARGE DIALOG DRAWS ONE PANEL. When a reader enlarges the
-          aggressor ladder, the drawing in the dialog is the only aggressor
-          drawing that matters and the gamma panel behind it may or may not
-          have run. Depending on another panel's private, unsuffixed id for a
-          mandatory encoding channel makes this panel's correctness a function
-          of a sibling's status. It must not be.
+       2. THE ENLARGE DIALOG DRAWS ONE PANEL, so depending on a sibling's
+          private unsuffixed id for a mandatory encoding channel would make
+          this panel's correctness a function of that sibling's status.
 
-       So: an id of this panel's own, suffixed with `mount`, because SVG ids
-       are document-global and url(#id) takes the FIRST match in document
-       order — a page showing the grid copy and the zoom copy at once would
-       otherwise silently give the second drawing the first's tile.
+       Hence an id of this panel's own, suffixed with `mount`: SVG ids are
+       document-global and url(#id) takes the FIRST match in document order,
+       so a page showing the grid copy and the zoom copy at once would
+       otherwise give the second drawing the first's tile.
 
        WHAT IS NOT DUPLICATED IS THE APPEARANCE. The tile is byte-identical to
-       renderGamma's (4×4, patternUnits userSpaceOnUse, rotate(45), the line at
-       x=2 so a 1.8 stroke sits wholly INSIDE the tile instead of being clipped
-       at the edge and rendering at a fraction of its ink) and it carries
-       renderGamma's own class as well as this panel's, so the single shipped
-       rule `.gp-negpat { color: var(--bg-deep) }` already colours it correctly
-       with no integrator work and the two hatches cannot drift apart. The
-       `.fa-negpat` hook exists so they CAN be diverged deliberately later.
-       One appearance, one rule, two independent ids: that is what §5.5a asks
-       for, read as an appearance requirement rather than an id requirement. */
+       renderGamma's (4×4, userSpaceOnUse, rotate(45), the line at x=2 so a
+       1.8 stroke sits wholly INSIDE the tile rather than clipped at its edge)
+       and carries renderGamma's class as well as this panel's, so the shipped
+       `.gp-negpat` rule colours it and the two cannot drift. `.fa-negpat`
+       exists so they CAN be diverged later. One appearance, one rule, two
+       independent ids. */
     const tag = String(mount || "grid").replace(/[^A-Za-z0-9_-]/g, "") || "grid";
     const patId = `faNeg-${tag}`;
     const defs = svgEl("defs");
@@ -4255,37 +4252,34 @@
      the two market-wide feeds the pulse leg already fetches once a
      run.
 
-     WHAT IT MUST NOT LET A READER BELIEVE, and each of these has a
-     line of code holding it:
+     WHAT IT MUST NOT LET A READER BELIEVE, each held by a line of
+     code:
 
-     1. THAT ABSENCE IS QUIET. Both feeds are SELECTIONS. A name
-        that is not in one did not make a market-wide list; it is
-        not a name with no open-interest change and no off-exchange
-        prints. So a missing name gets the quiet arm — never the
-        Unavailable banner — and the sentence carries the feed's
-        own population and, when the feed actually filled the
-        request, the value the last place held, so "just missed"
-        and "nowhere near" are different readings on the page.
+     1. THAT ABSENCE IS QUIET. Both feeds are SELECTIONS: a name not
+        in one did not make a market-wide list, it is not a name with
+        no open-interest change and no off-exchange prints. A missing
+        name gets the quiet arm, never the Unavailable banner, and
+        the sentence carries the feed's own population and — when the
+        feed filled the request — the value the last place held, so
+        "just missed" and "nowhere near" read differently.
 
      2. THAT THE RANKING IS TODAY'S. The vendor states its
         market-wide open-interest feed updates about 06:45 Eastern;
-        this pipeline runs at 05:15 Eastern. The session line under
-        each reading is therefore not decoration — it is the whole
-        difference between "ranks 14th across the market today" and
-        "ranked 14th across the market yesterday, joined onto
+        this pipeline runs at 05:15. The session line under each
+        reading is the whole difference between "ranks 14th across
+        the market today" and "ranked 14th yesterday, joined onto
         today's card". A feed that states no date says so; it never
         borrows the card's.
 
-     3. THAT A RANK IS A NUMBER ON ITS OWN. Every rank is printed
-        as "14 of 40" and never as "14". The population is the
-        payload's, and where the feed returned fewer rows than this
-        run asked for, the caption says the list was not cut by the
-        request at all.
+     3. THAT A RANK IS A NUMBER ON ITS OWN. Every rank prints as
+        "14 of 40", never "14", with the payload's own population —
+        and where the feed returned fewer rows than this run asked
+        for, the caption says the list was not cut by the request.
 
      4. THAT COVERAGE IS FINE. If three of fifty board names appear
-        in a feed, forty-seven cards will each say they are not in
-        it. That is one thin join, not forty-seven findings, and
-        the coverage line says which it is on every card.
+        in a feed, forty-seven cards each say they are not in it:
+        one thin join, not forty-seven findings, and the coverage
+        line says which on every card.
 
      SIGN NEVER RIDES ON HUE. The open-interest reading is signed
      and the sign is in the glyph (tcSignedInt: + / U+2212, and
@@ -4725,11 +4719,14 @@
         continue;
       }
 
-      /* ONE CALL SHAPE FOR EVERY DRAWER. The ten extracted renderers take
-         (host, panel) or (host, panel, card); the four new ones take two more.
-         JavaScript discards the arguments a function does not declare, so the
-         widest signature is safe for all of them and there is no per-panel
-         table of shapes to keep in step with the renderers. */
+      /* ONE CALL SHAPE FOR EVERY DRAWER: unused arguments are discarded, so
+         the widest signature is safe for all and no per-panel shape table has
+         to be kept in step. SAFE ONLY WHILE EVERY DRAWER DECLARES THAT ORDER,
+         and one did not: renderOverlay was `(host, join, questionIn)`, so
+         `card` landed in the question slot and "Score over price" headed
+         itself "[object Object]" on every ticker page. The fix is its
+         signature — a table here would be a second list of what the renderers
+         already declare. */
       try {
         drawer(host, panel, card, question, mount);
       } catch (error) {
@@ -4782,9 +4779,9 @@
     if (zoomTitle) zoomTitle.textContent = titleEl ? titleEl.textContent : "";
     zoom.showModal();
     /* THE rAF IS REQUIRED, NOT COSMETIC. showModal() on a display:none
-       element leaves clientWidth at 0 in the same tick, ftWidth would floor
-       to 300, and the ENLARGED panel would be drawn smaller than the grid
-       panel it came from. */
+       element leaves clientWidth at 0 in the same tick, so ftWidth returns
+       its unmeasurable-host 560 and the ENLARGED panel is drawn at a width
+       the dialog does not have, then squeezed to fit it. */
     requestAnimationFrame(() => drawZoom());
   }
 
@@ -5055,26 +5052,22 @@
      THE WORKSPACE — an index, an identity strip that stays, and a
      lead on WHAT CHANGED.
 
-     THE PAGE WAS TWENTY-ONE PANELS IN A FLAT SCROLL. Measured at
-     5,729px pinned and 7,185px gapless (the numbers are recorded in
-     assets/css/flows.css beside the tier that produced them), so a
-     reader hunting the gamma roll-off scanned five to seven screens
-     of near-identical headings with no table of contents, no group
-     boundaries and no way to send a colleague one of them —
-     `location.hash` was read in no file in this product, so "look at
-     panel 14" was a URL plus a sentence telling the reader to
-     scroll. The identity block scrolled away after the first panel,
-     taking the name, the score and the session date with it. And
-     nothing anywhere on the page said what the number had DONE: the
-     product is read as an early warning and it opened on a snapshot.
+     THE PAGE WAS TWENTY-ONE PANELS IN A FLAT SCROLL, measured at
+     5,729px pinned and 7,185px gapless (recorded in flows.css beside
+     the tier that produced them): five to seven screens of
+     near-identical headings, no table of contents, no group
+     boundaries, and no way to send a colleague one of them. The
+     identity block scrolled away after the first panel, taking the
+     name, the score and the session date with it, and nothing said
+     what the number had DONE — a product read as an early warning,
+     opening on a snapshot.
 
      FOUR THINGS ARE ADDED HERE AND NOT ONE OF THEM HIDES ANYTHING.
-     No tabs, no accordion over the panels, no `grid-auto-flow:
-     dense`: this page states find-in-page as a design value and the
-     stylesheet refuses dense packing on purpose so DOM order stays
-     tab order. An index that hid twenty panels to make one findable
-     would trade a scroll for a search, and the scroll is the cheaper
-     of the two.
+     No tabs, no accordion, no `grid-auto-flow: dense`: this page
+     states find-in-page as a design value and the stylesheet refuses
+     dense packing so DOM order stays tab order. An index that hid
+     twenty panels to make one findable would trade a scroll for a
+     search, and the scroll is cheaper.
 
        1. a sticky bar carrying the identity and the jump strip,
        2. group headings inside the grid, from the registry,
@@ -5155,20 +5148,14 @@
   };
 
   /* THE CHROME'S RULES ARE IN assets/css/flows.css, under "the workspace
-     chrome" at the foot of the ticker section.
-
-     They lived here until this commit, as a 236-line template literal injected
-     into document.head on first paint, on the argument that a rule for an
-     element only this file can construct belongs beside this file. What that
-     argument cost: an injected sheet is never fetched, so no ?v= can reach it
-     and a reader could hold this file's new markup against cached rules; no CSS
-     suite could see it, the polarity-class check in tests/flows-sign.mjs
-     included, because that suite reads flows.css; and it was JavaScript bytes
-     on the route tests/flows-weight.mjs weighs, parsed before a panel drew.
-
-     The dead-rule risk the old note named is covered by
-     tests/flows-ticker-contract.mjs, which mounts this controller against both
-     stylesheets and asserts the chrome it builds. */
+     chrome" at the foot of the ticker section — not injected from here as a
+     template literal, which is what they were. An injected sheet is never
+     fetched, so no ?v= reaches it and a reader can hold new markup against
+     cached rules; no CSS suite can see it, tests/flows-sign.mjs's polarity
+     check included; and it is JavaScript bytes on the route
+     tests/flows-weight.mjs weighs, parsed before a panel draws. The dead-rule
+     risk that move creates is covered by tests/flows-ticker-contract.mjs,
+     which mounts this controller against both stylesheets. */
 
   /* ---------- the sticky bar and the index -------------------------- */
 

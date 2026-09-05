@@ -3,30 +3,28 @@
    they are built on.
 
    EXTRACTED FROM flows-card.js RATHER THAN COPIED INTO A SECOND
-   PAGE. The card dialog was the only surface that drew these, so
-   they lived inside its IIFE — behind, critically, a guard that
-   returns when `#flowsCard` is absent. A second page that wanted the
-   same charts therefore had exactly two options: duplicate ~2,040 of
-   the file's 2,282 lines, or move them here. Duplication would mean
-   every future fix to a chart had to be made twice, in two files,
-   forever — the hazard shared/flows-chain.js names in its own header:
-   "A second implementation of any of those is a second answer to the
-   same question."
+   PAGE. These drawers lived inside the dialog's IIFE, behind a guard
+   that returns when `#flowsCard` is absent, so a second page wanting
+   the same charts had two options: duplicate ~2,040 of that file's
+   2,282 lines, or move them here. Duplication would mean every future
+   fix to a chart made twice, forever — the hazard shared/flows-chain.js
+   names in its own header: "A second implementation of any of those is
+   a second answer to the same question."
 
    THE CONTRACT WITH ITS CALLERS. One deliberate global,
-   `window.FlowsPanels`, following the pattern window.flowsCardPrefetch
-   already sets. Every renderer keeps the signature it had inside the
-   dialog, so the dialog's behaviour is unchanged by the move, and each
-   takes an OPTIONAL trailing `question` (and, where it emits <defs>, a
-   `mount` tag) — defaulting to the string it hardcoded before, so a
-   caller that passes nothing gets byte-identical output.
+   `window.FlowsPanels`, and ONE ARGUMENT ORDER for every renderer in
+   it: (host, panel, card, question[, mount]), the last two optional
+   and each defaulting to what the drawer hardcoded before.
+   flows-ticker.js's DRAW loop calls them all through that one shape,
+   so a drawer DECLARING a different order does not fail — it silently
+   reads one argument as another, which is how renderOverlay came to
+   head itself "[object Object]". renderScore is the one exception,
+   called by name because it draws the card's TOP LEVEL, not a panel.
 
-   WHY `mount` EXISTS. SVG `<defs>` ids are document-global and
-   `url(#id)` resolves to the first match in document order. A page that
-   mounts the same panel twice — a grid copy and an enlarged copy — emits
-   the same id twice, and the second drawing silently borrows the first's
-   pattern. Suffixing every id with the mount tag is what keeps two
-   drawings of one panel independent.
+   WHY `mount` EXISTS. SVG `<defs>` ids are document-global, so a page
+   that draws one panel twice emits one id twice and the second drawing
+   borrows the first's pattern. `mountId`, at the head of the drawers,
+   carries the rest of that argument beside the code that acts on it.
 
    EVERY PANEL IS A TAGGED UNION. The renderer switches on panel.status
    BEFORE touching a number. A missing source must never reach a chart,
@@ -64,11 +62,9 @@
      the same card, in the same session — the two files disagreeing about what
      "present" means, with nothing failing either way.
 
-     Written out rather than delegated to window.FlowsUI: flows-ui.js is
-     loaded on two of the eleven Flows routes and this file is loaded on four,
-     so reaching for it here would make the panels depend on a script that is
-     absent on the page they are drawn on. The duplication is the smaller
-     defect until the loader is fixed; the DIVERGENCE was the real one. */
+     Written out rather than delegated to window.FlowsUI, which is loaded on
+     two of the eleven Flows routes against this file's four: the duplication
+     is the smaller defect, and the DIVERGENCE was the real one. */
   const isNum = (v) => {
     if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
@@ -113,16 +109,11 @@
      families that use it carry their own neutral rule, since the base classes
      set `fill: none` or no stroke at all — a path with a polarity class that
      has no rule is not a neutral line, it is an invisible one. */
-  /* AND THE ABSENCE TEST IS isNum's, NOT A SECOND ONE WRITTEN HERE.
-
-     The first draft of this helper carried its own — `n === null || n ===
-     undefined || !Number.isFinite(Number(n))` — and Number("") is 0, so an
-     empty string arrived as a MEASURED ZERO and was tinted `is-flat`. That is
-     the confident zero, rebuilt inside the helper written to stop two-armed
-     ternaries from doing exactly this. isNum is this file's one answer to "is
-     there a reading here"; a second answer beside it is how the two come to
-     disagree, which is the divergence isNum itself was just realigned to
-     close, two screens up. */
+  /* AND THE ABSENCE TEST IS isNum's, NOT A SECOND ONE WRITTEN HERE. The first
+     draft carried its own, spelled `!Number.isFinite(Number(n))` — and
+     Number("") is 0, so an empty string arrived as a MEASURED ZERO tinted
+     `is-flat`: the confident zero, rebuilt inside the helper written to stop
+     two-armed ternaries from doing exactly this. */
   const polarity = (v) => {
     const n = isNum(v);
     return n === null ? "is-null" : n < 0 ? "is-neg" : n > 0 ? "is-pos" : "is-flat";
@@ -168,12 +159,7 @@
 
   /* Mono character advance, in px per px of font-size divided by 10.
 
-     6.5, AND THE OLD 6 WAS TOO NARROW IN THE ONE DIRECTION THAT MATTERS. The
-     comment this replaces said "5.81 measured, rounded up so every estimate
-     errs wide" and reasoned that the .gp-axis letter-spacing of 0.04em was
-     "exactly the gap between 5.81 and 6". It is not: 5.81 + 0.4 is 6.21, so
-     the rounding was already short before the spacing was counted.
-
+     6.5, AND THE OLD 6 WAS TOO NARROW IN THE ONE DIRECTION THAT MATTERS.
      MEASURED, in Chromium, on a real .fa-axis caption in the shipped webfont:
      getComputedTextLength() / length = 6.421 at font-size 10px with
      letter-spacing 0.4px. A 57-character axis caption is therefore 366 units
@@ -264,12 +250,23 @@
    * desktop card, silently, because the six-item case only appeared once the
    * panel grew. Wrapping each pair makes the grid item atomic.
    */
+  /**
+   * @param pairs — [label, value, class, emptyKind, explanation]: the last two
+   *   turn an em dash into a reading about the payload, `emptyKind` carrying
+   *   the taxonomy's word on data-empty and `explanation` the sentence that
+   *   says WHICH silence it is. Callers used to hang those on afterwards with
+   *   `stats.querySelector("dd").title`, which reaches the FIRST pair and no
+   *   other, so every later withheld figure stayed a bare dash.
+   */
   function statList(pairs) {
     const dl = el("dl", "fc-stats");
-    for (const [k, v, cls] of pairs) {
+    for (const [k, v, cls, empty, why] of pairs) {
       const wrap = el("div", "fc-stat");
       wrap.append(el("dt", null, k));
-      wrap.append(el("dd", cls || null, v));
+      const dd = el("dd", cls || null, v);
+      if (empty) dd.setAttribute("data-empty", empty);
+      if (why) dd.title = why;
+      wrap.append(dd);
       dl.append(wrap);
     }
     return dl;
@@ -383,46 +380,47 @@
    * factor is 288/560 = 0.514, so a 9px axis label renders at 4.6 CSS px and a
    * 10.5px one at 5.4. Unreadable, and silently so, because nothing overflows.
    *
-   * The gamma and path panels already sized themselves from the host; the four
-   * added later did not. A wide desktop gets a wider plot rather than a
-   * magnified one.
+   * THE CEILING WAS THE DIALOG'S 760, AND IT STOPPED BEING RIGHT THE MOMENT A
+   * SECOND SURFACE DREW THESE PANELS. Measured against it: a /flows/ticker/
+   * is-wide panel at a 1280px viewport gets a 958px host, so width:100%
+   * stretched the drawing by 1.261 and every 9px label rendered at 11.3. The
+   * card dialog's own 777.6px host bound it too, by 17.6px — a 1.023 stretch
+   * that sat inside the suite's old tolerance and was never caught.
    *
-   * THE CEILING WAS THE DIALOG'S, AND IT STOPPED BEING RIGHT THE MOMENT A
-   * SECOND SURFACE DREW THESE PANELS. It was 760, chosen when the modal was
-   * the only host. Two measurements say that number is now wrong in two
-   * different places:
+   * 1900 IS THE WIDEST HOST THE GRID CAN PRODUCE: a full-row .is-wide at the
+   * three-column tier, just below the four-column breakpoint, is viewport
+   * 2111 - 13rem rail - 2x2.5rem pad = 1823px.
    *
-   *   - /flows/ticker/, is-wide panel, 1280px viewport: host 958px, viewBox
-   *     760, so width:100% stretches the drawing by 1.261. Every 9px label
-   *     renders at 11.3 and the one-unit-one-pixel invariant is broken in the
-   *     direction nobody looks for — the original bug shrank type, this one
-   *     magnifies it, and neither overflows.
-   *   - The card dialog itself: .fc is min(52rem, 94vw) = 832px less 2x1.7rem
-   *     of padding = a 777.6px host. The old ceiling bound there too, by
-   *     17.6px — a 1.023 stretch that has always been live and sat just
-   *     inside the suite's 15% tolerance, which is why nothing caught it.
+   * NEITHER BOUND IS COSMETIC: outside them the SVG keeps its viewBox and
+   * width:100% rescales it, so the axis type moves with the drawing and
+   * nothing overflows to say so. The ticker suite asserts the drawn width at
+   * 320, 1280 and 1840px, to within a pixel, and caught both directions.
    *
-   * 1900 is set by the WIDEST HOST THE GRID CAN PRODUCE, and the number
-   * moved when the canvas did. Under the tiered .flows-main the largest a
-   * panel gets is a full-row .is-wide at the three-column tier, just below
-   * the four-column breakpoint: viewport 2111 - 13rem rail - 2x2.5rem pad
-   * = 1823px. The enlarge dialog is smaller than that (min(96rem, 96vw)
-   * less 2x1.7rem tops out at 1482), so it is no longer the binding case.
-   *
-   * THE CAP IS NOT COSMETIC. Above it the SVG keeps its viewBox and gets
-   * stretched by width:100%, so one viewBox unit stops being one CSS pixel
-   * and the axis type shrinks with the drawing — silently, because nothing
-   * overflows when everything scales together. The ticker suite asserts the
-   * ratio at 320, 1280 and 1840px and caught exactly that when the canvas
-   * widened and this number did not. Below the cap every host draws at
-   * exactly its own width, which is the whole invariant.
-   *
-   * ONE FUNCTION, NOT TWO. flows-ticker.js reads this rather than defining its
-   * own: two width policies is two answers to "how wide is this chart", and
-   * the panels are now drawn by two different controllers.
+   * ONE FUNCTION, NOT FOUR, WHICH IS WHAT IT WAS. renderGamma, renderPath and
+   * flows-ticker.js's renderSkewTerm each measured their own host before this
+   * existed; each call site now says what its inlined clamp cost. N width
+   * policies is N answers to "how wide is this chart", on panels drawn by two
+   * controllers that must agree to a pixel.
    */
   function panelWidth(host) {
-    return Math.max(300, Math.min(1900, Math.round((host && host.clientWidth) || 560)));
+    /* THE FLOOR IS FOR AN UNMEASURABLE HOST, NEVER A NARROW ONE, and it was
+       applied to both: `Math.max(300, …)` drew 300 units into the 282px host
+       a 320px viewport gives this page, so base.css's `max-width: 100%` shrank
+       all twelve charts to 0.940 CSS px per unit and a phone got 8.5px type
+       from a 9px drawing. Same invariant as the cap above, same silence, other
+       direction — and 0.94 sat inside the suite's old band as the dialog's
+       1.023 did.
+
+       FLOORED, AND FROM THE BOX. clientWidth is pre-rounded and rounds up half
+       the time, so a 282.6px host reads 283 and the drawing overflows by a
+       subpixel; floor() of the fractional box can only be narrower. 560 is for
+       a host with no layout at all — detached, display:none — the one case a
+       number must be invented. */
+    const box = host && typeof host.getBoundingClientRect === "function"
+      ? host.getBoundingClientRect().width : 0;
+    const measured = Math.floor(box > 0 ? box : ((host && host.clientWidth) || 0));
+    if (!(measured > 0)) return 560;
+    return Math.min(1900, measured);
   }
 
   /** A round tick interval at or just below `raw`: 1, 2, 2.5 or 5 times a power of ten. */
@@ -444,36 +442,31 @@
    * Suffix an SVG <defs> id with the mount it belongs to.
    *
    * SVG IDS ARE DOCUMENT-GLOBAL AND url(#id) TAKES THE FIRST MATCH IN
-   * DOCUMENT ORDER. The card dialog was the only surface that drew these
-   * panels, so one copy of each pattern was the only copy and a bare id was
-   * safe. /flows/ticker/ holds a grid copy and an enlarged copy of the same
-   * panel at once — two <pattern id="gpNeg"> in one document, and the second
-   * drawing silently borrows the first's tile. Today the two tiles are
-   * identical so it happens to look right; the moment one scales with its
-   * drawing it is wrong and NOTHING LOOKS WRONG.
-   *
-   * The default keeps every existing caller byte-identical: a renderer called
-   * without a mount emits exactly the id it always did.
+   * DOCUMENT ORDER. With the dialog the only surface drawing these panels a
+   * bare id was safe; /flows/ticker/ holds a grid copy and an enlarged copy
+   * at once — two <pattern id="gpNeg"> in one document — and the second
+   * drawing silently borrows the first's tile. The two tiles are identical
+   * today so it happens to look right; the moment one scales with its drawing
+   * it is wrong and NOTHING LOOKS WRONG. The default keeps every existing
+   * caller byte-identical.
    */
   const mountId = (base, mount) => (mount ? base + "-" + mount : base);
 
   function renderGamma(host, panel, card, questionIn, mount) {
     /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       The dialog passes nothing and gets exactly the string it always did;
-       /flows/ticker/ passes the registry's question, read out of the panel's
-       data-question attribute. Written this way rather than as a default
-       parameter because the string below is the documentation of what this
-       chart is FOR, and moving it out of the function would separate the two.
+       BOTH SURFACES PASS IT NOW: /flows/ticker/ reads the registry's question
+       off the panel's data-question attribute, and the card dialog reads the
+       same attribute off its own section, so one drawing carries one question
+       wherever it is opened. The fallback is written inline rather than as a
+       default parameter because the string below is the documentation of what
+       this chart is FOR, and moving it out would separate the two.
 
-       STATED HERE ONCE FOR ALL TEN RENDERERS. This paragraph stood verbatim
-       above every one of them — ten copies of one rule, restating what the
-       file header's "THE CONTRACT WITH ITS CALLERS" already says. Nine of
-       them are a citation now. That is not the same act as shortening a
-       comment to fit a byte ceiling, which tests/flows-weight.mjs rightly
-       calls degrading the thing this codebase is strictest about: no
-       reasoning is lost when the ninth restatement of one rule goes, and
-       this file is billed on four routes, so the duplication cost four
-       times over. */
+       STATED HERE ONCE FOR ALL TEN RENDERERS. It stood verbatim above every
+       one of them, restating the header's "THE CONTRACT WITH ITS CALLERS";
+       the other nine are gone. Deleting the ninth restatement of one rule
+       loses no reasoning, which is not the act flows-weight.mjs warns against
+       — shortening the reasoning itself to fit a ceiling. Measured: 1,350
+       bytes, billed on four routes. */
     const question = questionIn ||
       "Where does dealer hedging flip from damping moves to amplifying them, " +
       "and how far is that from spot?";
@@ -495,18 +488,19 @@
     let run = 0;
     const cum = bars.map((b) => (run += b.g));
 
-    const W = Math.max(300, Math.min(760, host.clientWidth || 560));
+    /* THROUGH panelWidth, LIKE EVERY OTHER CHART. This read `Math.min(760,
+       …)`, the dialog's old ceiling, left behind when panelWidth replaced
+       exactly this expression: the enlarge dialog's host is four figures
+       wide, so this drawer capped at 760 units and width:100% stretched the
+       drawing — one viewBox unit stopped being one CSS pixel. */
+    const W = panelWidth(host);
     const ROW = bars.length > 34 ? 9 : 12;
-    /* THE RAIL IS AN ANNOTATION COLUMN, NOT A TOOLTIP.
-
-       The two level readouts were drawn as filled, outlined plates in a 132px
-       rail — 44% of the canvas at a 320px viewport, sitting flush against the
-       right end of the bars with a card background behind them. Nothing was
-       ever drawn under them, so the fill bought nothing and cost the panel
-       its whole right-hand third: what it looked like was a tooltip that had
-       got stuck over the chart. Without the plate the same text needs no
-       padding, no border and no background, and the twenty pixels it gives
-       back go to the bars. */
+    /* THE RAIL IS AN ANNOTATION COLUMN, NOT A TOOLTIP. The two level readouts
+       were filled, outlined plates in a 132px rail — 44% of the canvas at a
+       320px viewport — with nothing ever drawn under them, so the fill bought
+       nothing and looked like a tooltip stuck over the chart. Without the
+       plate the text needs no padding, border or background, and the twenty
+       pixels go back to the bars. */
     const padT = 16, padB = 30, labelW = 46, railW = 112;
     const plotL = labelW, plotR = W - railW;
     const plotW = Math.max(60, plotR - plotL);
@@ -556,17 +550,15 @@
        which agrees with the bar rows only when the strikes are uniformly
        spaced.
 
-       Real chains are not uniformly spaced. Listed ladders tighten near the
-       money ($2.50 steps) and widen in the wings ($5, then $10), and on top of
-       that this panel DROPS any strike whose gamma the vendor did not report
-       — deliberately, so an absent reading is never drawn as a measured zero
-       — which punches gaps into whatever regularity was left.
-
-       Measured on a realistic 24-strike ladder from $100 to $270: the worst
-       divergence was 67.5px, or 4.8 bar rows, and the spot rule for $170
-       landed 35px away from the $170 bar. The panel drew a flip line pointing
-       at the wrong strike, on every non-uniform chain, and nothing about it
-       looked wrong.
+       Real chains are not uniformly spaced: listed ladders tighten near the
+       money and widen in the wings, and this panel DROPS any strike whose
+       gamma the vendor did not report — deliberately, so an absent reading is
+       never drawn as a measured zero — which punches gaps into whatever
+       regularity was left. Measured on a 24-strike ladder from $100 to $270,
+       the worst divergence was 67.5px, or 4.8 bar rows, and the spot rule for
+       $170 landed 35px from the $170 bar: a flip line pointing at the wrong
+       strike, on every non-uniform chain, with nothing about it looking
+       wrong.
 
        PIECEWISE ON THE LADDER, therefore: find the two strikes bracketing the
        price and interpolate between THEIR row positions. A price that is
@@ -629,12 +621,10 @@
        now the standard log ladder — 1, 2 and 5 times a power of ten — over
        the range the axis spans, and nothing else is ever printed.
 
-       The old `guaranteed` set existed to promise that the widest bar always
-       had a mark near it, and this ladder keeps that promise without a
-       special case. `lowest` is at most tau/5, tau is at most vmax, and the
-       largest ladder value at or below vmax is at least vmax/2 — so that
-       value always clears the floor and the loop below cannot fail to emit
-       it, on any book. An explicit re-add would be a line no input can reach.
+       The widest bar always has a mark near it without a special case:
+       `lowest` is at most tau/5, tau is at most vmax, and the largest ladder
+       value at or below vmax is at least vmax/2, so that value always clears
+       the floor on any book. An explicit re-add would be unreachable.
 
        niceStep() is deliberately NOT reused: its ladder carries 2.5 for the
        price rail, and every graduation on this axis has to come off ONE
@@ -716,19 +706,15 @@
       }));
       /* THE HATCH IS AN OVERLAY NOW, NOT THE WHOLE BAR.
 
-         A short bar was drawn with `fill: url(#gpNeg)` and no fill under it,
-         so it was a set of 1.8-on-4 diagonal lines — about 45% coverage —
-         while a long bar of identical magnitude was 100% solid. Two bars
-         meaning the same number, one of them half the ink. The reader's first
-         impression of which side of the book is heavier was being set by the
-         texture that exists to carry the SIGN, which is the one thing texture
-         must not be allowed to do here. Fill underneath, texture cut into it
-         from above: both channels intact, comparable weight, and the sign
-         still survives a greyscale render because the texture is still there.
-
-         This is the same construction the gamma surface uses for its own
-         short cells, which is the other reason to prefer it: one panel should
-         not encode short gamma differently from the panel beside it. */
+         A short bar was `fill: url(#gpNeg)` with no fill under it — 1.8-on-4
+         diagonals, about 45% coverage — against 100% solid for a long bar of
+         identical magnitude: two bars meaning the same number, one of them
+         half the ink, so which side of the book looked heavier was being set
+         by the texture that exists to carry the SIGN. Fill underneath,
+         texture cut into it from above: both channels intact, comparable
+         weight, and the sign still survives a greyscale render. It is the
+         construction the gamma surface uses for its own short cells, so one
+         panel does not encode short gamma differently from the next. */
       if (neg) {
         svg.append(svgEl("rect", {
           class: "gp-barhatch", x: bx, y, width: bw, height: ROW - 4,
@@ -910,17 +896,12 @@
        not five times as far apart as 20K and 100K), but visible is not the
        same as stated.
 
-       TWO THINGS THE OLD CLAMP GOT WRONG, both of which the longer caption
-       would have made worse. The per-character estimate was 4.5 units, and
-       .gp-axis measures 5.81 at 10px with its letter-spacing — so the comment
-       claiming the estimate "errs wide" had it backwards by 22%, and a
-       caption believed to fit could overhang by a fifth of its length. And
-       the clamp was to the PLOT, not the canvas: at a 320px viewport the plot
-       is 142 units and no caption of this kind fits inside it, so the clamp
-       was pushing a 250-unit string into a 142-unit box and the excess left
-       the canvas at whichever end lost. The caption is an axis label, not
-       plot furniture; it may use the whole canvas, and it drops to a short
-       form if even that will not hold it. */
+       AND THE CLAMP IS TO THE CANVAS, NOT THE PLOT. At a 320px viewport the
+       plot is 142 units and no caption of this kind fits inside it, so the
+       old clamp pushed a 250-unit string into a 142-unit box and the excess
+       left the canvas at whichever end lost. The caption is an axis label,
+       not plot furniture; it may use the whole canvas, and it drops to a
+       short form if even that will not hold it. */
     const axisLong = "◀ short   net dealer Γ (log scale)   long ▶";
     const axisShort = "◀ short   Γ, log scale   long ▶";
     const axisText = axisLong.length * AXIS_CH <= W - 8 ? axisLong : axisShort;
@@ -936,21 +917,19 @@
       (flip !== null ? `Gamma flip ${px2(flip)}. ` : "No gamma flip inside the drawn band. ") +
       `${panel.strikes} strikes drawn as ${bars.length} bars.`);
 
-    /* THE SENTENCE IS DERIVED, NOT ASSERTED.
+    /* THE SENTENCE IS DERIVED, NOT ASSERTED — AND WITHHELD WHEN IT CANNOT BE.
 
        This used to read "dealers are short gamma below X and long above it" as
        a hardcoded string. Whether that holds is determined by the sign of the
        cumulative on the low side of the crossing the pipeline actually chose,
        and on the live board it was frequently the other way round — the note
-       contradicted the header badge on the same card. */
+       contradicted the header badge on the same card. So a card from before
+       flipSide was measured gets no sentence at all: defaulting an absent
+       flipSide to "short" rebuilds exactly that string, and on the live INTC
+       book the truth is long_below. Withholding is the same discipline the
+       score panel applies to fam.V and fam.O, and for the same reason: a
+       field whose value cannot be verified must not be asserted. */
     const regime = card.regime || {};
-    /* A CARD FROM BEFORE flipSide WAS MEASURED gets no sentence at all.
-       Defaulting an absent flipSide to "short" reproduces the hardcoded string
-       this panel used to carry — and that string was wrong often enough to be
-       the reason flipSide exists: on the live INTC book the truth is
-       long_below. Withholding is the same discipline the score panel applies
-       to fam.V and fam.O, and for the same reason: a field whose value cannot
-       be verified must not be asserted. */
     const knowsSide = regime.flipSide === "long_below" || regime.flipSide === "short_below";
     const below = regime.flipSide === "long_below" ? "long" : "short";
     const above = below === "long" ? "short" : "long";
@@ -1026,15 +1005,11 @@
         "are round numbers on a 1-2-5 ladder, and treat bar length as rank. The widest bar is " +
         money(bars.reduce((a, b) => (Math.abs(b.g) > Math.abs(a) ? b.g : a), 0)).replace("$", "") +
         " Γ."),
-      /* THE CURVE AND THE BARS DO NOT SHARE A SCALE, and sharing the zero rule
-         makes them look as though they do. A running total is the SUM of the
-         bars, so it routinely exceeds the largest of them by an order of
-         magnitude and has to be normalised separately or it leaves the plot —
-         measured at 12.4x on a realistic 40-strike ladder. The two agree at
-         exactly one place, the zero rule, which is the only place they must:
-         it is where the crossing is the flip. Saying so is cheaper than a
-         second axis nobody would read, but leaving it unsaid invites a reader
-         to compare a curve height against a bar length, which means nothing. */
+      /* THE SEPARATE SCALE IS SAID OUT LOUD, because sharing the zero rule
+         makes the two series look as though they share everything. The
+         measurement and the defect are at the cumulative scale above; what
+         is here is that leaving it unsaid invites a reader to compare a
+         curve height against a bar length, which means nothing. */
       el("p", "fc-note",
         "The cumulative curve is normalised separately from the bars — only its ZERO CROSSING " +
         "is comparable to them, which is the flip. Read the curve for shape, not height. The " +
@@ -1059,8 +1034,6 @@
    * so the direction is read off position rather than off a sign.
    */
   function renderDisplacement(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Is today's flow building dealer gamma where the book already is, or somewhere else?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1173,18 +1146,15 @@
   /* THE SHADING RAMP: STEPPED, LOGARITHMIC, AND SCALED TO THE CELLS THAT ARE
      ACTUALLY ON THE GRID.
 
-     What shipped was linear in |v| / scaleCap, and scaleCap is
-     max(q95, peak/100) — so on any book with one dominant ATM cell the
-     divisor is a hundredth of a peak that is itself two or three decades
-     above the median cell. Measured on the suite's own surface fixture, whose
-     grid holds one 9e9 outlier and 98 cells between 1e6 and 4e6: every
-     ordinary cell mapped to a fill-opacity between 0.130 and 0.159. Five
-     "distinct" values, none of them separable by eye, against a void drawn at
-     0.35 — which is how a panel whose whole job is "find the concentration"
-     came to read as an empty grid with a few marks in it. The panel's own
-     test asserted that magnitude was "encoded in opacity, not flattened" and
-     passed on that, because it counted distinct values instead of measuring
-     their spread.
+     What shipped was linear in |v| / scaleCap = max(q95, peak/100), so on any
+     book with one dominant ATM cell the divisor is a hundredth of a peak two
+     or three decades above the median cell. Measured on the suite's own
+     surface fixture — one 9e9 outlier and 98 cells between 1e6 and 4e6 —
+     every ordinary cell mapped to a fill-opacity between 0.130 and 0.159:
+     five "distinct" values, none separable by eye, against a void drawn at
+     0.35. The panel's own test asserted magnitude was "encoded in opacity,
+     not flattened" and passed, because it counted distinct values instead of
+     measuring their spread.
 
      Three decisions, and each of them is a decision about a failure mode:
 
@@ -1242,8 +1212,6 @@
   }
 
   function renderSurface(host, panel, card, questionIn, mount) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn ||
       "Where is dealer gamma concentrated, and when does it expire?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.grid) || !panel.grid.length) {
@@ -1384,14 +1352,13 @@
     /* PRICE LABELS ARE EARNED, AND THERE ARE FEW OF THEM.
 
        The stride was `ceil(13 / rowH)` — as many labels as would fit without
-       overlapping. But a 21-rung ladder at 15px a rung fits twenty-one of
-       them, so the stride evaluated to 1 and every single strike was
-       labelled: twenty near-identical numbers, 62.00 63.00 64.00 and on down
-       the side, all of them at the same weight, competing with the cells for
-       the reader's eye. Legibility was never the binding constraint here.
-       COMPETITION WITH THE DATA is, and the fix is a budget rather than a
-       fit: the levels that mean something are guaranteed, the rest are a
-       coarse ruler, and a minimum separation stops the two from crowding.
+       overlapping — and a 21-rung ladder at 15px a rung fits twenty-one, so
+       the stride evaluated to 1 and every strike was labelled: 62.00 63.00
+       64.00 on down the side, all at one weight, competing with the cells.
+       Legibility was never the binding constraint here. COMPETITION WITH THE
+       DATA is, and the fix is a budget rather than a fit: the levels that
+       mean something are guaranteed, the rest are a coarse ruler, and a
+       minimum separation stops the two from crowding.
 
        Priority order matters — the first entry to claim a y wins it — so
        spot and the two walls are pushed before the ends and the ruler. */
@@ -1463,11 +1430,10 @@
        for a fraction of the ink, and the row's price label is guaranteed
        above, so the reader has three things on one line to follow.
 
-       Filled for the call wall, hollow for the put wall. That is the same
-       non-hue channel the session path uses for its two legs — filled disc,
-       hollow square — and it is why the marker is a shape at all rather than
-       two coloured rules: on a greyscale print or to a deuteranope reader,
-       the celadon rule and the red one were the same rule. */
+       Filled for the call wall, hollow for the put wall — the same non-hue
+       channel the session path uses for its two legs, and the reason the
+       marker is a shape at all: on a greyscale print or to a deuteranope
+       reader, the celadon rule and the red one were one rule. */
     const markWall = (rowIndex, cls) => {
       if (rowIndex < 0) return;
       const yc = yOfRow(rowIndex) + Math.max(1, rowH - 1) / 2;
@@ -1610,8 +1576,6 @@
   }
 
   function renderCalendar(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "When does this dealer positioning expire, and what is left after it does?";
     if (!panel || panel.status !== "ok" || !panel.schedule || !panel.schedule.length) {
       return emptyPanel(host, question, panel);
@@ -1704,9 +1668,45 @@
    * The gap between the implied band and the realized band IS the variance risk
    * premium, in the units a reader sizes in rather than in vol points.
    */
+  /* ---------- IV rank, where the unit IS the reading -----------------
+
+     THE SENTENCE MULTIPLIED BY 100 AND NAMED NO UNIT: it read
+     `Math.round(n * 100) + "% of its year"` off panels.pricedMove.ivRank, and
+     was right only because that field's fraction convention is implicit at
+     every hop from the vendor to this line. THE CARD CARRIES TWO IV RANKS IN
+     TWO UNITS — this one a 0-1 fraction, volContext.ivRank's rows[].rank1y on
+     0-100 with a `rankUnit` field saying so, because (its own comment) "this
+     vendor's rank fields have burned a '1352% of its year' once already" —
+     and the divide-by-100 lives in the pipeline, so a rank reaching this
+     formatter by any other path prints 52.15 as "5215%".
+
+     So the unit and the population are in the LABEL, the figure is stated out
+     of the 100 it is a percentile of, and a value above 1 is WITHHELD as
+     `unreadable`: above 1 is not a fraction, it is published bytes in a unit
+     this line cannot read. An ABSENT rank is `unavailable`, which is the
+     different fact that there is no rank at all. */
+  const IV_RANK_TERM = "IV rank, percentile of its own year";
+
+  function ivRankStat(panel) {
+    const n = isNum(panel.ivRank);
+    if (n === null) {
+      return [IV_RANK_TERM, DASH, "is-null", "unavailable",
+        "The priced-move panel published no IV rank for this name, so its place in " +
+        "its own year is not stated rather than stated as the bottom of it."];
+    }
+    if (n > 1) {
+      return [IV_RANK_TERM, DASH, "is-null", "unreadable",
+        "This card publishes pricedMove.ivRank as " + n + ", and this line reads that " +
+        "field as a fraction of one. A value above one is in some other unit, so the " +
+        "rank is withheld rather than multiplied by a hundred and printed."];
+    }
+    return [IV_RANK_TERM, Math.round(n * 100) + " of 100", null, null,
+      "Read from pricedMove.ivRank, a 0-1 fraction, and shown as the percentile it is: " +
+      "where 30-day implied volatility sits against this name's own trailing year. It is " +
+      "NOT panels.volContext.ivRank, which the stock feed publishes on 0-100."];
+  }
+
   function renderMove(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn ||
       "What move is priced over a fixed horizon, and is that band rich against " +
       "what this stock has actually been delivering?";
@@ -1809,7 +1809,7 @@
       ["Variance risk premium",
         fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
       ["Band", panel.richness === null ? DASH : panel.richness],
-      ["IV rank", fmtOr(panel.ivRank, (n) => Math.round(n * 100) + "% of its year")],
+      ivRankStat(panel),
       ["IV, past week",
         fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
     ]));
@@ -1834,8 +1834,6 @@
   /* ---------- price context ------------------------------------------ */
 
   function renderContext(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Where has this name been, before any of today's flow?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1902,8 +1900,6 @@
   /* ---------- level rail ------------------------------------------- */
 
   function renderLevels(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Where are the levels that matter, and how far is each in units I can size against?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -1953,12 +1949,6 @@
   /**
    * THE PANEL DRAWS BOTH SERIES, ON TWO SCALES THAT SHARE ONLY THEIR ZERO.
    *
-   * buildPath has always emitted `series` as [cumulative net delta,
-   * cumulative net premium] PAIRS, and this renderer read `p[0]` and dropped
-   * the second half of every row: ~78 premium points shipped on every card,
-   * paid for in ingest bytes, and never once drawn. The same shape as the
-   * `vol` block that no renderer read, and as assignedReturn on the desk rows.
-   *
    * The premium leg is worth its ink because DELTA AND PREMIUM DIVERGING
    * INTRADAY IS THE SPREAD-VERSUS-DIRECTIONAL TELL: money that moves premium
    * without moving net delta is being spent on structure — verticals, calendars,
@@ -1966,8 +1956,9 @@
    * delta curve cannot see that, and the two end-of-day totals below the chart
    * cannot show WHEN it happened.
    *
-   * TWO SCALES, STATED, BECAUSE THE UNITS ARE NOT COMMENSURABLE. One leg is
-   * contracts of delta, the other is dollars. Plotting them against one shared
+   * TWO SCALES, STATED, BECAUSE THE UNITS ARE NOT COMMENSURABLE — the payload
+   * names both under the stat block, and one leg is a delta-weighted contract
+   * count while the other is dollars. Plotting them against one shared
    * axis would let a reader compare their heights, which means nothing at all —
    * the identical mistake the gamma panel's note apologises for between its
    * bars and its cumulative curve. Each leg is normalised by its OWN largest
@@ -1977,20 +1968,16 @@
    *
    * IDENTITY WITHOUT HUE. Delta is a solid stroke ending in a filled disc;
    * premium is dashed and ends in a hollow square; the legend swatches are
-   * drawn with the same strokes rather than described in words. The gamma
-   * surface hatches its short-gamma cells for this reason and says why —
-   * colour is the LAST channel here, not the first — and this panel had been
-   * relying on hue alone to distinguish a positive run from a negative one.
+   * drawn with those strokes rather than described in words. Colour is the
+   * LAST channel here, and this panel had been relying on hue alone.
    *
-   * The stroke styling is set as PRESENTATION ATTRIBUTES rather than left to
-   * the stylesheet. A path with no CSS defaults to fill:black, stroke:none —
-   * a solid blob, not a line — so a renderer that ships before its rules do
-   * would draw something actively wrong rather than something plain. Any CSS
-   * rule of the same name still wins over an attribute.
+   * The strokes are PRESENTATION ATTRIBUTES rather than stylesheet rules: a
+   * path with no CSS defaults to fill:black, stroke:none — a solid blob, not
+   * a line — so a renderer that ships before its rules do draws something
+   * plain rather than something actively wrong. CSS still wins over an
+   * attribute.
    */
   function renderPath(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Did this arrive as one print, or as a bid that persisted all session?";
     if (!panel || panel.status !== "ok" || !Array.isArray(panel.series) || panel.series.length < 2) {
       return emptyPanel(host, question, panel);
@@ -2016,7 +2003,17 @@
     const premMoved = premMeasured.some((v) => v !== 0);
     const drawPrem = premPublished && premMoved;
 
-    const W = Math.max(280, Math.min(760, host.clientWidth || 560));
+    /* THE UNITS OF THE TWO TOTALS, AS THE PAYLOAD PUBLISHES THEM — read once,
+       because the chart's aria-label (this whole panel, to a screen reader)
+       and the sentence under the stat block both need them. */
+    const dUnit = typeof panel.netDeltaUnit === "string" ? panel.netDeltaUnit : "";
+    const pUnit = typeof panel.netPremiumUnit === "string" ? panel.netPremiumUnit : "";
+
+    /* THROUGH panelWidth, and the floor moves 280 -> 300 with it: two floors
+       20px apart are two answers to one question, and 300 is the one the
+       render contract's tolerance was computed against (a 320px viewport
+       gives a 284.8px host; 300/284.8 = 1.053, inside 15%). */
+    const W = panelWidth(host);
     const H = 132, pad = 10;
     const x = (i) => pad + (i / (rows.length - 1)) * (W - 2 * pad);
 
@@ -2100,6 +2097,7 @@
 
     svg.setAttribute("aria-label",
       `Cumulative net delta across the session, ending at ${compact(panel.netDelta)}` +
+      (dUnit ? ` ${dUnit}` : "") +
       (drawPrem ? `, and cumulative net premium ending at ${money(panel.netPremium)}, ` +
         `drawn on its own scale and sharing only the zero rule` : "") +
       (centroid !== null ? `. Movement-weighted mean minute at ${Math.round(centroid * 100)}% of the session` : "") +
@@ -2164,6 +2162,30 @@
       ["Weighted mean minute", share(centroid)],
     ]));
 
+    /* THE UNITS OF THE TWO FIGURES AT THE HEAD OF THAT BLOCK, printed from
+       the payload rather than restated — greekTermPanel states the rule
+       below. They belong here because "Net delta 39.0K" beside "Net premium
+       $2.3M" is a contract count and a dollar sum sharing one block, and a
+       reader who takes the first for dollars has misread the panel by three
+       orders of magnitude. A card built before the fields existed says so
+       rather than borrowing a unit this renderer would have to assume. */
+    if (dUnit || pUnit) {
+      host.append(el("p", "fc-note fp-unit",
+        "Net delta is in " + (dUnit || "a unit this card does not publish") +
+        "; net premium is in " + (pUnit || "a unit this card does not publish") + "."));
+    } else {
+      /* .flows-empty IS THE CLASS THE SILENCE TAXONOMY KEYS OFF — dashed rule
+         and a dagger for "published, and this field is not on it" — so this
+         withholding wears the same mark as on every other route. */
+      const noUnit = el("p", "flows-empty fp-unit",
+        "This card was built before the path panel published the units of its two " +
+        "totals, so neither figure above states one. The curve's own legend still " +
+        "names the scale each leg was normalised by. They return on the next " +
+        "published session.");
+      noUnit.setAttribute("data-empty", "unavailable");
+      host.append(noUnit);
+    }
+
     /* THE READING, not the method: what the three numbers say about this
        session, each against the baseline its own definition supplies. Nothing
        here is thresholded into an adjective — the baselines are 50% for a
@@ -2215,8 +2237,6 @@
   /* ---------- congress ---------------------------------------------- */
 
   function renderCongress(host, panel, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Who in Congress disclosed a trade in this name, and how old is that information?";
     if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
     panelHead(host, question);
@@ -2516,7 +2536,18 @@
     };
   }
 
-  function renderOverlay(host, join, questionIn) {
+  /* THE FILE'S CALL SHAPE, AND THIS DRAWER WAS THE ONE EXCEPTION TO IT.
+
+     It was declared `(host, join, questionIn)` where every other renderer
+     takes (host, panel, card, questionIn[, mount]) — renderLevels and
+     renderDisplacement both accept a `card` they never read. DRAW calls them
+     all as `drawer(host, panel, card, question, mount)`, on its own argument
+     that "the widest signature is safe for all of them", which holds only
+     while every drawer DECLARES the same order. Here the card landed in
+     `questionIn`, so the "Score over price" panel headed itself with
+     String(card) — "[object Object]" — on every ticker page, for every name,
+     for as long as the panel has been mounted. */
+  function renderOverlay(host, join, card, questionIn) {
     const question = questionIn ||
       "How has this name\u2019s daily score moved against its own price?";
     if (!join || join.status !== "ok") return emptyPanel(host, question, join);
@@ -2783,8 +2814,6 @@
   }
 
   function renderScore(host, card, questionIn) {
-    /* The caller's question wins; the hardcoded one is the fallback. Stated
-       in full at the first renderer in this file, and in the header. */
     const question = questionIn || "Why is this name on the board, and how much of the score came from where?";
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
@@ -2854,15 +2883,14 @@
     convictionArithmetic(host, card, conv);
 
     /* THE TWO REASONS THE QUALITY GAUGE IS LOW, spelled out.
-    
-       O is a single digit and it is a PRODUCT of four oriented axes, so a 38
-       can mean "this name's flow is lottery tickets", "this participant is
-       trading vol, not direction", or neither of those and something else
-       entirely. Those readings call for opposite handling — one says the
-       direction is real but the sizing is a punt, the other says there is no
-       directional view to read at all — and until now the card folded both
-       into that digit and the reader could not recover either.
-    
+
+       O is a single digit and a PRODUCT of four oriented axes, so a 38 can
+       mean "this name's flow is lottery tickets", "this participant is
+       trading vol, not direction", or neither. Those call for opposite
+       handling — one says the direction is real but the sizing is a punt, the
+       other that there is no directional view to read — and the digit alone
+       lets a reader recover neither.
+
        Both are ratios of gross sums with no free parameter. otmShare is in
        [0, 1] by construction (|otm directional delta| <= |directional delta|
        row by row); vegaTilt is gross vega flow per unit of gross delta flow,

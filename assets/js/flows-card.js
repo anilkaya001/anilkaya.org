@@ -23,14 +23,13 @@
    things that are tedious to get subtly right by hand.
 
    THE TEN RENDERERS AND THEIR SCAFFOLDING NOW LIVE IN
-   assets/js/flows-panels.js. They were 2,003 of this file's 2,325
-   lines, and they were unreachable from anywhere else because this
-   file's second statement returns when #flowsCard is absent. What is
-   left here is the dialog and only the dialog: its cache, its
-   loading and error states, the assembly that decides which panels a
-   card gets, and the wiring. flows-panels.js MUST be loaded first;
-   the guard below states what happens if it is not, rather than
-   throwing a ReferenceError into a click handler.
+   assets/js/flows-panels.js, whose header argues that move and names
+   what made it necessary. What is left here is the dialog and only
+   the dialog: its cache, its loading and error states, the assembly
+   that decides which panels a card gets, and the wiring.
+   flows-panels.js MUST be loaded first; the guard below states what
+   happens if it is not, rather than throwing a ReferenceError into a
+   click handler.
 
    EVERY PANEL IS A TAGGED UNION, and the switch on panel.status lives
    with the renderers, not here.
@@ -124,16 +123,30 @@
     }
 
     const panels = card.panels || {};
-    renderGamma($("fcGamma"), panels.gamma, card);
-    renderLevels($("fcLevels"), panels.levels);
-    renderDisplacement($("fcDisp"), panels.displacement);
-    renderSurface($("fcSurface"), panels.surface, card);
-    renderCalendar($("fcCal"), panels.calendar);
-    renderMove($("fcMove"), panels.pricedMove);
-    renderContext($("fcCtx"), panels.context);
-    renderPath($("fcPath"), panels.path);
-    renderCongress($("fcCongress"), panels.congress);
-    renderScore($("fcWhy"), card);
+    /* THE SAME QUESTION THE PAGE ASKS, OFF THE SAME REGISTRY. These ten calls
+       passed none, so every renderer fell back to the sentence hardcoded in
+       it while /flows/ticker/ passed TICKER_PANELS' — ten panels drawn by one
+       function and headed by two different questions depending on which
+       surface the reader opened, on a product whose claim is that the dialog
+       and the page cannot disagree about a chart. flows-pages.js now emits
+       the registry's question onto each dialog section as it does for the
+       ticker grid; `shared/` is never served, so markup is a browser's only
+       channel to that list. An absent attribute yields "" and each renderer's
+       own fallback still stands, so this cannot blank a heading. */
+    const ask = (id) => {
+      const section = $(id).closest(".fc-panel");
+      return (section && section.dataset.question) || "";
+    };
+    renderGamma($("fcGamma"), panels.gamma, card, ask("fcGamma"));
+    renderLevels($("fcLevels"), panels.levels, card, ask("fcLevels"));
+    renderDisplacement($("fcDisp"), panels.displacement, card, ask("fcDisp"));
+    renderSurface($("fcSurface"), panels.surface, card, ask("fcSurface"));
+    renderCalendar($("fcCal"), panels.calendar, card, ask("fcCal"));
+    renderMove($("fcMove"), panels.pricedMove, card, ask("fcMove"));
+    renderContext($("fcCtx"), panels.context, card, ask("fcCtx"));
+    renderPath($("fcPath"), panels.path, card, ask("fcPath"));
+    renderCongress($("fcCongress"), panels.congress, card, ask("fcCongress"));
+    renderScore($("fcWhy"), card, ask("fcWhy"));
 
     // Two dates, always. The job runs pre-open, so the session the data
     // describes is not the day it was built, and conflating them is how a

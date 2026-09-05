@@ -481,26 +481,25 @@ try {
       checks++;
     }
 
-    /* The name block is emitted on the ticker route ONLY, and hidden until a
-       controller fills it. A stat rail rendered as a frame of em dashes while
-       a fetch is in flight is a set of readings that came back blank. */
-    await page.goto(url("/flows/ticker/"), { waitUntil: "domcontentloaded" });
-    const railStats = await page.evaluate(() => {
-      const el = document.querySelector("#ftRail");
-      return el ? { cls: el.className, hidden: el.hidden, text: el.textContent.trim() } : null;
-    });
-    ok(railStats, "/flows/ticker/ emits the rail's name block");
-    eq(railStats.cls, "rail-stats", "under the class the stylesheet styles");
-    eq(railStats.hidden, true, "hidden until a controller fills it");
-    eq(railStats.text, "", "and empty, so it cannot render a frame of dashes");
+    /* AN ELEMENT NOTHING FILLS IS NOT EMITTED AT ALL.
 
-    /* AND `hidden` HIDES AT DESK WIDTH TOO, which the 320px sweep above cannot
-       say. `.rail-stats` is `display: none` on its own below 60rem, so the rail
-       block's dependence on the `[hidden]` reset only binds where the rail is a
-       column — and at 60rem and up its own `display: block` would beat the
-       user-agent `[hidden]` rule on cascade origin. Without the reset in
-       base.css this route renders an empty bordered stat block in the rail at
-       every desk width, and the 320px sweep stays green. */
+       This block used to assert that the ticker rail's `#ftRail` name block was
+       emitted, classed `rail-stats`, hidden, and EMPTY — which it was, on every
+       page view, forever: `grep ftRail` across assets/ found the emitter and the
+       stylesheet and no assignment anywhere. The assertion was true and the
+       element was dead weight, so the element, its seven CSS rules and that
+       assertion go together. The readings it promised are pinned by `.ft-bar`,
+       which is sticky and carries the whole identity strip at every viewport.
+
+       WHAT SURVIVES IS THE ASSERTION THAT MADE THE OLD ONE WORTH KEEPING: an
+       element marked `hidden` must actually not be laid out. `.rail-stats`
+       carried its own `display: block` above 60rem, which beats the user-agent
+       `[hidden]` rule on cascade origin — the class of defect that shows
+       nothing at 320px and an empty bordered box at every desk width. */
+    await page.goto(url("/flows/ticker/"), { waitUntil: "domcontentloaded" });
+    eq(await page.evaluate(() => !!document.querySelector("#ftRail")), false,
+       "/flows/ticker/ emits no rail name block: nothing has ever filled one");
+
     const leakedWide = await page.evaluate(() => [...document.querySelectorAll("[hidden]")]
       .filter((n) => getComputedStyle(n).display !== "none")
       .map((n) => (n.id || n.className || n.tagName) + " \u2192 " + getComputedStyle(n).display));
@@ -508,9 +507,13 @@ try {
       "[1280px] every element marked hidden is actually not laid out");
     checks++;
 
-    await page.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
-    eq(await page.evaluate(() => !!document.querySelector("#ftRail")), false,
-       "and nowhere else: a name block on a route with no name is chrome for nothing");
+    /* AND NO STYLESHEET RULE IS LEFT BEHIND FOR IT. A class with rules and no
+       emitter is the other half of the same dead weight, and it is the half a
+       DOM sweep structurally cannot see. */
+    const flowsCss = (await import("node:fs"))
+      .readFileSync(new URL("../assets/css/flows.css", import.meta.url), "utf8");
+    eq(/\.rail-stats/.test(flowsCss), false,
+       "and flows.css carries no .rail-stats rules for an element nothing emits");
 
     /* ---------- the footer stopped asserting a hit rate ----------
        The failure case IS the shipped one: a literal performance range in a
@@ -546,7 +549,9 @@ try {
     `colour removed, table cells leaded for figures rather than for prose, a ticker header ` +
     `measured against the fixed topbar in both the shape the controller builds and the ` +
     `shape the HTML ships, \`hidden\` proven to hide at BOTH a phone and a desk width ` +
-    `(the rail's stat block leaks only at the desk one), a breakpoint ladder with no width ` +
+    `— the class of leak that shows nothing at 320px and an empty bordered box at every ` +
+    `desk — and the rail's never-filled stat block gone from the markup AND from the ` +
+    `stylesheet, a breakpoint ladder with no width ` +
     `written as both a min and a max, and a footer that no longer asserts a hit rate it ` +
     `does not measure`);
 } finally {

@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "112";
+export const ASSET_VERSION = "113";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -66,6 +66,27 @@ const topbar = (active) => `
  * There is no hamburger and nothing to open: a menu you must open is a menu
  * that hides the product, which is the problem this replaces.
  */
+/* NO NAME BLOCK ON THE TICKER ROUTE, AND THE ELEMENT THAT PROMISED ONE IS GONE.
+
+   This function used to emit a hidden `div.rail-stats#ftRail` on that route
+   under a comment saying it was "filled by assets/js/flows-ticker.js from the
+   card it already holds", with seven rules waiting for it in flows.css.
+   Nothing ever wrote to it: grepping the id across assets/ returned this
+   emitter, the stylesheet, and no assignment at all — so the route shipped an
+   empty hidden box and a block of dead CSS to every reader, and the promise in
+   the comment had been false since it was written.
+
+   IT IS DELETED RATHER THAN FILLED, BECAUSE THE READINGS ARE ALREADY PINNED.
+   flows-ticker.js re-parents `#ftHead` into `.ft-bar`, which is
+   `position: sticky` at `top: 4.4rem`, so the name, the score, the conviction,
+   the regime, the spot, the day's move, the side, the overnight delta and the
+   distance to the gamma flip all stay on screen for the whole scroll — at
+   EVERY viewport, where `.rail-stats` was `display: none` below 60rem. A rail
+   copy of those readings would print one population twice, buy a reader
+   nothing they could not already see, and spend it on the route with the least
+   headroom under tests/flows-weight.mjs. tests/flows-motion.mjs asserts both
+   halves are gone: no `#ftRail` in the markup, no `.rail-stats` in the
+   stylesheet. */
 const rail = (active) => {
   /* THE COUNTS ARE FILLED IN THE BROWSER, not here. The Worker would have to
      read both board rows out of D1 on every page view to render a two-digit
@@ -109,21 +130,7 @@ const rail = (active) => {
   <p class="rail-group" id="railName">Name</p>
   <div class="rail-items" role="group" aria-labelledby="railName">
     ${item("/flows/ticker/", "Ticker page", "ticker")}
-  </div>${active === "ticker" ? `
-  <!-- THE ONLY COLUMN ON THE PAGE THAT SURVIVES A SCROLL, and on the one
-       route that is about a single name it spent its whole height on twelve
-       destinations. This is the host for that name's key readings — price,
-       levels, convexity, quality — filled by assets/js/flows-ticker.js from
-       the card it already holds. No new fetch: every number is on the payload
-       the page has in hand.
-
-       EMITTED EMPTY AND HIDDEN, on this route only. A rail block that says
-       nothing until the card lands is honest; one that renders a frame of em
-       dashes while a fetch is in flight is a set of readings that came back
-       blank, which is a different and false claim. The stylesheet also drops
-       it entirely below 60rem, where the rail is a horizontal strip and a
-       stat wall would push every destination off the screen. -->
-  <div class="rail-stats" id="ftRail" hidden></div>` : ""}
+  </div>
   <p class="rail-group" id="railDesk">Desk</p>
   <div class="rail-items" role="group" aria-labelledby="railDesk">
     ${item("/flows/desk/", "Premium desk", "desk")}
@@ -240,6 +247,37 @@ ${topbar(true)}
    overview and the two side pages cannot drift apart on the markup the card
    renderer targets by id — a mismatch there is a panel that silently never
    draws, which this repo has shipped before. */
+
+/**
+ * The registry's question for one panel key, escaped for an attribute.
+ *
+ * THE DIALOG AND THE PAGE ASKED DIFFERENT QUESTIONS ABOVE THE SAME CHART.
+ * /flows/ticker/ emits `data-question` from TICKER_PANELS and its controller
+ * passes it to the drawer; flows-card.js called the same ten renderers with no
+ * question at all, so each fell back to the string hardcoded inside itself —
+ * ten panels, two surfaces, two different sentences over one drawing. The
+ * priced move is the plainest of them: the page asks "What move is the option
+ * market pricing over the stated horizon?" and the dialog asked "What move is
+ * priced over a fixed horizon, and is that band rich against what this stock
+ * has actually been delivering?".
+ *
+ * IT TRAVELS AS MARKUP FOR THE REASON shared/flows-panels.js's header gives:
+ * `shared/` is in .assetsignore and is never served, so a browser module
+ * cannot import the registry. The attribute is the only channel, and it is the
+ * one the ticker page already uses — not a second list of ten strings in
+ * flows-card.js, which is the three-hand-written-lists defect the registry was
+ * created to close.
+ *
+ * A key with no registry entry returns "" rather than throwing: the renderers
+ * all fall back to their own sentence on an empty question, so a typo here
+ * costs the old behaviour rather than a blank panel. The test that the ten ids
+ * carry a non-empty question is what makes that fallback unreachable.
+ */
+const cardQ = (key) => {
+  const entry = TICKER_PANELS.find((p) => p.key === key);
+  return escapeHTML(entry ? entry.question : "");
+};
+
 const cardDialog = () => `
 <dialog id="flowsCard" class="fc" aria-labelledby="fcTitle">
   <article class="fc-inner">
@@ -262,52 +300,62 @@ const cardDialog = () => `
 
     <p class="fc-staleband" id="fcStale" role="status" hidden></p>
 
-    <section class="fc-panel" aria-labelledby="fcGammaH">
+    <section class="fc-panel" data-panel="gamma" data-question="${cardQ("gamma")}"
+             aria-labelledby="fcGammaH">
       <h3 id="fcGammaH">Gamma convexity</h3>
       <div id="fcGamma"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcSurfaceH">
+    <section class="fc-panel" data-panel="surface" data-question="${cardQ("surface")}"
+             aria-labelledby="fcSurfaceH">
       <h3 id="fcSurfaceH">Gamma surface &mdash; strike &times; expiry</h3>
       <div id="fcSurface"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcLevelsH">
+    <section class="fc-panel" data-panel="levels" data-question="${cardQ("levels")}"
+             aria-labelledby="fcLevelsH">
       <h3 id="fcLevelsH">Key levels &amp; distance to spot</h3>
       <div id="fcLevels"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcDispH">
+    <section class="fc-panel" data-panel="displacement" data-question="${cardQ("displacement")}"
+             aria-labelledby="fcDispH">
       <h3 id="fcDispH">Where the book is moving</h3>
       <div id="fcDisp"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcCalH">
+    <section class="fc-panel" data-panel="calendar" data-question="${cardQ("calendar")}"
+             aria-labelledby="fcCalH">
       <h3 id="fcCalH">Gamma roll-off</h3>
       <div id="fcCal"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcMoveH">
+    <section class="fc-panel" data-panel="pricedMove" data-question="${cardQ("pricedMove")}"
+             aria-labelledby="fcMoveH">
       <h3 id="fcMoveH">The priced move</h3>
       <div id="fcMove"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcCtxH">
+    <section class="fc-panel" data-panel="context" data-question="${cardQ("context")}"
+             aria-labelledby="fcCtxH">
       <h3 id="fcCtxH">Price context</h3>
       <div id="fcCtx"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcPathH">
+    <section class="fc-panel" data-panel="path" data-question="${cardQ("path")}"
+             aria-labelledby="fcPathH">
       <h3 id="fcPathH">Session path</h3>
       <div id="fcPath"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcCongressH">
+    <section class="fc-panel" data-panel="congress" data-question="${cardQ("congress")}"
+             aria-labelledby="fcCongressH">
       <h3 id="fcCongressH">Disclosed congressional transactions</h3>
       <div id="fcCongress"></div>
     </section>
 
-    <section class="fc-panel" aria-labelledby="fcWhyH">
+    <section class="fc-panel" data-panel="__score" data-question="${cardQ("__score")}"
+             aria-labelledby="fcWhyH">
       <h3 id="fcWhyH">Score derivation</h3>
       <div id="fcWhy"></div>
     </section>

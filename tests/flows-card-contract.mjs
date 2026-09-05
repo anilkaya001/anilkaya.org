@@ -133,6 +133,28 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(p.status, "ok", "a full session resolves");
   eq(p.series.length, 78, "390 minutes downsample to 78 buckets");
   eq(p.netDelta, 39000, "the series is CUMULATED, not the raw per-tick values");
+
+  /* THE TWO TOTALS SHIP THE UNITS THEY ARE IN.
+
+     They did not, and they are a CONTRACT COUNT and a DOLLAR SUM published
+     side by side on one panel — the pair house rule 3 names. Every other
+     quantity the card ships beside a number ships its unit: GREEK_UNITS gives
+     vanna, charm and dealer delta a sentence apiece, shapeIvRank publishes
+     rankUnit because a rank field "burned a '1352% of its year' once already".
+     shared/flows-ask.js records the cost of the omission in its own words —
+     "netDelta ... is NOT quoted, because the payload publishes no unit for it
+     and a number without a unit is not a reading this index will state".
+
+     THE STRINGS ARE ASSERTED VERBATIM because the renderer PRINTS them rather
+     than restating them, so a reworded unit is a reworded sentence on the
+     page, and both are named from the arithmetic above: cumD sums each tick's
+     ask-side-less-bid-side delta-weighted `net_delta`, cumP sums
+     `net_call_premium - net_put_premium` in dollars. */
+  eq(p.netDeltaUnit, "delta-weighted contracts, side-signed",
+     "netDelta ships the unit it is in, named from how it is summed");
+  eq(p.netPremiumUnit, "US dollars, net premium, side-signed",
+     "and netPremium ships its own — a ratio and a dollar sum never share a block " +
+     "without their units");
   eq(p.netPremium, 390 * 600, "net premium is call buying minus put buying");
   ok(p.series[77][0] > p.series[0][0], "the cumulative curve rises across the session");
   eq(p.asOf, "2026-08-24", "the panel carries the session it describes");
