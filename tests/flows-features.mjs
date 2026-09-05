@@ -42,6 +42,13 @@ const near = (a, b, tol, msg) => {
   near(num("abc"), 0, 0, "garbage falls back");
   near(num("abc", -1), -1, 0, "explicit fallback honoured");
   near(num(Infinity), 0, 0, "non-finite falls back");
+  /* A BLANK IS ABSENT, NOT ZERO. Number(" ") is 0, so before the trim a
+     whitespace-only field passed the empty test and reached NaN-fallback
+     callers — ivRankFraction among them — as a measured zero. */
+  near(num("   "), 0, 0, "whitespace falls back to the default 0");
+  eq(Number.isNaN(num("   ", NaN)), true, "whitespace honours a NaN fallback: absent, not zero");
+  eq(Number.isNaN(num("\t\n", NaN)), true, "so does a tab-and-newline blank");
+  near(num("  5 "), 5, 0, "a padded number still parses");
 }
 
 /* ---------- robust statistics ---------------------------------- */
