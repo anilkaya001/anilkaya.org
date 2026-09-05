@@ -85,6 +85,13 @@
 
   const MINUS = "−";           // U+2212, not a hyphen. Never inside an ISO date.
   const DASH = "—";            // U+2014, the one and only "not measured"
+  /* THE OTHER TWO ABSENCES IN THE PRICED COLUMN, each with its own glyph.
+     "0s" is a measured horizon of zero SESSIONS and carries its unit so it
+     can never be read as a zero move; U+2020 is the mark this stylesheet
+     already spends on "published, and this field is not on it". Both are in
+     the mono subset this site self-hosts. */
+  const ZERO_HORIZON = "0s";
+  const NOT_ON_ROW = "†";
   const MID = "·";
   const UP = "↑";              // verified present in the mono subset
   const DOWN = "↓";            // ditto; U+25B2/U+25BC are NOT and are never used
@@ -347,16 +354,81 @@
     if (windowPanel) windowPanel.hidden = false;
   }
 
+  /**
+   * THE CLAMP WAS THE DEFECT, SO THERE IS NO CLAMP.
+   *
+   * This returned `Math.max(300, Math.min(1900, w))`. Both bounds break the
+   * rule stated above, in opposite directions, and the ceiling broke it
+   * where the owner actually reads the page: at 2560 the host measures
+   * 1,998px, the viewBox was capped at 1900, and the svg went out at
+   * width:"100%" — so the browser stretched 1900 units across 1,998 pixels
+   * at 1.052 px per unit. Every 9.5px tick rendered at 10px, every 9-unit
+   * mark at 9.5, and the chart still looked exactly like a chart. The floor
+   * does the same thing under a 288px host: 300 units in a 288px box either
+   * scrolls the page sideways or gets squeezed back below one px per unit.
+   *
+   * A BOUND THAT CAN BIND IS A WRONG DRAWING, and no bound is needed: the
+   * host cannot be wider than the viewport, and the width does not multiply
+   * anything — the column count comes from the axis, not from the pixels,
+   * so a 2,544-unit drawing holds exactly as many nodes as a 304-unit one.
+   * What remains is the ONE case that is not a measurement: a host that
+   * reports 0, which is a hidden element rather than a narrow one, and which
+   * takes the documented 560 fallback. See revealPanel above for how that
+   * zero used to happen on every paint.
+   */
   function chartWidth() {
     revealPanel();
-    const w = windowHost && windowHost.clientWidth;
-    return Math.max(300, Math.min(1900, Math.round(w) || 560));
+    /* FLOORED, NOT ROUNDED, AND MEASURED FROM THE BOX RATHER THAN THE
+       ROUNDED PROPERTY. `clientWidth` is an integer: at the phone tier the
+       host's content box is 352.8125px and clientWidth reports 353, so a
+       353-unit viewBox went into a 352.8125px box and base.css's
+       `svg { max-width: 100% }` — the second mechanism house rule 7 names —
+       squeezed it back to 0.9995 px per unit. Rounding UP cannot be right
+       for a width the drawing must fit inside; the fraction of a pixel lost
+       by flooring is the price of one unit meaning one pixel at every width,
+       which is the whole rule. Measured after: 390 gives 352 units in a
+       352.8125px box, drawn at 1.000000 px per unit.
+
+       getBoundingClientRect is the sub-pixel truth; clientWidth is the
+       fallback for a host that reports no box at all. Zero stays the
+       documented 560, because a host reporting nothing is hidden rather
+       than narrow. */
+    const box = windowHost && typeof windowHost.getBoundingClientRect === "function"
+      ? windowHost.getBoundingClientRect().width : 0;
+    const measured = box > 0 ? box : ((windowHost && windowHost.clientWidth) || 0);
+    return Math.floor(measured) || 560;
   }
 
-  function windowMessage(text) {
+  /* ---------- the four silences, which are four marks -------------
+
+     EVERY EMPTY STATE ON THIS ROUTE WORE ONE MARK. windowMessage and
+     emptyRow both rendered `<p class="flows-empty …">` with no
+     `data-empty`, so the stylesheet's own vocabulary — dotted for pending,
+     a dashed dagger for a field the payload does not carry, a solid × for
+     a request that broke, a bare hairline for a measured emptiness
+     (flows.css, THE THREE SILENCES) — never fired on this page at all.
+     Measured by planting each state: "the run has not happened yet", "the
+     run happened and found nothing" and "the bytes under this key do not
+     parse" reached the reader as the same grey paragraph, three sentences
+     apart in meaning and identical in every pixel that is not a word.
+
+     The kind is therefore a REQUIRED argument at both call sites rather
+     than an option, so a new empty state cannot be added without saying
+     which of the four silences it is. */
+
+  function windowMessage(text, kind) {
     if (!windowHost) return;
-    windowHost.replaceChildren(el("p", "flows-empty ew-empty", text));
+    const p = el("p", "flows-empty ew-empty", text);
+    p.dataset.empty = kind;
+    windowHost.replaceChildren(p);
     revealPanel();
+  }
+
+  /** The status strip carries the same kind as the regions beneath it. */
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    if (kind) statusEl.dataset.empty = kind;
+    else delete statusEl.dataset.empty;
   }
 
   function renderWindow(payload) {
@@ -375,10 +447,12 @@
          still in `dte`, but a chart that cannot say what its own origin was
          invites the reader to supply one — and the one they will supply is
          today's date, which is not the run's. */
+      /* UNAVAILABLE, not broken and not empty: a payload arrived and parsed,
+         and this one field is not on it. */
       windowMessage(
         "This payload carried no gate origin, so the chart cannot say what its day zero " +
         "is. It is not drawn: an axis whose origin is unstated will be read as today, " +
-        "and today is not the date the earnings gate ran against.");
+        "and today is not the date the earnings gate ran against.", "unavailable");
       if (windowNote) {
         windowNote.textContent = "The table below is unaffected — every count in it is " +
           "the pipeline's own, not this page's arithmetic.";
@@ -400,7 +474,8 @@
 
     if (!marks.length) {
       windowMessage("No row in this payload carries the calendar day count the gate " +
-        "measured, so there is nothing that can honestly be placed on this axis.");
+        "measured, so there is nothing that can honestly be placed on this axis.",
+        "unavailable");
       return;
     }
 
@@ -468,7 +543,11 @@
     const otherIn = otherAll.filter(inBand).length;
 
     const svg = svgEl("svg", {
-      class: "ew", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+      /* WIDTH IN PIXELS, NOT PER CENT — see chartWidth. "100%" is the
+         permission to scale that made the clamp above a wrong drawing, and
+         `.ew` carries no `width` rule in flows.css for the same reason: a
+         CSS width would win here and put the stretch straight back. */
+      class: "ew", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
       role: "img", preserveAspectRatio: "xMidYMid meet",
       "aria-label":
         "Report dates for " + marks.length + " " + plural(marks.length, "name", "names") +
@@ -571,7 +650,16 @@
         class: "ew-lane is-" + L.key, x: padL, y: L.labelY,
         "font-size": "9.5px", "text-anchor": "start",
       });
-      lt.textContent = L.short + " " + MID + " " + (L.n || "none");
+      /* THE DENOMINATOR TRAVELS WITH THE COUNT. "GATED · 57" is a number
+         whose population sits 260px above it in the status strip, so a
+         reader with the chart on screen has three counts and no total, and
+         nothing on the drawing says whether they sum to it. The denominator
+         is `marks.length` — the population actually DRAWN on this axis,
+         which is the payload's rows minus the ones carrying no calendar day
+         count — and it says "drawn" whenever those two differ, so it can
+         never be read as the row count the strip above quotes. */
+      lt.textContent = L.short + " " + MID + " " + L.n + " / " + marks.length +
+        (undrawn ? " drawn" : "");
       svg.append(lt);
       svg.append(svgEl("line", {
         class: "ew-lanerule", x1: padL, x2: (W - padR).toFixed(2),
@@ -596,11 +684,27 @@
             width: ms, height: ms, rx: 1,
           });
         } else if (L.key === "board") {
+          /* THE SIDE IS IN THE SHAPE. Long and short were ONE diamond path
+             differing only in `fill`, so in a greyscale render — and for a
+             reader who cannot separate the two hues — the four long and the
+             four short names in this lane were eight identical marks, and
+             which side the board took on an event-exposed name is the one
+             fact this lane exists to carry. The table's chip already prints
+             ↑ or ↓, so the two surfaces disagreed about whether the reader
+             could tell. Apex up is long, apex down is short, and a board row
+             whose side the payload did not state keeps the diamond rather
+             than borrowing one of the two answers. Hue is now the third
+             channel behind shape and position, which is where it belongs. */
           const h = ms / 2 + 0.6;
+          const x = cx.toFixed(2), lx = (cx - h).toFixed(2), rx = (cx + h).toFixed(2);
+          const ty = (cy - h).toFixed(2), by = (cy + h).toFixed(2), my = cy.toFixed(2);
           node = svgEl("path", {
             class: cls,
-            d: `M${cx.toFixed(2)} ${(cy - h).toFixed(2)}L${(cx + h).toFixed(2)} ${cy.toFixed(2)}` +
-               `L${cx.toFixed(2)} ${(cy + h).toFixed(2)}L${(cx - h).toFixed(2)} ${cy.toFixed(2)}Z`,
+            d: m.r.st === "board:long"
+              ? `M${x} ${ty}L${rx} ${by}L${lx} ${by}Z`
+              : m.r.st === "board:short"
+                ? `M${x} ${by}L${rx} ${ty}L${lx} ${ty}Z`
+                : `M${x} ${ty}L${rx} ${my}L${x} ${by}L${lx} ${my}Z`,
           });
         } else {
           node = svgEl("circle", { class: cls, cx: cx.toFixed(2), cy: cy.toFixed(2), r: ms / 2 });
@@ -689,8 +793,9 @@
   }
 
   /**
-   * THREE DIFFERENT ABSENCES WEAR THE SAME EM DASH AND MUST NOT CARRY THE
-   * SAME EXPLANATION.
+   * THREE DIFFERENT ABSENCES WORE THE SAME EM DASH AND DID NOT CARRY THE
+   * SAME EXPLANATION. They are three facts, and they now print as three
+   * glyphs — the paragraph at the foot of this block records what changed.
    *
    *   - `ev === null` with `sdte === 0`: the name reports before another
    *     session opens. There are NO SESSIONS LEFT TO PRICE. That is not a
@@ -703,7 +808,12 @@
    *     Two rows of the fixture are here.
    *   - anything else: the field simply is not on the row.
    *
-   * All three print U+2014. The title says which.
+   * ALL THREE PRINTED U+2014 AND THAT WAS THE DEFECT. Three facts that a
+   * reader must be able to tell apart shared one glyph, and the only thing
+   * that separated them was a hover title — unreachable on a phone, absent
+   * from a printout, and invisible to anyone scanning the column. They now
+   * print "0s", "†" and "—" respectively, in that order of test, and the
+   * titles below still carry the full sentence for each.
    */
   /**
    * The priced move, or the absence of it, short enough for a chart tooltip.
@@ -712,8 +822,8 @@
    */
   function pricedShort(row) {
     if (isNum(row.ev) !== null) return pct(row.ev, 2);
-    if (isNum(row.sdte) === 0) return DASH + " (no sessions left to price)";
-    if (isNum(row.iv) === null) return DASH + " (implied volatility not measured)";
+    if (isNum(row.sdte) === 0) return ZERO_HORIZON + " (no sessions left to price)";
+    if (isNum(row.iv) === null) return NOT_ON_ROW + " (implied volatility not measured)";
     return DASH + " (not published)";
   }
 
@@ -727,14 +837,18 @@
         "this name's 30-day implied volatility scaled by the square root of time. " +
         "Scaled by SESSIONS, not by the calendar days the chart above plots. Not a forecast.");
     }
+    /* THE THREE GLYPHS, IN THE ORDER THE BLOCK ABOVE ARGUES THEM. "0s"
+       carries its own unit and so cannot be read as a zero MOVE; the dagger
+       is what this stylesheet already spends on "published, and this field
+       is not on it"; the em dash is left with one meaning. */
     if (isNum(row.sdte) === 0) {
-      return cell(DASH, "c-num ev-priced is-none",
+      return cell(ZERO_HORIZON, "c-num ev-priced is-zero-horizon",
         "There are no sessions left to price: this name reports before another session " +
         "opens. Not a zero move — a horizon of zero sessions, which nothing can be " +
         "scaled to. A different fact from a missing measurement.");
     }
     if (isNum(row.iv) === null) {
-      return cell(DASH, "c-num ev-priced is-none",
+      return cell(NOT_ON_ROW, "c-num ev-priced is-unavailable",
         "No 30-day implied volatility arrived for this name, so there is nothing to " +
         "scale to the report. NOT MEASURED FOR THIS NAME — not zero.");
     }
@@ -855,10 +969,11 @@
     return tr;
   }
 
-  function emptyRow(text) {
+  function emptyRow(text, kind) {
     bodyEl.replaceChildren();
     const tr = document.createElement("tr");
     const td = el("td", "flows-empty ev-empty", text);
+    td.dataset.empty = kind;
     td.colSpan = COLUMNS;
     tr.append(td);
     bodyEl.append(tr);
@@ -1020,9 +1135,22 @@
     const announce = payload && payload.announce;
 
     if (!notes) {
-      basisHost.append(el("p", "fc-note",
-        "This payload carried no notes block, so the page cannot say in the pipeline's " +
-        "own words how its numbers were built. Treat everything above as unexplained."));
+      /* THIS IS THE `unavailable` SILENCE AND IT NOW SAYS SO. A payload
+         arrived, it parsed, and one field of it — `notes` — is not on it.
+         The dagger is the stylesheet's, from data-empty; the sentence no
+         longer says "treat everything above as unexplained", because
+         everything above WAS measured and it is the method behind it, not
+         the numbers, that this payload declines to state.
+
+         It is also no longer reachable from the pending branch, which used
+         to call this function with `{status:"pending"}` and so described the
+         absence of a run as a published payload with a hole in it. */
+      const p = el("p", "flows-empty fc-note",
+        "This payload carries no notes block, so how these numbers were built is not " +
+        "stated in the pipeline's own words. The readings above were still measured; " +
+        "it is the method behind them that is not on this payload.");
+      p.dataset.empty = "unavailable";
+      basisHost.append(p);
     }
 
     /* The announce reason and notes.announce are the SAME sentence in every
@@ -1118,10 +1246,23 @@
     /* BOTH DATES, EACH WITH WHAT IT GOVERNS. Naming one alone is how a page
        ends up drawing its window from the wrong clock in silence. */
     const sd = payload.sessionDate, go = payload.gateOrigin;
+    /* THE STALENESS QUALIFIER BELONGS ON THE DAY COUNTS, NOT ONLY IN THE
+       BANNER ABOVE THEM. The banner said "every day count below is measured
+       from that run's date and not from today"; this sentence, immediately
+       under it, then stated the same counts flat, as though they were
+       current. One of the two had to carry the qualifier where the number
+       is, and the age is the same integer the banner printed — read from
+       renderStale rather than recomputed, so the two can never drift. */
     parts.push("prices are the " + (sd ? sd : "last completed") + " session's closes" +
       "; every day count is measured from " + (go ? go : "the run's own Eastern date") +
-      (go ? ", the run's own Eastern date and the origin the earnings gate used" : ""));
-    statusEl.textContent = parts.join(" " + MID + " ") + ".";
+      (go ? ", the run's own Eastern date and the origin the earnings gate used" : "") +
+      (staleDays === null ? "" : ", which was " + staleDays + " " +
+        plural(staleDays, "day", "days") + " ago — these counts are that run's, not today's"));
+    /* A STRIP DESCRIBING AN EMPTY CALENDAR IS THE `quiet` SILENCE and wears
+       its hairline: measured, and there was nothing. It is not pending and
+       it is not broken, and the mark is the only part of that distinction a
+       reader gets without reading the sentence. */
+    setStatus(parts.join(" " + MID + " ") + ".", rows.length ? null : "quiet");
 
     /* THE BADGE COUNTS THE POPULATION, NOT THE PAGE. It filled from `shown`,
        which is post-cap: the same clause four lines above says "the cap holds
@@ -1133,9 +1274,10 @@
        concludes there are two quantities.
 
        A ZERO HERE IS A MEASUREMENT AND IS PRINTED. renderStatus does not run
-       on a pending payload — that branch returns at :1212 before reaching
-       this line — and the empty-calendar branch at :1231 calls it
-       deliberately, as "a measured emptiness". What is withheld instead is an
+       on a pending payload — that branch returns before reaching this line,
+       and no longer even draws the basis panel — and the empty-calendar
+       branch calls it deliberately, as "a measured emptiness" and with the
+       `quiet` mark on this very strip. What is withheld instead is an
        inWindow that never arrived: no population was published, so no
        population is claimed. */
     const slot = document.querySelector('[data-rail-count="events"]');
@@ -1144,9 +1286,16 @@
     if (footEl) {
       const foot = [];
       if (payload.generatedAt) {
+        /* ISO, IN UTC, LIKE EVERY OTHER DATE ON THIS PAGE. toLocaleString
+           printed "9/5/2026, 1:28:48 AM" under a table of ISO report dates
+           and beside two ISO clocks named in the strip — three notations for
+           one kind of quantity on one screen, and the only one of the three
+           whose month and day a reader outside the US would swap. The zone
+           is named because an instant without one is not a reading. */
         const t = Date.parse(payload.generatedAt);
         foot.push("Built " + (Number.isFinite(t)
-          ? new Date(t).toLocaleString() : String(payload.generatedAt)));
+          ? new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC"
+          : String(payload.generatedAt)));
       }
       const v = isNum(payload.v);
       if (v !== null) foot.push("payload v" + v);
@@ -1162,52 +1311,105 @@
      waits for a page that has already given up. Every panel is unhidden
      precisely so that each can carry the failure. */
 
-  function failEverywhere(what) {
-    statusEl.textContent = what;
-    windowMessage(what);
+  function failEverywhere(kind, what) {
+    setStatus(what, kind);
+    windowMessage(what, kind);
     if (windowNote) windowNote.textContent = "";
-    emptyRow(what);
+    emptyRow(what, kind);
     if (capEl) capEl.textContent = "No name could be listed.";
     if (tableNote) tableNote.textContent = "";
     if (basisHost) {
-      basisHost.replaceChildren(el("p", "fc-note",
-        "The basis travels inside the same payload as the numbers, so it could not be " +
-        "loaded either. Nothing on this page has been explained by the pipeline."));
+      /* THE BASIS FAILS THE SAME WAY THE NUMBERS DID, and says which way.
+         It travels inside the same payload, so bytes that did not parse did
+         not parse here either — a different fact from a request that never
+         came back, and the difference is what tells a reader whether
+         reloading is worth anything. */
+      const p = el("p", "flows-empty fc-note", kind === "unreadable"
+        ? "The basis travels inside the same payload as the numbers, so it did not parse " +
+          "either. Nothing on this page has been explained by the pipeline."
+        : "The basis travels inside the same payload as the numbers, so it could not be " +
+          "fetched either. Nothing on this page has been explained by the pipeline.");
+      p.dataset.empty = kind;
+      basisHost.replaceChildren(p);
       if (basisPanel) basisPanel.hidden = false;
     }
     if (footEl) footEl.textContent = "";
   }
 
+  /* THE AGE IS MEASURED ONCE AND SPENT TWICE. The banner and the status
+     strip must not be able to disagree about how old this calendar is, so
+     the integer is computed here, kept, and read back by renderStatus —
+     which always runs after this function. Null means "not stale", which is
+     not the same as "zero days old" and is never printed as one. */
+  let staleDays = null;
+
   function renderStale(updatedAt) {
-    if (!staleEl || !updatedAt) return;
+    if (!updatedAt) return;
     const ageHours = (Date.now() - updatedAt) / 3600000;
     if (ageHours <= 30) return;
+    staleDays = Math.round(ageHours / 24);
+    if (!staleEl) return;
     staleEl.hidden = false;
     /* THE SAME STALENESS RULE THE BOARD AND THE WATCH LIST USE. It matters
        more here than anywhere: a stale calendar does not LOOK stale — it
-       looks like a week in which nothing reports soon. */
-    staleEl.textContent = "This calendar was last written " + Math.round(ageHours / 24) +
-      " day(s) ago. The pipeline has not published since, so every day count below is " +
-      "measured from that run's date and not from today — each name is nearer to its " +
-      "report than this page says.";
+       looks like a week in which nothing reports soon.
+
+       "day(s)" WAS A PARENTHESIS DOING A JOB THIS FILE ALREADY HAS A
+       FUNCTION FOR. plural() is four lines long and is used by every other
+       count on this page; a banner that reads "1 day(s) ago" is the one
+       sentence on the route that hedges about its own arithmetic. */
+    staleEl.textContent = "This calendar was last written " + staleDays + " " +
+      plural(staleDays, "day", "days") + " ago. The pipeline has not published since, " +
+      "so every day count below is measured from that run's date and not from today — " +
+      "each name is nearer to its report than this page says.";
   }
 
   /* ---------- the fetch ------------------------------------------- */
+
+  /* THE TWO WAYS A READING FAILS TO ARRIVE ARE NOT ONE WAY, AND THE REMEDY
+     IS THE PART THAT GAVE IT AWAY.
+
+     `response.json()` rejecting means the request SUCCEEDED and the store
+     has bytes under this key that this page cannot read. Both outcomes came
+     down one branch and reached the reader as "The calendar could not be
+     loaded: Unexpected end of JSON input. Refresh to try again." — a
+     JSON.parse message wearing a network sentence, offering a remedy that
+     cannot work, because a refresh reads the same broken bytes back. It also
+     hid the only fact an operator needs from it: the publish is bad, not the
+     connection. Measured by setting the stored payload to `{"v":2,"rows":[`.
+
+     So the parse gets its own branch, its own kind and its own sentence, and
+     only a transport failure keeps the refresh. */
+  const trouble = (kind, message) => {
+    const e = new Error(message);
+    e.evKind = kind;
+    return e;
+  };
 
   fetch("/api/flows/events", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
-    if (!response.ok) throw new Error("HTTP " + response.status);
+    if (!response.ok) throw trouble("failed", "HTTP " + response.status);
     const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
-    return response.json().then((payload) => {
-      if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
-      return payload;
-    });
+    return response.json().then(
+      (payload) => {
+        if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
+        return payload;
+      },
+      (error) => {
+        throw trouble("unreadable", (error && error.message) || "the body did not parse");
+      });
   }).then((payload) => {
     if (!payload) return;                       // the 401 branch has already navigated
-    if (typeof payload !== "object") throw new Error("the endpoint answered with no payload");
+    /* PARSED, AND NOT AN OBJECT. A number or a string under this key is a
+       published payload this page cannot use — the same silence as bytes
+       that never parsed, and not the same as a request that never landed. */
+    if (typeof payload !== "object") {
+      throw trouble("unreadable",
+        "the endpoint answered with a " + typeof payload + ", not a payload object");
+    }
 
     if (payload.status === "pending") {
       /* THE ORDINARY STATE BEFORE THE FIRST RUN, stated as a fact about the
@@ -1215,13 +1417,21 @@
       const msg = "The pipeline has not published this key yet. This calendar is built by " +
         "the weekday-morning run out of screener rows it already holds — it costs no " +
         "vendor call — and it appears with the first run after this page shipped.";
-      statusEl.textContent = msg;
-      windowMessage(msg);
+      setStatus(msg, "pending");
+      windowMessage(msg, "pending");
       if (windowNote) windowNote.textContent = "";
-      emptyRow(msg);
+      emptyRow(msg, "pending");
       if (capEl) capEl.textContent = "Nothing has been published under this key.";
       if (tableNote) tableNote.textContent = "";
-      renderBasis(payload);
+      /* THE BASIS PANEL STAYS HIDDEN, and that is the fix rather than an
+         omission. renderBasis on a `notes`-less payload prints "this payload
+         carries no notes block" — a sentence about a PUBLISHED payload that
+         is missing a field, which is the `unavailable` silence. Here there
+         is no payload and nothing above the panel to explain: `{status:
+         "pending"}` is the store saying the run has not happened. Calling it
+         a published payload with a hole in it collapsed two of the four
+         silences into one, three panels deep, where a reader would take it
+         for a permanent property of the page. */
       return;
     }
 
@@ -1241,9 +1451,12 @@
         (windowDays === null ? "window" : days(windowDays)) + ". That is a measured " +
         "emptiness — the run read every screener row and found no dated report inside " +
         "it — and not a missing publish.";
-      windowMessage(msg);
+      /* QUIET: published, measured, and empty. The hairline, no glyph — the
+         only one of the four silences that is a fact about the market, and
+         the one that must never wear the broken mark. */
+      windowMessage(msg, "quiet");
       if (windowNote) windowNote.textContent = "";
-      emptyRow(msg);
+      emptyRow(msg, "quiet");
       if (capEl) capEl.textContent = "No name reports inside the window.";
       if (tableNote) tableNote.textContent = "";
       renderBasis(payload);
@@ -1255,8 +1468,20 @@
     renderTable(payload);
     renderBasis(payload);
   }).catch((error) => {
-    failEverywhere("The calendar could not be loaded: " + (error && error.message
-      ? error.message : "the request failed") + ". Refresh to try again.");
+    const why = (error && error.message) ? error.message : "the request failed";
+    if (error && error.evKind === "unreadable") {
+      /* NO "REFRESH" IN THIS SENTENCE. The bytes are in the store; reloading
+         fetches the same ones. The remedy that exists is the next run, and
+         saying so is the difference between a reader who waits and a reader
+         who reloads eleven times. */
+      failEverywhere("unreadable",
+        "A calendar is published under this key, but it does not parse (" + why + "). " +
+        "Reloading reads the same bytes back — only the next weekday-morning run " +
+        "replaces them.");
+    } else {
+      failEverywhere("failed",
+        "The calendar could not be fetched (" + why + "). Refresh to try again.");
+    }
   });
 
   /* THE CHART IS REDRAWN AT THE NEW WIDTH, never scaled to it. One viewBox

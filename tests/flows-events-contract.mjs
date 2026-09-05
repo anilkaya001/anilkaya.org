@@ -1269,6 +1269,483 @@ const gateDteFrom = (origin) => (date) =>
   }
 }
 
+/* ============================================================
+   §17. FOUR SILENCES, THREE ABSENCES, AND ONE VIEWBOX UNIT.
+
+   THE SECOND SECTION THAT OPENS THE RENDERER, and for the same
+   reason as §16: none of what follows is visible from the payload.
+   Every defect here was measured by rendering the page and looking
+   at it, and every one of them is a distinction the module already
+   makes correctly being thrown away by the drawing.
+
+   THE FOUR SILENCES WERE ONE PARAGRAPH. pending, quiet, unreadable
+   and failed each had their own carefully argued sentence — and all
+   four rendered `<p class="flows-empty ew-empty">` with no
+   `data-empty`, so flows.css's own vocabulary (dotted for pending, a
+   dashed dagger for unavailable, a solid × for broken, a hairline
+   for measured-and-empty) never fired on this route at all. A reader
+   scanning the page could not see which of the four they were in
+   without stopping to read, and the two that matter most — "the run
+   has not happened" and "the run happened and found nothing" — are
+   the two whose sentences are the most alike.
+
+   AND MARKING THE STRIP OPENED A GAP OF ITS OWN. `data-empty` is not a
+   mark; the mark is whatever flows.css resolves it to, and this route is
+   the first anywhere to put `failed` on a `.flows-status`. That block
+   had arms for pending, unavailable, unreadable and quiet only, so the
+   new kind fell through to the base rule: `2px solid` in the hairline
+   ink with no glyph at all, one CSS pixel of border width away from
+   quiet's hairline, while the region three lines below it wore the 3px
+   signed-down bar and the ×. The page disagreed with itself about which
+   silence it was in, and every assertion here that reads dataset.empty
+   passed throughout — which is why the ones below read the computed
+   border and the ::before instead, on the three channels that survive
+   greyscale.
+
+   WORSE, TWO OF THEM WERE THE SAME STATE. A payload that was
+   published and does not parse came out as "The calendar could not
+   be loaded: Unexpected end of JSON input. Refresh to try again." —
+   a JSON.parse message inside a network sentence, offering a remedy
+   that cannot work, since a refresh fetches the same broken bytes.
+   And the pending branch called renderBasis with `{status:
+   "pending"}`, so a store with nothing under this key was described
+   to the reader as a published payload missing its notes block.
+
+   THE THREE ABSENCES IN THE PRICED COLUMN were one em dash and three
+   hover titles. The module distinguishes a horizon of zero SESSIONS
+   from a missing iv30 from a row that published neither, and the
+   file says so at length; the column then printed U+2014 for all
+   three, which on a phone or a printout is no distinction at all.
+
+   ONE VIEWBOX UNIT WAS 1.052 CSS PIXELS at the width this page is
+   read at. chartWidth clamped to 1900, the canvas tier's host is
+   wider than that, and the svg went out at width:"100%" — so the
+   browser scaled the whole drawing and every 9.5px label with it.
+   The assertion below is the rule itself, at three widths.
+
+   THE BOARD LANE'S TWO MARKS WERE ONE SHAPE. Long and short were the
+   same diamond path differing only in `fill`, so the direction the
+   board holds on an event-exposed name — the one fact the lane
+   exists to carry — did not survive greyscale. The table's chip
+   prints ↑/↓ and always did, so the two surfaces disagreed about
+   whether the reader could tell.
+
+   THE FIXTURE IS BUILT, NOT MUTATED, WHEREVER THE STATE OCCURS
+   NATURALLY: a name reporting on the origin date has zero sessions
+   left, and a tilt with no iv30 carries no implied volatility. The
+   one mutation is `ev = null` on a row that has both — the third
+   absence, which the emitter cannot produce because it derives `ev`
+   from the two fields above it — and it is named at the site.
+   ============================================================ */
+{
+  const HTML = eventsPage({ username: "test" }).replace(/<script[^>]*><\/script>/g, "");
+  const BUILT_AT = "2026-09-05T01:28:48.123Z";
+
+  /* Seven names: one on each side of the board, one gated, one past the
+     gate, and the three the Priced column has to tell apart. */
+  const STAGES = {
+    LONG: "board:long", SHORT: "board:short", GATE: "gated",
+    OPEN: "eligible", ZERO: "eligible", NOIV: "eligible", NOEV: "eligible",
+  };
+  const CAL = buildEvents([
+    nameAt("LONG", plusDays(GATE_ORIGIN, 14)),
+    nameAt("SHORT", plusDays(GATE_ORIGIN, 14)),
+    nameAt("GATE", plusDays(GATE_ORIGIN, 3)),
+    nameAt("OPEN", plusDays(GATE_ORIGIN, 17)),
+    /* Reports on the origin date itself: zero sessions left to price. */
+    nameAt("ZERO", plusDays(GATE_ORIGIN, 0)),
+    /* No iv30 on the wire, so nothing to scale to the report. */
+    nameAt("NOIV", plusDays(GATE_ORIGIN, 10), { iv30: null }),
+    nameAt("NOEV", plusDays(GATE_ORIGIN, 12)),
+  ], {
+    gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE,
+    stageOf: (t) => STAGES[t] || "screened",
+  });
+  CAL.generatedAt = BUILT_AT;
+
+  const byT = (t) => CAL.rows.find((r) => r.t === t);
+  eq(byT("ZERO").sdte, 0, "the fixture has a name with zero sessions left to price");
+  eq(byT("ZERO").ev, null, "and so no priced move — a horizon of nothing, not a zero move");
+  eq(byT("NOIV").iv, null, "a second name carries no 30-day implied volatility");
+  eq(byT("NOIV").ev, null, "and so no priced move either — a different absence, same blank");
+  /* THE ONE MUTATION, AND IT IS THE POINT. The third absence — a row with
+     sessions AND implied volatility and no priced move — cannot be emitted,
+     because `ev` is derived from exactly those two. It is the state a
+     partial write or a future field would produce, and it must not print
+     the same mark as the two above it. */
+  ok(byT("NOEV").ev !== null && byT("NOEV").iv !== null && byT("NOEV").sdte > 0,
+     "the third row publishes both inputs and a priced move before the mutation");
+  byT("NOEV").ev = null;
+
+  const browser = await chromium.launch();
+  try {
+    /* mode: "" serves the payload, "parse" rejects response.json() the way a
+       truncated blob in the store does, "http" answers 503 without ever
+       reaching a body. The three are the only ways this page can fail to
+       get a reading, and each has to arrive as a different silence. */
+    const render = async (payload, opts = {}) => {
+      const page = await browser.newPage({
+        viewport: { width: opts.width || 1280, height: 900 },
+      });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.route("**/*", (route) =>
+        route.fulfill({ contentType: "text/html", body: HTML }));
+      await page.addInitScript(([pl, mode, updatedAt]) => {
+        window.fetch = () => {
+          if (mode === "http") {
+            return Promise.resolve({
+              ok: false, status: 503,
+              headers: { get: () => null },
+              json: () => Promise.resolve({}),
+            });
+          }
+          return Promise.resolve({
+            ok: true, status: 200,
+            headers: { get: () => String(updatedAt) },
+            json: () => (mode === "parse"
+              ? Promise.reject(new SyntaxError("Unexpected end of JSON input"))
+              : Promise.resolve(JSON.parse(JSON.stringify(pl)))),
+          });
+        };
+      }, [payload, opts.mode || "", opts.updatedAt || Date.now()]);
+      await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
+      /* THE STYLESHEETS ARE OPT-IN, AND THAT IS DELIBERATE. Every request
+         this harness makes is fulfilled with the page's own HTML, so a
+         <link> resolves to a text/html body the browser refuses as CSS —
+         which is why the layout assertions in (a) read a width ATTRIBUTE
+         and a viewBox rather than a rendered box, and why they must go on
+         reading those. The silence marks in (f) cannot: a data-empty
+         attribute is not a mark, and the whole defect there was an
+         attribute the stylesheet had no arm for. Those renders load the
+         two real sheets from disk, in cascade order, so getComputedStyle
+         reports what a reader would see. */
+      if (opts.css) {
+        for (const sheet of ["assets/css/base.css", "assets/css/flows.css"]) {
+          await page.addStyleTag({ path: path.join(ROOT, sheet) });
+        }
+      }
+      await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
+      await page.waitForFunction(
+        () => !/^Loading/.test(document.getElementById("evStatus").textContent),
+        null, { timeout: 15000 });
+      const read = await page.evaluate(() => {
+        const mark = (n) => (n ? { text: n.textContent.trim(), kind: n.dataset.empty || null } : null);
+        /* THE MARK AS A READER MEETS IT: border style, border width and the
+           ::before glyph, and NOT the colour. Those three channels survive
+           a greyscale printout and every form of colour vision, so a set
+           built out of them is the monochrome-distinctness test itself. */
+        const drawn = (n) => {
+          if (!n) return null;
+          const cs = getComputedStyle(n), before = getComputedStyle(n, "::before");
+          return {
+            style: cs.borderLeftStyle, width: cs.borderLeftWidth,
+            glyph: before.content, colour: cs.borderLeftColor,
+          };
+        };
+        const svg = document.querySelector("#evWindow svg.ew");
+        const priced = {};
+        for (const tr of document.querySelectorAll("#evBody tr")) {
+          const th = tr.querySelector("th"), td = tr.querySelector("td.ev-priced");
+          if (th && td) priced[th.textContent.trim()] = { text: td.textContent.trim(), cls: td.className };
+        }
+        const marks = {};
+        for (const m of document.querySelectorAll("path.ew-m")) {
+          const c = m.getAttribute("class");
+          marks[/is-long/.test(c) ? "long" : /is-short/.test(c) ? "short" : "board"] =
+            m.getAttribute("d");
+        }
+        const stale = document.getElementById("evStale");
+        return {
+          status: mark(document.getElementById("evStatus")),
+          window: mark(document.querySelector("#evWindow p.flows-empty")),
+          body: mark(document.querySelector("#evBody td.flows-empty")),
+          /* `#evBasis > p` and not `p.flows-empty`: the message paragraph is
+             appended straight to the host, while every note item sits inside
+             a .ev-b-item or a <details>. Selecting on the class the FIX adds
+             would make a regression here a TypeError on null rather than an
+             assertion that says what went wrong. */
+          basis: mark(document.querySelector("#evBasis > p")),
+          statusDrawn: drawn(document.getElementById("evStatus")),
+          windowDrawn: drawn(document.querySelector("#evWindow p.flows-empty")),
+          basisHidden: document.getElementById("evBasisPanel").hidden,
+          stale: { hidden: stale.hidden, text: stale.textContent },
+          foot: document.getElementById("evFoot").textContent,
+          hostW: document.getElementById("evWindow").clientWidth,
+          /* THE HOST'S TRUE BOX, WHICH IS FRACTIONAL. clientWidth is an
+             integer property: at the phone tier the content box is
+             352.8125px and it reports 353, so an assertion written against
+             it cannot see a drawing that is one unit too wide for its box —
+             which is exactly the residual this section exists to catch. */
+          hostBox: document.getElementById("evWindow").getBoundingClientRect().width,
+          vb: svg ? svg.viewBox.baseVal.width : null,
+          /* AND THE SVG'S RECT UNROUNDED, for the same reason: rounding here
+             hid a 0.9995 px-per-unit squeeze as an exact match. */
+          rectW: svg ? svg.getBoundingClientRect().width : null,
+          widthAttr: svg ? svg.getAttribute("width") : null,
+          lanes: [...document.querySelectorAll("text.ew-lane")].map((t) => t.textContent),
+          rows: document.querySelectorAll("#evBody tr").length,
+          priced, marks,
+        };
+      });
+      await page.close();
+      return { ...read, errors };
+    };
+
+    /* ---- (a) ONE VIEWBOX UNIT IS ONE CSS PIXEL, AT EVERY WIDTH -------
+       The old clamp bound above 1900 and the svg went out at width:"100%",
+       so the browser stretched the drawing to whatever the host was. The
+       widths below straddle that ceiling deliberately: 2560 is the tier
+       where the defect was measured, 1440 is where it was not, and the
+       assertion is the same sentence at both. */
+    /* WITH THE REAL SHEETS LOADED, BECAUSE THE OTHER HALF OF THE RULE IS
+       IN CSS. This loop ran with no stylesheet at all, so it could not see
+       either of the two mechanisms house rule 7 names: `.ew { width: 100% }`
+       here, and `svg { max-width: 100% }` in base.css, which applies to
+       every svg on the site and squeezed the drawing back below one pixel
+       per unit at the phone tier even after the first was removed. 390 is
+       in the sweep for that: its host box is 352.8125px, an integer
+       clientWidth reports 353, and a 353-unit drawing in that box is a
+       0.9995 squeeze that a rounded assertion reads as exact. */
+    for (const width of [2560, 1440, 390, 320]) {
+      const r = await render(CAL, { width, css: true });
+      deep(r.errors, [], `[${width}] the calendar renders without throwing`);
+      eq(r.vb, r.rectW,
+         `[${width}] one viewBox unit is one CSS pixel: viewBox ${r.vb} units drawn in ` +
+         `${r.rectW}px. A stretched viewBox scales every 9.5px label with it, and the ` +
+         `chart goes on looking exactly like a chart`);
+      ok(r.vb <= r.hostBox && r.hostBox - r.vb < 1,
+         `[${width}] and the drawing fills its host without exceeding it: ${r.vb} units ` +
+         `in a ${r.hostBox}px box. A drawing WIDER than its box is squeezed back by ` +
+         `max-width; one NARROWER by a pixel or more is a clamp that binds. Both are ` +
+         `the wrong drawing, in opposite directions`);
+      ok(r.widthAttr !== "100%",
+         `[${width}] and the width is a pixel count (${r.widthAttr}), never a per cent: ` +
+         `"100%" hands the browser permission to scale the number above`);
+    }
+    const wide = await render(CAL, { width: 2560, css: true });
+    ok(wide.hostW > 1900,
+       `the 2560 host is ${wide.hostW}px — wider than the 1900 the clamp used to stop ` +
+       `at, which is what made this the width the defect was measured at`);
+
+    /* ---- (b) THE BOARD'S TWO SIDES ARE TWO SHAPES -------------------- */
+    ok(wide.marks.long && wide.marks.short,
+       "the board lane draws both a long and a short mark");
+    /* THE SHAPE IS READ OFF THE PATH, NOT TRUSTED, and "the two `d` strings
+       differ" would not do it: the two marks sit at different heights in the
+       lane, so their paths differed by position alone even when both were the
+       same diamond. A triangle has three vertices and the diamond had four,
+       and which way the apex points is the direction itself. */
+    eq(wide.marks.long.split("L").length, 3,
+       `the long mark is a three-vertex triangle (${wide.marks.long}), not the ` +
+       `four-vertex diamond both sides used to share — a mark that differs by hue alone ` +
+       `is one mark in greyscale, and the side the board took is the one fact this lane ` +
+       `exists to carry`);
+    eq(wide.marks.short.split("L").length, 3,
+       `and the short mark is the other one (${wide.marks.short})`);
+    const apexY = (d) => Number(d.match(/^M[\d.]+ ([\d.]+)/)[1]);
+    const baseY = (d) => Number(d.match(/L[\d.]+ ([\d.]+)Z$/)[1]);
+    ok(apexY(wide.marks.long) < baseY(wide.marks.long),
+       "the long mark's apex is above its base (▲)");
+    ok(apexY(wide.marks.short) > baseY(wide.marks.short),
+       "and the short mark's apex is below its base (▼) — the same direction the table's " +
+       "chip prints with ↑ and ↓, so the two surfaces agree");
+
+    /* ---- (c) EVERY LANE COUNT CARRIES ITS DENOMINATOR ---------------- */
+    for (const label of wide.lanes) {
+      ok(/ \d+ \/ 7$/.test(label),
+         `the lane label states its denominator: "${label}". A bare "GATED · 57" is a ` +
+         `count whose population sits 260px above it in the status strip`);
+    }
+    eq(wide.lanes.length, 3, "and there are three of them, one per lane");
+
+    /* ---- (d) THREE ABSENCES, THREE GLYPHS ---------------------------- */
+    eq(wide.priced.ZERO.text, "0s",
+       "a name with no sessions left prints 0s — a measured horizon of zero SESSIONS, " +
+       "with its unit attached so it can never be read as a zero move");
+    ok(/is-zero-horizon/.test(wide.priced.ZERO.cls),
+       "and is classed for it, so the stylesheet can hold it at the ink of a withholding");
+    eq(wide.priced.NOIV.text, "†",
+       "a name with no implied volatility prints the dagger — published, and this field " +
+       "is not on it, which is the mark this stylesheet already spends on that silence");
+    ok(/is-unavailable/.test(wide.priced.NOIV.cls), "and is classed for it");
+    eq(wide.priced.NOEV.text, "—",
+       "and a row that published neither keeps the em dash, which now means one thing");
+    ok(/is-none/.test(wide.priced.NOEV.cls), "and is classed for it");
+    eq(new Set([wide.priced.ZERO.text, wide.priced.NOIV.text, wide.priced.NOEV.text]).size, 3,
+       "three absences, three glyphs: the distinction the module makes and the file " +
+       "argues at length is now on the page and not only in a hover title");
+    eq(wide.priced.LONG.text, "5.98%",
+       "and a row that has a priced move still prints it, in per cent");
+
+    /* AND THE HEADING OVER THE COLUMN AGREES WITH THE COLUMN. The doc block
+       above pricedCell opened "THREE DIFFERENT ABSENCES WEAR THE SAME EM
+       DASH AND MUST NOT CARRY THE SAME EXPLANATION" — the defect stated in
+       the present tense, as a standing fact about this code — while the
+       paragraph twelve lines below it, and the three returns below that,
+       said the opposite. A reader who stops at the heading is told the
+       column collapses three absences into one glyph. In a file whose
+       headings are how the next reader decides which branches are
+       load-bearing, that is a wrong reading of the code, not a cosmetic
+       one, and it is the exact kind of drift the four assertions above
+       cannot see. */
+    const EV_SRC = fs.readFileSync(path.join(ROOT, "assets/js/flows-events.js"), "utf8");
+    ok(!/ABSENCES WEAR THE SAME EM DASH/.test(EV_SRC),
+       "the pricedCell heading no longer asserts the collapse in the present tense: the " +
+       "column prints 0s, † and — and the sentence over it has to say so too");
+    ok(/ABSENCES WORE THE SAME EM DASH/.test(EV_SRC),
+       "and the history is still written down, in the past tense where it belongs — the " +
+       "remedy for a comment that contradicts its code is to date it, never to delete the " +
+       "argument that says why the three branches exist");
+
+    /* ---- (e) THE FOOTER'S INSTANT IS ISO, LIKE EVERY OTHER DATE ------ */
+    ok(/Built 2026-09-05 01:28 UTC/.test(wide.foot),
+       `the built instant is ISO and names its zone: "${wide.foot}". toLocaleString ` +
+       `printed "9/5/2026, 1:28:48 AM" under a table of ISO report dates and beside two ` +
+       `ISO clocks — three notations for one kind of quantity on one screen, and the ` +
+       `only one of the three whose month and day a reader outside the US would swap`);
+    ok(!/\d+\/\d+\/\d{4}/.test(wide.foot),
+       "and no slashed locale date survives anywhere in it");
+
+    /* ---- (f) THE FOUR SILENCES, EACH WITH ITS OWN MARK --------------- */
+    const pending = await render({ status: "pending" }, { css: true });
+    const quiet = await render(
+      buildEvents([], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE }), { css: true });
+    const unreadable = await render(CAL, { mode: "parse", css: true });
+    const failed = await render(CAL, { mode: "http", css: true });
+
+    const kinds = {
+      pending: pending.window.kind, quiet: quiet.window.kind,
+      unreadable: unreadable.window.kind, failed: failed.window.kind,
+    };
+    deep(kinds, { pending: "pending", quiet: "quiet", unreadable: "unreadable", failed: "failed" },
+         `each silence names itself on data-empty (${JSON.stringify(kinds)}), so ` +
+         `flows.css's dotted / hairline / × vocabulary fires and a reader can see which ` +
+         `of the four they are in without reading the paragraph`);
+    for (const [name, r] of [["pending", pending], ["quiet", quiet],
+                             ["unreadable", unreadable], ["failed", failed]]) {
+      eq(r.status.kind, kinds[name],
+         `[${name}] the status strip carries the same kind as the region below it`);
+      eq(r.body.kind, kinds[name],
+         `[${name}] and so does the row that stands in for the table`);
+    }
+    eq(new Set(Object.values(kinds)).size, 4,
+       "four states, four kinds — not one hairline for all of them");
+
+    /* AND THE KIND HAS TO REACH THE READER AS A MARK, WHICH IS A SEPARATE
+       FACT FROM THE ATTRIBUTE. This route is the first anywhere to put
+       `failed` on a `.flows-status`: flows.css had arms for pending,
+       unavailable, unreadable and quiet, so the state the renderer newly
+       emits fell through to the base rule and drew `2px solid` in the
+       hairline ink with `content: none` — no glyph at all, and one CSS
+       pixel of border width away from quiet's hairline, which is the same
+       mark in greyscale. Everything above would still have passed: it
+       reads dataset.empty, which was never wrong.
+
+       THE THREE CHANNELS COMPARED ARE STYLE, WIDTH AND GLYPH, never the
+       colour, so what is asserted is exactly what survives a monochrome
+       printout. */
+    const strip = (r) =>
+      `${r.statusDrawn.style} ${r.statusDrawn.width} ${r.statusDrawn.glyph}`;
+    const region = (r) =>
+      `${r.windowDrawn.style} ${r.windowDrawn.width} ${r.windowDrawn.glyph}`;
+    for (const [name, r] of [["pending", pending], ["quiet", quiet],
+                             ["unreadable", unreadable], ["failed", failed]]) {
+      eq(strip(r), region(r),
+         `[${name}] the strip and the region under it draw ONE mark (strip ${strip(r)}, ` +
+         `region ${region(r)}) — a page whose two surfaces disagree about which silence ` +
+         `it is in has told the reader nothing`);
+    }
+    eq(strip(failed), strip(unreadable),
+       `a request that never came back wears the broken mark on the strip, the same one ` +
+       `the parse failure wears (${strip(failed)} vs ${strip(unreadable)}): the two share ` +
+       `a remedy, and neither is the quiet hairline`);
+    ok(/×/.test(failed.statusDrawn.glyph),
+       `and it carries the × (${failed.statusDrawn.glyph}) rather than the base rule's ` +
+       `content: none — a bar with no glyph is a mark that says only "something"`);
+    eq(failed.statusDrawn.width, "3px",
+       `at the 3px this stylesheet spends on the one silence that is THIS PAGE'S fault ` +
+       `(${failed.statusDrawn.width}), not the base rule's 2px`);
+    const stripMarks = new Set([strip(pending), strip(quiet),
+                                strip(unreadable), strip(failed)]);
+    eq(stripMarks.size, 3,
+       `and the four states resolve to three marks on the strip (${[...stripMarks].join("; ")}) ` +
+       `— unreadable and failed are one silence and share one, pending and quiet keep ` +
+       `their own, and nothing falls through to the unmarked base rule`);
+    eq(new Set([pending.window.text, quiet.window.text,
+                unreadable.window.text, failed.window.text]).size, 4,
+       "and four different sentences under them");
+
+    /* THE UNREADABLE SENTENCE IS THE ONE THAT WAS LYING. It said "could not
+       be loaded … Refresh to try again": a network sentence over a parse
+       failure, with a remedy that reads the same broken bytes back. */
+    ok(/does not parse/.test(unreadable.window.text),
+       `the unreadable state says the bytes do not parse: "${unreadable.window.text}"`);
+    ok(!/[Rr]efresh/.test(unreadable.window.text),
+       "and offers no refresh, because the bytes are in the store and a refresh fetches " +
+       "the same ones — the remedy that exists is the next run, and it says so");
+    ok(/Unexpected end of JSON input/.test(unreadable.window.text),
+       "the parser's own words are still carried, for whoever has to fix the publish");
+    ok(/Refresh to try again/.test(failed.window.text),
+       `a request that never landed DOES keep the refresh: "${failed.window.text}"`);
+    ok(/HTTP 503/.test(failed.window.text),
+       "with the status the transport actually returned");
+    ok(/did not parse/.test(unreadable.basis.text) && /could not be fetched/.test(failed.basis.text),
+       "and the basis panel fails the same way the numbers did, in the same words");
+
+    /* THE PENDING STATE HAS NO PAYLOAD, SO IT HAS NO BASIS PANEL. It used to
+       render one saying "this payload carried no notes block … treat
+       everything above as unexplained" — a sentence about a PUBLISHED
+       payload missing a field, over a store that has nothing under this key
+       and nothing above the panel to explain. Two of the four silences,
+       collapsed three panels deep. */
+    eq(pending.basisHidden, true,
+       "a pending key leaves the basis panel hidden rather than describing the absence " +
+       "of a run as a published payload with a hole in it");
+    ok(/has not published this key yet/.test(pending.window.text),
+       "and says what is actually true: the run has not happened");
+    eq(quiet.basisHidden, false,
+       "while a quiet payload — published, measured, empty — still explains itself");
+
+    /* AND A PARSED PAYLOAD WITH NO notes IS THE `unavailable` ONE. */
+    const noNotes = { ...CAL };
+    delete noNotes.notes;
+    const bare = await render(noNotes);
+    eq(bare.basis.kind, "unavailable",
+       "a payload that arrived and parsed without a notes block is the unavailable " +
+       "silence — published, and this field is not on it — and wears the dagger");
+    ok(!/unexplained/.test(bare.basis.text),
+       `and no longer calls the readings above it unexplained (${bare.basis.text.slice(0, 48)}…): ` +
+       `they were measured, and it is the method behind them that is missing`);
+
+    /* ---- (g) THE STALE QUALIFIER SITS ON THE NUMBER IT QUALIFIES ----- */
+    const HOUR = 3600000;
+    const old3 = await render(CAL, { updatedAt: Date.now() - 72 * HOUR });
+    eq(old3.stale.hidden, false, "a calendar written three days ago raises the banner");
+    ok(/last written 3 days ago/.test(old3.stale.text),
+       `the banner counts in whole days: "${old3.stale.text.slice(0, 44)}…"`);
+    ok(/3 days ago — these counts are that run's, not today's/.test(old3.status.text),
+       `and the status strip carries the qualifier ON the day counts it qualifies ` +
+       `("${old3.status.text.slice(-90)}"): the banner said every count below was that ` +
+       `run's, and the sentence immediately under it then stated them flat`);
+    /* THE SINGULAR ARM, which "day(s)" existed to avoid writing. 34 hours is
+       past the 30-hour bound and rounds to one day. */
+    const old1 = await render(CAL, { updatedAt: Date.now() - 34 * HOUR });
+    ok(/last written 1 day ago/.test(old1.stale.text),
+       `one day is "1 day", not "1 day(s)": "${old1.stale.text.slice(0, 40)}…" — this ` +
+       `file has had plural() since it was written and every other count on the page ` +
+       `uses it`);
+    ok(!/day\(s\)/.test(old1.stale.text + old1.status.text),
+       "and no parenthesised plural is left anywhere in the pair");
+    eq(wide.stale.hidden, true,
+       "while a fresh payload raises no banner and adds no qualifier");
+    ok(!/that run's, not today's/.test(wide.status.text),
+       "so the strip states its day counts flat only when they ARE today's");
+  } finally {
+    await browser.close();
+  }
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the run's ` +
   `own Eastern date and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +
@@ -1284,4 +1761,14 @@ console.log(`✓ flows-events: ${checks} assertions — a session count measured
   `an announce column withheld whole with its reason published, the sentences that keep ` +
   `the page from claiming a forecast, and a rail badge read off a rendered page that counts ` +
   `the names reporting rather than the rows the cap left on it, withholds where no ` +
-  `population was published, and prints a measured zero`);
+  `population was published, and prints a measured zero — and, drawn at three widths, ` +
+  `one viewBox unit that is one CSS pixel at every one of them, a board lane whose two ` +
+  `sides are two shapes rather than two fills, lane counts that carry their ` +
+  `denominator, three absences in the Priced column wearing three glyphs instead of one ` +
+  `em dash and three hover titles, an ISO instant in the footer, and four silences that ` +
+  `name themselves apart — on the attribute AND on the computed border and glyph a reader ` +
+  `actually meets, since a fetch that never came back was falling through the status ` +
+  `strip's rules to an unmarked 2px hairline while the region under it drew the × — the ` +
+  `published-but-unparseable one no longer offering a ` +
+  `refresh that would read the same broken bytes back, and the pending one no longer ` +
+  `describing an empty store as a published payload missing its notes`);
