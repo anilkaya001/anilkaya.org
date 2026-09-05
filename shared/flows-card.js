@@ -1930,7 +1930,11 @@ export function buildCard({
       volContext: darkNull(termStructure) && darkNull(ivRank)
         ? { status: "unavailable", reason: "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
-        : { ...buildVolContext(termStructure || [], ivRank || []), note: STOCK_NOTES.volContext },
+        /* THE HALVES GO THROUGH AS READ. `|| []` here turned a half whose
+           read never landed into an empty list, and the shaper called it
+           quiet — "the feed answered with nothing" over a feed that did
+           not answer. Each shaper now tells null from a list itself. */
+        : { ...buildVolContext(termStructure, ivRank), note: STOCK_NOTES.volContext },
     },
   };
 }

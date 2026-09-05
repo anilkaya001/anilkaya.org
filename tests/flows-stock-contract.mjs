@@ -122,8 +122,36 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const raws = [{ executed_at: "T", price: 2, size: 3, premium: 6 }];
   eq(JSON.stringify(shapeStockDarkpool(raws)), JSON.stringify(shapeStockDarkpool(raws)),
     "two shapes over one response are byte-identical");
-  eq(shapeStockDarkpool(null).status, "quiet", "junk input is quiet, not a throw");
-  eq(shapeIvRank({ data: "nope" }).status, "quiet", "as is a malformed envelope");
+  /* THREE ANSWERS FOR THREE FACTS, none of them a throw. This suite once
+     asserted that a null read and a malformed envelope were both "quiet",
+     which put the measured emptiness — the strongest claim a panel makes —
+     on a feed that never answered and on one whose answer this file could
+     not read. */
+  eq(shapeStockDarkpool(null).status, "unavailable",
+    "a read that never landed is unavailable, the card's word for it, never quiet");
+  const malformed = shapeIvRank({ data: "nope" });
+  eq(malformed.status, "unreadable", "a malformed envelope is UNREADABLE: the feed answered and this side could not read it");
+  ok(/could not read/.test(malformed.reason) && /fault on this side/.test(malformed.reason),
+    "with a reason that says whose fault it is");
+  eq(shapeStockOiChange("rate limited").status, "unreadable", "a bare string is unreadable too");
+  eq(shapeTermStructure({ error: "forbidden" }).status, "unreadable", "as is an error object");
+  eq(shapeStockDarkpool([]).status, "quiet", "while a list that is empty is the one quiet answer");
+  eq(shapeStockDarkpool({ data: [] }).status, "quiet", "in either envelope");
+  for (const bad of [null, "x", { data: "nope" }]) {
+    const shaped = shapeStockOiChange(bad);
+    ok(Array.isArray(shaped.rows) && shaped.rows.length === 0 && shaped.seen === 0 && shaped.shed === 0,
+      "and every non-list answer still carries the row fields a renderer reads, empty");
+  }
+  const halfDead = buildVolContext(null, []);
+  eq(halfDead.status, "unavailable",
+    "a panel whose term read never landed and whose rank was read empty is not quiet");
+  ok(/term structure could not be read this run; the IV rank history was read and holds nothing/.test(halfDead.reason),
+    "and its reason names each half — " + halfDead.reason);
+  eq(buildVolContext({ data: "x" }, null).status, "unreadable",
+    "an unreadable half outranks an unavailable one: a fault here is the louder fact");
+  const halfLive = buildVolContext([{ expiry: "2026-09-04", volatility: "0.4" }], null);
+  eq(halfLive.status, "ok", "and one live half is still a panel");
+  eq(halfLive.ivRank.status, "unavailable", "whose other half says unavailable for itself, not quiet");
 }
 
 /* ---------- §6 the vocabulary holds ------------------------------ */

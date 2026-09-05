@@ -31,11 +31,29 @@ const num = (v, d = null) => {
 const str = (v) => (typeof v === "string" && v ? v : null);
 const flag = (v) => (v === null || v === undefined ? null : Boolean(v));
 
+/* A BODY THAT IS NOT A LIST IS NOT AN EMPTY LIST. This returned [] for
+   anything it could not read, so a vendor error object, a bare string and
+   a {data: "nope"} envelope all came out of every shaper below as "quiet"
+   — the measured emptiness, the strongest claim a panel can make — when
+   the truth was that the feed answered and this file could not read the
+   answer. That is a fault here, and the taxonomy's word for it is
+   UNREADABLE. A read that never landed is the other fact, and it keeps
+   the card's word for it, UNAVAILABLE. Only a list that is a list can be
+   quiet. */
 const unwrap = (raw) => {
   if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return [];
+  if (raw && typeof raw === "object" && Array.isArray(raw.data)) return raw.data;
+  return null;
 };
+
+/* The two non-list answers, told apart by whether anything arrived. */
+const notAList = (raw, cap) => (raw === null || raw === undefined
+  ? { status: "unavailable", reason: "the feed could not be read this run",
+      rows: [], seen: 0, cap, shed: 0 }
+  : { status: "unreadable",
+      reason: "the feed answered with a body this shaper could not read as a list of rows, " +
+        "which is a fault on this side rather than a quiet feed",
+      rows: [], seen: 0, cap, shed: 0 });
 
 export const STOCK_CAPS = Object.freeze({
   darkpool: 12,
@@ -79,9 +97,11 @@ export const STOCK_NOTES = Object.freeze({
  * so they are counted and dropped rather than seated arbitrarily.
  */
 export function shapeStockDarkpool(raw, { cap = STOCK_CAPS.darkpool } = {}) {
+  const list = unwrap(raw);
+  if (list === null) return { ...notAList(raw, cap), unpriced: 0 };
   const rows = [];
   let unpriced = 0;
-  for (const r of unwrap(raw)) {
+  for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const px = num(r.price);
     const size = num(r.size);
@@ -111,8 +131,10 @@ export function shapeStockDarkpool(raw, { cap = STOCK_CAPS.darkpool } = {}) {
 /* ---------- contract-level OI deltas ---------------------------- */
 
 export function shapeStockOiChange(raw, { cap = STOCK_CAPS.oiDeltas } = {}) {
+  const list = unwrap(raw);
+  if (list === null) return notAList(raw, cap);
   const rows = [];
-  for (const r of unwrap(raw)) {
+  for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const oc = str(r.option_symbol);
     const parsed = oc ? parseOptionSymbol(oc) : null;
@@ -162,8 +184,10 @@ export function shapeStockOiChange(raw, { cap = STOCK_CAPS.oiDeltas } = {}) {
 /* ---------- volatility context: term structure + IV rank -------- */
 
 export function shapeTermStructure(raw, { cap = STOCK_CAPS.term } = {}) {
+  const list = unwrap(raw);
+  if (list === null) return notAList(raw, cap);
   const rows = [];
-  for (const r of unwrap(raw)) {
+  for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const expiry = str(r.expiry);
     const vol = num(r.volatility);
@@ -185,8 +209,10 @@ export function shapeTermStructure(raw, { cap = STOCK_CAPS.term } = {}) {
 }
 
 export function shapeIvRank(raw, { cap = STOCK_CAPS.ivRank } = {}) {
+  const list = unwrap(raw);
+  if (list === null) return notAList(raw, cap);
   const rows = [];
-  for (const r of unwrap(raw)) {
+  for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const date = str(r.date);
     if (!date) continue;
@@ -219,9 +245,24 @@ export function shapeIvRank(raw, { cap = STOCK_CAPS.ivRank } = {}) {
  * each surviving the other's absence — a name with a curve but no rank
  * history is half a panel, not an unavailable one.
  */
+/* HALF A PANEL IS A PANEL; NO PANEL IS THE STRONGER OF TWO SILENCES. One
+   half read is "ok" and the other half says its own silence for itself.
+   With neither half read, the panel cannot call itself quiet unless BOTH
+   halves were measured and empty: a half that was unreadable makes the
+   panel unreadable, a half that never arrived makes it unavailable, and
+   the reason names each half so the page can say which. The card used to
+   coerce a null half to [] before it reached here, which turned a read
+   that never landed into "the feed answered with nothing". */
 export function buildVolContext(termRaw, ivRankRaw) {
   const term = shapeTermStructure(termRaw);
   const ivRank = shapeIvRank(ivRankRaw);
-  const status = term.status === "ok" || ivRank.status === "ok" ? "ok" : "quiet";
-  return { status, term, ivRank };
+  if (term.status === "ok" || ivRank.status === "ok") return { status: "ok", term, ivRank };
+  const HALF = { unreadable: "answered with a body this side could not read",
+    unavailable: "could not be read this run", quiet: "was read and holds nothing" };
+  const status = term.status === "unreadable" || ivRank.status === "unreadable" ? "unreadable"
+    : term.status === "unavailable" || ivRank.status === "unavailable" ? "unavailable"
+    : "quiet";
+  const reason = status === "quiet" ? undefined
+    : "the term structure " + HALF[term.status] + "; the IV rank history " + HALF[ivRank.status];
+  return reason === undefined ? { status, term, ivRank } : { status, reason, term, ivRank };
 }

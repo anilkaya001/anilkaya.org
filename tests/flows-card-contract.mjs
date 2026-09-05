@@ -939,6 +939,23 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "worth a different sentence on the page");
   eq(quiet.volContext.status, "quiet", "for the vol context too");
 
+  /* THE HALVES REACH THE SHAPER AS READ. The card coerced a null half to []
+     before buildVolContext saw it, so a term read that never landed beside
+     a rank that was read empty came out "quiet" — "the feed answered with
+     nothing" over a feed that did not answer. */
+  const halfDead = buildCard({ ...base, darkpool: [], oiDeltas: [], termStructure: null, ivRank: [] }).panels.volContext;
+  eq(halfDead.status, "unavailable",
+     "a term half that never landed and a rank half read empty is NOT a quiet panel");
+  ok(/term structure could not be read this run/.test(halfDead.reason),
+     "and the reason names the half that failed — " + halfDead.reason);
+  const halfLive = buildCard({ ...base, darkpool: [], oiDeltas: [],
+    termStructure: [{ expiry: "2026-09-18", dte: 21, volatility: "0.3" }], ivRank: null }).panels.volContext;
+  eq(halfLive.status, "ok", "one live half is still a panel");
+  eq(halfLive.ivRank.status, "unavailable", "whose other half says unavailable for itself, never quiet");
+  const garbled = buildCard({ ...base, darkpool: { data: "nope" }, oiDeltas: "x", termStructure: [], ivRank: [] }).panels;
+  eq(garbled.darkpool.status, "unreadable", "a malformed dark-pool body is unreadable on the card");
+  eq(garbled.oiDeltas.status, "unreadable", "as is a malformed OI body");
+
   const live = buildCard({
     ...base,
     darkpool: [{ executed_at: "2026-08-28T14:00:00Z", price: "100", size: 1000, premium: "100000" }],
