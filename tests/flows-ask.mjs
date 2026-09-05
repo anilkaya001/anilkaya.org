@@ -29,7 +29,9 @@
 
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
-         tickerCoverage }
+         tickerCoverage,
+  shedCardFacts,
+}
   from "../shared/flows-ask.js";
 
 let checks = 0;
@@ -1340,6 +1342,188 @@ import { readFile } from "node:fs/promises";
   }
 }
 
+/* ---------- 12. the per-name readings, from the cards ------------ */
+
+/* THE DEFECT: asked about NVDA on a board where NVDA sat at rank 30,
+   the assistant answered with a market-wide put/call ratio, because the
+   index read six market-wide surfaces and no card. These assertions
+   are built on a store of their own rather than on STORE, so the
+   counts sections 1–11 assert on do not move.
+
+   THE DISTINCTION THE GAMMA FACT CARRIES IS THE ONE WORTH THE MOST
+   ASSERTIONS. Thirty-one of fifty emitted cards publish no flip level
+   because net gamma never changed sign inside the band — crossings is
+   a measured 0, and that is a finding about the book. A card whose
+   crossings is null was not measured, and gets no clause at all,
+   because "no flip level" over an unmeasured ladder is the confident
+   zero wearing prose. Three cards below hold the three states. */
+{
+  const CARD = (t, over) => ({
+    v: "2", ticker: t, generatedAt: STAMP, sessionDate: "2026-09-04",
+    score: 59, conviction: 96, gammaFlip: null,
+    regime: { label: "short", crossings: 0, flipSide: null },
+    panels: {
+      gamma: { status: "ok", spot: 386.4, callWall: 450.16, putWall: 293.66,
+        strikes: 41, bandMin: 270.48, bandMax: 502.32 },
+      pricedMove: { status: "ok", impliedMove: 0.0928123, realizedMove: 0.03681, sessions: 10,
+        impliedLow: 350.54, impliedHigh: 422.26, horizonRule: "the nearest end-of-week expiry" },
+      path: { status: "ok", netPremium: 20352135, persistence: 0.7948717948717948, minutes: 390 },
+      volContext: { status: "ok", ivRank: { status: "ok", rankUnit: "percent 0-100, as published",
+        rows: [{ date: "2026-09-03", rank1y: 52.15 }] } },
+    },
+    ...(over || {}),
+  });
+  const withPanels = (t, patch, over) => {
+    const c = CARD(t, over);
+    for (const [k, v] of Object.entries(patch)) c.panels[k] = { ...c.panels[k], ...v };
+    return c;
+  };
+  const store = {
+    "board:long": { generatedAt: STAMP, status: "ok",
+      rows: [{ t: "SYN46", r: 1, s: 59 }, { t: "SYN47", r: 2, s: 41 }] },
+    "board:short": { generatedAt: STAMP, status: "ok", rows: [{ t: "SYN90", r: 1, s: -50 }] },
+    "card:SYN46": CARD("SYN46"),
+    /* a measured flip level, with its side */
+    "card:SYN47": CARD("SYN47", { gammaFlip: 412.5,
+      regime: { label: "long", crossings: 1, flipSide: "short_below" } }),
+    /* an UNMEASURED ladder, a put wall that did not build, and a
+       persistence four decimals would round to nothing */
+    "card:SYN90": withPanels("SYN90",
+      { gamma: { putWall: null }, path: { persistence: 0.00003 } },
+      { regime: { label: "short", crossings: null, flipSide: null } }),
+    /* a card no board holds, whose IV rank is published as a fraction */
+    "card:ZZZ": withPanels("ZZZ",
+      { volContext: { ivRank: { status: "ok", rankUnit: "fraction 0-1", rows: [{ date: "2026-09-03", rank1y: 0.52 }] } } }),
+    /* a read that FAILED — null, which typeof calls an object */
+    "card:NUL": null,
+    market: MARKET,
+  };
+  const idx = buildFactIndex(store);
+  const of = (t) => idx.facts.filter((f) => f.source === "card:" + t);
+  const one = (t, tail) => of(t).find((f) => f.id.endsWith("/" + tail)) || null;
+
+  assert.deepEqual(idx.cardNames, ["SYN46", "SYN47", "SYN90", "ZZZ"],
+    "names are ordered long board by rank, then short, then the cards no board holds — the " +
+    "order a shed takes from the end — and a card whose read failed (null) is not a name");
+  checks++;
+  eq(of("SYN46").length, 5, "a full card yields five readings");
+  ok(of("SYN46").every((f) => f.topic.includes("syn46")),
+     "every one of them carries the ticker as a topic in the form questionTickers() emits, " +
+     "so the name in a question reaches the facts about it with no change to selection");
+  ok(of("SYN46").every((f) => f.at === STAMP && f.source === "card:SYN46"),
+     "and each is stamped with the card's own run and sourced to the card's own key");
+
+  /* standing */
+  const st46 = one("SYN46", "standing"), stZ = one("ZZZ", "standing");
+  ok(/rank 1 of 2 on the long board/.test(st46.say) && st46.n.boardRank === 1 && st46.n.boardRows === 2,
+     "a boarded name's standing names its rank WITH the side's row count, in the sentence and in n");
+  ok(!/rank/.test(stZ.say) && !("boardRank" in stZ.n),
+     "a name no board holds gets no rank clause rather than a rank on a board that is not there");
+  ok(/conviction 96 of 100/.test(st46.say) && st46.n.convictionOf100 === 96,
+     "conviction is printed over its 100, never bare");
+
+  /* gamma: measured zero, measured level, unmeasured */
+  const g46 = one("SYN46", "gamma"), g47 = one("SYN47", "gamma"), g90 = one("SYN90", "gamma");
+  ok(/no flip level is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("gammaFlipPx" in g46.n),
+     "crossings 0 with no flip is said as the finding it is — net gamma never changed sign — " +
+     "with the measured zero pinned in n and no flip price invented");
+  ok(/flips sign at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
+     "a measured flip level is quoted with its side, underscores read as words");
+  eq(g90, null,
+     "and a card whose put wall did not build has NO gamma fact at all — a sentence with a " +
+     "hole is worse than none — while its other readings survive: " +
+     of("SYN90").map((f) => f.id.split("/")[1]).join(","));
+  ok(of("SYN90").length === 4 && one("SYN90", "standing") && one("SYN90", "move") && one("SYN90", "flow"),
+     "four of five survive the missing wall");
+  {
+    /* the unmeasured ladder, on a card whose gamma DID build */
+    const unm = buildFactIndex({ "card:UNM": withPanels("UNM", {}, { regime: { label: "short", crossings: null, flipSide: null } }) });
+    const gu = unm.facts.find((f) => f.id === "card:UNM/gamma");
+    ok(gu && !/flip/.test(gu.say) && !("crossings" in gu.n) && !("gammaFlipPx" in gu.n),
+       "a null crossings — a ladder not measured — gets NEITHER clause: not a level, and not " +
+       "'no level', which over an unmeasured ladder is the confident zero in prose");
+  }
+
+  /* rounding: four decimals, never to zero, integers as published */
+  const mv = one("SYN46", "move"), fl = one("SYN46", "flow"), fl90 = one("SYN90", "flow");
+  ok(/is 0\.0928 of spot as a fraction/.test(mv.say) && mv.n.impliedMoveFraction === 0.0928 && !/0\.0928123/.test(mv.say),
+     "a full-precision fraction is rounded to four decimals ONCE, and the sentence and n agree " +
+     "so a model that restates 0.0928 is restating a figure it was given");
+  ok(/summed to 20352135 US dollars/.test(fl.say) && fl.n.netPremiumUsd === 20352135,
+     "a dollar sum is written as published — never as millions, which is arithmetic");
+  ok(/persistence of 0\.00003 as a ratio/.test(fl90.say) && fl90.n.persistenceRatio === 0.00003,
+     "a reading four decimals would round to 0 keeps its precision: a measured 0.00003 printed " +
+     "as 0 is the confident zero with a measurement behind it");
+  ok(/the horizon is the nearest end-of-week expiry\.$/.test(mv.say),
+     "the priced move names its horizon rule from the payload rather than asserting one");
+
+  /* IV rank is gated on the unit the payload publishes */
+  const iv46 = one("SYN46", "ivrank"), ivZ = one("ZZZ", "ivrank");
+  ok(iv46 && /52\.15 percent on 2026-09-03/.test(iv46.say) && iv46.n.ivRank1yPct === 52.15,
+     "an IV rank whose unit is published as a percent is quoted as one, dated");
+  eq(ivZ, null,
+     "and one published as a fraction is NOT quoted — a card carries two IV ranks in two units, " +
+     "and this reads only the one whose unit travels with it");
+
+  /* selection: the NVDA question, answered */
+  const sel = selectFacts(idx, "what is new for SYN46 calls");
+  const srcs = sel.picked.map((f) => f.source);
+  eq(srcs.filter((s) => s === "card:SYN46").length, 5,
+     "the question that failed on the live site now selects all five of the name's readings");
+  ok(!srcs.some((s) => s === "card:SYN47" || s === "card:SYN90" || s === "card:ZZZ"),
+     "and none of another name's");
+  const plain = renderFactsPlain(sel.picked, "what is new for SYN46 calls");
+  ok(/^These are the published readings that bear on what you asked/.test(plain),
+     "so the lead is the covered one — the withholding lead was correct while the index was " +
+     "blind and would be a lie now");
+  const g = guardAnswer(plain, sel.picked);
+  ok(g.ok && g.numerals.length >= 20,
+     "and the fallback built from them passes the guard it exists to satisfy, scanning " +
+     g.numerals.length + " figures");
+  const mk = selectFacts(idx, "how is net premium today");
+  eq(mk.picked[0].source, "market",
+     "a market-wide question still leads with the market fact: a card's flow fact matches the " +
+     "topic word too, and on a tie the source order decides, with cards last");
+
+  /* the shed: whole names, from the tail, counted with a denominator */
+  const all = idx.facts.filter((f) => f.source.startsWith("card:"));
+  const shed = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 12);
+  assert.deepEqual(shed.namesIndexed, { of: 4, indexed: 2, shed: 2 },
+    "over a budget that fits twelve facts, the two least-read names are shed WHOLE and the " +
+    "count published carries its denominator");
+  checks++;
+  ok(shed.facts.every((f) => f.source === "card:SYN46" || f.source === "card:SYN47"),
+     "the surviving facts are the top of the long board, untouched");
+  ok(shed.facts.filter((f) => f.source === "card:SYN46").length === 5,
+     "no fact was taken from the middle of a name that survived");
+  const none = shedCardFacts(all, idx.cardNames, () => -1);
+  ok(none.facts.length === all.length && none.namesIndexed.shed === 0 && none.namesIndexed.indexed === 4,
+     "and under budget nothing is shed and the count says all four are indexed");
+
+  /* THE SAME PINNING SCAN SECTION 8 RUNS, OVER THE NEW CLASS OF FACT.
+     Section 8 walks INDEX, which holds no card, so without this the
+     anti-tamper record would be asserted for every fact except the
+     ones most likely to carry a stray figure — a scale, a horizon, a
+     date — and "conviction 96 of 100" was exactly that stray until the
+     100 was pinned as the unit it is. */
+  let scanned = 0;
+  for (const f of all) {
+    const quoted = new Set();
+    for (const v of Object.values(f.n)) {
+      if (typeof v === "number") quoted.add(String(v));
+      else if (typeof v === "string") quoted.add(v);
+    }
+    let stripped = f.say;
+    for (const v of quoted) if (/\D/.test(v)) stripped = stripped.split(v).join(" ");
+    for (const lit of stripped.match(/-?\d+(?:\.\d+)?/g) || []) {
+      scanned++;
+      ok(quoted.has(lit) || quoted.has(String(Number(lit))),
+         `every figure in a per-name fact is pinned in n — "${lit}" in "${f.say.slice(0, 60)}"`);
+    }
+  }
+  ok(scanned >= 30, `the per-name scan inspected real numbers (${scanned})`);
+}
+
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +
   `published payload, three silences that stay three from the store all the way into the ` +
   `answer, deterministic selection that caps truthfully and never returns nothing while it ` +
@@ -1347,4 +1531,9 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `and a fallback answer that passes the guard it exists to satisfy, whose lead is now a ` +
   `claim about coverage — a name asked about that no served fact is about is withheld in ` +
   `the open, named where the guard allows it and referred to where it does not, and the ` +
-  `model is told the same withholding so a market-wide figure cannot be attached to it`);
+  `model is told the same withholding so a market-wide figure cannot be attached to it; ` +
+  `plus five per-name readings from every card, in which a measured zero crossings, a ` +
+  `measured flip level and an unmeasured ladder are three sentences, a fraction is rounded ` +
+  `once and never to zero, an IV rank is quoted only in the unit it publishes, and the shed ` +
+  `that keeps the key under the ingest cap drops whole names from the least-read end and ` +
+  `counts what it kept against what it was handed`);

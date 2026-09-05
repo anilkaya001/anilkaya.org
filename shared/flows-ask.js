@@ -665,6 +665,269 @@ const sourceRank = (s) => {
   return i === -1 ? SOURCE_ORDER.length : i;
 };
 
+/* ---------- the per-name readings ------------------------------- */
+
+/* THE DEFECT THIS BLOCK EXISTS FOR. Asked "what is new for NVDA Calls"
+   on a board where NVDA sat at rank 30, the assistant answered with a
+   market-wide put/call ratio, because nothing in this index was about
+   NVDA: the six surfaces above are boards and market-wide feeds, and
+   every deep reading the pipeline computes for one name — its gamma
+   regime, its walls, its priced move, its premium flow — was published
+   in card:NVDA and read by nobody here. The data existed; the index
+   was blind to it.
+
+   THE CARDS ARE ALREADY IN THE STORE. The pipeline holds every payload
+   it published in memory when it builds this index, so the per-name
+   facts cost no new read, no new key and no vendor call — only a
+   constructor. And they need no change downstream: keywords() splits
+   the source on ":" so a fact built from "card:NVDA" carries "nvda" as
+   a topic, which is the same lowercase form questionTickers() emits,
+   and the guard scans sentences it does not know the origin of.
+
+   WHAT BOUNDS IT IS BYTES, NOT CPU. The Worker parses the brief key on
+   every question, but the survey that costed this found the binding
+   limit is the ingest cap the pipeline publishes under, so the shed
+   below is by size and it drops whole NAMES from the least-read end,
+   never a fact from the middle of a name — a name half-indexed would
+   answer half a question and call it the reading. */
+
+/* THE CARD KEY, AND ONLY THE CARD KEY. Anchored at both ends so
+   "card:AAPL:2026-08-24" — a dated archive key, if one is ever
+   published — is not read as a live card for a name called
+   "AAPL:2026-08-24". The class is the pipeline's own ticker shape. */
+const CARD_KEY = /^card:([A-Z][A-Z0-9.\-]{0,9})$/;
+
+/* ROUNDED TO FOUR DECIMALS AND NEVER TO ZERO. A card carries readings
+   at full float precision — a persistence of 0.7948717948717948 — and
+   a model restating that faithfully as 0.79 would trip the guard on a
+   figure it did not invent, so the figure is rounded HERE, once, and
+   the same rounded value goes into `n` so the pins and the sentence
+   agree. The precision retreats rather than rounds when four decimals
+   would turn a nonzero reading into 0: that is the one rounding this
+   codebase refuses, because a measured 0.00003 printed as 0 is a
+   confident zero with a measurement behind it. Integers pass through
+   untouched — a dollar sum is written as published, never as
+   "20.4 million", since that is arithmetic on a measurement. */
+function r4(v) {
+  if (v === null || !Number.isFinite(v)) return null;
+  if (Number.isInteger(v)) return v;
+  let places = 4;
+  let out = Number(v.toFixed(places));
+  while (out === 0 && v !== 0 && places < 12) { places++; out = Number(v.toFixed(places)); }
+  return out;
+}
+
+/* WHERE EACH NAME STANDS ON THE BOARDS, keyed by ticker. The first
+   board a name appears on wins — a name is on one side only — and a
+   pending or failed board contributes nothing, so a card whose board
+   did not publish gets a standing clause of nothing rather than a
+   rank on a board that is not there. */
+function boardStanding(store) {
+  const map = new Map();
+  for (const side of ["long", "short"]) {
+    const p = store["board:" + side];
+    const list = p !== null && typeof p === "object" && p.status !== "pending" &&
+      Array.isArray(p.rows) ? p.rows : null;
+    if (list === null) continue;
+    for (const row of list) {
+      if (row === null || typeof row !== "object" || typeof row.t !== "string") continue;
+      if (map.has(row.t)) continue;
+      map.set(row.t, { side, rank: num(row.r), rows: list.length });
+    }
+  }
+  return map;
+}
+
+/* ONE CARD, UP TO FIVE FACTS. Each is emitted only when every reading
+   its sentence quotes is present — the same rule marketFacts follows —
+   so a card whose gamma panel did not build loses its gamma fact and
+   keeps the other four, rather than printing a sentence with a hole. */
+function oneCard(t, card, at, st) {
+  /* THE TICKER IS PINNED IN EVERY FACT'S RECORD. A symbol carries digits
+     of its own — SYN46, BRK.B — and the anti-tamper scan masks pinned
+     strings out of the sentence before it reads the figures, so a name
+     that is not pinned accuses its own fact of an unpinned "46". The
+     brief's facts pin theirs; these do the same, in one place. */
+  const f0 = maker("card:" + t, at);
+  const f = (id, topic, say, n) => f0(id, topic, say, { ticker: t, ...n });
+  const out = [];
+  const reg = card.regime !== null && typeof card.regime === "object" ? card.regime : {};
+  const panels = card.panels !== null && typeof card.panels === "object" ? card.panels : {};
+  const ok = (p) => p !== null && typeof p === "object" && p.status === "ok" ? p : {};
+
+  /* 1. STANDING: the score a reader arrived from, its conviction and
+        the regime word, plus the rank and side when a board holds it.
+        The rank always travels with the side's row count. */
+  const score = num(card.score), conv = num(card.conviction);
+  const label = typeof reg.label === "string" && reg.label ? reg.label : null;
+  if (all(score, conv) && label !== null) {
+    let say = t + " scored " + score + " this session with conviction " + conv +
+      " of 100; dealer gamma at spot is " + label + ".";
+    /* THE SCALE IS PINNED AS THE UNIT IT IS. "96 of 100" puts a literal
+       100 in the sentence, and the anti-tamper record must hold every
+       figure the prose quotes — a scale is a unit, and units travel. */
+    const n = { score, convictionOf100: conv, convictionScale: 100, regime: label };
+    if (st !== null && st.rank !== null && st.rows !== null) {
+      say += " It sits at rank " + st.rank + " of " + st.rows + " on the " + st.side + " board.";
+      n.boardRank = st.rank; n.boardRows = st.rows; n.side = st.side;
+    }
+    out.push(f("card:" + t + "/standing", [t, "score", "conviction", "rank", "regime"], say, n));
+  }
+
+  /* 2. GAMMA: spot, the walls, the band — and the flip level, which is
+        the reading most cards WITHHOLD. On 31 of 50 emitted cards
+        gammaFlip is null because crossings is a measured 0: net gamma
+        never changed sign inside the band, which is a finding about the
+        book and is said as one. A null crossings is not that — it is a
+        ladder that was not measured — and it gets no clause at all,
+        because "no flip level" over an unmeasured ladder is the
+        confident zero wearing prose. */
+  const g = ok(panels.gamma);
+  const spot = num(g.spot), cw = num(g.callWall), pw = num(g.putWall);
+  const strikes = num(g.strikes), lo = num(g.bandMin), hi = num(g.bandMax);
+  if (all(spot, cw, pw, strikes, lo, hi) && label !== null) {
+    let say = "Dealer gamma for " + t + " is " + label + " at spot " + r4(spot) +
+      ", measured over " + strikes + " strikes between " + r4(lo) + " and " + r4(hi) +
+      "; the call wall is at " + r4(cw) + " and the put wall at " + r4(pw) + ".";
+    const n = { spotPx: r4(spot), callWallPx: r4(cw), putWallPx: r4(pw), strikes,
+      bandMinPx: r4(lo), bandMaxPx: r4(hi) };
+    const flip = num(card.gammaFlip), crossings = num(reg.crossings);
+    if (flip !== null) {
+      const side = typeof reg.flipSide === "string" && reg.flipSide
+        ? " (" + reg.flipSide.replace(/_/g, " ") + ")" : "";
+      say += " Net gamma flips sign at " + r4(flip) + side + ".";
+      n.gammaFlipPx = r4(flip);
+      if (crossings !== null) n.crossings = crossings;
+    } else if (crossings === 0) {
+      say += " Net gamma does not change sign inside that band, so no flip level is " +
+        "published (0 crossings).";
+      n.crossings = 0;
+    }
+    out.push(f("card:" + t + "/gamma", [t, "gamma", "flip", "wall", "dealer"], say, n));
+  }
+
+  /* 3. THE PRICED MOVE, as the fraction of spot the payload publishes.
+        It is not turned into a percentage: that is arithmetic, and the
+        renderer that draws this panel already states the unit. */
+  const pm = ok(panels.pricedMove);
+  const im = num(pm.impliedMove), rm = num(pm.realizedMove), sess = num(pm.sessions);
+  const il = num(pm.impliedLow), ih = num(pm.impliedHigh);
+  if (all(im, rm, sess, il, ih)) {
+    const rule = typeof pm.horizonRule === "string" && pm.horizonRule ? pm.horizonRule : null;
+    const say = "The priced move for " + t + " over " + sess + " sessions is " + r4(im) +
+      " of spot as a fraction, implying a range of " + r4(il) + " to " + r4(ih) +
+      ", against a realised move of " + r4(rm) + " over the same horizon" +
+      (rule !== null ? "; the horizon is " + rule + "." : ".");
+    out.push(f("card:" + t + "/move", [t, "move", "priced", "implied", "range"],
+      say, { impliedMoveFraction: r4(im), realizedMoveFraction: r4(rm), sessions: sess,
+        impliedLowPx: r4(il), impliedHighPx: r4(ih) }));
+  }
+
+  /* 4. FLOW: the session's net premium, as published, and its
+        persistence as a ratio. netDelta is on the same panel and is
+        NOT quoted, because the payload publishes no unit for it and a
+        number without a unit is not a reading this index will state. */
+  const path = ok(panels.path);
+  const np = num(path.netPremium), pers = num(path.persistence), mins = num(path.minutes);
+  if (all(np, pers, mins)) {
+    const say = "Net option premium in " + t + " over the " + mins + " minutes read summed to " +
+      np + " US dollars, with a persistence of " + r4(pers) + " as a ratio.";
+    out.push(f("card:" + t + "/flow", [t, "premium", "flow", "dollars", "persistence"],
+      say, { netPremiumUsd: np, persistenceRatio: r4(pers), minutesRead: mins }));
+  }
+
+  /* 5. IV RANK, and only when the payload says its unit is a percent.
+        A card carries two IV ranks in two units — pricedMove.ivRank as
+        a 0–1 fraction and volContext.ivRank.rows[].rank1y as 0–100 —
+        and this reads the one whose unit travels with it, so a change
+        in what the vendor publishes cannot silently turn 52 into 0.52
+        on the page. */
+  const vc = ok(panels.volContext);
+  const ivr = vc.ivRank !== null && typeof vc.ivRank === "object" ? vc.ivRank : {};
+  const unit = typeof ivr.rankUnit === "string" ? ivr.rankUnit : "";
+  const latest = ivr.status === "ok" && Array.isArray(ivr.rows) && ivr.rows.length ? ivr.rows[0] : null;
+  const rank = latest !== null && typeof latest === "object" ? num(latest.rank1y) : null;
+  const asOf = latest !== null && typeof latest.date === "string" && latest.date ? latest.date : null;
+  if (rank !== null && asOf !== null && /^percent\b/i.test(unit)) {
+    out.push(f("card:" + t + "/ivrank", [t, "iv", "rank", "volatility", "cheap"],
+      t + "'s one-year implied-volatility rank was " + r4(rank) + " percent on " + asOf +
+      ", as published.",
+      { ivRank1yPct: r4(rank), ivRankAsOf: asOf }));
+  }
+
+  return out;
+}
+
+/**
+ * Every per-name fact the published cards support, in board order.
+ *
+ * Returns the facts and the ordered list of names they cover, so the
+ * shed below can drop names from the tail and the page can print how
+ * many of the carded names are indexed against how many were carded.
+ */
+export function cardFacts(store) {
+  const s = store && typeof store === "object" ? store : {};
+  const standing = boardStanding(s);
+  const entries = [];
+  for (const key of Object.keys(s)) {
+    const m = CARD_KEY.exec(key);
+    if (m === null) continue;
+    const card = s[key];
+    /* A NULL CARD IS A READ THAT FAILED, not a name with no card, and
+       typeof null is "object" — the null arm is written on its own. */
+    if (card === null || typeof card !== "object" || card.status === "pending") continue;
+    const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
+    entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
+  }
+  /* LEAST-READ LAST. A shed takes from the end, so the order is the
+     order a reader meets the names: long board by rank, then short by
+     rank, then any card no board holds. Ties and unranked names fall
+     back to the ticker so the order is a function of the store alone. */
+  const sideOrder = { long: 0, short: 1 };
+  entries.sort((a, b) => {
+    const sa = a.st === null ? 2 : sideOrder[a.st.side], sb = b.st === null ? 2 : sideOrder[b.st.side];
+    if (sa !== sb) return sa - sb;
+    const ra = a.st === null || a.st.rank === null ? Infinity : a.st.rank;
+    const rb = b.st === null || b.st.rank === null ? Infinity : b.st.rank;
+    if (ra !== rb) return ra - rb;
+    return a.t < b.t ? -1 : a.t > b.t ? 1 : 0;
+  });
+  const facts = [];
+  const names = [];
+  for (const e of entries) {
+    const built = oneCard(e.t, e.card, e.at, e.st);
+    if (!built.length) continue;
+    names.push(e.t);
+    for (const item of built) facts.push(item);
+  }
+  return { facts, names };
+}
+
+/**
+ * Drop per-name facts from the least-read end until `measure` says
+ * the whole payload fits, and say how many names survived.
+ *
+ * `measure` is handed the candidate fact list and returns the bytes
+ * the caller would publish; it is a parameter so this stays pure and
+ * testable without a serializer. Whole names go, never single facts,
+ * and the count published beside the facts is a count WITH its
+ * denominator: "indexed 38 of 50 carded names" is a reading a page
+ * can print, "38" is not.
+ */
+export function shedCardFacts(facts, names, measure) {
+  const list = Array.isArray(facts) ? facts.slice() : [];
+  const order = Array.isArray(names) ? names.slice() : [];
+  let kept = order.length;
+  while (kept > 0 && measure(list) > 0) {
+    const drop = order[kept - 1];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i] && list[i].source === "card:" + drop) list.splice(i, 1);
+    }
+    kept--;
+  }
+  return { facts: list, namesIndexed: { of: order.length, indexed: kept, shed: order.length - kept } };
+}
+
 /**
  * Every fact the published payloads support, and every silence they
  * do not.
@@ -889,6 +1152,10 @@ export function buildFactIndex(store) {
       "than a fact about the session.", surface.key, null);
   }
 
+  /* ---- the per-name readings, from every card in the store ---- */
+  const cards = cardFacts(s);
+  for (const item of cards.facts) facts.push(item);
+
   /* NO CLOCK. The index is stamped with the newest reading it was
      built from, which is a measurement; Date.now() here would be
      impure and would also stamp the index with the READER's clock
@@ -902,7 +1169,7 @@ export function buildFactIndex(store) {
     if (newest === null || ms > newest) { newest = ms; generatedAt = stamp; }
   }
 
-  return { facts, silences, generatedAt };
+  return { facts, silences, generatedAt, cardNames: cards.names };
 }
 
 /* ---------- selection -------------------------------------------- */
