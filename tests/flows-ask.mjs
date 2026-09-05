@@ -29,9 +29,7 @@
 
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
-         tickerCoverage,
-  shedCardFacts,
-}
+         tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS }
   from "../shared/flows-ask.js";
 
 let checks = 0;
@@ -641,19 +639,19 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   }
   const three = selectFacts(many, "SYN46 premium please", { max: 3 });
   eq(three.picked.length, 3, "three facts are served");
-  ok(/\b3 of those matched a ticker\b/.test(three.why),
-     "and the ticker tally counts THOSE three, not the five in the matched pool the " +
-     "reader never sees — a number in a sentence has to describe the list the sentence " +
-     "is about");
+  ok(/\b3 of the 5 facts about SYN46\b/.test(three.why),
+     "and the ticker tally counts THOSE three against the five that matched the name, " +
+     "and names the name — a number in a sentence has to describe the list the sentence " +
+     "is about, and 'matched a ticker' never said which");
 
-  ok(!/the rest/.test(three.why),
-     "with no remainder claimed when there is none: every fact served here matched the " +
-     "ticker, so 'and the rest matched topic words' would invent a second group out of " +
-     "the same three facts it had just counted");
-  ok(/the rest matched topic words/.test(selectFacts(many, "SYN46 premium please",
-       { max: 7 }).why),
-     "while a genuine remainder is still named, because that clause is a reading when " +
-     "the facts behind it exist");
+  ok(!/the rest/.test(three.why) && /\b0 of the 4 facts that matched the words premium\b/.test(three.why),
+     "with no remainder claimed among the three: every fact served here matched the " +
+     "ticker, and the four topic-word facts the cap cut are counted as 0 of 4 served " +
+     "rather than invented as a second group out of the same three facts");
+  ok(/\b5 of the 5 facts about SYN46 and 2 of the 4 facts that matched the words premium\b/
+       .test(selectFacts(many, "SYN46 premium please", { max: 7 }).why),
+     "while a genuine remainder is still named, with its own count over its own " +
+     "population, because that clause is a reading when the facts behind it exist");
 
   /* THE ORDER THE SENTENCE CLAIMS IS THE ORDER THE SELECTION USES.
      Recency lived inside the score, where it was the only term that
@@ -1553,6 +1551,147 @@ import { readFile } from "node:fs/promises";
   ok(scanned >= 30, `the per-name scan inspected real numbers (${scanned})`);
 }
 
+/* ---------- 13. selection honesty: the leak, the flood, the deal ---- */
+
+/* TWO DEFECTS MEASURED ON THE EMITTED INDEX, after the per-name facts
+   landed. (1) THE LEAK: a standing fact pins the regime label and the
+   board side beside its figures, and every letter-initial string in n
+   became a topic — so a name on the LONG board carried "short" as a
+   topic and "which names are on the short board" was answered with
+   eleven long-board names. (2) THE FLOOD: on a topic word a card fact
+   scored the same as a market-wide one and only lost the tie, so
+   "where is dealer gamma short" picked fourteen names' gamma facts and
+   no market-wide reading at all. */
+{
+  const CARD = (t, over) => ({
+    v: "2", ticker: t, generatedAt: STAMP, sessionDate: "2026-09-04",
+    score: 59, conviction: 96, gammaFlip: null,
+    regime: { label: "short", crossings: 0, flipSide: null },
+    panels: {
+      gamma: { status: "ok", spot: 386.4, callWall: 450.16, putWall: 293.66,
+        strikes: 41, bandMin: 270.48, bandMax: 502.32 },
+      pricedMove: { status: "ok", impliedMove: 0.0928123, realizedMove: 0.03681, sessions: 10,
+        impliedLow: 350.54, impliedHigh: 422.26, horizonRule: "the nearest end-of-week expiry" },
+      path: { status: "ok", netPremium: 20352135, persistence: 0.7948717948717948, minutes: 390 },
+      volContext: { status: "ok", ivRank: { status: "ok", rankUnit: "percent 0-100, as published",
+        rows: [{ date: "2026-09-03", rank1y: 52.15 }] } },
+    },
+    ...(over || {}),
+  });
+  const store = {
+    "board:long": { generatedAt: STAMP, status: "ok",
+      rows: [{ t: "SYN46", r: 1, s: 59 }, { t: "SYN47", r: 2, s: 41 }] },
+    "board:short": { generatedAt: STAMP, status: "ok", rows: [{ t: "SYN90", r: 1, s: -50 }] },
+    /* on the LONG board, in a SHORT gamma regime — the leak's exact shape */
+    "card:SYN46": CARD("SYN46"),
+    "card:SYN47": CARD("SYN47", { regime: { label: "long", crossings: 1, flipSide: "short_below" }, gammaFlip: 412.5 }),
+    "card:SYN90": CARD("SYN90"),
+    market: MARKET,
+  };
+  const idx = buildFactIndex(store);
+  const standing = idx.facts.find((f) => f.id === "card:SYN46/standing");
+  ok(standing && standing.n.regime === "short" && standing.n.side === "long",
+     "the fixture holds the leak's shape: regime 'short' and side 'long' are both pinned in n");
+  ok(standing.topic.includes("syn46"),
+     "the pinned ticker is a topic — a name begins with a capital, and the rule admits it");
+  ok(!standing.topic.includes("short") && !standing.topic.includes("long"),
+     "while the pinned regime and side are NOT topics: a word that describes a reading is " +
+     "not a name the reading is about, and it begins with a lowercase letter");
+
+  const shortBoard = selectFacts(idx, "which names are on the short board");
+  ok(shortBoard.picked.length > 0 && shortBoard.picked[0].topic.includes("short"),
+     "'which names are on the short board' leads with a fact whose topic carries the " +
+     "board's route name — the briefing's bearish leader, given 'short' as a synonym");
+  ok(!shortBoard.picked.some((f) => f.source === "card:SYN46" || f.source === "card:SYN47"),
+     "and serves no long-board name's card fact on the word 'short'");
+
+  /* THE FLOOD, on an index built for it: two market-wide gamma facts
+     and seven card facts over six names, one name holding two. */
+  const flood = { facts: [
+    ...[1, 2].map((k) => ({ id: "market/g" + k, topic: ["gamma", "dealer"], say: "M.", n: {}, source: "market", at: null })),
+    ...["A1", "A2", "A3", "A4", "A5", "A6", "A1"].map((t, k) => ({ id: "card:" + t + "/gamma" + k,
+      topic: [t.toLowerCase(), "gamma", "dealer"], say: "C.", n: { ticker: t }, source: "card:" + t, at: null })),
+  ] };
+  const gam = selectFacts(flood, "where is dealer gamma");
+  eq(gam.picked.length, 6, "two market-wide facts and four per-name ones are served — not nine");
+  ok(gam.picked[0].source === "market" && gam.picked[1].source === "market",
+     "the market-wide readings come first, ahead of every per-name copy of the same word");
+  const names = gam.picked.slice(2).map((f) => f.source);
+  same(names, ["card:A1", "card:A2", "card:A3", "card:A4"],
+     "then four names in the index's own order, one fact each — A1's second fact is not served");
+  eq(gam.capped, false, "and the flood rule is not the cap: nothing here was cut by max");
+  ok(/2 of the 2 facts that matched the words dealer, gamma and 4 per-name readings on the words dealer, gamma, one each from 4 of the 6 names that carry one/.test(gam.why),
+     "and the sentence counts both populations by name, so the two names left out are " +
+     "in the open — " + gam.why);
+  const named = selectFacts(flood, "A5 gamma");
+  ok(named.picked[0].source === "card:A5",
+     "while a name that is TYPED is not a word-only match: A5's fact leads on the name");
+
+  /* THE DEAL: two names, ten facts each, a cap of fourteen. */
+  const pair = { facts: [] };
+  for (let k = 0; k < 10; k++) {
+    pair.facts.push({ id: "a" + k, topic: ["aaa"], say: "A.", n: {}, source: "movers", at: null });
+  }
+  for (let k = 0; k < 10; k++) {
+    pair.facts.push({ id: "b" + k, topic: ["bbb"], say: "B.", n: {}, source: "movers", at: null });
+  }
+  const dealt = selectFacts(pair, "compare AAA and BBB");
+  eq(dealt.picked.filter((f) => f.topic.includes("aaa")).length, 7, "seven facts about the first name");
+  eq(dealt.picked.filter((f) => f.topic.includes("bbb")).length, 7, "and seven about the second — dealt, not ranked");
+  ok(dealt.picked[0].topic.includes("aaa") && dealt.picked[1].topic.includes("bbb"),
+     "alternating from the first fact, so a short cap still holds both names");
+  ok(/7 of the 10 facts about AAA and 7 of the 10 facts about BBB, cut at the cap of 14\./.test(dealt.why),
+     "and the sentence names both — " + dealt.why);
+
+  /* A NAME THAT MATCHED NOTHING IS NAMED AS SUCH, up front. */
+  const miss = selectFacts(idx, "what is new for XYZ calls");
+  ok(/^Nothing indexed is about XYZ\. Picked /.test(miss.why),
+     "a typed name with no fact opens the sentence, before the counts — " + miss.why);
+
+  /* THE PAGE'S OWN NAME. */
+  const onPage = selectFacts(idx, "what is new for calls", { subject: { tickers: ["SYN46"] } });
+  eq(onPage.subjectApplied, true, "with no name typed, the page's name is applied");
+  ok(onPage.picked[0].topic.includes("syn46") &&
+     onPage.picked.filter((f) => f.source === "card:SYN46").length >= 4,
+     "and the facts about the page's name lead the answer to a question that typed none — " +
+     "the briefing's own sentence about it first, then its card");
+  ok(/facts about SYN46, the name on this page and 1 of the 1 fact that matched the words calls/.test(onPage.why),
+     "and the sentence says the name came from the page — " + onPage.why);
+  const typedOver = selectFacts(idx, "what about SYN47", { subject: { tickers: ["SYN46"] } });
+  eq(typedOver.subjectApplied, false, "a typed name overrides the page outright");
+  ok(!typedOver.picked.some((f) => f.source === "card:SYN46"),
+     "so nothing about the page's name is served on a question about another");
+  const plainOnPage = renderFactsPlain(onPage.picked, "what is new for calls");
+  eq(guardAnswer(plainOnPage, onPage.picked).ok, true,
+     "and the fallback answer over a subject-led pick passes the guard — the subject " +
+     "changes which facts are picked, never what a fact says");
+  const junkSubject = selectFacts(idx, "what is new for calls", { subject: { tickers: ["nvda", 7, "syn-46", "BAD SYMBOL"] } });
+  ok(junkSubject.subjectApplied === true && !/undefined/.test(junkSubject.why),
+     "a malformed subject is filtered, never thrown on and never printed");
+
+  /* THE FOURTH SILENCE HAS A LIST, AND A FIFTH IS AN ERROR. */
+  same(Object.keys(buildFactIndex({}).silences), [...SILENCE_KINDS],
+     "the index files four kinds of silence, in the stylesheet's order");
+  ok(SILENCE_KINDS.includes("unavailable"), "and unavailable is the fourth");
+  const box = emptySilences();
+  fileSilence(box, "unavailable", "the IV rank", "It spoke, and this field was not in it.", "card:SYN46", null);
+  eq(box.unavailable.length, 1, "an unavailable silence lands in its own list");
+  assert.throws(() => fileSilence(box, "bogus", "x", "y", "z", null), /unknown silence kind: bogus/,
+    "and a kind this product has not named throws rather than vanishing");
+  checks++;
+
+  /* THE LEAD TRAVELS FROM THE BRIEFING TO THE INDEX. */
+  ok(INDEX.facts.some((f) => f.source === "brief" && f.lead && Array.isArray(f.lead.keys) && f.lead.keys.length > 0),
+     "a briefing fact that names which figure leads its sentence keeps that spec in the index");
+  ok(INDEX.facts.every((f) => f.source !== "brief" ? f.lead === undefined : true),
+     "and no other surface invents one");
+
+  /* THE MODEL IS TOLD THERE ARE FOUR. */
+  const told = promptFor(onPage.picked, "what is new for calls").system;
+  ok(/3\. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS/.test(told) && /UNAVAILABLE means/.test(told),
+     "rule 3 names four silences, unavailable among them");
+}
+
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +
   `published payload, three silences that stay three from the store all the way into the ` +
   `answer, deterministic selection that caps truthfully and never returns nothing while it ` +
@@ -1565,4 +1704,7 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `measured flip level and an unmeasured ladder are three sentences, a fraction is rounded ` +
   `once and never to zero, an IV rank is quoted only in the unit it publishes, and the shed ` +
   `that keeps the key under the ingest cap drops whole names from the least-read end and ` +
-  `counts what it kept against what it was handed`);
+  `counts what it kept against what it was handed; and a selection whose topics are names ` +
+  `and never the words that describe a reading, that serves the market-wide reading before ` +
+  `four names' copies of it, deals two names evenly, reads the page's own name below a ` +
+  `typed one, and says in one sentence every name it found and every name it did not`);

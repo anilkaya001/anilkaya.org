@@ -3626,7 +3626,7 @@ async function route(request, env, url, ctx) {
       const stored = await readFlowsPayload(env, "brief");
       if (stored === null) {
         return json({ status: "pending", today: null, yesterday: null, next: null,
-          facts: [], silences: { pending: [], unreadable: [], quiet: [] } });
+          facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
       }
       return passthrough(stored);
     }
