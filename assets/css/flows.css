@@ -6462,14 +6462,27 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    and pushed the third region below the fold. They are laid out as cards
    that fill the width the canvas already earned. `auto-fill` with a 30rem
    floor is what keeps each one near the same measure the prose uses, so
-   widening the window adds COLUMNS rather than lengthening lines. */
+   widening the window adds COLUMNS rather than lengthening lines.
+
+   THE FLOOR IS `min(30rem, 100%)` AND THE `min()` IS THE WHOLE FIX. A bare
+   minmax(30rem, 1fr) is a floor the track may not go under, so in a host
+   NARROWER than 30rem the track stays 30rem and the list overflows its own
+   panel. The docked assistant is exactly that host: `.ak-dock-panel` is
+   `width: min(30rem, 92vw)` with 1.4rem of padding a side, so its content
+   box measures 27.2rem on every desktop — 2.8rem short of the floor — and
+   every fact drawn in the rail hung 45px past the panel edge, on every
+   answer, at every window width above the 59.99rem tier below. `min()`
+   makes the floor "30rem, or the whole host if the host is smaller", which
+   leaves the wide case byte-for-byte what it was and lets the narrow one
+   fit. tests/flows-ask-render.mjs measures the resolved track against the
+   panel's own content width, in the dock, rather than trusting the eye. */
 .ak-facts {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 0.75rem 1.75rem;
-  grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(30rem, 100%), 1fr));
 }
 .ak-fact { margin: 0; padding: 0.7rem 0 0.7rem 0.9rem; border-left: 2px solid var(--panel-border); }
 
@@ -6485,6 +6498,65 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 .ak-fact-src { margin: 0.3rem 0 0; font-size: var(--fs-micro); color: var(--ink-dim); }
 .ak-src-key { font-family: var(--font-mono); }
+
+/* THE PROVENANCE-ONLY LIST, WHICH IS NOT A LIST OF READINGS. It is drawn
+   under an answer that already printed the sentences, so its rows carry a
+   key and a stamp and nothing else. They lose the reading-sized left rule
+   and the card gap for that reason: a row set like a finding, holding a
+   monospace key, would read as a reading whose sentence had gone missing —
+   which is the exact appearance this route names as a payload defect. */
+.ak-facts.is-prov { gap: 0.15rem; }
+.ak-facts.is-prov .ak-fact { padding: 0; border-left: 0; }
+.ak-facts.is-prov .ak-fact-src { margin: 0; }
+
+/* WHAT TO ASK, AS THREE THINGS TO PRESS. The rail used to open onto 335
+   characters of guarantee above an empty field; the guarantee is now one
+   click below the field and these are what a reader meets instead. They
+   are buttons rather than links because pressing one fills the field and
+   sends nothing — the model call stays the reader's to spend. */
+.ak-examples { margin: 0 0 0.9rem; }
+.ak-examples-l {
+  margin: 0 0 0.4rem;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.ak-examples-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ak-example {
+  font: inherit;
+  font-size: var(--fs-note);
+  text-align: left;
+  padding: 0.35rem 0.6rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.ak-example:hover, .ak-example:focus-visible { color: var(--ink); }
+
+/* THE NAME ON THE PAGE THE RAIL IS DOCKED TO. A note, not a reading: it
+   describes what will happen to the question, so it is set at note size
+   and sits directly on top of the field it describes. */
+.ak-onpage {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-note);
+  color: var(--ink-dim);
+  max-width: var(--measure);
+}
+.ak-onpage-go {
+  font: inherit;
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+  padding: 0.15rem 0.45rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.ak-onpage-go:hover, .ak-onpage-go:focus-visible { color: var(--ink); }
 
 /* THE QUESTION BOX IS AS WIDE AS ITS PANEL. It rendered at the browser's
    default textarea size — about 190px, narrower than the placeholder it
@@ -6690,7 +6762,22 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   border-radius: var(--radius-2) 0 0 var(--radius-2);
   cursor: pointer;
 }
+/* THE KEY IS ON THE TAB, IN THE TAB'S OWN DIRECTION. The button is
+   `writing-mode: vertical-rl`, so the glyph sits under the word rather
+   than beside it and needs no second layout. It is dimmer than the label
+   because it is an instruction for the hands and not a reading — the same
+   treatment `.ak-ask-hint` gets inside the question field's label, for the
+   same reason. */
+.ak-dock-tab-k {
+  display: block;
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
 .ak-dock-tab:hover, .ak-dock-tab:focus-visible { color: var(--ink); }
+.ak-dock-tab:hover .ak-dock-tab-k, .ak-dock-tab:focus-visible .ak-dock-tab-k {
+  color: var(--ink-dim);
+}
 
 .ak-dock { position: fixed; inset: 0 0 0 auto; z-index: 41; pointer-events: none; }
 .ak-dock-panel {
@@ -6732,7 +6819,6 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    would otherwise leave the gauge stopping short of the rail it sits in. */
 .ak-dock .ak-meter-bar { max-width: none; }
 .ak-dock .ak-meter-say { max-width: none; }
-.ak-dock .fc-panel-h { display: none; }
 
 @media (prefers-reduced-motion: no-preference) {
   .ak-dock-panel { transition: transform 160ms var(--ease, ease); }

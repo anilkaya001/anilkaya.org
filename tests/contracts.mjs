@@ -931,4 +931,62 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
   assert(checkedFiles > 40, `the absolute-path scan found only ${checkedFiles} files to read`);
 }
 
+/* THE DOCK'S "?" IS ONLY FREE IF NOTHING BESIDE IT TAKES A BARE PRINTABLE KEY.
+   flows-dock.js binds "?" on `document` and its header says why that is safe.
+   That sentence is a measurement, and a measurement left in a comment rots the
+   day somebody adds a second listener — silently, because two handlers on one
+   key both run and the reader sees whichever acted last. So it is measured
+   here instead.
+
+   THE RULE IS NOT "NO BARE PRINTABLE KEYS ANYWHERE". lab-ui.js binds "/" and
+   is entitled to: /lab/ is a static page that loads no Flows asset and draws
+   no dock. The rule is that a file which SHARES A DOCUMENT with the dock may
+   not. Which files those are is read off the two things that actually emit
+   script tags — the tracked .html pages, and shared/flows-pages.js, which is
+   the shell every gated Flows route is served from and the file that puts the
+   dock on them. Reading the emitter rather than a hand-kept list is the whole
+   point: no Flows route is a .html file in this repo, so a scan of markup
+   alone would have found no document carrying the dock at all and passed by
+   measuring nothing. */
+{
+  const DOC_KEY = /document\.addEventListener\(\s*["'`]key(?:down|press|up)["'`]/;
+  /* A one-character `key` comparison is a bare printable key. "Escape",
+     "ArrowRight" and the rest are longer, so they do not match and are not
+     contested: a named key is not something "?" can collide with. Both
+     polarities, because a handler may guard with !== and return, or act
+     on ===. */
+  const BARE = /\.key\s*[!=]==\s*"([ -~])"/g;
+  const jsFiles = execFileSync("git", ["ls-files", "-z", "--", "assets/js/*.js"],
+    { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean);
+  const htmlFiles = execFileSync("git", ["ls-files", "-z", "--", "*.html"],
+    { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean);
+  const SHELL = "shared/flows-pages.js";
+  const shell = read(SHELL);
+  assert(shell.includes("assets/js/flows-dock.js"),
+    `${SHELL} no longer emits the dock. Either it moved, and this scan is now reading the ` +
+    `wrong file, or the dock is gone and flows-dock.js's header should go with it.`);
+  const documents = [
+    { where: SHELL, loads: (file) => shell.includes(file) },
+    ...htmlFiles
+      .filter((page) => read(page).includes("assets/js/flows-dock.js"))
+      .map((page) => ({ where: page, loads: (file) => read(page).includes(file) })),
+  ];
+  const listeners = jsFiles.filter((file) => DOC_KEY.test(read(file)));
+  assert(listeners.includes("assets/js/flows-dock.js"),
+    "the scan found no document-level key listener in flows-dock.js, so it is not reading " +
+    "what that file's header claims to have surveyed and would pass by seeing nothing");
+  const contested = [];
+  for (const file of listeners) {
+    if (file === "assets/js/flows-dock.js") continue;
+    const keys = [...read(file).matchAll(BARE)].map((m) => m[1]);
+    if (!keys.length) continue;
+    const shared = documents.filter((doc) => doc.loads(file)).map((doc) => doc.where);
+    if (shared.length) contested.push(`${file} binds ${keys.join(", ")} — shared with the dock by ${shared.join(", ")}`);
+  }
+  assert.deepEqual(contested, [],
+    `a file sharing a document with the dock binds a bare printable key: ${contested.join("; ")}. ` +
+    `flows-dock.js's header says "?" is free on the routes it mounts on; either that key is now ` +
+    `contested — two handlers, one keystroke, no error — or the header must stop saying so.`);
+}
+
 console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);

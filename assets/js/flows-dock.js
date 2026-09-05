@@ -1,43 +1,38 @@
 /* =============================================================
    flows-dock.js — the assistant, docked on every page but its own.
 
-   The question box was reachable at one route, which made it a
-   destination. A reader looking at the bearish board and wondering
-   what changed had to leave the board to ask. This puts the same box
-   on the right edge of every gated page, one key away.
+   The box was reachable at one route, which made it a destination:
+   a reader on the bearish board wondering what changed had to leave
+   it to ask. It is now on every gated page, behind the tab or "?".
 
-   IT LOADS NOTHING UNTIL IT IS OPENED, and that is the whole reason
-   this file exists separately from the renderer it mounts.
-   assets/js/flows-ask.js is 55KB; served on all thirteen routes it
-   would break the weight ceiling of six of them, and it would bill
-   every reader who never opens the rail for a feature they did not
-   use. This file is a few kilobytes: a button, a panel, and the
-   loader that fetches the renderer the first time somebody asks for
-   it. tests/flows-weight.mjs measures what a route loads ON ARRIVAL,
-   so the ceiling it enforces is honest about that — the deferred
-   55KB is a real cost, paid on open, and the ceiling comment says so
-   rather than letting a lazy import look free.
+   THE KEY IS "?" AND IT IS PRINTED ON THE TAB. This file said "one
+   key away" from the day it shipped and bound no key at all. "?" is
+   free ON THE ROUTES THIS MOUNTS ON — not in assets/js, where
+   lab-ui.js binds "/", on /lab/, which draws no dock. That is a
+   measurement, so it is measured: contracts.mjs re-derives which
+   files share a document with this one and fails if any takes a
+   bare printable key.
 
-   IT IS NOT DRAWN ON /flows/ask, where the page IS the assistant.
-   Two mounts would collide on `#askApp` — one id, two elements, and
-   the renderer would take whichever the DOM handed it — and a
-   floating copy of the page you are already reading is noise.
+   IT LOADS NOTHING UNTIL IT IS OPENED, which is why this file is
+   separate from the renderer it mounts. assets/js/flows-ask.js is
+   94k as measured on 2026-09-05, in the unit and rounding
+   tests/flows-weight.mjs prints — one file measured once reads as
+   one number in both places. On all twelve dock routes it would
+   break every ceiling; the widest headroom of the twelve is watch's
+   37k. flows-weight measures what a route loads ON ARRIVAL, so the
+   deferred 94k is absent there: a real cost, paid on open, said here
+   rather than left to look free.
 
-   COLLAPSED IS THE DEFAULT, AND "ALWAYS ACCESSIBLE" IS NOT THE SAME
-   AS "ALWAYS OPEN". A 380px rail held open on the board takes a
-   quarter of the width from a thirteen-column table that has spent
-   two design phases earning it. The tab is always visible and the
-   panel is one click or one keystroke away.
+   NOT ON /flows/ask, where the page IS the assistant: two mounts
+   collide on `#askApp` and the renderer takes whichever it is given.
 
-   IT DOES NOT REMEMBER, AND THAT IS THE HOUSE PATTERN RATHER THAN AN
-   OMISSION. No file under this section touches browser storage —
-   tests/contracts.mjs enforces it, and flows-desk.js shows what Flows
-   does instead: every choice it makes goes into the URL's query
-   string, where it is linkable, bookmarkable and sendable to someone
-   else. A dock spans pages, so a query parameter would have to be
-   threaded through every link on the site to survive a navigation,
-   which is a large change to make for a preference whose cost of
-   being wrong is one click on a tab that is already on screen.
+   COLLAPSED IS THE DEFAULT: a 380px rail held open takes a quarter
+   of the width from a thirteen-column table that earned it. IT DOES
+   NOT REMEMBER, which is the house pattern rather than an omission:
+   nothing here touches browser storage (contracts.mjs enforces it)
+   and Flows keeps every choice in the URL, which for a dock would
+   mean threading a parameter through every link on the site — a
+   large change for a preference one click on the tab undoes.
    ============================================================= */
 (function () {
   "use strict";
@@ -54,17 +49,23 @@
   var loaded = false;
   var loading = false;
 
-  /* THE RENDERER IS FETCHED ONCE AND ITS FAILURE IS SAID OUT LOUD. A
-     panel that opened onto nothing would read as a broken assistant
-     rather than as a script that did not arrive, and the reader would
-     not know that reloading is the thing to try. */
+  /* THE RENDERER IS FETCHED ONCE AND ITS FAILURE IS SAID OUT LOUD. A panel
+     that opened onto nothing would read as a broken assistant rather than a
+     script that did not arrive, and the reader would not know to reload. */
   function ensureRenderer() {
     if (loaded || loading) return;
     loading = true;
     var s = document.createElement("script");
     s.src = dock.getAttribute("data-src");
     s.defer = true;
-    s.onload = function () { loaded = true; loading = false; };
+    s.onload = function () {
+      loaded = true;
+      loading = false;
+      /* THE OTHER HALF OF focusField'S JOB, at the only moment it can be
+         done: on a FIRST open the renderer is still in flight, so the call
+         below focused the panel and left the caret nowhere. */
+      if (dock.classList.contains("is-open")) focusField();
+    };
     s.onerror = function () {
       loading = false;
       var p = document.createElement("p");
@@ -78,20 +79,20 @@
     document.head.append(s);
   }
 
+  /* THE FIELD IF IT IS THERE, THE PANEL IF IT IS NOT — focusing the panel
+     is what tells someone who cannot see it that it appeared at all. */
+  function focusField() {
+    var target = panel.querySelector("#askQ") || panel;
+    try { target.focus(); } catch (e) { /* a detached node; harmless */ }
+  }
+
   function setOpen(open, focus) {
     dock.classList.toggle("is-open", open);
     tab.setAttribute("aria-expanded", open ? "true" : "false");
     panel.hidden = !open;
     if (!open) return;
     ensureRenderer();
-    /* FOCUS MOVES TO THE PANEL, NOT TO THE FIELD, on open. The field may
-       not exist yet — the renderer is still in flight on a first open —
-       and focusing a heading a screen reader can announce is what tells
-       someone who cannot see the panel that it appeared at all. */
-    if (focus) {
-      var target = panel.querySelector("#askQ") || panel;
-      try { target.focus(); } catch (e) { /* a detached node; harmless */ }
-    }
+    if (focus) focusField();
   }
 
   tab.addEventListener("click", function () {
@@ -104,10 +105,30 @@
     });
   }
 
-  /* ESCAPE CLOSES IT, because a panel that covers content and can only
-     be dismissed by finding a small button is a trap for anyone
-     navigating by keyboard. It closes only when the focus is inside the
-     panel, so Escape elsewhere on the page still belongs to the page. */
+  /* "?" OPENS IT, BUT NOT WHERE IT IS A CHARACTER BEING TYPED. Every Flows
+     route carries text controls — the board's search, the desk's symbol
+     box, this panel's own textarea — and swallowing it there would leave
+     the site unable to write a question mark, a worse defect than a missing
+     shortcut. Ctrl, Meta and Alt with a printable key belong to the
+     browser. It only ever OPENS, so it cannot become a toggle that closes
+     a panel a reader is typing into. */
+  function typingIn(node) {
+    if (!node) return false;
+    var tag = node.tagName ? String(node.tagName).toLowerCase() : "";
+    return tag === "input" || tag === "textarea" || tag === "select" ||
+      node.isContentEditable === true;
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (dock.classList.contains("is-open") || typingIn(document.activeElement)) return;
+    e.preventDefault();
+    setOpen(true, true);
+  });
+
+  /* ESCAPE CLOSES IT: a panel that covers content and can only be dismissed
+     by finding a small button is a trap for anyone navigating by keyboard.
+     Only when the focus is inside it, so Escape elsewhere is the page's. */
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || !dock.classList.contains("is-open")) return;
     if (!dock.contains(document.activeElement)) return;

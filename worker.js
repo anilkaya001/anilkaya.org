@@ -1477,6 +1477,33 @@ async function askRecordSpend(env, usage) {
  * and validating it second meant a broken request got the pending
  * envelope's 200 — the caller's own mistake dressed up as our silence.
  */
+/* THE NAME THE PAGE THE READER IS ON IS ABOUT, and it is a SEPARATE field
+   from the question rather than words glued onto it here. The docked
+   assistant sits on /flows/ticker/?t=SYN046 and on every other gated route,
+   and a reader who types "what changed" on a page about one name means that
+   name — but a reader who types "what changed for AMD" does not, and only
+   selectFacts knows which of those it is holding. It already does: `subject`
+   is consulted only when the question itself names no ticker. Deciding that
+   here would be a second copy of the rule, in a file that does not own it.
+
+   ONE TOKEN, SHAPED LIKE A SYMBOL, OR NOTHING. The value arrives from a
+   query string a reader can type into, so it is bounded before it is
+   trusted; subjectTickers() in shared/flows-ask.js applies the same shape
+   test again on the other side, and neither is load-bearing alone.
+
+   THE SHAPE IS THE ONE THE ROUTE THAT PRODUCES THE VALUE USES —
+   /^[A-Z][A-Z0-9.\-]{0,9}$/, readTicker()'s in assets/js/flows-ticker.js
+   and subjectTickers()'s here. A narrower test in the middle of three is
+   not extra safety, it is a silent drop: the subject becomes null, the
+   reader's "what changed" is answered market-wide, and no field on the
+   response says a name was discarded. Measured: /^[A-Z][A-Z0-9]{0,4}$/
+   rejects all 93 cards the pipeline emits (SYN0##, six characters) and
+   both share-class symbols the vendor quotes, BRK.B and RDS-A. */
+function askSubject(body) {
+  const raw = body && typeof body.subject === "string" ? body.subject.trim().toUpperCase() : "";
+  return /^[A-Z][A-Z0-9.\-]{0,9}$/.test(raw) ? raw : null;
+}
+
 async function askQuestion(request) {
   let body;
   try {
@@ -1488,17 +1515,34 @@ async function askQuestion(request) {
   if (raw === "") {
     throw new HttpError(400, "no_question", "Ask a question in the `question` field.");
   }
-  return raw.slice(0, ASK_QUESTION_MAX);
+  return { question: raw.slice(0, ASK_QUESTION_MAX), subject: askSubject(body) };
 }
 
-async function askAnswer(question, env, index, updatedAt) {
-  const { picked, why, capped } = FLOWS_ASK.selectFacts(index, question);
+async function askAnswer(question, env, index, updatedAt, subject) {
+  /* THE SHAPE selectFacts READS IS `{ tickers: [...] }`, and it is built
+     here rather than sent over the wire in that form: the browser posts one
+     symbol because one page is about one name, and a route that accepted a
+     list would be accepting a caller's own selection weighting. */
+  const sel = FLOWS_ASK.selectFacts(index, question,
+    subject === null ? undefined : { subject: { tickers: [subject] } });
+  const { picked, why, withheld, capped } = sel;
+  /* THE QUESTION THE REST OF THIS FUNCTION IS ANSWERING, with the page's
+     own name in it when selection used one. `subjectApplied` is true
+     exactly when the reader named no ticker and the page's name was taken
+     instead, so this is where "append the page's ticker to the question
+     sent" happens — once, after the module has decided, rather than in the
+     browser before it. It matters downstream twice: renderFactsPlain reads
+     the question to work out which names the served facts cover, and would
+     otherwise lead a per-name answer with "nothing in the question matched
+     a name"; and promptFor hands the model the question, which should name
+     what it is about. */
+  const framed = sel.subjectApplied && subject ? question + " " + subject : question;
   /* THE DETERMINISTIC ANSWER IS BUILT FIRST, ALWAYS. It is what ships
      when the model is refused, unreachable, or caught inventing — and
      building it up front means no branch below can reach a reader
      without one. A fallback assembled only inside a catch is a
      fallback nobody runs until the morning it is needed. */
-  const plain = FLOWS_ASK.renderFactsPlain(picked, question);
+  const plain = FLOWS_ASK.renderFactsPlain(picked, framed);
   /* READ BEFORE THE CALL, so every branch below carries it — including the
      ones that never reach a model. A reader told the allowance is spent
      needs the gauge most, and a gauge that only appears on success is
@@ -1506,6 +1550,23 @@ async function askAnswer(question, env, index, updatedAt) {
   const spend = await askSpend(env);
   const base = {
     answer: plain, llm: false, guard: null, why, capped,
+    /* THE WITHHOLDING TRAVELS AS ITS OWN FIELD so the page can print it
+       above the fold. It restates a sentence `why` also carries, and that
+       duplication is deliberate: `why` is the audit trail and folds, this
+       is the caveat and does not. The two are worded for their own places
+       and are not substrings of each other — selectFacts writes "Nothing
+       indexed is about ZZZ, so no reading below is about it." here while
+       `why` says "Nothing indexed is about ZZZ. Picked 1 of the 1 fact
+       that matched the words board." — so a page that went looking for
+       one inside the other by matching on wording would find nothing
+       today, and would find nothing tomorrow for a second reason once
+       either was rephrased. */
+    withheld: withheld || null,
+    /* AND WHETHER THE PAGE'S OWN NAME WAS ADDED, because a reader who
+       typed four words and got readings about a symbol they did not type
+       is owed the sentence explaining where the symbol came from. */
+    subject: sel.subjectApplied && subject ? subject : null,
+    subjectApplied: sel.subjectApplied === true,
     facts: picked, silences: index.silences || null,
     briefUpdatedAt: updatedAt || null, model: null, note: null, spend,
   };
@@ -1517,7 +1578,7 @@ async function askAnswer(question, env, index, updatedAt) {
         "pipeline's own wording. Every figure in it was measured." });
   }
 
-  const { system, user } = FLOWS_ASK.promptFor(picked, question);
+  const { system, user } = FLOWS_ASK.promptFor(picked, framed);
   let generated = null;
   /* The meter as it stands AFTER the model call, or null if no call was
      recorded. Declared out here because it is set inside the try and read
@@ -3658,7 +3719,7 @@ async function route(request, env, url, ctx) {
          key of roughly sixteen kilobytes. Parsing that is affordable;
          parsing the seventeen surfaces it was built from, here, on every
          question, would not be. */
-      const asked = await askQuestion(request);
+      const { question: asked, subject: onPage } = await askQuestion(request);
       const stored = await readFlowsPayload(env, "brief");
 
       if (stored === null) {
@@ -3678,7 +3739,7 @@ async function route(request, env, url, ctx) {
           "The briefing was published and could not be read, so no answer is offered. " +
           "That is a fault on this site rather than a fact about the session.");
       }
-      return askAnswer(asked, env, index, stored.updatedAt);
+      return askAnswer(asked, env, index, stored.updatedAt, onPage);
     }
 
     if (path === "/api/flows/record") {

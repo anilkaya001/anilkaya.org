@@ -172,25 +172,22 @@
 
      REFUSAL 1 IN PRACTICE. The source is a contract counter, so the words a
      per-execution feed lives on — print, trade, block, sweep, bought, sold,
-     paid, and every "smart money" flourish built on them — assert something
-     it cannot support. None appears in a single string this file writes: not
-     in the strip, a caption, a note, a column title or an attribute. That is
-     the copy a reader takes a reading from.
+     paid, and the "smart money" flourishes built on them — assert something
+     it cannot support. None appears in a string this file writes: not in the
+     strip, a caption, a note, a column title or an attribute.
 
-     THE BAN IS ON THE CLAIM, NOT ON THE WORD, which is why the PAYLOAD'S own
+     THE BAN IS ON THE CLAIM, NOT THE WORD, which is why the PAYLOAD'S own
      prose renders as sent. Five of the twelve basis entries carry a banned
-     token legitimately: two of them ARE the refusals, and a page cannot
-     refuse a vocabulary without naming it; one is the vendor's relation
-     harvested verbatim, where a paraphrase would be the second spelling that
-     harvest exists to prevent; the other two define what the vendor
-     classified. The guard that used to paraphrase them cost the page its
-     clearest sentence and gave one relation two spellings. The test names
-     all five.
+     token legitimately: two ARE the refusals, and a page cannot refuse a
+     vocabulary without naming it; one is the vendor's relation harvested
+     verbatim, where a paraphrase would be the second spelling that harvest
+     exists to prevent; two define what the vendor classified. The guard that
+     paraphrased them cost the page its clearest sentence and gave one
+     relation two spellings. The test names all five.
 
      The tripwire is a TEST, not a filter: the contract suite runs the ban
      over the payload with four phrase-pinned exceptions and fails if one goes
-     dead, so a banned word fails a build rather than reaching a reader, where
-     a filter could only hide it. */
+     dead, so a banned word fails a build rather than reaching a reader. */
 
   /* ---------- the contract feed -----------------------------------
 
@@ -556,12 +553,12 @@
      This page carries two populations of the same object. The alerts table
      above is the windows the VENDOR'S RULES flagged; the counter feed below is
      contracts that cleared this desk's own volume and open-interest floors on
-     chains the pipeline had already read. Each row of each carries the same
-     four-tuple — name, call or put, strike, expiry — parsed by the same
+     chains the pipeline had already read. Each row carries the same four-tuple
+     — name, call or put, strike, expiry — parsed by the same
      parseOptionSymbol, and finding a contract in BOTH meant reading sixty rows
      against fifty by hand. That intersection is the strongest reading this
-     page can produce, because the two selections are independent: one is the
-     vendor's model of what is worth flagging, the other is arithmetic on a
+     page can produce, because the selections are independent: one is the
+     vendor's model of what is worth flagging, the other arithmetic on a
      chain.
 
      NO SHARED FATE. Either fetch can fail without the other, so the marking is
@@ -581,7 +578,7 @@
   let feedKeys = null;       // Set of keys, or null until resolved
   /* Declared HERE, not beside the alerts painter three hundred lines down:
      the filter note and the join both read it, and a `let` is in its temporal
-     dead zone until its own declaration runs. */
+     dead zone until its declaration runs. */
   let alertRows = [];        // [{ r, i }] in the vendor's published order
 
   /* WHY THE JOIN'S NULL IS NOT ENOUGH FOR THE FILTER NOTE.

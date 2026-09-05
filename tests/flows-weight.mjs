@@ -38,7 +38,7 @@
    look like one in a diff.
    ============================================================= */
 import assert from "node:assert/strict";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import * as PAGES from "../shared/flows-pages.js";
 
 /* PATHS RESOLVE AGAINST THIS FILE, NEVER AGAINST THE PROCESS.
@@ -139,25 +139,41 @@ const CEILING_KIB = {
      honest fix is not a bigger number here, it is that the overview should
      not parse the whole panel library to open one dialog. Until that is done,
      12k of headroom is what the two new regions need to be maintainable
-     rather than golfed. */
-  overviewPage: 312,
-  /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COSTS 5k ON EVERY ROUTE.
-     The board was at 297k and the tab, the empty panel and the loader took
-     it to 302k. Raising the number is the honest move rather than shaving
-     five kilobytes of comment out of flows-board.js to fit under a line
-     nobody re-derived — this file's own header calls that degrading the
-     thing this codebase is strictest about.
+     rather than golfed.
+
+     +1, 2026-09-05, FOR THE DOCK'S KEYSTROKE — see the note on unusualPage
+     below, which states this decision once for the three routes it lands on.
+     Measured here: 584 bytes over before the raise, 440 in hand after. */
+  overviewPage: 313,
+  /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
+     THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
+     the empty panel and the loader took it to 302k. Raising the number is
+     the honest move rather than shaving five kilobytes of comment out of
+     flows-board.js to fit under a line nobody re-derived — this file's own
+     header calls that degrading the thing this codebase is strictest about.
+
+     THE DOCK IS 6,004 BYTES AS MEASURED 2026-09-05, up from 5,282: a "?"
+     shortcut, the guard that keeps "?" a typeable character inside a field,
+     and a focus call at the moment the renderer arrives. It grew to 7,254
+     first and has been shed back by 1,250 bytes of block comment, because
+     the dock is on twelve routes and market had 782 bytes of headroom — see
+     marketPage below for why the shed happened there rather than here. 60
+     bytes of that headroom are left, and unusualPage records what happened
+     on the one route a shed could not cover.
 
      WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
-     is 79k — it was 55k when this note was written, and a figure left at
-     the size a file used to be is worse than no figure, because a reader
-     takes it for a measurement — and it arrives only when a reader opens
-     the panel, so it is absent
-     from a measurement of what a route loads ON ARRIVAL — which is what
-     this suite measures and should keep measuring. It is a real cost, paid
-     on open, by the readers who asked for it. Stating it here is what stops
-     a lazy import from looking free. */
-  sidePage: 306,
+     is 94k as measured 2026-09-05 — it was 55k when this note was written
+     and 79k at the last re-measure, and a figure left at the size a file
+     used to be is worse than no figure, because a reader takes it for a
+     measurement. It arrives only when a reader opens the panel, so it is
+     absent from a measurement of what a route loads ON ARRIVAL, which is
+     what this suite measures and should keep measuring. It is a real cost,
+     paid on open, by the readers who asked for it. Stating it here is what
+     stops a lazy import from looking free. */
+  /* +1, 2026-09-05, the same raise for the same reason — the argument is on
+     unusualPage below. Measured here: 455 bytes over before, 569 in hand
+     after. */
+  sidePage: 307,
   watchPage: 240,
   deskPage: 135,
   /* SET AT FIRST MEASUREMENT, 2026-09-04, against 102k — nav 3k, flows-ui 25k,
@@ -233,24 +249,87 @@ const CEILING_KIB = {
      becomes a ratchet, so it is filed as its own task rather than as a
      third comment promising it. 97 against a 93k measurement leaves 4k,
      which is room for a fix and not room for a feature: the next thing
-     that wants space here should find the shed already done. */
+     that wants space here should find the shed already done.
+
+     THE NEXT WAVE SPENT THAT 4k AND PAID FOR THE REST IN COMMENT BYTES,
+     which is the shed this file's own header sanctions and the one the
+     entry above described. It bought: an evidence list that fits the
+     docked rail rather than overflowing it, each selected sentence printed
+     once rather than as an answer and again as evidence, the key and stamp
+     stated once with a denominator instead of under all fourteen facts, a
+     withholding lifted out of the method disclosure, three example
+     questions and the name of the page the rail is docked to. Measured
+     94k against 97, so the ceiling did not move; what moved was 14k of
+     block comment inside assets/js/flows-ask.js — the restatement, the
+     stale flows.css line references, and a class inventory that had become
+     a commentary. Not one sentence a reader sees was shortened.
+
+     THE MARGIN IS 163 BYTES, and that is the whole number rather than a
+     rounded reassurance: the route measures 99,165 bytes against 99,328.
+     The repair pass that widened the page's ticker bound to the shape
+     /flows/ticker actually serves spent the last of it and bought a
+     further 1,300 bytes of comment back to stay inside. There is nothing
+     left to sell here. The shed named above — moving prose into
+     shared/flows-ask.js, which the Worker bundles and the browser never
+     fetches — is no longer owed at some point, it is owed before the next
+     sentence of code lands on this route. */
   askPage: 97,
   strategyPage: 120,
   trackPage: 118,
-  /* 95 -> 102, THE SAME 5k OF DOCK AS EVERY OTHER ROUTE. The market page
-     was the tightest of the mid-weight routes at 95k against 95, so it is
-     the one the assistant pushed over. See sidePage above for why the
-     number moves rather than the comment budget, and for what this
-     measurement deliberately does NOT count. */
+  /* 95 -> 102, THE SAME DOCK AS EVERY OTHER ROUTE. The market page was the
+     tightest of the mid-weight routes at 95k against 95, so it is the one
+     the assistant pushed over. See sidePage above for why the number moves
+     rather than the comment budget, and for what this measurement
+     deliberately does NOT count.
+
+     AND THIS IS THE ROUTE THAT MADE THE DOCK GIVE BYTES BACK. The 102 was
+     set with 782 bytes in hand against a 5,282-byte dock; flows-market.js
+     then grew to 95,824 and the assistant's second wave took the dock to
+     7,254, which put the route 1,190 bytes OVER. Raising 102 would have
+     been absorbing an overrun, which is the one thing the header above
+     forbids, and shedding from flows-market.js would have paid for the
+     dock's bytes out of a file that did not spend them. So the dock shed
+     1,439 bytes of its own block comment and the route measures 102k
+     against 102 with 249 bytes in hand. That margin is thin and it is
+     stated so nobody spends it twice: the next thing that wants space on
+     this route should expect to argue for it. */
   marketPage: 102,
   /* THE +7 ON THIS AND THE FOUR ENTRIES BELOW IS THE DOCKED ASSISTANT.
-     assets/js/flows-dock.js is 5k and now ships on every gated route but
-     /flows/ask, and these were the routes with less than that in hand. The
-     reasoning is sidePage's, once: the number moves rather than the comment
-     budget, and the 55k renderer the dock fetches on first open is
-     deliberately NOT in this measurement, which is of what a route loads on
-     arrival. */
-  unusualPage: 92,
+     assets/js/flows-dock.js now ships on every gated route but /flows/ask,
+     and these were the routes with less than that in hand. The reasoning is
+     sidePage's, once: the number moves rather than the comment budget, and
+     the renderer the dock fetches on first open is deliberately NOT in this
+     measurement, which is of what a route loads on arrival.
+
+     AND +1 MORE, 2026-09-05, WHICH IS A DECISION AND IS WRITTEN DOWN AS ONE.
+     IT IS THE SAME DECISION ON THREE ROUTES — overviewPage and sidePage above
+     take the identical +1 and point here rather than repeat it; the other
+     nine dock routes absorbed the growth out of headroom they already had.
+
+     The route measures 92.53k. The dock went 5,268 -> 6,004 bytes: the "?"
+     shortcut, the guard keeping "?" typeable inside a field, and the focus
+     call at the moment the renderer arrives. THE GROWTH IS CODE — its
+     comments came out 74 bytes SMALLER than they went in — which is why
+     shedding prose could not pay for all of it.
+
+     SHEDDING WAS STILL TRIED FIRST, AND IS SPENT. About a thousand bytes of
+     genuine restatement came out of flows-dock.js, flows-ask.js and
+     flows-unusual.js: a paragraph repeating a measurement its own opening
+     already gave, a rule stated twice in two files, the long form of a dedup
+     note. That cleared market and ask without moving either line. Two further
+     attempts were reverted BY THIS SUITE, which asserts the dock's
+     deferred-renderer paragraph down to its sentence shape — the mechanism
+     working, and the boundary between restatement and argument drawn by
+     something other than my own judgement. What is left is argument, and
+     shortening an argument to fit a byte ceiling is what this file's header
+     calls degrading the thing the codebase is strictest about.
+
+     WHAT THE ROUTE GAINED FOR THE KILOBYTE: the assistant is reachable here
+     by one keystroke instead of a navigation away from the reading. That is
+     the question the assertion below asks, answered rather than dodged. The
+     margin is 485 bytes and it is thin; the next thing that wants space on
+     this route should expect to argue for it. */
+  unusualPage: 93,
   eventsPage: 92,
   politicalPage: 62,
   historyPage: 52,
@@ -359,8 +438,98 @@ for (const name of Object.keys(CEILING_KIB)) {
      `visitors to those routes never open`);
 }
 
+/* =============================================================
+   ONE FILE, ONE MEASUREMENT, WHEREVER IT IS QUOTED.
+
+   assets/js/flows-dock.js exists to keep the assistant's renderer OFF every
+   route until somebody opens the rail, and the whole argument for that is a
+   number: how big flows-ask.js is. That number is written down twice — in
+   the dock's own header and in this file's sidePage note — and one wave
+   left it saying "95KB" in one place and "94k" in the other, for a file
+   that is neither 95 KB nor 95 KiB. A reader who checks one of them has
+   been told something false about the cost of a feature, and the two
+   disagreeing is the tell that neither was re-measured.
+
+   The dock's header also stated a CONSEQUENCE — how many routes the
+   renderer would break if it shipped on arrival — and that count was left
+   at "six" from when the renderer was 55k, inside a sentence whose
+   measurement the same commit had just rewritten. It is now every one of
+   the twelve, and it is derived below from the same table the ceilings are
+   checked against rather than counted by hand a second time.
+
+   THESE ASSERTIONS ARE DELIBERATELY BRITTLE. They fail whenever flows-ask.js
+   crosses a kilobyte, and the fix is to update the SENTENCE, never to loosen
+   the test: a comment carrying a measurement is a claim this suite is
+   already standing in front of the data to check, and an unchecked one is
+   exactly how "55k" survived two rewrites of the file it describes.
+   ============================================================= */
+{
+  const askBytes = sizeOf("/assets/js/flows-ask.js");
+  const askKib = Math.round(askBytes / 1024);
+  const dockSrc = readFileSync(new URL("./assets/js/flows-dock.js", REPO), "utf8");
+  const hereSrc = readFileSync(new URL("./tests/flows-weight.mjs", REPO), "utf8");
+
+  const dockSays = /assets\/js\/flows-ask\.js is\s+(\d+)k as measured on (\d{4}-\d{2}-\d{2})/
+    .exec(dockSrc);
+  ok(dockSays !== null,
+     `flows-dock.js states the size of the renderer it defers, and the date it was ` +
+     `measured — the whole argument for that file is that the renderer is too big to ship ` +
+     `on arrival, and an argument from a number nobody wrote down is not one`);
+  const hereSays = /flows-ask\.js\s+is (\d+)k as measured (\d{4}-\d{2}-\d{2})/.exec(hereSrc);
+  ok(hereSays !== null, "and this file's sidePage note states the same measurement");
+  if (dockSays && hereSays) {
+    eq(Number(dockSays[1]), askKib,
+       `flows-dock.js says flows-ask.js is ${dockSays[1]}k and it measures ${askKib}k ` +
+       `(${askBytes} bytes). Update the sentence in that header — a figure left at the size ` +
+       `a file used to be is worse than no figure, because a reader takes it for a ` +
+       `measurement`);
+    eq(Number(hereSays[1]), askKib,
+       `and this file says ${hereSays[1]}k for the same file, which measures ${askKib}k — ` +
+       `one population, one number, in every place the page states it`);
+    eq(hereSays[2], dockSays[2],
+       `and both name the same measurement date, because two dates on one number is two ` +
+       `measurements and only one of them can be this one`);
+  }
+
+  /* THE CONSEQUENCE, COUNTED FROM THE TABLE ABOVE RATHER THAN BY HAND. */
+  const dockRoutes = measured.filter((m) => m.parts.some((p) => /^flows-dock\.js/.test(p)));
+  const spare = (m) => (CEILING_KIB[m.name] - m.kib) * 1024;
+  const wouldFit = dockRoutes.filter((m) => spare(m) >= askBytes);
+  const roomiest = dockRoutes.slice().sort((a, b) => spare(b) - spare(a))[0];
+
+  const claim = /On all (\w+) dock routes it would\s+break every ceiling; the widest headroom of\s+the (\w+) is (\w+)'s\s+(\d+)k/
+    .exec(dockSrc);
+  ok(claim !== null,
+     `flows-dock.js states which routes the renderer would break and by how much it misses ` +
+     `— that sentence IS the argument for the file, and this is the table it argues about`);
+  const WORDS = { twelve: 12, thirteen: 13 };
+  if (claim) {
+    eq(WORDS[claim[1]], dockRoutes.length,
+       `flows-dock.js says "all ${claim[1]} dock routes" and the dock is emitted on ` +
+       `${dockRoutes.length}, counted from the HTML each page function actually writes`);
+    eq(WORDS[claim[2]], dockRoutes.length,
+       `and names that same count the second time the sentence refers to them, rather than ` +
+       `two counts of one population in one sentence`);
+    eq(claim[3], roomiest.name.replace(/Page$/, ""),
+       `and names the route with the most room, which is ` +
+       `${roomiest.name.replace(/Page$/, "")}`);
+    eq(Number(claim[4]), Math.round(spare(roomiest) / 1024),
+       `with that room stated as ${Math.round(spare(roomiest) / 1024)}k. It is the number ` +
+       `that makes "it would break every one of them" true, so it is the one a reader ` +
+       `checking the claim would reach for`);
+  }
+  eq(wouldFit.length, 0,
+     `and flows-ask.js (${askKib}k) fits inside the headroom of NONE of the ` +
+     `${dockRoutes.length} routes the dock ships on, which is what the header claims. That ` +
+     `claim read "six" for as long as the renderer was 55k, and it stayed "six" through two ` +
+     `re-measurements of the one number that decides it`);
+}
+
 console.log(`✓ flows-weight: ${checks} assertions — every route's JavaScript weighed from the ` +
   `HTML it actually emits rather than from a list that could go stale, every emitted script ` +
   `proven to exist so a deferred 404 cannot leave a route a silent shell, a stated ceiling ` +
-  `per route and no ceiling without a route, and the table printed on every run so the number ` +
-  `lives in the log of a build that passed`);
+  `per route and no ceiling without a route, the table printed on every run so the number ` +
+  `lives in the log of a build that passed, and every measurement the dock's own header ` +
+  `quotes about the renderer it defers — its size, its date, the routes it would break ` +
+  `and the widest headroom it misses — checked against this table rather than left to ` +
+  `go stale in prose`);
