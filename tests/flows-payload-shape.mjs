@@ -144,6 +144,15 @@ const SURFACES = [
      rename here is invisible: `market.breadth` gone is "— / —" under Breadth
      on a session the pipeline screened and measured in full. */
   { key: "market", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["market"] },
+  /* poolCount() is the one place this page decides a side's population —
+     `cleared`, the publisher's pool, ahead of the rows the cap kept — and the
+     rail badge, the Cleared tile, the status line and the pole subtitles all
+     read it. A renamed `cleared` would fall through to the row count in all
+     four at once, silently: the badge would print 50 on a route whose own
+     board says 53. An arrow const rather than a function declaration, so it
+     is anchored on its own text. */
+  { key: "board:long", file: "assets/js/flows-overview.js", at: "const poolCount = (payload)",
+    to: "\n  };", label: "poolCount", vars: ["payload"] },
   { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["alerts"] },
   { key: "board:long", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["long"] },
   { key: "board:short", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["short"] },

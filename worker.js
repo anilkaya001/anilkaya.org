@@ -1210,12 +1210,19 @@ async function refreshFlowsIntraday(env) {
   }
 }
 
-async function readFlowsPayload(env, key) {
-  if (!env.DB) return null;
+async function readFlowsPayload(env, key, trace) {
+  /* `trace`, when a caller passes one, is stamped `failed: true` on the two
+     ways a read can return null WITHOUT the row being absent: no database
+     binding, and a SELECT that threw. Every caller that does not pass it sees
+     exactly the null it always saw. The board route reads it so its pending
+     envelope can say "read-failed" — until it could, a never-published side
+     and a broken store reached the reader as one sentence hedged across both,
+     and a renderer cannot tell them apart from bytes that are identical. */
+  if (!env.DB) { if (trace) trace.failed = true; return null; }
   await ensureFlowsTables(env);
   const row = await env.DB.prepare(
     "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
-  ).bind(key).first().catch(() => null);
+  ).bind(key).first().catch(() => { if (trace) trace.failed = true; return null; });
   return row && row.payload ? { payload: row.payload, updatedAt: row.updated_at } : null;
 }
 
@@ -3444,9 +3451,18 @@ async function route(request, env, url, ctx) {
          URL cannot mint a key. */
       const raw = url.searchParams.get("side");
       const side = raw === "short" || raw === "watch" ? raw : "long";
-      const stored = await readFlowsPayload(env, "board:" + side);
+      /* WHICH KIND OF NOTHING. A null read is "never published" only when the
+         SELECT ran and found no row; when it threw, the same null means "could
+         not look". Both still answer 200 with the pending shape every board
+         renderer already understands — but the failed read carries a reason,
+         so the page can mark it unreadable (×) rather than pending (…). The
+         envelope is constructed here anyway; the field costs no parse. */
+      const trace = {};
+      const stored = await readFlowsPayload(env, "board:" + side, trace);
       if (stored === null) {
-        return json({ side, rows: [], generatedAt: null, status: "pending" });
+        return json(trace.failed
+          ? { side, rows: [], generatedAt: null, status: "pending", reason: "read-failed" }
+          : { side, rows: [], generatedAt: null, status: "pending" });
       }
       return passthrough(stored);
     }

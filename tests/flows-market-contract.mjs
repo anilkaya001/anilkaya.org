@@ -53,6 +53,15 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 
+/* THE FOUR SILENCES, COLLECTED AS THE SCENARIOS MEET THEM. Each kind is
+   recorded with the sentence it was printed under, and the tail of the file
+   asserts that all four were seen and that no two share a sentence: a page
+   that only ever emitted two of the four marks — which this one did, for
+   months — passes every per-scenario assertion and is still collapsing
+   silences. */
+const seenSilences = new Map();
+const sawSilence = (kind, text) => { if (kind) seenSilences.set(kind, text); };
+
 /* ---------- the arithmetic, before any browser ------------------- */
 {
   const row = (t, over) => Object.assign({
@@ -281,9 +290,55 @@ try {
     const text = await page.textContent("#mktStatus");
     ok(/no session has been measured yet/i.test(text || ""),
        "and the page says so as a fact about the store rather than rendering an empty chart");
-    const panels = await page.evaluate(() =>
-      [...document.querySelectorAll(".fc-panel")].filter((p) => !p.hidden).length);
-    eq(panels, 0, "with no panel drawn at all, rather than panels full of zeroes");
+    const bare = await page.evaluate(() => {
+      const first = (sel) => document.querySelector(sel);
+      const kindOf = (sel) => (first(sel) ? first(sel).getAttribute("data-empty") : null);
+      const tilt = first("#mktTilt [data-empty]");
+      return {
+        panels: [...document.querySelectorAll(".fc-panel")].filter((p) => !p.hidden).length,
+        status: document.getElementById("mktStatus").getAttribute("data-empty"),
+        statusStyle: getComputedStyle(document.getElementById("mktStatus")).borderLeftStyle,
+        tilt: kindOf("#mktTilt [data-empty]"),
+        tiltStyle: tilt ? getComputedStyle(tilt).borderLeftStyle : null,
+        tiltGlyph: tilt ? getComputedStyle(tilt, "::before").content : null,
+        tiltText: tilt ? tilt.textContent : "",
+        breadth: kindOf("#mktBreadth [data-empty]"),
+        tape: kindOf("#mktTapeBody [data-empty]"),
+        sectors: kindOf("#mktSectors [data-empty]"),
+        movers: kindOf("#mktMovers [data-empty]"),
+        pulse: kindOf("#mkPulseGrid [data-empty]"),
+        against: kindOf("#mktAgainst [data-empty]"),
+        charts: document.querySelectorAll(".mk-tide-svg").length,
+      };
+    });
+    /* THE EMPTY STORE IS SEVEN PENDING REGIONS, NOT A BLANK PAGE. The
+       controller used to return before any painter ran, so a market key the
+       pipeline had not written yet took sectors, the extremes, the pulse and
+       the board join down with it — four regions that never read that key —
+       behind one untagged sentence in the status line. Every region now
+       carries its own pending mark: the dotted bar and ellipsis flows.css
+       reserves for "still coming", which is a different mark from the dagger
+       that means "published without this field", and which pendingLine()
+       used to emit for both. */
+    eq(bare.panels, 7,
+       "every panel is drawn, each holding a pending line, rather than no panel at all — a " +
+       "panel that vanishes for a reason the reader cannot see is the worst of the silences");
+    eq(bare.status, "pending", "the status line carries the pending mark, not bare prose");
+    eq(bare.statusStyle, "dotted", "and draws it as the dotted bar");
+    for (const region of ["tilt", "breadth", "tape", "sectors", "movers", "pulse", "against"]) {
+      eq(bare[region], "pending",
+         `the ${region} region is tagged pending — an unpublished key, which is neither a ` +
+         "failed request nor a payload missing a field");
+      sawSilence(bare[region], region + ": " + bare.tiltText);
+    }
+    eq(bare.tiltStyle, "dotted",
+       "the pending line's mark is the dotted bar — the dagger it used to wear belongs to " +
+       "a published payload missing a field, which this is not");
+    ok(/…/.test(bare.tiltGlyph || ""),
+       `and the ellipsis glyph (${bare.tiltGlyph}), so the kind is legible in greyscale`);
+    ok(/has not published the market level yet/.test(bare.tiltText),
+       `naming the key that is pending (${bare.tiltText})`);
+    eq(bare.charts, 0, "and no chart is drawn from a pulse that was never published");
     await page.close();
   }
 
@@ -348,9 +403,18 @@ try {
     basis: "SPDR Select Sector ETFs, not GICS index levels",
     sectors: SECTOR_FIXTURE,
   });
+  /* THE DENOMINATORS THE PUBLISHER WRITES, in the fixture so the page can be
+     required to print them: universe is the screened population, ranked and
+     priced the names that quoted a change and a net premium, and the two
+     complements the names in no column. Nine risers against a cut of eight,
+     so the column's "8 of 9" is a number the page has to compute rather than
+     one it could echo. */
   await put("movers", {
     v: 2, status: "ok",
-    risers: [{ t: "AAA", chg: 0.081, netPrem: 1e7 }],
+    universe: 260, cap: 15, ranked: 254, priced: 250, unrankedChange: 6, unrankedPremium: 10,
+    risers: [{ t: "AAA", chg: 0.081, netPrem: 1e7 }].concat(
+      ["AB2", "AC3", "AD4", "AE5", "AF6", "AG7", "AH8", "AI9"].map((t, i) => (
+        { t, chg: 0.07 - i * 0.005, netPrem: 1e6 }))),
     fallers: [{ t: "BBB", chg: -0.064, netPrem: -2e7 }],
     premium: { bullish: [{ t: "CCC", netPrem: 5e8 }], bearish: [{ t: "DDD", netPrem: -6e8 }] },
   });
@@ -483,6 +547,14 @@ try {
       putD: g.querySelector(".mk-tide-put")
         ? g.querySelector(".mk-tide-put").getAttribute("d") : null,
       labels: [...g.querySelectorAll(".mk-tide-lab")].map((t) => t.textContent),
+      /* The x-axis ticks alone: the labels on the chart's bottom row, by x. */
+      ticks: (() => {
+        const labs = [...g.querySelectorAll(".mk-tide-lab")].map((t) => ({
+          x: Number(t.getAttribute("x")), y: Number(t.getAttribute("y")), text: t.textContent,
+        }));
+        const bottom = Math.max(...labs.map((l) => l.y));
+        return labs.filter((l) => l.y === bottom).sort((a, b) => a.x - b.x);
+      })(),
     }));
     return {
       status: txt("#mktStatus"),
@@ -500,13 +572,18 @@ try {
         n: tr.querySelectorAll("td")[1].textContent,
       })),
       bars,
-      sectors: [...document.querySelectorAll(".mk-sector-k")].map((n) => n.textContent),
+      /* The NAME is the label's first text node: the ETF ticker sits beside
+         it in a <small>, and textContent would fuse the two. */
+      sectors: [...document.querySelectorAll(".mk-sector-k")].map((n) => n.firstChild.textContent),
+      sectorEtfs: [...document.querySelectorAll(".mk-sector-k")]
+        .map((n) => (n.querySelector(".mk-sector-etf") || {}).textContent || null),
       /* THE WHOLE SECTOR ROW, not just its name: the defect this suite missed
-         lived entirely in the bar's placement and the value's sign. */
-      sectorRows: [...document.querySelectorAll(".mk-sector")].map((li) => {
+         lived entirely in the bar's placement and the value's sign. The
+         unsettled row is read apart, below: it has no bar and no value. */
+      sectorRows: [...document.querySelectorAll(".mk-sector:not(.is-unsettled)")].map((li) => {
         const bar = li.querySelector(".mk-bar");
         return {
-          name: (li.querySelector(".mk-sector-k") || {}).textContent,
+          name: li.querySelector(".mk-sector-k").firstChild.textContent,
           value: (li.querySelector(".mk-sector-v") || {}).textContent,
           cls: bar ? bar.className : null,
           width: bar ? bar.style.width : null,
@@ -516,8 +593,24 @@ try {
         };
       }),
       sectorNote: txt("#mktSectorNote"),
+      unsettled: [...document.querySelectorAll(".mk-sector.is-unsettled")].map((li) => ({
+        name: li.querySelector(".mk-sector-k").firstChild.textContent,
+        etf: (li.querySelector(".mk-sector-etf") || {}).textContent || null,
+        kind: li.querySelector("[data-empty]")
+          ? li.querySelector("[data-empty]").getAttribute("data-empty") : null,
+        text: li.querySelector("[data-empty]") ? li.querySelector("[data-empty]").textContent : "",
+        bars: li.querySelectorAll(".mk-bar").length,
+        values: li.querySelectorAll(".mk-sector-v").length,
+      })),
       movers: [...document.querySelectorAll("#mktMovers .mk-mv-t")].map((n) => n.textContent),
       moverLinks: document.querySelectorAll("#mktMovers a").length,
+      moverHeads: [...document.querySelectorAll("#mktMovers .mk-movers-h")].map((h) => ({
+        title: h.firstChild.textContent,
+        cut: (h.querySelector(".mk-movers-n") || {}).textContent || null,
+      })),
+      moverPop: txt("#mktMovers .mk-movers-pop"),
+      moverPopEmpty: document.querySelector("#mktMovers > [data-empty]")
+        ? document.querySelector("#mktMovers > [data-empty]").getAttribute("data-empty") : null,
       stackTotal: [...document.querySelectorAll(".mk-seg")]
         .reduce((s, i) => s + parseFloat(i.style.width || "0"), 0),
       againstHidden: (document.getElementById("mktAgainstPanel") || {}).hidden,
@@ -597,15 +690,42 @@ try {
      side of the centre rule, or the words in the caption, so the whole block
      holds on a greyscale printout — which is the actual requirement. */
 
-  /* A SECTOR WITH NO SETTLED READING IS OMITTED, NEVER DRAWN AT ZERO. */
-  ok(!read.sectors.includes("Real Estate"),
-     "a sector whose TRIX could not settle is left out rather than drawn as a flat bar at zero, " +
-     "which would read as measured neutrality");
-  ok(/1 sector/.test(read.sectorNote) && /omitted/i.test(read.sectorNote),
-     "and its absence is counted in the note, so the omission is visible");
-  assert.deepEqual(read.sectors, ["Technology", "Financials", "Energy", "Utilities"],
-    "the settled sectors are ranked by the RAW reading, high to low. Ranking on `trix` " +
-    "instead ties every saturated sector at 100 and then orders them arbitrarily"); checks++;
+  /* A SECTOR WITH NO SETTLED READING IS NAMED IN ITS ROW, NEVER DRAWN AT
+     ZERO. It used to be omitted and counted — "1 sector had too little
+     history to settle and is omitted" — which told a reader that one of
+     eleven was missing and not which, while the payload carried the name,
+     the ticker and the reason. The withholding is a row now: no bar, no
+     number, the reason verbatim, under the mark for a published field that
+     is not on the payload. */
+  assert.deepEqual(read.sectors, ["Technology", "Financials", "Energy", "Utilities", "Real Estate"],
+    "the settled sectors are ranked by the RAW reading, high to low — ranking on `trix` " +
+    "instead ties every saturated sector at 100 and then orders them arbitrarily — and " +
+    "the unsettled sector is listed last, by name"); checks++;
+  eq(read.unsettled.length, 1, "exactly one row is the unsettled kind");
+  const xlre = read.unsettled[0];
+  eq(xlre.name, "Real Estate", "it is the sector the fixture could not settle");
+  eq(xlre.etf, "XLRE", "with its ticker");
+  eq(xlre.bars, 0, "and NO bar: a flat bar at zero would read as measured neutrality");
+  eq(xlre.values, 0, "and no number, because there is none");
+  eq(xlre.kind, "unavailable",
+     "tagged unavailable — the payload was published and this reading is not on it — " +
+     "which is neither a failed request nor a quiet market");
+  ok(/31 usable XLRE closes of 31 returned; 106 are needed/.test(xlre.text),
+     `holding the payload's own reason verbatim (${xlre.text})`);
+  sawSilence(xlre.kind, xlre.text);
+  ok(/4 of 5 sectors settled a reading/.test(read.sectorNote),
+     `the note states the settled population with its denominator (${read.sectorNote.slice(0, 60)})`);
+  ok(/1 of 5 sectors had too little history to settle/.test(read.sectorNote) &&
+     /listed without a bar/.test(read.sectorNote),
+     "and counts the unsettled one against the same denominator, saying it is listed rather " +
+     "than omitted");
+  ok(!/omitted/.test(read.sectorNote),
+     "and no longer claims an omission, since nothing is omitted any more");
+  /* UNITS TRAVEL WITH THE LABEL TOO. Every row is a tradeable ETF and not
+     the GICS index its name suggests; the basis sentence said so five rows
+     away from the labels it was about. */
+  assert.deepEqual(read.sectorEtfs, ["XLK", "XLF", "XLE", "XLU", "XLRE"],
+    "every row, the unsettled one included, carries its ETF ticker beside the sector name"); checks++;
 
   const sec = (name) => read.sectorRows.find((r) => r.name === name);
   const xlk = sec("Technology"), xlf = sec("Financials");
@@ -686,6 +806,48 @@ try {
      "reliably lead nowhere");
   ok(read.movers.includes("AAA") && read.movers.includes("DDD"),
      "all four mover lists reach the page — eleven vendor calls a run stop being dark");
+
+  /* A COUNT NEVER APPEARS WITHOUT ITS POPULATION. Four columns of eight
+     names printed with no number anywhere saying eight of what: the payload
+     ranks fifteen deep over a screened universe it also counts, and none of
+     universe, ranked, priced, unrankedChange or unrankedPremium was read. */
+  const head = (t) => read.moverHeads.find((h) => h.title === t);
+  eq(head("Largest risers").cut, " · 8 of 9",
+     "a column cut to eight of nine ranked names says so beside its title");
+  eq(head("Largest fallers").cut, " · 1 of 1",
+     "and a column that prints its whole ranking says that too, in the same form");
+  ok(!read.movers.includes("AI9"),
+     "the ninth riser is the one cut, which is what makes the 8 of 9 a measurement");
+  ok(/254 of 260 screened names could be ranked by change and 250 by net premium/.test(read.moverPop),
+     `the open population line reads the publisher's own denominators (${read.moverPop})`);
+  ok(/6 quoted no change and 10 no net premium, and those names are in no column/.test(read.moverPop),
+     "and accounts for the names in no column out loud rather than deducting them silently");
+  eq(read.moverPopEmpty, null,
+     "with no silence mark on the panel's population, because the payload carried it");
+
+  /* THE FUSED SENTENCE. The size-rank claim had no terminator, so it ran
+     into the caveat after it: "…that quoted both legs A rank over 20
+     sessions is an ordinal claim". */
+  ok(/that quoted both legs\. A rank over 20 sessions/.test(read.pulseRank),
+     `the size rank ends in a full stop before the caveat begins (${read.pulseRank.slice(-200)})`);
+
+  /* THE X TICKS DO NOT OVERPRINT. Twenty sessions make the step 6, so the
+     ticks fall on 0, 6, 12, 18 and then the newest session, 19, is pushed
+     one bucket after 18 — two five-glyph mono labels a bucket apart, which
+     rendered as "07-2307-24". The newest stamp always prints; the one
+     crowding it is dropped. */
+  const totalsTicks = read.svgs[1].ticks;
+  ok(totalsTicks.length >= 3, `the totals chart labels at least three sessions (${totalsTicks.length})`);
+  totalsTicks.slice(1).forEach((t, i) => {
+    ok(t.x - totalsTicks[i].x >= 40,
+       `x ticks "${totalsTicks[i].text}" and "${t.text}" are ${(t.x - totalsTicks[i].x).toFixed(1)}px ` +
+       "apart — never under 40px, where two five-glyph labels overprint");
+  });
+  eq(totalsTicks[totalsTicks.length - 1].text, dayStamp(1).slice(5),
+     "and the newest session keeps its label, so the tick dropped was the one crowding it");
+
+  read.againstEmpties.forEach((e) => sawSilence(e.kind, e.text));
+  read.pulseCards.forEach((c) => c.empties.forEach((e) => sawSilence(e.kind, e.text)));
 
   /* THE PROSE TRAVELS WITH THE NUMBERS. */
   ok(/screened universe/i.test(read.foot),
@@ -937,6 +1099,9 @@ try {
           hidden: panel ? panel.hidden : null,
           kind: empty ? empty.getAttribute("data-empty") : null,
           text: empty ? empty.textContent : "",
+          /* The mark, computed: the kind has to be visible, not only readable. */
+          bar: empty ? getComputedStyle(empty).borderLeftWidth : null,
+          glyph: empty ? getComputedStyle(empty, "::before").content : null,
         };
       };
       return {
@@ -949,7 +1114,14 @@ try {
     });
 
     eq(dead.sectors.hidden, false, "a failed sector fetch still draws its panel");
-    eq(dead.sectors.kind, "unavailable", "tagged as a failure to produce a reading");
+    eq(dead.sectors.kind, "unreadable",
+       "tagged UNREADABLE — a request that never came back is this page's failure to read, " +
+       "and it wore the dagger of 'published without this field' until the two were told apart");
+    eq(dead.sectors.bar, "3px",
+       "under the 3px bar flows.css reserves for the one silence whose remedy is reload");
+    ok(/×/.test(dead.sectors.glyph || ""),
+       `with the cross glyph (${dead.sectors.glyph}), so the kind survives greyscale`);
+    sawSilence(dead.sectors.kind, dead.sectors.text);
     ok(/did not come back/.test(dead.sectors.text),
        `and says the REQUEST failed (${dead.sectors.text})`);
     ok(!/has not published/.test(dead.sectors.text),
@@ -961,13 +1133,13 @@ try {
     eq(dead.movers.hidden, false,
        "and the movers panel is DRAWN rather than deleted: a section that vanishes for a " +
        "reason the reader cannot see is the worst of the silences");
-    eq(dead.movers.kind, "unavailable", "with the same tag");
+    eq(dead.movers.kind, "unreadable", "with the same tag");
     ok(/did not come back/.test(dead.movers.text), "and the same distinction in words");
 
     eq(dead.pulse.hidden, false,
        "and the whole pulse SECTION is drawn: seven feeds and two charts used to disappear " +
        "together on a failed request, with no sentence left where they had been");
-    eq(dead.pulse.kind, "unavailable", "tagged as a read failure");
+    eq(dead.pulse.kind, "unreadable", "tagged as a read failure");
     ok(/did not come back/.test(dead.pulse.text),
        `naming the request rather than the pipeline (${dead.pulse.text})`);
     eq(dead.charts, 0,
@@ -980,6 +1152,78 @@ try {
        `and names WHICH of its two inputs failed (${dead.against.text})`);
 
     await failing.close();
+  }
+
+  /* ---------- AND THE LOAD-BEARING KEY ITSELF REFUSED ------------------
+
+     THE DEFECT: the market key kept the bare get(), so an HTTP 500 on it
+     fell to the catch, which wrote "could not be loaded: HTTP 500" into the
+     status line with no data-empty on it and stopped. The three regions
+     the key feeds stayed hidden, and so did the four that never read it —
+     sectors, the extremes, the pulse and the join were deleted by a failure
+     on a key they do not need. Fulfilled with a 500 rather than aborted, so
+     the branch under test is the one a real upstream error takes. */
+  {
+    const broken = await browser.newPage();
+    await broken.context().addCookies([{
+      name: "flows_session", value: token, url: server.baseURL,
+    }]);
+    await broken.route("**/api/flows/market", (route) =>
+      route.fulfill({ status: 500, contentType: "text/plain", body: "upstream" }));
+    await broken.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+    /* Settled on the status line, which both the fixed and the old
+       controller write, so the old one fails on an assertion below and not
+       on a wait for a panel it never draws. */
+    await broken.waitForFunction(
+      () => !/Loading the session/.test(document.getElementById("mktStatus").textContent),
+      null, { timeout: 15000 });
+
+    const refused = await broken.evaluate(() => {
+      const one = (sel) => {
+        const e = document.querySelector(sel);
+        return e ? {
+          kind: e.getAttribute("data-empty"), text: e.textContent,
+          bar: getComputedStyle(e).borderLeftWidth,
+        } : null;
+      };
+      return {
+        status: one("#mktStatus"),
+        tilt: one("#mktTilt [data-empty]"),
+        breadth: one("#mktBreadth [data-empty]"),
+        tape: one("#mktTapeBody [data-empty]"),
+        panels: [...document.querySelectorAll(".fc-panel")].filter((p) => !p.hidden).length,
+        sectorRows: document.querySelectorAll(".mk-sector").length,
+        moverNames: [...document.querySelectorAll("#mktMovers .mk-mv-t")].map((n) => n.textContent),
+        charts: document.querySelectorAll(".mk-tide-svg").length,
+        staleHidden: document.getElementById("mktStale").hidden,
+      };
+    });
+
+    eq(refused.tilt && refused.tilt.kind, "unreadable",
+       "the market key's failure is painted where the level would have been, as unreadable");
+    ok(/HTTP 500/.test(refused.tilt.text),
+       `carrying the status the request came back with (${refused.tilt.text})`);
+    eq(refused.tilt.bar, "3px", "under the 3px bar, which no other kind wears");
+    eq(refused.breadth && refused.breadth.kind, "unreadable", "the breadth region says the same");
+    eq(refused.tape && refused.tape.kind, "unreadable",
+       "and so does the tape, inside its own table rather than as a header over nothing");
+    eq(refused.status.kind, "unreadable",
+       "the status line carries the mark too, instead of the bare prose it used to hold");
+    ok(/did not come back: HTTP 500/.test(refused.status.text),
+       `and names the request rather than the pipeline (${refused.status.text})`);
+    eq(refused.panels, 7,
+       "all seven panels are drawn: four of them never read this key and paint from " +
+       "their own settled payloads");
+    ok(refused.sectorRows >= 4,
+       `the sector list is drawn from its own payload (${refused.sectorRows} rows)`);
+    ok(refused.moverNames.includes("AAA"), "the extremes are drawn from theirs");
+    eq(refused.charts, 2, "and the pulse draws both its charts");
+    eq(refused.staleHidden, true,
+       "while no stale verdict is passed on a payload that never arrived — an age cannot " +
+       "be measured on nothing");
+    sawSilence(refused.tilt.kind, refused.tilt.text);
+
+    await broken.close();
   }
 
   /* ---------- THE STALE BANNER, which nothing had ever written ----------
@@ -1290,7 +1534,7 @@ try {
     const part = await half.evaluate(() => {
       const col = (hostId) => [...document.querySelectorAll("#" + hostId + " .mk-movers-col")]
         .map((c) => ({
-          title: (c.querySelector(".mk-movers-h") || {}).textContent,
+          title: ((c.querySelector(".mk-movers-h") || {}).firstChild || {}).textContent,
           kind: c.querySelector("[data-empty]")
             ? c.querySelector("[data-empty]").getAttribute("data-empty") : null,
           text: c.querySelector("[data-empty]")
@@ -1314,8 +1558,12 @@ try {
         rank: (document.querySelector(".mk-pulse-rank") || {}).textContent || "",
         stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
         sectorNote: (document.getElementById("mktSectorNote") || {}).textContent || "",
+        moverPop: document.querySelector("#mktMovers > [data-empty]") ? {
+          kind: document.querySelector("#mktMovers > [data-empty]").getAttribute("data-empty"),
+          text: document.querySelector("#mktMovers > [data-empty]").textContent,
+        } : null,
         sectorBars: [...document.querySelectorAll(".mk-sector")].map((li) => ({
-          name: (li.querySelector(".mk-sector-k") || {}).textContent,
+          name: li.querySelector(".mk-sector-k").firstChild.textContent,
           width: (li.querySelector(".mk-bar") || {}).style
             ? li.querySelector(".mk-bar").style.width : null,
         })),
@@ -1367,6 +1615,15 @@ try {
        "and the missing premium extreme is unavailable too");
     assert.deepEqual(mv("Most net call premium").names, ["GGG", "ZZZ"],
       "while the one ranking that did arrive is drawn"); checks++;
+    /* A PAYLOAD WITH NO DENOMINATOR SAYS SO. This fixture carries none of
+       universe, ranked, priced or the two complements, so the population line
+       under the columns is the unavailable kind rather than an em dash or
+       nothing — a published payload missing a field, marked as one. */
+    eq(part.moverPop && part.moverPop.kind, "unavailable",
+       "the missing denominators are a marked silence under the columns");
+    ok(/no count of the screened names it ranked/.test((part.moverPop || {}).text || ""),
+       `naming what is missing (${(part.moverPop || {}).text})`);
+    sawSilence(part.moverPop.kind, part.moverPop.text);
 
     /* THE JOIN, WITH ONE SIDE UNJOINABLE. */
     const ag = (t) => part.against.find((c) => c.title === t);
@@ -1807,6 +2064,13 @@ try {
        "a typo");
   }
 
+  /* ---------- THE FOUR SILENCES, TOLD APART ----------------------------- */
+  assert.deepEqual([...seenSilences.keys()].sort(), ["pending", "quiet", "unavailable", "unreadable"],
+    "the scenarios above, taken together, met all four kinds of silence — an unpublished " +
+    "key, a request that never came back, a published payload missing a field, and a " +
+    "reading taken and found empty — each under its own data-empty"); checks++;
+  eq(new Set(seenSilences.values()).size, seenSilences.size,
+     "and no two kinds were printed under the same sentence");
 } finally {
   await browser.close();
   await server.stop();

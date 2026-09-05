@@ -352,10 +352,20 @@ try {
        /is-neg/.test(by["Tilt · dollars"]?.cls || ""),
        `and a sold tape is toned as one on both (${by["Tilt · names"]?.cls})`);
     eq(by.Breadth?.v, "9 / 12", "breadth is bull over bear, from the market payload");
-    eq(by["Both sides"]?.v, "5 / 4", "and both boards are counted whole, not to the region cap");
+    /* THE POOL, NOT THE ROWS. Neither fixture board publishes `cleared`, so
+       here the pool IS the row count and the two readings agree; the pooled
+       phase below is where they part and the tile has to follow the rail. */
+    eq(by.Cleared?.v, "5 / 4", "and both boards are counted whole, not to the region cap");
+    eq(by.Cleared?.s, "bull / bear cleared the band",
+       "under the population's own name, with no not-carried clause when nothing was shed");
+    ok(!("Both sides" in by), "and the old row-count tile is gone rather than kept beside it");
     eq(by["Flagged windows"]?.v, "7", "the vendor's flagged-window count");
     eq(by["Flagged windows"]?.s, "nightly read",
        "carrying WHEN it was read, because the number means nothing without it");
+    /* A TILE WITH A READING CARRIES NO SILENCE MARK. The four kinds are
+       asserted one by one further down; here every tile holds a number. */
+    eq(await page.locator("#ccVerdict .cc-tile[data-empty]").count(), 0,
+       "and no tile on a fully published session wears a silence mark");
   }
 
   /* ---------- both sides, whole ---------------------------------- */
@@ -840,7 +850,7 @@ try {
       Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
         t.querySelector(".cc-tile-k")?.textContent.trim(),
         t.querySelector(".cc-tile-v")?.textContent.trim()])));
-    eq(tiles["Both sides"], "\u2014 / 4", "the unreadable side is an em dash, never a 0");
+    eq(tiles.Cleared, "\u2014 / 4", "the unreadable side is an em dash, never a 0");
     eq(tiles.Session, SESSION, "and the session is taken off the half that answered");
 
     /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
@@ -968,7 +978,12 @@ try {
 
     const watchMany = Array.from({ length: 12 }, (_, i) => ({
       t: "W" + String(i + 1).padStart(2, "0"), r: i + 1, s: 18 - i,
-      cnv: 40, px: 10 + i, resid: 0.0200 - i * 0.0011,
+      cnv: 40, px: 10 + i,
+      /* SIGNED, ALTERNATING, SO THE FIRST ROW IS BELOW ZERO. The list
+         printed the residual through toFixed, which writes a hyphen-minus,
+         while every other signed number on the page carries U+2212 — and a
+         fixture of positive residuals could never see the glyph. */
+      resid: (i % 2 ? 1 : -1) * (0.0200 - i * 0.0011),
     }));
     await post("board:watch", { ...watch, rows: watchMany });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -977,6 +992,20 @@ try {
        "twelve published rows are listed eight deep");
     eq((await page.locator("#ccWatchSub").textContent()).trim(), "8 of 12",
        "and the anchor says eight of twelve rather than \"all 12\" over eight names");
+    /* THE SIGN IS THE PAGE'S GLYPH AND THE UNIT IS ON THE ROW. "-0.0080"
+       sat here beside "conv 60": a hyphen-minus twelve pixels from a ranked
+       score in U+2212, and a four-decimal number whose quantity — the
+       cross-sectional residual — was named only in a title a mouse can
+       reach. */
+    const band = await page.evaluate(() => Array.from(
+      document.querySelectorAll("#ccWatch .cc-moves li"), (li) => ({
+        text: li.textContent, num: li.children[1].textContent.trim() })));
+    eq(band[0].num, "resid −0.0200",
+       "a residual below zero carries U+2212, the page's one minus, and the name of its unit");
+    eq(band[1].num, "resid +0.0189",
+       "and one above zero carries the plus every other signed number here carries");
+    ok(band.every((r) => !/-\d/.test(r.text)),
+       "so no row in the band prints a hyphen-minus before a digit");
     eq(await page.evaluate(
        () => document.querySelector('[data-rail-count="watch"]').textContent.trim()), "12",
        "while the rail still badges the whole board, which is what its link opens");
@@ -1042,6 +1071,46 @@ try {
     });
     eq(flagged.v, "44",
        "which is the same number the verdict tile has always printed twelve pixels away");
+
+    /* THE CEILING IS NOT A CENSUS. shared/flows-alerts.js publishes
+       `vendorTruncated` beside `seen` when the read came back at the vendor's
+       documented maximum; the 2026-08-24 payload carries seen 200,
+       vendorLimit 200, vendorTruncated true, and this tile printed "200" over
+       a subtitle reading "8 of 200" — the ceiling printed as the population.
+       The true count is unknown and at least that large, which is what ≥
+       says; and it is said in words too, in the open, because a withholding
+       never folds. The bare count on a read published as not truncated is
+       asserted right after, on the same fixture. */
+    await post("flowalerts", { ...alerts, seen: 44, rows: alertMany,
+      vendorLimit: 44, vendorTruncated: true });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    const ceiling = await page.evaluate(() => {
+      const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
+        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
+      return { v: tile.querySelector(".cc-tile-v").textContent.trim(),
+               s: tile.querySelector(".cc-tile-s").textContent.trim(),
+               sub: document.getElementById("ccAlertsSub").textContent.trim() };
+    });
+    eq(ceiling.v, "≥44",
+       "a read that hit the vendor's ceiling prints the count as a floor, never as a census");
+    ok(/vendor ceiling/.test(ceiling.s) && /population unknown/.test(ceiling.s),
+       `and says so in words beside the cadence, in the open (${ceiling.s})`);
+    ok(/nightly read/.test(ceiling.s),
+       `without dropping when the read was taken to make room (${ceiling.s})`);
+    ok(/^8 of ≥44 · read /.test(ceiling.sub),
+       `and the region subtitle carries the same floor, so the two cannot disagree (${ceiling.sub})`);
+    await post("flowalerts", { ...alerts, seen: 44, rows: alertMany,
+      vendorLimit: 44, vendorTruncated: false });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
+    const under = await page.evaluate(() => ({
+      v: Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
+        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows")
+        .querySelector(".cc-tile-v").textContent.trim(),
+      sub: document.getElementById("ccAlertsSub").textContent.trim() }));
+    eq(under.v, "44", "a read published as NOT truncated prints the bare count");
+    ok(/^8 of 44 · read /.test(under.sub), `on the tile and in the subtitle alike (${under.sub})`);
 
     /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. Both
        current writers set `refreshed`; the else-branch printed "nightly
@@ -1339,6 +1408,37 @@ try {
        "slot from its own rows.length, so moving this one alone would open the split the two " +
        "board badges just closed");
 
+    /* ONE POPULATION, ONE NUMBER, IN EVERY PLACE THIS PAGE PRINTS IT. The
+       badge was moved to the pool and the verdict tile, the status line and
+       the pole subtitle were left on the rows, so the 2026-08-24 screen read
+       "Bearish 53" in the rail, "44 / 50" in the tile, "50 bearish" on the
+       status line and "top 10 of 50" over the region — four prints of one
+       side, two numbers, and no clause relating them. The numerators are
+       read off the tile and compared to the badge rather than to a literal,
+       so the two cannot drift apart under one label again. */
+    const onePop = await page.evaluate(() => {
+      const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
+        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Cleared");
+      return {
+        v: tile.querySelector(".cc-tile-v").textContent.trim(),
+        s: tile.querySelector(".cc-tile-s").textContent.trim(),
+        status: document.getElementById("flowsStatus").textContent.trim(),
+        bullSub: document.getElementById("ccBullSub").textContent.trim(),
+        bearSub: document.getElementById("ccBearSub").textContent.trim(),
+      };
+    });
+    eq(onePop.v, "12 / 9", "the Cleared tile prints the pool the rail badges");
+    eq(onePop.v.split(" / ")[1], pooled.short,
+       "read back against the badge rather than a literal: one bearish population, one number");
+    eq(onePop.v.split(" / ")[0], pooled.long, "and the same on the bullish side");
+    ok(/7 bull and 5 bear counted, not carried/.test(onePop.s),
+       `and the tile says what the cap took, beside the pool, in the open (${onePop.s})`);
+    ok(/5 of 12 bullish carried · 4 of 9 bearish carried/.test(onePop.status),
+       `the status line reconciles the rows it drew against the same pool (${onePop.status})`);
+    eq(onePop.bullSub, "top 5 of 12",
+       "and the pole subtitle counts against the pool its link opens, not the excerpt on the wire");
+    eq(onePop.bearSub, "top 4 of 9", "on both sides");
+
     /* THE ASSERTION THE WHOLE FIX IS FOR: ONE SLOT, TWO ROUTES, ONE NUMBER.
        Each half of this pair passed on its own while the two disagreed — the
        overview badged 5 and /flows/long/ badged 5 out of a pool of 12, and a
@@ -1589,6 +1689,166 @@ try {
     await post("market", market);
   }
 
+  /* ---------- four silences, four tiles, four marks ---------------- */
+  {
+    /* BOTH TILT TILES SAID "not measured this session" FOR THREE FAULTS OF
+       THIS PAGE AND ONE READING. /api/flows/market failing to read, the key
+       being unpublished, the payload predating `breadth.tilt`, and a session
+       in which no name leaned all printed the same words — words shaped as a
+       claim about the session, which only the last of them is. The Session
+       tile did the same with a bare em dash and no sub at all. Each tile now
+       carries the kind on data-empty, and the stylesheet draws the mark the
+       region silences wear, so the four are told apart without prose and
+       without colour: the mark is read here as shape and glyph only. */
+    const readTiles = () => page.evaluate(() => Object.fromEntries(
+      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => {
+        const sub = t.querySelector(".cc-tile-s");
+        const cs = getComputedStyle(t);
+        const glyph = sub ? getComputedStyle(sub, "::before").content : "none";
+        return [t.querySelector(".cc-tile-k")?.textContent.trim(), {
+          v: t.querySelector(".cc-tile-v")?.textContent.trim(),
+          s: sub ? sub.textContent.trim() : "",
+          kind: t.dataset.empty || null,
+          mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " + glyph,
+        }];
+      })));
+    const marks = new Map();
+    const TILTS = ["Tilt · names", "Tilt · dollars"];
+
+    /* 1. UNREADABLE: the request did not come back. This page's fault. */
+    allowFetchFailure = true;
+    await page.route("**/api/flows/market", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    let tiles = await readTiles();
+    for (const k of [...TILTS, "Breadth", "Screened"]) {
+      eq(tiles[k]?.v, k === "Breadth" ? "— / —" : "—",
+         `${k} is an em dash when the market payload could not be read`);
+      eq(tiles[k]?.kind, "unreadable", `and is marked as this page's fault (${k})`);
+      ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
+         `worded as the fetch silence, never as a reading about the session (${tiles[k]?.s})`);
+    }
+    marks.set("unreadable", tiles[TILTS[0]].mark);
+    await page.unroute("**/api/flows/market");
+    allowFetchFailure = false;
+
+    /* 2. PENDING: the key has never been published, served as the Worker
+       serves it — a truthy envelope with nothing in it. */
+    await page.route("**/api/flows/market", (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ status: "pending", rows: [] }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    for (const k of TILTS) {
+      eq(tiles[k]?.v, "—", `${k} is an em dash on an unpublished market key`);
+      eq(tiles[k]?.kind, "pending", `and is marked pending (${k})`);
+      eq(tiles[k]?.s, "not published yet", `in the pipeline's own silence (${k})`);
+    }
+    marks.set("pending", tiles[TILTS[0]].mark);
+    await page.unroute("**/api/flows/market");
+
+    /* 3. UNAVAILABLE: published, and neither tilt is on it — a payload that
+       predates the field. Breadth and Screened still read, because their
+       fields are there, and they carry no mark. */
+    await post("market", { ...market,
+      breadth: { bull: 9, bear: 12, flat: 0, unpriced: 3 }, premium: { net: -18400000 } });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    for (const k of TILTS) {
+      eq(tiles[k]?.v, "—", `${k} is an em dash when the payload carries no tilt`);
+      eq(tiles[k]?.kind, "unavailable", `and is marked as the payload's gap (${k})`);
+      eq(tiles[k]?.s, "not on this payload", `worded as one, not as a session that measured nothing (${k})`);
+    }
+    eq(tiles.Breadth?.v, "9 / 12", "while the breadth the same payload does carry still prints");
+    eq(tiles.Breadth?.kind, null, "with no mark on a tile that has its reading");
+    marks.set("unavailable", tiles[TILTS[0]].mark);
+
+    /* 4. QUIET: measured, and nothing leaned. The shaper publishes tilt as
+       null when bull + bear is 0 and when the gross premium is 0
+       (shared/flows-market.js:157, :168); both denominators are on the
+       payload as measured zeros, so this — and only this — is a reading. */
+    await post("market", { ...market,
+      breadth: { bull: 0, bear: 0, flat: 264, unpriced: 0, tilt: null },
+      premium: { netPositive: 0, netNegative: 0, net: 0, priced: 0, oneLegged: 0,
+                 tilt: null, topShare: null } });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    eq(tiles["Tilt · names"]?.kind, "empty", "a session in which no name leaned is measured-empty");
+    eq(tiles["Tilt · names"]?.s, "no name leaned", "and says so as a reading about the session");
+    eq(tiles["Tilt · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
+    eq(tiles["Tilt · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
+    eq(tiles.Breadth?.v, "0 / 0", "and the measured zeros behind it print as zeros");
+    eq(tiles.Breadth?.kind, null, "which are a reading, not a silence");
+    marks.set("empty", tiles[TILTS[0]].mark);
+    await post("market", market);
+
+    /* FOUR KINDS, FOUR MARKS, AND NONE OF THEM IS A HUE. Border style, border
+       width and the leading glyph are the channels a monochrome printout
+       keeps; two marks that differed by colour alone would be one mark here. */
+    eq(marks.size, 4, "the four silences were each seen once");
+    eq(new Set(marks.values()).size, 4,
+       `and draw four different marks by shape and glyph alone (${[...marks].map(
+         ([k, m]) => k + ": " + m).join(" | ")})`);
+
+    /* THE SESSION TILE, THE SAME WAY. The two boards are two writes of one
+       session, so the tile is a silence only when neither half named it —
+       unreadable if either fetch failed, pending if both are unpublished,
+       unavailable if a half answered without the field. */
+    allowFetchFailure = true;
+    for (const side of ["long", "short"]) {
+      await page.route("**/api/flows/board?side=" + side, (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+    }
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    eq(tiles.Session?.v, "—", "with both boards unreadable the session is an em dash");
+    eq(tiles.Session?.kind, "unreadable", "marked as this page's fault");
+    ok(/could not be read/.test(tiles.Session?.s), `and worded as one (${tiles.Session?.s})`);
+    eq(tiles.Cleared?.v, "— / —", "and so is the pool on both sides");
+    eq(tiles.Cleared?.kind, "unreadable", "under the same mark");
+    for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
+    allowFetchFailure = false;
+
+    for (const side of ["long", "short"]) {
+      await page.route("**/api/flows/board?side=" + side, (route) => route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({ side, rows: [], generatedAt: null, status: "pending" }) }));
+    }
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    eq(tiles.Session?.kind, "pending", "with both boards unpublished the session is pending");
+    eq(tiles.Session?.s, "not published yet", "in the pipeline's own words");
+    eq(tiles.Cleared?.kind, "pending", "and so is the pool");
+    for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
+
+    /* A half that answered without a date, beside a half that has not
+       published: the page has a board and no session to name. */
+    await page.route("**/api/flows/board?side=long", (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ ...board("long", bullRows, SESSION, { deep: 4 }),
+                             sessionDate: undefined }) }));
+    await page.route("**/api/flows/board?side=short", (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ side: "short", rows: [], generatedAt: null, status: "pending" }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
+    tiles = await readTiles();
+    eq(tiles.Session?.kind, "unavailable",
+       "a board published without a session date is the payload's gap, not a fetch that failed");
+    eq(tiles.Session?.s, "not on this payload", "and is worded as one");
+    eq(tiles.Cleared?.v, "5 / —",
+       "while the pool prints the half that answered beside a dash for the half that has not");
+    eq(tiles.Cleared?.kind, null,
+       "with no mark, because the dash is explained in that half's own region and on the status line");
+    for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
+  }
+
   /* ---------- a pending pole does not hide a published one ------- */
   {
     /* THE WORKER'S UNPUBLISHED ANSWER IS A TRUTHY OBJECT —
@@ -1668,6 +1928,24 @@ try {
     ok(Math.abs(wide.rendered - wide.host) <= 1,
        `and the drawing is the measured host width, not a 900-unit clamp (${wide.host})`);
     eq(wide.par, "xMidYMid meet", "with the aspect rule the invariant names");
+
+    /* AND THE SAME INVARIANT ON EVERY RANKED ROW'S STRIP. scoreStrip draws
+       150 units wide with width="150", and the cell it sat in was 156px —
+       laid out as a border box, so after the table's 0.52rem left pad and
+       the cell's 0.6rem right pad the content box was ~138px and base.css's
+       `svg { max-width: 100% }` rendered the drawing at 139.375px: 0.93 CSS
+       px per unit on every row, the rescale the cell's own comment says it
+       exists to prevent. Measured on every strip, at the canvas width where
+       nothing else could be squeezing the table. */
+    const strips = await page.evaluate(() => Array.from(
+      document.querySelectorAll(".cc-trk svg"), (s) => ({
+        attr: Number(s.getAttribute("width")), rendered: s.getBoundingClientRect().width })));
+    ok(strips.length >= 8, `every ranked row with a trace draws a strip (${strips.length})`);
+    for (const s of strips) {
+      eq(s.attr, Math.round(s.rendered),
+         `a score strip renders at its own width attribute, one viewBox unit per CSS pixel ` +
+         `(${s.attr} units drawn at ${s.rendered}px)`);
+    }
 
     /* REDRAWN AT THE NEW WIDTH, NEVER SCALED TO IT. Without the debounced
        repaint the first drag of a window edge reintroduces the same defect
@@ -2369,6 +2647,22 @@ try {
     ok(/POSITION/.test(note),
        "and that the sign is carried by position, which is what survives greyscale");
 
+    /* THE FINDING NAMES ITS SUBJECTS. The lead sentence read `hi.t`, the
+       board row's key, on rows keyed `etf`/`sector` — so it printed
+       "undefined leans most bullish at +27.8% of its own premium; undefined
+       most bearish at −22.1%." on every live session, and this file asserted
+       the table under it without ever reading it. Built through the same
+       pct() the cells use, from the two rows the ordering put at the ends,
+       so lead and column cannot disagree. */
+    const finding = (await page.locator("#ccLean .fc-reading").textContent()).trim();
+    /* The note legitimately says "0/0 is undefined" about the quiet basket,
+       so the word is checked where the defect printed it: as a subject. */
+    ok(!/undefined (leans|most|is)/.test(region),
+       `no sentence in the region has "undefined" for a subject (${finding})`);
+    eq(finding,
+       "XLB leans most bullish at +62.0% of its own premium; XLE most bearish at −55.0%.",
+       "the finding names the top and bottom basket by ticker, at the percentages their cells print");
+
     eq((await page.locator("#ccLeanSub").textContent()).trim(), "8 of 11 leaned",
        "the subtitle counts the baskets that produced a lean against the eleven asked about");
   }
@@ -2727,6 +3021,25 @@ try {
          "neutral one, it is an invisible one");
     }
 
+    /* AND THE TWO INLINE TAGS ON A RANKED NAME STAND APART FROM IT. .cc-cross
+       and .cc-ern follow the ticker inside one cell with no text node
+       between, and neither had a rule at all — so the page printed
+       "SYN132cleared" and "SYN182⚠38d" as one token, a number and its unit
+       glued to a name, at a measured gap of 0px. */
+    const tagGap = await page.evaluate(() => ["cc-cross", "cc-ern"].map((c) => {
+      const tag = document.querySelector(".cc-bull ." + c + ", .cc-bear ." + c);
+      if (!tag) return { c, present: false };
+      const prev = tag.previousElementSibling;
+      return { c, present: true, margin: parseFloat(getComputedStyle(tag).marginLeft),
+               gap: prev ? tag.getBoundingClientRect().left - prev.getBoundingClientRect().right
+                         : null };
+    }));
+    for (const t of tagGap) {
+      ok(t.present, `a ranked row carries a .${t.c} tag to measure`);
+      ok(t.margin > 0 && t.gap > 0,
+         `.${t.c} stands apart from the ticker it follows (margin ${t.margin}px, gap ${t.gap}px)`);
+    }
+
     /* AND THE PAGE STILL DOES NOT WIDEN. Two regions were added to a
        twelve-column grid; the one thing that can go wrong at 320px is the
        document itself scrolling sideways, which no overflow container
@@ -2749,7 +3062,11 @@ try {
     `in the payload's own rank order, a score strip per row on one shared domain, earnings ` +
     `joined onto the ranked names in the events payload's own unit and the score joined ` +
     `back onto the calendar, both weightings of the tilt rather than a silent choice ` +
-    `between them, four silences in four sentences, a spine at one viewBox unit per CSS ` +
+    `between them, four silences in four sentences on the regions and on the verdict tiles ` +
+    `with a mark apiece, one bearish population printed as one number in the rail, the tile, ` +
+    `the status line and the pole subtitle, a vendor ceiling printed as a floor and never a ` +
+    `census, a residual signed in U+2212 with its unit named on the row, a spine and every ` +
+    `score strip at one viewBox unit per CSS ` +
     `pixel that repaints on resize and trails only the moves the two payloads agree are ` +
     `this session's, a staleness guard that is flows-ui.js's one test rather than a second ` +
     `copy of it, two halves that refuse to be presented as one session when they are not, ` +

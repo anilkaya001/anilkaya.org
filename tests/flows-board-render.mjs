@@ -307,23 +307,32 @@ eq(railFull.text, "8",
 eq(railFull.hidden, false, "and the slot is shown once it has a measurement in it");
 
 /* THE PENDING CASE IS WRITTEN, NOT ARRANGED BY DELETION. This is the exact
-   envelope the Worker answers with (worker.js:2605) both when the board row is
-   absent and when the D1 read THREW, so the page under test reads the same
-   bytes either cause produces. */
+   envelope the Worker answers with for a board row that is ABSENT (worker.js,
+   the board route). A D1 read that THREW answers the same shape with
+   `reason: "read-failed"` on it, and section 12 feeds that one separately —
+   the two used to be byte-identical, which is why this page once hedged one
+   sentence across both causes. */
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForFunction(() => !!document.querySelector('[data-empty="unavailable"]'));
+/* Waited for by CLASS, asserted by KIND: a wait keyed to the right kind would
+   report a collapsed silence as a timeout rather than as the assertion below. */
+await page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
 const railPending = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="long"]');
+  const p = document.querySelector("p.fb-empty[data-empty]");
   return {
     text: el ? el.textContent : null,
     hidden: el ? el.hidden : null,
-    msg: document.querySelector('[data-empty="unavailable"]').textContent,
+    kind: p.getAttribute("data-empty"),
+    msg: p.textContent,
   };
 });
-ok(/No board is available for this side/.test(railPending.msg),
-   "the pending payload reaches the branch that says no board is available — the badge is being " +
-   "read BESIDE that sentence, so the sentence is confirmed on screen rather than assumed");
+eq(railPending.kind, "pending",
+   "the absent-row envelope is tagged PENDING — “not published yet” — and no longer wears the " +
+   "dagger that means “published, and this field is not on it”");
+ok(/No board has been published for this side yet/.test(railPending.msg),
+   "the pending payload reaches the branch that says no board has been published — the badge is " +
+   "being read BESIDE that sentence, so the sentence is confirmed on screen rather than assumed");
 eq(railPending.hidden, true,
    "the badge stays HIDDEN on a pending board. The fill at flows-board.js:1811 runs BEFORE the " +
    "pending branch at :1840, and a pending payload has rows.length 0 by construction, so the " +
@@ -349,7 +358,9 @@ const railQuiet = await page.evaluate(() => {
   return {
     text: el ? el.textContent : null,
     hidden: el ? el.hidden : null,
-    msg: document.querySelector('[data-empty="quiet"]').textContent,
+    /* THE PARAGRAPH, NOT THE FIRST MARKED ELEMENT. The status line above the
+       deck now carries the same data-empty, and it comes first in the DOM. */
+    msg: document.querySelector('p.fb-empty[data-empty="quiet"]').textContent,
   };
 });
 ok(/130 names were scored/.test(railQuiet.msg),
@@ -450,6 +461,280 @@ eq(railZero.text, "0",
    "absence of it");
 eq(railZero.hidden, false, "and it is visible, for the reason the fallback arm already gives");
 
+/* ---- 12. the deck's silences are four, not one ---------------------- */
+
+/* WHAT THIS SECTION MEASURES. showMessage() has stamped data-empty on
+   p.fb-empty since the deck view existed, and flows.css scoped every silence
+   mark to :is(.flows-empty, .cc-quiet, .ft-quiet) — a list the board's own
+   paragraph was never in. Measured on the emitted corpus: a short side that
+   scored 100 names and placed none (quiet, a reading about the market) and a
+   long side the store had never held (pending) were one centred grey
+   sentence, told apart only by reading it. And the Worker answered a
+   never-published key and a D1 read that THREW with byte-identical
+   envelopes, so the page could not have told THOSE apart even had it tried;
+   it tagged both "unavailable", a word the taxonomy reserves for "published,
+   and this field is not on it". The Worker now stamps `reason: "read-failed"`
+   on the failed read. This suite feeds that envelope by ingesting it — a
+   local D1 cannot be made to throw from a browser test — and
+   tests/flows-worker-contract.mjs proves the Worker writes it.
+
+   THE ASSERTION IS DISTINCTNESS ON THE MONOCHROME CHANNELS, as in
+   flows-motion.mjs: border style and width carry no hue, so four silences
+   separable on those two alone survive a greyscale printout. The glyph is
+   read as well, because it is the channel a screen magnifier keeps. Each
+   fixture is also checked against the taxonomy's own shape — pending dotted,
+   unavailable dashed, unreadable a wide solid, quiet a hairline — so a
+   future stylesheet that made them four DIFFERENT wrong shapes fails here
+   rather than passing a distinctness test. */
+const readSilence = () => page.evaluate(() => {
+  const p = document.querySelector("p.fb-empty");
+  if (!p) return null;
+  const cs = getComputedStyle(p);
+  const before = getComputedStyle(p, "::before");
+  const status = document.getElementById("flowsStatus");
+  return {
+    kind: p.getAttribute("data-empty"),
+    text: p.textContent,
+    style: cs.borderLeftStyle,
+    width: cs.borderLeftWidth,
+    glyph: before.content,
+    align: cs.textAlign,
+    justify: cs.justifySelf,
+    statusKind: status.getAttribute("data-empty"),
+    statusText: status.textContent,
+  };
+});
+const silences = {};
+
+/* Every wait below is keyed to the CLASS and every kind is asserted after,
+   so a silence that collapses into its neighbour fails on a sentence naming
+   the collapse rather than on a thirty-second timeout. */
+const waitMessage = () => page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
+
+/* quiet: board:short still holds the scored-130, cleared-0 fixture above. */
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await waitMessage();
+silences.quiet = await readSilence();
+
+/* pending: the absent-row envelope, verbatim. */
+await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await waitMessage();
+silences.pending = await readSilence();
+
+/* unreadable, from the Worker: the same envelope with the catch path's reason. */
+await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending", reason: "read-failed" });
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await waitMessage();
+silences.unreadable = await readSilence();
+
+/* unavailable: a PUBLISHED board with no rows and no scored population — the
+   one case of the three where "not on this payload" is the true sentence. */
+await put("board:long", { side: "long", generatedAt: new Date().toISOString(),
+  sessionDate: "2026-09-03", status: "ok", rows: [] });
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await waitMessage();
+silences.unavailable = await readSilence();
+
+/* unreadable, from the page: the fetch itself did not come back. Aborted at
+   the route so the catch in render() runs against a real failed request. */
+await page.route("**/api/flows/board*", (r) => r.abort());
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await waitMessage();
+silences.failed = await readSilence();
+await page.unroute("**/api/flows/board*");
+/* THE ONE FAILURE THIS SUITE CAUSED ON PURPOSE. Chromium logs the aborted
+   request as a console error, and section 11 counts every console error as a
+   defect — so the abort is claimed here, exactly once, and removed from the
+   ledger. A count of zero would mean the route never aborted and the
+   "failed" fixture above measured a page that loaded normally. */
+const abortedAt = errors.findIndex((e) => /net::ERR_FAILED/.test(e));
+ok(abortedAt >= 0, "the aborted board fetch was recorded as the request failure it is");
+errors.splice(abortedAt, 1);
+eq(errors.filter((e) => /net::ERR_FAILED/.test(e)).length, 0,
+   "and it failed exactly once — the unroute took, so nothing after it is measured against a dead API");
+
+for (const kind of ["quiet", "pending", "unreadable", "unavailable"]) {
+  eq(silences[kind].kind, kind, `the ${kind} fixture reaches the ${kind} branch and is tagged as such`);
+  eq(silences[kind].statusKind, kind,
+     `and the status line above the deck carries the same data-empty="${kind}", so the silence is ` +
+     `marked where a screen reader is told about it first`);
+  eq(silences[kind].align, "left",
+     `the marked ${kind} paragraph is set flush left — a left-edge mark on a centred block floats ` +
+     `mid-grid, which is the same as no mark`);
+  eq(silences[kind].justify, "start",
+     `and it starts at the deck's left edge rather than centring in the grid, for the same reason`);
+}
+
+const shape = (k) => silences[k].style + " " + silences[k].width + " " + silences[k].glyph;
+eq(new Set(["quiet", "pending", "unreadable", "unavailable"].map(shape)).size, 4,
+   "the four silences resolve to four different treatments on the board's own paragraph — " +
+   ["quiet", "pending", "unreadable", "unavailable"].map((k) => k + "=" + shape(k)).join("; ") +
+   " — where before every one of them was the same centred grey sentence");
+eq(new Set(["quiet", "pending", "unreadable", "unavailable"]
+     .map((k) => silences[k].style + " " + silences[k].width)).size, 4,
+   "and they are separable on border STYLE and WIDTH alone, which carry no hue: the monochrome " +
+   "printout keeps all four apart");
+eq(silences.pending.style, "dotted", "pending is the dotted edge the taxonomy names (still coming)");
+eq(silences.pending.glyph, '"…"', "with the ellipsis glyph");
+eq(silences.unavailable.style, "dashed", "unavailable is the dashed edge (published, not on it)");
+eq(silences.unavailable.glyph, '"†"', "with the dagger");
+eq(silences.unreadable.style + " " + silences.unreadable.width, "solid 3px",
+   "unreadable is the wide solid edge — the one silence whose remedy is “refresh”");
+eq(silences.unreadable.glyph, '"×"', "with the cross");
+eq(silences.quiet.style + " " + silences.quiet.width, "solid 1px",
+   "quiet is a hairline: a reading about the market, at the same ink as any other note");
+eq(silences.quiet.glyph, "none", "and no glyph at all — it is not an alarm");
+eq(silences.failed.kind, "unreadable",
+   "a fetch that did not come back is tagged UNREADABLE — the catch in render() used to tag it " +
+   "“unavailable”, the dagger that means “published, and this field is not on it”, which is the " +
+   "opposite of what happened");
+eq(shape("failed"), shape("unreadable"),
+   "and so it wears the SAME mark as a store read that threw: both are " +
+   "“nothing was read”, and the catch in render() used to tag it “unavailable” — the dagger " +
+   "that means “published, and this field is not on it”, which is the opposite of what happened");
+eq(silences.failed.statusKind, "unreadable", "and the status line says so too on the failed fetch");
+
+/* THE SENTENCES SAY WHICH, in the taxonomy's own words, and no longer hedge. */
+ok(/has been published for this side yet/.test(silences.pending.text),
+   `pending says the board is not published yet, without guessing at a store fault (${silences.pending.text})`);
+ok(/could not be read/.test(silences.unreadable.text),
+   `unreadable says the store could not be read (${silences.unreadable.text})`);
+ok(/no rows and no scored population/.test(silences.unavailable.text),
+   `unavailable says what the published payload lacks (${silences.unavailable.text})`);
+for (const kind of ["pending", "unreadable", "unavailable"]) {
+  ok(!/Either the pipeline|Actions tab/.test(silences[kind].text),
+     `the ${kind} sentence no longer hedges across two causes or sends the reader to a CI tab`);
+}
+
+/* A FILTER THAT MATCHES NOTHING IS NOT A SILENCE and gets no edge: the rows
+   are here, the reader hid them. Same paragraph, same class, no mark. */
+await put("board:long", board("long", true));
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+await page.fill("#fbQ", "ZZZZ");
+await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="filtered"]'));
+const filteredMsg = await readSilence();
+eq(filteredMsg.style, "none", "the filtered paragraph carries no edge — it is not one of the four silences");
+eq(filteredMsg.glyph, "none", "and no glyph");
+eq(filteredMsg.statusKind, null, "and the status line above it carries no silence either");
+
+/* ---- 13. the tile foot prints its absence, and hue claims no side ------ */
+
+/* ONE ROW WITH NO PRICED MOVE, beside seven that have one. On the emitted
+   long board this was SYN168 — `hm` null because the run had no usable
+   30-day implied volatility to scale — and its tile showed an EMPTY foot
+   slot: the same appearance as a board published before the field existed.
+   The em dash is the mark every other absence on this tile wears. The
+   fixture also carries a dispersion and alternates the gamma regime, so the
+   two other readings on this line are measured on the same page. */
+await put("board:long", {
+  ...board("long", true), dispersion: 0.7076, horizonSessions: 10,
+  rows: TICKERS.map((t, i) => ({ ...boardRow(t, i, true), hm: i === 0 ? null : 0.0931, hr: 0.0368 })),
+});
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const foot = await page.evaluate(() => {
+  /* By ticker, not by position: section 8 chose an order, and a fixture read
+     at an index pins whichever order happens to be current. */
+  const cardOf = (t) => Array.from(document.querySelectorAll(".fd-card"))
+    .find((c) => c.querySelector(".fd-tk").textContent === t);
+  const rowOf = (t) => Array.from(document.querySelectorAll("#flowsBody tr"))
+    .find((tr) => tr.querySelector(".fb-open").textContent === t);
+  const unpriced = cardOf("NVDA").querySelector(".fd-move");
+  const priced = cardOf("NVAX").querySelector(".fd-move");
+  const regimeCell = rowOf("NVAX").children[7];
+  return {
+    unpriced: {
+      text: unpriced.textContent,
+      empty: unpriced.getAttribute("data-empty"),
+      title: unpriced.getAttribute("title") || "",
+      aria: cardOf("NVDA").getAttribute("aria-label") || "",
+    },
+    priced: { text: priced.textContent, title: priced.getAttribute("title") || "" },
+    toned: document.querySelectorAll(".fd-foot .fb-neg, .fd-foot .fb-pos").length,
+    shortRegimes: Array.from(document.querySelectorAll(".fd-foot"))
+      .filter((f) => /short Γ/.test(f.textContent)).length,
+    cell: { text: regimeCell.textContent.trim(), cls: regimeCell.className },
+    status: document.getElementById("flowsStatus").textContent,
+    statusKind: document.getElementById("flowsStatus").getAttribute("data-empty"),
+  };
+});
+eq(foot.unpriced.text, "±—",
+   "a row with hm null prints “±—” in the priced-move slot, never “” — an unmeasured move and a " +
+   "missing field must not render the same way, and the em dash is this tile's mark for absence");
+eq(foot.unpriced.empty, "unavailable",
+   "and the span is tagged unavailable: the board is published, and this field is not on this row");
+ok(/no usable 30-day implied volatility/.test(foot.unpriced.title),
+   `the title says why the slot is empty rather than leaving a dash to be guessed at (${foot.unpriced.title})`);
+ok(/Priced move unavailable\./.test(foot.unpriced.aria),
+   "and the card's accessible name says the same, where before a screen reader heard nothing in " +
+   "that position — a silence indistinguishable from the field never having existed");
+eq(foot.priced.text, "±9.3% priced", "while a measured move still prints as it did");
+ok(/over 10 trading sessions/.test(foot.priced.title), "with its horizon in the title");
+eq(foot.toned, 0,
+   "no tile foot carries fb-neg or fb-pos: a short gamma regime is a dealer-hedging state, not a " +
+   "bearish lean, and 36 of 44 tiles on the emitted BULLISH board ended in red “short Γ” — hue " +
+   "saying bearish under text that says nothing of the kind");
+eq(foot.shortRegimes, 4, "the regime itself is still printed on every short-regime tile (4 of 8 here)");
+eq(foot.cell.text, "short Γ", "the table's Γ regime cell still prints the regime");
+ok(/fb-flat/.test(foot.cell.cls) && !/fb-neg|fb-pos/.test(foot.cell.cls),
+   `and carries the neutral class only, like the 52w, VRP and IVR cells beside it (${foot.cell.cls})`);
+ok(/spread 0\.71 composite units \(95th pct of \|residual\|, not the score's scale\)/.test(foot.status),
+   "the dispersion travels with its unit and its statistic: 0.71 is the 95th percentile of " +
+   "|residual| in composite units, printed beside scores like +59 that are 100·tanh of a scaled " +
+   "residual — a bare “spread 0.71 (95th pct)” shared no scale with its neighbours and said so " +
+   `nowhere (${foot.status})`);
+ok(/1 new to this side since the previously published board/.test(foot.status),
+   "the warm board's memory clause is unchanged: one name new, against the row count this same line opens with");
+eq(foot.statusKind, null, "a board with rows carries no silence mark on its status line");
+
+/* THE COLD CLAUSE IS GONE. On a board with no memory the status line used to
+   add “no comparison with a previously published board” — 200px above the
+   note setMemoryNote() draws from the publisher's own sentence. The same
+   silence worded twice, and two wordings of one outage is how a reader
+   concludes there are two outages. The note is the single statement. */
+await put("board:short", board("short", false));
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
+const cold = await page.evaluate(() => {
+  const note = document.querySelector(".fb-memnote");
+  return {
+    status: document.getElementById("flowsStatus").textContent,
+    note: note ? { memory: note.getAttribute("data-memory"), text: note.textContent } : null,
+  };
+});
+ok(cold.note && cold.note.memory === "pre-memory",
+   "the cold board draws its memory note — the one statement of the missing comparison");
+ok(!/no comparison/i.test(cold.status),
+   `and the status line does not restate it in a second wording (${cold.status})`);
+
+/* ---- 14. the quiet sentence states counts and passes no verdict --------- */
+
+/* "which is what a quiet session looks like" was a template, printed
+   whatever the numbers were: with the emitted corpus's 3 neutral of 100
+   scored it would have called a session with 97 names past the band on the
+   other side quiet. And an absent `neutral` printed "all of them landed
+   inside the band" — a confident census from a field that was not there. */
+await put("board:short", { ...board("short", false), rows: [], deadBand: 1, scored: 100, neutral: 3 });
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="quiet"]'));
+const quietSaid = await page.evaluate(() => document.querySelector("p.fb-empty").textContent);
+ok(/cleared the ±1 band this session\. 100 names were scored, 3 of them inside the band; the other side may hold the rest\./.test(quietSaid),
+   `the quiet sentence states the band, the scored population and the neutral count, each from its own field (${quietSaid})`);
+ok(!/quiet session looks like/.test(quietSaid),
+   "and characterises the session as nothing — 3 of 100 inside the band is not a quiet session, " +
+   "and the sentence no longer says it is");
+
+await put("board:short", { ...board("short", false), rows: [], scored: 100 });
+await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
+await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="quiet"]'));
+const quietBare = await page.evaluate(() => document.querySelector("p.fb-empty").textContent);
+ok(/cleared the dead band this session\. 100 names were scored; the other side may hold the rest\./.test(quietBare),
+   `with no band width and no neutral count published, the sentence names neither (${quietBare})`);
+ok(!/all of them|inside the band|±/.test(quietBare),
+   "and never fills the neutral count with “all” — an absent field is a silence, not a census");
+
 /* ---- 11. nothing threw along the way -------------------------------- */
 
 eq(errors.length, 0,
@@ -463,5 +748,9 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control bar ex
   `it has something to say, a measured zero match distinguished from an empty board, orders ` +
   `withheld exactly when the payload cannot produce them, a rail badge that is silent on a ` +
   `pending board, prints its measured zero on a quiet one and its whole POOL on a board the ` +
-  `length cap truncated — the same number the sentence beside it reconciles against — and no ` +
-  `overflow at 320px`);
+  `length cap truncated — the same number the sentence beside it reconciles against — no ` +
+  `overflow at 320px, four silences on the deck's own paragraph that are four shapes in ` +
+  `greyscale with the Worker's failed read told apart from a never-published side, a priced ` +
+  `move that prints its absence, a gamma regime no hue calls bearish, a dispersion that ` +
+  `carries its unit, one statement of a cold memory, and a quiet sentence that counts and ` +
+  `passes no verdict`);

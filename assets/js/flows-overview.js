@@ -20,21 +20,13 @@
    it did. Both keys were published and served and drawn nowhere until this
    page asked for them.
 
-   AND THE CHANGE ARITHMETIC IS NO LONGER THIS FILE'S. The version this
-   replaces did, in the browser:
-
-       const measured = name.s.map(isNum).filter(v => v !== null);
-       const delta = measured[len - 1] - measured[len - 2];
-
-   The .filter() is the defect. A null in the aligned series means the name
-   WAS NOT SCORED that session, so the two survivors can be one session apart
-   or twenty and the subtraction produces the same integer either way — a
-   name last scored three weeks ago came back with a "+40" that read as an
-   overnight move, printed under a region subtitled "since each name's prior
-   scored session" on today's page. shared/flows-scores.js derives the move
-   once, beside the series it comes from, and publishes it WITH its
-   denominator: d1.v, d1.gap, d1.cross, lastAt, run. This file reads those
-   and does no delta arithmetic of its own.
+   AND THE CHANGE ARITHMETIC IS NOT THIS FILE'S. A null in a name's aligned
+   series means it WAS NOT SCORED that session, so subtracting the last two
+   measured values here produced the same integer whether they were one
+   session apart or twenty — a "+40" three weeks old read as an overnight
+   move. shared/flows-scores.js derives the move once, beside the series it
+   comes from, and publishes it WITH its denominator: d1.v, d1.gap,
+   d1.cross, lastAt, run. This file reads those and subtracts nothing.
 
    NINE REGIONS, AND EACH ONE IS ALLOWED TO SAY NOTHING. A region with an
    unpublished key, a region whose request never came back, a region whose
@@ -44,11 +36,10 @@
    others are claims about this page, and printing the last one for all of
    them is how a surface starts lying quietly.
 
-   THE PRIMITIVES ARE THE LIBRARY'S. This file used to re-derive isNum, el,
-   svgEl, the em dash and the U+2212 minus — the sixth such copy in the repo,
-   and its isNum was one of the wrong ones (`Number(null)` is 0 and 0 is
-   finite, so an absent score drew a confident mark at zero on the spine).
-   They come from flows-ui.js now, which is loaded before this file.
+   THE PRIMITIVES ARE THE LIBRARY'S: isNum, el, svgEl, the em dash and the
+   U+2212 minus come from flows-ui.js, loaded before this file. Its own copy
+   of isNum once took `Number(null)` for a finite zero and drew a confident
+   mark at zero on the spine for an absent score.
    ============================================================= */
 (() => {
   "use strict";
@@ -189,6 +180,23 @@
     payload && payload.status !== "pending" && Array.isArray(payload.rows)
       ? payload.rows.length : null;
 
+  /* THE SIDE'S WHOLE POOL, OR NULL WHEN THERE IS NO PUBLISHED BOARD TO COUNT.
+     The publisher caps each side and publishes `cleared` — every name that
+     left the band on that side — beside the rows it kept (flows-pipeline.mjs:
+     5687). The rail badge printed that pool while the verdict tile, the
+     status line and the pole subtitle printed the row count, so one screen
+     of the 2026-08-24 payload (cleared 53, rows 50) read "Bearish 53",
+     "44 / 50" and "50 bearish": three numbers for one population. One rule,
+     read from all four places: prefer `cleared`, fall back to the rows only
+     for a board published before that field existed, and let rowCount's null
+     carry the two silences through. Where the pool exceeds the rows the
+     callers print the difference as "counted, not carried", the words the
+     alerts and news regions use for a row ceiling. */
+  const poolCount = (payload) => {
+    const rows = rowCount(payload);
+    return rows === null ? null : (isNum(payload.cleared) ?? rows);
+  };
+
   /* ---------- the ranking is the payload's -------------------------
 
      The pipeline stamps `r` on every row: 1 is the name furthest from
@@ -226,20 +234,17 @@
   /* ---------- a name that opens its card in place ------------------
 
      The tiles this replaces were anchors to ?t=SYM, so opening a card was a
-     full page navigation that re-fetched both board payloads to redraw a
-     page the reader was already looking at. A button carrying data-t is
-     picked up by the delegated handler in flows-card.js, which opens the
-     dialog and pushes the same ?t= state — same address, same Back button,
-     no reload.
+     full navigation that re-fetched both boards to redraw the page on
+     screen. A button carrying data-t is picked up by the delegated handler
+     in flows-card.js, which opens the dialog and pushes the same ?t= state.
 
      A ROW WITHOUT A CARD IS NOT A BUTTON. The card costs vendor calls the
-     run spends only on the names furthest from neutral, and the board says
-     which those are: `deep` at the payload root means this board knows the
-     distinction at all, `dp` on a row means this row got one. A board
-     predating the distinction publishes neither, and every row on it does
-     have a card — so the test is on the PAYLOAD first. Withholding data-t
-     is what actually keeps a cardless row out of the click delegation; a
-     class name would only keep it out of the stylesheet. */
+     run spends only on the names furthest from neutral: `deep` at the
+     payload root means this board knows the distinction, `dp` on a row means
+     this row got one, and a board predating both publishes neither — so the
+     test is on the PAYLOAD first. Withholding data-t is what keeps a
+     cardless row out of the click delegation; a class name would only keep
+     it out of the stylesheet. */
   function nameNode(t, hasCard) {
     if (!t) return el("span", "cc-flat", DASH);
     if (!hasCard) {
@@ -261,20 +266,17 @@
   /* ---------- the earnings marker ----------------------------------
 
      THE MOST EXPENSIVE MISTAKE THIS SURFACE CAN LET A READER MAKE is
-     carrying a long signal into a print. Both boards and the events
-     calendar were already fetched in the same Promise.all and were never
-     joined: the page ranked ORCL #1 bullish in one region while another
-     region, three hundred pixels below, said ORCL reports in three
-     sessions. Neither region knew about the other and the reader had to.
+     carrying a long signal into a print. Both boards and the events calendar
+     were fetched in the same Promise.all and never joined: ORCL ranked #1
+     bullish in one region while another, three hundred pixels below, said
+     ORCL reports in three sessions.
 
-     TWO SOURCES, TWO UNITS, AND THE UNIT IS PRINTED. The board row now
-     carries `edte` in CALENDAR DAYS (the gate's own arithmetic, on the row
-     the gate spared) and the events payload carries `sdte` in TRADING
-     SESSIONS. They are different quantities and "3" means different things
-     in each, so the glyph is followed by the number AND its unit letter,
-     and the title spells both out with the date. The events count is
-     preferred where both exist because it is the count the earnings gate
-     itself measured. */
+     TWO SOURCES, TWO UNITS, AND THE UNIT IS PRINTED. The board row carries
+     `edte` in CALENDAR DAYS and the events payload `sdte` in TRADING
+     SESSIONS; "3" means different things in each, so the glyph is followed
+     by the number AND its unit letter, and the title spells both out with
+     the date. The events count is preferred where both exist because it is
+     the one the earnings gate itself measured. */
   function earningsMark(row, ev) {
     const s = isNum(ev && ev.sdte);
     const d = isNum(row && row.edte);
@@ -410,16 +412,12 @@
   /* ---------- the score track, pooled once for both sides ---------- */
 
   /* THE MOVE TRAVELS WITH THE SESSION IT WAS MEASURED ON, everywhere on this
-     page and not only in the change table. `d1` alone is a delta with no date
-     on it, and the two other places that draw it — the crossing tag on a
-     ranked row and the trail on the spine — were reading exactly that: a
-     name last scored a week ago had its crossing tagged onto today's ranked
-     row and its move drawn on today's axis, in a region of a page whose whole
-     argument is that a reading which is not about today has to say so. So the
-     index carries `at` (the session the reading ends on), `last` (the score
-     it ended at) and `current` (whether that session is the newest one the
-     track holds), and the callers decide with those rather than with a bare
-     delta. */
+     page. `d1` alone is a delta with no date on it, and the crossing tag on a
+     ranked row and the trail on the spine read exactly that: a name last
+     scored a week ago had its crossing tagged onto today's row and its move
+     drawn on today's axis. So the index carries `at` (the session the
+     reading ends on), `last` (the score it ended at) and `current` (whether
+     that is the track's newest session), and the callers decide with those. */
   function readTrack(payload) {
     const byName = Object.create(null);
     const moveBy = Object.create(null);
@@ -571,8 +569,8 @@
     }
     if (entered) {
       said.push(entered + (entered === 1 ? " name was" : " names were") +
-        " scored for the first time in this window and has no prior reading to " +
-        "compare against.");
+        " scored for the first time in this window and " + (entered === 1 ? "has" : "have") +
+        " no prior reading to compare against.");
     }
     if (left) {
       said.push(left + (left === 1 ? " name was" : " names were") +
@@ -842,30 +840,80 @@
 
      Seven readings the rest of the page then explains. Every one of them is
      allowed to be an em dash: a tile whose endpoint did not answer says so
-     by not saying a number, which is the only honest thing a tile can do. */
+     by not saying a number, which is the only honest thing a tile can do —
+     and then says WHICH of the four silences the dash stands for, because
+     the dash alone is one glyph for four facts. */
   function paintVerdict(into, long, short, market, alerts) {
     const breadth = (market && market.breadth) || {};
     const premium = (market && market.premium) || {};
-    const bulls = rowCount(long);
-    const bears = rowCount(short);
+
+    /* FOUR SILENCES, FOUR SENTENCES, ON A TILE. Both tilt tiles printed "not
+       measured this session" whenever the ratio was null — whether
+       /api/flows/market failed to read, is unpublished, is published without
+       the field, or was measured over nothing. Only the last is a reading;
+       the words were shaped as one for all four, and the Session tile did the
+       same with a bare em dash and no sub. Same kinds, precedence and
+       data-empty names as quiet()/silent() give a region, so a tile and the
+       region beneath it never word one fact two ways. `quietSaid` is passed
+       only when the caller's own denominator is a published zero — a null
+       ratio with no such denominator is the payload's gap, not the market's.
+       Returns [kind, sentence] for a silence and null for a reading. */
+    const tileSilence = (payload, read, quietSaid) => {
+      if (!payload) return ["unreadable", "could not be read — refresh to try again"];
+      if (payload.status === "pending") return ["pending", "not published yet"];
+      if (read) return null;
+      if (quietSaid) return ["empty", quietSaid];
+      return ["unavailable", "not on this payload"];
+    };
+
+    /* THE TWO BOARDS ARE ONE PAYLOAD FOR THE SESSION AND CLEARED TILES: a
+       half that answered names it, and only when neither did is the tile a
+       silence — unreadable if either fetch failed, pending if both are
+       unpublished, unavailable if a half answered without the field. */
+    const answered = [long, short].filter((p) => p && p.status !== "pending");
+    const boardsSilence = (read) => read ? null
+      : answered.length ? ["unavailable", "not on this payload"]
+        : (!long || !short) ? ["unreadable", "could not be read — refresh to try again"]
+          : ["pending", "not published yet"];
+    const longDate = answered.includes(long) ? long.sessionDate : null;
+    const shortDate = answered.includes(short) ? short.sessionDate : null;
+    const sessionDate = (typeof longDate === "string" && longDate) ||
+      (typeof shortDate === "string" && shortDate) || null;
+
+    /* THE POOL, NOT THE ROWS — poolCount, the number the rail badges. The
+       difference is printed beside it as what was counted and not carried. */
+    const bulls = poolCount(long);
+    const bears = poolCount(short);
+    const notCarried = (payload, side) => {
+      const rows = rowCount(payload), pool = poolCount(payload);
+      return rows !== null && pool !== null && pool > rows ? (pool - rows) + " " + side : null;
+    };
+    const held = [notCarried(long, "bull"), notCarried(short, "bear")].filter(Boolean);
+    const clearedSub = "bull / bear cleared the band" +
+      (held.length ? " · " + held.join(" and ") + " counted, not carried" : "");
 
     /* WHY THE ALERT SUB-LABEL IS NOT A CONSTANT. "nightly read" is a claim
-       about when the feed was taken, and printing it beside an em dash —
-       for a payload that never arrived — would attach a provenance to a
-       number that does not exist. */
-    let alertNote = "not read";
-    if (alerts && alerts.status === "pending") alertNote = "not published yet";
-    /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. The
-       else-branch used to print "nightly read" for every payload that was
-       not explicitly intraday, so a payload predating the field asserted a
-       provenance nobody published — the confident default wearing a
-       ternary. Both current writers set it; the one that does not is
-       exactly the reader this sentence is for. */
-    else if (alerts) {
+       about when the feed was taken; the two fetch silences are tileSilence's
+       above, so no provenance is attached to a number that does not exist.
+       AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE: the
+       else-branch used to print "nightly read" for everything not explicitly
+       intraday, so a payload predating the field asserted a provenance
+       nobody published — the confident default wearing a ternary. */
+    let alertNote = "read, cadence not published";
+    if (alerts && alerts.status !== "pending") {
       alertNote = alerts.refreshed === "intraday" ? "refreshed intraday"
-        : alerts.refreshed === "nightly" ? "nightly read"
-          : "read, cadence not published";
+        : alerts.refreshed === "nightly" ? "nightly read" : alertNote;
     }
+    /* THE VENDOR'S CEILING IS NOT A CENSUS. shared/flows-alerts.js publishes
+       `vendorTruncated` beside `seen` when the read came back at the vendor's
+       documented maximum — 2026-08-24: seen 200, vendorLimit 200, truncated.
+       This tile printed "200" and the region subtitle "8 of 200", a ceiling
+       as a population. The true count is unknown and at least 200: ≥ on the
+       number, and the words beside it, because a withholding never folds.
+       The news region words its own ceiling the same way. */
+    const seen = isNum(alerts && alerts.seen);
+    const atLimit = Boolean(alerts) && alerts.vendorTruncated === true;
+    const flaggedSaid = atLimit ? alertNote + " · vendor ceiling hit, population unknown" : alertNote;
 
     /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE.
        breadth.tilt counts names, premium.tilt weights dollars; they are the
@@ -881,6 +929,17 @@
     const pt = isNum(premium.tilt);
     const disagree = bt !== null && pt !== null && bt !== 0 && pt !== 0 && (bt > 0) !== (pt > 0);
     const DISAGREE_SAID = "the two weightings disagree in sign";
+    /* THE QUIET CASE IS THE SHAPER'S OWN 0/0, read off its published
+       denominator: breadth.tilt is null when bull + bear is 0, premium.tilt
+       when netPositive + netNegative is 0 (shared/flows-market.js:157, :168).
+       Both published as zero is a measurement; either absent is not. */
+    const bull = isNum(breadth.bull), bear = isNum(breadth.bear);
+    const leaned = bull !== null && bear !== null ? bull + bear : null;
+    const up = isNum(premium.netPositive), down = isNum(premium.netNegative);
+    const gross = up !== null && down !== null ? up + down : null;
+    const btSilence = tileSilence(market, bt !== null, leaned === 0 ? "no name leaned" : null);
+    const ptSilence = tileSilence(market, pt !== null,
+      gross === 0 ? "no net premium was priced" : null);
 
     const tiles = [
       /* EITHER HALF CAN NAME THE SESSION. This read the long board alone,
@@ -889,8 +948,9 @@
          carried the date. Neither half is the page's session; they are two
          writes of one, and the mismatch warning below already fires when
          they disagree. */
-      ["Session", (long && long.sessionDate) || (short && short.sessionDate) || DASH, "", null],
-      ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), "names", null],
+      ["Session", sessionDate || DASH, "", null, boardsSilence(sessionDate !== null)],
+      ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), "names", null,
+        tileSilence(market, isNum(market && market.n) !== null, null)],
       /* EACH SHARE NAMES THE POPULATION IT IS A SHARE OF, and neither
          population is "names" or "premium" in the loose sense the first
          version used. breadth.tilt is (bull − bear) / (bull + bear), so its
@@ -901,25 +961,32 @@
          "not call premium and not put premium": the subtitle that read
          "calls − puts" named two vendor columns this number is not made of. */
       ["Tilt · names", pct(bt, 1),
-        bt === null ? "not measured this session"
-          : disagree ? DISAGREE_SAID : "of the names that leaned, bull − bear", tone(bt)],
+        disagree ? DISAGREE_SAID : "of the names that leaned, bull − bear", tone(bt), btSilence],
       ["Tilt · dollars", pct(pt, 1),
-        pt === null ? "not measured this session"
-          : disagree ? DISAGREE_SAID : "of gross net premium, bought − sold", tone(pt)],
+        disagree ? DISAGREE_SAID : "of gross net premium, bought − sold", tone(pt), ptSilence],
       ["Breadth",
-        (isNum(breadth.bull) === null ? DASH : String(breadth.bull)) + " / " +
-        (isNum(breadth.bear) === null ? DASH : String(breadth.bear)), "bull / bear", null],
-      ["Both sides",
-        (bulls === null ? DASH : bulls) + " / " + (bears === null ? DASH : bears), "ranked", null],
-      ["Flagged windows",
-        isNum(alerts && alerts.seen) === null ? DASH : String(alerts.seen), alertNote, null],
+        (bull === null ? DASH : String(bull)) + " / " + (bear === null ? DASH : String(bear)),
+        "bull / bear", null, tileSilence(market, bull !== null && bear !== null, null)],
+      /* The pool, so rail, tile, status line and pole subtitle agree. A
+         silent half is a dash explained in its region; the tile is marked
+         only when neither half answered. */
+      ["Cleared",
+        (bulls === null ? DASH : bulls) + " / " + (bears === null ? DASH : bears), clearedSub, null,
+        boardsSilence(bulls !== null || bears !== null)],
+      ["Flagged windows", seen === null ? DASH : (atLimit ? "≥" : "") + seen, flaggedSaid, null,
+        tileSilence(alerts, seen !== null, null)],
     ];
 
-    for (const [key, value, sub, cls] of tiles) {
+    /* A silent tile keeps its dash, prints the silence's sentence as its sub
+       and carries the kind on data-empty — the mark flows.css draws for a
+       region's silence — so the four are told apart without prose. */
+    for (const [key, value, sub, cls, silence] of tiles) {
       const tile = el("div", "cc-tile");
+      if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
-      if (sub) tile.append(el("span", "cc-tile-s", sub));
+      const said = silence ? silence[1] : sub;
+      if (said) tile.append(el("span", "cc-tile-s", said));
       into.append(tile);
     }
   }
@@ -1036,15 +1103,21 @@
          ordering is made of. Falls back to the score for a payload published
          before this field existed, which is the only reading available there. */
       const resid = isNum(row.resid);
-      /* AND THE NUMBER SAYS WHICH OF THE TWO IT IS. This list has no column
-         header to hang a unit on, and the two branches print DIFFERENT
-         quantities into the same slot: 0.0182 is a residual and +18 is a
-         score on a ±100 scale. Unlabelled they are one column of bare
-         numbers a reader cannot compare across rows, let alone against the
-         ranked regions above. */
-      const cell = resid !== null
-        ? el("span", "c-num" + tone(resid), resid.toFixed(4))
-        : el("span", "c-num" + tone(row.s), fmtSigned(row.s));
+      /* AND THE NUMBER SAYS WHICH OF THE TWO IT IS, IN A WORD ON THE ROW.
+         This list has no column header to hang a unit on, and the two
+         branches print DIFFERENT quantities into one slot: 0.0182 is a
+         residual, +18 a score on a ±100 scale. The unit lived only in a
+         title a mouse can reach, so it is named beside the number the way
+         "conv 60" names its own. AND THE SIGN IS THE PAGE'S GLYPH: toFixed
+         wrote a hyphen-minus here while every other signed number carries
+         U+2212 through fmtSigned — which also leaves a measured zero
+         unsigned. */
+      const [unit, said, cls] = resid !== null
+        ? ["resid", fmtSigned(resid, 4), tone(resid)]
+        : ["score", fmtSigned(row.s), tone(row.s)];
+      const cell = el("span", "c-num" + cls);
+      cell.append(el("span", "cc-dim", unit + " "));
+      cell.append(document.createTextNode(said));
       cell.title = resid !== null
         ? "The cross-sectional residual this name was ranked on, in the units " +
           "the score is a bounded transform of. The rows are ordered on its " +
@@ -1078,20 +1151,17 @@
 
   /* THE ORDER IS THE PUBLISHER'S CHOICE, RESTATED RATHER THAN INVENTED.
      `lean.rank` says "leanRatio" and flows-pipeline.mjs:3722 argues why: XLK
-     clears hundreds of millions of premium on an ordinary day and XLB tens of
-     thousands, so ranking the eleven by DOLLAR difference ranks them by BASKET
-     SIZE with a faint conviction signal on top. The ratio is the share of each
-     basket's OWN two-sided premium that leaned one way, comparable across
-     baskets three orders of magnitude apart.
+     clears hundreds of millions of premium on an ordinary day and XLB tens
+     of thousands, so ranking by DOLLAR difference ranks by BASKET SIZE. The
+     ratio is the share of each basket's OWN two-sided premium that leaned
+     one way, comparable three orders of magnitude apart.
 
-     A BASKET WITH NO RATIO CANNOT BE PLACED ON THAT ORDERING AT ALL, and that
-     is the quiet case entire: gross is a measured 0, so the ratio is 0/0 —
-     undefined, not neutral — and sorting it as 0.0 would seat a basket where
-     nothing traded among ten where something did. That is the confident zero
-     this file refuses everywhere else, wearing a comparator. Such a basket goes
-     to the tail with its measured zeros still printed, AHEAD of the ones that
-     could not be read at all: "measured and empty" is a reading, "unreadable"
-     is not. */
+     A BASKET WITH NO RATIO CANNOT BE PLACED ON THAT ORDERING AT ALL: gross
+     is a measured 0, the ratio is 0/0 — undefined, not neutral — and sorting
+     it as 0.0 is the confident zero wearing a comparator. It goes to the
+     tail with its measured zeros still printed, AHEAD of the baskets that
+     could not be read: "measured and empty" is a reading, "unreadable" is
+     not. */
   const LEAN_TAIL = { quiet: 1, unreadable: 2 };
   function leanOrder(rows) {
     return rows.slice().sort((a, b) => {
@@ -1232,23 +1302,26 @@
         "on /flows/market/ draws, in basis points per session.");
     }
 
-    /* THE READING LEADS, THE DERIVATION FOLLOWS. The first draft put ~1,100
-       characters of method above the table — the shape this product's own
-       prose audit named (the method paragraph 87 times, the finding four),
-       reproduced in a new region on the day it was diagnosed.
-
-       Built from the rows the table draws, through the same pct() the cells
-       use, so lead and column cannot disagree. And only when something
-       leaned: `ordered` keeps the quiet and unreadable baskets at its tail,
-       so the ends of the array are not the ends of the readings. */
+    /* THE READING LEADS, THE DERIVATION FOLLOWS — the first draft put ~1,100
+       characters of method above the table, the shape this product's own
+       prose audit named. Built from the rows the table draws, through the
+       same pct() the cells use, so lead and column cannot disagree; and only
+       when something leaned, since `ordered` keeps the quiet and unreadable
+       baskets at its tail. */
     const leaners = ordered.filter((r) => isNum(r && r.leanRatio) !== null);
     if (leaners.length) {
       const hi = leaners[0], lo = leaners[leaners.length - 1];
+      /* NAMED BY THE FIELD THE ROW CARRIES. Sector rows are keyed `etf` and
+         `sector` (the name cell below reads the same two); this read `.t`,
+         the board row's key, so the region's lead reading printed "undefined
+         leans most bullish at +27.8% …; undefined most bearish at −22.1%."
+         on every session. The ticker leads: it is what can be looked up. */
+      const basket = (r) => r.etf || r.sector || r.fullName || DASH;
       const finding = leaners.length === 1
-        ? hi.t + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
+        ? basket(hi) + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
           " of its own premium."
-        : hi.t + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
-          lo.t + " most bearish at " + pct(lo.leanRatio, 1) + ".";
+        : basket(hi) + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
+          basket(lo) + " most bearish at " + pct(lo.leanRatio, 1) + ".";
       into.append(el("p", "fc-reading", finding));
     } else {
       into.append(el("p", "cc-quiet",
@@ -1595,29 +1668,23 @@
      level is today's and its move is not", which is a reading; a trail
      drawn anyway would have been a fabrication.
 
-     THE CHART INVARIANT, WHICH THIS FUNCTION USED TO BREAK. One viewBox
-     unit is one CSS pixel (assets/js/flows-ui.js:20-27). The old code
-     measured the host, then clamped W to 900 and emitted width:"100%" — so
-     on the 132rem canvas tier, where this region spans all twelve columns
-     and the host is around 2000px, a 900-unit viewBox was stretched to
-     ~2.2 CSS px per unit: every dot rendered at radius ~10 instead of 4.5,
-     the 6-unit hatch became ~13px, and the 9px tick labels rendered near
-     20px. The width is now the measured host width and it is emitted as an
-     attribute, which is the shape scoreStrip has always used. */
+     THE CHART INVARIANT, WHICH THIS FUNCTION USED TO BREAK. One viewBox unit
+     is one CSS pixel (assets/js/flows-ui.js:20-27). The old code clamped W
+     to 900 and emitted width:"100%", so on the 132rem canvas tier a
+     900-unit viewBox was stretched to ~2.2 CSS px per unit — dots at radius
+     ~10 instead of 4.5, 9px tick labels near 20px. The width is now the
+     measured host width, emitted as an attribute, the shape scoreStrip has
+     always used. */
 
   let spineDrawn = null;   // the last payload drawn, kept for the resize repaint
   let spineW = 0;          // and the width it was drawn at
 
   /* MEASURED FROM A VISIBLE HOST, AND NEVER FLOORED ABOVE IT. A hidden
-     element reports clientWidth 0, which is the only reason a fallback
-     exists; the ceiling is a sanity bound on a runaway layout rather than a
-     design width, and it sits above the widest canvas tier so it never binds
-     in practice.
-
-     THE OLD FLOOR OF 300 CANNOT COME BACK. With width:"100%" a floor was
-     harmless — the svg scaled down to fit. With an explicit width attribute
+     element reports clientWidth 0, the only reason a fallback exists; the
+     ceiling is a sanity bound above the widest canvas tier, never binding.
+     THE OLD FLOOR OF 300 CANNOT COME BACK: with an explicit width attribute
      a floor wider than the host is horizontal overflow on the document, and
-     zero horizontal overflow at 320px is a tested invariant of this site. */
+     zero overflow at 320px is a tested invariant of this site. */
   function spineWidth() {
     const measured = Math.round(spineHost.clientWidth);
     return measured > 0 ? Math.min(2400, measured) : 720;
@@ -1704,22 +1771,16 @@
         const t = String(r.t || "");
         const mv = moves.get(t) || null;
         /* TWO PAYLOADS, AND THE TRAIL IS DRAWABLE ONLY WHERE THEY AGREE.
-           The dot sits at the BOARD's score for this session; the move comes
-           off the SCORE TRACK, whose newest column is not always this
-           session and whose newest score for a name is not always the one
-           the board is publishing. Where they differ, `s - v` is neither
-           observation — it is a third number this renderer would be making
-           up, drawn as a measured origin. The first version of this trail
-           did exactly that and its comment claimed the origin was "the
-           previous scored observation exactly", which was true only for the
-           names where the two payloads happened to coincide.
-
-           So the move is drawn only when the track's newest reading IS this
-           board row: measured on the track's newest session, and at the same
-           score the board is printing. Then `s - v` is the previous scored
-           observation, exactly, and the dashes below describe a real span.
-           Everywhere else the mark stands alone and its title says when the
-           name was last scored, which is the honest reading. */
+           The dot sits at the BOARD's score; the move comes off the SCORE
+           TRACK, whose newest column is not always this session and whose
+           newest score for a name is not always the one the board prints.
+           Where they differ, `s - v` is neither observation — a third number
+           drawn as a measured origin, which the first version of this trail
+           did. So the move is drawn only when the track's newest reading IS
+           this board row: then `s - v` is the previous scored observation,
+           exactly, and the dashes below describe a real span. Everywhere
+           else the mark stands alone and its title says when the name was
+           last scored. */
         const usable = Boolean(mv && mv.current && mv.last !== null && mv.last === s);
         const v = usable ? isNum(mv.d1.v) : null;
         const gap = usable ? isNum(mv.d1.gap) : null;
@@ -1818,28 +1879,21 @@
   /* ---------- the staleness guard ----------------------------------
 
      THE ONLY FLOWS ROUTE WITHOUT ONE, AND IT IS THE ROUTE THE SECTION OPENS
-     ON. loadBoard and loadRegion read r.json() and dropped the
-     X-Payload-Updated response header the Worker stamps on every payload —
-     so during a pipeline outage /flows/long/ warned and /flows/ rendered
-     Tuesday's board on Friday with a "Session" tile that named a date and no
-     warning anywhere.
+     ON. loadBoard and loadRegion dropped the X-Payload-Updated header the
+     Worker stamps on every payload, so during a pipeline outage /flows/long/
+     warned and /flows/ rendered Tuesday's board on Friday under a "Session"
+     tile naming a date and no warning anywhere.
 
      THE TEST ITSELF IS flows-ui.js's, AND THIS FILE MAY NOT KEEP A SECOND
-     COPY OF IT. The version this replaces carried its own `localStaleness`
-     with its own two constants and its own two sentences, behind a comment
-     saying the shared one did not exist yet. It does — flows-ui.js exports
-     `staleness(payload, now, {subject})`, lifted out of flows-board.js for
-     exactly this reason — and a private copy beside it is how the same
-     outage ends up worded two ways on two routes of one product, which
-     reads to a reader as two outages. The thresholds live there too: they
-     were duplicated across six renderers before, with the same numbers and
-     six different comments, and the first one somebody tuned would have
-     silently disagreed with the other five.
+     COPY OF IT: `staleness(payload, now, {subject})` was lifted out of
+     flows-board.js for exactly this reason, and a private copy beside it —
+     its own constants, its own sentences — is how one outage ends up worded
+     two ways on two routes of one product, which reads as two outages.
 
-     ITS ABSENCE IS REPORTED RATHER THAN SWALLOWED, the same way
-     flows-board.js reports it: a freshness check that quietly stops running
-     looks exactly like a pipeline that is fine, which is the one failure
-     mode this banner exists to make impossible. */
+     ITS ABSENCE IS REPORTED RATHER THAN SWALLOWED, as flows-board.js reports
+     it: a freshness check that quietly stops running looks exactly like a
+     pipeline that is fine, the one failure this banner exists to make
+     impossible. */
   function assessAge(payload) {
     if (typeof UI.staleness !== "function") {
       return {
@@ -1880,17 +1934,14 @@
 
   /* ---------- the page leads on change -----------------------------
 
-     "What changed" was two of twelve columns beside the poles — about 194px
-     of content at the 78rem clamp — holding a three-item list, and it fell
-     BELOW both ranked tables in the reading order. The region that answers
-     the only question this page is opened to ask cannot be its narrowest.
-
-     Re-seated here rather than in the stylesheet because this file owns the
-     renderer and not the grid; the span is an inline declaration of the same
-     `1 / -1` the spine region already carries, and the phone breakpoint's
-     `!important` one-column rule still wins over it, which is the behaviour
-     we want. The stylesheet should grow a `.cc-chg { grid-column: 1 / -1 }`
-     rule and a source-order move, and this can then go. */
+     "What changed" was two of twelve columns beside the poles — ~194px at
+     the 78rem clamp, a three-item list — and fell BELOW both ranked tables
+     in reading order. The region that answers the only question this page
+     is opened to ask cannot be its narrowest. Re-seated here because this
+     file owns the renderer and not the grid: an inline `1 / -1`, which the
+     phone breakpoint's `!important` one-column rule still wins over. The
+     stylesheet should grow a `.cc-chg { grid-column: 1 / -1 }` rule and a
+     source-order move, and this can then go. */
   function promoteChange() {
     const body = host("ccChg");
     const region = body && body.closest ? body.closest(".cc-region") : null;
@@ -1926,21 +1977,14 @@
      must not be told apart by the same value. */
   let gated = false;
 
-  /* A BOARD THAT DID NOT ANSWER BLANKS ONE REGION, NOT SEVEN.
-
-     This threw on every non-OK status and had no catch for a network
-     failure, so a 500 on either pole — or an offline laptop, or a TLS
-     error — rejected the Promise.all and skipped the whole render. The five
-     region payloads that HAD come back were parsed and thrown away, and the
-     page came up as seven empty labelled shells with not one of the four
-     silences in any of them: the fetch-then-discard pattern this page exists
-     to end, surviving in the failure path.
-
-     Null is the answer loadRegion already gives, `silent()` already knows
-     the sentence for it, and the containment doctrine three comments below
-     — "an events calendar that does not answer must not blank the five
-     regions that did" — is not a rule the two boards were ever exempt
-     from. */
+  /* A BOARD THAT DID NOT ANSWER BLANKS ONE REGION, NOT SEVEN. This threw on
+     every non-OK status and had no catch for a network failure, so a 500 on
+     either pole rejected the Promise.all and skipped the whole render: seven
+     empty labelled shells with none of the four silences in any of them,
+     while five region payloads that HAD come back were parsed and thrown
+     away. Null is the answer loadRegion already gives and `silent()` already
+     knows the sentence for it; the containment doctrine above was never a
+     rule the two boards were exempt from. */
   function loadBoard(side) {
     return fetch("/api/flows/board?side=" + side, {
       credentials: "same-origin", headers: { Accept: "application/json" },
@@ -2032,8 +2076,12 @@
       }
       sideTable(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
       if (sub) {
-        sub.textContent = rows.length > ROW_MAX
-          ? "top " + ROW_MAX + " of " + rows.length : "all " + rows.length;
+        /* THE DENOMINATOR IS THE POOL, which is what the link opens (see
+           poolCount). The publisher keeps the top-ranked rows, so "top N of
+           pool" holds even when the page carries fewer than the pool. */
+        const pool = poolCount(payload) ?? rows.length;
+        const shown = Math.min(rows.length, ROW_MAX);
+        sub.textContent = shown < pool ? "top " + shown + " of " + pool : "all " + pool;
         sub.hidden = false;
       }
     }
@@ -2057,8 +2105,12 @@
         ? alerts.rows : null;
       if (alrRows) {
         const seen = isNum(alerts.seen);
-        said.push(capSaid(Math.min(alrRows.length, LIST_MAX),
-          seen === null ? alrRows.length : seen));
+        const shown = Math.min(alrRows.length, LIST_MAX);
+        const of = seen === null ? alrRows.length : seen;
+        /* THE CEILING IS NOT A CENSUS (see the Flagged tile): at the vendor's
+           maximum `seen` is a floor, printed with ≥ — and a truncated read
+           is never "all", so capSaid's whole-population word is not offered. */
+        said.push(alerts.vendorTruncated === true ? shown + " of ≥" + of : capSaid(shown, of));
       }
       /* THE INSTANT, WITH A ZONE ON IT AND NO SECONDS. A bare
          toLocaleTimeString follows the viewer's 12/24-hour locale, prints a
@@ -2157,10 +2209,17 @@
     setStale(notes);
 
     const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
-    const bullN = rowCount(lng), bearN = rowCount(sht);
+    /* THE ROWS AGAINST THE POOL, in the line that already reconciles the
+       counts: "50 of 53 bearish carried" where the cap took names — the
+       reconciliation /flows/long/ prints at flows-board.js:1960 — and the
+       bare count where rows and pool agree (see poolCount). An unread or
+       unpublished side stays the em dash, named below. */
+    const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
+      : pool !== null && pool > rows ? rows + " of " + pool + " " + word + " carried"
+        : rows + " " + word;
     const parts = [];
-    parts.push((bullN === null ? DASH : bullN) + " bullish · " +
-      (bearN === null ? DASH : bearN) + " bearish");
+    parts.push(sideSaid(rowCount(lng), poolCount(lng), "bullish") + " · " +
+      sideSaid(rowCount(sht), poolCount(sht), "bearish"));
     if (meta.sessionDate) parts.push("session " + meta.sessionDate);
     if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
     /* AND A BOARD THAT DID NOT ANSWER IS NAMED HERE. The em dash the count
@@ -2176,57 +2235,27 @@
       : "");
 
     /* THE TWO BOARD BADGES ARE THE POPULATION, WHICH IS WHAT /flows/long/
-       BADGES. These filled from `rowCount`, the published rows — and the
-       publisher caps each side, publishing `cleared` (the side's whole pool)
-       and `shed` (what did not fit) beside them for exactly that reason
-       (flows-pipeline.mjs:5687). So this page wrote 93 into the slot that
-       flows-board.js:1842 fills with 97, on the route the badge links to. Two
-       routes wording one quantity differently is how a reader concludes there
-       are two quantities; the badge states the size of the SECTION, not this
-       page's excerpt of it, which is the rule flows-events.js:1126 already
-       settled for the fourth slot below.
-
-       THE SAME RULE AS THE BOARD, WRITTEN ONCE: prefer `cleared`, fall back to
-       the row count only for a board published before that field existed, and
-       let `rowCount`'s null carry the two silences through untouched — a
-       pending or unreadable board has no population to claim and setRailCount
-       withholds on null. A measured-quiet side still badges its 0, because
-       `cleared` is 0 there rather than absent.
+       BADGES: the size of the SECTION the link opens, not this page's excerpt
+       of it — the rule flows-events.js:1126 settled for the fourth slot
+       below, read here through poolCount so the tile, the status line and
+       the pole subtitles cannot part from it; setRailCount withholds on null.
 
        THE WATCH BADGE STAYS ON `rowCount`, checked rather than assumed:
        `board:watch` publishes `neutral` and NO `cleared` at all
        (flows-pipeline.mjs:5824), and flows-watch.js:434 fills this same slot
-       from its own rows.length — so the two routes already agree. `neutral` is
-       the in-band population and would be the field to move to, but it would
-       have to move on both routes at once, which is a separate decision from
-       this one.
-
-       WHAT IS STILL UNRECONCILED HERE, stated rather than left to be found:
-       the status line above opens "93 bullish · 88 bearish" from the published
-       rows, and this page carries no clause pairing that with the pool the
-       badge now shows. /flows/long/ does — "4 more cleared the band and did
-       not fit (93 of 97 shown)" at flows-board.js:1960 — so there the two
-       numbers are explained where they sit together. Giving this line the same
-       clause is a copy change on a live page for two sides at once, and it is
-       left as one. */
-    const population = (payload, rows) =>
-      rows === null ? null : (isNum(payload.cleared) ?? rows);
-    setRailCount("long", population(lng, bullN));
-    setRailCount("short", population(sht, bearN));
+       from its own rows.length — so the two routes already agree. `neutral`
+       would be the field to move to, but it would have to move on both
+       routes at once, which is a separate decision from this one. */
+    setRailCount("long", poolCount(lng));
+    setRailCount("short", poolCount(sht));
     setRailCount("watch", rowCount(watch));
-    /* THE FOURTH SLOT WAS EMITTED AND NEVER FILLED FROM HERE. The nav renders
-       a badge for four keys (shared/flows-pages.js:84) and this page held the
-       events payload — it is fetched at :1453 and read at :1571 — while
-       filling three. So the rail's events count appeared on /flows/events/
-       and vanished on /flows/, which reads as "nothing reports this week"
-       rather than "this page did not say".
-
-       AND IT IS THE POPULATION, the same quantity flows-events.js:1142 now
-       writes. `rowCount` would have been the published rows — capped at 200
-       on the wire and at eight in the region above — so the two routes would
-       have filled one badge with two different numbers, which is the defect
-       this fix exists to close, not the fix. `inWindow` is null on a pending
-       envelope and setRailCount withholds on null. */
+    /* THE FOURTH SLOT IS THE CALENDAR'S POPULATION, the same quantity
+       flows-events.js:1142 writes: `inWindow`, not the published rows, which
+       are capped at 200 on the wire and at eight in the region above — so the
+       two routes fill one badge with one number. The nav emits the slot
+       (shared/flows-pages.js:84) and this page held the payload and never
+       filled it, which read as "nothing reports this week". `inWindow` is
+       null on a pending envelope and setRailCount withholds on null. */
     setRailCount("events", events && events.status !== "pending"
       ? isNum(events.inWindow) : null);
   }).catch(() => {
