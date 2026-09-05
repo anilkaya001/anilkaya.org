@@ -170,8 +170,22 @@ const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)
    in the same space as the words around them. Values that look like
    dates or timestamps are left out: they carry digits rather than
    meaning, and a reader asking about "2026" wants a session, not
-   every fact stamped in that year. */
-const NAME_LIKE = /^[A-Za-z][A-Za-z0-9.]{0,9}$/;
+   every fact stamped in that year.
+
+   AN UPPERCASE INITIAL, WHICH EVERY TICKER AND SECTOR HAS AND NO
+   REGIME OR SIDE WORD DOES. The per-name facts pin the words that
+   describe a reading beside its figures — the gamma regime "short",
+   the board side "long" — and a pattern that admitted any letter
+   turned each of those into a topic. A standing fact for a name on
+   the LONG board then carried "short" (its regime), and "which names
+   are on the short board" was answered with eleven long-board names:
+   measured on the emitted index before this line changed, 11 of 14
+   picks came from card facts and every one of them from the wrong
+   side. A pinned word that describes a reading is not a name the
+   reading is about. Names the index is about — SYN046, XLF,
+   Technology — all begin with a capital; the describing words never
+   do. */
+const NAME_LIKE = /^[A-Z][A-Za-z0-9.]{0,9}$/;
 
 function addNames(set, v) {
   if (typeof v === "string") {
@@ -196,9 +210,22 @@ function keywords(topic, source, n) {
    does not. `n` stays an OBJECT keyed by what each number is, with
    the unit in the key — a ratio and a dollar sum never share a name. */
 function maker(source, at) {
-  return (id, topic, say, n) => ({
-    id, topic: keywords(topic, source, n), say, n: n || {}, source, at: at || null,
-  });
+  return (id, topic, say, n, lead) => {
+    const f = { id, topic: keywords(topic, source, n), say, n: n || {}, source, at: at || null };
+    /* THE LEAD TRAVELS, OR THE FIGURE NEVER LANDS. flows-brief attaches
+       `lead` — which keys of `n` head the sentence, in which unit — so
+       a renderer can set the number before the words. The re-emit at
+       the briefing loop dropped it for every fact, and the thirty
+       lines of renderer and the stylesheet built for the headline
+       figure were dead on every answer ever served: measured, zero of
+       282 facts carried one. It is copied as published, never built
+       here, because the module that wrote the sentence is the only
+       one that knows which number leads it. */
+    if (lead && typeof lead === "object" && Array.isArray(lead.keys) && lead.keys.length) {
+      f.lead = lead;
+    }
+    return f;
+  };
 }
 
 /* A FACT IS EMITTED ONLY WHEN EVERY READING ITS SENTENCE QUOTES IS
@@ -928,6 +955,29 @@ export function shedCardFacts(facts, names, measure) {
   return { facts: list, namesIndexed: { of: order.length, indexed: kept, shed: order.length - kept } };
 }
 
+/* THE FOUR SILENCES THIS INDEX CAN FILE, AND A FIFTH IS AN ERROR. The
+   stylesheet has named four kinds and four marks since the ask page
+   shipped — pending, unreadable, quiet, and UNAVAILABLE, "it spoke, and
+   this field was not in it" — while this index held three lists and a
+   record() that returned quietly on any other kind. So the fourth
+   silence had nowhere to go, and a per-name withholding filed as
+   "unavailable" would have vanished with no error and no failing test:
+   the exact class of defect the module header says it most fears. The
+   list exists now, and an unknown kind throws rather than returns,
+   because a silence that is dropped in silence is the one this file
+   cannot see. */
+export const SILENCE_KINDS = Object.freeze(["pending", "unreadable", "quiet", "unavailable"]);
+
+export function emptySilences() {
+  return { pending: [], unreadable: [], quiet: [], unavailable: [] };
+}
+
+export function fileSilence(silences, kind, what, say, source, reason) {
+  if (!SILENCE_KINDS.includes(kind)) throw new Error("unknown silence kind: " + String(kind));
+  silences[kind].push({ kind, what, say, source,
+    reason: typeof reason === "string" && reason ? reason : null });
+}
+
 /**
  * Every fact the published payloads support, and every silence they
  * do not.
@@ -941,17 +991,13 @@ export function shedCardFacts(facts, names, measure) {
 export function buildFactIndex(store) {
   const s = store && typeof store === "object" ? store : {};
   const facts = [];
-  /* THREE LISTS, NOT ONE WITH A FIELD. A silence that can be filtered
+  /* FOUR LISTS, NOT ONE WITH A FIELD. A silence that can be filtered
      is a silence that gets summed, and "4 surfaces are silent" is a
      sentence that merges a job that has not run with a market that
      was quiet. Keeping them apart in the shape makes the merge take
      an edit rather than an oversight. */
-  const silences = { pending: [], unreadable: [], quiet: [] };
-  const record = (kind, what, say, source, reason) => {
-    if (!silences[kind]) return;
-    silences[kind].push({ kind, what, say, source,
-      reason: typeof reason === "string" && reason ? reason : null });
-  };
+  const silences = emptySilences();
+  const record = (kind, what, say, source, reason) => fileSilence(silences, kind, what, say, source, reason);
 
   /* ---- the three-session briefing ---- */
   const briefStore = briefStoreFrom(s);
@@ -1017,11 +1063,25 @@ export function buildFactIndex(store) {
     ["yesterday", brief.yesterday, ["yesterday", "changed", "moved", "prior"]],
     ["next", brief.next, ["next", "tomorrow", "scheduled", "calendar", "threshold"]],
   ];
+  /* THE BOARDS' TWO NAMES. The briefing says "bullish" and "bearish";
+     the routes say "long" and "short"; a reader asks in either. Before
+     the regime label stopped leaking into topics, "which names are on
+     the short board" matched fourteen per-name facts on the leaked word
+     and looked answered; with the leak closed it matched nothing on
+     "short" at all, because no market-wide fact carried the route's
+     word. The board's route name is a topic of the fact about its
+     leader, so the question lands on the reading it asks for. */
+  const SIDE_WORDS = { bullish: ["long"], bearish: ["short"] };
+  const sideWords = (id) => {
+    const out = [];
+    for (const part of id.split(":")) for (const w of SIDE_WORDS[part] || []) out.push(w);
+    return out;
+  };
   for (const [name, section, topics] of SECTIONS) {
     const f = maker("brief", briefAt);
     for (const item of section.facts) {
-      facts.push(f("brief:" + name + "/" + item.id, topics.concat(item.id.split(":")),
-        item.say, item.n));
+      facts.push(f("brief:" + name + "/" + item.id,
+        topics.concat(item.id.split(":"), sideWords(item.id)), item.say, item.n, item.lead));
     }
     for (const q of section.silences) {
       /* THE TWO SILENCES THE BRIEFING CANNOT CLASSIFY FROM WHERE IT
@@ -1215,17 +1275,95 @@ function questionTickers(question) {
  * recency only ever breaks a tie — a fact that scored on the
  * question is always preferred to a newer fact that did not.
  */
+/* THE PAGE'S OWN NAME, SCORED BELOW A TYPED ONE. A question asked from
+   the docked box on /flows/ticker/?t=NVDA is about NVDA unless it says
+   otherwise, so the caller may pass the page's name as `subject` and it
+   scores at half the weight of a symbol the reader typed: a typed name
+   overrides the page outright (the subject list is emptied), and the
+   page's name never outranks a typed one. Two names at most, because a
+   page is about one and the desk's pair is the widest any route holds. */
+const NAMED_WEIGHT = 100;
+const SUBJECT_WEIGHT = 50;
+
+/* THE FLOOD RULE. Two hundred and forty-four per-name facts share the
+   index with thirty-eight market-wide ones, and on a topic word every
+   card fact scores the same ten as a market fact and only loses the
+   tie. Measured on the emitted index: "where is dealer gamma short"
+   picked 14 of 14 from card facts and "what is priced" the same, so the
+   market-wide reading a question like that is asking for was pushed out
+   by fourteen names' copies of the same sentence. A card fact that hit
+   no name — typed, on the page, or otherwise — is capped at one word's
+   score, and at most FOUR such facts are served, one per name, in the
+   index's own order (long board by rank, then short, then unboarded),
+   AFTER every matched market-wide fact. The reader gets the reading and
+   four names to open, not fourteen and no reading. */
+const WORD_ONLY_NAMES = 4;
+
+function subjectTickers(subject) {
+  const list = subject && typeof subject === "object" && Array.isArray(subject.tickers)
+    ? subject.tickers : [];
+  const out = [];
+  for (const t of list) {
+    if (typeof t !== "string") continue;
+    const u = t.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(u)) continue;
+    const l = u.toLowerCase();
+    if (!out.includes(l)) out.push(l);
+  }
+  return out.slice(0, 2);
+}
+
+const plural = (n, word) => word + (n === 1 ? "" : "s");
+
+/* "a", "a and b", "a, b and c" — the clauses of one sentence. */
+function joinClauses(list) {
+  if (list.length <= 1) return list.join("");
+  return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+}
+
+/**
+ * The facts a question is answered from, chosen deterministically.
+ *
+ * NO EMBEDDINGS AND NO MODEL. Retrieval that cannot be replayed is
+ * retrieval that cannot be tested, and this layer is the one a
+ * reader has to be able to hold the bot to: the same question over
+ * the same index picks the same facts on every machine, forever.
+ *
+ * A ticker is weighted far above a topic word because a question
+ * naming a symbol is asking about that symbol and nothing else, and
+ * recency only ever breaks a tie — a fact that scored on the
+ * question is always preferred to a newer fact that did not.
+ *
+ * TWO NAMES ARE DEALT, NOT RANKED. When a question names two symbols
+ * the facts about each are dealt round-robin before the cap, so a
+ * comparison is answered seven and seven rather than ten and four —
+ * the first name's fifth fact does not outrank the second name's
+ * first. Within a name the order is the usual one.
+ *
+ * THE SENTENCE NAMES WHAT IT COUNTED. "3 of those matched a ticker"
+ * never said which, and a reader holding two names could not tell
+ * whether both were found. Every count below is over the list the
+ * reader is holding, and every name that was asked about is named,
+ * found or not.
+ */
 export function selectFacts(index, question, options) {
   const o = options || {};
   const max = num(o.max) === null ? 14 : Math.max(1, Math.trunc(num(o.max)));
   const facts = index && Array.isArray(index.facts) ? index.facts : [];
   if (!facts.length) {
-    return { picked: [], capped: false,
+    return { picked: [], capped: false, subjectApplied: false,
       why: "The index holds no facts at all, so nothing was selected." };
   }
 
-  const tickers = questionTickers(question);
-  const words = questionWords(question);
+  const typed = questionTickers(question);
+  const subject = typed.length ? [] : subjectTickers(o.subject);
+  const named = typed.length ? typed : subject;
+  const weight = typed.length ? NAMED_WEIGHT : SUBJECT_WEIGHT;
+  /* A NAME IS NOT ALSO A WORD. questionWords lowercases every token,
+     so a typed symbol would match its own fact twice — once as the
+     name and once as a word — and the sentence below would report it
+     among "the words". */
+  const words = questionWords(question).filter((w) => !named.includes(w));
 
   /* RECENCY IS A RATIO INSIDE THE INDEX'S OWN SPAN, not an age. The
      module has no clock, so "newer" can only mean newer than the
@@ -1240,18 +1378,23 @@ export function selectFacts(index, question, options) {
   }
   const span = oldest !== null && newestMs !== null ? newestMs - oldest : 0;
 
+  const cardName = (f) => (typeof f.source === "string" && f.source.startsWith("card:")
+    ? f.source.slice(5).toLowerCase() : null);
+
   const scored = facts.map((f, i) => {
     const topic = new Set(f.topic || []);
-    let hitTickers = 0, hitWords = 0;
-    for (const t of tickers) if (topic.has(t)) hitTickers++;
+    let hitNamed = 0, hitWords = 0, first = null;
+    for (const t of named) if (topic.has(t)) { hitNamed++; if (first === null) first = t; }
     for (const w of words) if (topic.has(w)) hitWords++;
     const ms = f.at === null ? NaN : Date.parse(f.at);
     const recency = span > 0 && Number.isFinite(ms) ? (ms - oldest) / span : 0;
-    return { f, i, hitTickers, hitWords, recency,
-      score: hitTickers * 100 + hitWords * 10 };
+    const name = cardName(f);
+    const wordOnly = name !== null && hitNamed === 0 && hitWords > 0;
+    const score = wordOnly ? 10 : hitNamed * weight + hitWords * 10;
+    return { f, i, hitNamed, hitWords, first, name, wordOnly, recency, score };
   });
 
-  const matched = scored.filter((x) => x.hitTickers > 0 || x.hitWords > 0);
+  const matched = scored.filter((x) => x.hitNamed > 0 || x.hitWords > 0);
   const pool = matched.length ? matched : scored;
   /* RECENCY BREAKS A TIE; IT DOES NOT SET THE ORDER. Held inside the
      score it was the only term that ever varied among facts that
@@ -1262,50 +1405,103 @@ export function selectFacts(index, question, options) {
      nothing was answered "the run spent 812 vendor calls" while being
      told these were the session's headline readings in the briefing's
      order. Ranked after the source, it does what its own comment says. */
-  pool.sort((a, b) => (b.score - a.score) ||
+  const byRank = (a, b) => (b.score - a.score) ||
     (sourceRank(a.f.source) - sourceRank(b.f.source)) ||
-    (b.recency - a.recency) || (a.i - b.i));
+    (b.recency - a.recency) || (a.i - b.i);
 
-  const chosen = pool.slice(0, max);
+  const general = pool.filter((x) => !x.wordOnly).sort(byRank);
+
+  /* The flood rule, applied: one per name, four names, index order. */
+  const perName = [];
+  const seenNames = new Set();
+  const wordOnlyNames = new Set();
+  for (const x of pool) {
+    if (!x.wordOnly) continue;
+    wordOnlyNames.add(x.name);
+    if (seenNames.has(x.name) || perName.length >= WORD_ONLY_NAMES) continue;
+    seenNames.add(x.name);
+    perName.push(x);
+  }
+
+  /* Fairness: deal the named facts round-robin when two names hit. */
+  let ordered;
+  if (named.length >= 2) {
+    const groups = new Map(named.map((t) => [t, []]));
+    const rest = [];
+    for (const x of general) {
+      if (x.hitNamed > 0) groups.get(x.first).push(x);
+      else rest.push(x);
+    }
+    const dealt = [];
+    let dealing = true;
+    while (dealing) {
+      dealing = false;
+      for (const t of named) {
+        const g = groups.get(t);
+        if (g.length) { dealt.push(g.shift()); dealing = true; }
+      }
+    }
+    ordered = dealt.concat(rest, perName);
+  } else {
+    ordered = general.concat(perName);
+  }
+
+  const chosen = ordered.slice(0, max);
   const picked = chosen.map((x) => x.f);
-  const capped = pool.length > max;
-  /* COUNTED OVER THE FACTS THE READER IS HOLDING, because that is the
-     list the sentence below opens by naming. Counted over `matched` it
-     described a population the reader never sees: three facts served
-     under "5 matched a ticker named in the question", which is the
-     defect the block comment further down says it fixed one clause
-     earlier and then reintroduced in the next one. */
-  const tickerHits = chosen.reduce((n, x) => n + (x.hitTickers > 0 ? 1 : 0), 0);
+  const capped = ordered.length > max;
 
   /* THE POPULATION IS KNOWN AND IS SAID, because a list that
      truncates without saying so reads as a population — and here the
      cap is ours, so the total is exactly reportable rather than a
-     lower bound.
+     lower bound. Each clause counts the group it names, over the list
+     the reader is holding against the group that matched, so "3 of
+     the 9 facts about NVDA" means nine matched the name and three were
+     served — never nine in the index, never nine that matched
+     something else. */
+  const upper = (t) => t.toUpperCase();
+  const hitWordList = words.filter((w) => pool.some((x) => x.f.topic && x.f.topic.includes(w)));
+  const wordsPhrase = "the words " + hitWordList.slice(0, 4).join(", ") +
+    (hitWordList.length > 4 ? " and " + (hitWordList.length - 4) + " more" : "");
+  const pageNote = (t) => (subject.includes(t)
+    ? (subject.length === 1 ? ", the name on this page" : ", a name on this page") : "");
 
-     AND IT IS THE POPULATION THE CAP WAS APPLIED TO. Naming the wrong
-     one is the same defect a step quieter: the cap cuts the facts that
-     MATCHED, so "3 of 40 facts, and the list was cut at the cap" told a
-     reader the cap had dropped thirty-seven when it had dropped six and
-     the other thirty-one had simply not matched the question. Both
-     totals are ours and both are exactly countable, so each sentence
-     states the one it is about.
-
-     AND "THE REST" HAS TO BE SOMEBODY. When every fact served matched a
-     ticker there is no remainder, and a clause describing one invented
-     a second group out of the same facts it had just counted. */
-  const why = matched.length
-    ? "Picked " + picked.length + " of the " + matched.length +
-      " facts that matched: " + (tickerHits
-        ? tickerHits + " of those matched a ticker named in the question" +
-          (tickerHits < picked.length ? " and the rest matched topic words" : "")
-        : "matched on topic words, no ticker in the question matched one") +
-      (capped ? ", and the list was cut at the cap." : ".")
-    : "Nothing in the question matched a ticker or a topic word in the index, so these " +
+  let why;
+  if (matched.length) {
+    const clauses = [];
+    const missing = [];
+    for (const t of named) {
+      const about = general.filter((x) => x.hitNamed > 0 && x.first === t).length;
+      if (!about) { missing.push(t); continue; }
+      const served = chosen.filter((x) => x.hitNamed > 0 && x.first === t).length;
+      clauses.push(served + " of the " + about + plural(about, " fact") + " about " + upper(t) + pageNote(t));
+    }
+    const wordGeneral = general.filter((x) => x.hitNamed === 0).length;
+    if (wordGeneral) {
+      const served = chosen.filter((x) => !x.wordOnly && x.hitNamed === 0).length;
+      clauses.push(served + " of the " + wordGeneral + plural(wordGeneral, " fact") + " that matched " + wordsPhrase);
+    }
+    if (wordOnlyNames.size) {
+      const served = chosen.filter((x) => x.wordOnly).length;
+      clauses.push(served + " per-name reading" + (served === 1 ? "" : "s") + " on " +
+        wordsPhrase + ", one each from " + served + " of the " + wordOnlyNames.size +
+        " name" + (wordOnlyNames.size === 1 ? "" : "s") + " that carry one");
+    }
+    why = (missing.length
+      ? "Nothing indexed is about " + joinClauses(missing.map((t) => upper(t) + pageNote(t))) + ". "
+      : "") +
+      "Picked " + joinClauses(clauses) + (capped ? ", cut at the cap of " + max + "." : ".");
+  } else {
+    why = (subject.length
+      ? "Nothing indexed is about " + joinClauses(subject.map(upper)) +
+        (subject.length === 1 ? ", the name on this page. " : ", the names on this page. ")
+      : "") +
+      "Nothing in the question matched a ticker or a topic word in the index, so these " +
       "are the session's headline readings in the order the briefing states them: " +
       picked.length + " of " + facts.length + " facts" +
       (capped ? ", cut at the cap." : ".");
+  }
 
-  return { picked, capped, why };
+  return { picked, capped, why, subjectApplied: subject.length > 0 };
 }
 
 /* ---------- the guard -------------------------------------------- */
@@ -1609,13 +1805,14 @@ export function promptFor(picked, question) {
     "2. NEVER say what the market is going to do. No prediction, no expectation, no " +
       "likelihood. The facts are measurements and calendar entries that already exist, " +
       "and nothing in them supports a claim about a future price or score.",
-    "3. THREE KINDS OF SILENCE ARE THREE DIFFERENT FACTS and may never be merged into " +
+    "3. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS and may never be merged into " +
       "one sentence. PENDING means the payload has not been published for this session, " +
       "so nothing was measured and nothing is claimed. UNREADABLE means it was " +
       "published and could not be read, which is a fault on our side rather than a fact " +
       "about the session. QUIET means it was measured and holds nothing, which is a " +
-      "reading in its own right. Never answer that a market was quiet when the truth is " +
-      "that a job has not run.",
+      "reading in its own right. UNAVAILABLE means the payload was published and this " +
+      "particular reading is not on it, so nothing is claimed about that reading. Never " +
+      "answer that a market was quiet when the truth is that a job has not run.",
     "4. UNITS TRAVEL WITH NUMBERS. A ratio and a dollar sum are not interchangeable; " +
       "quote the unit the fact itself uses, in the fact's own words.",
     "5. A capped list is not a population. If a fact says a count was capped or came " +
