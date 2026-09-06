@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "117";
+export const ASSET_VERSION = "118";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1376,9 +1376,21 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <div class="flows-status" id="ftStatus" role="status">Loading the name…</div>
   <p class="flows-stale fc-staleband" id="ftStale" role="status" hidden></p>
 
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-  </div>
+  <!-- THE LEDE IS THE PAGE'S DESCRIPTION, NOT ONE OF ITS READINGS, and this
+       is the one route where that distinction costs something. It is still
+       served — head() above puts it in <meta name="description">, which is
+       where a description belongs and where a search result reads it. What is
+       gone is the visible copy: 95px measured, on a page a reader opens every
+       morning to look at ONE name, spent every time on six lines about what
+       the page is.
+
+       THIS IS NOT THE CAVEATS MOVING. The provenance prose — what a number
+       was measured over, which session it belongs to, why a silence is the
+       silence it is — stays exactly where it is on every panel, because that
+       is evidence and a reader needs it beside the figure it qualifies. A
+       paragraph explaining the ROUTE is navigation, and navigation is read
+       once. The other six Flows routes keep theirs; they are not opened
+       daily to re-read one name. -->
 
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
        IT. The controller used to build this <div> from nothing on first paint,
