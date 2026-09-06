@@ -19,7 +19,7 @@
 
 import { TICKER_PANELS } from "./flows-panels.js";
 
-export const ASSET_VERSION = "114";
+export const ASSET_VERSION = "115";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -253,127 +253,26 @@ ${topbar(true)}
 }
 
 
-/* The ticker card, shared by every page that lists tickers. Extracted so the
-   overview and the two side pages cannot drift apart on the markup the card
-   renderer targets by id — a mismatch there is a panel that silently never
-   draws, which this repo has shipped before. */
+/* ---------- the retired card dialog ----------------------------
+   THE ONE FULL STATEMENT OF THE RETIREMENT; everywhere else points here.
+   cardQ() and cardDialog() stood here: a `<dialog id="flowsCard">` of ten
+   hand-written <section class="fc-panel"> blocks emitted into the overview,
+   both sides and the watch list, with the flows-panels.js and flows-card.js
+   tags each of those four routes parsed to open it.
 
-/**
- * The registry's question for one panel key, escaped for an attribute.
- *
- * THE DIALOG AND THE PAGE ASKED DIFFERENT QUESTIONS ABOVE THE SAME CHART.
- * /flows/ticker/ emits `data-question` from TICKER_PANELS and its controller
- * passes it to the drawer; flows-card.js called the same ten renderers with no
- * question at all, so each fell back to the string hardcoded inside itself —
- * ten panels, two surfaces, two different sentences over one drawing. The
- * priced move is the plainest of them: the page asks "What move is the option
- * market pricing over the stated horizon?" and the dialog asked "What move is
- * priced over a fixed horizon, and is that band rich against what this stock
- * has actually been delivering?".
- *
- * IT TRAVELS AS MARKUP FOR THE REASON shared/flows-panels.js's header gives:
- * `shared/` is in .assetsignore and is never served, so a browser module
- * cannot import the registry. The attribute is the only channel, and it is the
- * one the ticker page already uses — not a second list of ten strings in
- * flows-card.js, which is the three-hand-written-lists defect the registry was
- * created to close.
- *
- * A key with no registry entry returns "" rather than throwing: the renderers
- * all fall back to their own sentence on an empty question, so a typo here
- * costs the old behaviour rather than a blank panel. The test that the ten ids
- * carry a non-empty question is what makes that fallback unreachable.
- */
-const cardQ = (key) => {
-  const entry = TICKER_PANELS.find((p) => p.key === key);
-  return escapeHTML(entry ? entry.question : "");
-};
+   THREE DEFECTS, ONE FIX. (a) Two answers to one question: /flows/ticker/?t=
+   draws the SAME renderers and has an address, so it can be bookmarked, sent,
+   and give each panel the width it measured for. (b) 166.3 KiB on four routes
+   — flows-panels.js 150.91k plus flows-card.js 15.41k — where only the dialog
+   called in; assets/js/flows-watch.js does not contain the string
+   `FlowsPanels` at all. (c) It put the score derivation LAST, under nine
+   panels, on the surface a reader always reaches from a row carrying a score,
+   while shared/flows-panels.js had already moved that panel FIRST.
 
-const cardDialog = () => `
-<dialog id="flowsCard" class="fc" aria-labelledby="fcTitle">
-  <article class="fc-inner">
-    <header class="fc-head">
-      <div class="fc-id">
-        <h2 id="fcTitle" tabindex="-1">&nbsp;</h2>
-        <span class="fc-score" id="fcScore"></span>
-        <span class="fc-meta" id="fcConv"></span>
-        <span class="fc-meta" id="fcRegime"></span>
-        <!-- THE WAY OUT OF THE MODAL, and it lives here rather than on the
-             deck card because .fd-card IS a <button> and an <a> inside a
-             button is invalid HTML — interactive content cannot nest. Putting
-             it in the dialog reaches every surface that opens a card at once,
-             which the deck-card version would not have. href is filled by
-             paint(); the anchor stays hidden until a card is painted. -->
-        <a class="ft-link fc-full" id="fcFull" hidden>Full page &#8599;</a>
-      </div>
-      <button type="button" class="fc-close" id="fcClose" aria-label="Close">&times;</button>
-    </header>
-
-    <p class="fc-staleband" id="fcStale" role="status" hidden></p>
-
-    <section class="fc-panel" data-panel="gamma" data-question="${cardQ("gamma")}"
-             aria-labelledby="fcGammaH">
-      <h3 id="fcGammaH">Gamma convexity</h3>
-      <div id="fcGamma"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="surface" data-question="${cardQ("surface")}"
-             aria-labelledby="fcSurfaceH">
-      <h3 id="fcSurfaceH">Gamma surface &mdash; strike &times; expiry</h3>
-      <div id="fcSurface"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="levels" data-question="${cardQ("levels")}"
-             aria-labelledby="fcLevelsH">
-      <h3 id="fcLevelsH">Key levels &amp; distance to spot</h3>
-      <div id="fcLevels"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="displacement" data-question="${cardQ("displacement")}"
-             aria-labelledby="fcDispH">
-      <h3 id="fcDispH">Where the book is moving</h3>
-      <div id="fcDisp"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="calendar" data-question="${cardQ("calendar")}"
-             aria-labelledby="fcCalH">
-      <h3 id="fcCalH">Gamma roll-off</h3>
-      <div id="fcCal"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="pricedMove" data-question="${cardQ("pricedMove")}"
-             aria-labelledby="fcMoveH">
-      <h3 id="fcMoveH">The priced move</h3>
-      <div id="fcMove"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="context" data-question="${cardQ("context")}"
-             aria-labelledby="fcCtxH">
-      <h3 id="fcCtxH">Price context</h3>
-      <div id="fcCtx"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="path" data-question="${cardQ("path")}"
-             aria-labelledby="fcPathH">
-      <h3 id="fcPathH">Session path</h3>
-      <div id="fcPath"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="congress" data-question="${cardQ("congress")}"
-             aria-labelledby="fcCongressH">
-      <h3 id="fcCongressH">Disclosed congressional transactions</h3>
-      <div id="fcCongress"></div>
-    </section>
-
-    <section class="fc-panel" data-panel="__score" data-question="${cardQ("__score")}"
-             aria-labelledby="fcWhyH">
-      <h3 id="fcWhyH">Score derivation</h3>
-      <div id="fcWhy"></div>
-    </section>
-
-    <p class="fc-prov" id="fcProv"></p>
-  </article>
-</dialog>`;
-
+   WHAT REPLACED IT: every opener is an
+   <a href="/flows/ticker/?t=…&s=signal&from=…">, and worker.js 302s the four
+   board routes' own ?t= addresses there. A row with no card is still not a
+   link — deckCard() in assets/js/flows-board.js says why. */
 /* ---------- overview: the command center ------------------------ */
 
 /**
@@ -564,9 +463,9 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
 
          AND A TICKER LINKS ONLY WHERE THERE IS SOMETHING BEHIND IT. Every row
          carries the vendor's tickers array, which is a genuine join between a
-         headline and a name this product ranks — but the card dialog only
-         exists for the names the run went deep on, so the rest are printed
-         plain. An opener that usually opens nothing is worse than no opener. -->
+         headline and a name this product ranks — but a detail card exists only
+         for the names the run went deep on, so the rest are printed plain. A
+         link to a reader with nothing to read is worse than no link. -->
     <section class="cc-region cc-news" aria-labelledby="ccNewsH">
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccNewsH">Headlines</h2>
@@ -615,7 +514,6 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
     <a href="/flows/history/">track record</a>.</span>
   </p>
 `)}
-${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <!-- flows-ui.js BEFORE flows-overview.js: the overview reads window.FlowsUI at
      module scope, and two deferred scripts execute in document order, so the
@@ -623,8 +521,6 @@ ${cardDialog()}
      says so on the status line rather than throwing when it is missing. -->
 <script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
-<script src="${v("/assets/js/flows-panels.js")}" defer></script>
-<script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -712,7 +608,6 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
     <a href="/flows/history/">track record</a>.</span>
   </p>
 `)}
-${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <!-- flows-ui.js BEFORE flows-board.js, for the reason the overview states at
      its own tag: two deferred scripts execute in document order and the board
@@ -729,19 +624,16 @@ ${cardDialog()}
      survived: the page looked finished because the missing part was the part
      that would have drawn itself.
 
-     NOT ADDED TO THE OTHER NINE ROUTES, and that is a measurement rather than
-     an oversight. The library is 24k of uncompressed parse; tests/flows-weight
-     measures each route's JavaScript against a stated ceiling, and serving it
-     everywhere trips five of them at once (desk 141/135, market 115/95,
-     unusual 104/85, political 73/55, history 68/45) while leaving events 1k
-     and ticker 6k. flows-weight.mjs:92 already says where that cost comes
-     from — "THE SHARED BUNDLE IS WHERE THE COST COMPOUNDS" — so the library
-     goes where something on the page actually calls it. Here, 267k to 291k
-     against a 300k ceiling, and it buys back a whole control bar. -->
+     NOT ADDED TO THE OTHER ROUTES, and that is a measurement rather than an
+     oversight. The library is 24.6k of uncompressed parse; tests/flows-weight
+     measures each route against a stated ceiling, and serving it everywhere
+     trips SIX at once — desk 151/135, market 126/102, unusual 117/93, events
+     104/92, political 82/62, history 74/52 — for a control bar none of those
+     pages builds. A library goes where something on the page calls it, which
+     is the rule that just took flows-panels.js off this route with the card
+     dialog. Here, 115.1k to 139.6k against a 155k ceiling. -->
 <script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
-<script src="${v("/assets/js/flows-panels.js")}" defer></script>
-<script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -976,11 +868,8 @@ ${shell("Watch List", "Options-flow intelligence", "watch", username, `
     is stirring, never for what to do.
   </p>
 `)}
-${cardDialog()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-watch.js")}" defer></script>
-<script src="${v("/assets/js/flows-panels.js")}" defer></script>
-<script src="${v("/assets/js/flows-card.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -1360,12 +1249,11 @@ ${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
 /* ---------- the ticker page ------------------------------------ */
 
 /**
- * ONE NAME, THE WHOLE BOOK — and the four panels nothing has ever drawn.
+ * ONE NAME, THE WHOLE BOOK — and now the ONLY per-name reader in the section.
  *
- * The card dialog answers "what about this name?" in a modal over the board,
- * which is right for a quick look and wrong for the drill: a modal cannot be
- * linked to, cannot be sent to anyone, and has to give every panel the same
- * cramped width. This page is the drill. The dialog stays.
+ * This docblock used to end "This page is the drill. The dialog stays." It
+ * does not; the retirement note above argues that once. Every board row links
+ * here, and worker.js 302s the four board routes' own ?t= addresses here.
  *
  * THE HALF OF THE PAYLOAD THAT WAS NEVER RENDERED. `ivSurface`, `skewTerm`,
  * `topContracts` and `aggressor` have been built, published, served and
@@ -1399,10 +1287,12 @@ export function tickerPage({ username = "" } = {}) {
     "from every level that matters — all of it read off the card the pipeline " +
     "published this morning, with no vendor call made by this page.";
 
-  /* Emitted from the registry rather than hand-written, unlike the card
-     dialog's ten <section> blocks above. Every id, title, question and span
-     comes from the one array, so adding a panel is a one-line edit that the
-     markup, the drawer table and the pipeline's shed order all pick up. */
+  /* Emitted from the registry rather than hand-written. That used to be a
+     contrast with the card dialog's ten hand-written <section> blocks; the
+     dialog is gone and the registry is now the only list there is. Every id,
+     title, question and span comes from the one array, so adding a panel is a
+     one-line edit that the markup, the drawer table and the pipeline's shed
+     order all pick up. */
   const panels = TICKER_PANELS.map((p) => `
   <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : ""}"
            data-panel="${escapeHTML(p.key)}" data-question="${escapeHTML(p.question)}"

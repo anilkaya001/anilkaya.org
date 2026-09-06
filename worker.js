@@ -3250,6 +3250,40 @@ async function route(request, env, url, ctx) {
     return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
   }
 
+  /* THE FOUR BOARD ROUTES' OWN ?t= ADDRESSES, FORWARDED TO THE READER.
+
+     Each carried a card dialog that read `?t=` off the address and pushed it
+     into history on every open, so they are in histories, bookmarks and links
+     people sent each other. The dialog is retired (shared/flows-pages.js
+     argues that once) and nothing reads the parameter.
+
+     A 302 RATHER THAN A 308: /flows/long/ is still itself and a bare board
+     route falls through untouched; it is /flows/long/?t=NVDA that moved.
+
+     IT READS NO PAYLOAD AND NO SESSION. The Location is a pure function of the
+     request URL, so it costs no KV read and cannot leak whether a name was
+     published — an anonymous visitor is forwarded and met by the login page at
+     /flows/ticker/, the same answer the path they asked for would have given.
+     `from` comes from this table, never from the caller, and `t` is re-encoded
+     rather than pasted, so it lands as one query value and cannot open a
+     second parameter, a fragment or a path segment. An empty or
+     whitespace-only `t` is not a name and is left to the board. */
+  const FLOWS_READER_FROM = {
+    "/flows/": "overview",
+    "/flows/long/": "long",
+    "/flows/short/": "short",
+    "/flows/watch/": "watch",
+  };
+  if (Object.hasOwn(FLOWS_READER_FROM, path) && url.searchParams.has("t")) {
+    const wanted = (url.searchParams.get("t") || "").trim();
+    if (wanted) {
+      requireMethod(request, ["GET", "HEAD"]);
+      return redirect(new URL(
+        "/flows/ticker/?t=" + encodeURIComponent(wanted) +
+        "&s=signal&from=" + FLOWS_READER_FROM[path], url).toString(), 302);
+    }
+  }
+
   /* THE FLOWS PAGES, one table rather than four near-identical blocks.
   
      The long and short sides were a TOGGLE on one page, which is two problems:
@@ -3277,8 +3311,9 @@ async function route(request, env, url, ctx) {
     /* Query parameter, never a path segment: dispatch here is
        Object.hasOwn(FLOWS_ROUTES, path), so /flows/ticker/NVDA would have to
        introduce a prefix match into a table whose exactness is the reason a
-       missed path can only ever 404. ?t= is also the parameter the card
-       dialog's deep link already uses. */
+       missed path can only ever 404. ?t= is also the parameter the retired
+       card dialog's deep links used, which is what the forward above exists
+       to honour. */
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
     "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),

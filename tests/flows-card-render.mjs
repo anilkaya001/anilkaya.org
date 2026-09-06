@@ -92,23 +92,20 @@ function fixture() {
 const panel = fixture();
 ok(panel.status === "ok", "the fixture builds a surface");
 
-/* Test-only: both modules are IIFEs with no export. The rewrite happens in
-   memory; the sources on disk are never touched.
+/* ONE FILE NOW, AND THE PUBLIC SURFACE IS THE ONLY WAY IN.
 
-   TWO FILES NOW, AND THE SPLIT IS THE POINT. The ten renderers moved to
-   flows-panels.js so a second page could draw them; flows-card.js kept the
-   dialog. This suite reaches the renderers through the SAME public surface
-   the ticker page uses — window.FlowsPanels — rather than through a private
-   hook, so an export that goes missing fails here instead of only on the
-   page nobody tests. `paint` is dialog-internal and still needs a hook. */
+   There were two: the renderers in flows-panels.js, and flows-card.js's modal
+   that drew them over the board. This suite injected both and reached the
+   modal's private paint() through a hook added in memory. The modal is
+   retired, so flows-card.js is gone and the hook has nothing to hook.
+
+   What is left is the arrangement this suite already preferred — the drawers
+   reached through window.FlowsPanels, the same public surface the ticker page
+   uses, so an export that goes missing fails here rather than only on a page.
+   The module is an IIFE with no export, so it is injected as source; nothing
+   on disk is rewritten. */
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
 assert.ok(panelsSrc.lastIndexOf("})();") > 0, "flows-panels.js is still an IIFE");
-
-let src = fs.readFileSync(path.join(ROOT, "assets/js/flows-card.js"), "utf8");
-const close = src.lastIndexOf("})();");
-assert.ok(close > 0, "flows-card.js is still an IIFE");
-src = src.slice(0, close) +
-  "  window.__paint = paint;\n" + src.slice(close);
 
 const browser = await chromium.launch();
 try {
@@ -121,17 +118,55 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
 
-  /* THE REAL MARKUP. A stub dialog would pass this test while the shipped page
-     was missing the panel's own container — which is the failure the id in
-     flows-pages.js and the id in flows-card.js exist to keep in step. */
-  const boardHTML = FLOWS_PAGES.sidePage({ username: "test", side: "long" })
+  /* THE REAL MARKUP, /flows/ticker/'s now rather than the board's — the
+     board carried the dialog whose ten hand-written <section> blocks were the
+     containers these renderers target by id, and the ticker page emits the
+     same ids from shared/flows-panels.js. Still SHIPPED markup rather than a
+     stub, which is the property that matters: a stub would pass this suite
+     while the served page was missing a panel's own container. */
+  const pageHTML = FLOWS_PAGES.tickerPage({ username: "test" })
     .replace(/<script[^>]*><\/script>/g, "")
     .replace("</body>", '<div id="h"></div></body>');
-  await page.setContent(boardHTML);
+  await page.setContent(pageHTML);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
+  /* THE GRID SHIPS HIDDEN AND THE CONTROLLER UNHIDES IT WHEN A CARD LANDS. No
+     controller runs here, so without this line every .ft-panel host is
+     display:none and clientWidth is 0 — a measurement of nothing dressed as
+     one. Same trap a closed <dialog> set, which is why the sweeps below used
+     to open it first. */
+  await page.evaluate(() => { document.getElementById("ftGrid").hidden = false; });
   await page.addScriptTag({ content: panelsSrc });
-  await page.addScriptTag({ content: src });
+
+  /* THE DRAWERS, DISPATCHED FROM THE REGISTRY RATHER THAN FROM A HOOK. The
+     sweep below called flows-card.js's private paint(), which chose which
+     panel got which slice of the card, and that file went with the dialog. Its
+     replacement is not a list of pairs typed here: it is the registry
+     INTERSECTED with what window.FlowsPanels exports, computed in the page, so
+     a renamed key or a dropped export moves the count and fails the assertion
+     below rather than quietly drawing one panel fewer. `__score` is the one
+     entry drawn from the card's TOP LEVEL rather than from panels[key]. */
+  const DRAWN_HOSTS = await page.evaluate((all) => {
+    const P = window.FlowsPanels;
+    const pairs = all.filter(([, key]) =>
+      typeof (key === "__score" ? P.score : P[key]) === "function");
+    window.__paintAll = (card) => {
+      for (const [id, key] of pairs) {
+        const host = document.getElementById(id);
+        if (!host) continue;
+        host.textContent = "";
+        const sec = document.querySelector('.ft-panel[data-panel="' + key + '"]');
+        const q = sec ? sec.dataset.question : "";
+        if (key === "__score") P.score(host, card, q);
+        else P[key](host, (card.panels || {})[key], card, q);
+      }
+    };
+    return pairs;
+  }, TICKER_PANELS.map((e) => [e.id, e.key]));
+  eq(DRAWN_HOSTS.length, 13,
+     `thirteen registry panels are drawn by window.FlowsPanels — the ten this file was ` +
+     `written for plus the three second-order Greeks that share one drawer (${
+       DRAWN_HOSTS.length})`);
   /* Through the module's own exported surface, not a private hook — see above. */
   await page.evaluate(() => {
     const P = window.FlowsPanels;
@@ -140,10 +175,11 @@ try {
     window.__renderGamma = P.gamma;
     window.__renderScore = P.score;
   });
-  eq(errors.length, 0, "the card module loads against the real board markup without throwing");
+  eq(errors.length, 0, "the panel module loads against the real page markup without throwing");
 
-  ok(await page.evaluate(() => !!document.getElementById("fcSurface")),
-     "the board's card dialog carries the container the surface renderer targets");
+  ok(await page.evaluate(() => !!document.getElementById("ftSurface")),
+     "the ticker page carries the container the surface renderer targets, under the id " +
+     "the registry names");
 
   const r = await page.evaluate(({ panel }) => {
     const host = document.getElementById("h");
@@ -389,7 +425,7 @@ try {
   /* ---------- EVERY PANEL, from a real emitted card -------------- */
 
   /* The surface assertions above are specific. This sweep is general, and it
-     is the part that scales: paint() dispatches ten renderers, and the bugs
+     is the part that scales: ten renderers over five real cards, and the bugs
      this repository has actually shipped — type scaled to 4.6 CSS px, a mark
      that landed on none of 109 cards, 54 bars of zero — were all invisible to
      every numeric test and all visible the moment something drew them.
@@ -401,12 +437,12 @@ try {
     const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
     ok(emitted.length > 0, `the dry run emitted cards to sweep (${SCRATCH})`);
 
-    /* ---- THE DIALOG AND THE PAGE ASK THE SAME QUESTION ----------------
+    /* ---- EVERY DRAWER ASKS THE REGISTRY'S QUESTION -------------------
 
-       Both surfaces draw the SAME ten renderers — that is the whole reason
+       Both surfaces drew the SAME ten renderers — that is the whole reason
        flows-panels.js exists — and each renderer takes the question from its
        caller with a hardcoded fallback. /flows/ticker/ passed the registry's;
-       this dialog passed nothing, so all ten fell back and the two surfaces
+       the dialog passed nothing, so all ten fell back and the two surfaces
        headed one drawing with two different sentences. The priced move is the
        plainest of them: the page asked "What move is the option market pricing
        over the stated horizon?" and the dialog asked "What move is priced over
@@ -415,40 +451,31 @@ try {
 
        CHECKED AGAINST THE REGISTRY, NOT AGAINST A LIST HERE. shared/ is never
        served, so the question reaches the browser as a data-question attribute
-       and this reads what was DRAWN back out of the dialog — a second list of
+       and this reads what was DRAWN back out of the DOM — a second list of
        ten strings in this file would be the drift the registry exists to
        close, one level up. */
     {
-      const HOST_KEYS = [
-        ["fcGamma", "gamma"], ["fcSurface", "surface"], ["fcLevels", "levels"],
-        ["fcDisp", "displacement"], ["fcCal", "calendar"], ["fcMove", "pricedMove"],
-        ["fcCtx", "context"], ["fcPath", "path"], ["fcCongress", "congress"],
-        ["fcWhy", "__score"],
-      ];
       const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
       const drawn = await page.evaluate(({ card, hosts }) => {
-        const dlg = document.getElementById("flowsCard");
-        try { dlg.showModal(); } catch { /* measured below either way */ }
-        window.__paint(card, Date.now());
+        window.__paintAll(card);
         const out = {};
         for (const id of hosts) {
           const q = document.querySelector("#" + id + " .fc-q");
           out[id] = q ? q.textContent : null;
         }
         return out;
-      }, { card, hosts: HOST_KEYS.map(([id]) => id) });
+      }, { card, hosts: DRAWN_HOSTS.map(([id]) => id) });
 
-      for (const [id, key] of HOST_KEYS) {
+      for (const [id, key] of DRAWN_HOSTS) {
         const entry = TICKER_PANELS.find((e) => e.key === key);
-        ok(entry && entry.question,
-           `the registry carries a question for "${key}" — the dialog reads the same list`);
-        ok(drawn[id], `${id}: the dialog panel drew a question at all`);
+        ok(entry && entry.question, `the registry carries a question for "${key}"`);
+        ok(drawn[id], `${id}: the panel drew a question at all`);
         ok(!String(drawn[id]).includes("[object"),
            `${id}: and it is a sentence, not a stringified object ("${
              String(drawn[id]).slice(0, 48)}")`);
         eq(drawn[id], entry.question,
-           `${id}: the dialog asks the registry's question, the same one /flows/ticker/ ` +
-           "puts over this drawing");
+           `${id}: draws the registry's question, the one /flows/ticker/ puts over this ` +
+           "drawing");
       }
     }
 
@@ -460,19 +487,11 @@ try {
     for (const file of sample) {
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, file), "utf8"));
 
-    const swept = await page.evaluate(({ card }) => {
+    const swept = await page.evaluate(({ card, HOSTS }) => {
       const errors = [];
-      /* THE DIALOG MUST BE OPEN. A closed <dialog> is display:none, so every
-         child measures zero and the sweep would confirm a card is fine while
-         measuring nothing at all — the exact failure mode it exists to catch,
-         reproduced in the test itself. */
-      const dlg = document.getElementById("flowsCard");
-      try { dlg.showModal(); } catch { errors.push("dialog would not open"); }
-      try { window.__paint(card, Date.now()); }
+      try { window.__paintAll(card); }
       catch (e) { return { threw: String(e) }; }
 
-      const HOSTS = ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal",
-                     "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"];
       const out = [];
       for (const id of HOSTS) {
         const host = document.getElementById(id);
@@ -508,10 +527,14 @@ try {
           widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
           /* [viewBox width, rendered CSS width] per svg. The invariant the
              host-sizing fix exists to hold is that these are the SAME: one
-             viewBox unit is one CSS pixel. */
+             viewBox unit is one CSS pixel. UNROUNDED, because the assertion
+             downstream is "within a pixel" and rounding would hand it a number
+             already half a pixel off — turning its tolerance into a second
+             one. A 282.5px host drawn at 282 units rounds to 283 and reads as
+             a whole pixel of error that is not there. */
           scales: svgs.map((s) => {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
-            return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
+            return [Number(vb[2]), s.getBoundingClientRect().width];
           }),
           /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
              carrying preserveAspectRatio="none" over width:100% and a fixed
@@ -526,12 +549,12 @@ try {
         });
       }
       return { panels: out, errors, overflow: document.documentElement.scrollWidth > 320 };
-    }, { card });
+    }, { card, HOSTS: DRAWN_HOSTS.map(([id]) => id) });
 
     const who = card.ticker || file;
     ok(!swept.threw, `${who}: painting a real emitted card does not throw (${swept.threw || ""})`);
     eq((swept.errors || []).length, 0,
-       `${who}: every panel the renderer targets exists in the board markup (${(swept.errors || []).join("; ")})`);
+       `${who}: every panel the renderer targets exists in the served markup (${(swept.errors || []).join("; ")})`);
 
     for (const p of swept.panels) {
       /* NO CHART SCALES ITS AXES INDEPENDENTLY. `none` is the one value that
@@ -578,12 +601,16 @@ try {
          viewBox that is too WIDE (type shrinks) and is structurally incapable
          of catching one that is too NARROW (the drawing is centred in empty
          space at its intended size). Comparing the two widths catches both.
-         The tolerance is 15% because panelWidth clamps to [300, 760]. */
+
+         WITHIN A PIXEL, NOT WITHIN 15%. The band was 15% because panelWidth
+         clamped to [300, 760]; both clamps are gone, and a tolerance wide
+         enough to hold a defect is not a measurement of the invariant it
+         names. */
       for (const [vbW, cssW] of p.scales) {
         if (!(vbW > 0) || !(cssW > 0)) continue;
-        const ratio = vbW / cssW;
-        ok(ratio > 0.85 && ratio < 1.15,
-           `${who} ${p.id}: one viewBox unit is one CSS pixel (viewBox ${vbW} in ${cssW}px)`);
+        ok(Math.abs(vbW - cssW) < 1,
+           `${who} ${p.id}: one viewBox unit is one CSS pixel (viewBox ${vbW} in ${
+             cssW.toFixed(2)}px)`);
       }
     }
     eq(swept.overflow, false, `${who}: a fully painted card overflows nothing at 320px`);
@@ -602,13 +629,10 @@ try {
     const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
 
-    const wide = await page.evaluate(({ card }) => {
-      const dlg = document.getElementById("flowsCard");
-      if (!dlg.open) dlg.showModal();
-      window.__paint(card, Date.now());
+    const wide = await page.evaluate(({ card, HOSTS }) => {
+      window.__paintAll(card);
       const out = [];
-      for (const id of ["fcGamma", "fcSurface", "fcLevels", "fcDisp", "fcCal",
-                        "fcMove", "fcCtx", "fcPath", "fcCongress", "fcWhy"]) {
+      for (const id of HOSTS) {
         const host = document.getElementById(id);
         const svgs = Array.from(host.querySelectorAll("svg"));
         let minText = Infinity, maxText = 0, clipped = false;
@@ -630,7 +654,7 @@ try {
           widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
           scales: svgs.map((s) => {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
-            return [Number(vb[2]), Math.round(s.getBoundingClientRect().width)];
+            return [Number(vb[2]), s.getBoundingClientRect().width];
           }),
           /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
              carrying preserveAspectRatio="none" over width:100% and a fixed
@@ -645,7 +669,7 @@ try {
         });
       }
       return { panels: out, overflow: document.documentElement.scrollWidth > 1280 };
-    }, { card });
+    }, { card, HOSTS: DRAWN_HOSTS.map(([id]) => id) });
 
     for (const p of wide.panels) {
       ok(!p.empty, `wide ${p.id}: renders content or an explicit notice`);
@@ -659,9 +683,9 @@ try {
          intended size inside empty margins, so no type measurement can see it. */
       for (const [vbW, cssW] of p.scales) {
         if (!(vbW > 0) || !(cssW > 0)) continue;
-        const ratio = vbW / cssW;
-        ok(ratio > 0.85 && ratio < 1.15,
-           `wide ${p.id}: the drawing fills its host rather than letterboxing (viewBox ${vbW} in ${cssW}px)`);
+        ok(Math.abs(vbW - cssW) < 1,
+           `wide ${p.id}: the drawing fills its host rather than letterboxing (viewBox ${
+             vbW} in ${cssW.toFixed(2)}px)`);
       }
     }
     eq(wide.overflow, false, "a painted card overflows nothing at 1280px either");
@@ -933,9 +957,11 @@ try {
     const gr = await page.evaluate(({ twoSided, allLong, lopsided }) => {
       /* THE REAL PANEL HOST, not the bare probe div. The rail is sized as a
          fraction of the canvas and the canvas is sized from the host, so a
-         320px scratch div and the dialog's own 288px column are different
-         layouts — and the narrower one is the one a phone gets. */
-      const host = document.getElementById("fcGamma");
+         320px scratch div and the shipped panel's own column are different
+         layouts — and the narrower one is the one a phone gets. This is
+         .ft-panel's host on /flows/ticker/, which is where the panel is
+         actually read; it was the dialog's before the dialog was retired. */
+      const host = document.getElementById("ftGamma");
       const draw = (gp) => {
         window.__renderGamma(host, gp, {
           ticker: "T", gammaFlip: 70.12, panels: {},
@@ -980,13 +1006,11 @@ try {
             open: n.closest("details") ? n.closest("details").open : true,
           })),
           howSummary: (host.querySelector("details.ft-how > summary") || {}).textContent || "",
-          /* THE DISCLOSURE ARRIVED ON THIS ROUTE WITH THIS CHANGE, and its
-             stylesheet did not move with it — .ft-how was written for
-             /flows/ticker/. If those rules were scoped to that page the
-             dialog would draw a <summary> with `list-style: none` and no
-             replacement marker: a control that opens on click and shows
-             nothing that says so. Read off the REAL flows.css, added at the
-             top of this file. */
+          /* READ OFF THE REAL flows.css, added at the top of this file,
+             rather than assumed. `.ft-how` uses bare selectors, and getting
+             that wrong fails silently: `list-style: none` with a ::before the
+             selector never reaches is a control that opens on click and shows
+             nothing saying it can be opened. */
           howChrome: (() => {
             const sm = host.querySelector("details.ft-how > summary");
             if (!sm) return null;
@@ -1216,14 +1240,12 @@ try {
     ok(/normalised separately from the bars/.test(gr.two.all) && /is ATR\(14\)/.test(gr.two.all),
        "and the curve-scale and sigma sentences survived the move too, in full");
 
-    /* A DOOR THAT LOOKS LIKE ONE, ON A ROUTE THAT HAD NO DOORS. This panel is
-       drawn in the card dialog on /flows/long/, /flows/ and /flows/watch/,
-       none of which built a <details> before this change; the marker, the
-       pointer and the focus ring live in flows.css under bare `.ft-how-s`
-       selectors and are therefore inherited here. Asserted rather than
-       assumed, because `list-style: none` with a scoped ::before is a control
-       that opens on click and shows nothing that says it can be opened. */
-    ok(gr.two.howChrome, "the dialog's fold has a summary to operate");
+    /* A DOOR THAT LOOKS LIKE ONE. The marker, pointer and focus ring live in
+       flows.css under bare `.ft-how-s` selectors, so a panel inherits them
+       wherever it is mounted. The fold is built in one file and styled in
+       another, two that can drift apart in one commit, and the drift is
+       invisible — which is why it is asserted rather than assumed. */
+    ok(gr.two.howChrome, "the fold has a summary to operate");
     ok(gr.two.howChrome && /\+/.test(gr.two.howChrome.marker),
        `and a visible closed-state marker on it (${gr.two.howChrome
          && gr.two.howChrome.marker}) — the default triangle is suppressed by the same rule ` +
@@ -1408,7 +1430,7 @@ try {
        "uniform ladder this whole block would pass against the defect it exists to catch");
 
     const placed = await page.evaluate((ks) => {
-      const host = document.getElementById("fcGamma");
+      const host = document.getElementById("ftGamma");
       window.__renderGamma(host, {
         status: "ok",
         bars: ks.map((k, i) => ({ k, g: (i % 5) - 2, cum: i - 10 })),

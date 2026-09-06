@@ -735,7 +735,52 @@ ok(/cleared the dead band this session\. 100 names were scored; the other side m
 ok(!/all of them|inside the band|±/.test(quietBare),
    "and never fills the neutral count with “all” — an absent field is a silence, not a census");
 
-/* ---- 11. nothing threw along the way -------------------------------- */
+/* ---- 11. EVERY OPENER ON BOTH VIEWS IS A LINK TO THE READER ---------
+   Both were <button data-t> that a delegated handler in the retired
+   flows-card.js turned into a modal. BOTH VIEWS IN ONE PLACE, because the deck
+   and the table are two renderers over one payload — the kind of fact that
+   gets fixed in one of them. The table cell also carried a SECOND control, a
+   small arrow anchor for the reader who wanted the page instead, and the
+   anchor count below is what proves it gone. */
+{
+  await put("board:long", board("long", true));
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(".fd-card");
+  /* The toggle hides a view, it does not unbuild it, so the table's rows are
+     waited on as ATTACHED rather than visible. */
+  await page.waitForSelector("#flowsBody tr .fb-open", { state: "attached" });
+  const shapes = await page.evaluate(() => {
+    const read = (el, t, anchors) => ({
+      tag: el.tagName, href: el.getAttribute("href"), t,
+      pop: el.getAttribute("aria-haspopup"), dataT: el.dataset.t || null, anchors });
+    return {
+      deck: Array.from(document.querySelectorAll(".fd-card"),
+        (c) => read(c, c.querySelector(".fd-tk").textContent, 0)),
+      rows: Array.from(document.querySelectorAll("#flowsBody tr"), (tr) => {
+        const cell = tr.querySelector(".fb-tk"), open = cell.querySelector(".fb-open");
+        return read(open, open.textContent, cell.querySelectorAll("a").length);
+      }),
+    };
+  });
+  ok(shapes.deck.length > 0 && shapes.rows.length > 0,
+     `both views rendered rows (${shapes.deck.length} cards, ${shapes.rows.length} rows)`);
+  for (const [view, list] of [["deck card", shapes.deck], ["row", shapes.rows]]) {
+    for (const o of list) {
+      eq(o.tag, "A", `${view} ${o.t}: is an anchor, not a button that opened a modal`);
+      eq(o.href, "/flows/ticker/?t=" + o.t + "&s=signal&from=long",
+         `${view} ${o.t}: links to its own reader, carrying the side (${o.href})`);
+      eq(o.pop, null, `${view} ${o.t}: announces no dialog, because there is none`);
+      eq(o.dataT, null, `${view} ${o.t}: carries no data-t for a delegation to find`);
+    }
+  }
+  for (const r of shapes.rows) {
+    eq(r.anchors, 1,
+       `row ${r.t}: the name cell offers ONE link and not two — the arrow beside the ` +
+       "modal-opening button has nothing left to be an alternative to");
+  }
+}
+
+/* ---- 12. nothing threw along the way -------------------------------- */
 
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
@@ -752,5 +797,7 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control bar ex
   `overflow at 320px, four silences on the deck's own paragraph that are four shapes in ` +
   `greyscale with the Worker's failed read told apart from a never-published side, a priced ` +
   `move that prints its absence, a gamma regime no hue calls bearish, a dispersion that ` +
-  `carries its unit, one statement of a cold memory, and a quiet sentence that counts and ` +
-  `passes no verdict`);
+  `carries its unit, one statement of a cold memory, a quiet sentence that counts and ` +
+  `passes no verdict, and every opener on BOTH views an anchor to that name's reader — ` +
+  `carrying the side it was read off, announcing no dialog, and offering one link per name ` +
+  `rather than the button-plus-arrow pair the retired modal needed`);

@@ -446,62 +446,85 @@ try {
        `the lead region's move column is in score points and says so (${chg.join(" | ")})`);
   }
 
-  /* ---------- the ticker is a button, not a navigation ----------- */
+  /* ---------- the ticker is a link to the reader ------------------ */
   {
-    /* THE DEFECT THIS REPLACES. Every name used to be <a href="?t=SYM">, so
-       opening a card was a full document load that re-fetched both boards
-       to rebuild the page the reader was already looking at. */
+    /* THE ROUND TRIP, AND WHY IT ENDS HERE. Every name was <a href="?t=SYM">,
+       an address that reloaded this whole page to draw a modal over it; it
+       became a <button data-t> that flows-card.js turned into that modal in
+       place, giving up the address. The modal is retired. */
     const shape = await page.evaluate(() => {
       const el = document.querySelector(".cc-bull tbody .cc-t > *");
       return { tag: el.tagName, type: el.getAttribute("type"), t: el.dataset.t,
                href: el.getAttribute("href"), pop: el.getAttribute("aria-haspopup") };
     });
-    eq(shape.tag, "BUTTON", "a name is a button");
-    eq(shape.href, null, "and not an anchor to ?t=, which would reload the page");
-    eq(shape.type, "button", "typed, so it cannot submit anything");
-    eq(shape.t, "ORCL", "carrying the ticker the card delegation reads");
-    eq(shape.pop, "dialog", "and announcing that it opens a dialog");
+    eq(shape.tag, "A", "a name is an anchor, not a button that opens a modal");
+    eq(shape.href, "/flows/ticker/?t=ORCL&s=signal&from=overview",
+       `and it names the reader, the section and the surface it was read off (${shape.href})`);
+    eq(shape.type, null, "an anchor carries no type");
+    eq(shape.t, undefined,
+       "and no data-t: the attribute existed only so a click delegation could find it");
+    eq(shape.pop, null,
+       "nor aria-haspopup=dialog, which would announce a modal that no longer exists");
+
+    /* THE DIALOG IS NOT ON THE PAGE AT ALL: the anchor assertion alone would
+       pass on a page still emitting it and 166 KiB of library beside it. */
+    eq(await page.locator("#flowsCard").count(), 0,
+       "and the card dialog is gone from the document rather than merely unreachable");
 
     /* A ROW WITH NO CARD IS NOT AN OPENER. The card costs vendor calls the
        run spends only on the names furthest from neutral, and this board
-       publishes `deep` with `dp` on four rows of five. Withholding data-t
-       is what actually keeps the fifth out of the click delegation. */
+       publishes `deep` with `dp` on four rows of five. What keeps the fifth
+       from being followable is now the ELEMENT: it is a <span>, so there is
+       no href to follow and nothing to delegate to either — the click
+       delegation that `data-t` used to feed went with assets/js/flows-card.js
+       in this same change. */
     const cat = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".cc-bull tbody tr"));
       const row = rows.find((r) => r.querySelector(".cc-t > :first-child")?.textContent.trim() === "CAT");
       const el = row.querySelector(".cc-t > *");
-      return { tag: el.tagName, t: el.dataset.t || null, title: el.getAttribute("title") };
+      return { tag: el.tagName, t: el.dataset.t || null,
+               /* READ, so the sentence below is checked rather than asserted.
+                  This probe used to return no href at all while its assertion
+                  said "and no href either" — an instrument that agrees with
+                  every outcome, which is the defect flows-legacy-payload.mjs
+                  spends a paragraph on. */
+               href: el.getAttribute("href"), title: el.getAttribute("title") };
     });
     eq(cat.tag, "SPAN", "a row the run built no card for renders as plain text");
-    eq(cat.t, null, "with no data-t, so the delegation cannot reach it");
+    eq(cat.t, null, "with no data-t left over from the delegation that is gone");
+    eq(cat.href, null, "and no href either — there is nothing to open");
     ok(/No detail card/.test(cat.title || ""),
        `and it says why rather than looking broken (${cat.title})`);
     /* SCOPED TO THE TWO RANKED REGIONS. The lead region mints openers for
        the same rule over its own rows, so a page-wide count would be
        counting two regions and asserting about one. */
     eq(await page.locator(".cc-bull .cc-open, .cc-bear .cc-open").count(), 8,
-       "so eight of the nine published names open a card and the ninth says why");
+       "so eight of the nine published names link to a reader and the ninth says why");
+    /* EVERY ONE: a sampled href cannot see a loop that mints one right
+       address and stale ones after it. */
+    const hrefs = await page.evaluate(() => Array.from(
+      document.querySelectorAll(".cc-bull .cc-open, .cc-bear .cc-open"),
+      (a) => [a.textContent.trim(), a.getAttribute("href")]));
+    for (const [name, href] of hrefs) {
+      eq(href, "/flows/ticker/?t=" + name + "&s=signal&from=overview",
+         `${name}: links to its own name on the reader (${href})`);
+    }
 
-    /* THE CARD OPENS IN PLACE. A marker set on the window survives a
-       dialog; it does not survive a navigation, which is the difference
-       this whole change is about. */
+    /* AND IT REALLY NAVIGATES: a window marker survives a modal and does not
+       survive a document load, which is the difference this change is about.
+       Back returns to the board, the gesture that used to close the dialog
+       doing what it was standing in for. */
     await page.evaluate(() => { window.__noReload = true; });
-    await page.locator('.cc-bull .cc-open[data-t="ORCL"]').click();
-    await page.waitForSelector("#flowsCard[open]", { timeout: 10000 });
-    ok(await page.evaluate(() => window.__noReload === true),
-       "clicking a name opens the card WITHOUT reloading the document");
-    ok(/[?&]t=ORCL/.test(page.url()), `and the address still carries the name (${page.url()})`);
-
-    /* AND BACK CLOSES IT. The opener pushed one history entry, so the
-       browser's own back gesture is the way out of the modal. */
-    await page.goBack();
-    /* Waited on the dialog's own `open`, not on visibility: a closed dialog
-       is hidden, and waitForSelector's default state is "visible". */
-    await page.waitForFunction(
-      () => !document.getElementById("flowsCard").open, null, { timeout: 10000 });
-    ok(!/[?&]t=ORCL/.test(page.url()), `back leaves the card and the address (${page.url()})`);
-    ok(await page.evaluate(() => window.__noReload === true),
-       "and back out of the dialog is not a reload either");
+    await Promise.all([
+      page.waitForNavigation({ timeout: 10000 }),
+      page.locator(".cc-bull .cc-open").first().click(),
+    ]);
+    ok(/\/flows\/ticker\/\?t=/.test(page.url()),
+       `clicking a name lands on the reader for that name (${page.url()})`);
+    eq(await page.evaluate(() => window.__noReload === undefined), true,
+       "and it is a real navigation rather than a modal painted over this page");
+    await page.goBack({ waitUntil: "networkidle" });
+    await page.waitForSelector(".cc-bull tbody .cc-open", { timeout: 10000 });
   }
 
   /* ---------- a score strip per row ------------------------------ */
@@ -664,26 +687,28 @@ try {
     ok(!rows.some((r) => r[1] === "KLA"),
        "and a name with one scored session has nothing to subtract from");
 
-    /* THE NAMES OPEN. These are the same deep board rows that are rendered
-       as openers in the ranked region twelve lines below, and this region
-       used to emit a plain <span> for every one of them — so the region
-       leading the page was the only dead text on it. */
+    /* THE NAMES LINK. These are the same deep board rows that are rendered
+       as links in the ranked region twelve lines below, and this region used
+       to emit a plain <span> for every one of them — so the region leading
+       the page was the only dead text on it. */
     const cells = await page.evaluate(() => {
       const out = {};
       for (const tr of document.querySelectorAll("#ccChg tbody tr")) {
         const name = tr.children[1];
         const node = name.querySelector("*");
         out[name.textContent.trim()] =
-          { tag: node.tagName, t: node.dataset.t || null, title: node.getAttribute("title") };
+          { tag: node.tagName, t: node.dataset.t || null,
+            href: node.getAttribute("href"), title: node.getAttribute("title") };
       }
       return out;
     });
-    eq(cells.ORCL?.tag, "BUTTON", "a changed name with a card opens it in place");
-    eq(cells.ORCL?.t, "ORCL", "carrying the ticker the card delegation reads");
+    eq(cells.ORCL?.tag, "A", "a changed name with a card links to its reader");
+    eq(cells.ORCL?.href, "/flows/ticker/?t=ORCL&s=signal&from=overview",
+       `at the address the ranked region uses for the same name (${cells.ORCL?.href})`);
     /* CAT crossed the band AND has no detail card. A crossing does not mint
-       an opener that opens nothing. */
+       a link to a reader with nothing to read. */
     eq(cells.CAT?.tag, "SPAN", "a crossing with no card is still plain text");
-    eq(cells.CAT?.t, null, "with no data-t for the delegation to reach");
+    eq(cells.CAT?.href, null, "with no href, so there is nothing to follow");
     ok(/No detail card/.test(cells.CAT?.title || ""),
        `and it says why rather than looking broken (${cells.CAT?.title})`);
     /* AVGO is in the trace and on neither board, so no card exists for it
@@ -710,19 +735,16 @@ try {
     eq(tags.PFE, null, "while the largest drift on the page carries no crossing tag");
     eq(tags.DE, null, "and neither does a name that has not moved at all");
 
-    /* AND IT REALLY OPENS. The delegation in flows-card.js matches
-       .cc-open[data-t] anywhere on the document, so the proof that this
-       region's names are live — rather than merely button-shaped — is
-       opening one from it and coming back out. */
-    await page.locator('#ccChg .cc-open[data-t="MU"]').click();
-    await page.waitForSelector("#flowsCard[open]", { timeout: 10000 });
-    ok(/[?&]t=MU/.test(page.url()),
-       `a name in the lead region opens its card in place (${page.url()})`);
-    ok(await page.evaluate(() => window.__noReload === true),
-       "without reloading the document");
-    await page.goBack();
-    await page.waitForFunction(
-      () => !document.getElementById("flowsCard").open, null, { timeout: 10000 });
+    /* AND IT REALLY GOES SOMEWHERE, which is the proof these names are live
+       rather than merely link-shaped. */
+    await Promise.all([
+      page.waitForNavigation({ timeout: 10000 }),
+      page.locator("#ccChg .cc-open").filter({ hasText: "MU" }).first().click(),
+    ]);
+    ok(/\/flows\/ticker\/\?t=MU\b/.test(page.url()),
+       `a name in the lead region leads to that name's reader (${page.url()})`);
+    await page.goBack({ waitUntil: "networkidle" });
+    await page.waitForSelector("#ccChg .cc-open", { timeout: 10000 });
   }
 
   /* ---------- the three silences, side by side ------------------- */
@@ -2826,7 +2848,8 @@ try {
           ? { text: li.querySelector(".cc-nw-sent").textContent,
               cls: li.querySelector(".cc-nw-sent").className } : null,
         major: !!li.querySelector(".cc-nw-major"),
-        opens: Array.from(li.querySelectorAll(".cc-open"), (b) => b.dataset.t),
+        opens: Array.from(li.querySelectorAll(".cc-open"), (a) => a.textContent.trim()),
+        openHrefs: Array.from(li.querySelectorAll(".cc-open"), (a) => a.getAttribute("href")),
         plain: Array.from(li.querySelectorAll(".cc-nw-tk"), (s) => s.textContent),
         more: (li.querySelector(".cc-nw-more") || {}).textContent || null,
         tags: Array.from(li.querySelectorAll("script, b, i.injected"), (n) => n.tagName),
@@ -2861,10 +2884,16 @@ try {
 
     /* ---- A TICKER LINKS ONLY WHERE THERE IS SOMETHING BEHIND IT ---- */
     deep(rows[0].opens, ["ORCL", "MU"],
-      "only the names this session built a detail card for are minted as openers");
+      "only the names this session built a detail card for are minted as links");
+    deep(rows[0].openHrefs,
+      ["/flows/ticker/?t=ORCL&s=signal&from=overview",
+       "/flows/ticker/?t=MU&s=signal&from=overview"],
+      "at the same address a ranked row uses — a second address for one destination is a " +
+      "second thing to keep in step");
     ok(rows[0].plain.includes("CAT"),
        `a board name with no card is printed plain (${rows[0].plain.join(" ")}) — the mention ` +
-       "is still the join between a headline and a ranked name, and a dead button is not");
+       "is still the join between a headline and a ranked name, and a link to an empty " +
+       "reader is not");
     ok(rows[0].plain.includes("SNAP"),
        "and so is a name this session never screened at all");
     eq(rows[0].more, "+1 more",

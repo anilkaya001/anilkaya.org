@@ -279,6 +279,70 @@ try {
       eq(bareMarket.status, 308, "/flows/market without its trailing slash redirects too");
     }
 
+    /* ---------- THE FOUR BOARD ROUTES' OWN ?t= ADDRESSES ------------
+       The retired dialog pushed one into history on every open, so they are in
+       histories, bookmarks and links people sent each other, naming a
+       parameter no page reads. Asserted per route AND per `from`: a table
+       mapping three routes to one origin would name a page the reader was
+       never on. */
+    for (const [route, from] of [["/flows/", "overview"], ["/flows/long/", "long"],
+                                 ["/flows/short/", "short"], ["/flows/watch/", "watch"]]) {
+      const fwd = await get(route + "?t=NVDA", { headers: { Cookie: "flows_session=" + token } });
+      eq(fwd.status, 302,
+         `${route}?t= forwards to the reader — 302 and not 308, because the address is not ` +
+         "permanently gone: it is the parameter on it that moved");
+      eq(new URL(fwd.headers.get("location"), url("/")).pathname + "" +
+         new URL(fwd.headers.get("location"), url("/")).search,
+         "/flows/ticker/?t=NVDA&s=signal&from=" + from,
+         `${route}?t=NVDA lands on that name's reader carrying from=${from}`);
+
+      /* THE BARE ROUTE IS UNTOUCHED: a forward firing without a `t` would
+         make the board unreachable. */
+      const bare = await get(route, { headers: { Cookie: "flows_session=" + token } });
+      eq(bare.status, 200, `${route} with no ?t= still renders its own page`);
+
+      /* AND SO IS AN EMPTY OR BLANK ONE: `?t=` and `?t=%20` are not names. */
+      for (const empty of ["?t=", "?t=%20%20"]) {
+        eq((await get(route + empty,
+             { headers: { Cookie: "flows_session=" + token } })).status, 200,
+           `${route}${empty} is not a name, so the board answers it`);
+      }
+    }
+
+    /* IT READS NO PAYLOAD AND NO SESSION, which is what makes it free and
+       keeps it from leaking: a forward that first checked whether the name was
+       published would be a KV read on every stale bookmark AND an oracle for
+       whether a ticker is on the board. */
+    {
+      const anonFwd = await get("/flows/long/?t=NVDA");
+      eq(anonFwd.status, 302, "an anonymous visitor is forwarded like any other");
+      eq(new URL(anonFwd.headers.get("location"), url("/")).search,
+         "?t=NVDA&s=signal&from=long", "to the same address, decided without a session");
+
+      /* RE-ENCODED, NEVER PASTED: whatever arrives lands as ONE query value
+         and cannot open a second parameter, a fragment or a path segment. */
+      const hostile = await get("/flows/long/?t=" + encodeURIComponent("A&s=evil#x/../"));
+      const loc = new URL(hostile.headers.get("location"), url("/"));
+      eq(loc.pathname, "/flows/ticker/",
+         `a hostile name cannot climb out of the query into the path (${loc.pathname})`);
+      eq(loc.searchParams.get("s"), "signal",
+         "nor overwrite the section parameter with one of its own");
+      eq(loc.searchParams.get("t"), "A&s=evil#x/../",
+         "and it survives the round trip as the single value it was");
+      eq(loc.hash, "", "with no fragment smuggled onto the end");
+    }
+
+    /* AND THE DIALOG IS OFF THE ROUTES THAT CARRIED IT: the forward above would
+       pass on a page still shipping it and 166 KiB of library beside it. */
+    for (const route of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/"]) {
+      const html = await (await get(route,
+        { headers: { Cookie: "flows_session=" + token } })).text();
+      for (const gone of ['id="flowsCard"', "/assets/js/flows-card.js",
+                          "/assets/js/flows-panels.js"]) {
+        ok(!html.includes(gone), `${route} no longer serves ${gone}`);
+      }
+    }
+
     /* THE UNUSUAL-ACTIVITY FEED. Its own block because the thing that can go
        wrong here is not routing but VOCABULARY: the page is built on a
        contract aggregate and may never call it a trade, and may never date a
@@ -1357,7 +1421,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session`);
 } finally {
   await server.stop();
 }

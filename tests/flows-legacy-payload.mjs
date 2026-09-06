@@ -141,10 +141,16 @@ const withheldSort = await page.evaluate(() => ({
 }));
 
 
-await page.click('.flows-view[data-view="deck"]');
-await page.click('.fd-card[data-t="INTC"]');
-await page.waitForSelector("#fcWhy .fc-fam li");
-const fam = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-fam li")].map((li) => ({
+/* THE SCORE DERIVATION IS READ ON /flows/ticker/ NOW. It used to be read by
+   clicking a deck card and measuring inside the card dialog's #fcWhy; the
+   dialog is retired, the same renderer draws the same panel into #ftWhy on
+   the reader, and the deck card is the link that leads there. The fixture and
+   the question are unchanged — a v1 card drawn by a v2 renderer, withholding
+   exactly the two fields whose meaning moved — because that question never
+   depended on which surface the panel was mounted in. */
+await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "networkidle" });
+await page.waitForSelector("#ftWhy .fc-fam li");
+const fam = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
   k: li.querySelector(".fc-fam-k").textContent,
   v: li.querySelector(".fc-fam-v").textContent,
   note: li.querySelector(".fc-fam-l").textContent,
@@ -158,11 +164,11 @@ const fam = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-
 const V_O_NOTE = "volatility and quality readings became";
 const QUALITY_NOTE = "not published on this card";
 const legacyNote = await page.evaluate((needle) =>
-  [...document.querySelectorAll("#fcWhy .fc-note")].some((n) => n.textContent.includes(needle)), V_O_NOTE);
+  [...document.querySelectorAll("#ftWhy .fc-note")].some((n) => n.textContent.includes(needle)), V_O_NOTE);
 
 
-// No negative or absurd widths anywhere on the card.
-const bad = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-fam-track i")]
+// No negative or absurd widths anywhere on the panel.
+const bad = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam-track i")]
   .map((i) => getComputedStyle(i).width).filter((w) => w.startsWith("-")));
 
 
@@ -170,9 +176,6 @@ const bad = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-
    regressing into silence — withholding everything always passes a
    "withholds the moved fields" assertion. So the same renderer is handed a
    current payload and must draw the gauges it just refused to draw. */
-await page.keyboard.press("Escape");
-await page.waitForTimeout(200);
-
 const currentCard = JSON.parse(JSON.stringify(legacyCard));
 currentCard.v = 2;
 currentCard.ticker = "CURR";
@@ -196,11 +199,9 @@ currentBoard.shed = 4;
 await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
-await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector('.fd-card[data-t="CURR"]');
-await page.click('.fd-card[data-t="CURR"]');
-await page.waitForSelector("#fcWhy .fc-fam li");
-const famV2 = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .fc-fam li")].map((li) => ({
+await page.goto(url("/flows/ticker/?t=CURR&s=signal&from=long"), { waitUntil: "networkidle" });
+await page.waitForSelector("#ftWhy .fc-fam li");
+const famV2 = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
   k: li.querySelector(".fc-fam-k").textContent,
   v: li.querySelector(".fc-fam-v").textContent,
   gauge: li.classList.contains("is-gauge"),
@@ -208,6 +209,39 @@ const famV2 = await page.evaluate(() => [...document.querySelectorAll("#fcWhy .f
 })));
 const v2 = (k) => famV2.find((f) => f.k === k);
 const px = (w) => parseFloat(w) || 0;
+
+/* NARROWED, AND THE NARROWING IS THE POINT.
+
+   This read `.includes("built before")` and matched ANY such note in the
+   panel. That was fine while there was exactly one — the note explaining that
+   V and O could not be redrawn as gauges on a v1 payload. It broke the moment
+   a second, entirely correct one appeared: the quality pair (otmShare and
+   vegaTilt) is newer than this fixture, so a v2 card that predates it says so,
+   which is exactly the behaviour the transitional design demands.
+
+   A schema boundary accumulates these notes by construction — every field
+   added after a stored payload earns one. So an assertion here must name the
+   note it means, or it becomes a tripwire that fires on every future addition
+   and has to be loosened each time until it means nothing. */
+const notesOnV2 = await page.evaluate(() =>
+  [...document.querySelectorAll("#ftWhy .fc-note")].map((n) => n.textContent));
+const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
+/* The other side of the same coin: a card genuinely missing a newer field
+   must SAY so rather than render a zero. The fixture predates the quality
+   pair, so this note is required to be present — which turns the collision
+   above into a guard instead of a nuisance. */
+const qualityNoteOnV2 = notesOnV2.some((t) => t.includes(QUALITY_NOTE));
+
+/* READ WHILE THE READER IS STILL ON SCREEN. The version this replaces pulled
+   these notes out of the dialog after two reloads had closed it, and the
+   panel was only still populated because flows-card.js reopened itself from
+   the ?t= it had pushed — three coincidences holding up an assertion. On its
+   own page the panel is there for as long as the page is. */
+
+/* BACK TO THE BOARD: the panel above was read on its own page, so returning
+   is a navigation rather than an Escape keystroke. */
+await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+await page.waitForSelector(".fd-card");
 
 /* ---------- THE DEEP-ROW WINDOW ------------------------------------
 
@@ -235,9 +269,12 @@ delete preDeep.deep;
 await post("board:long", preDeep);
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
-const preDeepClickable = await page.evaluate(() =>
-  document.querySelectorAll('.fd-card[data-t="OLDB"]').length === 1 &&
-  document.querySelector('.fd-card[data-t="OLDB"]').tagName === "BUTTON");
+const preDeepClickable = await page.evaluate(() => {
+  const cards = [...document.querySelectorAll(".fd-card")]
+    .filter((el) => (el.getAttribute("aria-label") || "").startsWith("OLDB"));
+  return cards.length === 1 && cards[0].tagName === "A" &&
+    cards[0].getAttribute("href") === "/flows/ticker/?t=OLDB&s=signal&from=long";
+});
 
 // (b) A board that DOES publish `deep`: an unstamped row is a real answer.
 const withDeep = JSON.parse(JSON.stringify(currentBoard));
@@ -249,42 +286,28 @@ withDeep.rows = [
 ];
 await post("board:long", withDeep);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector('.fd-card[data-t="DEEPR"]');
+await page.waitForSelector(".fd-card");
 const deepSplit = await page.evaluate(() => {
-  const deep = document.querySelector('.fd-card[data-t="DEEPR"]');
-  const flat = [...document.querySelectorAll(".fd-card")]
-    .find((el) => (el.getAttribute("aria-label") || "").startsWith("FLATR"));
+  const byName = (t) => [...document.querySelectorAll(".fd-card")]
+    .find((el) => (el.getAttribute("aria-label") || "").startsWith(t));
+  const deep = byName("DEEPR");
+  const flat = byName("FLATR");
   return {
-    deepIsButton: !!deep && deep.tagName === "BUTTON",
+    /* NAMED FOR WHAT THEY HOLD. These were deepIsButton / flatIsButton /
+       flatHasDataT while holding `tagName === "A"` and `hasAttribute("href")`
+       — the messages below had been rewritten for the anchor and the names
+       left behind, so the file read `[!deepSplit.flatHasHref, "and it
+       carries no href at all"]`. A name that says the opposite of its value
+       is the same defect as a stale comment, and harder to see. */
+    deepIsAnchor: !!deep && deep.tagName === "A",
+    deepHref: deep ? deep.getAttribute("href") : null,
     flatExists: !!flat,
-    flatIsButton: !!flat && flat.tagName === "BUTTON",
-    flatHasDataT: !!flat && flat.hasAttribute("data-t"),
+    flatIsAnchor: !!flat && flat.tagName === "A",
+    flatHasHref: !!flat && flat.hasAttribute("href"),
     flatSaysWhy: !!flat && /No detail card/i.test(flat.getAttribute("aria-label") || ""),
   };
 });
-/* NARROWED, AND THE NARROWING IS THE POINT.
-
-   This read `.includes("built before")` and matched ANY such note in the
-   panel. That was fine while there was exactly one — the note explaining that
-   V and O could not be redrawn as gauges on a v1 payload. It broke the moment
-   a second, entirely correct one appeared: the quality pair (otmShare and
-   vegaTilt) is newer than this fixture, so a v2 card that predates it says so,
-   which is exactly the behaviour the transitional design demands.
-
-   A schema boundary accumulates these notes by construction — every field
-   added after a stored payload earns one. So an assertion here must name the
-   note it means, or it becomes a tripwire that fires on every future addition
-   and has to be loosened each time until it means nothing. */
-const notesOnV2 = await page.evaluate(() =>
-  [...document.querySelectorAll("#fcWhy .fc-note")].map((n) => n.textContent));
-const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
-/* The other side of the same coin: a card genuinely missing a newer field
-   must SAY so rather than render a zero. The fixture predates the quality
-   pair, so this note is required to be present — which turns the collision
-   above into a guard instead of a nuisance. */
-const qualityNoteOnV2 = notesOnV2.some((t) => t.includes(QUALITY_NOTE));
-await page.keyboard.press("Escape");
-await page.waitForTimeout(200);
+/* TABLE VIEW, for the purity column below. */
 await page.click('.flows-view[data-view="table"]');
 const v2Purity = await page.evaluate(() =>
   document.querySelector("#flowsBody tr").children[6].textContent.trim());
@@ -466,18 +489,22 @@ const assertions = [
      agrees with everything certifies everything. Order corrected; all six
      still pass, and reverting the renderer makes them fail. */
   [preDeepClickable,
-   "a board written BEFORE `deep` existed keeps every card clickable — the deploy window " +
-   "between new assets and the next pipeline run must not dark the card reader"],
-  [deepSplit.deepIsButton,
-   "on a board that publishes `deep`, a stamped row is still a button"],
+   "a board written BEFORE `deep` existed keeps every card linked, at the reader's own " +
+   "address — the deploy window between new assets and the next pipeline run must not dark " +
+   "the per-name reader"],
+  [deepSplit.deepIsAnchor,
+   "on a board that publishes `deep`, a stamped row is an anchor"],
+  [deepSplit.deepHref === "/flows/ticker/?t=DEEPR&s=signal&from=long",
+   `and its href names that row's own reader (${deepSplit.deepHref}) — the card dialog it ` +
+   "used to open had no address at all"],
   [deepSplit.flatExists,
    "an unstamped row on that same board still RENDERS — it is a real row with real numbers, " +
    "not a hidden one"],
-  [!deepSplit.flatIsButton,
-   "but it is not a button, so it cannot be clicked into a 404"],
-  [!deepSplit.flatHasDataT,
-   "and it carries no data-t, which is what keeps it out of the click delegation rather than " +
-   "a class name two files have to agree about"],
+  [!deepSplit.flatIsAnchor,
+   "but it is not an anchor, so it cannot be followed to a reader with nothing to read"],
+  [!deepSplit.flatHasHref,
+   "and it carries no href at all, which is what makes the absence structural rather than a " +
+   "class name two files have to agree about"],
   [deepSplit.flatSaysWhy,
    "and it tells a screen reader WHY there is nothing to open"],
   [fam.find((f) => f.k === "V").v === "—", "V is withheld on a v1 card"],

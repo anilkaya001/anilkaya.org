@@ -357,8 +357,10 @@ HTML rewriting and is therefore not a complete test environment.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `flowsCardPrefetch`, `FlowsPanels`, and
-  `FlowsUI`.
+  `LEARNING_PATHS`, `toast`, `FlowsPanels`, and `FlowsUI`.
+  (`flowsCardPrefetch` was on this list and went with the card dialog: it
+  warmed a card on hover so a modal would open instantly, and a board row is a
+  link to `/flows/ticker/?t=` now.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
   one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, the labeled controls, and the
@@ -366,9 +368,11 @@ HTML rewriting and is therefore not a complete test environment.
   primitive rather than re-derived per page) — the seed of the component
   layer, introduced with `/flows/track/`.
   `FlowsPanels` is the ten card-panel renderers plus their scaffolding,
-  extracted from `flows-card.js` so the card dialog and `/flows/ticker/` draw
-  the SAME code — the alternative was duplicating 2,003 of that file's 2,325
-  lines and fixing every future chart bug twice.
+  extracted from the retired `assets/js/flows-card.js` so the card dialog and
+  `/flows/ticker/` would draw the SAME code — the alternative was duplicating
+  2,003 of that file's 2,325 lines and fixing every future chart bug twice.
+  The ticker page is the only caller now, and that extraction is what made
+  deleting the modal a routing change rather than a rewrite of every chart.
   `CURRICULUM` is an authoring/generator input, not a production course-page
   payload.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin

@@ -87,12 +87,14 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      history       26k     26k   unchanged
      login          3k      3k   unchanged
 
-   THE SHARED BUNDLE IS WHERE THE COST COMPOUNDS. flows-panels.js went from
-   137k to 147k, and it is loaded on FOUR routes — so ten kilobytes of panel
-   work is forty kilobytes of parse across the section, three quarters of it on
-   routes that are not the panel workspace. That is the number this table
-   exists to keep visible, and it is the reason a ceiling per route beats one
-   total.
+   THE SHARED BUNDLE WAS WHERE THE COST COMPOUNDED, AND IT IS ONE ROUTE NOW.
+   flows-panels.js went from 137k to 147k while loaded on FOUR routes, so ten
+   kilobytes of panel work was forty kilobytes of parse across the section,
+   three quarters of it on routes that are not the panel workspace. Keeping
+   that visible is what got it fixed: those three carried the library for a
+   card dialog, the dialog is retired, and it is on /flows/ticker/ alone. A
+   per-route ceiling is what made the cost attributable; one total would have
+   hidden it in an average.
 
    RAISING A CEILING IS A DECISION AND IT LOOKS LIKE ONE HERE. These are set
    above the post-refit measurement with room for ordinary work, not fitted
@@ -106,6 +108,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
      route      before   after   what changed
      ticker       422k    411k   236 lines of CSS stopped shipping as JS
+
+   AND RATCHETED DOWN HARD 2026-09-05, WHEN THE CARD DIALOG WAS RETIRED — the
+   largest movement this table has recorded, in the good direction, so it is
+   written as plainly as a raise would be:
+
+     route      before   after   what it shed
+     overview   312.57k 146.23k  flows-panels.js 150.91k + flows-card.js 15.41k
+     side       306.44k 139.62k  the same 166.32k
+     watch      202.75k  36.72k  the same 166.32k
+
+   Each row's before-minus-after misses 166.32k by a few hundred bytes in one
+   direction or the other, and that residue is the route's OWN renderer
+   changing size in the same patch: flows-overview.js lost 25 bytes and
+   flows-board.js 513 as their openers became links, while flows-watch.js
+   gained 296 saying why a watched name may have no card. Stated rather than
+   rounded away, because a shed that does not reconcile is how a second change
+   hides inside a first.
+
+   ONE MODAL, THREE ROUTES, 166 KiB EACH — the only caller of the panel library
+   on any of them, and assets/js/flows-watch.js does not contain the string
+   `FlowsPanels` at all.
 
    Note the direction. A shed has to move the ceiling too, or the room the
    ceiling was written with silently becomes room plus the shed, and the next
@@ -124,7 +147,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
    one case where raising a ceiling is not absorbing an overrun: the route is
    inside it, and the ceiling was left behind by work that already shipped. */
 const CEILING_KIB = {
-  tickerPage: 470,
+  /* 470 -> 480, AND THE FIRST NUMBER IS THE ONE THIS CHANGE DID NOT CAUSE:
+     the route measured 468.53k against 470 before a byte of it landed. 470 was
+     set 2026-09-04 against 411k and the route then spent all but 1.5k of that
+     room with nobody re-deriving the number — the political case this file's
+     header describes, on the heaviest route here. This change added 4,140
+     bytes to flows-panels.js, and they are a fix and its argument: the priced
+     move's caption painted 289.4 units across a 282-unit viewBox at 320px and
+     was clipped at both ends, silently, on 48 of the 50 cards a dry run emits.
+     480 leaves 7.0k on 472.95k — room for a fix, not for a feature.
+
+     THE THREE FIGURES IN THIS PARAGRAPH WERE EACH WRONG ONCE, which is worth
+     recording where the next person to quote a number will read it. Drafts of
+     this comment said 3,376 and 3,977 bytes and put the route at 472.08k and
+     472.79k — all taken mid-edit and never re-derived, in the one file whose
+     whole subject is figures going stale. The values above are `git cat-file
+     -s HEAD:` against `stat` on disk (154,528 -> 158,668) and the sum of the
+     route's four scripts (6,003 + 2,560 + 158,668 + 317,065 = 484,296 B =
+     472.95 KiB, leaving 7,224 B under 480). Re-derive, never re-quote: editing
+     THIS comment does not change flows-panels.js, so a figure measured before
+     the edit and pasted after it is wrong by the size of the edit. */
+  tickerPage: 480,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -143,8 +186,16 @@ const CEILING_KIB = {
 
      +1, 2026-09-05, FOR THE DOCK'S KEYSTROKE — see the note on unusualPage
      below, which states this decision once for the three routes it lands on.
-     Measured here: 584 bytes over before the raise, 440 in hand after. */
-  overviewPage: 313,
+     Measured here: 584 bytes over before the raise, 440 in hand after.
+
+     313 -> 160, AND THE PARAGRAPH ABOVE STANDS BECAUSE IT IS THE ONE THAT GOT
+     DONE: it named the honest fix — the overview should not parse the whole
+     panel library to open one dialog — and deferred it behind 12k of headroom.
+     312.57k this morning, 146.23k now. THE NUMBER COMES DOWN WITH THE WEIGHT,
+     this file's rule for a shed: room the ceiling was written with must not
+     silently become room plus the shed. 160 leaves the 13.8k the entry above
+     asked for and no more. */
+  overviewPage: 160,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
@@ -172,9 +223,19 @@ const CEILING_KIB = {
      stops a lazy import from looking free. */
   /* +1, 2026-09-05, the same raise for the same reason — the argument is on
      unusualPage below. Measured here: 455 bytes over before, 569 in hand
-     after. */
-  sidePage: 307,
-  watchPage: 240,
+     after.
+
+     307 -> 155 THE SAME DAY AND FOR THE SAME REASON AS overviewPage ABOVE:
+     306.44k to 139.62k. What the reader loses is a modal; what they get is
+     /flows/ticker/?t=, an address the row links to directly. 155 keeps 15.4k,
+     about the proportion the entry above kept. */
+  sidePage: 155,
+  /* 240 -> 48, AND HERE THE COST WAS PUREST WASTE: assets/js/flows-watch.js
+     does not contain the string `FlowsPanels`, so all 150.91k was fetched,
+     parsed and compiled on every visit for a dialog flows-card.js drew.
+     202.75k to 36.72k, the right weight for a page whose content is one
+     table. 48 rather than 40 for the proportion this header asks for. */
+  watchPage: 48,
   deskPage: 135,
   /* SET AT FIRST MEASUREMENT, 2026-09-04, against 102k — nav 3k, flows-ui 25k,
      flows-strategy 75k.
@@ -182,8 +243,13 @@ const CEILING_KIB = {
      THE ROUTE'S BUDGET WAS AN ARGUMENT BEFORE IT WAS A NUMBER, and the
      argument is what it does NOT load. The strategy tester needs a payoff
      engine, a diagram, a chain table and a leg editor; what it emphatically
-     does not need is flows-panels.js, which is 152k and sits on four other
-     routes for the sake of a card dialog this page has no reason to open.
+     does not need is flows-panels.js, which is 155k.
+
+     THAT SENTENCE USED TO END "and sits on four other routes for the sake of
+     a card dialog this page has no reason to open". It sits on ONE now: the
+     three whose own renderers never named it gave back 166k each.
+     This route's decision is unchanged and was right before the others caught
+     up with it — weight should be what a page uses, not what it inherited.
      Putting the tester on the premium desk's route — its natural neighbour,
      and the one other page that spends live vendor calls on the request
      path — would have cost the desk 75k against 15k of headroom, so it is its
@@ -432,10 +498,22 @@ for (const name of Object.keys(CEILING_KIB)) {
      `${heaviest.name}) — asserted as a STANDING FACT rather than as a target, so that the ` +
      `day someone splits that bundle this line fails and has to be rewritten deliberately ` +
      `rather than the improvement passing unnoticed`);
-  ok(panelRoutes.length >= 3,
-     `the panel bundle is loaded on ${panelRoutes.length} routes, most of which are not the ` +
-     `panel workspace — it is there for the card overlay a deep link opens, which most ` +
-     `visitors to those routes never open`);
+  /* THE BUNDLE IS ON THE ONE ROUTE THAT DRAWS WITH IT. This inverts the
+     assertion it replaces, which read `panelRoutes.length >= 3` over four
+     routes loading 151k for "the card overlay a deep link opens, which most
+     visitors to those routes never open" — a standing fact, pinned so the day
+     somebody fixed it the line would fail and be rewritten deliberately. This
+     is that rewrite. EXACTLY ONE, not "at most one": a route that quietly
+     picks the bundle up again fails here, and so does a ticker page that stops
+     loading the library it is built out of. */
+  eq(panelRoutes.length, 1,
+     `the panel bundle is on exactly one route (${panelRoutes.map((m) => m.name).join(", ") ||
+      "none"}) — it was on four, and on three of them the only thing that ever reached it ` +
+     `was the card dialog: none of flows-overview.js, flows-board.js or flows-watch.js ` +
+     `contains the string FlowsPanels, and on /flows/watch/ not even the dialog did, ` +
+     `because that page minted no opener for its delegation to find`);
+  eq(panelRoutes[0] && panelRoutes[0].name, "tickerPage",
+     "and that route is the panel workspace itself, not a board that inherited it");
 }
 
 /* =============================================================

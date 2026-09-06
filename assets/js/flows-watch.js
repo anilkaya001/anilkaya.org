@@ -247,10 +247,39 @@
     const th = document.createElement("th");
     th.scope = "row";
     th.className = "fb-tk";
-    /* The card deep-link is the same one the board uses, so a name being
-       watched opens exactly the reader a published name would. */
+    /* THE SAME DESTINATION THE BOARD ROWS USE, so a watched name opens exactly
+       the reader a published name would. It used to be `?t=SYM` — this page's
+       own address, which the retired card dialog read to open a modal over
+       this table. Nothing reads that parameter here now, so the href names the
+       reader outright; worker.js 302s the old shape to this exact URL.
+
+       AND EVERY ROW HERE IS LINKED, WHICH LOOKS LIKE THE RULE THE BOARDS KEEP
+       AND IS NOT. On the boards a row is linked only when the run built a card
+       for it, because there a flat row is the honest form: cardedness varies
+       between rows and `dp` says which is which. On this page it does not vary
+       — it is false for every row, BY CONSTRUCTION, and the construction is
+       nameable rather than observed. The dead band decides publication: a name
+       outside it goes on a board, a name inside it goes on this list. Cards go
+       to `deepNames(published)`, which reads `published.long` and
+       `published.short` and nothing else. A watch name is by definition not in
+       `published`, so it cannot be in the deep set, so it cannot have a card —
+       whatever the run's budget or the state of the market. Measured for
+       agreement rather than for proof: p-board-watch.json holds SYN243, SYN250
+       and SYN200, and none of the 50 emitted p-card-*.json files carries any
+       of them.
+
+       SO THE LINK IS NOT AN OFFER OF A CARD. It is the offer of the funnel
+       answer, which is the one thing a reader of this table wants and this
+       table cannot say: the reader names the ticker, states that no card was
+       built, says which stage the name stopped at, and carries the switcher to
+       every name that does have one. Withholding the link the way a board
+       withholds it would leave a watched name with nowhere at all to go, which
+       is worse than a page that explains itself. tests/flows-watch-render.mjs
+       pins that destination, so the day it becomes an error page rather than
+       an explanation this reasoning fails with it. */
     const link = document.createElement("a");
-    link.href = "?t=" + encodeURIComponent(String(row.t || ""));
+    link.href = "/flows/ticker/?t=" + encodeURIComponent(String(row.t || "")) +
+      "&s=signal&from=watch";
     link.textContent = String(row.t || DASH);
     th.append(link);
     tr.append(th);

@@ -379,7 +379,9 @@ try {
          `object ("${p.drawnQ.slice(0, 56)}")`);
       eq(p.drawnQ, p.question,
          `${width}px ${p.key}: draws the registry's question verbatim — the one this ` +
-         "page's markup handed it, so the page and the card dialog ask the same thing");
+         "page's markup handed it, not the drawer's own hardcoded fallback, which is how " +
+         "one drawing wore two different questions while a card dialog drew these same " +
+         "renderers with no question at all");
       if (p.dead) continue;
 
       if (p.minText !== null) {
@@ -524,15 +526,21 @@ try {
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
 
-    /* GAMMA AND PATH ARE HERE BECAUSE THEY WERE THE TWO THAT COULD NOT GROW.
-       Both sized themselves from the host before panelWidth existed, so each
-       carried its own inlined `Math.min(760, …)` — the dialog's old ceiling —
-       and neither was touched when that ceiling moved to 1900. A span-1 grid
-       host is ~456 units at 1280px, so the enlarged copy capped at 760 where
-       the assertion below asks for at least 912: the Convexity group's lead
-       and the session path both FAILED to double, on the control that exists
-       to make them bigger. Two keys in this list could never have caught it. */
-    for (const key of ["aggressor", "ivSurface", "gamma", "path"]) {
+    /* EVERY REGISTRY KEY, NOT A HAND-PICKED FOUR, and the four are why.
+
+       This list read ["aggressor", "ivSurface"] and could not see the defect
+       it was written for: `gamma` and `path` each carried their own inlined
+       `Math.min(760, …)` — the retired dialog's ceiling — so at 1280px, where
+       a span-1 host is ~456 units, the enlarged copy capped at 760 against the
+       912 the assertion below asks for. Adding those two keys fixed the list
+       for the two panels somebody had already found.
+
+       A HAND-WRITTEN LIST OF PANELS IS THE DEFECT shared/flows-panels.js WAS
+       CREATED TO CLOSE, one level up: a panel not named here is one whose
+       enlarge nobody checks, and reading the list cannot tell you that. It is
+       derived from the registry now, and a panel with no chart is skipped by
+       MEASUREMENT — `gridW` is 0 — rather than by omission. */
+    for (const key of TICKER_PANELS.map((p) => p.key)) {
       const section = TICKER_PANELS.find((p) => p.key === key);
       const gridW = await page.evaluate((k) => {
         const s = document.querySelector('.ft-panel[data-panel="' + k + '"] svg');
@@ -3668,7 +3676,9 @@ console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup,
   `whose explanation a keyboard and a thumb can open without adding one tab stop, ` +
   `a question DRAWN rather than merely attributed so a drawer handed the card where it ` +
   `expected the question cannot head a panel with a stringified object, an enlarge ` +
-  `checked on the two panels that used to cap at the old modal's width, the session ` +
+  `checked on EVERY registry panel that draws a chart rather than on a hand-picked four ` +
+  `— the list that could not see the two panels still capped at the retired modal's own ` +
+  `width — the session ` +
   `path's contract count and dollar sum each carrying the unit the payload publishes ` +
   `for it, and an IV rank in the wrong unit withheld under its own mark rather than ` +
   `multiplied into a percentage no year can hold`);

@@ -157,6 +157,24 @@ try {
   const order = await page.$$eval("#watchBody tr th a", (a) => a.map((x) => x.textContent.trim()));
   eq(order.length, 6, "every fixture row rendered");
 
+  /* THE NAME LEADS TO THE READER, AND THE HREF SAYS WHICH ONE.
+
+     This link read `?t=SYM` — this page's own address — because the retired
+     card dialog was mounted here and read that parameter to open a modal over
+     the table. Nothing on this route reads `?t=` now, so the same href would
+     be a link that reloads the watch list and does nothing visible: the
+     quietest kind of dead control, since the page it lands on looks correct.
+     Asserted per row, because a loop that mints one right address and stale
+     ones after it is what a sampled assertion cannot see. `from=watch` is what
+     lets the reader offer a way back HERE rather than to a board these names —
+     inside the dead band, on neither side — are not on. */
+  const readerHrefs = await page.$$eval("#watchBody tr th a",
+    (as) => as.map((a) => [a.textContent.trim(), a.getAttribute("href")]));
+  for (const [name, href] of readerHrefs) {
+    eq(href, "/flows/ticker/?t=" + name + "&s=signal&from=watch",
+       `${name}: the watched name links to its own reader (${href})`);
+  }
+
   /* THE CONTROLLED PAIR. CLOSE and WIDEN sit at IDENTICAL distances and moved
      by the same amount in opposite directions. A distance sort cannot order
      them at all — it falls through to input order, which the fixture put the

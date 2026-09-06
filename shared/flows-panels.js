@@ -6,17 +6,24 @@
    by tests to assert that the emitted markup, the browser's drawer
    table and the pipeline's shed order all name the same panels.
 
-   WHY A REGISTRY AND NOT THREE HAND-WRITTEN LISTS. The card dialog's
-   markup is ten hand-written <section class="fc-panel"> blocks in
-   flows-pages.js, its drawer table is a second list in the browser,
-   and the pipeline's shed ladder is a third in flows-pipeline.mjs.
-   Three lists of the same panels, maintained by hand, is three
-   chances for a panel to exist in two of them and be silently
-   invisible in the product — which this repo has shipped: the four
-   chain panels below have been published in every card since the
-   chain leg landed and NOTHING HAS EVER DRAWN THEM. A key with no
-   drawer now renders a visible "no renderer is registered" panel,
-   and a drawer with no key fails a test.
+   WHY A REGISTRY AND NOT THREE HAND-WRITTEN LISTS. The retired card
+   dialog's markup WAS ten hand-written <section class="fc-panel">
+   blocks in flows-pages.js, its drawer table a second list in the
+   browser, and the pipeline's shed ladder a third in
+   flows-pipeline.mjs. Three hand-maintained lists of the same panels
+   is three chances for one to exist in two of them and be silently
+   invisible — which this repo has shipped: the four chain panels
+   below were published in every card since the chain leg landed and
+   NOTHING EVER DREW THEM. Two of those three went with the dialog —
+   its markup blocks and its drawer table, both deleted with it. The
+   third, the pipeline's shed ladder, is still live, and so is a
+   fourth this count used to leave out: assets/js/flows-ticker.js's
+   DRAW table, which exists only because `shared/` is never served
+   and a browser module cannot import this file. So TWO hand-written
+   lists remain, and tests/flows-ticker-contract.mjs pins both
+   against this one: a key with no drawer renders a visible "no
+   renderer is registered" panel, and a drawer with no key fails a
+   test.
 
    `question` REACHES THE BROWSER AS MARKUP, NOT AS AN IMPORT.
    `shared/` is listed in .assetsignore and is never served, so a
