@@ -58,6 +58,26 @@
  * impossible, and the assertion that checks it would be unsatisfiable rather
  * than merely failing.
  *
+ * IT IS ALSO HOW A PANEL IS TAKEN OUT OF THE PAIRING, and that use is newer
+ * than the paragraph above. A grid row is as tall as its tallest member, so
+ * two panels sharing a row share a height whether or not they have that much
+ * to say: measured across six names and four widths, the worst mismatch on
+ * this page was `__score` at 1034px beside `__stats` at 330px — 3.13x, and
+ * the stretch handed an eight-row stat list seven hundred pixels of ground.
+ * `gamma` and `__stats` are span 2 for that reason and for no geometric one;
+ * each entry says so.
+ *
+ * WHICH ONE OF A MISMATCHED PAIR IS WIDENED IS NOT FREE, AND THE SUITE OWNS
+ * THE ANSWER. Widening the TALL panel is the obvious move and it is wrong
+ * here: this file tried it, and the contract refused with a measurement it
+ * already held — `__score` is five gauges and their weights, which set their
+ * own width, so a span-2 host spends the difference on white space. The rule
+ * that survives is about the CONTENT, not the height: widen the panel whose
+ * layout can absorb width. `__stats` is a `.fc-stats` grid, and that rule is
+ * `repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr))` — a wider host buys it
+ * more COLUMNS and a shorter box, which is the opposite of what it buys the
+ * gauges. So the short panel is widened and the tall one keeps its column.
+ *
  * `group` IS THE PAGE'S TABLE OF CONTENTS, and it is a field rather than a
  * heading because a group is now three things at once — a served <section
  * class="ft-station">, a heading inside it, a tab in the bar above it — and
@@ -76,6 +96,24 @@
  * moved for that reading — `scoreOverlay` leads, being the only panel that
  * can say a reading is NEW, and `displacement`, `path` and `marketRank` each
  * move up beside the panel they are the second reading of.
+ *
+ * AND ORDER IS NOW ALSO A HEIGHT ARGUMENT, which is the fourth rewrite. At two
+ * columns a station's span-1 panels pair off in this order, and a pair shares
+ * the taller one's height — so which panels are adjacent decides how much
+ * blank ground the page opens. Measured intrinsic heights turned that into a
+ * matching problem with an answer: today's order left a worst row mismatch of
+ * 704px and a mean of 280px; sorting by height alone fixed the mean (181px)
+ * and not the worst; the order below, with `gamma` and `__stats` lifted out to
+ * span 2, measures 233px worst and 99px mean. The remaining gaps — 19, 24, 47,
+ * 85, 111, 172 and 233 pixels — are small enough for the shorter panel's own
+ * drawing to grow into honestly, which is what the fills are for.
+ *
+ * AN ODD STATION LEAVES ITS SHORTEST PANEL ALONE, deliberately. `context`
+ * (350px) ends its station without a row-mate; pairing it with either
+ * neighbour stretched it, and the half-row that leaves is at the station's end
+ * where it reads as a closing rather than as a defect. Which panel is left
+ * alone is a choice, and the shortest is the only choice that asks nobody to
+ * fill a gap — asserted in flows-ticker-contract.mjs, not just written here.
  *
  * The groups themselves are contiguous by contract:
  *
@@ -146,34 +184,81 @@ export const TICKER_PANELS = Object.freeze([
      whichever station it lives in and scans a chart for a figure that is one
      line of text. Gathering them costs no vendor call and no payload field.
 
-     IT IS DELIBERATELY EMPTY IN THIS CHANGE. The figures are the next patch;
-     what ships is the registry entry, the served box and an explicit PENDING
-     line — never a blank panel, the one state a reader cannot tell from a
-     broken page. */
-  { key: "__stats", id: "ftStats", span: 1, group: "signal", tier: "table",
+     IT WAS DELIBERATELY EMPTY WHEN IT SHIPPED, and that sentence outlived the
+     patch that filled it: keyStats() emits eight pairs — spot, ATR, max pain,
+     both walls, the gamma flip, the priced move and the IV rank — each
+     carrying the silence of the panel it was gathered from. The comment is
+     corrected here rather than deleted, because "this panel is empty on
+     purpose" is exactly the claim a later reader would have believed.
+
+     AND IT IS span 2, WHICH IS A HEIGHT FIX APPLIED TO THE SHORT PANEL.
+     Intrinsic heights: `__score` is 1034px and this panel is 330px — 3.13x,
+     the widest mismatch on the page, and `signal` holds no third span-1 panel
+     to pair either with. Stretch gave this eight-row list the derivation's
+     full height and asked it to fill 700px it has nothing to say into.
+
+     THE FIRST ATTEMPT WIDENED `__score` AND THE SUITE REFUSED IT, holding a
+     measurement this change had not made: five gauges and their weights set
+     their own width, so a span-2 host spends the difference on white space —
+     vertical dead space traded for horizontal. This panel is the one that can
+     take the width instead. `.fc-stats` is `repeat(auto-fit, minmax(min(
+     8.5rem, 100%), 1fr))`, so a full-width host lays the same eight readings
+     out in more columns and fewer rows: wider AND shorter, which ends the
+     pairing from the other side.
+
+     THE COST IS ONE HALF-ROW, STATED RATHER THAN HIDDEN. `__score` keeps its
+     column and now has no row-mate, so the cell beside it is empty and that
+     cell is not at the station's end. It is the smaller of the two costs —
+     an empty half-row against 700px of stretched-open stat list — and it
+     closes when this panel becomes the large-type readout it is headed for. */
+  { key: "__stats", id: "ftStats", span: 2, group: "signal", tier: "table",
     title: "Key statistics",
     question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 
   /* ---------- CONVEXITY: the dealer book ---------------------------
      Gamma leads: it is the one panel a reader opens on a name they already
-     know. Then the ladder's own movement, then the joint the two are
-     marginals of — `displacement` reads the same standing bars `levels`
-     measures spot against, so it belongs beside it, not below the surface. */
-  { key: "gamma", id: "ftGamma", span: 1, group: "convexity", tier: "lead",
+     know. Then the joint its ladder is a marginal of, and only then the two
+     short readings that measure spot against the same standing bars.
+
+     THE ORDER MOVED SO THAT `levels` AND `displacement` ARE ACTUALLY BESIDE
+     EACH OTHER. The sentence this replaces said `displacement` "belongs
+     beside" `levels` and the registry did put them adjacent — but adjacency
+     in a LIST is not adjacency in a GRID. At two columns the old order seated
+     `levels` in row 1 column 2 and `displacement` in row 2 column 1: one below
+     the other, which is the arrangement the sentence was written to refuse.
+     `surface` moving up one place is what makes them row-mates, and it is
+     also the better reading order — the joint before its marginals.
+
+     AND IT CLOSES A HOLE. `surface` is span 2, so it can only begin a row.
+     Sitting at an odd cell index it could not start until the next row and
+     left the cell beside `displacement` empty — a gap in the middle of the
+     station, which reads as a broken renderer rather than as the end of a
+     section.
+
+     `gamma` IS span 2 NOW, and that is what leaves it without a row-mate.
+     Measured intrinsic heights put it at 795px against `levels` 313 and
+     `displacement` 360; pairing it with either would have stretched a short
+     reading across nearly 500px of ground it cannot fill. Its ladder is also
+     the panel the 76rem breakpoint exists for (see .ft-station in flows.css),
+     so the extra width is a reading improvement and not a layout dodge. */
+  { key: "gamma", id: "ftGamma", span: 2, group: "convexity", tier: "lead",
     title: "Gamma convexity",
     question: "Where is the dealer book long and short gamma?" },
+  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
+    title: "Gamma surface — strike × expiry",
+    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "levels", id: "ftLevels", span: 1, group: "convexity", tier: "reading",
     title: "Key levels & distance to spot",
     question: "Where are the walls, and how far is spot from each in ATR?" },
   { key: "displacement", id: "ftDisp", span: 1, group: "convexity", tier: "reading",
     title: "Where the book is moving",
     question: "Is new gamma building above or below the standing book?" },
-  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
-    title: "Gamma surface — strike × expiry",
-    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "calendar", id: "ftCal", span: 1, group: "convexity", tier: "chart",
     title: "Gamma roll-off",
     question: "How much of the book expires, and when?" },
+  { key: "charm", id: "ftCharm", span: 1, group: "convexity", tier: "chart",
+    title: "Charm by expiry",
+    question: "How fast is that exposure decaying with time alone, spot unchanged?" },
   /* THE SECOND-ORDER GREEKS, PAID FOR AND THEN INVISIBLE.
 
      These three came off a vendor call the pipeline was already making for
@@ -191,9 +276,6 @@ export const TICKER_PANELS = Object.freeze([
   { key: "deltaExposure", id: "ftDelta", span: 1, group: "convexity", tier: "chart",
     title: "Dealer delta by expiry",
     question: "How much directional exposure are dealers carrying, and where along the term?" },
-  { key: "charm", id: "ftCharm", span: 1, group: "convexity", tier: "chart",
-    title: "Charm by expiry",
-    question: "How fast is that exposure decaying with time alone, spot unchanged?" },
   { key: "vanna", id: "ftVanna", span: 1, group: "convexity", tier: "chart",
     title: "Vanna by expiry",
     question: "How much would that exposure move on a one-point change in implied volatility?" },
@@ -255,11 +337,26 @@ export const TICKER_PANELS = Object.freeze([
     question: "Where did open interest move between clearing snapshots?" },
 
   /* ---------- CONTEXT: the name's own year, and who is in it -------
-     THE TWO PLACEMENT QUESTIONS ARE ADJACENT NOW. "Where does today sit in
-     this name's own year" and "does this name place against every other name"
-     are one question asked at two scales, and the congressional table — a
+     THE TWO PLACEMENT QUESTIONS ARE ADJACENT. "Where does today sit in this
+     name's own year" and "does this name place against every other name" are
+     one question asked at two scales, and the congressional table — a
      different kind of fact entirely, about disclosure rather than about
-     price — used to sit between them. */
+     price — used to sit between them.
+
+     AND THIS IS THE ONE STATION THE HEIGHT PASS COULD NOT IMPROVE, which is
+     worth writing down rather than leaving as an absence. Measured, `context`
+     is 350px and `marketRank` is 865px, so as row-mates the shorter is
+     stretched 515px — the widest mismatch left on the page. Three rules
+     already argued in this file pin that arrangement: this panel is its
+     group's lead so it must come first, `marketRank` must sit directly under
+     it (asserted in flows-ticker-contract.mjs), and `congress` is the only
+     other member. Every ordering that fixes the height breaks one of them.
+
+     SO IT STAYS, AND IT IS AN EDITORIAL DECISION RATHER THAN A LAYOUT ONE.
+     Closing it needs one of: this panel giving up the lead, the adjacency
+     being dropped, or `marketRank` taking span 2 — each a claim about what
+     the station SAYS, which is not a change a height measurement gets to
+     make on its own. */
   { key: "context", id: "ftCtx", span: 1, group: "context", tier: "lead",
     title: "Price context",
     question: "Where does today sit in the name’s own year?" },
@@ -282,8 +379,7 @@ export const TICKER_PANELS = Object.freeze([
     question: "Does this name place in the market’s own two lists, and from which session?" },
   { key: "congress", id: "ftCongress", span: 1, group: "context", tier: "table",
     title: "Disclosed congressional transactions",
-    question: "Has anyone in Congress disclosed a trade in this name?" },
-]);
+    question: "Has anyone in Congress disclosed a trade in this name?" },]);
 
 /**
  * The keys that name no `card.panels` entry at all.
