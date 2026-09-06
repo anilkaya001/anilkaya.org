@@ -40,8 +40,11 @@
    THE WORKSPACE, below.
 
    THE TEN SHIPPED RENDERERS ARE NOT COPIED HERE. They are
-   window.FlowsPanels, extracted from flows-card.js so the dialog and
-   this page draw the SAME code and can never disagree about a chart.
+   window.FlowsPanels, extracted from assets/js/flows-card.js so the
+   card dialog and this page would draw the SAME code. The dialog is
+   retired and this page is the only caller — the extraction paying
+   off twice: a modal holding its own copy of these charts could not
+   have been deleted without rewriting them.
    ============================================================= */
 (function () {
   "use strict";
@@ -92,16 +95,20 @@
      the defect: `.fc-note` — the METHOD paragraph — was emitted 87 times
      against 4 emissions of `.fc-reading`, the FINDING.
 
-     THEY MOVED RATHER THAN BEING COPIED OR THREADED. flows-panels.js is drawn
-     on four routes and the card dialog calls the same functions this page's
-     grid calls, so a copy is what that file's header exists to refuse, and
-     threading would leave the dialog folding while the page did not, or the
-     reverse. This file reads them back out of `P` with the width policy and
-     the formatters. It is not a byte saving: a <details> is cheaper on a
-     READER than an always-drawn paragraph and DEARER on the wire, and three
-     routes now pay for a fold they did not have — which is the trade
-     tests/flows-weight.mjs measures and the reason several renderers on those
-     routes still lead with method.
+     THEY MOVED RATHER THAN BEING COPIED OR THREADED. flows-panels.js was
+     drawn on four routes when they moved, and the card dialog called the same
+     functions this page's grid calls: a copy is what that file's header
+     exists to refuse, and threading would have left the dialog folding while
+     the page did not, or the reverse. This file reads them back out of `P`
+     with the width policy and the formatters.
+
+     AND THE BYTE TRADE THAT PARAGRAPH RECORDED IS OVER. A <details> is
+     cheaper on a READER than an always-drawn paragraph and DEARER on the
+     wire, so the three routes that drew no panels paid for a fold they never
+     opened. They do not load flows-panels.js at all now — the dialog they
+     loaded it for is retired — so the fold is billed to the one route that
+     opens it, and tests/flows-weight.mjs records that as three ceilings
+     coming down rather than as a trade.
 
      WHAT STAYED IS NOT A SECOND COPY. `appendNotes` is the string-shaped
      adapter over the moved `appendMethod`: the eight call sites below own

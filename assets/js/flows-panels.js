@@ -2,14 +2,24 @@
    flows-panels.js — the ten panel renderers, and the scaffolding
    they are built on.
 
-   EXTRACTED FROM flows-card.js RATHER THAN COPIED INTO A SECOND
-   PAGE. These drawers lived inside the dialog's IIFE, behind a guard
-   that returns when `#flowsCard` is absent, so a second page wanting
-   the same charts had two options: duplicate ~2,040 of that file's
-   2,282 lines, or move them here. Duplication would mean every future
-   fix to a chart made twice, forever — the hazard shared/flows-chain.js
-   names in its own header: "A second implementation of any of those is
-   a second answer to the same question."
+   EXTRACTED FROM assets/js/flows-card.js RATHER THAN COPIED INTO A
+   SECOND PAGE. These drawers lived inside that file's IIFE, behind a
+   guard that returned when `#flowsCard` — the card dialog — was
+   absent, so a second page wanting the same charts had two options:
+   duplicate 2,003 of its 2,325 lines, or move them here. (2,003 is
+   measured, not estimated: that file was 2,325 lines before the
+   extraction and 322 after it, and AGENTS.md's allowlist entry cites
+   the same pair.) Duplication would mean every future fix to a chart
+   made twice, forever — the hazard shared/flows-chain.js names in its
+   own header.
+
+   THAT FILE HAS SINCE BEEN DELETED, which is why the extraction was
+   worth doing rather than a reason to undo it: the dialog was retired
+   for /flows/ticker/, and had these charts still been inside it,
+   retiring the modal would have meant rewriting every one of them.
+   The `#flowsCard` guard went with it. The ticker page is the one
+   caller today; the argument order below is what keeps a second
+   caller cheap.
 
    THE CONTRACT WITH ITS CALLERS. One deliberate global,
    `window.FlowsPanels`, and ONE ARGUMENT ORDER for every renderer in
@@ -376,12 +386,12 @@
    *
    * A viewBox fixed at 560 units, emitted with width="100%", is scaled by the
    * browser to whatever the container is — and it scales the TEXT with it.
-   * Measured at a 320px viewport, where the dialog's inner width is 288px: the
-   * factor is 288/560 = 0.514, so a 9px axis label renders at 4.6 CSS px and a
-   * 10.5px one at 5.4. Unreadable, and silently so, because nothing overflows.
+   * Measured at a 320px viewport, where the card dialog's inner width was 288:
+   * the factor is 288/560 = 0.514, so a 9px axis label renders at 4.6 CSS px
+   * and a 10.5px one at 5.4. Unreadable, silently, because nothing overflows.
    *
-   * THE CEILING WAS THE DIALOG'S 760, AND IT STOPPED BEING RIGHT THE MOMENT A
-   * SECOND SURFACE DREW THESE PANELS. Measured against it: a /flows/ticker/
+   * THE CEILING WAS THE CARD DIALOG'S 760, AND IT STOPPED BEING RIGHT THE
+   * MOMENT A SECOND SURFACE DREW THESE PANELS. Against it: a /flows/ticker/
    * is-wide panel at a 1280px viewport gets a 958px host, so width:100%
    * stretched the drawing by 1.261 and every 9px label rendered at 11.3. The
    * card dialog's own 777.6px host bound it too, by 17.6px — a 1.023 stretch
@@ -454,12 +464,23 @@
 
   function renderGamma(host, panel, card, questionIn, mount) {
     /* THE CALLER'S QUESTION WINS, and the hardcoded one is the fallback.
-       BOTH SURFACES PASS IT NOW: /flows/ticker/ reads the registry's question
-       off the panel's data-question attribute, and the card dialog reads the
-       same attribute off its own section, so one drawing carries one question
-       wherever it is opened. The fallback is written inline rather than as a
-       default parameter because the string below is the documentation of what
-       this chart is FOR, and moving it out would separate the two.
+       THERE IS ONE SURFACE NOW. /flows/ticker/ reads the registry's question
+       off the panel's data-question attribute and hands it in, so the sentence
+       over this drawing is the registry's wherever the panel is drawn. The
+       second surface this paragraph used to name — the card dialog, reading
+       the same attribute off its own <section class="fc-panel"> — is retired,
+       and the drift the threading was built to close went with it.
+
+       THE FALLBACK IS NOT DEAD CODE. `shared/` is in .assetsignore and never
+       served, so a renderer cannot import the registry at runtime; a drawer
+       that headed itself with an empty .fc-q whenever a caller forgot the
+       fourth argument would be a chart that depends on its caller for its own
+       meaning. It is exercised too: the geometry probes in
+       tests/flows-card-render.mjs call this function with three arguments, so
+       the drawing a forgetful caller gets is the drawing that is measured.
+       Written inline rather than as a default parameter because the string
+       below is the documentation of what this chart is FOR, and moving it out
+       would separate the two.
 
        STATED HERE ONCE FOR ALL TEN RENDERERS. It stood verbatim above every
        one of them, restating the header's "THE CONTRACT WITH ITS CALLERS";
@@ -1081,8 +1102,8 @@
 
        This was one centred <text> carrying the whole reading — "gap −0.76σ —
        new gamma is building BELOW the standing book" — and SVG text cannot
-       wrap. Measured at a 320px viewport, where the dialog's inner width is
-       288: the sentence drew 334px wide and overhung its own canvas by 23px on
+       wrap. Measured at a 320px viewport, where the card dialog's inner width
+       was 288: the sentence drew 334px wide and overhung its own canvas by 23px on
        each side. SVG clipping is silent, so both ends were simply missing and
        the panel looked fine. A quantity is an axis label; a sentence is prose,
        and prose belongs in HTML that reflows. */
@@ -1778,11 +1799,15 @@
     st.textContent = px2(spot);
     svg.append(st);
 
+    /* THE CAPTION IS TWO CLAUSES, HELD AS TWO, so it can be folded onto two
+       lines when one will not hold it. Joined for the common case and split
+       below only if the measurement says it must be. */
+    const capClauses = imp !== null
+      ? [`±${(imp * 100).toFixed(1)}% priced over ${sessions} sessions`]
+        .concat(real !== null ? [`±${(real * 100).toFixed(1)}% delivered`] : [])
+      : [`±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonRule || "the vendor's own expiry"}`];
     const cap = svgEl("text", { class: "pm-axis", x: mid, y: H - 8, "text-anchor": "middle" });
-    cap.textContent = imp !== null
-      ? `±${(imp * 100).toFixed(1)}% priced over ${sessions} sessions` +
-        (real !== null ? `  ·  ±${(real * 100).toFixed(1)}% delivered` : "")
-      : `±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonRule || "the vendor's own expiry"}`;
+    cap.textContent = capClauses.join("  ·  ");
     svg.append(cap);
 
     svg.setAttribute("aria-label",
@@ -1800,6 +1825,54 @@
           `${panel.horizonRule}, a different horizon.`
         : ""));
     host.append(svg);
+
+    /* ---- THE CAPTION IS MEASURED, AND FOLDS RATHER THAN BEING CLIPPED ----
+
+       ON A 320px PHONE IT RAN OFF BOTH ENDS OF ITS OWN CANVAS: centred in a
+       282-unit viewBox, "±11.3% priced over 10 sessions · ±3.3% delivered"
+       advances 288.6 units and paints a box 289.4 wide — 3.3 units off the
+       left edge and 4.1 off the right, the two differing because a glyph's
+       ink box is not its advance box — so a reader saw a caption beginning
+       and ending mid-glyph. Nothing failed: SVG clips silently and no number
+       was wrong. It is the failure the `.pm-quotelab` note above describes
+       for the vendor label, and it survived here because the caption only
+       overflows when the payload publishes BOTH a priced and a delivered move
+       at a host this narrow — 48 of the 50 cards a dry run emits, the other
+       two carrying the single "quoted to …" clause, which has no seam.
+
+       MEASURED IN THE DOCUMENT, NOT ESTIMATED FROM A CHARACTER COUNT: the face
+       is mono at 10px, so an advance-width estimate looks safe and is not —
+       the webfont may not have arrived and its fallback's advance is a
+       different number. getComputedTextLength() is what will be painted, which
+       is why this sits below host.append().
+
+       THE FOLD IS AT THE SEAM THE SENTENCE ALREADY HAS, so two lines lose
+       nothing but the middle dot, and the canvas grows by one 12-unit line
+       rather than the type shrinking — shrinking is how 9px axis type became
+       4.6 CSS px on these panels before. A single clause has no seam and is
+       left alone; tests/flows-card-render.mjs sweeps five emitted cards at
+       320px, so one that outgrew its host fails there.
+
+       AND THE 0 IS THE ONE ANSWER THAT CANNOT BE WRONG, which is why it is a
+       zero here and would be a null anywhere a reading is involved. This is
+       not a measurement of the caption; it is the width the caption occupies
+       in a document that is not painting it. getComputedTextLength is absent
+       only where there is no SVG text layout at all — a non-rendering host —
+       and there 0 is exact: nothing is drawn, so nothing can be clipped, and
+       skipping the fold is right rather than merely harmless. Every other
+       zero in this file carries its reason; so does this one. */
+    const capWidth = typeof cap.getComputedTextLength === "function"
+      ? cap.getComputedTextLength() : 0;
+    if (capWidth > W - 2 && capClauses.length > 1) {
+      const H2 = H + 12;
+      svg.setAttribute("viewBox", `0 0 ${W} ${H2}`);
+      svg.setAttribute("height", H2);
+      cap.textContent = capClauses[0];
+      cap.setAttribute("y", H2 - 20);
+      const cap2 = svgEl("text", { class: "pm-axis", x: mid, y: H2 - 8, "text-anchor": "middle" });
+      cap2.textContent = capClauses[1];
+      svg.append(cap2);
+    }
 
     host.append(statList([
       ["Implied 30d vol", vol1(panel.iv30)],
@@ -1927,9 +2000,14 @@
       tb.append(tr);
     }
     table.append(tb);
-    // The table gets its own scroll container so the DIALOG never scrolls
-    // sideways: at 320px a horizontally scrolling dialog takes the header and
-    // the close button off-screen with it.
+    // The table gets its own scroll container so nothing AROUND it scrolls
+    // sideways, and there are two things that must not. /flows/ticker/ puts
+    // this 22rem table on a 320px phone: a horizontal scrollbar on the
+    // DOCUMENT drags the rail and every other panel across with it, and the
+    // enlarge dialog this same panel is redrawn into carries its close button
+    // in the header that would ride off with the scroll. The sentence here
+    // named only the card dialog's .fc-head and .fc-close, both deleted with
+    // it; the geometry outlived them on both of the surfaces that are left.
     const wrap = el("div", "fc-tablewrap");
     wrap.tabIndex = 0;
     wrap.setAttribute("role", "region");
@@ -2990,8 +3068,8 @@
       "How much directional exposure are dealers carrying, by expiry?"),
 
     /* THE OVERLAY'S ARITHMETIC, exported beside the drawer that draws the
-       same rows. /flows/ticker/ leads on it and the card dialog does not, so
-       it is a function rather than a second copy in the controller. */
+       same rows, so it is a function here rather than a second copy in the
+       controller that leads on it. */
     changeFrom,
 
     /* scaffolding */

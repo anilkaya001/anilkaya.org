@@ -27,12 +27,14 @@
      and was lifted there because six routes had grown six copies of the same
      two tests with the same two constants and six different sentences.
 
-     THIS PAGE IS NOT YET SERVED THAT FILE — shared/flows-pages.js sidePage()
-     emits nav.js, this controller, flows-panels.js and flows-card.js and no
-     UI module — so every use is guarded and the absence is ANNOUNCED rather
-     than swallowed. A freshness banner that quietly stops appearing is
-     indistinguishable from a pipeline that is fine, and that is the one
-     failure this page must never present as health. */
+     THE ABSENCE IS STILL GUARDED AND STILL ANNOUNCED. sidePage() does emit
+     this file now — the tag sits above flows-board.js so the library is
+     defined before this module's top-level read of it — but the guard stays,
+     because the failure it covers is the quiet one: a freshness banner that
+     stops appearing is indistinguishable from a pipeline that is fine. (The
+     sentence this replaces also named flows-panels.js and flows-card.js as
+     this route's other two tags. Both are gone with the card dialog; see the
+     retirement note in shared/flows-pages.js.) */
   const UI = window.FlowsUI || null;
 
   const table = document.getElementById("flowsTable");
@@ -607,6 +609,17 @@
     return chip;
   }
 
+  /* THE PER-NAME READER'S ADDRESS, built once for the deck and the table.
+     Both openers were <button data-t> that flows-card.js turned into a modal;
+     it is retired (see shared/flows-pages.js) and an <a href> gets
+     bookmarking, middle-click and a history entry for free. `s=signal` names
+     the section, `from=` the surface the row was read off — query parameters
+     rather than path segments, because worker.js dispatches /flows/ by exact
+     path match, which is what makes a missed path a 404. */
+  const readerHref = (t) =>
+    "/flows/ticker/?t=" + encodeURIComponent(String(t || "")) +
+    "&s=signal&from=" + encodeURIComponent(side);
+
   function deckCard(row, index) {
     /* NOT EVERY ROW HAS A CARD, and the deck has to say so BEFORE the click.
 
@@ -615,24 +628,22 @@
        vendor calls a name — so the pipeline builds them only for the names
        furthest from neutral and stamps `dp` on the rows that got one.
 
-       A row without `dp` therefore renders as a plain element, not a button:
-       no pointer cursor, no tab stop, no aria-haspopup, no prefetch, and no
-       `data-t` — which is what actually keeps it out of the click delegation
-       in flows-card.js, since a missing attribute cannot be styled around.
-       The alternative is 43 cards that look identical to the other 50 and
-       open a fetch for a key the pipeline never wrote. */
+       A row without `dp` therefore renders as a plain <div>, not a link: no
+       pointer cursor, no tab stop, no href. The alternative is 43 cards that
+       look identical to the other 50 and lead to a reader with nothing to
+       read. It is as flat as it was under the dialog — same element, class and
+       title — because what changed is where a DEEP card goes.
+
+       `role="listitem"` STAYS ON BOTH AND COSTS WHAT IT ALREADY COST: the
+       deck container is role="list", so the attribute overrides the implicit
+       LINK role exactly as it overrode the implicit BUTTON role. That is why
+       the accessible name below ends by saying what activating the card does
+       — the affordance is in text because the role cannot carry it. */
     const deep = !knowsDeep || row.dp === 1;
-    const card = document.createElement(deep ? "button" : "div");
-    if (deep) card.type = "button";
+    const card = document.createElement(deep ? "a" : "div");
     card.className = deep ? "fd-card" : "fd-card fd-flat";
     card.setAttribute("role", "listitem");
-    if (deep) {
-      card.dataset.t = String(row.t || "");
-      card.setAttribute("aria-haspopup", "dialog");
-      card.addEventListener("pointerenter", () => {
-        if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
-      });
-    }
+    if (deep) card.href = readerHref(row.t);
 
     const score = isNum(row.s);
 
@@ -795,7 +806,7 @@
       (isNum(row.netPrem) === null
         ? `Net premium unavailable. `
         : `Net premium ${fmtMoney(row.netPrem)}. `) +
-      (deep ? `Open the detail card.` : NO_CARD_SAID));
+      (deep ? `Open the full reader for ${row.t}.` : NO_CARD_SAID));
     return card;
   }
 
@@ -1481,52 +1492,28 @@
     const move = memoryMark(row);
     if (move) rankCell.append(markNode(move));
     tr.append(rankCell);
-    /* The ticker is a real button, not a click handler on the row. That buys
-       keyboard operability and a focus ring for free and states honest
-       semantics; giving the <tr> role="button" would lie to a screen reader
-       about what a table row is. */
+    /* THE TICKER IS THE LINK. It was two controls in one cell — a <button
+       data-t> that opened the dialog, and a small arrow anchor beside it for
+       the reader who wanted the page instead — and one destination needs one
+       control. A real <a>, never a click handler on the <tr>: giving a table
+       row role="button" would lie about what a table row is. */
     const tk = document.createElement("td");
     tk.className = "fb-tk";
-    /* Same rule as the deck: a row with no card is not a button. See
-       deckCard. A <span> rather than a disabled <button>, because a disabled
-       button reads as "temporarily broken" and this is a permanent, stated
-       property of the row. */
+    /* Same rule as the deck: a row with no card is not a link. See deckCard.
+       A <span> rather than a disabled control, because "disabled" reads as
+       temporarily broken and this is a permanent, stated property of the row,
+       said in the title the span carries. */
     const deep = !knowsDeep || row.dp === 1;
-    const open = document.createElement(deep ? "button" : "span");
+    const open = document.createElement(deep ? "a" : "span");
     open.className = deep ? "fb-open" : "fb-open fb-flat";
     open.textContent = String(row.t || DASH);
     if (deep) {
-      open.type = "button";
-      open.dataset.t = String(row.t || "");
-      open.setAttribute("aria-haspopup", "dialog");
-      // Warm the card on hover so the overlay opens instantly. At most six
-      // entries are cached, against a 5M row/day read budget.
-      open.addEventListener("pointerenter", () => {
-        if (window.flowsCardPrefetch && row.t) window.flowsCardPrefetch(String(row.t));
-      });
+      open.href = readerHref(row.t);
+      open.title = "Open the full reader for " + String(row.t || "");
     } else {
       open.title = NO_CARD_SAID;
     }
     tk.append(open);
-    /* THE DIALOG IS THE QUICK LOOK; THE PAGE IS THE DRILL. A real anchor, not
-       a second button: /flows/ticker/?t= is a place, so it must be linkable,
-       middle-clickable and sendable to someone. Only a deep row gets one —
-       the page would render honestly for a name with no card, but a link that
-       usually leads to "no card for this name" is worse than no link. */
-    if (deep) {
-      const full = document.createElement("a");
-      full.className = "ft-link ft-link-glyph";
-      full.href = "/flows/ticker/?t=" + encodeURIComponent(String(row.t || ""));
-      /* THE ARROW IS DRAWN BY CSS, NOT WRITTEN INTO THE CELL. An anchor with
-         textContent "↗" makes the cell's own text "INTC↗" — which a screen
-         reader announces, and which a test reading the first row's ticker to
-         check the published ORDER reads as a different ticker. The accessible
-         name comes from aria-label; the glyph is decoration and lives in the
-         stylesheet where decoration belongs. */
-      full.setAttribute("aria-label", "Full page for " + String(row.t || ""));
-      full.title = "Open the full page for " + String(row.t || "");
-      tk.append(full);
-    }
     /* THE TWO REASONS THIS ROW MAY BE GONE TOMORROW, folded into the name cell
        instead of becoming two more columns. Thirteen columns already overflow
        every phone; two more would be two more the reader has to scroll to, for
@@ -1534,10 +1521,10 @@
 
        A NOTE FOR WHOEVER READS THIS CELL FROM A TEST: .fb-tk's textContent is
        now the ticker PLUS any marks. The ticker alone is .fb-open — which is
-       also what tests/flows-legacy-payload.mjs should read, and does not:
-       it passes today only because a v1 board carries no memory at all. The
-       same hazard is why the full-page arrow is drawn by CSS rather than
-       written into this cell. */
+       also what tests/flows-legacy-payload.mjs should read, and does not: it
+       passes today only because a v1 board carries no memory at all. The
+       full-page arrow drawn by CSS for that same hazard went with the
+       dialog. */
     for (const mark of tenureMarks(row)) tk.append(markNode(mark));
     tr.append(tk);
 

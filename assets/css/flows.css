@@ -744,52 +744,15 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 }
 
 /* =============================================================
-   Card reader — a modal dialog over the board.
+   Panel chrome, and the identity marks above it.
 
-   Below 640px it is a full-bleed sheet rather than a centred box,
-   which is the correct mobile detail-view idiom, and it uses dvh so
-   the iOS URL bar cannot clip the footer.
+   THE MODAL THIS SECTION OPENED WITH IS GONE — .fc, .fc::backdrop, .fc-inner,
+   .fc-head, .fc-id, .fc-close and the .fc.is-stale rules went with it. What
+   survives was never about the box: the panel, the question over its chart,
+   its reading, note, stats and tables, and the marks /flows/ticker/'s header
+   uses. The `fc-` prefix stays because assets/js/flows-panels.js emits these
+   names and a rename buys a prefix.
    ============================================================= */
-
-.fc {
-  /* The UA centres a dialog with margin:auto; restate it because the
-     shorthand reset below would otherwise leave it pinned left. */
-  margin: auto;
-  width: min(52rem, 94vw);
-  max-width: none;
-  max-height: 90dvh;
-  padding: 0;
-  border: 1px solid var(--hairline);
-  border-radius: 5px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.fc::backdrop { background: rgba(0, 0, 0, 0.62); }
-
-.fc-inner { padding: clamp(1rem, 3vw, 1.7rem); }
-
-.fc-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-bottom: 0.7rem;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.fc-id { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
-
-.fc-id h2 {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-mark);
-  letter-spacing: 0.02em;
-}
-
-.fc-id h2:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 3px; }
 
 .fc-score {
   font-family: var(--font-mono);
@@ -803,20 +766,6 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 
 .fc-meta { color: var(--ink-dim); font-size: var(--fs-note); }
 
-.fc-close {
-  flex: none;
-  background: none;
-  border: 1px solid var(--hairline);
-  border-radius: 3px;
-  color: var(--ink-dim);
-  font-size: var(--fs-head);
-  line-height: 1;
-  padding: 0.15rem 0.5rem 0.3rem;
-  cursor: pointer;
-}
-
-.fc-close:hover { color: var(--ink); border-color: var(--gold-mystic); }
-
 /* A persistent band, not a toast: a reader scrolls past a toast, and a card
    whose numbers are two days old must keep saying so. */
 .fc-staleband {
@@ -829,37 +778,10 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   font-size: var(--fs-note);
 }
 
-/* Staleness is marked on the chrome, NOT by dimming text.
-   opacity:0.62 over --bg-elev pushed --ink-dim body copy to roughly 2.9:1,
-   below the 4.5:1 floor — and it dimmed the very sentence explaining why the
-   card was dimmed. The band says it in words; a rule down the left edge says
-   it visually without touching a single glyph's contrast. */
-.fc.is-stale .fc-panel {
-  border-left: 2px solid color-mix(in srgb, var(--flow-down) 55%, transparent);
-  padding-left: 0.8rem;
-}
-
-/* FIVE OF THE SEVEN CHARTS WERE MISSING FROM THIS RULE. It reached `.gp` and
-   `.fp` only, so on a stale card the gamma ladder and the session path dimmed
-   while the book displacement, the gamma surface, the roll-off, the priced
-   move and the price context did not. Charts disagreeing with the staleness
-   band on their own card is worse than no dimming at all: it reads as "these
-   five are current", which is the one thing the band exists to deny.
-
-   Enumerated from the class each renderer actually emits — `gp`, `bd`, `gs`,
-   `gc`, `pm`, `px`, `fp` — rather than from a list in a spec, which named a
-   `.gr` this codebase has never had.
-
-   OPACITY ON CHARTS ONLY, NEVER ON GLYPHS. The rule above this one puts a
-   rule down the panel's left edge for the same reason: dimming a number drops
-   it below the 4.5:1 floor and it is still read as a number. */
-.fc.is-stale .gp,
-.fc.is-stale .bd,
-.fc.is-stale .gs,
-.fc.is-stale .gc,
-.fc.is-stale .pm,
-.fc.is-stale .px,
-.fc.is-stale .fp { opacity: 0.72; }
+/* THE STALENESS RULES THAT LIVED HERE FOLLOWED THE DIALOG OUT: they marked
+   `.fc.is-stale`, a state only the retired <dialog class="fc"> carried.
+   `.ft-grid.is-stale` further down states the argument again for
+   /flows/ticker/ and is where to change it. */
 
 /* A PANEL IS A BOX NOW, and the box is the point.
 
@@ -986,15 +908,6 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   border-radius: 3px;
   color: var(--ink-dim);
   font-size: var(--fs-note);
-}
-
-.fc-prov {
-  margin: 1.6rem 0 0;
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--hairline);
-  color: var(--ink-faint);
-  font-family: var(--font-mono);
-  font-size: var(--fs-fine);
 }
 
 /* ---------- gamma profile ---------------------------------------- */
@@ -1404,8 +1317,17 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 
 .fc-fam-l { color: var(--ink-dim); font-size: var(--fs-data); }
 
-/* ---------- the ticker button -------------------------------------- */
+/* ---------- the ticker link ---------------------------------------- */
 
+/* `all: unset` OUTLIVED THE <button> IT WAS WRITTEN FOR, and still earns its
+   line. It was there to strip the UA's button chrome; the element is an <a>
+   on a carded row now, and it strips the underline and the visited colour
+   just as usefully — the row states its own affordance in the title, and a
+   purple ticker would say a name had been read rather than that it has a
+   card. It is also what lets an uncarded row's <span>.fb-flat share every
+   declaration in this block with a real link. `cursor: pointer` has to be
+   restated for exactly the same reason: `all: unset` takes the anchor's
+   default cursor with it. */
 .fb-open {
   all: unset;
   cursor: pointer;
@@ -1420,15 +1342,6 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 .fb-open:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
 
 @media (max-width: 40rem) {
-  .fc {
-    inset: 0;
-    width: 100vw;
-    height: 100dvh;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-  }
-
   .fc-fam li { grid-template-columns: 1.2rem minmax(3rem, 1fr) 2.6rem; }
   .fc-fam-l { grid-column: 1 / -1; padding-left: 1.8rem; }
   .fc-congress .fc-amt { font-size: var(--fs-fine); }
@@ -1452,9 +1365,13 @@ body.is-stale .flows-tablewrap {
   border-color: color-mix(in srgb, var(--flow-down) 55%, transparent);
 }
 
-/* Card tables scroll inside their own box so the DIALOG never scrolls
-   sideways — at 320px that would take the header and the close button
-   off-screen with it. */
+/* Panel tables scroll inside their own box so nothing AROUND them scrolls
+   sideways. /flows/ticker/ puts a 22rem congress table on a 320px phone, and
+   there are two containers that must not take it: a horizontal scrollbar on
+   the DOCUMENT drags the rail and every other panel with it, and .ft-zoom —
+   which redraws these same panels — carries its close button in the header
+   that would ride off with the scroll. The retired card dialog's .fc-head was
+   the third, and the only one this note used to name. */
 .fc-tablewrap {
   overflow-x: auto;
   outline-offset: 2px;
@@ -3172,9 +3089,9 @@ body.is-stale .flows-tablewrap {
 
    An OPAQUE ground, because a translucent one lets a chart's ink read through
    the header and both become unreadable. z-index 5 puts it over the panels it
-   scrolls past; the card and zoom dialogs are <dialog> elements painted in the
-   top layer, which no z-index on this page can reach past, so nothing here can
-   cover them.
+   scrolls past; the enlarge dialog below is a <dialog> painted in the top
+   layer, which no z-index here can reach past, so nothing here can cover it.
+   (It used to be two; the card dialog was the other.)
 
    THE HEADER IS A HOST, not a fixed set of five slots. Whatever the ticker
    controller paints into it rides along; the rules here only guarantee it
@@ -3208,25 +3125,30 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.02em;
 }
 
-/* The link out of the card dialog and off a board row. Chrome, not data:
-   gold is allowed here precisely because it carries no reading. */
+/* A link inside a panel — the name switcher's rows, and the way out of a
+   reading. Chrome, not data: gold is allowed here precisely because it
+   carries no reading.
+
+   THREE RULES CAME OUT WITH THE DIALOG. `.ft-link-glyph::after` drew a "↗"
+   from CSS so a board cell's textContent stayed the ticker alone, and two
+   `.fb-tk .ft-link` rules faded it until hover. All three existed for the
+   small anchor beside a ticker that opened a modal. The ticker IS that link
+   now, so they had no element left to match. */
 .ft-link {
   color: var(--gold-harvest); text-decoration: none; font-size: var(--fs-data);
   white-space: nowrap;
 }
 .ft-link:hover { text-decoration: underline; }
 .ft-link:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-/* The glyph, so the cell's textContent stays the ticker alone. */
-.ft-link-glyph::after { content: "\2197"; }
-.fb-tk .ft-link { margin-left: 0.4rem; opacity: 0.55; }
-.fb-tk:hover .ft-link, .fb-tk .ft-link:focus-visible { opacity: 1; }
 
 .ft-picker { margin: 0 0 var(--space-3); }
 .ft-picker h2 { margin: 0 0 0.4rem; font-size: var(--fs-lead); }
 
 /* --- the enlarge affordance ----------------------------------------- */
 /* SCOPED TO .ft-panel. Making .fc-panel h3 a flex container would reflow the
-   header of every panel on the card dialog, the desk and the board. */
+   header of every panel wearing the shared class — the market, political,
+   strategy and ask pages all emit .fc-panel — and only the ticker grid has an
+   enlarge button to make room for. */
 .ft-panel h3 {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-2);
@@ -3280,8 +3202,10 @@ body.is-stale .flows-tablewrap {
    does. The two existing reduced-motion blocks name specific classes and
    cannot reach these rules — a reduced-motion reader would otherwise get the
    spotlight this page just added. No lift is defined at all: .fd-card's
-   translateY is right for a card that IS a button and wrong for a panel
-   containing a scrollable table. */
+   translateY is right for a deck card the whole of which is one link, and
+   wrong for a panel containing a scrollable table — a panel that rose on
+   hover would slide the scrollbar out from under the reader reaching for
+   it. */
 @media (prefers-reduced-motion: reduce) {
   .ft-panel { transition: none; }
   .ft-panel:hover { box-shadow: var(--shadow-card); }
@@ -3340,7 +3264,7 @@ body.is-stale .flows-tablewrap {
   }
 }
 
-/* --- staleness, the same two channels the dialog uses ---------------- */
+/* --- staleness, on the two channels that survived the dialog --------- */
 /* Words in the band above, chrome here. NEVER opacity on a glyph: dimming a
    number drops it below the 4.5:1 floor and it is still read as a number.
    Charts may take 0.72; text may not.
@@ -5327,13 +5251,11 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   padding-right: 0.6rem;
 }
 
-/* ---------- the ticker, as an opener ----------
-   A BUTTON, NOT A LINK. The tiles this replaced were <a href="?t=SYM">, so
-   opening a card was a full navigation that re-fetched both boards to
-   redraw the page already on screen. flows-card.js delegates on
-   .cc-open[data-t] and pushes the same ?t= state, so the address, the Back
-   button and the deep link all behave exactly as before — without the
-   reload. A button inherits none of its container's type, hence the reset. */
+/* ---------- the ticker, as a link to the reader ----------
+   A LINK AGAIN — see nameNode() in flows-overview.js for the round trip. THE
+   RESET STAYS AND DOES DIFFERENT WORK: it was here because a <button> inherits
+   none of its container's type, and is here now to strip an anchor's colour
+   and underline so a name reads as a name and announces itself on hover. */
 .cc-open {
   font: inherit;
   color: inherit;
@@ -5344,6 +5266,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   margin: 0;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
 }
 .cc-open:hover { color: var(--gold-celadon); text-decoration: underline; }
 .cc-open:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
@@ -5519,9 +5442,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   cursor: help;
 }
 .cc-nw-tks { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; }
-/* A NAME THIS SESSION BUILT NO CARD FOR. Not a button — the dialog would open
-   and apologise — but the mention is still the join between a headline and a
-   name this product ranks, so it is printed rather than dropped.
+/* A NAME THIS SESSION BUILT NO CARD FOR. Not a link — the reader it led to
+   would have nothing to read — but the mention is still the join between a
+   headline and a name this product ranks, so it is printed rather than
+   dropped.
 
    AND IT IS THE FAINTER OF THE TWO, which it was not: .cc-open inherits the
    meta line's --ink-faint while this carried --ink-dim, so on the first render

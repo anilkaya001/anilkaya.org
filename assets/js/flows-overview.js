@@ -231,20 +231,20 @@
     return list;
   }
 
-  /* ---------- a name that opens its card in place ------------------
+  /* ---------- a name that goes to the reader -----------------------
 
-     The tiles this replaces were anchors to ?t=SYM, so opening a card was a
-     full navigation that re-fetched both boards to redraw the page on
-     screen. A button carrying data-t is picked up by the delegated handler
-     in flows-card.js, which opens the dialog and pushes the same ?t= state.
+     THE TILE IS A LINK AGAIN, and each stop of the round trip was right about
+     a different thing. It began as <a href="?t=SYM">, a real address that
+     reloaded this page — nine regions and both board payloads — to draw a card
+     over what the reader was looking at; it became a <button data-t> that
+     flows-card.js turned into a modal in place, giving up the address. The
+     modal is retired, so the destination is a different document either way.
 
-     A ROW WITHOUT A CARD IS NOT A BUTTON. The card costs vendor calls the
-     run spends only on the names furthest from neutral: `deep` at the
-     payload root means this board knows the distinction, `dp` on a row means
-     this row got one, and a board predating both publishes neither — so the
-     test is on the PAYLOAD first. Withholding data-t is what keeps a
-     cardless row out of the click delegation; a class name would only keep
-     it out of the stylesheet. */
+     A ROW WITHOUT A CARD IS NOT A LINK. The card costs vendor calls the run
+     spends only on the names furthest from neutral: `deep` at the payload
+     root means this board knows the distinction and `dp` means this row got
+     one, so the test is on the PAYLOAD first. The flat span is unchanged,
+     down to its title. */
   function nameNode(t, hasCard) {
     if (!t) return el("span", "cc-flat", DASH);
     if (!hasCard) {
@@ -252,15 +252,12 @@
       flat.title = NO_CARD_SAID;
       return flat;
     }
-    const button = el("button", "cc-open", t);
-    button.type = "button";
-    button.dataset.t = t;
-    button.setAttribute("aria-haspopup", "dialog");
-    // Warm the card on hover so the dialog opens instantly; at most six are cached.
-    button.addEventListener("pointerenter", () => {
-      if (window.flowsCardPrefetch) window.flowsCardPrefetch(t);
-    });
-    return button;
+    const link = el("a", "cc-open", t);
+    /* `from=overview` is the surface this name was read off, so the reader can
+       offer a way back to it rather than to a default. */
+    link.href = "/flows/ticker/?t=" + encodeURIComponent(t) + "&s=signal&from=overview";
+    link.title = "Open the full reader for " + t;
+    return link;
   }
 
   /* ---------- the earnings marker ----------------------------------
@@ -1603,12 +1600,12 @@
       if (named.length) {
         const box = el("span", "cc-nw-tks");
         for (const t of named.slice(0, NEWS_TICKERS)) {
-          /* AN OPENER ONLY WHERE THERE IS SOMETHING BEHIND IT. `cards` is the
-             set of names this session built a detail card for, so a button
-             minted for anything else opens a dialog that has to apologise. The
-             rest print plain: the MENTION is still information — the join
-             between a headline and a name this product ranks — a dead button
-             is not. */
+          /* A LINK ONLY WHERE THERE IS SOMETHING BEHIND IT. `cards` is the
+             set of names this session built a detail card for, so a link
+             minted for anything else lands on a reader that has to apologise.
+             The rest print plain: the MENTION is still information — the join
+             between a headline and a name this product ranks — a link to an
+             empty page is not. */
           if (cards.has(t)) { box.append(nameNode(t, true)); continue; }
           const flat = el("span", "cc-nw-tk", t);
           flat.title = "Named by the vendor on this headline. This session built no card for " +
