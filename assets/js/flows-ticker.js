@@ -4637,19 +4637,147 @@
    * mark, rather than rendering an empty host — and names where they already
    * are.
    */
-  function keyStatsPending(host, question) {
-    const { panelHead } = P;
+  /**
+   * The headline figures, gathered from the panels that already publish them.
+   *
+   * SEVEN ROWS FROM FIVE PANELS, AND THE SILENCES DO NOT MERGE. Every figure
+   * here is a reading some other panel on this page makes; this block is a
+   * gathering, not a second measurement, and the difference matters twice.
+   * It means no row may be computed here — a second derivation of one number
+   * is two chances for this panel and the one below it to disagree about the
+   * same name. And it means each row inherits the silence of the panel it came
+   * from, separately: `levels` can be quiet while `volContext` is unavailable,
+   * and a block that answered both with one dash would report a vendor outage
+   * as a market with nothing to say.
+   *
+   * THE FLIP IS ABSENT ON MOST NAMES. card.gammaFlip is published on 19 of the
+   * 50 cards a dry run emits — the majority case is no flip, not a rare one —
+   * and the reason is the gamma panel's: net gamma does not change sign inside
+   * the drawn band. So this row takes that panel's OWN sentence rather than a
+   * new one. One fact with two explanations is the same defect as two facts
+   * with one, read from the other end.
+   *
+   * ATR IS READ FROM ONE PLACE. It is published twice, at card.atr and at
+   * card.panels.levels.atr, and they agree on all 50 today. Reading one of
+   * them is what keeps that true: a block that averaged them, or picked
+   * whichever was present, would print a number no single measurement made.
+   *
+   * THE IV RANK IS PICKED BY DATE, NEVER BY INDEX. ivRank.rows arrives
+   * newest-first, and the score-over-price panel's own note says its two series
+   * "both run oldest first" — so the ordering a reader of this file would
+   * assume is the opposite of the one this payload uses, and `rows[rows.length
+   * - 1]` would publish a rank measured 60 sessions ago as today's. Scanning
+   * for the latest date costs 60 comparisons and cannot be wrong when a future
+   * payload changes its order.
+   */
+  function keyStats(host, _panel, card, question) {
+    const { panelHead, statList, isNum } = P;
     panelHead(host, question);
-    const p = el("p", "ft-quiet");
-    p.setAttribute("data-empty", "pending");
-    p.append(el("strong", null, "Not yet gathered. "));
-    p.append(document.createTextNode(
-      "Every figure this panel will hold is published by one of the panels on " +
-      "this page — spot and its distance to each wall, the ATR, the gamma " +
-      "flip, the priced move and the implied-volatility rank. Reading them " +
-      "into one block is a separate change; until it lands they are where they " +
-      "have always been."));
-    host.append(p);
+    const panels = (card && card.panels) || {};
+
+    /* A PANEL'S STATUS BECOMES A ROW'S SILENCE, using the same two words the
+       rest of this file uses: `quiet` when the panel measured and had nothing
+       to report, `unavailable` when it could not measure. The panel carries
+       its own reason; this never writes one for it. */
+    const silence = (p, what) => {
+      if (!p) return ["unavailable", "The " + what + " panel is not on this card."];
+      if (p.status === "quiet") return ["quiet", p.reason || "Measured, with nothing to report."];
+      if (p.status === "pending") return ["pending", p.reason || "Not gathered yet."];
+      return ["unavailable", p.reason || "The " + what + " panel could not be read."];
+    };
+
+    const money = (n) => "$" + n.toFixed(2);
+    const pct1 = (n) => (n * 100).toFixed(1) + "%";
+    /* THREE ARMS, NOT TWO, and tests/flows-sign.mjs caught this one as its own
+       fixture — (n >= 0 ? "+" : MINUS) is verbatim the bad form that file
+       lists. The reason is a reading, not a style: a wall sitting exactly AT
+       spot measures distAtr === 0, and the two-armed form prints it +0.00 —
+       a confident positive sign on a measured zero. Unsigned is the truth
+       there: the wall is at spot, neither above it nor below. */
+    const atrOf = (n) => (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(2) + "σ";
+
+    const pairs = [];
+    const lv = panels.levels;
+    const spot = lv ? isNum(lv.spot) : null;
+    if (spot === null) {
+      const [kind, why] = silence(lv, "levels");
+      pairs.push(["Spot", DASH, null, kind, why]);
+    } else {
+      pairs.push(["Spot", money(spot)]);
+    }
+
+    /* THE ATR IS THE UNIT THE DISTANCES BELOW ARE IN, so it is stated before
+       them rather than left for a reader to find in another panel's note. */
+    const atr = isNum(card && card.atr);
+    if (atr === null) {
+      pairs.push(["ATR", DASH, null, "unavailable",
+        "This card publishes no ATR, so the distances below are in percent only."]);
+    } else {
+      pairs.push(["ATR", money(atr)]);
+    }
+
+    /* THE THREE WALLS, each with its distance in ATR — the unit that compares
+       across names, where a percentage does not: 2% is a long way on a quiet
+       name and nothing on a volatile one. */
+    const rows = (lv && Array.isArray(lv.levels)) ? lv.levels : null;
+    for (const [kind, label] of [["max_pain", "Max pain"], ["put_wall", "Put wall"], ["call_wall", "Call wall"]]) {
+      const row = rows ? rows.find((r) => r && r.kind === kind) : null;
+      const px = row ? isNum(row.px) : null;
+      const dist = row ? isNum(row.distAtr) : null;
+      if (px === null) {
+        const [k, why] = silence(lv, "levels");
+        pairs.push([label, DASH, null, k, why]);
+      } else {
+        pairs.push([label, money(px) + (dist === null ? "" : " · " + atrOf(dist))]);
+      }
+    }
+
+    /* THE FLIP, AND ITS OWN PANEL'S REASON FOR NOT HAVING ONE. */
+    const flip = isNum(card && card.gammaFlip);
+    if (flip === null) {
+      const gm = panels.gamma;
+      if (gm && gm.status && gm.status !== "ok") {
+        const [k, why] = silence(gm, "gamma");
+        pairs.push(["Gamma flip", DASH, null, k, why]);
+      } else {
+        pairs.push(["Gamma flip", DASH, null, "quiet",
+          "Net gamma does not change sign materially inside the drawn band, so " +
+          "no flip level is published for this name."]);
+      }
+    } else {
+      pairs.push(["Gamma flip", money(flip)]);
+    }
+
+    const pm = panels.pricedMove;
+    const move = pm ? isNum(pm.movePerc) : null;
+    if (move === null) {
+      const [k, why] = silence(pm, "priced move");
+      pairs.push(["Priced move", DASH, null, k, why]);
+    } else {
+      pairs.push(["Priced move", "±" + pct1(move)]);
+    }
+
+    /* THE RANK, ITS UNIT AND ITS DATE. The unit is the payload's own
+       rankUnit — this block does not decide that a rank is a percentage. */
+    const vc = panels.volContext;
+    const ir = vc && vc.ivRank;
+    let latest = null;
+    if (ir && Array.isArray(ir.rows)) {
+      for (const r of ir.rows) {
+        if (!r || isNum(r.rank1y) === null || !r.date) continue;
+        if (!latest || String(r.date) > String(latest.date)) latest = r;
+      }
+    }
+    if (!latest) {
+      const [k, why] = silence(ir || vc, "implied-volatility rank");
+      pairs.push(["IV rank", DASH, null, k, why]);
+    } else {
+      const unit = typeof ir.rankUnit === "string" && /percent/i.test(ir.rankUnit) ? "%" : "";
+      pairs.push(["IV rank", isNum(latest.rank1y).toFixed(1) + unit +
+        " · " + String(latest.date)]);
+    }
+
+    host.append(statList(pairs));
   }
 
   const DRAW = {
@@ -4684,7 +4812,7 @@
        emitter marks those sections data-sentinel and the walks read it off
        the DOM, as they read the question. */
     __score: (host, panel, card, question) => P.score(host, card, question),
-    __stats: (host, panel, card, question) => keyStatsPending(host, question),
+    __stats: keyStats,
   };
 
   /* ---------- the walk --------------------------------------------- */

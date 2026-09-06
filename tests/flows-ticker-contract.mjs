@@ -849,6 +849,108 @@ try {
     await page.close();
   }
 
+  /* ---------- 2c. key statistics, gathered and not re-derived ---------
+
+     THE FIXTURE CORPUS CANNOT FAIL THIS ONE, which is why the payloads below
+     are built here. All 50 emitted cards carry the same latest ivRank —
+     52.15 on 2026-08-28, every one — so a keyStats that read a shared object,
+     or the wrong card entirely, would render exactly what a correct one does
+     and this check would pass while proving nothing. Distinct values are the
+     only thing that can tell those apart.
+
+     AND THE ROW ORDER IS THE TRAP. ivRank.rows arrives NEWEST-first while the
+     score-over-price panel's own note says its series "both run oldest first",
+     so the ordering a reader of this repo would assume is the opposite of the
+     one this payload uses. `rows[rows.length - 1]` would publish a rank
+     measured 60 sessions ago as today's — a number that is wrong by two
+     months and looks entirely reasonable. The rows below are deliberately
+     shuffled so that neither the first nor the last is the newest: only a
+     scan by date gets this right. */
+  {
+    const base = JSON.parse(JSON.stringify(withChain[0]));
+    base.atr = 2.5;
+    base.gammaFlip = 101.25;
+    base.panels.levels = {
+      status: "ok", spot: 100, atr: 2.5,
+      levels: [
+        { kind: "max_pain", label: "Max pain", px: 105, distPct: 0.05, distAtr: 2 },
+        { kind: "put_wall", label: "Put wall", px: 90, distPct: -0.1, distAtr: -4 },
+        { kind: "call_wall", label: "Call wall", px: 120, distPct: 0.2, distAtr: 8 },
+      ],
+    };
+    base.panels.pricedMove = { status: "ok", movePerc: 0.0731 };
+    base.panels.volContext = {
+      status: "ok",
+      ivRank: {
+        status: "ok", rankUnit: "percent 0-100, as published",
+        rows: [
+          { date: "2026-05-01", rank1y: 11.1 },
+          { date: "2026-08-28", rank1y: 73.4 },
+          { date: "2026-07-15", rank1y: 44.4 },
+        ],
+      },
+    };
+
+    const read = async (card) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      await mount(page, card, { ticker: card.ticker });
+      const out = await page.evaluate(() => {
+        const host = document.getElementById("ftStats");
+        if (!host) return null;
+        const rows = {};
+        for (const stat of host.querySelectorAll(".fc-stat")) {
+          const dd = stat.querySelector("dd");
+          rows[stat.querySelector("dt").textContent] = {
+            text: dd.textContent, empty: dd.dataset.empty || null, why: dd.title || "",
+          };
+        }
+        return rows;
+      });
+      await page.close();
+      return out;
+    };
+
+    const r = await read(base);
+    ok(r && Object.keys(r).length >= 8,
+       `key statistics draws its rows rather than a pending note (${r ? Object.keys(r).length : 0})`);
+    eq(r.Spot.text, "$100.00", `spot is this card's spot (${r.Spot.text})`);
+    eq(r.ATR.text, "$2.50", `the ATR is this card's (${r.ATR.text})`);
+    eq(r["Max pain"].text, "$105.00 · +2.00\u03c3",
+       `a wall carries its price AND its distance in ATR, the unit that compares ` +
+       `across names where a percentage does not (${r["Max pain"].text})`);
+    eq(r["Put wall"].text, "$90.00 · \u22124.00\u03c3",
+       `and a wall below spot is signed (${r["Put wall"].text})`);
+    eq(r["Gamma flip"].text, "$101.25", `the flip when it is published (${r["Gamma flip"].text})`);
+    eq(r["Priced move"].text, "\u00b17.3%", `the priced move (${r["Priced move"].text})`);
+    eq(r["IV rank"].text, "73.4% · 2026-08-28",
+       `THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the ` +
+       `newest of three deliberately shuffled rows; 11.1 would mean rows[0] and ` +
+       `44.4 would mean the last row (${r["IV rank"].text})`);
+
+    /* THE FLIP IS ABSENT ON 31 OF THE 50 CARDS A DRY RUN EMITS, so this is the
+       common path and not an edge. It takes the gamma panel's OWN sentence:
+       one fact explained two ways is the same defect as two facts sharing one
+       explanation, read from the other end. */
+    const noFlip = JSON.parse(JSON.stringify(base));
+    noFlip.gammaFlip = null;
+    const q = await read(noFlip);
+    eq(q["Gamma flip"].empty, "quiet",
+       `a card with no published flip says so under the quiet mark rather than ` +
+       `printing a bare dash (${q["Gamma flip"].empty})`);
+    ok(/does not change sign/.test(q["Gamma flip"].why),
+       `and gives the gamma panel's own reason for it (${q["Gamma flip"].why})`);
+
+    /* A PANEL THAT COULD NOT BE READ IS NOT A MARKET WITH NOTHING TO SAY. */
+    const dead = JSON.parse(JSON.stringify(base));
+    dead.panels.volContext = { status: "unavailable", reason: "The vendor returned no volatility history." };
+    const d = await read(dead);
+    eq(d["IV rank"].empty, "unavailable",
+       `an unreadable source panel makes its row unavailable, never quiet (${d["IV rank"].empty})`);
+    eq(d.Spot.empty, null,
+       `and it does not silence the rows that came from panels that DID publish ` +
+       `(spot: ${JSON.stringify(d.Spot)})`);
+  }
+
   /* ---------- 3. the minus sign, on numbers only ------------------ */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -3347,10 +3449,15 @@ try {
        "and the drawn copy is hidden inside the grid, so the reader is asked the question " +
        "once rather than twice in one box");
 
-    /* THE SECOND SENTINEL DRAWS A PENDING LINE, and pending is one of four
-       silences that never collapse: not unavailable, not unreadable, not
-       quiet — and above all not "your card predates this panel", the branch a
-       sentinel falls into the moment the walk finds no card.panels.__stats. */
+    /* THE SECOND SENTINEL DRAWS ITS FIGURES NOW. This block asserted a PENDING
+       line while the panel was a placeholder; the placeholder is gone, so the
+       assertion that pinned it is replaced rather than relaxed. What has to
+       stay true is the part that was never about pending: a sentinel has no
+       card.panels entry on ANY card, so it must never fall into the "your card
+       predates this panel" branch, and it must never render an empty host.
+       What the rows themselves say is asserted in section 2c, against payloads
+       built there because the emitted corpus carries one constant IV rank
+       across all 50 cards and so cannot fail that check. */
     const stats = await page.evaluate(() => {
       const s = document.getElementById("panel-__stats");
       const host = s.querySelector("div");
@@ -3363,24 +3470,26 @@ try {
         drawnQ: host.querySelector(".fc-q") ? host.querySelector(".fc-q").textContent : null,
         dead: !!host.querySelector(".fc-dead"),
         quiet: !!host.querySelector(".ft-quiet, .fc-quiet"),
+        statRows: host.querySelectorAll(".fc-stat").length,
       };
     });
     ok(stats.sentinel, "the key-statistics panel is marked as a sentinel in the served markup");
     ok(!stats.childless,
        "and it renders something — an empty host is the one state a reader cannot tell from " +
        "a broken page");
-    eq(stats.kind, "pending",
-       "under the PENDING mark specifically, which is its own silence and not one of the " +
-       "other three");
+    ok(stats.statRows >= 8,
+       `it draws the gathered figures rather than a placeholder (${stats.statRows} rows)`);
+    ok(stats.kind === null || ["quiet", "pending", "unavailable", "unreadable"].includes(stats.kind),
+       `and any figure it cannot show wears one of the four silences, never a bare ` +
+       `dash (${stats.kind})`);
     ok(!stats.dead,
-       "it wears no Unavailable banner — nothing declined to publish these figures, they " +
-       "are simply not gathered yet");
+       "the panel as a whole wears no Unavailable banner — a source panel that declined " +
+       "silences its own row and not the seven beside it");
     ok(!/predates|built before/i.test(stats.text),
        `and it never tells a reader their card predates it (${stats.text.slice(0, 70)}) — ` +
        `no card carries a panels.__stats, so that sentence is false on every card`);
-    ok(/published by one of the panels on this page/i.test(stats.text),
-       "and it says where the figures already are, which is the only useful thing it can " +
-       "say before it gathers them");
+    ok(/Spot/.test(stats.text) && /IV rank/.test(stats.text),
+       `and it names the figures it gathered (${stats.text.slice(0, 70)})`);
     eq(stats.drawnQ, TICKER_PANELS.find((p) => p.key === "__stats").question,
        "and it heads itself with the registry's question like every other panel");
 
