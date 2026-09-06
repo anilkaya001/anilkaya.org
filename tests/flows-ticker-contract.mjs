@@ -3385,11 +3385,37 @@ try {
          "enlarging a panel puts that panel in the URL, so a reader can send the chart " +
          "they are looking at");
       await page.keyboard.press("Escape");
+      /* WAIT FOR THE HANDLER, NOT FOR THE FLAG.
+         `dialog.open` is set to false SYNCHRONOUSLY inside close(); the
+         `close` EVENT is queued and fires a task later, and it is that
+         handler (flows-ticker.js:4988-4994) which restores the hash and
+         returns focus. So a wait on `.open` alone can win the race and read
+         location.hash one task too early — which is exactly what happened:
+         this assertion passed locally and failed in CI on the same commit,
+         reading '#panel-gamma' where it expected the arrival hash. The race
+         was always here; a change elsewhere in this file only altered how the
+         coin landed.
+
+         FOCUS IS THE THING TO WAIT ON, because it is a DIFFERENT effect of
+         the SAME handler — so this is a wait on the handler having run, not a
+         wait on the assertion below, which would assert nothing. */
       await page.waitForFunction(
-        () => !document.getElementById("ftZoom").open, null, { timeout: 2000 });
+        () => !document.getElementById("ftZoom").open &&
+          document.activeElement ===
+            document.querySelector('.ft-panel[data-panel="gamma"] .ft-zoom-open'),
+        null, { timeout: 3000 });
       const closed = await page.evaluate(() => location.hash);
       eq(closed, before,
          "and closing restores the hash the reader arrived on rather than clearing it");
+      /* AND THE WAIT ABOVE IS ITSELF WORTH ASSERTING. Returning focus to the
+         button that opened the dialog is what keeps a keyboard reader's place
+         in a 23-panel grid; nothing in this file said so until the race made
+         it necessary to look. */
+      const refocused = await page.evaluate(() => document.activeElement &&
+        document.activeElement.closest(".ft-panel[data-panel]").dataset.panel);
+      eq(refocused, "gamma",
+         "and returns focus to the button that opened it, so a keyboard reader " +
+         "keeps their place in the grid");
       eq(errors.length, 0, `the enlarge round trip throws nothing (${errors.join("; ")})`);
       await page.close();
     }
