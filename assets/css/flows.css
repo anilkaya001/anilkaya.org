@@ -3496,13 +3496,20 @@ body.is-stale .flows-tablewrap {
 }
 .ft-tab:hover, .ft-tab:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
 .ft-tab:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-/* WHERE THE READER IS, not which station is open. aria-current is written by
-   the intersection observer as they scroll; aria-selected is served "false"
-   on all five, every station being shown here and nothing selecting one yet.
-   NO RULE FOR aria-selected HERE, deliberately: it would paint nothing today,
-   and a rule with no element it can match is what tests/flows-sign.mjs and the
-   chrome-class sweep keep out of this file. It arrives with the controller. */
+/* TWO MARKS, AND THEY STOPPED MEANING THE SAME THING THE MOMENT TABS SWITCHED.
+   aria-current is WHERE THE READER IS — written by the intersection observer
+   as they scroll, which in `all` is still a question worth asking of five
+   stacked stations. aria-selected is WHICH STATION IS OPEN, written by the
+   controller. On a single station the two land on one tab and the stronger
+   mark simply wins; in `all` they part company, and that is the case each
+   rule is really for. The note that used to stand here refused an
+   aria-selected rule because nothing wrote the attribute yet. The controller
+   arrived. */
 .ft-tab[aria-current="true"] { color: var(--gold-harvest); border-color: var(--gold-harvest); }
+.ft-tab[aria-selected="true"] {
+  color: var(--bg); background: var(--gold-harvest); border-color: var(--gold-harvest);
+}
+.ft-tab[aria-selected="true"] .ft-tab-n { color: var(--bg); opacity: 0.72; }
 .ft-tab-n { color: var(--ink-faint); }
 
 /* THE WAY OUT OF THE FIVE. It sits beside the tablist rather than in it — a
@@ -3516,6 +3523,19 @@ body.is-stale .flows-tablewrap {
 }
 .ft-all-link:hover { color: var(--ink); text-decoration: underline; }
 .ft-all-link:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-all-link[aria-selected="true"] { color: var(--gold-harvest); text-decoration: underline; }
+
+/* PAPER HAS NO TABS. A reader who prints one station has printed a fifth of
+   the name, and a reader who searches the page for a word in a station they
+   are not looking at finds nothing — so print reveals all five whatever is
+   selected, and the row that selects them prints as nothing, being a control
+   and not a reading. `display: block` rather than `revert`: .ft-station is a
+   grid on screen at every width above 76rem, and reverting would drop the
+   columns the panels were drawn into. */
+@media print {
+  .ft-grid .ft-station[hidden] { display: grid !important; }
+  .ft-tabs, .ft-all-link { display: none !important; }
+}
 
 /* THE FIXED BAND — seven slots, served empty and hidden, painted by PR 4, and
    costing no height and NO MARGIN until it is: every slot is hidden, so the row

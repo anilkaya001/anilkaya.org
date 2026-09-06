@@ -166,8 +166,36 @@ const CEILING_KIB = {
      route's four scripts (6,003 + 2,560 + 158,668 + 317,065 = 484,296 B =
      472.95 KiB, leaving 7,224 B under 480). Re-derive, never re-quote: editing
      THIS comment does not change flows-panels.js, so a figure measured before
-     the edit and pasted after it is wrong by the size of the edit. */
-  tickerPage: 480,
+     the edit and pasted after it is wrong by the size of the edit.
+
+     480 -> 493, AND THE PARAGRAPH ABOVE ALREADY NAMED THIS DECISION: "480
+     leaves 7.0k on 472.95k — room for a fix, not for a feature." The station
+     switcher is the feature, so it does not get to spend that reserve quietly;
+     it has to move the number in the open, which is this.
+
+     WHAT IT BOUGHT. The ticker page measured 11,468px of continuous scroll at
+     1440 and 19,978px at 390 — 23 panels stacked, with a tab row that anchored
+     into them rather than switching between them. On the default address it now
+     measures 2,622px and 4,309px: 77% and 78% less page to read. `?s=all` still
+     renders 11,468 and 19,978 EXACTLY, at both widths, which is the measurement
+     that proves the switcher changed what is in the flow and nothing about the
+     layout.
+
+     WHERE THE 13k WENT, re-derived rather than quoted — the four scripts of
+     tickerPage(), `stat` on disk: 6,003 + 2,560 + 159,278 + 329,821 =
+     497,662 B = 486.00 KiB. Two changes, and only the second is this PR's:
+     PR 2's stations took flows-panels.js from 158,668 to 159,278 and had
+     already moved the route to 477.66k, spending 4.7k of the reserve before a
+     byte of the switcher landed. The switcher itself is 8,543 B of
+     flows-ticker.js (321,278 -> 329,821). 493 leaves 7,168 B on 486.00 KiB —
+     the same reserve the last decision set, and for the same reason: a fix,
+     not the next feature.
+
+     THIS CEILING IS OWED A REDUCTION. The deferral PRs (the eight ticker-only
+     drawers out of flows-panels.js) take roughly 230k off this route, and when
+     they land 493 becomes exactly the inherited headroom this file's header
+     warns about. Re-derive it downward then; do not leave it. */
+  tickerPage: 493,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

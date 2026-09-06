@@ -4884,7 +4884,7 @@
          at a different count on every width — a stale height puts the panel a
          reader jumped to underneath the bar that took them there. */
       syncBarHeight();
-      drawAll(painted, "grid");
+      withAllStations(() => drawAll(painted, "grid"));
       if (zoomKey) drawZoom();
     }, 160);
   });
@@ -5301,6 +5301,13 @@
   function honourHash() {
     const target = hashTarget();
     if (!target) return;
+    /* THE STATION BEFORE THE PANEL. A link to panel 14 is a link to the station
+       that holds it; scrolling to an element inside a hidden station scrolls to
+       something with no box, which is how a deep link becomes a no-op. */
+    const group = target.dataset ? target.dataset.group : null;
+    if (group && station !== ALL_STATIONS && station !== group) {
+      showStation(group, { url: true, push: false });
+    }
     syncBarHeight();
     target.scrollIntoView({ block: "start" });
     /* FOCUS FOLLOWS THE JUMP, or a keyboard reader lands visually on panel 14
@@ -5321,6 +5328,165 @@
       if (group && a.dataset.group === group) a.setAttribute("aria-current", "true");
       else a.removeAttribute("aria-current");
     }
+  }
+
+  /* ---------- the station switcher ----------------------------------
+
+     FIVE STATIONS, ONE ON SCREEN. PR 2 served the stations and a tab row, but
+     the tabs were anchors into one continuous scroll: the page measured
+     11,468px at 1440 and 19,978px at 390, and clicking Convexity moved the
+     reader four thousand pixels with the other four stations still stacked
+     underneath. Twenty-three panels read top to bottom or not at all is not a
+     reader, it is a report. The tabs now SWITCH — the station asked for is the
+     only one in the document's flow.
+
+     THE STATION IS NOT WHAT DECIDES A CHART'S WIDTH, which is the whole reason
+     this is safe. Stations are full-width block siblings inside .ft-grid, so
+     hiding four changes the page's height and nothing about the fifth's width,
+     and every chart is still measured with all five in flow — at boot because
+     the selection is applied after drawAll, on a resize because withAllStations
+     puts them back for the draw. A panel drawn inside a hidden station would
+     measure a host width of 0, so that is a guarantee, not a bet.
+
+     ALL IS A STATION TOO. Hiding four fifths of a page takes find-in-page and
+     printing away from a reader who had them, so `?s=all` puts every station
+     back, the All link addresses it, and print reveals everything whatever is
+     selected. */
+  const ALL_STATIONS = "all";
+  let station = null;
+
+  const stationEls = () => grid.querySelectorAll(".ft-station[data-group]");
+
+  function stationKeys() {
+    const keys = [];
+    for (const s of stationEls()) if (s.dataset.group) keys.push(s.dataset.group);
+    return keys;
+  }
+
+  /* Revealing them for a draw costs one layout on a resize. */
+  function withAllStations(fn) {
+    const put = [];
+    for (const s of stationEls()) if (s.hidden) { put.push(s); s.hidden = false; }
+    try { return fn(); } finally { for (const s of put) s.hidden = true; }
+  }
+
+  /* AN UNKNOWN STATION IS NOT OBEYED. A reader who edits ?s= to something no
+     station answers to gets the first station, not a page with all five
+     hidden — and the URL is rewritten to say which one they are looking at. */
+  function wantedStation() {
+    const keys = stationKeys();
+    if (!keys.length) return null;
+    let asked = "";
+    try { asked = new URL(location.href).searchParams.get("s") || ""; } catch { asked = ""; }
+    if (asked === ALL_STATIONS || keys.indexOf(asked) !== -1) return asked;
+    /* A HASH IS AN ADDRESS TOO, and every link already sent is one: it names a
+       panel or a heading, and the station that holds it is the one to open. */
+    const target = hashTarget();
+    const group = target && target.dataset ? target.dataset.group : null;
+    if (group && keys.indexOf(group) !== -1) return group;
+    return keys[0];
+  }
+
+  /* A CLICK IS AN ACT AND A SCROLL IS NOT. pushState so Back returns the reader
+     to the station they came from; everything else replaces, because a history
+     entry per station scrolled past would make Back mean nothing at all. */
+  function writeStation(key, push) {
+    let url;
+    try { url = new URL(location.href); } catch { return; }
+    const first = stationKeys()[0];
+    if (key === first) url.searchParams.delete("s");
+    else url.searchParams.set("s", key);
+    const next = url.pathname + url.search + url.hash;
+    try {
+      if (push) history.pushState({ s: key }, "", next);
+      else history.replaceState({ s: key }, "", next);
+    } catch { /* a browser that refuses the write still switched the station */ }
+  }
+
+  function showStation(key, opts) {
+    const keys = stationKeys();
+    if (!keys.length) return;
+    const next = (key === ALL_STATIONS || keys.indexOf(key) !== -1) ? key : keys[0];
+    station = next;
+    for (const s of stationEls()) {
+      s.hidden = !(next === ALL_STATIONS || s.dataset.group === next);
+    }
+    if (barEl) {
+      for (const a of barEl.querySelectorAll("[data-side]")) {
+        const on = a.dataset.side === next;
+        a.setAttribute("aria-selected", on ? "true" : "false");
+        /* ONE TAB STOP FOR THE WHOLE ROW. A tablist takes a single stop and the
+           arrow keys move inside it; five tabbable anchors would make a
+           keyboard reader press Tab five times to get past the row. */
+        if (a.classList.contains("ft-tab")) a.tabIndex = on ? 0 : -1;
+      }
+    }
+    /* IN ALL, NO ONE STATION IS THE CURRENT ONE — the observer marks whichever
+       fills the band, exactly as it did when the page was one scroll. */
+    if (next !== ALL_STATIONS) markCurrentGroup(next);
+    if (opts && opts.url) writeStation(next, !!opts.push);
+  }
+
+  function applyStation(opts) {
+    const want = wantedStation();
+    if (want === null) return;
+    showStation(want, opts || { url: true, push: false });
+  }
+
+  /* THE ROW IS A TABLIST, SO IT ANSWERS TO THE ARROW KEYS. Left and Right move
+     between stations, Home and End to the ends, and the moved-to tab is both
+     focused and selected — a tablist that focuses without selecting makes a
+     keyboard reader press Enter for something a mouse reader gets on arrival. */
+  function stationKeydown(event) {
+    const keys = stationKeys();
+    if (!keys.length || event.altKey || event.ctrlKey || event.metaKey) return;
+    const here = event.target && event.target.closest
+      ? event.target.closest(".ft-tab[data-side]") : null;
+    if (!here) return;
+    const at = keys.indexOf(here.dataset.side);
+    if (at === -1) return;
+    let to = -1;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") to = (at + 1) % keys.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") to = (at - 1 + keys.length) % keys.length;
+    else if (event.key === "Home") to = 0;
+    else if (event.key === "End") to = keys.length - 1;
+    else return;
+    event.preventDefault();
+    showStation(keys[to], { url: true, push: true });
+    const tab = barEl && barEl.querySelector('.ft-tab[data-side="' + keys[to] + '"]');
+    if (tab) { try { tab.focus(); } catch { /* focus is a courtesy, not the switch */ } }
+  }
+
+  function installStations() {
+    if (!barEl) return;
+    barEl.addEventListener("click", (event) => {
+      const tab = event.target && event.target.closest
+        ? event.target.closest("[data-side]") : null;
+      if (!tab || !barEl.contains(tab)) return;
+      /* A MODIFIED CLICK STAYS A NAVIGATION. Ctrl or Cmd click opens the
+         station in a new tab, and swallowing that would take away something
+         the anchor gave the reader for free. */
+      if (event.defaultPrevented || event.button !== 0 ||
+          event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showStation(tab.dataset.side, { url: true, push: true });
+      /* THE READER ARRIVES AT THE TOP OF THE STATION THEY ASKED FOR. Switching
+         leaves the scroll where it was, which on a long station is the middle
+         of a panel that was not there a moment ago. */
+      const head = tab.dataset.side === ALL_STATIONS
+        ? grid
+        : grid.querySelector('.ft-station[data-group="' + tab.dataset.side + '"] .ft-group');
+      if (head) {
+        syncBarHeight();
+        head.scrollIntoView({ block: "start" });
+        if (!head.hasAttribute("tabindex")) head.tabIndex = -1;
+        try { head.focus({ preventScroll: true }); } catch { head.focus(); }
+      }
+    });
+    barEl.addEventListener("keydown", stationKeydown);
+    /* BACK AND FORWARD MOVE BETWEEN STATIONS, and never write a third entry
+       for the state the browser just restored. */
+    window.addEventListener("popstate", () => applyStation({ url: false }));
   }
 
   /* WHICH STATION THE READER IS IN, tracked by observation rather than by a
@@ -5828,6 +5994,7 @@
   function installWorkspace() {
     buildBar();
     mountChrome();
+    installStations();
     watchGroups();
     window.addEventListener("hashchange", honourHash);
   }
@@ -5869,6 +6036,18 @@
        element with no box and does nothing at all — which is why a deep link
        used to drop the reader at the top of the page. */
     syncBarHeight();
+    /* AFTER drawAll, AND BEFORE honourHash. Every panel is drawn with all five
+       stations in flow, so the width each chart measured is the width the sweep
+       asserts; only then is the selection applied and four taken out of it.
+
+       THE ORDER OF THESE TWO IS A BUG FIX, NOT A PREFERENCE. honourHash used to
+       run first, and it decides a station too — so on `?s=all#ftg-convexity` it
+       fired while `station` was still null, its guard passed, and it opened
+       convexity. The reader had asked for all five in the query and got one,
+       because the hash was read before the query existed to lose to.
+       wantedStation() already ranks them correctly (?s= first, hash second);
+       running it first is what lets that ranking apply. */
+    applyStation({ url: true, push: false });
     honourHash();
 
     statusEl.textContent = (card.ticker || "This name") +

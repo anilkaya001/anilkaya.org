@@ -403,7 +403,7 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
  */
 async function mount(page, card,
                      { ticker = null, boards = null, hash = "", events = null,
-                       html = null } = {}) {
+                       html = null, station = "all" } = {}) {
   await page.addInitScript(({ card, boards, events }) => {
     window.__requested = [];
     window.fetch = (url) => {
@@ -433,9 +433,29 @@ async function mount(page, card,
      goto rather than assigned afterwards: the controller reads it once the
      card has painted, and a hash set after load would test a different code
      path from the one a pasted link exercises. */
+  /* ?s= IS PART OF THAT URL TOO. The stations switch, so which one is open is
+     an address a reader can be sent, and a test that set it after load would
+     exercise the tab handler rather than the arriving-reader path.
+
+     IT DEFAULTS TO `all`, AND THAT IS NOT A CONVENIENCE. Every check in this
+     file older than the switcher was written against a page holding all 23
+     panels in one document: they click a zoom button on `gamma`, measure a
+     chart in `tape`, read a silence in `context`. `?s=all` IS that page — the
+     same markup, the same widths, the same draw — so defaulting to it leaves
+     53 mounts asserting exactly what they asserted before, rather than 53
+     rewrites each of which could quietly weaken one.
+
+     WHAT THAT LEAVES UNCOVERED IS THE PAGE A READER ACTUALLY ARRIVES ON, so
+     section 2b passes `station: null` to get the default address and asserts
+     there: one station open, the right one, its charts at one-to-one, and the
+     deep link, Back and unknown-?s= paths. A reader's first screen is checked
+     in exactly one place, deliberately, rather than assumed in fifty-three. */
+  const query = [
+    ticker ? "t=" + encodeURIComponent(ticker) : null,
+    station ? "s=" + encodeURIComponent(station) : null,
+  ].filter(Boolean).join("&");
   const url = "https://example.test/flows/ticker/" +
-    (ticker ? "?t=" + encodeURIComponent(ticker) : "") +
-    (hash ? "#" + hash : "");
+    (query ? "?" + query : "") + (hash ? "#" + hash : "");
   /* `html` IS FOR ONE THING ONLY: serving DELIBERATELY WRONG markup, so a
      check that exists to notice it can be proven to. Everyone else gets the
      page the worker emits. */
@@ -523,7 +543,17 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     const card = withChain[0];
-    await mount(page, card, { ticker: card.ticker });
+    /* EVERY STATION IN FLOW, BECAUSE THE INVARIANT IS ABOUT EVERY PANEL. The
+       stations switch now, so on the default address four of the five are
+       `hidden` and a hidden element measures a zero-width box — which is what
+       this sweep saw the first time it ran against the switcher: "320px gamma:
+       drawn 282, rendered 0.00". That is not a chart at the wrong scale, it is
+       a chart with no box, and asserting one-to-one against it would be
+       asserting nothing. `?s=all` is the address that puts all five back, and
+       it is the same layout the page had before a station could hide, so what
+       this loop measures is unchanged. The switcher's own effect on scale is
+       asserted separately, below, on the station that IS open. */
+    await mount(page, card, { ticker: card.ticker, station: "all" });
 
     eq(errors.length, 0, `${width}px: the ticker page paints a real card without throwing (${errors.join("; ")})`);
 
@@ -665,6 +695,156 @@ try {
             .split(" ").filter((t) => parseFloat(t) > 0).length));
       eq(tracks.join(","), new Array(TICKER_GROUPS.length).fill(3).join(","),
          `${width}px: every station opens its third column at the 108rem tier (${tracks})`);
+    }
+    await page.close();
+  }
+
+  /* ---------- 2b. the stations SWITCH -------------------------------
+
+     THE READER THIS REPLACED WAS 11,468px OF SCROLL at 1440 and 19,978px at
+     390 — 23 panels stacked, and a tab row that anchored into them rather
+     than switching between them, so choosing Convexity moved the reader four
+     thousand pixels and left the other four stations underneath. These
+     assertions are about the switch itself; section 2 above measures the
+     drawing, which is why it asks for ?s=all.
+
+     THE ONE THING THAT COULD GO WRONG SILENTLY is scale. A panel drawn while
+     its station is hidden measures a zero-width host, and base.css's
+     `svg { max-width: 100% }` would then paint it at whatever size it landed
+     at without overflowing anything. So the last assertion here is the same
+     one-to-one rule section 2 applies, taken on the station that is actually
+     open on the DEFAULT address, where four stations are hidden. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const card = withChain[0];
+    await mount(page, card, { ticker: card.ticker, station: null });
+    eq(errors.length, 0,
+       `the switcher paints without throwing (${errors.join("; ")})`);
+
+    const shown = () => page.evaluate(() => {
+      const out = { open: [], hidden: [], selected: [], current: [], url: location.search };
+      for (const s of document.querySelectorAll(".ft-station[data-group]")) {
+        (s.hidden ? out.hidden : out.open).push(s.dataset.group);
+      }
+      for (const a of document.querySelectorAll("#ftBar [data-side]")) {
+        if (a.getAttribute("aria-selected") === "true") out.selected.push(a.dataset.side);
+        if (a.getAttribute("aria-current") === "true") out.current.push(a.dataset.side);
+      }
+      return out;
+    });
+
+    const first = await shown();
+    eq(first.open.length, 1,
+       `on arrival exactly one station is in the document (${first.open.join(", ") || "none"})`);
+    eq(first.hidden.length, 4,
+       `and the other four are out of it (${first.hidden.length} hidden)`);
+    eq(first.selected.join(","), first.open[0],
+       `the tab marked selected is the station that is open (${first.selected.join(",")} vs ${first.open[0]})`);
+
+    /* A CLICK SWITCHES, AND DOES NOT SCROLL TO SOMETHING FOUR THOUSAND PIXELS
+       DOWN — the station it names is the only one left in the flow. */
+    await page.click('.ft-tab[data-side="convexity"]');
+    const after = await shown();
+    eq(after.open.join(","), "convexity",
+       `clicking a tab makes its station the only one open (${after.open.join(", ")})`);
+    ok(after.url.includes("s=convexity"),
+       `and the URL says which station a reader is looking at (${after.url})`);
+
+    /* BACK IS AN UNDO, because a click is an act. The scroll observer replaces
+       its entry instead, or Back would walk a reader through every station
+       they merely scrolled past. */
+    await page.goBack();
+    await page.waitForFunction(() => !document.querySelector(
+      '.ft-station[data-group="convexity"]') || document.querySelector(
+      '.ft-station[data-group="convexity"]').hidden, null, { timeout: 4000 });
+    const back = await shown();
+    eq(back.open.join(","), first.open[0],
+       `Back returns to the station the reader came from (${back.open.join(", ")})`);
+
+    /* ?s=all IS THE WAY BACK TO ONE PAGE, and it is what keeps find-in-page and
+       printing from silently losing four fifths of the name. */
+    const allPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(allPage, card, { ticker: card.ticker, station: "all" });
+    const every = await allPage.evaluate(() =>
+      [...document.querySelectorAll(".ft-station[data-group]")].filter((s) => !s.hidden).length);
+    eq(every, 5, `s=all puts every station back in the document (${every} of 5)`);
+    await allPage.close();
+
+    /* AN ADDRESS NO STATION ANSWERS TO IS NOT OBEYED. Hiding all five because a
+       reader mistyped the query is the one outcome worse than ignoring them. */
+    const badPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(badPage, card, { ticker: card.ticker, station: "not-a-station" });
+    const bad = await badPage.evaluate(() =>
+      [...document.querySelectorAll(".ft-station[data-group]")].filter((s) => !s.hidden)
+        .map((s) => s.dataset.group));
+    eq(bad.length, 1, `an unknown ?s= opens one station rather than none (${bad.join(", ")})`);
+    await badPage.close();
+
+    /* A DEEP LINK OPENS THE STATION THAT HOLDS THE PANEL. Scrolling to an
+       element inside a hidden station scrolls to something with no box, which
+       is how a link to panel 14 becomes a link to the top of the page. */
+    const deepPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(deepPage, card, { ticker: card.ticker, hash: "panel-gamma", station: null });
+    const deep = await deepPage.evaluate(() => {
+      const panel = document.getElementById("panel-gamma");
+      const station = panel && panel.closest(".ft-station");
+      return { group: station && station.dataset.group, hidden: !station || station.hidden };
+    });
+    eq(deep.hidden, false,
+       `a deep link to a panel opens the station that holds it (${deep.group})`);
+    await deepPage.close();
+
+    /* WHICH ADDRESS WINS, ON ALL SIX COMBINATIONS. Two things can name a
+       station — `?s=` and the hash — and nothing asserted which of them ranked
+       higher, so the answer was free to be wrong: `?s=all#ftg-convexity` opened
+       ONE station, because honourHash ran while the selection was still null,
+       its guard passed, and it chose before the query had been read. The reader
+       asked for five and got one. The rule is: an explicit ?s= wins, a hash
+       decides when ?s= is silent, and a hash naming a PANEL wins over ?s= —
+       otherwise a link someone was sent lands on a station that does not hold
+       it. This table is the only thing that keeps those three straight. */
+    for (const [query, want] of [
+      ["&s=all#ftg-convexity", "signal,convexity,volatility,tape,context"],
+      ["&s=all", "signal,convexity,volatility,tape,context"],
+      ["#ftg-convexity", "convexity"],
+      ["", "signal"],
+      ["&s=volatility#panel-gamma", "convexity"],
+      ["&s=bogus", "signal"],
+    ]) {
+      const p = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      const hash = query.includes("#") ? query.slice(query.indexOf("#") + 1) : "";
+      const sParam = /[?&]s=([^#&]*)/.exec(query);
+      await mount(p, card, {
+        ticker: card.ticker, hash,
+        station: sParam ? decodeURIComponent(sParam[1]) : null,
+      });
+      const open = await p.evaluate(() =>
+        [...document.querySelectorAll(".ft-station[data-group]")]
+          .filter((s) => !s.hidden).map((s) => s.dataset.group).join(","));
+      eq(open, want, `?t=X${query || " (no station named)"} opens ${want} (${open || "none"})`);
+      await p.close();
+    }
+
+    /* THE SCALE RULE, ON THE STATION THAT IS OPEN WHILE FOUR ARE HIDDEN. */
+    const scales = await page.evaluate(() => {
+      const out = [];
+      for (const s of document.querySelectorAll(".ft-station[data-group]")) {
+        if (s.hidden) continue;
+        for (const svg of s.querySelectorAll("svg")) {
+          const vb = (svg.getAttribute("viewBox") || "").split(/\s+/);
+          if (vb.length !== 4) continue;
+          out.push([s.dataset.group, Number(vb[2]), svg.getBoundingClientRect().width]);
+        }
+      }
+      return out;
+    });
+    ok(scales.length > 0, `the open station draws at least one chart (${scales.length})`);
+    for (const [group, vb, rendered] of scales) {
+      ok(Math.abs(rendered - vb) < 1,
+         `switched: one viewBox unit is one CSS pixel in the open station ` +
+         `(${group}: drawn ${vb}, rendered ${rendered.toFixed(2)})`);
     }
     await page.close();
   }
