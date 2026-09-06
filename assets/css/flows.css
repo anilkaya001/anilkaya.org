@@ -3081,6 +3081,64 @@ body.is-stale .flows-tablewrap {
 .ft-panel { min-width: 0; }
 .ft-panel > div { min-width: 0; }
 
+/* THE PANEL BECOMES A COLUMN SO THE STRETCH HAS SOMEWHERE TO GO.
+   A grid row is as tall as its tallest member and `align-items` defaults to
+   stretch, so every shorter panel in that row is already given the full row
+   height. Measured across six names and four widths, that surplus is 2,100px
+   at 1280 (20.1% of panel area) and 4,456px at 2560 (60.2%) — and because
+   .fc-panel is a plain block box, all of it lands as blank ground UNDER the
+   content, inside the border.
+
+   `align-items: start` is the reflex and it is the wrong knob: measured, the
+   document is byte-identical stretched and un-stretched at 1280, 1440, 1840
+   and 2560 (11534/11534, 11109/11109, 10998/10998, 8433/8433), because the
+   row was already sized by its tallest member. It converts filled dead space
+   into ragged dead space and reclaims nothing. The surplus is not to be
+   removed; it is to be GIVEN to the drawing.
+
+   NO PADDING, NO BORDER-WIDTH, NO INLINE MARGIN CHANGES HERE. A column flex
+   item stretches on the cross axis to the container's content box, which is
+   the used width a block child already had — so host.getBoundingClientRect()
+   reads the same number it read before, and the term line's j-th bar still
+   centres on the surface's j-th column. That equality is the one thing this
+   rule could break, and it is asserted at 320, 1280 and 1840 rather than
+   argued.
+
+   ONLY THE PANEL BECOMES FLEX, NOT THE HOST. Making the host a flex column
+   too would turn its <svg> into a flex item, and a flex item's default
+   flex-shrink is 1: a drawing whose viewBox is held to one CSS pixel per
+   unit would be silently compressed the moment its column ran short. The
+   host stays a block; what it gains is only the room. */
+.ft-grid .ft-panel { display: flex; flex-direction: column; }
+.ft-grid .ft-panel > div { flex: 1 1 auto; }
+
+/* A PANEL THAT SHARES A ROW MAY NOT SET THAT ROW'S HEIGHT FROM A LIST WHOSE
+   LENGTH IS THE VENDOR'S TO CHOOSE.
+
+   `congress` is the outlier that makes this a rule rather than a preference:
+   measured across ten names it ranges 464px to 1371px, a 2.95x swing, and it
+   is a span-1 panel sitting beside `context` (350px) and `marketRank`. On a
+   name with a long disclosure list it stretches both of them across a
+   thousand pixels of blank ground — one vendor's filing count deciding the
+   shape of two panels that have nothing to do with it.
+
+   BOUNDED, NEVER TRUNCATED. Every row stays in the DOM, so find-in-page still
+   reaches them and scrolls the region to them; the wrapper already carries
+   tabIndex 0, role="region" and its own aria-label (flows-panels.js:2011,
+   flows-ticker.js:3739), so a keyboard reaches the scroller too; and each of
+   these panels prints its total in a note OUTSIDE the wrapper, so a reader is
+   told what they are scrolling through before they scroll it. 26rem is not a
+   new number — .sg-chainwrap has bounded the strategy page's chain that way
+   since it shipped.
+
+   :not(.is-wide) IS THE WHOLE ARGUMENT. A span-2 panel owns its row outright,
+   so its length costs no other panel anything and `topContracts` keeps all
+   fifty rows in the open. The bound is for the panels that have row-mates. */
+.ft-grid .ft-panel:not(.is-wide) .fc-tablewrap {
+  max-height: 26rem;
+  overflow: auto;
+}
+
 /* WHY 76rem AND NOT THE EXISTING 60rem BREAKPOINT.
    The panel that pays for this number is the AGGRESSOR ladder, not the IV
    surface: the surface is .is-wide at every width above the breakpoint and
