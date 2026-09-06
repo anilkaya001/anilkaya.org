@@ -17,9 +17,11 @@
    assets/version.txt, so a bump cannot silently desynchronise.
    ============================================================= */
 
-import { TICKER_PANELS } from "./flows-panels.js";
+import {
+  TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
+} from "./flows-panels.js";
 
-export const ASSET_VERSION = "115";
+export const ASSET_VERSION = "116";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1290,18 +1292,84 @@ export function tickerPage({ username = "" } = {}) {
   /* Emitted from the registry rather than hand-written. That used to be a
      contrast with the card dialog's ten hand-written <section> blocks; the
      dialog is gone and the registry is now the only list there is. Every id,
-     title, question and span comes from the one array, so adding a panel is a
-     one-line edit that the markup, the drawer table and the pipeline's shed
-     order all pick up. */
-  const panels = TICKER_PANELS.map((p) => `
-  <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : ""}"
-           data-panel="${escapeHTML(p.key)}" data-question="${escapeHTML(p.question)}"
-           aria-labelledby="${p.id}H">
-    <h3 id="${p.id}H"><span class="ft-panel-t">${p.title}</span>
-      <button type="button" class="ft-zoom-open" data-panel="${escapeHTML(p.key)}"
-              aria-label="Enlarge: ${escapeHTML(p.title)}">&#10529;</button></h3>
-    <div id="${p.id}"></div>
+     title, question, span, group and tier comes from the one array, so adding
+     a panel is a one-line edit the markup, the drawer table and the shed
+     order all pick up.
+
+     FOUR THINGS THE CONTROLLER USED TO WRITE ARE EMITTED HERE NOW, for one
+     reason: they answer "what is this panel", and a reader should have that
+     before a fetch rather than after one.
+
+       data-group / data-tier  written by mountChrome on first paint, so a
+                               reader with a slow card, or with JavaScript
+                               that threw, got 23 identical boxes in no groups.
+       ft-panel-q              the question, VISIBLE. It was already an
+                               attribute no reader can see, and drawn by each
+                               renderer — after the card landed.
+       data-sentinel           `shared/` is never served, so the browser
+                               cannot import SENTINEL_KEYS. Rather than a
+                               third copy, of two strings, that nothing
+                               compares, it travels as markup the way
+                               `question` does: such a panel is drawn from the
+                               top level or from its neighbours, so the "this
+                               card predates the panel" branch must not fire.
+
+     THE DRAWN QUESTION IS NOT DELETED, ONLY HIDDEN IN THE GRID (`.ft-grid
+     .fc-q`, where that rule's own comment argues it). */
+  const panelMarkup = (p) => `
+    <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : ""}"
+             id="panel-${escapeHTML(p.key)}" data-panel="${escapeHTML(p.key)}"
+             data-group="${escapeHTML(p.group)}" data-tier="${escapeHTML(p.tier)}"${
+      SENTINEL_KEYS.has(p.key) ? " data-sentinel" : ""}
+             data-question="${escapeHTML(p.question)}"
+             aria-labelledby="${p.id}H">
+      <h3 id="${p.id}H"><span class="ft-panel-t">${p.title}</span>
+        <button type="button" class="ft-zoom-open" data-panel="${escapeHTML(p.key)}"
+                aria-label="Enlarge: ${escapeHTML(p.title)}">&#10529;</button></h3>
+      <p class="ft-panel-q">${escapeHTML(p.question)}</p>
+      <p class="ft-panel-one" id="${p.id}One"></p>
+      <div id="${p.id}"></div>
+    </section>`;
+
+  /* THE FIVE STATIONS, SERVED. The page carried zero group boundaries in its
+     markup until now: five <h2>s were built by the controller and inserted
+     between panels, so the served document was one undifferentiated run and
+     each group's question existed only after a script ran. A station is a real
+     <section> now — linkable, labelled, and what a later change hides.
+
+     role="tabpanel" ON A SECTION NOTHING HIDES YET, deliberately. This change
+     ships the structure and no tab logic: all five stations are visible — the
+     "all panels" state — and no tab is selected. The roles are served because
+     a document that becomes a tablist only once a script runs is two
+     documents to a screen reader, and one of them tested.
+
+     A STATION LAYS OUT NOTHING HORIZONTALLY. It is the grid now and .ft-grid
+     is a plain block, so every panel host measures what it did before this
+     wrapper existed — a border, a padding or a margin here is a wrong chart,
+     and the argument is stated in full at .ft-station in flows.css. */
+  const stations = TICKER_GROUPS.map((g) => `
+  <section class="ft-station" id="ftst-${g.key}" role="tabpanel"
+           aria-labelledby="${g.hash}" data-group="${g.key}" data-side="${g.key}">
+    <h2 class="ft-group" id="${g.hash}" tabindex="-1" data-group="${g.key}"><span class="ft-group-n">${escapeHTML(g.label)}</span><span class="ft-group-b">${escapeHTML(g.blurb)}</span></h2>
+    <p class="ft-station-lead" id="ftlead-${g.key}"></p>${
+    TICKER_PANELS.filter((p) => p.group === g.key).map(panelMarkup).join("")}
   </section>`).join("");
+
+  /* THE TAB ROW, AND WHY THE COUNT IS NOT COUNTED HERE. Each tab prints how
+     many panels its station holds, and that number is STATION_SIDE_COUNTS —
+     the export the station is built from — rather than a filter written twice.
+     A count computed twice is not wrong about any panel, only about how many
+     there are, the one error a per-panel assertion cannot see.
+
+     ANCHORS, NOT BUTTONS, and that survives the tab logic that is coming: a
+     plain fragment link is keyboard-native, copyable out of the status bar and
+     works with no script. aria-selected is false on all five — nothing is
+     selected while everything is shown, and saying otherwise is untrue. */
+  const tabs = TICKER_GROUPS.map((g) => `
+      <a class="ft-tab" role="tab" id="fttab-${g.key}" href="#${g.hash}"
+         aria-controls="ftst-${g.key}" aria-selected="false"
+         data-group="${g.key}" data-side="${g.key}">${escapeHTML(g.label)} <span
+         class="ft-tab-n">${STATION_SIDE_COUNTS[g.key]}</span></a>`).join("");
 
   return `${head("Flows — Ticker", lede)}
 ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
@@ -1310,6 +1378,52 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 
   <div class="flows-controls">
     <p class="flows-lede">${lede}</p>
+  </div>
+
+  <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
+       IT. The controller used to build this <div> from nothing on first paint,
+       which put the whole index — five tabs and their counts — behind a fetch
+       of a payload none of it depends on. It still re-parents #ftHead in as
+       the first child: a second markup for that block, built in the browser,
+       is the defect the registry exists to prevent. It is "hidden" for the
+       grid's reason — a bar of tabs over an empty page offers to move a
+       reader between five empty stations. -->
+  <div class="ft-bar" id="ftBar" hidden>
+    <nav class="ft-tabs" role="tablist" aria-label="Stations of this name">${tabs}
+    </nav>
+    <!-- ONE LINK OUT OF THE TABLIST AND DELIBERATELY NOT IN IT: "everything
+         at once" is not one of the five stations a tab selects. Today it
+         scrolls to the top of the grid, because every station is already
+         open; the change that hides four gives it the ?s=all address it
+         names, which this function cannot write, not knowing the ticker. -->
+    <a class="ft-all-link" id="ftAll" href="#ftGrid"
+       data-side="all">All ${TICKER_PANELS.length} panels</a>
+    <!-- THE FIXED BAND: seven slots, served EMPTY and HIDDEN. Each is a fact
+         this page already holds and has never shown in the bar — where the
+         reader came from, the name's sector, its ATR, its neighbours by rank,
+         a way to reach another name, the premium desk for this symbol, and
+         the next earnings date. They are emitted rather than created by the
+         controller so the rules that lay them out ship in the stylesheet the
+         page is versioned against, and so PR 4 fills slots rather than
+         inventing them. The row costs no height and no margin until it does
+         (see .ft-band in flows.css): every slot is hidden, and 9.6px of
+         nothing under the tabs is a gap, not a reserved height.
+
+         EMPTY AND HIDDEN IS THE HONEST SERVED STATE. A dash claims a
+         measurement came back empty; a label with no value claims one is
+         coming. Neither is true before a card lands. -->
+    <div class="ft-band" id="ftBand">
+      <a class="ft-band-b" id="ftFrom" hidden></a>
+      <span class="ft-band-v" id="ftSector" hidden></span>
+      <span class="ft-band-v" id="ftAtr" hidden></span>
+      <nav class="ft-band-nav" id="ftRankNav" hidden
+           aria-label="Neighbouring names by rank"></nav>
+      <input class="ft-band-find" id="ftFind" type="search" list="ftFindNames"
+             autocomplete="off" aria-label="Find another name" hidden>
+      <datalist id="ftFindNames"></datalist>
+      <a class="ft-band-b" id="ftPrem" hidden></a>
+      <span class="ft-band-v" id="ftEarn" hidden></span>
+    </div>
   </div>
 
   <header class="ft-head" id="ftHead" hidden>
@@ -1369,7 +1483,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </div>
   </section>
 
-  <div class="ft-grid" id="ftGrid" hidden>${panels}
+  <div class="ft-grid" id="ftGrid" hidden>${stations}
   </div>
 
   <p class="flows-foot" id="ftFoot"></p>

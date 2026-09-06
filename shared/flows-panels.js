@@ -25,22 +25,24 @@
    renderer is registered" panel, and a drawer with no key fails a
    test.
 
-   `question` REACHES THE BROWSER AS MARKUP, NOT AS AN IMPORT.
+   EVERYTHING THE BROWSER NEEDS FROM THIS FILE REACHES IT AS MARKUP.
    `shared/` is listed in .assetsignore and is never served, so a
-   browser module cannot import this file. flows-pages.js emits each
-   question into a data-question attribute and the drawer reads it
-   from the DOM. A renderer that tried to read `entry.question` at
-   runtime would get `undefined` and print an empty question with
-   nothing failing.
+   browser module cannot import it. flows-pages.js therefore emits
+   each panel's `question` into a data-question attribute AND into a
+   visible <p class="ft-panel-q">, its `group` and `tier` into
+   data-group and data-tier, and its sentinel-ness into a bare
+   data-sentinel — four facts the controller reads off the DOM rather
+   than restating. A renderer reading `entry.question` at runtime
+   gets `undefined` and prints an empty question, failing nothing.
 
-   AND THAT IS WHY `group` AND `tier` HAVE A SECOND HOME. The markup
-   emitter reads them from here; the browser cannot, so
-   assets/js/flows-ticker.js carries a PANEL_CHROME table keyed by
-   the same panel keys — the identical arrangement the DRAW table
-   already has, and pinned the identical way: tests/flows-ticker-
+   THE ONE PROJECTION THAT SURVIVES IS A CHECK, NOT A SOURCE.
+   assets/js/flows-ticker.js still carries a PANEL_CHROME table of
+   group and tier and no longer WRITES either: the served markup
+   does, from this file, and mountChrome only reports a disagreement.
+   It is pinned the way the DRAW table is — tests/flows-ticker-
    contract.mjs asserts the two agree key for key AND value for
-   value, in both directions. A duplicate a test cannot see is a
-   drift; a duplicate a test compares is a projection.
+   value, both directions. A duplicate a test cannot see is a drift;
+   a duplicate a test compares is a projection.
    ============================================================= */
 
 /**
@@ -57,33 +59,34 @@
  * than merely failing.
  *
  * `group` IS THE PAGE'S TABLE OF CONTENTS, and it is a field rather than a
- * heading because the heading has to be emitted in two places — once into
- * the served markup and once into the jump strip the controller builds — and
- * two hand-written lists of five headings is the same defect this file was
- * created to close, one level up.
+ * heading because a group is now three things at once — a served <section
+ * class="ft-station">, a heading inside it, a tab in the bar above it — and
+ * three hand-written lists of five labels is this file's own defect, one
+ * level up.
  *
- * ORDER IS THE ARGUMENT THE PAGE MAKES, and the argument has changed twice.
+ * ORDER IS THE ARGUMENT THE PAGE MAKES, and it has changed three times. It
+ * was "the four chain panels come first, being the half of the payload never
+ * drawn" — correct until they were drawn. Then "the score derivation leads,
+ * because a reader arrives from a board row carrying a score", with the other
+ * twenty regrouped so `levels` sat beside `surface`.
  *
- * It used to be "the four chain panels come first because they are the half
- * of the card payload that has never been drawn" — correct while that was
- * true, and stale once they were drawn. It then became "the score derivation
- * leads, because a reader arrives from a board row carrying a score". That is
- * still the first entry, and it was still not enough: the remaining twenty
- * panels sat in the order they had been ADDED in, so `levels` was seven
- * panels away from `surface`, the three second-order Greeks sat below the
- * off-exchange tape, and a reader hunting the gamma roll-off scanned five to
- * seven screens of near-identical headings with no index to jump from.
+ * IT IS NOW A SEQUENCE OF STATIONS: five sections a reader tabs between
+ * rather than five headings in one scroll, so a group is what a reader is ON
+ * and the order within one is what they read top to bottom. Four entries
+ * moved for that reading — `scoreOverlay` leads, being the only panel that
+ * can say a reading is NEW, and `displacement`, `path` and `marketRank` each
+ * move up beside the panel they are the second reading of.
  *
- * So the order is now GROUPED, and the groups are contiguous by contract:
+ * The groups themselves are contiguous by contract:
  *
- *   signal      what the number is and what it just did
+ *   signal      what the number is, what it just did, and its headline figures
  *   convexity   the dealer book that produced it
  *   volatility  what the chain is charging for the move
  *   tape        what actually traded
  *   context     the name's own year, and who else is in it
  *
  * WITHIN A GROUP THE FIRST ENTRY IS ITS LEAD, and carries `tier: "lead"`.
- * That is not decoration: with 21 boxes of identical chrome the eye has no
+ * That is not decoration: with 23 boxes of identical chrome the eye has no
  * way to find the primary reading of a section, so the lead wears heavier
  * chrome and everything under it is evidence for it. Exactly one lead per
  * group, always first — asserted, because "roughly one" is not a rule.
@@ -100,41 +103,26 @@
  * apart without a per-panel rule.
  */
 export const TICKER_PANELS = Object.freeze([
-  /* ---------- SIGNAL: the number, and what it just did -------------
+  /* ---------- SIGNAL: the number, what it did, and its figures ------
 
-     THE SCORE'S OWN DERIVATION, FIRST, and the ordering argument above has
-     been rewritten because it expired.
+     THE HISTORY LEADS, and the ordering argument above has been rewritten a
+     second time because it expired a second time.
 
-     It used to sit LAST. That was defensible when it was written: the four
-     chain panels were the half of the payload nothing drew, and putting them
-     first was the argument the page made. They have been drawn for a while
-     now, and four more panels have since been added above this one — so the
-     explanation of the single number this page is about had drifted to entry
-     21 of 21, below a twenty-panel scroll.
+     The score derivation led while this page was one scroll: a reader off a
+     board row carrying a score was owed, first, what that score is made of.
+     That is still true of the DERIVATION and it is not what a reader opens a
+     station for. This is the one panel built from two payloads and the only
+     one carrying a SERIES — the card's dated price window joined, in the
+     pipeline, against the dated score history for every name on the board.
+     Everything else describes one session in enormous detail; this is the
+     only thing that can say a reading is NEW, the claim the product makes.
 
-     A reader arrives here from a board row carrying a score. The first thing
-     the page owes them is what that score is made of. Everything below is
-     evidence for it. */
-  { key: "__score", id: "ftWhy", span: 2, group: "signal", tier: "lead",
-    title: "Score derivation",
-    question: "Which components produced this score, and how heavily?" },
-  /* THE ONE PANEL BUILT FROM TWO PAYLOADS, and the reason the join happens in
-     the pipeline rather than the browser. The card carries a dated price
-     window; `scoretrack` carries the dated score history for every name on
-     the board. The pipeline holds both when it builds a card — the track is
-     assembled before the card loop — so the join is done once, at build time,
-     by a shaper that a contract test can run without a browser. Fetching the
-     track in the page instead would put an untested date join inside a
-     drawing function, which is exactly what shared/flows-overlay.js exists to
-     prevent.
-
-     IT MOVED FROM LAST TO SECOND. It was the final entry of 21, which put the
-     only history on the page — the only thing that can say a reading is NEW —
-     below every static snapshot of one session. This page is read as an early
-     warning; the series that shows the warning belongs beside the number it
-     is a series of. The header strip's overnight move is derived from these
-     same rows, so the panel is also the working the strip is a summary of. */
-  { key: "scoreOverlay", id: "ftOverlay", span: 2, group: "signal", tier: "chart",
+     The join is in the pipeline, which holds both payloads when it builds a
+     card, so it is done once by a shaper a contract test can run without a
+     browser; fetching the track in the page would put an untested date join
+     inside a drawing function. The header strip's overnight move comes off
+     these same rows, so this panel is the working that strip summarises. */
+  { key: "scoreOverlay", id: "ftOverlay", span: 2, group: "signal", tier: "lead",
     title: "Score over price",
     /* THE TYPOGRAPHIC APOSTROPHE, as every other question on this page uses.
        escapeHTML turns an ASCII ' into &#39;, and the worker suite compares
@@ -143,24 +131,46 @@ export const TICKER_PANELS = Object.freeze([
        markup", which is not what went wrong. U+2019 passes through untouched
        and is what this site sets prose in anyway. */
     question: "How has this name’s daily score moved against its own price?" },
+  /* THE DERIVATION, SECOND AND NARROWER. It gave up the lead to the series
+     above it and its second column with it: five gauges and their weights are
+     a column of rows, not a drawing, and a span-2 host spent the extra 470px
+     on white space beside a list that sets its own width. `tier: "table"` for
+     the same reason — rows a reader scans, not a chart sized from its host. */
+  { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "table",
+    title: "Score derivation",
+    question: "Which components produced this score, and how heavily?" },
+  /* THE SECOND SENTINEL, AND THE FIRST PANEL HERE NOT ABOUT ONE PAYLOAD KEY.
+     Spot, ATR, the gamma flip, the priced move and the IV rank are each
+     published by a DIFFERENT panel below and each answer the same kind of
+     question — "what is the headline number" — so a reader hunting one opens
+     whichever station it lives in and scans a chart for a figure that is one
+     line of text. Gathering them costs no vendor call and no payload field.
+
+     IT IS DELIBERATELY EMPTY IN THIS CHANGE. The figures are the next patch;
+     what ships is the registry entry, the served box and an explicit PENDING
+     line — never a blank panel, the one state a reader cannot tell from a
+     broken page. */
+  { key: "__stats", id: "ftStats", span: 1, group: "signal", tier: "table",
+    title: "Key statistics",
+    question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 
   /* ---------- CONVEXITY: the dealer book ---------------------------
      Gamma leads: it is the one panel a reader opens on a name they already
-     know. `levels` and `surface` sit under it now rather than seven entries
-     away — the ladder, the rail measured against it, and the joint the two
-     are marginals of belong in one eyeful. */
+     know. Then the ladder's own movement, then the joint the two are
+     marginals of — `displacement` reads the same standing bars `levels`
+     measures spot against, so it belongs beside it, not below the surface. */
   { key: "gamma", id: "ftGamma", span: 1, group: "convexity", tier: "lead",
     title: "Gamma convexity",
     question: "Where is the dealer book long and short gamma?" },
   { key: "levels", id: "ftLevels", span: 1, group: "convexity", tier: "reading",
     title: "Key levels & distance to spot",
     question: "Where are the walls, and how far is spot from each in ATR?" },
-  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
-    title: "Gamma surface — strike × expiry",
-    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "displacement", id: "ftDisp", span: 1, group: "convexity", tier: "reading",
     title: "Where the book is moving",
     question: "Is new gamma building above or below the standing book?" },
+  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
+    title: "Gamma surface — strike × expiry",
+    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "calendar", id: "ftCal", span: 1, group: "convexity", tier: "chart",
     title: "Gamma roll-off",
     question: "How much of the book expires, and when?" },
@@ -193,7 +203,9 @@ export const TICKER_PANELS = Object.freeze([
      has to coincide with the surface's j-th column centre, which can only
      hold if the two mount at the same host width. Moving either out of the
      other's shadow, or dropping one to span 1, does not merely misalign the
-     chart — it makes the alignment assertion unsatisfiable. */
+     chart — it makes the alignment assertion unsatisfiable. Wrapping the
+     groups in stations does not touch it: both panels are inside THIS
+     station, and a station lays out nothing horizontally of its own. */
   { key: "ivSurface", id: "ftIvs", span: 2, group: "volatility", tier: "lead",
     title: "Implied volatility — moneyness × expiry",
     question: "What shape is the smile, and how does it change with tenor?" },
@@ -207,10 +219,18 @@ export const TICKER_PANELS = Object.freeze([
     title: "Volatility context",
     question: "What does the chain charge across tenors, and where does implied volatility sit in its own year?" },
 
-  /* ---------- TAPE: what actually traded --------------------------- */
+  /* ---------- TAPE: what actually traded ---------------------------
+     THE TWO READINGS OF THE SAME TAPE ARE ADJACENT NOW. `aggressor` says
+     which strikes were taken at the offer and `path` says how that flow
+     accumulated through the session — the same executions, once by strike and
+     once by clock. The fifty-row contract table used to sit between them, so
+     a reader holding one against the other scrolled past it twice. */
   { key: "aggressor", id: "ftAggr", span: 1, group: "tape", tier: "lead",
     title: "Who is lifting, by strike",
     question: "At which strikes were contracts taken at the offer?" },
+  { key: "path", id: "ftPath", span: 1, group: "tape", tier: "chart",
+    title: "Session path",
+    question: "How did the flow accumulate through the session?" },
   /* SPAN 2 BECAUSE THE COLUMN THAT PAYS IS THE LAST ONE. Nine columns in a
      span-1 host (456px at a 1216px viewport) push `Net aggr` outside the
      scroll wrapper's visible width, so the panel's whole answer — which lines
@@ -220,9 +240,6 @@ export const TICKER_PANELS = Object.freeze([
   { key: "topContracts", id: "ftTop", span: 2, group: "tape", tier: "table",
     title: "The day’s most-traded contracts",
     question: "Which single lines carried the volume?" },
-  { key: "path", id: "ftPath", span: 1, group: "tape", tier: "chart",
-    title: "Session path",
-    question: "How did the flow accumulate through the session?" },
   /* TWO OF THE THREE WAVE-2 STOCK PANELS, published by shared/flows-stock.js
      since the per-name deep feeds shipped. Both are tape — reported equity
      executions and the clearing snapshots that follow them — so they sit with
@@ -237,13 +254,15 @@ export const TICKER_PANELS = Object.freeze([
     title: "Open-interest changes",
     question: "Where did open interest move between clearing snapshots?" },
 
-  /* ---------- CONTEXT: the name's own year, and who is in it ------- */
+  /* ---------- CONTEXT: the name's own year, and who is in it -------
+     THE TWO PLACEMENT QUESTIONS ARE ADJACENT NOW. "Where does today sit in
+     this name's own year" and "does this name place against every other name"
+     are one question asked at two scales, and the congressional table — a
+     different kind of fact entirely, about disclosure rather than about
+     price — used to sit between them. */
   { key: "context", id: "ftCtx", span: 1, group: "context", tier: "lead",
     title: "Price context",
     question: "Where does today sit in the name’s own year?" },
-  { key: "congress", id: "ftCongress", span: 1, group: "context", tier: "table",
-    title: "Disclosed congressional transactions",
-    question: "Has anyone in Congress disclosed a trade in this name?" },
   /* THE CROSS-SECTION THE PER-NAME FEEDS CANNOT CARRY, off two market-wide
      reads this run already makes once for the market pulse.
 
@@ -261,31 +280,58 @@ export const TICKER_PANELS = Object.freeze([
   { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "reading",
     title: "Market-wide standing",
     question: "Does this name place in the market’s own two lists, and from which session?" },
-  /* NOT A PANEL KEY. The score derivation is drawn from the card's TOP-LEVEL
-     fields (score, fam, weights, conv, quality), not from card.panels — so it
-     is deliberately spelled with a sentinel that can never collide with a
-     payload key, and the test that asserts "every registry key is a key of
-     buildCard().panels" excludes exactly this one. */
+  { key: "congress", id: "ftCongress", span: 1, group: "context", tier: "table",
+    title: "Disclosed congressional transactions",
+    question: "Has anyone in Congress disclosed a trade in this name?" },
 ]);
 
-/** The sentinel key that is drawn from the card's top level, not its panels. */
-export const SCORE_KEY = "__score";
+/**
+ * The keys that name no `card.panels` entry at all.
+ *
+ * NOT PANEL KEYS, AND SPELLED SO THEY CAN NEVER COLLIDE WITH ONE. `__score`
+ * is drawn from the card's TOP-LEVEL fields (score, fam, weights, conv,
+ * quality); `__stats` is drawn from the OTHER PANELS, gathering one figure
+ * each out of several of them. Both mount and both draw, and neither is a key
+ * the pipeline publishes.
+ *
+ * A SET AND NOT A CONSTANT, BECAUSE ONE OF THEM WAS ABOUT TO LEAK. While
+ * there was exactly one sentinel it was a string, `SCORE_KEY`, and every
+ * exclusion in the repo was written `!== SCORE_KEY` — a shape that silently
+ * admits the second sentinel the moment it exists. Two things go wrong then
+ * and neither loudly: TICKER_PANEL_KEYS starts demanding a
+ * `card.panels.__stats` on every card, and the pipeline's shed ladder becomes
+ * free to name a key it can never drop, "shedding" a panel nobody publishes
+ * to save nothing. Both are asserted against this set in
+ * tests/flows-ticker-contract.mjs, in the direction that fails.
+ */
+export const SENTINEL_KEYS = new Set(["__score", "__stats"]);
 
 /**
- * The five groups, in the order the page reads them.
+ * The five stations, in the order the page reads them.
  *
  * `blurb` IS THE GROUP'S OWN SENTENCE and it is here rather than in the
  * controller for the same reason every `question` is: it is prose about the
  * payload, and prose about the payload is what the vocabulary suites scan.
+ * The controller no longer keeps a copy of any of it — the worker emits the
+ * label and the blurb into each station's own <h2> from this array, so the
+ * five sentences exist once instead of twice.
  *
  * `hash` IS PART OF THE CONTRACT, not a slug computed at render time. A
  * colleague pastes `…/flows/ticker/?t=NVDA#ftg-convexity` into a message and
  * it has to survive a rename of the label above it.
+ *
+ * `key` IS ALSO THE STATION'S ADDRESS — the `?s=` value every board row, deck
+ * tile and watch row already links here with (`…&s=signal&from=long`). That
+ * is why the first label reads "Overview" over a group keyed "signal": the
+ * LABEL is what a reader sees, and it changed when the group stopped being a
+ * heading and became the station a reader lands ON; the KEY is in links that
+ * were sent before this change and must still open after it.
  */
 export const TICKER_GROUPS = Object.freeze([
-  { key: "signal", label: "Signal", hash: "ftg-signal",
-    blurb: "The published score, what it is made of, and what it has done since " +
-      "the last session that scored this name." },
+  { key: "signal", label: "Overview", hash: "ftg-signal",
+    blurb: "The published score, what it has done since the last session that " +
+      "scored this name, what it is made of, and the figures the rest of this " +
+      "page derives." },
   { key: "convexity", label: "Convexity", hash: "ftg-convexity",
     blurb: "The dealer book: where gamma sits along the strike ladder and the " +
       "term, and how it is moving." },
@@ -293,12 +339,11 @@ export const TICKER_GROUPS = Object.freeze([
     blurb: "What the option chain charges — the smile, the term structure, and " +
       "the move those two imply." },
   { key: "tape", label: "Tape", hash: "ftg-tape",
-    blurb: "What actually traded: the lifted strikes, the largest lines, the " +
-      "session path and the off-exchange prints." },
+    blurb: "What actually traded: the lifted strikes, the session path, the " +
+      "largest lines and the off-exchange prints." },
   { key: "context", label: "Context", hash: "ftg-context",
-    blurb: "Where this session sits in the name’s own year, who has " +
-      "disclosed a trade in it, and whether it places against the rest of " +
-      "the market." },
+    blurb: "Where this session sits in the name’s own year, whether it places " +
+      "against the rest of the market, and who has disclosed a trade in it." },
 ]);
 
 /** The legal `tier` values. A tier with no stylesheet rule is a box with no chrome. */
@@ -306,4 +351,18 @@ export const PANEL_TIERS = Object.freeze(["lead", "chart", "table", "reading"]);
 
 /** Every registry key that names a `card.panels` entry. */
 export const TICKER_PANEL_KEYS = Object.freeze(
-  TICKER_PANELS.filter((p) => p.key !== SCORE_KEY).map((p) => p.key));
+  TICKER_PANELS.filter((p) => !SENTINEL_KEYS.has(p.key)).map((p) => p.key));
+
+/**
+ * How many panels each station holds, keyed by its `?s=` address.
+ *
+ * ONE NUMBER, MORE THAN ONE READER. The tab in the bar prints it, the station
+ * that tab opens holds exactly that many, and the controller that will hide
+ * four of the five has to say how many panels a reader is not looking at.
+ * COUNTED FROM TICKER_PANELS rather than written down: a hand-typed 8 beside
+ * a nine-panel station is not wrong about any panel, only about how many
+ * there are, which is the one error a per-panel assertion cannot see.
+ */
+export const STATION_SIDE_COUNTS = Object.freeze(
+  Object.fromEntries(TICKER_GROUPS.map((g) =>
+    [g.key, TICKER_PANELS.filter((p) => p.group === g.key).length])));

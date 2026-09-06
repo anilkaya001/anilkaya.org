@@ -33,6 +33,10 @@
    duplicate a test compares is a projection; a duplicate a test
    cannot see is a drift.
 
+   AND PANEL_CHROME NO LONGER WRITES ANYTHING: the worker emits
+   data-group and data-tier, so a stale entry is now reported rather
+   than shipped as the layout, which is what it was while it wrote.
+
    THE PAGE OPENS ON WHAT CHANGED. It used to open on twenty-one
    panels of one session with no index, no group boundaries, no way
    to link a colleague to a panel, an identity block that scrolled
@@ -4622,6 +4626,32 @@
                 "About this market-wide join");
   }
 
+  /**
+   * The key-statistics panel, before it gathers anything.
+   *
+   * PENDING IS ONE OF THE FOUR SILENCES AND IT IS NOT THE OTHER THREE. It is
+   * not unavailable (nothing declined to publish), not unreadable (nothing
+   * failed to parse) and not quiet (nothing measured empty): it is a box whose
+   * figures are gathered from the panels below, and the gathering is the next
+   * change. So it says that, in its own sentence and under its own data-empty
+   * mark, rather than rendering an empty host — and names where they already
+   * are.
+   */
+  function keyStatsPending(host, question) {
+    const { panelHead } = P;
+    panelHead(host, question);
+    const p = el("p", "ft-quiet");
+    p.setAttribute("data-empty", "pending");
+    p.append(el("strong", null, "Not yet gathered. "));
+    p.append(document.createTextNode(
+      "Every figure this panel will hold is published by one of the panels on " +
+      "this page — spot and its distance to each wall, the ATR, the gamma " +
+      "flip, the priced move and the implied-volatility rank. Reading them " +
+      "into one block is a separate change; until it lands they are where they " +
+      "have always been."));
+    host.append(p);
+  }
+
   const DRAW = {
     gamma: P.gamma,
     aggressor: drawAggressor,
@@ -4644,7 +4674,17 @@
     deltaExposure: P.deltaExposure,
     charm: P.charm,
     vanna: P.vanna,
-    __score: null,          // drawn from the card's TOP LEVEL, not its panels
+    /* THE TWO SENTINELS, IN THE SAME TABLE AND UNDER THE SAME CALL SHAPE.
+       `__score` used to sit here as `null` beside an `if (key === "__score")`
+       branch in each of the two walks below — a table entry that was not a
+       drawer, and a hard-coded key in two places the second sentinel would
+       have had to be added to in both, correctly, or draw nothing. Both are
+       ordinary drawers now and ignore the `panel` argument, having no
+       card.panels entry. WHICH keys are sentinels is not restated here: the
+       emitter marks those sections data-sentinel and the walks read it off
+       the DOM, as they read the question. */
+    __score: (host, panel, card, question) => P.score(host, card, question),
+    __stats: (host, panel, card, question) => keyStatsPending(host, question),
   };
 
   /* ---------- the walk --------------------------------------------- */
@@ -4670,12 +4710,6 @@
          page for a release without anyone noticing. */
       if (!host) { missing.push(key); continue; }
 
-      if (key === "__score") {
-        try { P.score(host, card, question); }
-        catch (error) { deadPanel(host, question, drawFailed(error)); }
-        continue;
-      }
-
       const drawer = DRAW[key];
       if (typeof drawer !== "function") {
         deadPanel(host, question, "no renderer is registered for this panel.");
@@ -4690,8 +4724,15 @@
          goes to the drawer, which switches on status before touching a
          number. The transitional sentence is per-wave (predatesSentence):
          the chain four and the deep-feed three shipped at different times,
-         and each absence is dated by its own wave. */
-      if (panel === undefined) {
+         and each absence is dated by its own wave.
+
+         A FOURTH ABSENCE IS NOT AN ABSENCE AT ALL. A sentinel has no
+         card.panels entry on ANY card, however new — `__score` reads the
+         card's top level and `__stats` reads the other panels — so this branch
+         would tell a reader that a card published this morning "predates" a
+         panel no payload carries. data-sentinel comes from the one registry,
+         so no list of keys is kept in this file. */
+      if (panel === undefined && !section.hasAttribute("data-sentinel")) {
         deadPanel(host, question, predatesSentence(key));
         continue;
       }
@@ -4770,19 +4811,17 @@
        would multiply every absolute unit — 9px axis type to 24px, the 112px
        rail to 298px — and break the one-viewBox-unit-is-one-CSS-pixel
        invariant in the one place a reader is looking hardest. */
-    if (zoomKey === "__score") {
-      try { P.score(zoomHost, painted, question); }
-      catch (error) { deadPanel(zoomHost, question, drawFailed(error)); }
-      markExplained(zoomHost);
-      return;
-    }
     const drawer = DRAW[zoomKey];
     const panel = painted.panels && painted.panels[zoomKey];
     if (typeof drawer !== "function") {
       deadPanel(zoomHost, question, "no renderer is registered for this panel.");
       return;
     }
-    if (panel === undefined) {
+    /* THE SAME SENTINEL TEST THE GRID WALK MAKES, off the same attribute on
+       the same section. It was an `if (zoomKey === "__score")` branch above,
+       which drew the derivation correctly and would have told a reader
+       enlarging the key statistics that their card predates it. */
+    if (panel === undefined && !(section && section.hasAttribute("data-sentinel"))) {
       deadPanel(zoomHost, question, predatesSentence(zoomKey));
       return;
     }
@@ -5039,12 +5078,7 @@
      what the number had DONE — a product read as an early warning,
      opening on a snapshot.
 
-     FOUR THINGS ARE ADDED HERE AND NOT ONE OF THEM HIDES ANYTHING.
-     No tabs, no accordion, no `grid-auto-flow: dense`: this page
-     states find-in-page as a design value and the stylesheet refuses
-     dense packing so DOM order stays tab order. An index that hid
-     twenty panels to make one findable would trade a scroll for a
-     search, and the scroll is cheaper.
+     FOUR THINGS WERE ADDED HERE AND NOT ONE OF THEM HID ANYTHING:
 
        1. a sticky bar carrying the identity and the jump strip,
        2. group headings inside the grid, from the registry,
@@ -5052,6 +5086,21 @@
           stop wearing the same box,
        4. a change block above the fold, derived from the score
           overlay the card already carries.
+
+     TWO OF THOSE FOUR ARE NOT BUILT HERE ANY MORE. The bar and the
+     headings are served — five <section class="ft-station"> wrappers
+     carrying their counts and questions, from the registry this file
+     used to rebuild them from — so the page is readable before a card.
+
+     AND THE CASE AGAINST HIDING HAS BEEN RE-ARGUED, NOT DELETED. It
+     read: "an index that hid twenty panels to make one findable
+     would trade a scroll for a search, and the scroll is cheaper."
+     Measured, it is not: 23 panels of one session is five to seven
+     screens of near-identical headings, and a reader off a board row
+     wants one station. The unit hidden is the STATION — a named
+     group of stated size, addressable as `?s=` — never a panel, and
+     `grid-auto-flow: dense` is still refused, so DOM order stays tab
+     order. NOTHING IS HIDDEN HERE: every station is visible.
 
      THE RULE THESE STYLES MAY NOT BREAK, stated here because the
      next person to widen one will read this before the stylesheet:
@@ -5069,43 +5118,30 @@
   /**
    * The registry's `group` and `tier`, keyed by panel key.
    *
-   * A SECOND COPY, AND THE SAME KIND OF SECOND COPY AS `DRAW`. `shared/` is
-   * in .assetsignore and is never served, so a browser file cannot import
-   * shared/flows-panels.js; the emitter puts each `question` into an
-   * attribute, but it cannot put a group heading into a panel — a heading is
-   * a BOUNDARY BETWEEN sections and its map has no shape for one. So the
-   * chrome table is projected here and pinned the way DRAW is pinned:
-   * tests/flows-ticker-contract.mjs reads the registry, reads what this
-   * controller wrote onto the mounted DOM, and asserts the two agree key for
-   * key AND value for value, in both directions. A duplicate a test compares
-   * is a projection; a duplicate a test cannot see is a drift.
+   * A SECOND COPY THAT IS NOW ONLY A CHECK. `shared/` is in .assetsignore and
+   * is never served, so a browser cannot import shared/flows-panels.js.
+   * This table used to be how the page got its groups: mountChrome read it and
+   * WROTE both attributes onto every section on first paint. The worker emits
+   * them from the registry now, so what is left is a second opinion, and
+   * mountChrome's job is to say when the two disagree. Pinned the way DRAW is:
+   * the suite reads the registry, this table out of the source AND the mounted
+   * DOM, and asserts all three agree both directions. A duplicate a test
+   * compares is a projection; one it cannot see is a drift.
+   *
+   * THE FIVE GROUP LABELS AND BLURBS ARE NOT HERE ANY MORE — they had to be
+   * built in the browser when headings were inserted between panels. The
+   * stations are served with their headings inside them, so those five
+   * sentences exist once, in shared/flows-panels.js, and all this file needs
+   * to know is which group a section belongs to, which the section says.
    */
-  const GROUPS = [
-    { key: "signal", label: "Signal", hash: "ftg-signal",
-      blurb: "The published score, what it is made of, and what it has done " +
-        "since the last session that scored this name." },
-    { key: "convexity", label: "Convexity", hash: "ftg-convexity",
-      blurb: "The dealer book: where gamma sits along the strike ladder and " +
-        "the term, and how it is moving." },
-    { key: "volatility", label: "Volatility", hash: "ftg-volatility",
-      blurb: "What the option chain charges — the smile, the term " +
-        "structure, and the move those two imply." },
-    { key: "tape", label: "Tape", hash: "ftg-tape",
-      blurb: "What actually traded: the lifted strikes, the largest lines, " +
-        "the session path and the off-exchange prints." },
-    { key: "context", label: "Context", hash: "ftg-context",
-      blurb: "Where this session sits in the name’s own year, who has " +
-        "disclosed a trade in it, and whether it places against the rest " +
-        "of the market." },
-  ];
-
   const PANEL_CHROME = {
-    __score: { group: "signal", tier: "lead" },
-    scoreOverlay: { group: "signal", tier: "chart" },
+    scoreOverlay: { group: "signal", tier: "lead" },
+    __score: { group: "signal", tier: "table" },
+    __stats: { group: "signal", tier: "table" },
     gamma: { group: "convexity", tier: "lead" },
     levels: { group: "convexity", tier: "reading" },
-    surface: { group: "convexity", tier: "chart" },
     displacement: { group: "convexity", tier: "reading" },
+    surface: { group: "convexity", tier: "chart" },
     calendar: { group: "convexity", tier: "chart" },
     deltaExposure: { group: "convexity", tier: "chart" },
     charm: { group: "convexity", tier: "chart" },
@@ -5115,13 +5151,13 @@
     pricedMove: { group: "volatility", tier: "reading" },
     volContext: { group: "volatility", tier: "chart" },
     aggressor: { group: "tape", tier: "lead" },
-    topContracts: { group: "tape", tier: "table" },
     path: { group: "tape", tier: "chart" },
+    topContracts: { group: "tape", tier: "table" },
     darkpool: { group: "tape", tier: "table" },
     oiDeltas: { group: "tape", tier: "table" },
     context: { group: "context", tier: "lead" },
-    congress: { group: "context", tier: "table" },
     marketRank: { group: "context", tier: "reading" },
+    congress: { group: "context", tier: "table" },
   };
 
   /* THE CHROME'S RULES ARE IN assets/css/flows.css, under "the workspace
@@ -5134,73 +5170,35 @@
      risk that move creates is covered by tests/flows-ticker-contract.mjs,
      which mounts this controller against both stylesheets. */
 
-  /* ---------- the sticky bar and the index -------------------------- */
+  /* ---------- the sticky bar the worker serves ---------------------- */
 
   let barEl = null;
-  let jumpEl = null;
   let changeEl = null;
 
-  const countIn = (group) => {
-    let n = 0;
-    for (const k in PANEL_CHROME) if (PANEL_CHROME[k].group === group) n++;
-    return n;
-  };
-
   /**
-   * Wrap the identity header and the jump strip into one sticky bar.
+   * Take over the served sticky bar, and move the identity block into it.
    *
-   * THE HEADER IS MOVED, NOT REBUILT. `#ftHead` and every id inside it are
-   * emitted by the page and written by paint(); re-creating them here would
-   * be a second markup for the same block, which is the defect the panel
-   * registry exists to prevent one level up. It is re-parented into the bar
-   * so the two stick together — an identity that stays while its index
-   * scrolls away is half a fix.
+   * THE BAR IS NO LONGER BUILT HERE. It was: five jump chips and a <details>
+   * of all 22 panel names, rebuilt from a copy of a registry the browser
+   * cannot import, and none of it existing until a card had been fetched and
+   * painted. The worker serves the bar, the tab row and the counts now.
+   *
+   * WHAT IS LEFT IS THE HEADER, MOVED AND NOT REBUILT. `#ftHead` and its ids
+   * are emitted by the page and written by paintIdentity(); re-creating them
+   * here would be a second markup for one block — the defect the registry
+   * exists to prevent, one level up. It is
+   * re-parented in as the bar's FIRST child so the two stick together — an
+   * identity that stays while its index scrolls away is half a fix.
    */
   function buildBar() {
     if (!headEl || barEl) return;
-    barEl = el("div", "ft-bar");
-    barEl.hidden = true;
-    headEl.parentNode.insertBefore(barEl, headEl);
-    barEl.append(headEl);
-
-    jumpEl = el("nav", "ft-jump");
-    jumpEl.setAttribute("aria-label", "Jump to a group of panels");
-    for (const g of GROUPS) {
-      const a = el("a", "ft-jump-b");
-      a.href = "#" + g.hash;
-      a.append(document.createTextNode(g.label + " "));
-      a.append(el("span", "ft-jump-n", String(countIn(g.key))));
-      jumpEl.append(a);
-    }
-    barEl.append(jumpEl);
-
-    /* THE FULL INDEX, one click away and still in the DOM.
-       Five group anchors answer "where is the volatility section"; they do
-       not answer "where is the gamma roll-off", which is the question that
-       made a reader scan seven screens. Every panel is named here, under its
-       group, and collapsed by default so the bar stays one row of chips
-       tall. Nothing is hidden from find-in-page: a <details> keeps its
-       contents in the document and browsers open it to reveal a match. */
-    const all = el("details", "ft-all");
-    all.append(el("summary", "ft-all-s",
-      "All " + Object.keys(PANEL_CHROME).length + " panels"));
-    const list = el("ul", "ft-all-l");
-    for (const g of GROUPS) {
-      list.append(el("li", "ft-all-g", g.label));
-      for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
-        const chrome = PANEL_CHROME[section.dataset.panel];
-        if (!chrome || chrome.group !== g.key) continue;
-        const li = el("li");
-        const a = el("a");
-        a.href = "#panel-" + section.dataset.panel;
-        const title = section.querySelector(".ft-panel-t");
-        a.textContent = title ? title.textContent : section.dataset.panel;
-        li.append(a);
-        list.append(li);
-      }
-    }
-    all.append(list);
-    barEl.append(all);
+    barEl = $("ftBar");
+    /* NO FALLBACK THAT BUILDS ONE. A missing #ftBar means this controller is
+       running against markup that did not come from tickerPage(), and the
+       honest outcome is a page with no sticky bar rather than a second bar
+       shape only this branch can produce and no test ever renders. */
+    if (!barEl) return;
+    barEl.insertBefore(headEl, barEl.firstChild);
 
     changeEl = el("section", "ft-change");
     changeEl.id = "ftChange";
@@ -5210,48 +5208,61 @@
   }
 
   /**
-   * Give every panel its anchor, its group and its tier, and open each group
-   * with a heading inside the grid.
+   * Check the served chrome against this file's copy of it.
    *
-   * A panel whose key is not in the chrome table keeps its anchor and is left
-   * where it is rather than dropped: the registry test fails on it, and a
-   * page that silently omitted it would make that test the only place a
-   * reader could learn the panel existed.
+   * IT USED TO WRITE THE ANSWER IT NOW CHECKS, so a stale PANEL_CHROME entry
+   * did not fail, it SHIPPED — the panel mounted in the wrong section wearing
+   * the wrong chrome. It only reports now: a controller that rewrote the
+   * served markup to match itself would restore that failure with an extra
+   * step.
    */
   function mountChrome() {
-    let current = null;
-    const missing = [];
+    const wrong = [];
+    const seen = new Set();
     for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
       const key = section.dataset.panel;
-      section.id = "panel-" + key;
+      seen.add(key);
       const chrome = PANEL_CHROME[key];
-      const g = chrome ? GROUPS.find((x) => x.key === chrome.group) : null;
-      if (!chrome || !g) { missing.push(key); continue; }
-      section.dataset.group = chrome.group;
-      section.dataset.tier = chrome.tier;
-      if (chrome.group === current) continue;
-      current = chrome.group;
-      const h = el("h2", "ft-group");
-      h.id = g.hash;
-      h.tabIndex = -1;
-      h.dataset.group = g.key;
-      h.append(el("span", "ft-group-n", g.label));
-      h.append(el("span", "ft-group-b", g.blurb));
-      grid.insertBefore(h, section);
+      if (!chrome) {
+        wrong.push(key + ": served, but this file has no chrome entry for it");
+        continue;
+      }
+      if (section.dataset.group !== chrome.group || section.dataset.tier !== chrome.tier) {
+        wrong.push(key + ": served as " + section.dataset.group + "/" +
+          section.dataset.tier + ", this file says " + chrome.group + "/" + chrome.tier);
+      }
     }
-    if (missing.length) {
-      console.error("flows-ticker: no chrome entry for panel(s): " + missing.join(", "));
+    for (const key in PANEL_CHROME) {
+      if (!seen.has(key)) wrong.push(key + ": in this file's chrome table, not on the page");
+    }
+    if (wrong.length) {
+      console.error("flows-ticker: the served panel chrome and this file disagree — " +
+        wrong.join("; "));
     }
   }
 
   /* The sticky bar's own height, written back so an anchor lands BELOW it
      rather than under it. Measured rather than assumed: the identity row
      wraps at three different widths and the strip scrolls rather than
-     wrapping, so no constant is right at more than one viewport. */
+     wrapping, so no constant is right at more than one viewport.
+
+     AND MEASURED AGAIN WHEN THE WEBFONT LANDS, ONCE. The row wraps at a
+     different count under the fallback face, so the height taken at first
+     paint is 42px SHORT of the bar the reader ends up under — the suite reads
+     147 written against a 189px bar — and every panel's scroll-margin-top is
+     built from it. The resize handler cannot catch it: it returns early unless
+     innerWidth moved, and a font swap moves none. THE VALUE ONLY, never the
+     jump: honourHash can fire before the grid is shown, where its target has
+     no box, and re-running it there settled the page at 178px. */
+  let fontsArmed = !!(document.fonts && document.fonts.ready);
   function syncBarHeight() {
     if (!barEl || barEl.hidden) return;
     const h = Math.round(barEl.getBoundingClientRect().height);
     if (h > 0) grid.style.setProperty("--ft-bar-h", h + "px");
+    if (fontsArmed) {
+      fontsArmed = false;
+      document.fonts.ready.then(() => { syncBarHeight(); });
+    }
   }
 
   /* ---------- deep links -------------------------------------------
@@ -5299,37 +5310,79 @@
     markCurrentGroup(target.dataset ? target.dataset.group : null);
   }
 
+  /* MATCHED ON data-group, NOT ON THE href. The chips were built here from a
+     local copy of the group list, so "which chip is this group's" meant
+     rebuilding the hash and comparing strings. Each served tab carries the
+     group it opens, so the comparison is between two values of one field and
+     a change to the hash scheme cannot silently stop marking anything. */
   function markCurrentGroup(group) {
-    if (!jumpEl) return;
-    const entry = GROUPS.find((g) => g.key === group);
-    for (const a of jumpEl.querySelectorAll(".ft-jump-b")) {
-      if (entry && a.getAttribute("href") === "#" + entry.hash) {
-        a.setAttribute("aria-current", "true");
-      } else {
-        a.removeAttribute("aria-current");
-      }
+    if (!barEl) return;
+    for (const a of barEl.querySelectorAll(".ft-tab[data-group]")) {
+      if (group && a.dataset.group === group) a.setAttribute("aria-current", "true");
+      else a.removeAttribute("aria-current");
     }
   }
 
-  /* WHICH GROUP THE READER IS IN, tracked by observation rather than by a
+  /* WHICH STATION THE READER IS IN, tracked by observation rather than by a
      scroll handler doing arithmetic on every frame. Without
-     IntersectionObserver the strip simply never marks a current group, which
-     costs a highlight and nothing else — the anchors still work. */
+     IntersectionObserver the tab row simply never marks a current station,
+     which costs a highlight and nothing else — the anchors still work.
+
+     IT OBSERVES THE FIVE STATIONS, NOT THE 23 PANELS. The question is which
+     GROUP is on screen, and asking it of every panel took 23 observations to
+     answer, each reporting a group as a property of one panel. The station is
+     the element that IS the group, so the `best` tie-break below is between
+     at most two stations meeting at a boundary rather than between whichever
+     panels of one group were in the band. */
   function watchGroups() {
     if (typeof IntersectionObserver !== "function") return;
-    const seen = new Map();
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        seen.set(e.target, e.isIntersecting ? e.boundingClientRect.top : null);
-      }
-      let best = null, bestTop = Infinity;
-      for (const [node, top] of seen) {
-        if (top === null) continue;
-        if (top < bestTop) { bestTop = top; best = node; }
+
+    /* WHICHEVER STATION FILLS MOST OF THE BAND, RE-ASKED WHENEVER THE PAGE
+       MOVES. Two defects, both pre-dating the move from panels to stations.
+
+       "Smallest boundingClientRect.top among the intersecting" always prefers
+       the station ABOVE, however little of it is left: on a 900px viewport the
+       band is 225-360, and landing on #ftg-tape left volatility ending at 244
+       against tape starting at 270 — 19px of band against 90 — so the bar
+       named volatility.
+
+       AND AN OBSERVER SPEAKS WHEN AN INTERSECTION CHANGES, NOT WHEN THE PAGE
+       STOPS. Scrolling is smooth, so the last callback of that jump fired at
+       y=7429 against a resting 7503: one station behind, with nothing at rest
+       to correct it. Measured from the callback log, not reasoned. Hence the
+       recompute on scroll, throttled to a frame; the observer now only
+       maintains the candidate set. */
+    const inBand = new Set();
+    let queued = false;
+
+    function choose() {
+      queued = false;
+      const bandTop = 0.25 * window.innerHeight, bandBottom = 0.4 * window.innerHeight;
+      let best = null, bestSeen = 0;
+      for (const node of inBand) {
+        const r = node.getBoundingClientRect();
+        const seen = Math.min(r.bottom, bandBottom) - Math.max(r.top, bandTop);
+        if (seen > bestSeen) { bestSeen = seen; best = node; }
       }
       if (best) markCurrentGroup(best.dataset.group);
+    }
+
+    /* One frame at a time: a scroll fires far faster than a paint, and every
+       call here reads layout. */
+    function schedule() {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(choose);
+    }
+
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) inBand.add(e.target); else inBand.delete(e.target);
+      }
+      choose();
     }, { rootMargin: "-25% 0px -60% 0px" });
-    for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) io.observe(section);
+    for (const station of grid.querySelectorAll(".ft-station[data-group]")) io.observe(station);
+    addEventListener("scroll", schedule, { passive: true });
   }
 
   /* history.replaceState rather than `location.hash = …`: assigning to the
@@ -5889,8 +5942,8 @@
     if (!picker) return;
     grid.hidden = true;
     if (headEl) headEl.hidden = true;
-    /* THE INDEX GOES WITH THE PANELS IT INDEXES. Leaving the jump strip stuck
-       to the top of a picker would offer five anchors to a grid that is
+    /* THE TABS GO WITH THE PANELS THEY OPEN. Leaving the station row stuck to
+       the top of a picker would offer five anchors into a grid that is
        `hidden` — every one of them a link to nothing. */
     if (barEl) barEl.hidden = true;
     if (changeEl) changeEl.hidden = true;

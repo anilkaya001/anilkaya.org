@@ -25,7 +25,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import {
-  TICKER_PANELS, TICKER_PANEL_KEYS, SCORE_KEY, TICKER_GROUPS, PANEL_TIERS,
+  TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS, TICKER_GROUPS, PANEL_TIERS,
+  STATION_SIDE_COUNTS,
 } from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,6 +52,18 @@ const cards = fs.readdirSync(EMIT_DIR)
   .filter((f) => f.startsWith("-card-"))
   .map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
+
+/* CHECKED HERE BECAUSE THE FILTER BELOW LEANS ON IT: it demands every
+   TICKER_PANEL_KEYS key on a card, so a leaked sentinel matches no card and
+   the suite dies on "0 do", a sentence about the chain leg.
+
+   AND IT IS A TAUTOLOGY FOR ONE DRIFT, A REAL CHECK FOR THE OTHER: since
+   TICKER_PANEL_KEYS is DERIVED by filtering on SENTINEL_KEYS, shrinking that
+   set cannot fire it. It catches the registry gaining a __key nobody added to
+   SENTINEL_KEYS — which is the drift that actually happens. */
+for (const k of SENTINEL_KEYS) {
+  ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
+}
 
 const withChain = cards.filter((c) =>
   TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
@@ -87,6 +100,34 @@ const truncated = cards.filter((c) =>
   }
   eq(drawKeys.size, regKeys.size, "the two panel lists are the same size");
 
+  /* AND THE CHROME TABLE, THE SAME WAY AND FOR A NEWER REASON. PANEL_CHROME
+     used to WRITE data-group and data-tier, so the rendered DOM WAS the table.
+     The worker emits both now and the table only CHECKS — so the DOM
+     comparison further down would pass with this table wrong, the only symptom
+     a console error nothing reads. Read out of the source instead. */
+  const chromeBlock = src.slice(src.indexOf("const PANEL_CHROME = {"));
+  const chromeBody = chromeBlock.slice(0, chromeBlock.indexOf("\n  };"));
+  const chrome = new Map(
+    [...chromeBody.matchAll(
+      /^\s{4}([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{\s*group:\s*"([a-z]+)",\s*tier:\s*"([a-z]+)"/gm)]
+      .map((m) => [m[1], { group: m[2], tier: m[3] }]));
+  eq(chrome.size, TICKER_PANELS.length,
+     `the controller's chrome table names every registry panel (${chrome.size} of ` +
+     `${TICKER_PANELS.length}) — an entry that stopped parsing would silently shrink this ` +
+     `comparison rather than fail it`);
+  for (const p of TICKER_PANELS) {
+    const got = chrome.get(p.key);
+    ok(got, `the controller's chrome table has an entry for "${p.key}"`);
+    if (!got) continue;
+    eq(got.group, p.group, `and puts "${p.key}" in the registry's group`);
+    eq(got.tier, p.tier, `and gives "${p.key}" the registry's tier`);
+  }
+  for (const key of chrome.keys()) {
+    ok(regKeys.has(key),
+       `the chrome entry "${key}" is a panel the registry mounts — an entry for a panel that ` +
+       `is not on the page makes mountChrome report a disagreement on every paint`);
+  }
+
   /* Every registry key other than the score sentinel names a real payload
      panel. This is the assertion that would have caught four published,
      served, undrawn panels. */
@@ -96,8 +137,24 @@ const truncated = cards.filter((c) =>
          `${card.ticker}: the emitted card carries panel "${k}"`);
     }
   }
-  ok(!TICKER_PANEL_KEYS.includes(SCORE_KEY),
-     "the score sentinel is excluded from the payload-key list, since it is drawn from the card's top level");
+  /* NEITHER SENTINEL LEAKS INTO THE PAYLOAD-KEY LIST, asserted over the SET
+     rather than one string because the exclusion used to read `!== SCORE_KEY`
+     — a shape that admits the second sentinel silently. The failure that
+     produces is the misleading part, and it was measured: with `__stats` in
+     TICKER_PANEL_KEYS the fixture filter finds no usable card and the suite
+     dies at "all four chain panels (0 do)", about the chain leg on a run where
+     it is fine. Hence the same exclusion above that filter, where it fails
+     first; the rest of the contract is here. */
+  eq(SENTINEL_KEYS.size, 2,
+     "the registry declares both sentinels — the score derivation and the key statistics");
+  for (const key of SENTINEL_KEYS) {
+    ok(TICKER_PANELS.some((p) => p.key === key),
+       `the sentinel "${key}" is a panel the registry actually mounts`);
+    ok(!TICKER_PANEL_KEYS.includes(key),
+       `and "${key}" is excluded from the payload-key list — it is drawn from the card's ` +
+       `top level or from the other panels, never from card.panels["${key}"], so a card ` +
+       `that does not carry it is not a card that is missing anything`);
+  }
 
   /* ---------- AND THE OTHER DIRECTION, which is the one that was missing.
 
@@ -170,11 +227,36 @@ const truncated = cards.filter((c) =>
      100KB self-check. A key it can shed that the registry does not mount
      would be shed into a panel nobody draws. */
   const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
-  const shedBlock = pipe.slice(pipe.indexOf("dropped to fit the payload cap") - 400,
-                               pipe.indexOf("shed ") + 200);
-  for (const m of shedBlock.matchAll(/\[\s*"([a-zA-Z]+)",\s*"dropped to fit/g)) {
+  /* THE SLICE IS THE LADDER'S OWN DECLARATION, AND IT USED NOT TO BE — this
+     block read `pipe.slice(indexOf("dropped to fit the payload cap") - 400,
+     indexOf("shed ") + 200)`, which looks like a window around the ladder and
+     is not: "shed " matches inside "publi_shed under_" 431KB EARLIER, so the
+     end index came out below the start and slice returned "". Every assertion
+     here was made zero times. Anchored on the code now, and COUNTED below. */
+  const shedFrom = pipe.indexOf("const shed = [");
+  ok(shedFrom > 0, "the pipeline still declares its shed ladder as `const shed = [`");
+  const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n      ];", shedFrom));
+  /* THE KEY PATTERN ADMITS AN UNDERSCORE ON PURPOSE. It was [a-zA-Z]+, which
+     cannot match `__stats` at all — so a sentinel added to the ladder would
+     not have failed this assertion, it would have been INVISIBLE to it, and
+     the ladder would have gone on naming a key it can never drop. A guard
+     whose pattern excludes the shape it is guarding against is not a guard. */
+  let shedNamed = 0;
+  for (const m of shedBlock.matchAll(/\[\s*"([A-Za-z_][A-Za-z0-9_]*)",\s*"dropped to fit/g)) {
+    shedNamed++;
     ok(regKeys.has(m[1]), `the pipeline's shed ladder only names registry panels ("${m[1]}")`);
+    /* AND NEVER A SENTINEL. Shedding is `card.panels[key] = {status:
+       "unavailable", …}` on a card over the 100KB cap; a sentinel has no
+       card.panels entry, so the ladder would INVENT one — an unavailability
+       for a panel the pipeline does not publish, saving no bytes, telling
+       every reader a panel drawn from the top level was dropped to fit. */
+    ok(!SENTINEL_KEYS.has(m[1]),
+       `and never a sentinel ("${m[1]}") — there is no card.panels entry for it to shed, ` +
+       `so a drop would fabricate an unavailability and save nothing`);
   }
+  ok(shedNamed >= 5,
+     `the shed ladder was actually read (${shedNamed} entries) — a slice that stopped ` +
+     `matching passes this block by making none of it`);
 }
 
 /* ---------- the browser ------------------------------------------ */
@@ -226,6 +308,90 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
      "\"how long is too long\" is two answers a reader would have to reconcile");
 }
 
+/* ---------- THE STRUCTURE IS IN THE SERVED BYTES ------------------
+
+   READ OFF THE STRING, BEFORE A BROWSER EXISTS, because that is the claim.
+   Everything below used to be built by assets/js/flows-ticker.js on first
+   paint — headings, index, every panel's group and tier — so a reader with a
+   slow card got 23 identical boxes in no sections. A browser assertion cannot
+   tell "served" from "built in the first frame"; this runs no script. */
+{
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const served = FLOWS_PAGES.tickerPage({ username: "test" });
+
+  eq((served.match(/<section class="ft-station"/g) || []).length, TICKER_GROUPS.length,
+     `the served page carries all ${TICKER_GROUPS.length} stations`);
+  for (const g of TICKER_GROUPS) {
+    ok(served.includes(`id="ftst-${g.key}" role="tabpanel"`),
+       `station ${g.key} is served as a tabpanel with its own id`);
+    ok(served.includes(`data-group="${g.key}" data-side="${g.key}"`),
+       `and carries both its registry group and its ?s= address (${g.key})`);
+    ok(served.includes(esc(g.blurb)),
+       `and the group's own sentence is in the bytes (${g.key}) — not fetched, not built`);
+    ok(served.includes(`>${esc(g.label)} <span`),
+       `and its tab prints the label (${g.label})`);
+  }
+
+  for (const p of TICKER_PANELS) {
+    /* THE QUESTION, VISIBLE, IN THE DOCUMENT. It was already a data-question
+       attribute, which no reader can see, and drawn by the renderer after the
+       card landed. Both still are; this is the only copy before the fetch. */
+    ok(served.includes(`<p class="ft-panel-q">${esc(p.question)}</p>`),
+       `panel ${p.key}'s question is served as visible prose, not only as an attribute`);
+    ok(served.includes(`data-question="${esc(p.question)}"`),
+       `and still as the attribute the drawers are handed (${p.key})`);
+    ok(served.includes(`data-group="${p.group}" data-tier="${p.tier}"`),
+       `panel ${p.key} is served already in its group and tier`);
+    ok(served.includes(`id="panel-${p.key}"`),
+       `and with the fragment id a link names it by (${p.key}), so a deep link resolves ` +
+       `before any script runs`);
+    ok(served.includes(`<p class="ft-panel-one" id="${p.id}One"></p>`),
+       `panel ${p.key} carries an EMPTY one-line slot — a placeholder with words in it is ` +
+       `a sentence a reader would believe`);
+    const marked = new RegExp(
+      `id="panel-${p.key}"[\\s\\S]{0,200}?data-sentinel`).test(served);
+    eq(marked, SENTINEL_KEYS.has(p.key),
+       `panel ${p.key} is marked data-sentinel exactly when the registry says so — the ` +
+       `browser cannot import SENTINEL_KEYS, so this is how the walk knows not to tell a ` +
+       `reader their card "predates" a panel no payload has ever carried`);
+  }
+
+  /* `.fc-q` is what a RENDERER emits; one in the served bytes would mean a
+     pre-drawn panel, and the visible question above a duplicate. */
+  ok(!served.includes('class="fc-q"'),
+     "no renderer's own question is in the served bytes — the served copy stands alone " +
+     "until a card lands");
+
+  /* THE BAND: SEVEN SLOTS, EACH ONCE, EACH EMPTY, EACH HIDDEN. Emitted now so
+     PR 4 fills slots rather than inventing them; it costs no height until
+     then, and .ft-band carries no margin either. */
+  for (const id of ["ftFrom", "ftSector", "ftAtr", "ftRankNav", "ftFind", "ftPrem", "ftEarn"]) {
+    eq((served.match(new RegExp(`id="${id}"`, "g")) || []).length, 1,
+       `the band slot ${id} is served exactly once`);
+    /* The element's own attribute list, id to end of start tag — never a
+       fixed character window, which is how the first draft of this assertion
+       read a `hidden` belonging to the NEXT element. */
+    const at = served.indexOf(`id="${id}"`);
+    const close = served.indexOf(">", at);
+    const attrs = served.slice(at, close);
+    ok(/\bhidden\b/.test(attrs),
+       `and ${id} is served hidden — a VISIBLE empty slot claims a measurement was taken ` +
+       `and came back with nothing, a different fact from "not yet painted"`);
+    ok(!/\bvalue=/.test(attrs), `and carries no value of its own (${id})`);
+    /* AND IT IS EMPTY. `ftFind` is an <input>, which is void and has no
+       content to be empty of — its emptiness is the missing `value` above. */
+    if (id !== "ftFind") {
+      eq(served.slice(close + 1, close + 3), "</",
+         `and ${id} is served with nothing inside it`);
+    }
+  }
+  ok(served.includes('<datalist id="ftFindNames"></datalist>'),
+     "the find box's datalist is served empty beside it");
+  ok(served.includes('id="ftBar"') && served.includes('class="ft-tabs" role="tablist"'),
+     "the sticky bar and its tablist are served rather than built on first paint");
+}
+
 /**
  * Mount the real page markup, stub the two fetches, and let the real
  * controller paint a real card.
@@ -235,7 +401,9 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
  * discrimination and the header wiring — every part of this file that decides
  * WHICH state the reader gets. The stub answers the two real endpoints.
  */
-async function mount(page, card, { ticker = null, boards = null, hash = "", events = null } = {}) {
+async function mount(page, card,
+                     { ticker = null, boards = null, hash = "", events = null,
+                       html = null } = {}) {
   await page.addInitScript(({ card, boards, events }) => {
     window.__requested = [];
     window.fetch = (url) => {
@@ -268,7 +436,11 @@ async function mount(page, card, { ticker = null, boards = null, hash = "", even
   const url = "https://example.test/flows/ticker/" +
     (ticker ? "?t=" + encodeURIComponent(ticker) : "") +
     (hash ? "#" + hash : "");
-  await page.route("**/*", (route) => route.fulfill({ contentType: "text/html", body: pageHTML }));
+  /* `html` IS FOR ONE THING ONLY: serving DELIBERATELY WRONG markup, so a
+     check that exists to notice it can be proven to. Everyone else gets the
+     page the worker emits. */
+  await page.route("**/*",
+    (route) => route.fulfill({ contentType: "text/html", body: html || pageHTML }));
   await page.goto(url);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
@@ -484,10 +656,15 @@ try {
        box, every span-1 host still above the 300 chart floor, and .is-wide
        still `1 / -1` across all three — the same span rule, not a new one. */
     if (width >= 1840) {
+      /* READ OFF A STATION, NOT OFF #ftGrid: the track list moved down a
+         level with the five <section>s, and .ft-grid's computed
+         grid-template-columns is "none" now, so this would count zero. */
       const tracks = await page.evaluate(() =>
-        getComputedStyle(document.getElementById("ftGrid")).gridTemplateColumns
-          .split(" ").filter((t) => parseFloat(t) > 0).length);
-      eq(tracks, 3, `${width}px: the grid opens its third column at the 110rem tier`);
+        [...document.querySelectorAll(".ft-station")].map((s) =>
+          getComputedStyle(s).gridTemplateColumns
+            .split(" ").filter((t) => parseFloat(t) > 0).length));
+      eq(tracks.join(","), new Array(TICKER_GROUPS.length).fill(3).join(","),
+         `${width}px: every station opens its third column at the 108rem tier (${tracks})`);
     }
     await page.close();
   }
@@ -1787,27 +1964,64 @@ try {
     await page.close();
   }
 
-  /* ---------- 6i. the score derivation leads --------------------------
+  /* ---------- 6i. the overview station opens on the series -------------
 
-     IT USED TO BE ENTRY 21 OF 21. The explanation of the single number this
-     page is about sat below a twenty-panel scroll — defensible when the
-     chain panels above it were the undrawn half of the payload, and stale
-     once they were drawn and four more panels were added on top.
+     THE LEAD HAS MOVED TWICE AND BOTH MOVES ARE THE SAME ARGUMENT. The score
+     derivation used to be entry 21 of 21, below a twenty-panel scroll; it was
+     promoted to first because a reader arrives from a board row carrying a
+     score. It is second now, under the score-over-price series, because a
+     station is what a reader LANDS on and the series is the only panel that
+     can say a reading is NEW — the derivation explains a number that has not
+     changed since publication, the overlay says what it DID.
 
      Asserted on the REGISTRY and on the rendered DOM, because the page is
      generated from the registry and a test that only read the registry would
      pass on a page that never mounted it. */
   {
-    eq(TICKER_PANELS[0].key, SCORE_KEY,
-       "the score derivation is the first panel the registry mounts");
+    eq(TICKER_PANELS[0].key, "scoreOverlay",
+       "the score-over-price series is the first panel the registry mounts");
+    eq(TICKER_PANELS[0].tier, "lead", "and it is the Overview station's lead");
+    eq(TICKER_PANELS[1].key, "__score",
+       "with the derivation directly under it — demoted, not dropped: still the second " +
+       "thing the page says about the number a reader arrived carrying");
+    eq(TICKER_PANELS[0].span, 2,
+       "the series keeps both columns, because a 60-session line in a 424px host is a " +
+       "sparkline and the panel's whole claim is that a reading is new");
+    eq(TICKER_PANELS[1].span, 1,
+       "and the derivation gives its second column up — five gauges and their weights set " +
+       "their own width, and a span-2 host spent the rest on white space");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>
       [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => s.dataset.panel));
-    eq(order[0], "__score",
+    eq(order[0], "scoreOverlay",
        "and it is first in the document too — a reader arrives from a board row carrying " +
-       "a score, and the first thing the page owes them is what it is made of");
+       "a score, and the first thing the page owes them is what that score has done since");
+    eq(order[1], "__score", "with the derivation second in the document as well");
     await page.close();
+
+    /* THE OTHER THREE MOVES, PINNED AS ADJACENCIES rather than as indices. An
+       index is wrong the moment a panel is added above it and would then be
+       "fixed" by renumbering, which is not the claim. The claim is that these
+       pairs answer one question at two resolutions and belong beside each
+       other. */
+    const at = (key) => TICKER_PANELS.findIndex((p) => p.key === key);
+    eq(at("displacement"), at("levels") + 1,
+       "where the book is MOVING sits directly under the walls it is moving relative to, " +
+       "with the gamma surface — a different question about the same book — no longer " +
+       "between them");
+    eq(at("path"), at("aggressor") + 1,
+       "the session path sits directly under the lifted strikes: the same executions once " +
+       "by strike and once by clock, with the fifty-row contract table out from between them");
+    eq(at("marketRank"), at("context") + 1,
+       "and the market-wide standing sits directly under the name's own year — one question " +
+       "at two scales, no longer split by the congressional disclosures");
+    eq(TICKER_GROUPS[0].label, "Overview",
+       "the first station is labelled Overview: it is the station a reader LANDS on, and " +
+       "\"Signal\" named a group of panels rather than a place to arrive");
+    eq(TICKER_GROUPS[0].key, "signal",
+       "while its key is still `signal`, the ?s= value in every link the boards have sent " +
+       "since the card dialog was retired");
   }
 
   /* ---------- 6j. the registry's chrome reaches the page --------------
@@ -1889,72 +2103,136 @@ try {
       eq(members[0].tier, "lead",
          `and it is the group's first panel (${members[0].key}), not one buried inside it`);
     }
-    eq(TICKER_PANELS[0].key, SCORE_KEY,
-       "and the very first lead is still the score derivation");
+    eq(TICKER_PANELS[0].key, "scoreOverlay",
+       "and the very first lead is the score-over-price series");
 
-    /* THE HEADINGS ARE IN THE GRID, IN ORDER, EACH IMMEDIATELY BEFORE ITS OWN
-       GROUP. They are grid children spanning every column, so DOM order stays
-       tab order and nothing is hidden — the whole point of not using tabs. */
+    /* THE GRID IS FIVE STATIONS AND NOTHING ELSE, each opening with its own
+       heading. The headings used to be siblings of the panels, inserted
+       between them by the controller; inside the section they name, they let
+       a later change hide a group by hiding ONE element rather than a heading
+       and then panels counted until the next one. DOM order is still reading
+       order and still tab order. */
     const flow = await page.evaluate(() =>
-      [...document.getElementById("ftGrid").children].map((n) =>
-        n.classList.contains("ft-group")
-          ? { kind: "h", id: n.id, text: n.textContent }
-          : { kind: "p", key: n.dataset.panel }));
-    const heads = flow.filter((n) => n.kind === "h");
-    eq(heads.length, TICKER_GROUPS.length,
-       `the grid opens each group with a heading (${heads.length})`);
+      [...document.getElementById("ftGrid").children].map((n) => ({
+        tag: n.tagName, cls: n.className, group: n.dataset.group, side: n.dataset.side,
+        role: n.getAttribute("role"), labelledBy: n.getAttribute("aria-labelledby"),
+        head: (() => {
+          const h = n.querySelector(":scope > .ft-group");
+          return h ? { id: h.id, text: h.textContent, group: h.dataset.group } : null;
+        })(),
+        lead: !!n.querySelector(":scope > .ft-station-lead"),
+        keys: [...n.querySelectorAll(":scope > .ft-panel[data-panel]")]
+          .map((s) => s.dataset.panel),
+        firstChildIsHead: n.firstElementChild &&
+          n.firstElementChild.classList.contains("ft-group"),
+      })));
+    eq(flow.length, TICKER_GROUPS.length,
+       `the grid holds exactly the five stations and nothing beside them (${flow.length})`);
     for (let i = 0; i < TICKER_GROUPS.length; i++) {
       const g = TICKER_GROUPS[i];
-      eq(heads[i].id, g.hash,
+      const st = flow[i];
+      eq(st.cls, "ft-station", `station ${i} is a station`);
+      eq(st.group, g.key, `and it is ${g.key}'s, in the order the registry declares`);
+      /* THE `?s=` ADDRESS IS ON THE SECTION, not derived at read time. Every
+         board row, deck tile and watch row already links here with one. */
+      eq(st.side, g.key, `and carries its own ?s= address (${g.key})`);
+      eq(st.role, "tabpanel",
+         "and is served as a tabpanel — the structure is in the document, not added to it " +
+         "by a script, so the served page and the scripted page are the same page");
+      eq(st.labelledBy, g.hash, "labelled by its own heading rather than by a repeated string");
+      ok(st.firstChildIsHead, `and the heading is the station's first child (${g.key})`);
+      ok(st.lead, `the station carries its empty lead slot (${g.key})`);
+      eq(st.head.id, g.hash,
          `heading ${i} carries the group's own fragment id (${g.hash}) — a slug computed ` +
          `at render time would break every link the moment a label was reworded`);
-      ok(heads[i].text.includes(g.label), `and its label (${g.label})`);
-      /* THE WHOLE SENTENCE, NOT ITS FIRST FORTY CHARACTERS. The controller
-         keeps a second copy of every label, hash and blurb (shared/ is never
-         served), and a prefix comparison pins only the prefix: the two copies
-         could have disagreed about the back half of all five sentences with
-         nothing failing. Equality, because the heading is exactly the label
-         and the blurb and there is nothing else in it. */
-      eq(heads[i].text, g.label + g.blurb,
+      eq(st.head.group, g.key, "and names its own group, which is what the tab row matches on");
+      ok(st.head.text.includes(g.label), `and its label (${g.label})`);
+      /* THE WHOLE SENTENCE, NOT ITS FIRST FORTY CHARACTERS. This guarded a
+         second copy of all five sentences kept in the controller; that copy
+         is gone — the worker emits them straight from the registry — and the
+         assertion stays, because what it pins now is that the blurb REACHES
+         the page intact rather than truncated or escaped into something else
+         on the way. */
+      eq(st.head.text, g.label + g.blurb,
          `and the group's own published sentence in full, verbatim (${g.key})`);
-      const at = flow.findIndex((n) => n.kind === "h" && n.id === g.hash);
-      const first = TICKER_PANELS.find((p) => p.group === g.key);
-      eq(flow[at + 1].key, first.key,
-         `and it sits immediately before ${first.key}, the group's first panel`);
+      eq(st.keys.join(","),
+         TICKER_PANELS.filter((p) => p.group === g.key).map((p) => p.key).join(","),
+         `and the station holds exactly its own panels, in registry order (${g.key})`);
+      eq(st.keys.length, STATION_SIDE_COUNTS[g.key],
+         `and as many of them as STATION_SIDE_COUNTS says (${g.key})`);
     }
+    eq(flow.reduce((n, s) => n + s.keys.length, 0), TICKER_PANELS.length,
+       "and between them the five stations hold every panel — a panel in no station is a " +
+       "panel no tab can ever reach");
 
-    /* THE JUMP STRIP AND THE FULL INDEX. Five anchors answer "where is the
-       volatility section"; they do not answer "where is the gamma roll-off",
-       which is the question that made a reader scan seven screens — so every
-       panel is named too, and every href in both resolves. */
+    /* THE TAB ROW. Five served tabs, each naming a station and how many
+       panels it holds, plus the one link out of the five. Every href
+       resolves: a tab pointing at a renamed heading silently does nothing. */
     const nav = await page.evaluate(() => {
-      const strip = [...document.querySelectorAll(".ft-jump .ft-jump-b")]
-        .map((a) => a.getAttribute("href"));
-      const all = [...document.querySelectorAll(".ft-all-l a")]
-        .map((a) => a.getAttribute("href"));
-      const resolves = [...strip, ...all].filter((h) => {
-        try { return !document.getElementById(decodeURIComponent(h.slice(1))); }
-        catch { return true; }
-      });
+      const tabs = [...document.querySelectorAll(".ft-tabs .ft-tab")].map((a) => ({
+        href: a.getAttribute("href"), group: a.dataset.group, side: a.dataset.side,
+        role: a.getAttribute("role"), controls: a.getAttribute("aria-controls"),
+        selected: a.getAttribute("aria-selected"),
+        count: a.querySelector(".ft-tab-n") ? a.querySelector(".ft-tab-n").textContent : null,
+        text: a.textContent.trim(),
+      }));
+      const all = document.querySelector(".ft-all-link");
       const bar = document.querySelector(".ft-bar");
       return {
-        strip, all, dead: resolves,
+        tabs,
+        dead: tabs.map((t) => t.href).filter((h) => {
+          try { return !document.getElementById(decodeURIComponent(h.slice(1))); }
+          catch { return true; }
+        }),
+        deadControls: tabs.map((t) => t.controls).filter((id) => !document.getElementById(id)),
+        allText: all ? all.textContent.trim() : null,
+        allSide: all ? all.dataset.side : null,
+        tablist: document.querySelector(".ft-tabs")
+          ? document.querySelector(".ft-tabs").getAttribute("role") : null,
         sticky: bar ? getComputedStyle(bar).position : null,
         holdsHead: !!(bar && bar.contains(document.getElementById("ftHead"))),
-        holdsJump: !!(bar && bar.querySelector(".ft-jump")),
+        headIsFirst: !!(bar && bar.firstElementChild &&
+          bar.firstElementChild.id === "ftHead"),
+        holdsTabs: !!(bar && bar.querySelector(".ft-tabs")),
+        holdsBand: !!(bar && bar.querySelector(".ft-band")),
       };
     });
-    eq(nav.strip.join(","), TICKER_GROUPS.map((g) => "#" + g.hash).join(","),
-       "the jump strip lists every group, in reading order");
-    eq(nav.all.length, TICKER_PANELS.length,
-       `the full index names all ${TICKER_PANELS.length} panels`);
+    eq(nav.tablist, "tablist", "the station row is a tablist");
+    eq(nav.tabs.map((t) => t.href).join(","), TICKER_GROUPS.map((g) => "#" + g.hash).join(","),
+       "the tab row lists every station, in reading order");
+    eq(nav.tabs.map((t) => t.group).join(","), TICKER_GROUPS.map((g) => g.key).join(","),
+       "and each tab names the station it opens");
     eq(nav.dead.length, 0,
-       `every anchor in the index resolves to an element (${nav.dead.join(", ")})`);
+       `every tab's anchor resolves to an element (${nav.dead.join(", ")})`);
+    eq(nav.deadControls.length, 0,
+       `and every aria-controls names a section that exists (${nav.deadControls.join(", ")})`);
+    for (const g of TICKER_GROUPS) {
+      const tab = nav.tabs.find((t) => t.group === g.key);
+      eq(tab.role, "tab", `the ${g.key} tab is a tab`);
+      eq(tab.side, g.key, `and carries the ?s= address it will set (${g.key})`);
+      eq(tab.controls, "ftst-" + g.key, `and controls its own station (${g.key})`);
+      /* NOTHING IS SELECTED WHILE EVERYTHING IS SHOWN. Every station is
+         visible in this change, so a tab claiming selection would be a claim
+         about the page that is not true of it. */
+      eq(tab.selected, "false",
+         `and is not selected (${g.key}) — all five stations are open, so none of them is ` +
+         `the one a tab has chosen`);
+      eq(tab.count, String(STATION_SIDE_COUNTS[g.key]),
+         `and prints how many panels it holds (${g.key}), from the one export the station ` +
+         `itself is built from — a count written twice is wrong about no panel, only about ` +
+         `their number`);
+    }
+    eq(nav.allText, "All " + TICKER_PANELS.length + " panels",
+       `the way out of the five names the real total (${TICKER_PANELS.length})`);
+    eq(nav.allSide, "all", "and carries the ?s= value that will mean every station");
     eq(nav.sticky, "sticky",
        "the identity bar is sticky — it used to scroll away after the first panel, " +
        "taking the name, the score and the session date with it");
-    ok(nav.holdsHead && nav.holdsJump,
-       "and it carries BOTH the identity and the index, so neither can outscroll the other");
+    ok(nav.holdsHead && nav.holdsTabs && nav.holdsBand,
+       "and carries the identity, the tabs and the fixed band, so none outscrolls the rest");
+    ok(nav.headIsFirst,
+       "with the identity FIRST inside it — the controller moves the served header in at " +
+       "the top rather than appending it under the tabs that index it");
 
     eq(errors.length, 0, `the workspace chrome throws nothing (${errors.join("; ")})`);
     await page.close();
@@ -1973,7 +2251,7 @@ try {
     const touch = await browser.newPage({ viewport: { width: 320, height: 900 } });
     await mount(touch, withChain[0], { ticker: withChain[0].ticker });
     const hit = await touch.evaluate(() => {
-      const b = document.querySelector(".ft-jump-b");
+      const b = document.querySelector(".ft-tab");
       const r = b.getBoundingClientRect();
       const cx = Math.round(r.left + r.width / 2);
       let span = 0;
@@ -1983,7 +2261,7 @@ try {
       return { box: Math.round(r.height), span };
     });
     ok(hit.span >= 44,
-       `a jump chip is at least 44px of hit area at 320px (${hit.span}px over a ` +
+       `a station tab is at least 44px of hit area at 320px (${hit.span}px over a ` +
        `${hit.box}px box) — the extension is worthless if its own scroll container clips it`);
     await touch.close();
   }
@@ -2616,15 +2894,33 @@ try {
       await settled(page);
       const grp = await page.evaluate((h) => ({
         scrolled: window.scrollY,
-        current: [...document.querySelectorAll(".ft-jump-b[aria-current='true']")]
+        current: [...document.querySelectorAll(".ft-tab[aria-current='true']")]
           .map((a) => a.getAttribute("href")),
         headTop: document.getElementById(h).getBoundingClientRect().top,
         barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
+        /* AND THE NUMBER EVERY scroll-margin-top IS BUILT FROM, against the
+           bar it claims to be: the identity row wraps at a different count
+           under the fallback face, so before the controller re-measured on
+           document.fonts.ready this read 147 against a 189px bar. */
+        said: parseFloat(getComputedStyle(document.getElementById("ftGrid"))
+          .getPropertyValue("--ft-bar-h")),
+        barIs: document.querySelector(".ft-bar").getBoundingClientRect().height,
       }), g.hash);
       ok(grp.scrolled > 100, "a group anchor scrolls to its heading");
       ok(grp.headTop >= grp.barBottom - 4,
          `and the heading clears the sticky bar rather than hiding behind it ` +
          `(heading ${Math.round(grp.headTop)}, bar ends ${Math.round(grp.barBottom)})`);
+      ok(Math.abs(grp.said - grp.barIs) <= 1,
+         `and --ft-bar-h is the bar's real height once the webfont has landed ` +
+         `(${grp.said} written, ${Math.round(grp.barIs)} measured)`);
+      /* AND THE OBSERVER SAYS WHERE YOU ARE. watchGroups() moved from 23 panels
+         to 5 stations and nothing bit on it — `current` was collected here and
+         never read. Asserted on the BEHAVIOUR, so it survives a rewrite of how
+         the observer finds its rows and fails if the marking stops. */
+      eq(grp.current.length, 1,
+         `exactly one station tab is marked current (${grp.current.join(", ") || "none"})`);
+      ok(grp.current[0] && grp.current[0].endsWith("#" + g.hash),
+         `and it is the one deep-linked to (${grp.current[0]} for #${g.hash})`);
       eq(errors.length, 0, `a group deep link throws nothing (${errors.join("; ")})`);
       await page.close();
     }
@@ -2761,6 +3057,196 @@ try {
        `an unreadable funnel says so rather than guessing (${unread.text.slice(0, 120)})`);
     ok(/not on today/.test(unread.text),
        "while still stating the one thing that IS known: the name is not on the board");
+  }
+
+  /* ---------- 6o. the station lays nothing out, the question is
+                   served, and the second sentinel says PENDING ---------
+
+     THE TRAP THIS SECTION EXISTS FOR. Wrapping 23 panels in five <section>s
+     changes every panel host's containing block, and every chart here is drawn
+     at its host's MEASURED width with one viewBox unit held to one CSS pixel.
+     A border, a padding or an inline margin on the wrapper is a wrong drawing,
+     and the symptom is not overflow: base.css gives every svg `max-width:
+     100%`, so an over-wide drawing SHRINKS and 9px axis type renders at 8.
+
+     SO THE BOX IS MEASURED DIRECTLY, because nothing else here CAN see this.
+     Section 2 cannot: a uniform inset narrows every host, each drawer
+     re-measures its own host and draws at the narrowed width, so one viewBox
+     unit is still one CSS pixel; and the surface/term alignment is between two
+     hosts in the SAME station, which a station-level inset moves together.
+     Measured — `padding-left: 4px` on .ft-station passes every section before
+     this one, the 320/1280/1840 sweep included, and fails only here. The fix
+     is the stylesheet, never a wider tolerance. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    const errors = [];
+    const said = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    page.on("console", (m) => { if (m.type() === "error") said.push(m.text()); });
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+
+    const boxes = await page.evaluate(() => {
+      const grid = document.getElementById("ftGrid");
+      const gridBox = grid.getBoundingClientRect();
+      return {
+        gridDisplay: getComputedStyle(grid).display,
+        gridWidth: gridBox.width,
+        /* THE BAR CARRIES NO DEAD STRIP: every band slot is hidden, so a
+           margin under a 0px row is a blank strip, not a reserved height. */
+        bandH: document.getElementById("ftBand").getBoundingClientRect().height,
+        bandM: getComputedStyle(document.getElementById("ftBand")).marginBottom,
+        allM: getComputedStyle(document.getElementById("ftAll")).marginBottom,
+        stations: [...document.querySelectorAll(".ft-station")].map((s) => {
+          const cs = getComputedStyle(s);
+          const r = s.getBoundingClientRect();
+          return {
+            group: s.dataset.group, display: cs.display,
+            pad: [cs.paddingLeft, cs.paddingRight],
+            border: [cs.borderLeftWidth, cs.borderRightWidth],
+            margin: [cs.marginLeft, cs.marginRight],
+            inset: r.left - gridBox.left, width: r.width,
+          };
+        }),
+        /* span-2 panels in three DIFFERENT stations: if a wrapper laid
+           anything out they would stop agreeing. */
+        wide: ["surface", "ivSurface", "skewTerm", "topContracts"].map((k) => {
+          const host = document.querySelector(`#panel-${k} > div`);
+          return [k, host ? Math.round(host.clientWidth * 100) / 100 : null];
+        }),
+      };
+    });
+    eq(boxes.gridDisplay, "block",
+       "the grid itself lays nothing out any more — the track list moved into the stations, " +
+       "because a wrapper between a grid and its items un-grids them");
+    eq(boxes.bandH, 0, "the served band measures nothing — every one of its slots is hidden");
+    eq(boxes.bandM, "0px", "so it carries no margin under it either, until PR 4 paints it");
+    eq(boxes.allM, "0px",
+       "and the all-panels link declares no vertical margin, which an inline anchor discards");
+    for (const st of boxes.stations) {
+      eq(st.display, "grid", `the ${st.group} station is the grid now`);
+      eq(st.pad.join(" "), "0px 0px", `and adds no inline padding (${st.group})`);
+      eq(st.border.join(" "), "0px 0px", `no inline border (${st.group})`);
+      eq(st.margin.join(" "), "0px 0px", `and no inline margin (${st.group})`);
+      ok(Math.abs(st.inset) < 0.5,
+         `so it starts exactly where the grid starts (${st.group}, ${st.inset.toFixed(2)}px in)`);
+      ok(Math.abs(st.width - boxes.gridWidth) < 0.5,
+         `and is exactly as wide as the grid (${st.group}, ${st.width.toFixed(2)} vs ` +
+         `${boxes.gridWidth.toFixed(2)}), so every panel measures what it did before`);
+    }
+    const wideW = boxes.wide.filter(([, w]) => w !== null).map(([, w]) => w);
+    ok(wideW.length >= 3, "there are span-2 panels in more than one station to compare");
+    for (const [key, w] of boxes.wide) {
+      ok(w !== null, `${key} has a drawing host`);
+      ok(Math.abs(w - wideW[0]) <= 1,
+         `${key} mounts at the same width as every other span-2 panel (${w} vs ${wideW[0]}), ` +
+         `across three stations — which is what proves the wrapper is not in the layout`);
+    }
+
+    /* THE QUESTION IS SERVED AND THE DRAWN COPY IS HIDDEN, NOT DELETED. The
+       renderer still emits it — section 2 reads that copy and the enlarge
+       dialog has no other — but one sentence must not appear twice in a box. */
+    const q = await page.evaluate(() => {
+      const s = document.getElementById("panel-gamma");
+      const served = s.querySelector(".ft-panel-q");
+      const drawn = s.querySelector(".fc-q");
+      return {
+        servedText: served ? served.textContent : null,
+        servedShown: !!(served && served.getClientRects().length),
+        drawnText: drawn ? drawn.textContent : null,
+        drawnShown: !!(drawn && drawn.getClientRects().length),
+      };
+    });
+    eq(q.servedText, TICKER_PANELS.find((p) => p.key === "gamma").question,
+       "the served question is the registry's, verbatim");
+    ok(q.servedShown, "and a reader can see it");
+    eq(q.drawnText, q.servedText,
+       "the renderer still draws the same sentence — deleting the drawn copy would pass " +
+       "every assertion here and lose the comparison that catches a drawer handed the card " +
+       "where it expected the question");
+    ok(!q.drawnShown,
+       "and the drawn copy is hidden inside the grid, so the reader is asked the question " +
+       "once rather than twice in one box");
+
+    /* THE SECOND SENTINEL DRAWS A PENDING LINE, and pending is one of four
+       silences that never collapse: not unavailable, not unreadable, not
+       quiet — and above all not "your card predates this panel", the branch a
+       sentinel falls into the moment the walk finds no card.panels.__stats. */
+    const stats = await page.evaluate(() => {
+      const s = document.getElementById("panel-__stats");
+      const host = s.querySelector("div");
+      const mark = host.querySelector("[data-empty]");
+      return {
+        sentinel: s.hasAttribute("data-sentinel"),
+        childless: host.childElementCount === 0,
+        kind: mark ? mark.getAttribute("data-empty") : null,
+        text: host.textContent,
+        drawnQ: host.querySelector(".fc-q") ? host.querySelector(".fc-q").textContent : null,
+        dead: !!host.querySelector(".fc-dead"),
+        quiet: !!host.querySelector(".ft-quiet, .fc-quiet"),
+      };
+    });
+    ok(stats.sentinel, "the key-statistics panel is marked as a sentinel in the served markup");
+    ok(!stats.childless,
+       "and it renders something — an empty host is the one state a reader cannot tell from " +
+       "a broken page");
+    eq(stats.kind, "pending",
+       "under the PENDING mark specifically, which is its own silence and not one of the " +
+       "other three");
+    ok(!stats.dead,
+       "it wears no Unavailable banner — nothing declined to publish these figures, they " +
+       "are simply not gathered yet");
+    ok(!/predates|built before/i.test(stats.text),
+       `and it never tells a reader their card predates it (${stats.text.slice(0, 70)}) — ` +
+       `no card carries a panels.__stats, so that sentence is false on every card`);
+    ok(/published by one of the panels on this page/i.test(stats.text),
+       "and it says where the figures already are, which is the only useful thing it can " +
+       "say before it gathers them");
+    eq(stats.drawnQ, TICKER_PANELS.find((p) => p.key === "__stats").question,
+       "and it heads itself with the registry's question like every other panel");
+
+    /* THE ENLARGE DIALOG KEEPS THE ONLY QUESTION IT HAS, which is why the hide
+       rule is scoped to .ft-grid: the dialog carries no served chrome, so a
+       global rule would strip the copy a reader looks hardest at. */
+    await page.click('#panel-gamma .ft-zoom-open');
+    await page.waitForFunction(
+      () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
+    const zoomQ = await page.evaluate(() => {
+      const el = document.querySelector("#ftZoomHost .fc-q");
+      return { text: el ? el.textContent : null, shown: !!(el && el.getClientRects().length) };
+    });
+    eq(zoomQ.text, q.servedText, "the enlarged panel carries the same question");
+    ok(zoomQ.shown, "and it is visible there, because it is the only copy in the dialog");
+
+    eq(errors.length, 0, `the station structure throws nothing (${errors.join("; ")})`);
+    eq(said.filter((t) => /chrome/.test(t)).length, 0,
+       `and mountChrome reports nothing against the markup the worker really serves ` +
+       `(${said.join(" | ").slice(0, 140)})`);
+    await page.close();
+
+    /* ---- AND THE CHROME CHECK ACTUALLY FIRES -------------------------
+
+       PANEL_CHROME stopped writing data-group and data-tier here and became a
+       second opinion held against the served ones. A second opinion nobody
+       consults is dead weight, and the source comparison further up proves
+       only that the two AGREE — the case in which the reporting path never
+       runs. So one panel is served in the wrong group and the console is
+       read. The MARKUP is mutated, not the table: mutating the table would
+       fail that comparison first and never reach this. */
+    {
+      const badHTML = pageHTML.replace('data-group="tape" data-tier="chart"',
+                                       'data-group="context" data-tier="chart"');
+      ok(badHTML !== pageHTML,
+         "the mutated markup differs from the served page — a replacement that matched " +
+         "nothing would prove the check fires by never testing it");
+      const bad = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const cried = [];
+      bad.on("console", (m) => { if (m.type() === "error") cried.push(m.text()); });
+      await mount(bad, withChain[0], { ticker: withChain[0].ticker, html: badHTML });
+      ok(cried.some((t) => /chrome/.test(t) && /path/.test(t) && /context/.test(t)),
+         `mountChrome reports the disagreement, naming the panel and both answers ` +
+         `(${cried.join(" | ").slice(0, 160)})`);
+      await bad.close();
+    }
   }
 
   /* ---------- 7. motion, in both states and both halves ----------- */
@@ -3660,8 +4146,10 @@ console.log(`✓ flows-ticker: ${checks} assertions — one registry the markup,
   `and cannot shrink the panels it exists for, absent and unavailable told apart, the ` +
   `three stock panels rendering the payload's own numbers and notes with quiet, ` +
   `unavailable and pre-wave absence held apart, a rank that is never rescaled and ` +
-  `a strip that never bridges a gap, twenty-two panels grouped into five contiguous ` +
-  `sections with one lead each and an index that links to every one of them, a page ` +
+  `a strip that never bridges a gap, twenty-three panels served inside five station ` +
+  `sections with one lead each, a tab row that counts them from the same export the ` +
+  `stations are built from, and two sentinels that reach neither the payload-key list ` +
+  `nor the shed ladder they would have fabricated an unavailability in, a page ` +
   `that opens on the overnight move with its gap and its dead-band crossing rather ` +
   `than on a snapshot — with a measured zero told from an unmeasured session in both ` +
   `directions — deep links that survive a hidden grid and a hostile hash, and a gated ` +

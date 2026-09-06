@@ -3020,10 +3020,30 @@ body.is-stale .flows-tablewrap {
    /flows/ticker/ — one name, every panel
    ============================================================== */
 
-/* --- the panel grid ------------------------------------------------ */
+/* --- the panel grid, and the five stations inside it ---------------- */
+
+/* .ft-grid LAYS NOTHING OUT ANY MORE; each station does. The five groups are
+   served as <section class="ft-station"> wrappers, and a wrapper between the
+   grid and its items does not merely reflow the panels —
+   it UN-GRIDS them: `grid-column: 1 / -1` on .is-wide would apply to a
+   non-item and do nothing, and every panel would stretch to the content
+   width. So the grid moved down one level, track list and gap intact.
+
+   NOT `display: contents` ON THE STATION, which would have flattened the
+   wrapper back out and cost nothing today. It is refused for what comes next:
+   the tabbed page hides four stations, and a `display: contents` box is hidden
+   by [hidden] only because base.css marks that rule !important — a layout
+   resting on an !important in another file is one edit from hiding nothing.
+
+   WHAT MUST NOT CHANGE IS THE HOST WIDTH. Every chart is drawn at its host's
+   measured clientWidth and holds one viewBox unit to one CSS pixel, and the
+   term line's j-th bar centre has to land on the surface's j-th column centre
+   — an equality between two hosts' widths. So the station takes the SAME track
+   list and gap the grid carried and no padding, border or inline margin of its
+   own; measured at 320, 1280 and 1840, every host is the width it was before
+   this wrapper existed. The fix for a failure there is this rule. */
 .ft-grid {
-  display: grid; gap: var(--space-3);
-  grid-template-columns: minmax(0, 1fr);
+  display: block;
   /* THE FALLBACK UNTIL THE BAR HAS BEEN MEASURED. The controller writes the
      sticky bar's real height back onto this element as an inline property on
      every paint and resize; this value is only what an anchor lands against
@@ -3032,6 +3052,20 @@ body.is-stale .flows-tablewrap {
      scroll-margin rule further down this section is its only reader. */
   --ft-bar-h: 5.5rem;
 }
+.ft-station {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+/* THE SPACE BETWEEN TWO STATIONS IS THE SPACE TWO GROUPS USED TO HAVE, to the
+   pixel: one row gap plus the top margin the group heading carried and no
+   longer needs. VERTICAL ONLY — a horizontal margin would narrow every panel
+   in this station and nothing else, the misalignment the note above refuses. */
+.ft-station + .ft-station { margin-top: calc(var(--space-3) + var(--space-2)); }
+/* PR 4 fills this with the station's one-line answer. Until then an empty
+   block still takes a grid row and a gap, opening a hole under every heading
+   that reads as a sentence missing rather than one not yet written. */
+.ft-station-lead { grid-column: 1 / -1; margin: 0; }
+.ft-station-lead:empty { display: none; }
 /* Grid items default to min-width:auto, which lets a wide child (the top
    contracts table, a 30-bar ladder) push its column past 1fr and take the
    whole page into horizontal overflow. Both the item and its drawing host
@@ -3052,7 +3086,7 @@ body.is-stale .flows-tablewrap {
    is 424 and the plot is 266, which is where a 30-bar ladder's strike labels
    and volume rail stop colliding. */
 @media (min-width: 76rem) {
-  .ft-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ft-station { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: 1 / -1; }
 }
 
@@ -3181,6 +3215,33 @@ body.is-stale .flows-tablewrap {
 .ft-zoom-open:hover, .ft-panel:hover .ft-zoom-open { color: var(--gold-harvest); }
 .ft-zoom-open:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 .ft-panel-t { min-width: 0; }
+
+/* THE QUESTION, SERVED. Every panel's question is in the document now, above
+   its host, readable before the fetch that fills the box under it and set
+   exactly as the drawn one was — the same sentence in the same place, and a
+   reader must not be able to tell which arrived with the page. */
+.ft-panel-q {
+  margin: 0 0 0.7rem;
+  color: var(--ink-dim);
+  font-size: var(--fs-note);
+  font-style: italic;
+}
+/* AND THE DRAWN COPY IS HIDDEN IN THE GRID, NOT DELETED. Every renderer still
+   heads its drawing with the question it was handed, which is what the ticker
+   suite compares against the registry to catch a drawer passed the CARD where
+   it expected the question — a defect that shipped, and that a served question
+   would have hidden rather than fixed. Scoped to .ft-grid so the enlarge
+   dialog, carrying no served chrome, keeps the only copy it has. */
+.ft-grid .ft-panel .fc-q { display: none; }
+
+/* PR 4's one-line answer. Empty until then, and an empty <p> with a bottom
+   margin opens a gap under every question that reads as a sentence that failed
+   to load rather than one not yet written. */
+.ft-panel-one {
+  margin: 0 0 0.7rem;
+  color: var(--ink); font-size: var(--fs-body); line-height: 1.5;
+}
+.ft-panel-one:empty { display: none; }
 
 /* --- pointer response (decoration only) ------------------------------ */
 .ft-panel {
@@ -3392,11 +3453,17 @@ body.is-stale .flows-tablewrap {
 .ft-id.is-null b { color: var(--ink-faint); }
 .ft-id[data-empty] b { color: var(--ink-faint); }
 
-/* THE JUMP STRIP. Anchors, not buttons, and not a scripted scroller: a plain
-   <a href="#ftg-tape"> is keyboard-native, is copyable out of the status bar,
-   survives a script error, and is the same mechanism a deep link uses. The
-   controller's only job is marking which one is current. */
-.ft-jump {
+/* THE STATION TABS. Anchors, not buttons, and not a scripted scroller: a
+   plain <a href="#ftg-tape"> is keyboard-native, is copyable out of the
+   status bar, survives a script error, and is the same mechanism a deep link
+   uses — which is why the row is served as anchors even carrying
+   role="tablist". With every station visible, a tab's job is to scroll.
+
+   THIS WAS THE JUMP STRIP and every declaration below is its, unchanged: the
+   row moved from five chips the controller built after the card landed to five
+   tabs the worker serves before it, and the 44px measurement in the padding
+   note is not re-derived because nothing it measures moved. */
+.ft-tabs {
   display: flex; flex-wrap: nowrap; gap: var(--space-1);
   margin: 0;
   /* THE VERTICAL PADDING IS THE HIT AREA, and it is here rather than on the
@@ -3411,7 +3478,7 @@ body.is-stale .flows-tablewrap {
   overflow-x: auto; overscroll-behavior-x: contain;
   scrollbar-width: thin;
 }
-.ft-jump-b {
+.ft-tab {
   position: relative; flex: none;
   border: 1px solid var(--panel-border); border-radius: var(--radius-1);
   padding: 0.24rem 0.5rem;
@@ -3423,62 +3490,97 @@ body.is-stale .flows-tablewrap {
    it: the hit area is a transparent pseudo-element, so five chips stay one
    line tall on a phone and are still tappable. It only works because the
    strip above reserves the room for it — see the padding note there. */
-.ft-jump-b::after {
+.ft-tab::after {
   content: ""; position: absolute; left: 0; right: 0; top: 50%;
   height: 44px; transform: translateY(-50%);
 }
-.ft-jump-b:hover, .ft-jump-b:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
-.ft-jump-b:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-.ft-jump-b[aria-current="true"] { color: var(--gold-harvest); border-color: var(--gold-harvest); }
-.ft-jump-n { color: var(--ink-faint); }
+.ft-tab:hover, .ft-tab:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
+.ft-tab:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+/* WHERE THE READER IS, not which station is open. aria-current is written by
+   the intersection observer as they scroll; aria-selected is served "false"
+   on all five, every station being shown here and nothing selecting one yet.
+   NO RULE FOR aria-selected HERE, deliberately: it would paint nothing today,
+   and a rule with no element it can match is what tests/flows-sign.mjs and the
+   chrome-class sweep keep out of this file. It arrives with the controller. */
+.ft-tab[aria-current="true"] { color: var(--gold-harvest); border-color: var(--gold-harvest); }
+.ft-tab-n { color: var(--ink-faint); }
 
-.ft-all { margin: 0 0 var(--space-2); }
-.ft-all-s {
+/* THE WAY OUT OF THE FIVE. It sits beside the tablist rather than in it — a
+   tablist holds tabs, and "all of them at once" selects no station — so it
+   reads as the quieter control it is: no border, no box, no box model either.
+   .ft-bar is a block and this is an inline anchor, so `flex`, `align-self` and
+   a vertical margin would each paint nothing, which the note above refuses. */
+.ft-all-link {
   font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--ink-faint); cursor: pointer;
-  list-style: none;
+  text-transform: uppercase; color: var(--ink-faint); text-decoration: none;
 }
-.ft-all-l {
-  display: flex; flex-wrap: wrap; gap: 0.2rem var(--space-2);
-  margin: var(--space-2) 0 0; padding: 0; list-style: none;
-}
-.ft-all-l a { color: var(--ink-dim); font-size: var(--fs-data); text-decoration: none; }
-.ft-all-l a:hover { color: var(--ink); text-decoration: underline; }
-.ft-all-l a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-.ft-all-g {
-  flex-basis: 100%; margin-top: var(--space-1);
-  color: var(--ink-faint); font-family: var(--font-mono); font-size: var(--fs-label);
-  letter-spacing: 0.12em; text-transform: uppercase;
-}
+.ft-all-link:hover { color: var(--ink); text-decoration: underline; }
+.ft-all-link:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 
-/* THE DISCLOSURE MARKER, ONCE, FOR BOTH <details> ON THIS PAGE. The panel
-   decoder (.ft-how, further down) and this index arrived in different commits
-   and each wrote its own +/− marker, its own hover ink and its own focus
-   ring: five rules, twice, character for character. Their SUMMARY rules still
-   differ and stay apart — the decoder's is a reading-size line under a chart,
-   this one is a chip in a sticky bar — but the marker is one idiom and is
-   stated in one place, so a change to how a disclosure opens cannot land on
-   one of them and miss the other.
-   Every rule here outranks the base .ft-how-s / .ft-all-s rules on
-   specificity, so being written above them changes nothing. */
-.ft-how-s::-webkit-details-marker,
-.ft-all-s::-webkit-details-marker { display: none; }
-.ft-how-s::before,
-.ft-all-s::before { content: "+ "; color: var(--gold-harvest); }
-.ft-how[open] .ft-how-s::before,
-.ft-all[open] .ft-all-s::before { content: "\2212 "; }
-.ft-how-s:hover,
-.ft-all-s:hover { color: var(--ink); }
-.ft-how-s:focus-visible,
-.ft-all-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+/* THE FIXED BAND — seven slots, served empty and hidden, painted by PR 4, and
+   costing no height and NO MARGIN until it is: every slot is hidden, so the row
+   measures 0px and a bottom margin is 9.6px of blank strip in the sticky bar
+   (measured: 189px to 199px), not a reserved slot height. A row not a grid: the
+   slots resolve independently and any can be absent, so a grid leaves a hole
+   where a flex line closes up. */
+.ft-band {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+.ft-band-b {
+  color: var(--ink-dim); font-family: var(--font-mono); font-size: var(--fs-label);
+  letter-spacing: 0.1em; text-decoration: none;
+}
+.ft-band-b:hover { color: var(--ink); text-decoration: underline; }
+.ft-band-b:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-band-v {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label); color: var(--ink-dim); white-space: nowrap;
+}
+.ft-band-nav { display: flex; gap: var(--space-1); }
+.ft-band-find {
+  min-width: 0; width: 10rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--panel-border); border-radius: var(--radius-1);
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-mono); font-size: var(--fs-label);
+}
+.ft-band-find:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 1px; }
+
+/* THE DISCLOSURE MARKER FOR THE ONE <details> LEFT ON THIS PAGE. It was
+   stated once for two — the panel decoder (.ft-how, further down) and the
+   sticky bar's collapsed index of every panel — because each had written its
+   own +/− marker, hover ink and focus ring, character for character. The
+   index is gone: the worker serves five stations with their headings and
+   counts, so a <details> listing all 23 panel names is a second table of
+   contents for a page that has one in its markup. The de-duplication
+   argument stays here, because the decoder's own summary rules still live
+   apart from these and the next disclosure added must land here. */
+.ft-how-s::-webkit-details-marker { display: none; }
+.ft-how-s::before { content: "+ "; color: var(--gold-harvest); }
+.ft-how[open] .ft-how-s::before { content: "\2212 "; }
+.ft-how-s:hover { color: var(--ink); }
+.ft-how-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 
 /* THE GROUP HEADING IS A GRID CHILD AND TAKES THE WHOLE ROW at every tier.
    grid-column 1 / -1 is span-agnostic, so it is one declaration for two,
    three and four columns — the same rule .ft-panel.is-wide already relies on
-   below 132rem. */
+   below 132rem.
+
+   NO TOP MARGIN AND NO :first-child EXCEPTION ANY MORE. It carried both while
+   five headings were siblings of the panels in one grid: the margin opened
+   the space between the previous group's last row and the next group's
+   heading, and the exception took it back off the first one. Each heading is
+   now the first child of its own <section class="ft-station">, so the
+   exception matched every heading and the margin it was cancelling had
+   nothing left to separate — the space between two groups is between two
+   sections, and .ft-station + .ft-station owns it. The NEGATIVE bottom margin
+   stays and is doing something different: it cancels one grid gap, so the
+   heading sits against the panels it introduces rather than floating midway
+   between two groups. */
 .ft-group {
   grid-column: 1 / -1;
-  margin: var(--space-2) 0 calc(var(--space-2) * -1);
+  margin: 0 0 calc(var(--space-2) * -1);
   padding-bottom: var(--space-1);
   border-bottom: 1px solid var(--panel-border);
   /* NOT A LADDER STEP, and it is not text: this <h2> holds two spans that
@@ -3486,7 +3588,6 @@ body.is-stale .flows-tablewrap {
      It reads as the heading's default size undone. */
   font-size: 1rem;
 }
-.ft-group:first-child { margin-top: 0; }
 .ft-group-n {
   font-family: var(--font-mono); font-size: var(--fs-data); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-harvest);
@@ -3631,8 +3732,9 @@ body.is-stale .flows-tablewrap {
   .ft-bar .ft-head > * { flex: none; }
   .ft-bar .ft-head h2 { font-size: 1.15rem; }
   .ft-id, .ft-bar .fc-meta { font-size: 0.76rem; }
-  .ft-jump-b { padding: 0.2rem 0.42rem; font-size: var(--fs-micro); letter-spacing: 0.08em; }
-  .ft-all-s { font-size: var(--fs-micro); }
+  .ft-tab { padding: 0.2rem 0.42rem; font-size: var(--fs-micro); letter-spacing: 0.08em; }
+  .ft-all-link { font-size: var(--fs-micro); }
+  .ft-band-find { width: 100%; }
   .ft-bar { padding-top: var(--space-1); }
 }
 
@@ -3796,9 +3898,12 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.04em; text-transform: uppercase;
   padding: 0.35rem 0; list-style: none;
 }
-/* The marker, the hover ink and the focus ring are stated ONCE for both
-   disclosures on this page, in the workspace-chrome block above — this rule
-   set and .ft-all's were character-for-character identical in two places. */
+/* The marker, the hover ink and the focus ring are in the workspace-chrome
+   block above, where they were stated once for the two disclosures this page
+   used to carry. It carries one now — the sticky bar's collapsed index of all
+   23 panels went with the served stations — and they stay up there so that
+   the next disclosure added here inherits them instead of restating them,
+   which is how the duplication happened the first time. */
 .ft-how .fc-note { margin-top: 0.5rem; }
 
 /* --- the explained element, and where its explanation can be read ----
@@ -4783,7 +4888,7 @@ body.is-stale .flows-tablewrap {
    ============================================================== */
 
 /* --- the landscape pass ---------------------------------------------- */
-/* The 76rem block above already gives .ft-grid its two columns and sends
+/* The 76rem block above already gives .ft-station its two columns and sends
    .is-wide across them with `grid-column: 1 / -1`, which is span-agnostic —
    so the only new ink a third column needs is the track list. The three
    wave-2 panels are span 1 in the registry and slot as single cells; the
@@ -4798,7 +4903,7 @@ body.is-stale .flows-tablewrap {
    while the content was still clamped at 1248, which is how it came to hand
    out 380px tracks — narrower than the two-column tier it replaced. */
 @media (min-width: 108rem) {
-  .ft-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ft-station { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* AT FOUR TRACKS .is-wide STOPS TAKING THE ROW. A full-row panel here is
@@ -4829,7 +4934,7 @@ body.is-stale .flows-tablewrap {
    grid of independently labelled regions is not worth a focus-order defect,
    so the 8% stays on the table deliberately. */
 @media (min-width: 132rem) {
-  .ft-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: span 2; }
   .ft-panel[data-panel="ivSurface"],
   .ft-panel[data-panel="skewTerm"] { grid-column: 1 / span 2; }
