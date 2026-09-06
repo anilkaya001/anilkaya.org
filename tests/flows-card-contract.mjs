@@ -462,7 +462,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
            state and mapped onto the two instead, deliberately, rather than
            widening this assertion to let new code pass — because widening it
            without teaching the renderer the third arm would have produced
-           panels the reader sees as "Unavailable." regardless. The renderer
+           panels the reader sees as "Unavailable —" regardless. The renderer
            has that arm now, so this widens once, for every panel. */
         ok(p.status === "ok" || p.status === "unavailable" || p.status === "quiet",
            `every panel is a tagged union with ${source} missing`);
