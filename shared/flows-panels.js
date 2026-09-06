@@ -111,9 +111,22 @@
  * AN ODD STATION LEAVES ITS SHORTEST PANEL ALONE, deliberately. `context`
  * (350px) ends its station without a row-mate; pairing it with either
  * neighbour stretched it, and the half-row that leaves is at the station's end
- * where it reads as a closing rather than as a defect. Which panel is left
- * alone is a choice, and the shortest is the only choice that asks nobody to
- * fill a gap — asserted in flows-ticker-contract.mjs, not just written here.
+ * where it reads as a closing rather than as a defect.
+ *
+ * REACHING THAT COST AN EDITORIAL DECISION, AND IT IS THE ONLY ONE IN THE
+ * HEIGHT PASS. `context` was this station's LEAD, so it had to come first, and
+ * `marketRank` had to sit directly under it — two rules argued in this file,
+ * and together they forced `context` (350px) to be `marketRank`'s (865px)
+ * row-mate: a 515px stretch, the last one on the page and the only one the
+ * matching could not route around. Every ordering that fixed it broke one of
+ * them. The owner chose which to break: `marketRank` leads the station now.
+ *
+ * WHAT THAT CHANGES IS WHAT THE STATION CLAIMS TO BE ABOUT. It opens on where
+ * this name places against every other name and closes on where today sits in
+ * its own year, rather than the reverse. The two placement questions are still
+ * one question at two scales and they are still adjacent — the order of the
+ * asking is what moved, and the adjacency assertion in
+ * flows-ticker-contract.mjs moved with it rather than being deleted.
  *
  * The groups themselves are contiguous by contract:
  *
@@ -335,31 +348,12 @@ export const TICKER_PANELS = Object.freeze([
   { key: "oiDeltas", id: "ftOi", span: 1, group: "tape", tier: "table",
     title: "Open-interest changes",
     question: "Where did open interest move between clearing snapshots?" },
-
-  /* ---------- CONTEXT: the name's own year, and who is in it -------
-     THE TWO PLACEMENT QUESTIONS ARE ADJACENT. "Where does today sit in this
-     name's own year" and "does this name place against every other name" are
-     one question asked at two scales, and the congressional table — a
-     different kind of fact entirely, about disclosure rather than about
-     price — used to sit between them.
-
-     AND THIS IS THE ONE STATION THE HEIGHT PASS COULD NOT IMPROVE, which is
-     worth writing down rather than leaving as an absence. Measured, `context`
-     is 350px and `marketRank` is 865px, so as row-mates the shorter is
-     stretched 515px — the widest mismatch left on the page. Three rules
-     already argued in this file pin that arrangement: this panel is its
-     group's lead so it must come first, `marketRank` must sit directly under
-     it (asserted in flows-ticker-contract.mjs), and `congress` is the only
-     other member. Every ordering that fixes the height breaks one of them.
-
-     SO IT STAYS, AND IT IS AN EDITORIAL DECISION RATHER THAN A LAYOUT ONE.
-     Closing it needs one of: this panel giving up the lead, the adjacency
-     being dropped, or `marketRank` taking span 2 — each a claim about what
-     the station SAYS, which is not a change a height measurement gets to
-     make on its own. */
-  { key: "context", id: "ftCtx", span: 1, group: "context", tier: "lead",
-    title: "Price context",
-    question: "Where does today sit in the name’s own year?" },
+  /* ---------- CONTEXT: who else is in the name's year, and the year -
+     The cross-section leads: where this name places against every other name,
+     then what has been disclosed about it, then the name's own year as the
+     closing reading. The lead moved here from `context` — see the note on
+     that entry at the end of the station for the measurement and the
+     decision. */
   /* THE CROSS-SECTION THE PER-NAME FEEDS CANNOT CARRY, off two market-wide
      reads this run already makes once for the market pulse.
 
@@ -371,15 +365,50 @@ export const TICKER_PANELS = Object.freeze([
      "where does today sit in this name's own year". A rank has no meaning
      without the population beside it, and the population here is the market.
 
-     span 1 AND tier "reading": it is two short readings and their prose, not
-     a table and not a drawing, and at 320px it must not carry a row of
-     columns that can only be reached by scrolling sideways. */
-  { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "reading",
+     span 1 STILL, and at 320px it must not carry a row of columns that can
+     only be reached by scrolling sideways — it is two short readings and
+     their prose, not a table and not a drawing.
+
+     tier "lead" NOW, WHICH IS THE ONE EDITORIAL CHANGE IN THE HEIGHT PASS.
+     It was "reading". This panel opens the station because the alternative
+     was a 515px stretch on `context` that no reordering could route around
+     while `context` held the lead — the full argument is on that entry, at
+     the end of this station. A "reading"-shaped panel wearing the lead's
+     chrome is not a contradiction: `tier` is the panel's SHAPE and the lead
+     is a POSITION, and the file's own ladder says the two are separate. */
+  { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "lead",
     title: "Market-wide standing",
     question: "Does this name place in the market’s own two lists, and from which session?" },
   { key: "congress", id: "ftCongress", span: 1, group: "context", tier: "table",
     title: "Disclosed congressional transactions",
-    question: "Has anyone in Congress disclosed a trade in this name?" },]);
+    question: "Has anyone in Congress disclosed a trade in this name?" },
+
+  /* THE STATION'S CLOSING READING, AND THE PANEL THAT GAVE UP THE LEAD.
+     "Where does today sit in this name's own year" and "does this name place
+     against every other name" are one question asked at two scales, and they
+     are still adjacent — the order of the asking is what moved.
+
+     WHY IT MOVED, AND IT IS THE ONLY EDITORIAL DECISION THE HEIGHT PASS MADE.
+     This panel led the station, so it came first, and `marketRank` sat
+     directly under it. Measured, that is 350px beside 865px: a 515px stretch,
+     the last one left on the page and the only one the matching could not
+     route around, because both rules pinning it are argued in this file and
+     `congress` is the only other member. Every ordering that fixed the height
+     broke one of them, so the choice went to the owner rather than to a
+     measurement, and the lead is what they chose to move.
+
+     WHAT IT COSTS IS A CLAIM ABOUT THE STATION. It opens on the cross-section
+     and closes on the name's own year, rather than the reverse. WHAT IT BUYS
+     is `marketRank`|`congress` at Δ233px and this panel alone at the end,
+     with nothing stretched — and the 515px exemption that used to sit in
+     flows-ticker-contract.mjs deleted rather than carried.
+
+     tier "chart" NOW, NOT "lead": it draws a sparkline sized from its host,
+     which is exactly what that tier names, and the lead's heavier chrome
+     belongs to the panel that opens the station. */
+  { key: "context", id: "ftCtx", span: 1, group: "context", tier: "chart",
+    title: "Price context",
+    question: "Where does today sit in the name’s own year?" },]);
 
 /**
  * The keys that name no `card.panels` entry at all.
