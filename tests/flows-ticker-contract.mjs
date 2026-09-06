@@ -510,6 +510,23 @@ function sweepPanels() {
       empty: host.childElementCount === 0,
       wide: section.classList.contains("is-wide"),
       boxW: Math.round(section.getBoundingClientRect().width),
+      /* THE HOST'S OWN WIDTH, REPORTED SO A FAILURE NAMES ITS CAUSE.
+         Every drawing is sized from this number (panelWidth reads the host's
+         box), so when the 1:1 scale assertion below breaks, the question is
+         always "did the host change width?" — and until this was carried out
+         of the page, answering it meant re-running the sweep by hand. It is
+         the measurement the .fc-panel flex-column rule is checked against.
+         Floored, not rounded, because panelWidth() floors: rounding here
+         would report a 282.6px host as 283 and disagree with the drawing by
+         a pixel that is only in this file. */
+      hostW: Math.floor(host.getBoundingClientRect().width),
+      /* Is the panel's table bounded, and did bounding it lose a row? Both
+         halves are needed: a scroller that fits everything proves nothing,
+         and a bound that truncated would look identical from the outside. */
+      wrapBound: [...host.querySelectorAll(".fc-tablewrap")].map((w) => [
+        Math.round(w.scrollHeight), Math.round(w.clientHeight),
+        w.querySelectorAll("tbody tr").length,
+      ]),
       minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
       clipped,
       /* UNROUNDED. The assertion downstream is "within a pixel", so rounding
@@ -618,6 +635,51 @@ try {
            `${width}px ${p.key}: one viewBox unit is one CSS pixel — drawn ${vb}, ` +
            `rendered ${rendered.toFixed(2)} (${(rendered / vb).toFixed(4)})`);
         eq(transform, "none", `${width}px ${p.key}: the chart is drawn, never CSS-scaled`);
+        /* AND THE DRAWING NEVER OUTGREW THE HOST IT SITS IN.
+           NOT `vb === hostW`. That was this assertion's first form and the
+           suite refused it inside a minute: volContext draws a 220-unit strip
+           into a 454px host on purpose, and several panels size a mark to its
+           content rather than to the box. Drawing at full host width is a
+           choice a renderer makes, not an invariant — so asserting it would
+           have pinned a preference and called it a contract.
+
+           What IS an invariant is the direction. base.css gives every svg
+           `max-width: 100%`, so a drawing WIDER than its host is not clipped
+           and does not overflow: it is silently scaled down, and one viewBox
+           unit stops being one CSS pixel with nothing on the page to show it.
+           The scale check above cannot see it either — viewBox and rendered
+           width still agree, because the shrink moves both.
+
+           This is the assertion the .fc-panel flex-column rule is checked
+           against. A column flex item's cross size is the container's content
+           box, the same used width a block child had; if that ever stops
+           being true the host narrows under a drawing already measured
+           against the old number, and this is the line that says so. */
+        ok(vb <= p.hostW + 1,
+           `${width}px ${p.key}: the drawing is never wider than its host, or ` +
+           `max-width:100% shrinks it and one unit stops being one pixel — ` +
+           `viewBox ${vb}, host ${p.hostW}`);
+      }
+
+      /* A TABLE THAT SHARES A ROW IS BOUNDED, AND BOUNDING IT LOST NOTHING.
+         Both halves, because either alone passes on a defect: a scroller that
+         happens to fit everything proves no bound exists, and a bound that
+         had truncated its list would look identical from outside the box.
+         `congress` is why the rule exists — 464px to 1371px across ten names,
+         a 2.95x swing on a span-1 panel whose row-mates are `context` (350px)
+         and `marketRank`. Span-2 panels are exempt in the stylesheet and so
+         are exempt here: they own their row, so their length costs no one. */
+      if (!p.wide) {
+        for (const [scrollH, clientH, rows] of p.wrapBound) {
+          ok(clientH <= 417,
+             `${width}px ${p.key}: a span-1 panel's table is bounded, so its ` +
+             `row-mates are not stretched by a vendor's row count (${clientH}px)`);
+          if (scrollH > clientH) {
+            ok(rows > 0,
+               `${width}px ${p.key}: the bounded table still holds its rows — ` +
+               `bounded is not truncated (${rows} row(s) in ${scrollH}px of scroll)`);
+          }
+        }
       }
     }
 
@@ -949,6 +1011,85 @@ try {
     eq(d.Spot.empty, null,
        `and it does not silence the rows that came from panels that DID publish ` +
        `(spot: ${JSON.stringify(d.Spot)})`);
+  }
+
+  /* ---------- 2d. a long table is bounded, and bounding it lost nothing --
+     THE PAYLOAD IS BUILT HERE BECAUSE THE CORPUS CANNOT REACH THE CASE. The
+     richest emitted card carries twelve congressional trades, which draw to
+     roughly 360px — under the 26rem bound, so the width sweep's own check of
+     this rule never takes its scrolling branch. An assertion that cannot fire
+     on any fixture the suite owns is not a check, and this file has been
+     bitten by that shape before. Forty rows is past the bound on any width.
+
+     WHY THIS PANEL. `congress` is the reason the stylesheet rule exists: it
+     measures 464px to 1371px across ten names, a 2.95x swing, and it is a
+     span-1 panel whose row-mates are `context` (350px) and `marketRank`. A
+     grid row is as tall as its tallest member, so before the bound one
+     vendor's filing count set the height of two panels that have nothing to
+     do with disclosure — 1,003px of blank ground opened under both.
+
+     BOUNDED IS NOT TRUNCATED, AND BOTH HALVES ARE ASSERTED. Either alone
+     passes on a defect: a scroller that happens to fit everything proves no
+     bound exists, and a bound that had dropped rows would look identical from
+     outside the box. So the box is measured AND every member name is looked
+     for in the text. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const long = JSON.parse(JSON.stringify(withChain[0]));
+    const members = Array.from({ length: 40 }, (_, i) => `Representative Number ${i + 1}`);
+    long.panels.congress = {
+      status: "ok", asOf: "2026-08-24", total: 40, buys: 20, sells: 20,
+      medianLagDays: 31,
+      trades: members.map((member, i) => ({
+        member, chamber: i % 2 ? "senate" : "house",
+        issuer: "Synthetic Holdings Inc", side: i % 2 ? "buy" : "sell",
+        txnDate: "2026-07-0" + ((i % 9) + 1), filedDate: "2026-08-0" + ((i % 9) + 1),
+        lagDays: 30 + i, amountLow: 1000 * (i + 1), amountHigh: 15000 * (i + 1),
+      })),
+    };
+    await mount(page, long, { ticker: long.ticker, station: "all" });
+    eq(errors.length, 0, `a forty-row disclosure list paints without throwing (${errors.join("; ")})`);
+
+    const seen = await page.evaluate(() => {
+      const panel = document.querySelector('.ft-panel[data-panel="congress"]');
+      const wrap = panel && panel.querySelector(".fc-tablewrap");
+      return {
+        found: !!wrap,
+        clientH: wrap ? Math.round(wrap.clientHeight) : null,
+        scrollH: wrap ? Math.round(wrap.scrollHeight) : null,
+        rows: wrap ? wrap.querySelectorAll("tbody tr").length : 0,
+        text: panel ? panel.textContent : "",
+        /* The panel's own box, which is what a row-mate is stretched to. */
+        panelH: panel ? Math.round(panel.getBoundingClientRect().height) : null,
+        focusable: wrap ? wrap.tabIndex : null,
+        region: wrap ? wrap.getAttribute("role") : null,
+      };
+    });
+
+    ok(seen.found, "the disclosure table is inside a wrapper that can be bounded");
+    ok(seen.scrollH > seen.clientH,
+       `forty rows really overflow the bound, so this case exercises it — ` +
+       `${seen.scrollH}px of table in ${seen.clientH}px of box`);
+    ok(seen.clientH <= 417,
+       `the wrapper is bounded at 26rem, so a filing count cannot set the row's ` +
+       `height (${seen.clientH}px)`);
+    eq(seen.rows, 40,
+       `every disclosed trade is still in the DOM — bounded, never truncated (${seen.rows})`);
+    const missing = members.filter((m) => !seen.text.includes(m));
+    eq(missing.length, 0,
+       `and every member is still findable by find-in-page, including the ones ` +
+       `below the fold (${missing.slice(0, 3).join(", ")})`);
+    /* A SCROLLER A KEYBOARD CANNOT REACH IS A TRAP, and bounding the box is
+       what creates one. Both attributes are set by the renderer already; this
+       asserts the bound did not arrive without them. */
+    eq(seen.focusable, 0, `the bounded region is reachable by keyboard (tabIndex ${seen.focusable})`);
+    eq(seen.region, "region", `and announces itself as a region (${seen.region})`);
+    ok(seen.panelH < 900,
+       `the panel that was measured at 1371px no longer sets its row from the ` +
+       `vendor's row count (${seen.panelH}px)`);
+    await page.close();
   }
 
   /* ---------- 3. the minus sign, on numbers only ------------------ */
