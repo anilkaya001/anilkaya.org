@@ -4297,7 +4297,7 @@
     const { el } = window.FlowsPanels;
     const p = el("p", kind === "quiet" ? "ft-quiet fmr-empty" : "fc-dead fmr-empty");
     p.setAttribute("data-empty", kind);
-    p.append(el("strong", null, kind === "quiet" ? "Not in this feed. " : "Unavailable. "));
+    p.append(el("strong", null, kind === "quiet" ? "Not in this feed \u2014 " : "Unavailable \u2014 "));
     p.append(document.createTextNode(String(sentence).trim().replace(/\.+$/, "") + "."));
     host.append(p);
   }
@@ -5997,7 +5997,7 @@
       const quiet = chg.status === "quiet";
       const p = el("p", quiet ? "fc-quiet" : "fc-dead");
       p.setAttribute("data-empty", quiet ? "quiet" : "unavailable");
-      p.append(el("strong", null, quiet ? "Nothing to report. " : "Unavailable. "));
+      p.append(el("strong", null, quiet ? "Nothing to report \u2014 " : "Unavailable \u2014 "));
       p.append(document.createTextNode(chg.reason + "."));
       changeEl.append(p);
       return chg;

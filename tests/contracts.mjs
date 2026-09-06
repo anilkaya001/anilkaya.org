@@ -989,4 +989,57 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     `contested — two handlers, one keystroke, no error — or the header must stop saying so.`);
 }
 
+/* ---------- a silence lead-in never ends a sentence ----------------
+
+   THE REASON IS THE PUBLISHER'S SENTENCE AND IS REPRODUCED VERBATIM. That is a
+   deliberate property — flows-ticker.js says so where it refuses to capitalise
+   one — and it is why the fix for a broken silence line has to be at the
+   lead-in rather than the reason. Live on the reader, for months:
+
+     "Nothing to report. the disclosure tape was read and named no member
+      trading this ticker"
+
+   Nineteen reason literals across the renderers, and the count is what settles
+   it: 19 start lowercase, 0 start uppercase, and 16 of 19 carry no terminal
+   stop. They are written as CONTINUATIONS, unanimously. A lead-in that closes
+   with a full stop contradicts every one of them, so the lead-ins end with an
+   em dash and the reasons are left exactly as their publisher wrote them.
+
+   This scans rather than lists, so a fifth lead-in added tomorrow is held to
+   the same rule without anyone remembering to add it here. */
+{
+  const flowsJs = readdirSync(path.join(ROOT, "assets/js"))
+    .filter((f) => f.startsWith("flows-") && f.endsWith(".js"))
+    .map((f) => path.join("assets/js", f));
+  /* A LEAD-IN IS A <strong> STANDING IMMEDIATELY BEFORE A REASON. Two of the
+     four are el("strong", null, "..."); the other two pick between two words
+     with a ternary, so the argument is not a bare literal and a pattern that
+     demanded one found half of them. This takes the whole argument list and
+     reads every string in it — which is what the found-count guard below
+     caught the first version failing to do. */
+  const LEAD = /el\("strong",\s*null,([\s\S]{0,240}?)\)\s*\)/g;
+  const STR = /"((?:[^"\\]|\\.)*)"/g;
+  const offenders = [];
+  let found = 0;
+  for (const file of flowsJs) {
+    const src = readFileSync(path.join(ROOT, file), "utf8");
+    for (const m of src.matchAll(LEAD)) {
+      for (const lit of m[1].matchAll(STR)) {
+        const text = JSON.parse(`"${lit[1]}"`);
+        /* Only the silence vocabulary, not every bold run on the page. */
+        if (!/^(Nothing to report|Unavailable|Not in this feed|Unreadable|Pending)\b/.test(text)) continue;
+        found += 1;
+        if (/[.!?]\s*$/.test(text)) offenders.push(`${file}: ${JSON.stringify(text)}`);
+      }
+    }
+  }
+  assert(found >= 4,
+    `the scan found ${found} silence lead-ins, so it is matching nothing and would pass by ` +
+    `seeing nothing — the pattern has drifted from what the renderers emit`);
+  assert.deepEqual(offenders, [],
+    `a silence lead-in ends its sentence, and every reason that follows one starts lowercase: ` +
+    `${offenders.join("; ")}. The reason is reproduced verbatim by design, so the lead-in is ` +
+    `what has to give — use an em dash.`);
+}
+
 console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);

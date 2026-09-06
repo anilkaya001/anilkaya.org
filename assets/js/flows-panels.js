@@ -206,7 +206,7 @@
     host.append(el("p", "fc-q", question));
     const note = el("p", "fc-dead");
     note.setAttribute("data-empty", "unavailable");
-    note.append(el("strong", null, "Unavailable. "));
+    note.append(el("strong", null, "Unavailable \u2014 "));
     note.append(document.createTextNode(
       reason || "This panel's data source did not return.",
     ));
@@ -228,7 +228,7 @@
     host.append(el("p", "fc-q", question));
     const note = el("p", "fc-quiet");
     note.setAttribute("data-empty", "quiet");
-    note.append(el("strong", null, "Nothing to report. "));
+    note.append(el("strong", null, "Nothing to report \u2014 "));
     note.append(document.createTextNode(
       reason || "This panel's source answered and measured nothing.",
     ));

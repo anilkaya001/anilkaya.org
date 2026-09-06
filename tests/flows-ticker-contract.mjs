@@ -1733,9 +1733,19 @@ try {
     eq(got.tags[0], "quiet",
        "a name the feed was READ without finding is tagged quiet — the request succeeded and " +
        "the market answered, and only the third silence is a fact about the market");
-    ok(!/Unavailable\./.test(got.texts[0]),
+    /* THE WORD, NOT THE PUNCTUATION AFTER IT. This read /Unavailable\./ and so
+       stopped catching anything the moment the lead-ins took an em dash — a
+       negative check that matches a stale spelling passes by seeing nothing.
+
+       AND NO BOUNDARY IN FRONT OF IT. The first attempt at this fix wrote
+       /\bUnavailable\b/, which is WEAKER here, not stronger: textContent
+       concatenates the block's heading straight onto the paragraph, so the
+       real string is "Off-exchange printsUnavailable — ..." and there is no
+       word boundary between the s and the U. A leading \b would let the
+       banner through exactly where this assertion is meant to catch it. */
+    ok(!/Unavailable\b/.test(got.texts[0]),
        "and it never wears the Unavailable banner");
-    ok(/^Not in this feed\./.test(got.said[0]),
+    ok(/^Not in this feed\b/.test(got.said[0]),
        "leading instead on the reading itself — the card's other quiet lead-in, \"Nothing " +
        "to report\", is false here: what is being reported is that the feed WAS read and " +
        "this name was not in it");
@@ -1748,7 +1758,7 @@ try {
        "differently");
 
     eq(got.tags[1], "unavailable", "a feed that did not come back is tagged unavailable");
-    ok(/Unavailable\./.test(got.texts[1]), "and does wear the banner");
+    ok(/Unavailable\b/.test(got.texts[1]), "and does wear the banner");
     ok(/timeout/.test(got.texts[1]), "with the reason it was given, verbatim");
 
     ok(got.spill <= 0,

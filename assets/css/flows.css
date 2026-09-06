@@ -178,16 +178,24 @@
   .flows-main { max-width: 132rem; }
 }
 
-/* MEASURE IS DEFENDED WITHOUT SPENDING HEIGHT. A wider page would otherwise
-   set 140-character lines. Capping at 68ch fixes that but costs height —
-   measured at +5..9% on the prose-heavy routes, because the same words wrap
-   into more lines over a narrower column. `columns: 32rem` instead lets the
-   browser choose how many columns keep every line near 70ch while using the
-   width, so the full caveats this product refuses to hide cost LESS vertical
-   space than they do today, not more. */
+/* MEASURE IS DEFENDED BY MEASURE AGAIN, AND THE TRADE THAT REPLACED IT HAS
+   EXPIRED. A wider page would otherwise set 140-character lines. The note that
+   stood here chose `columns: 32rem` over a 68ch cap and said why: capping costs
+   height, "+5..9% on the prose-heavy routes", where columns use the width and
+   cost less. That was the correct trade WHEN HEIGHT WAS THE ENEMY — the ticker
+   page was then 11,468px of continuous scroll at 1440 and 19,978px at 390.
+
+   The stations switch now, and that page is 2,622px. 5 to 9% of it is 130 to
+   235px, which buys nothing worth what it was paying for: a multi-column flow
+   breaks ONE sentence across a gutter, so a reader finishes a line at the
+   bottom of column one and hunts for its verb at the top of column two. Seen
+   live on the reader: "Every session count above counts THOSE sessions. The" |
+   "series itself is in the score-over-price panel below."
+
+   A caveat is read once, carefully, beside the figure it qualifies. Newspaper
+   columns are for text read continuously, and none of this text is. */
 @media (min-width: 92rem) {
-  .fc-note, .fc-q, .flows-foot, .flows-lede { columns: 32rem; column-gap: 2.5rem; }
-  .fc-reading { max-width: 68ch; }
+  .fc-note, .fc-q, .flows-foot, .flows-lede, .fc-reading { max-width: 68ch; }
 }
 
 .flows-head {
