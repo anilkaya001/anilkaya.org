@@ -128,6 +128,88 @@ const truncated = cards.filter((c) =>
        `is not on the page makes mountChrome report a disagreement on every paint`);
   }
 
+  /* ---------- the pairing, checked without a browser -----------------
+     A GRID ROW IS AS TALL AS ITS TALLEST MEMBER, so two panels sharing a row
+     share a height whether or not they have that much to say. Which panels
+     are adjacent in this registry therefore decides how much blank ground the
+     page opens, and that made the order a matching problem rather than a
+     preference. Measured intrinsic heights (six names x four widths, mounted
+     with the stretch removed) put today's worst row mismatch at 704px; the
+     order this file now carries measures 233px.
+
+     THE HEIGHTS ARE CHECKED IN, AND THAT IS THE COMPROMISE THIS ASSERTION
+     MAKES. They are a property of what each panel draws, so they can drift
+     from the table below without anything here noticing — a renderer that
+     grows a panel by 300px would not fail this check. What it does catch is
+     the thing that actually happens: somebody reorders the registry for an
+     editorial reason and silently reintroduces a mismatch nobody measured.
+     Re-derive the table with tests/_rows.mjs when a drawer changes shape.
+
+     NO BROWSER, DELIBERATELY. This is arithmetic over a list, so it runs in
+     milliseconds and fails with the two panel names in the message — which is
+     what makes it usable while somebody is editing the order. */
+  const PANEL_H = {
+    __stats: 330, levels: 313, displacement: 360, context: 350, scoreOverlay: 506,
+    deltaExposure: 416, charm: 435, vanna: 435, congress: 632, calendar: 520,
+    aggressor: 550, pricedMove: 584, surface: 668, ivSurface: 640, oiDeltas: 661,
+    marketRank: 865, path: 712, darkpool: 688, gamma: 795, skewTerm: 829,
+    volContext: 756, topContracts: 1044, __score: 1034,
+  };
+  eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
+     `the measured-height table covers every registry panel (${Object.keys(PANEL_H).length} ` +
+     `of ${TICKER_PANELS.length}) — a panel missing from it would be skipped by the pairing ` +
+     `check below rather than fail it`);
+  for (const p of TICKER_PANELS) {
+    ok(Object.hasOwn(PANEL_H, p.key), `the height table knows "${p.key}"`);
+  }
+  /* THE LIMIT IS 200, AND ONE STATION IS EXEMPT BY NAME.
+     Every pairing this file can reach now measures 172px or less. 200 leaves
+     a drawer room to grow without a false failure and refuses the 704px and
+     482px pairings this order was chosen to end.
+
+     `context` IS EXEMPT AT 515px AND THE EXEMPTION IS THE POINT. Three rules
+     already argued in shared/flows-panels.js pin that station's order —
+     `context` is its group's lead so it comes first, `marketRank` must sit
+     directly under it (asserted below), and `congress` is the only other
+     member — and every ordering that fixes the 515px stretch breaks one of
+     them. So the number is recorded here rather than quietly accommodated by
+     a limit loose enough to swallow it: an editorial decision would be needed
+     to close it, and a test is not entitled to make one. If the station's
+     order changes, this exemption's own assertion fails and somebody has to
+     decide again. */
+  const PAIR_LIMIT = 200;
+  const EXEMPT = { context: 515 };
+  eq(TICKER_PANELS.filter((p) => p.group === "context").map((p) => p.key).join(","),
+     "context,marketRank,congress",
+     "the context station still holds the order its 515px exemption was granted for — " +
+     "change it and the exemption is void, because it was granted to THIS arrangement " +
+     "and not to the station");
+  for (const g of TICKER_GROUPS) {
+    const limit = EXEMPT[g.key] || PAIR_LIMIT;
+    /* Span-2 panels own their row, so they never share a height with anyone;
+       at two columns the rest pair off in registry order. */
+    const solo = TICKER_PANELS.filter((p) => p.group === g.key && p.span !== 2);
+    for (let i = 0; i + 1 < solo.length; i += 2) {
+      const [a, b] = [solo[i], solo[i + 1]];
+      const gap = Math.abs(PANEL_H[a.key] - PANEL_H[b.key]);
+      ok(gap <= limit,
+         `${g.key}: "${a.key}" (${PANEL_H[a.key]}px) and "${b.key}" (${PANEL_H[b.key]}px) are ` +
+         `row-mates at two columns, so the shorter is stretched ${gap}px — past the ${limit}px ` +
+         `a panel can fill honestly. Reorder the station, or widen the panel whose layout ` +
+         `can absorb width (see the span note in shared/flows-panels.js — widening the TALL ` +
+         `one is the obvious move and it is usually the wrong one)`);
+    }
+    /* NO "THE ODD ONE OUT MUST BE THE SHORTEST" RULE, and dropping it was a
+       finding rather than a concession. It follows from the UNCONSTRAINED
+       matching optimum, and this registry is not unconstrained: three argued
+       adjacency contracts and the lead-is-first rule pin most of the order
+       already. In `context` the shortest panel is the lead and must come
+       first, so the rule and the contracts cannot both hold — and the
+       contracts are the ones with reasons written next to them. The pair
+       limit above is what survives, because it constrains the thing that
+       actually hurts a reader. */
+  }
+
   /* Every registry key other than the score sentinel names a real payload
      panel. This is the assertion that would have caught four published,
      served, undrawn panels. */
