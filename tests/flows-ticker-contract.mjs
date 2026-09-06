@@ -162,30 +162,36 @@ const truncated = cards.filter((c) =>
   for (const p of TICKER_PANELS) {
     ok(Object.hasOwn(PANEL_H, p.key), `the height table knows "${p.key}"`);
   }
-  /* THE LIMIT IS 200, AND ONE STATION IS EXEMPT BY NAME.
-     Every pairing this file can reach now measures 172px or less. 200 leaves
-     a drawer room to grow without a false failure and refuses the 704px and
-     482px pairings this order was chosen to end.
+  /* THE LIMIT IS 250, AND IT WENT UP WHEN THE EXEMPTION WENT AWAY.
+     It was 200 while `context` carried a named 515px exemption, because every
+     pairing the limit actually governed measured 172px or less. Folding that
+     station back under the general rule brings `marketRank`|`congress` — Δ233,
+     the closest pair that station allows — inside it, so 250 is the honest
+     number: the worst pairing this registry can now reach, plus a little room
+     for a drawer to grow without a false failure.
 
-     `context` IS EXEMPT AT 515px AND THE EXEMPTION IS THE POINT. Three rules
-     already argued in shared/flows-panels.js pin that station's order —
-     `context` is its group's lead so it comes first, `marketRank` must sit
-     directly under it (asserted below), and `congress` is the only other
-     member — and every ordering that fixes the 515px stretch breaks one of
-     them. So the number is recorded here rather than quietly accommodated by
-     a limit loose enough to swallow it: an editorial decision would be needed
-     to close it, and a test is not entitled to make one. If the station's
-     order changes, this exemption's own assertion fails and somebody has to
-     decide again. */
-  const PAIR_LIMIT = 200;
-  const EXEMPT = { context: 515 };
-  eq(TICKER_PANELS.filter((p) => p.group === "context").map((p) => p.key).join(","),
-     "context,marketRank,congress",
-     "the context station still holds the order its 515px exemption was granted for — " +
-     "change it and the exemption is void, because it was granted to THIS arrangement " +
-     "and not to the station");
+     RAISING A LIMIT TO ADMIT A PAIR IS THE MOVE THIS FILE IS MOST SUSPICIOUS
+     OF, so the direction matters. 200-with-a-515-exemption admitted a 515px
+     stretch; 250-with-none admits 233. The number went up and the check got
+     stricter, because what it now refuses is everything above 233 rather than
+     everything above 200 except one station where anything went.
+
+     THERE IS NO EXEMPTION ANY MORE, AND THAT IS THE POINT. `context` carried
+     one at 515px: it was its station's lead so it came first, `marketRank` had
+     to sit directly under it, and `congress` was the only other member — three
+     rules argued in shared/flows-panels.js, and together they forced a 350px
+     panel to be an 865px panel's row-mate. The number was recorded here rather
+     than swallowed by a limit loose enough to hide it, because closing it
+     needed an editorial decision and a test is not entitled to make one.
+
+     The owner made it: `marketRank` leads the station now. So the exemption is
+     DELETED rather than kept at a smaller number — a limit with no exceptions
+     is a stronger check than a limit with a well-argued one, and leaving the
+     machinery in place "in case" would be leaving a hole shaped like the
+     defect it was built for. */
+  const PAIR_LIMIT = 250;
   for (const g of TICKER_GROUPS) {
-    const limit = EXEMPT[g.key] || PAIR_LIMIT;
+    const limit = PAIR_LIMIT;
     /* Span-2 panels own their row, so they never share a height with anyone;
        at two columns the rest pair off in registry order. */
     const solo = TICKER_PANELS.filter((p) => p.group === g.key && p.span !== 2);
@@ -2528,9 +2534,19 @@ try {
     eq(at("path"), at("aggressor") + 1,
        "the session path sits directly under the lifted strikes: the same executions once " +
        "by strike and once by clock, with the fifty-row contract table out from between them");
-    eq(at("marketRank"), at("context") + 1,
-       "and the market-wide standing sits directly under the name's own year — one question " +
-       "at two scales, no longer split by the congressional disclosures");
+    /* INVERTED, NOT DROPPED. The claim was always that these two answer one
+       question at two scales and belong beside each other; which of them is
+       asked FIRST is a different claim, and it is the one that moved. The
+       station now opens on where the name places against the market and
+       closes on where today sits in its own year, because `context` holding
+       the lead forced it to be `marketRank`'s row-mate — 350px beside 865px,
+       the last 515px stretch on the page. The adjacency itself is untouched. */
+    eq(at("context"), at("congress") + 1,
+       "the name's own year closes the station, one place under the disclosures — still " +
+       "adjacent to the market-wide standing at one remove, and no longer stretched 515px " +
+       "by leading a station whose second panel is two and a half times its height");
+    eq(at("marketRank"), 0 + TICKER_PANELS.findIndex((p) => p.group === "context"),
+       "and the market-wide standing opens the station, which is what took the stretch out");
     eq(TICKER_GROUPS[0].label, "Overview",
        "the first station is labelled Overview: it is the station a reader LANDS on, and " +
        "\"Signal\" named a group of panels rather than a place to arrive");

@@ -5283,8 +5283,8 @@
     topContracts: { group: "tape", tier: "table" },
     darkpool: { group: "tape", tier: "table" },
     oiDeltas: { group: "tape", tier: "table" },
-    context: { group: "context", tier: "lead" },
-    marketRank: { group: "context", tier: "reading" },
+    context: { group: "context", tier: "chart" },
+    marketRank: { group: "context", tier: "lead" },
     congress: { group: "context", tier: "table" },
   };
 
