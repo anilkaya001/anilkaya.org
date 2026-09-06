@@ -1963,6 +1963,44 @@
         fmtOr(panel.week52Pos, (n) => Math.round(n * 100) + "% of range")],
     ]));
 
+    /* ---- THE WINDOW THE LINE ABOVE IS ACTUALLY DRAWN OVER ------------
+       THE PUBLISHER COMPUTED THIS WARNING AND THIS RENDERER THREW IT AWAY.
+       buildContext (shared/flows-card.js) publishes `sessions`,
+       `datedSessions`, `dropped` and `closeDates`, and its comment on the
+       third reads: "Sessions the filter removed. Non-zero means index is NOT
+       time in the arrays above, which is precisely when a reader needs the
+       dates." The sparkline above places every close by INDEX —
+       `xOf = (i) => pad + (i / (closes.length - 1)) * …` — so when the filter
+       dropped a session the line is drawn straight across the gap, at the
+       same slope as a real move, with nothing on the page saying so.
+
+       IT IS ONE SENTENCE AND IT IS A QUALIFIER, not a method note: it changes
+       what the drawing MEANS rather than explaining how it was made, so it
+       stays open under the fold rule this file states above.
+
+       EVERY BRANCH IS A DIFFERENT FACT, and none of them is silence. A window
+       with no gaps says its span; a window with gaps says how many and that
+       the axis is order rather than time; a card built before the fields
+       existed says nothing at all rather than printing a confident zero,
+       because `dropped` absent and `dropped === 0` are not the same claim. */
+    const dropped = isNum(panel.dropped);
+    const sessions = isNum(panel.sessions);
+    const dates = Array.isArray(panel.closeDates) ? panel.closeDates.filter(Boolean) : [];
+    if (dropped !== null || sessions !== null) {
+      const span = dates.length >= 2
+        ? ` from ${dates[0]} to ${dates[dates.length - 1]}`
+        : "";
+      host.append(qualifier(dropped === null || sessions === null
+        ? `Drawn over ${sessions === null ? dates.length : sessions} close(s)${span}.`
+        : dropped > 0
+          ? `Drawn over ${sessions} close(s)${span}, with ${dropped} session(s) ` +
+            `dropped from the window. The line joins them in ORDER, not on a time ` +
+            `axis — a segment spanning a gap is drawn at the same slope as one ` +
+            `spanning a single session, so read its shape and not its steepness.`
+          : `Drawn over ${sessions} consecutive close(s)${span}, none dropped, so ` +
+            `each step of the line is one session.`));
+    }
+
     host.append(el("p", "fc-note",
       "Simple close-to-close returns over the trailing window, and where the last " +
       "close sits between the 52-week low and high. Descriptive only: none of it " +
