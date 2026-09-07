@@ -304,6 +304,12 @@
   border: 1px solid var(--hairline);
   border-radius: 4px;
   background: var(--bg-elev);
+  /* THE ANCHOR THE CAPTION MEASURES ITSELF AGAINST. A <caption> takes its
+     TABLE's width, and the table here is up to 1063px inside a 351px port —
+     so the caption wrapped at 1063 and every visible line was cut mid-word.
+     `container-type: inline-size` makes this box a query container so the
+     caption can ask for the PORT's width instead. See .flows-caption. */
+  container-type: inline-size;
 }
 
 /* ---- TABLE DENSITY, IN ONE PLACE ----
@@ -348,6 +354,34 @@
 .cc-tbl,
 .mk-pulse-table { --tbl-pad-y: 0.28rem; --tbl-pad-x: 0.52rem; }
 
+/* THE CAPTION IS THE ONLY PROSE ON THIS PAGE SET TO A SCROLLING WIDTH, and
+   that made it unreadable on a phone rather than merely wide.
+
+   A <caption> is laid out at its TABLE's width, not its scroll port's. At
+   390px the port is 351px and these tables are 736-1063px, so the caption
+   wrapped at up to 1063px and each line ran 694px past the right edge.
+   Reading straight down then gives a NON-SENTENCE, because line two starts
+   after a hidden middle: measured on /flows/political/, a reader sees
+
+     "Ranked by the summed midpoint of each filer's disclos"
+     "high of the same filings. Sales are shown beside, never"
+
+   This stylesheet has already ruled exactly this failure out once. The
+   argument at the `columns: 32rem` rejection above says a multi-column flow
+   "breaks ONE sentence across a gutter, so a reader finishes a line at the
+   bottom of column one and hunts for its verb at the top of column two".
+   Here the gutter is 634px wide and invisible, which is worse: nothing tells
+   the reader a middle exists. The per-panel notes rendered OUTSIDE the
+   wrapper wrap correctly at 351px in the same screenshot, so this was the
+   one block of prose measuring itself against the data.
+
+   100cqw IS THE PORT, which is what `container-type: inline-size` on
+   .flows-tablewrap is there to provide. The table keeps its own width and
+   keeps scrolling — the caption simply stops being sized by it.
+
+   NOT `display: block`, which was the other candidate and was measured:
+   it re-boxes the caption out of the table's internal layout and blanks
+   the table body. */
 .flows-caption {
   caption-side: top;
   text-align: left;
@@ -355,6 +389,8 @@
   font-size: var(--fs-note);
   color: var(--ink-faint);
   border-bottom: 1px solid var(--hairline);
+  width: 100cqw;
+  box-sizing: border-box;
 }
 
 .flows-table th,
@@ -1416,6 +1452,30 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-dim);
+  /* Positioning context for the hit area below. `all: unset` also cleared
+     the UA button metrics, which is why this control measured 30px. */
+  position: relative;
+}
+
+/* A 44px TOUCH TARGET WITHOUT A 44px BOX, the same way .ft-tab and
+   .ft-zoom-open do it: the hit area is a transparent pseudo-element centred
+   on the chip, so the pill keeps the 30px height the controls row is drawn
+   around and a thumb still gets the full target. A 44px BOX instead would
+   add 14px to the controls row on every board route.
+
+   THIS IS THE CONTROL THAT SWAPS WHAT THE WHOLE PAGE SHOWS — Deck/Table on
+   the boards, All/Calls/Puts/Both feeds on /flows/unusual/ — and it is the
+   first thing a reader reaches for on arriving. Measured at 390x844 it was
+   a 29-30px target. The 7px of overhang each side clears its neighbours:
+   23px to the Find input on /flows/long/, 373px on /flows/unusual/. */
+.flows-view::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
 }
 
 .flows-view.is-on {
@@ -2318,12 +2378,24 @@ body.is-stale .flows-tablewrap {
    button would put ten chrome widgets across a data table, which is
    how a dense table stops being readable. */
 
+/* THE PADDING BELONGS TO THE BUTTON, NOT TO THE CELL AROUND IT. With
+   `padding: 0` on a control filling a cell that carries 9.6px of its own,
+   the target was the text line and nothing else: 65x13 inside a 79x32 header
+   on /flows/unusual/, twenty of them on that route. A tap on the cell's own
+   padding did nothing, and on a table that scrolls sideways a missed tap
+   starts a drag instead.
+
+   Moving the padding across costs the density pass nothing — measured, the
+   table stays 810px wide — because the same pixels are being spent, just
+   inside the thing a finger has to land on. */
+.flows-table thead th:has(.fb-sort) { padding: 0; }
+
 .flows-table thead th .fb-sort {
   display: flex;
   align-items: baseline;
   gap: 0.3em;
   width: 100%;
-  padding: 0;
+  padding: var(--tbl-pad-y) var(--tbl-pad-x);
   margin: 0;
   border: 0;
   background: none;
@@ -2834,6 +2906,59 @@ body.is-stale .flows-tablewrap {
 }
 
 .flows-rail a:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* THE COMFORTABLE TAP MINIMUM, ON A COARSE POINTER ONLY — the clause this
+   stylesheet already argues for .sg-btn, and the floor it states outright
+   further down: "44px is the tap-target floor every primary Flows control
+   keeps". The rail was the one primary control that did not keep it, and
+   .flows-signout — sitting in the same header — has carried min-height:44px
+   all along.
+
+   THIS IS THE ONE UNDERSIZED CONTROL WHERE A MISS IS NOT A NO-OP, which is
+   what makes it worth 39px of an 844px screen. Measured at 390x844 with
+   elementFromPoint rather than inset arithmetic, and swept over ALL FOURTEEN
+   links rather than one: every link 37.5-37.9px tall, rows 2.4px apart, and
+   a tap below the centre of FIVE of them reaches a DIFFERENT DESTINATION —
+   /flows/ask/ -> /flows/, /flows/ -> /flows/ticker/, /flows/ticker/ ->
+   /flows/desk/, /flows/desk/ -> /flows/political/, /flows/political/ ->
+   /flows/history/. The other nine have an inert neighbour, so a miss there
+   does nothing. Fourteen links, thirteen routes, the most-tapped control in
+   the product.
+
+   AND HERE IS WHAT THIS RULE DOES NOT FIX, because the first version of this
+   comment claimed more than the measurement supports. Raising the box to
+   44px moves the crossover from +22px below centre to +25px — it does NOT
+   make a near miss inert. The gutter is unchanged at 2.4px, and the same
+   five links still cross. That is arithmetic rather than preference: the
+   inert band IS the gap, so band = pitch - 44, and buying one costs height.
+   Measured at 390x844, all with overflow still 0:
+
+     gap 0.15rem (shipped)   rail 362px   inert band 2px
+     gap 0.35rem             rail 378px   inert band 5px
+     gap 0.5rem              rail 390px   inert band 8px
+
+   Not taken, and the reason is the charge the rail is already carrying: it
+   costs 323px of an 844px screen before this rule and 362px after, which
+   puts the first actual reading around 518px down. Spending another 28px to
+   buy 8px of margin makes the phone worse in the larger way to fix it in the
+   smaller one. The numbers are here so the next person to weigh it has the
+   measurement rather than a guess.
+
+   NOT THE PSEUDO-ELEMENT PATTERN EITHER, and that is measured too. A 44px
+   ::after on a 40.4px pitch OVERLAPS its neighbours: hit heights came back
+   39-44px rather than a uniform 44, and the probe crossed from "Ask the
+   data" into "Ticker page" — taps silently routed to whichever pseudo paints
+   last, which is worse than the gap it was meant to close. That pattern
+   works on .ft-tab because that strip reserves 10px of padding each side, so
+   its pitch already exceeds 44. Here the box itself has to grow.
+
+   THE REST OF THE CHARGE, STATED THE WAY THE BAR BUDGET IS: horizontal
+   overflow stays 0, the rail gains no vertical scrollbar, and its
+   scrollWidth/clientWidth stays 695/390 — so the scroll-edge contract below
+   is untouched. */
+@media (pointer: coarse) {
+  .flows-rail a { min-height: 44px; }
+}
 
 .rail-count {
   font-size: var(--fs-label);
@@ -3856,6 +3981,54 @@ body.is-stale .flows-tablewrap {
 
    GREYSCALE-SAFE BY CONSTRUCTION: the edge is a luminance step, not a hue,
    so it survives the same way every other mark in this product does. */
+/* AND THE TABLES HIDE MORE THAN THE STRIPS DO. The rule below was written
+   for three strips hiding 142-648px; measured at 390, eight table wrappers
+   on /flows/political/, /flows/unusual/ and /flows/events/ hide 385-712px,
+   which is 52-67% of each table — against the 31% that .flows-rail hides.
+
+   Before: the wrapper's right edge read its 1px border and then straight to
+   content, while its LEFT edge — with nothing past it at all — read the same
+   way. The edge with 634px behind it and the edge with nothing behind it
+   were indistinguishable. The wrapper reserves no scrollbar gutter either
+   (offsetHeight - clientHeight is 2, the borders), so on a phone with
+   overlay scrollbars nothing at rest said the row continues.
+
+   AFTER, AND READ THE NUMBERS HONESTLY. Mean column luminance on the three
+   scrolling wrappers of /flows/political/ at 390, right edge then left:
+
+     hides 634px   at the start  64.76 / 24.30    at the end  30.07 / 55.76
+     hides 712px   at the start  68.53 / 18.38    at the end  32.75 / 57.26
+     hides 385px   at the start  53.13 / 18.20    at the end  47.01 / 56.65
+
+   The DIRECTION is the affordance and it holds on all three: the right edge
+   falls as the content behind it runs out and the left edge rises as content
+   appears behind it. But these are not the strips' clean numbers, and the
+   reason is worth writing down rather than rounding away — a strip's edge
+   columns are page ground, so its flat rows sit AT the ground to a tenth,
+   whereas a table's edge columns hold cell text at every scroll position.
+   That text is what puts 24.30 in a row that "should" be flat and 47.01 in
+   another. The third wrapper is the weak case: 53.13 to 47.01 is six counts,
+   because its right-hand column is dense at both extremes.
+
+   So: a reader gets a real cue on the two wide tables and a faint one on the
+   narrow one. Anyone tempted to pin these the way the strips are pinned
+   should measure a column of PAGE GROUND rather than of the wrapper, or the
+   assertion will be reading the payload's own text.
+
+   IT TAKES --bg-elev, NOT --bg, because the wrapper paints its own elevated
+   ground and a local layer painting the page ground would show as a band. */
+.flows-tablewrap {
+  background-image:
+    linear-gradient(to right, var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left,  var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0)),
+    linear-gradient(to left,  rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0));
+  background-position: left center, right center, left center, right center;
+  background-size: 2.2rem 100%, 2.2rem 100%, 0.9rem 100%, 0.9rem 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
 .ft-bar .ft-head, .flows-rail, .ft-tabs {
   background-image:
     linear-gradient(to right, var(--bg) 30%, rgba(0, 0, 0, 0)),
