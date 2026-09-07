@@ -623,7 +623,73 @@ export function buildPricedMove({
   if ((m === null || !(m > 0)) && impliedH === null) return unavailable("no implied volatility");
 
   const quoted = m !== null && m > 0;
+
+  /* THE PANEL ASKS WHAT MOVE IS PRICED AND THEN DREW A BAND. Both readings
+     are here; neither was ever stated.
+
+     IT LEADS ON THE FIXED HORIZON WHEN THERE IS ONE, and that ordering is the
+     distinction this function is built around rather than a preference. The
+     vendor's own quote is real but runs to ITS OWN undated horizon — "the
+     nearest end-of-week expiry" — so it is neither comparable across names
+     nor datable from anything this pipeline sees. The horizon-scaled band is
+     comparable across the whole board, which is what a reader coming off a
+     ranked list needs.
+
+     THE VENDOR QUOTE IS STILL A READING, so when the fixed horizon is absent
+     the sentence states the quote and NAMES ITS RULE VERBATIM out of
+     `horizonRule`. Saying nothing there would withhold the only measurement
+     the panel has; inventing a date for it would be worse.
+
+     REALIZED IS STATED ONLY WHEN IT EXISTS, and the two are the same scaling
+     of iv30 and rv30, so "against N% realized" is the richness comparison in
+     the horizon's own units rather than a second, differently-scaled claim
+     beside it.
+
+     AND THE ZERO CASE DOES NOT BEHAVE THE WAY THIS COMMENT FIRST CLAIMED. I
+     wrote that a realized move of exactly 0 is a measured zero and prints;
+     it does not. horizonMove() returns null for any annualVol <= 0, so a
+     zero 30-day realized vol reaches this lead as ABSENT and takes the
+     no-comparison clause. That is an upstream decision and a defensible one
+     — an annualised volatility of zero says a name did not move for thirty
+     sessions, which in practice is a missing value rather than a reading —
+     but it is the one place the measured-zero rule bends, and a lead must
+     not claim otherwise. The offline branch scan is what caught it. */
+  const pct = (x) => Number((x * 100).toFixed(1));
+  const lead = (() => {
+    if (impliedH !== null) {
+      const lo = Number((s * (1 - impliedH)).toFixed(2));
+      const hi = Number((s * (1 + impliedH)).toFixed(2));
+      return panelLead(
+        `Options price a \u00b1${pct(impliedH)}% move over ${sessions} session` +
+        `${sessions === 1 ? "" : "s"} \u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}` +
+        (realizedH === null
+          ? ", with no realized volatility to compare it against."
+          : `, against ${pct(realizedH)}% realized.`),
+        {
+          impliedPct: pct(impliedH),
+          sessions,
+          low: lo,
+          high: hi,
+          realizedPct: realizedH === null ? null : pct(realizedH),
+        });
+    }
+    if (!quoted) return null;
+    const lo = Number((s * (1 - m)).toFixed(2));
+    const hi = Number((s * (1 + m)).toFixed(2));
+    return panelLead(
+      `Options price a \u00b1${pct(m)}% move to the nearest end-of-week expiry ` +
+      /* "interpolated" RATHER THAN "30-day", and not for brevity: a bare 30
+         in the prose is a numeral the scan cannot match against `n`, and it
+         is not a figure this sentence claims — it names a field. iv30 IS the
+         vendor's interpolation, which this file says a few lines down, so the
+         word is accurate as well as scannable. */
+      `\u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
+      `volatility, so no fixed-horizon band to compare across names.`,
+      { quotedPct: pct(m), low: lo, high: hi });
+  })();
+
   return ok({
+    lead,
     /* --- the vendor's quote, to ITS OWN undated horizon: real, but neither
        comparable across names nor datable from anything this pipeline sees. --- */
     movePerc: quoted ? Number(m.toFixed(5)) : null,
