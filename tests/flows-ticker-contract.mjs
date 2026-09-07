@@ -24,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
-import { buildLevels, buildContext } from "../shared/flows-card.js";
+import { buildLevels, buildContext, buildDisplacement, buildPath } from "../shared/flows-card.js";
 import {
   TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS, TICKER_GROUPS, PANEL_TIERS,
   STATION_SIDE_COUNTS,
@@ -1377,6 +1377,19 @@ try {
       closes: Array.from({ length: 40 }, (_, i) => 150 + i * 0.8),
       r5: 0.012, r21: 0.084, r42: 0.11, week52Pos: 0.91, changePct: 0.004,
     });
+    led.panels.displacement = buildDisplacement([
+      { strike: 180, call_gamma_oi: 1e6, put_gamma_oi: 0, call_gamma_vol: 0, put_gamma_vol: 0 },
+      { strike: 186, call_gamma_oi: 0, put_gamma_oi: 0, call_gamma_vol: 1e6, put_gamma_vol: 0 },
+    ], { atr: 4, spot: 183 });
+    /* A NET DELTA LARGE ENOUGH TO BE GROUPED, deliberately. The first version
+       of buildPath's lead printed toLocaleString, so 1,250,000 reached the
+       prose as three unpinned figures — and every fixture in its branch check
+       happened to produce 870, which needs no separator. A corpus that cannot
+       reach a branch is a corpus that cannot test it. */
+    led.panels.path = buildPath(Array.from({ length: 5 }, (_, i) => ({
+      tape_time: new Date(Date.UTC(2026, 7, 24, 13, 31 + i)).toISOString(),
+      net_delta: 250000, net_call_premium: 2500000, net_put_premium: 0,
+    })), { sessionDate: "2026-08-24" });
     await mount(page, led, { ticker: led.ticker, station: "all" });
 
     const ones = await page.evaluate(() =>
@@ -1391,7 +1404,8 @@ try {
        target: the day a panel gains a lead this line fails and is rewritten
        deliberately, which is the only way a slot cannot quietly stop being
        filled. */
-    assert.deepEqual(ones.map((p) => p.key).sort(), ["context", "levels"],
+    assert.deepEqual(ones.map((p) => p.key).sort(),
+      ["context", "displacement", "levels", "path"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
