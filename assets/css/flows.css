@@ -3072,7 +3072,26 @@ body.is-stale .flows-tablewrap {
 /* PR 4 fills this with the station's one-line answer. Until then an empty
    block still takes a grid row and a gap, opening a hole under every heading
    that reads as a sentence missing rather than one not yet written. */
-.ft-station-lead { grid-column: 1 / -1; margin: 0; }
+/* THE COVERAGE LINE READS AS THE STATION'S METADATA, NOT AS ITS PROSE.
+
+   It shipped with `grid-column` and `margin` and nothing else, so it inherited
+   the body face at the body size in the body colour — measured identical to
+   `body` on every width (16.18/17.12/18.80px, weight 400, rgb(236,232,216)).
+   A sentence counting what drew is not a reading and must not be set like one:
+   at body weight it competes with the panels it is describing, and a reader
+   scanning for findings has to parse it to discover it is bookkeeping.
+
+   IT TAKES `.ft-group-b`'s VOCABULARY, which is the station blurb sitting
+   directly above it — same serif, same note size, same dimmed ink. The two
+   belong to the same heading and now look like it: the blurb says what the
+   station asks, this says what came back. */
+.ft-station-lead {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--fs-note);
+  color: var(--ink-dim);
+}
 .ft-station-lead:empty { display: none; }
 /* Grid items default to min-width:auto, which lets a wide child (the top
    contracts table, a 30-bar ladder) push its column past 1fr and take the
@@ -3793,6 +3812,83 @@ body.is-stale .flows-tablewrap {
    640px and 736px the untightened 195px wall the measurement above is about.
    It is the tenth width in this section and it is the only one — if a second
    appears, the ladder is the thing to move, not this. */
+/* =============================================================
+   A STRIP THAT SCROLLS SAYS SO.
+
+   Three strips scroll horizontally inside themselves on a phone, and each
+   decision is argued where it is made: the identity row trades four wrapped
+   lines and 90px for one scrolling line and 28px, `.flows-rail` takes the same
+   treatment, and the station tabs follow. Measured on a 390x844 viewport with
+   the real faces loaded, what that hides is:
+
+     .ft-bar .ft-head    579px   conviction, the gamma regime, both dates
+     .flows-rail         179px   the later sections
+     .ft-tabs             72px   the CONTEXT station, entirely
+
+   The identity row's own comment says those readings are "a swipe away", and
+   that is exactly the gap: NOTHING TOLD ANYONE TO SWIPE. No fade, no shadow,
+   no mask — a grep for gradient or mask rules over this stylesheet returned
+   none. A strip cut mid-word with no edge treatment does not read as scrollable,
+   it reads as broken text, and a reader who never swipes never learns the
+   conviction, the regime, the session dates, or that a fifth station exists.
+
+   CSS-ONLY, AND THE MECHANISM IS THE POINT. Two background layers per edge:
+   one attached `local` (it scrolls WITH the content) painting the page ground,
+   one attached `scroll` (it stays with the box) painting the shadow. At rest
+   the local layer sits over the shadow and hides it; scroll away from an edge
+   and the local layer travels off, uncovering it. So each edge shows its
+   shadow exactly when there is something past it — the affordance is a
+   function of the actual scroll position rather than of a media query
+   guessing at one.
+
+   NO JAVASCRIPT, DELIBERATELY. This is chrome on the route tests/flows-weight
+   .mjs weighs, and a scroll listener would be bytes on the reader's CPU to
+   compute what the compositor already knows. It also works before any script
+   runs, which is the state a slow connection spends the longest in.
+
+   THE EDGE LIGHTENS, IT DOES NOT DARKEN, AND THAT WAS MEASURED RATHER THAN
+   CHOSEN. The published version of this technique paints a black shadow,
+   which assumes a light page. On `--bg: #0a0a08` there is nothing left to
+   darken: sampled down the right edge of the tab strip, the black form read
+   7.07 mean luminance against a 10.92 ground — a four-count drop out of 255,
+   which is no affordance at all. The ink colour at low alpha reads as a soft
+   edge on this ground and is measured below the rule.
+
+   GREYSCALE-SAFE BY CONSTRUCTION: the edge is a luminance step, not a hue,
+   so it survives the same way every other mark in this product does. */
+.ft-bar .ft-head, .flows-rail, .ft-tabs {
+  background-image:
+    linear-gradient(to right, var(--bg) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left,  var(--bg) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0)),
+    linear-gradient(to left,  rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0));
+  background-position: left center, right center, left center, right center;
+  background-size: 2.2rem 100%, 2.2rem 100%, 0.9rem 100%, 0.9rem 100%;
+  background-repeat: no-repeat;
+  /* The two ground layers ride WITH the content; the two shadows stay with the
+     box. That pairing is the whole trick. */
+  background-attachment: local, local, scroll, scroll;
+}
+/* MEASURED, both edges and both directions, on a 320x900 viewport with the six
+   real faces loaded, sampling mean column luminance (0-255) down each strip.
+   The ground is `--bg` itself, which computes to 9.86:
+
+     .flows-rail   right edge, scrolled to the start   12.30  28.03  39.33  48.59  51.84
+                   right edge, scrolled to the end      9.82   9.84   9.94   9.94   9.94
+                   left  edge, scrolled to the start    9.94   9.94   9.94   9.84  10.25
+                   left  edge, scrolled to the end     52.50  47.23  42.24  27.89  13.11
+
+   Read it as the contract: an edge with something past it stands 40 counts off
+   the ground, and an edge with nothing past it IS the ground to a tenth. The
+   two rows that must be flat are flat, which is the half a static fade cannot
+   do and the half that makes this an affordance rather than a decoration.
+   tests/flows-ticker-contract.mjs pins all four rows, so the polarity cannot
+   silently invert back to the black form that measured 7.07 against 10.92.
+
+   The identity row and the tab strip carry the same treatment and measure the
+   same on their right edge; their LEFT columns are the first chip's own border
+   and text, so that edge is not readable there and is not asserted there. */
+
 @media (max-width: 46rem) {
   /* THE IDENTITY ROW SCROLLS INSTEAD OF WRAPPING, which is the whole saving:
      wrapped, ten chips are four lines and 90px; on one scrolling line they are
