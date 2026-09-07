@@ -191,11 +191,54 @@ const CEILING_KIB = {
      the same reserve the last decision set, and for the same reason: a fix,
      not the next feature.
 
+     493 -> 496, AND THE FIRST THING TO SAY IS THAT THE PARAGRAPH ABOVE WAS
+     QUOTED AS A MEASUREMENT AND IS NOT ONE. "493 leaves 7,168 B" was true of a
+     486.00 KiB route on 2026-09-05; two PRs have landed on it since. Re-derived
+     — `stat` on disk against `git cat-file -s` at the merge base:
+
+       file                before     after
+       flows-dock.js        6,003     6,003
+       nav.js               2,560     2,560
+       flows-panels.js    159,290   161,628
+       flows-ticker.js    336,334   336,334
+       total              504,187   506,525 B = 494.65 KiB
+
+     The room under 493 was 645 B, not 7,168, and this change needs 2,338. A
+     comment read as if it were a reading is the precise failure this file
+     exists to catch, and it happened here, to the person writing this line.
+
+     WHAT IT BOUGHT, AND IT IS A FIX RATHER THAN A FEATURE. renderContext
+     positioned the price sparkline BY INDEX and read none of `dropped`,
+     `sessions`, `datedSessions` or `closeDates` — four fields buildContext
+     (shared/flows-card.js:575-596) publishes, the last of them carrying its own
+     note: "Non-zero means index is NOT time in the arrays above, which is
+     precisely when a reader needs the dates." So on a name with a session
+     dropped from the window, the line was drawn straight across the hole as
+     though the window were continuous. The pipeline computed the warning,
+     published it, wrote down why it mattered, and the renderer discarded it.
+     The panel now states the window's real extent in three branches — gapless,
+     gapped, and a payload too old to say which — and only the gapped one tells
+     the reader to read the line's shape and not its steepness.
+
+     THE BYTES WERE NOT BOUGHT BACK BY SHORTENING THE COMMENT. The note on
+     unusualPage below already settled that trade: doing so "is bookkeeping
+     rather than engineering: it degrades the one thing this codebase is
+     strictest about to satisfy a number." The number moves instead, in a diff,
+     where it can be argued with.
+
+     AND 496 RATHER THAN 502 — THE RESERVE IS DELIBERATELY NOT RESTORED. Both
+     raises above left ~7 KiB as "room for a fix, not for a feature", and the
+     470 paragraph records what became of one: the route "spent all but 1.5k of
+     that room with nobody re-deriving the number." 496 leaves 1,379 B, which is
+     room for nothing, and that is the intent. This route is already owed the
+     reduction below; until it lands, the next change here has to move this
+     number in the open rather than find room waiting for it.
+
      THIS CEILING IS OWED A REDUCTION. The deferral PRs (the eight ticker-only
      drawers out of flows-panels.js) take roughly 230k off this route, and when
-     they land 493 becomes exactly the inherited headroom this file's header
+     they land 496 becomes exactly the inherited headroom this file's header
      warns about. Re-derive it downward then; do not leave it. */
-  tickerPage: 493,
+  tickerPage: 496,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
