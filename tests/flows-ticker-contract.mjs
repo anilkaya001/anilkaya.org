@@ -3755,24 +3755,36 @@ try {
          "enlarging a panel puts that panel in the URL, so a reader can send the chart " +
          "they are looking at");
       await page.keyboard.press("Escape");
-      /* WAIT FOR THE HANDLER, NOT FOR THE FLAG.
+      /* WAIT FOR THE HANDLER, NOT FOR ANYTHING THE BROWSER DOES ON ITS OWN.
+
          `dialog.open` is set to false SYNCHRONOUSLY inside close(); the
          `close` EVENT is queued and fires a task later, and it is that
-         handler (flows-ticker.js:4988-4994) which restores the hash and
-         returns focus. So a wait on `.open` alone can win the race and read
-         location.hash one task too early — which is exactly what happened:
-         this assertion passed locally and failed in CI on the same commit,
-         reading '#panel-gamma' where it expected the arrival hash. The race
-         was always here; a change elsewhere in this file only altered how the
-         coin landed.
+         handler (assets/js/flows-ticker.js, the "close" listener) which
+         restores the hash. So a wait on `.open` alone reads location.hash one
+         task too early.
 
-         FOCUS IS THE THING TO WAIT ON, because it is a DIFFERENT effect of
-         the SAME handler — so this is a wait on the handler having run, not a
-         wait on the assertion below, which would assert nothing. */
+         AND FOCUS IS NOT THE FIX, WHICH IS WHAT THE PREVIOUS VERSION OF THIS
+         WAIT GOT WRONG. It waited on `.open === false` AND focus being back
+         on the opener, on the reasoning that focus is "a different effect of
+         the same handler". It is not: closing a modal dialog runs the
+         browser's own focus-restoring steps, SYNCHRONOUSLY, inside close().
+         The handler's `zoomOpener.focus()` is belt-and-braces over something
+         that has already happened. Measured, sampling in the same microtask
+         that close() returns in:
+
+           open false | focused true | hash "#panel-gamma" | host 6 children
+
+         — both conditions of the old wait already true, the hash not yet
+         restored. That wait asserted nothing, and main went red on it.
+
+         THE HOST EMPTYING IS THE SIGNAL, because nothing but the handler
+         empties it, and it happens AFTER the writeHash inside the same
+         handler. `hostChildren === 0` therefore proves the hash has already
+         been written. Arm B below pins the browser behaviour that made the
+         old wait wrong, so it cannot be reintroduced as a simplification. */
       await page.waitForFunction(
         () => !document.getElementById("ftZoom").open &&
-          document.activeElement ===
-            document.querySelector('.ft-panel[data-panel="gamma"] .ft-zoom-open'),
+          document.getElementById("ftZoomHost").childElementCount === 0,
         null, { timeout: 3000 });
       const closed = await page.evaluate(() => location.hash);
       eq(closed, before,
@@ -3786,6 +3798,42 @@ try {
       eq(refocused, "gamma",
          "and returns focus to the button that opened it, so a keyboard reader " +
          "keeps their place in the grid");
+
+      /* ARM B: THE RACE ITSELF, PINNED. Reopen and call close() from inside
+         the page, sampling in the SAME synchronous turn it returns in. This
+         is not a test of the product — it is a test of the assumption the
+         wait above depends on, written down so the shorter wait cannot come
+         back. If a future browser (or a future handler) makes focus restore
+         late, this arm fails and says the wait may be simplified. */
+      await page.click('.ft-panel[data-panel="gamma"] .ft-zoom-open');
+      await page.waitForFunction(
+        () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
+      const sync = await page.evaluate(() => {
+        const zoom = document.getElementById("ftZoom");
+        const host = document.getElementById("ftZoomHost");
+        const opener = document.querySelector('.ft-panel[data-panel="gamma"] .ft-zoom-open');
+        zoom.close();
+        return { open: zoom.open, hash: location.hash,
+                 focused: document.activeElement === opener,
+                 hostChildren: host.childElementCount };
+      });
+      eq(sync.open, false, "close() clears .open synchronously, so .open is not a wait");
+      eq(sync.focused, true,
+         "and the BROWSER has already restored focus to the opener in that same turn — " +
+         "which is why focus is not a wait either, however much it looks like one");
+      eq(sync.hash, "#panel-gamma",
+         "while the hash is still the panel's: the close HANDLER has not run yet, so a " +
+         "wait satisfied by the two facts above reads the hash one task too early");
+      ok(sync.hostChildren > 0,
+         `and the enlarge host still holds its drawing (${sync.hostChildren} children) — ` +
+         "emptying it is the handler's own work and happens after the hash is written, " +
+         "which is what makes it the signal to wait on");
+      await page.waitForFunction(
+        () => document.getElementById("ftZoomHost").childElementCount === 0,
+        null, { timeout: 3000 });
+      eq(await page.evaluate(() => location.hash), before,
+         "and once the host IS empty the hash is restored, every time");
+
       eq(errors.length, 0, `the enlarge round trip throws nothing (${errors.join("; ")})`);
       await page.close();
     }
