@@ -272,11 +272,22 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
   let scanned = 0;
   for (const sec of sections) {
     for (const f of sec.facts) {
-      const quoted = new Set();
+      /* NUMBERS AND STRINGS ARE KEPT IN SEPARATE SETS, and the single set this
+         replaces carried a latent defect that this suite's own data never
+         happened to reach. The mask below exists for STRING values; a NUMBER
+         stringified is also a string, so one set masks "182.5" out of a
+         prose "182.50" and leaves a bare "0" behind, which is then reported as
+         an unpinned figure. The ticker contract's copy of this scan met exactly
+         that on a levels reading, which is how it was found. */
+      const quotedNums = new Set();
+      const quotedText = new Set();
       for (const v of Object.values(f.n)) {
-        if (typeof v === "number") quoted.add(String(v));
-        else if (typeof v === "string") quoted.add(v);
-        else if (Array.isArray(v)) for (const x of v) quoted.add(String(x));
+        if (typeof v === "number") quotedNums.add(String(v));
+        else if (typeof v === "string") { quotedNums.add(v); if (/\D/.test(v)) quotedText.add(v); }
+        else if (Array.isArray(v)) for (const x of v) {
+          quotedNums.add(String(x));
+          if (typeof x === "string" && /\D/.test(x)) quotedText.add(x);
+        }
       }
       /* THE STRING VALUES ARE MASKED OUT BEFORE THE DIGITS ARE READ,
          and getting this wrong is what the first run of this suite
@@ -286,15 +297,11 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
          quoted in `n` — tickers, dates, timestamps — is removed
          first, and what remains is the prose's own arithmetic. */
       let stripped = f.say;
-      for (const v of quoted) {
-        if (typeof v === "string" && /\D/.test(v)) {
-          stripped = stripped.split(v).join(" ");
-        }
-      }
+      for (const v of quotedText) stripped = stripped.split(v).join(" ");
       const inProse = stripped.match(/-?\d+(?:\.\d+)?/g) || [];
       for (const lit of inProse) {
         scanned++;
-        ok(quoted.has(lit) || quoted.has(String(Number(lit))),
+        ok(quotedNums.has(lit) || quotedNums.has(String(Number(lit))),
            `every figure in a briefing sentence is pinned in n — "${lit}" in "${f.say.slice(0, 55)}" ` +
            "must be quoted from a payload field, or a rephrasing could change it silently");
       }

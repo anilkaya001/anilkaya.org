@@ -4888,6 +4888,7 @@
     for (const section of grid.querySelectorAll(".ft-panel[data-panel] > div")) {
       markExplained(section);
     }
+    writePanelLeads(card);
     writeStationLeads();
     if (missing.length) {
       console.error("flows-ticker: no drawing host for panel(s): " + missing.join(", "));
@@ -4927,6 +4928,24 @@
      already exists. That is the next change, not this one. This one ships the
      five station lines, which carry information no panel holds and therefore
      duplicate nothing. */
+
+  /* The panel's one-line answer, PRINTED and never composed. `panel.lead` is
+     `{ say, n }`; shared/flows-card.js builds it where CPU is free and carries
+     the whole argument, including why every numeral in `say` is pinned in `n`. */
+  function writePanelLeads(card) {
+    const panels = (card && card.panels) || {};
+    for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
+      const slot = section.querySelector(":scope > .ft-panel-one");
+      if (!slot) continue;
+      /* CLEARED FIRST, on every card. A slot holding the previous name's
+         reading under this name's heading is the worst failure this page has. */
+      slot.textContent = "";
+      const panel = panels[section.dataset.panel];
+      const said = panel && panel.lead && typeof panel.lead.say === "string"
+        ? panel.lead.say.trim() : "";
+      if (said) slot.textContent = said;
+    }
+  }
 
   /* The station's own line: what its panels came back with, counted.
 
