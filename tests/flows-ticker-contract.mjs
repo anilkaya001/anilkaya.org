@@ -1262,6 +1262,119 @@ try {
     eq(errors.length, 0, `none of the three windows throws (${errors.join("; ")})`);
   }
 
+  /* ---------- 2f. the five station lines, written at last -------------
+
+     `.ft-station-lead` is served on all five stations, styled, guarded with
+     `:empty{display:none}`, asserted above to arrive EMPTY — and nothing had
+     ever written to it. Same for `.ft-panel-one` on all 23 panels. Twenty-
+     eight slots the design reserved and never filled.
+
+     THE PANEL SLOTS ARE NOT FILLED HERE, AND THE REASON IS THIS SUITE. The
+     obvious implementation lifts each panel's `.fc-reading.is-lead` into its
+     slot, and two assertions in this file refused it: skewTerm leads on TWO
+     readings kept separate on purpose, and ivSurface is asserted to lead "on
+     exactly one reading" in its DRAWING. Read together they say the slot sits
+     immediately above the drawing, so moving a sentence up by one element
+     changes nothing a reader sees while breaking rules about where a finding
+     lives. The nineteen panels that do NOT lead in their drawing are the ones
+     the slot is for, and each needs a one-line answer authored from its own
+     payload. That is the next change.
+
+     WHAT A STATION LINE SAYS IS WHAT NO PANEL CAN: what is missing here,
+     before a reader scrolls six boxes to find out. It is counted off the DOM
+     the renderers actually emitted rather than off the payload, so a panel
+     that draws nothing is counted as silent however it came to be silent —
+     and the four silences are NOT collapsed: `unavailable` (the source did not
+     return) and `quiet` (it answered and measured nothing) are counted and
+     named separately, because a reader deciding whether to trust a thin
+     station needs to know which it is. */
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const card = withChain[0];
+    await mount(page, card, { ticker: card.ticker, station: "all" });
+
+    const leads = await page.evaluate(() =>
+      [...document.querySelectorAll("#ftGrid .ft-station[data-group]")].map((st) => ({
+        group: st.dataset.group,
+        text: String((st.querySelector(":scope > .ft-station-lead") || {}).textContent || "").trim(),
+        panels: st.querySelectorAll(":scope > .ft-panel[data-panel]").length,
+        /* THE READING BELONGS TO THE STATION, NOT TO THE GRID. Read as a
+           direct child so a line written into the wrong station — or once,
+           into the first — fails here rather than looking right. */
+        own: st.querySelectorAll(":scope > .ft-station-lead").length,
+      })));
+
+    eq(leads.length, 5, "all five stations are inspected");
+    for (const st of leads) {
+      eq(st.own, 1, `station ${st.group} has exactly one lead slot of its own`);
+      ok(st.text.length > 0,
+         `station ${st.group} writes its coverage line — the slot was served empty and ` +
+         `nothing had ever written to it on any card, for the life of the markup`);
+      ok(/\d/.test(st.text),
+         `and it carries a NUMBER (${st.group}: "${st.text}") — a one-liner with no ` +
+         `figure in it is prose, not a reading`);
+      const drawn = /(\d+) of (\d+) drawn/.exec(st.text);
+      ok(drawn !== null,
+         `stating a count against its own denominator — a count with no denominator ` +
+         `cannot say whether a station is thin or ordinary (${st.text})`);
+      if (!drawn) continue;
+      eq(Number(drawn[2]), st.panels,
+         `${st.group}: the denominator is this station's own panel count, not a constant ` +
+         `a registry change would leave behind`);
+      const withheld = /(\d+) withheld/.exec(st.text);
+      const quiet = /(\d+) quiet/.exec(st.text);
+      eq(Number(drawn[1]) + (withheld ? Number(withheld[1]) : 0) + (quiet ? Number(quiet[1]) : 0),
+         st.panels,
+         `${st.group}: drawn + withheld + quiet accounts for every panel in the station ` +
+         `("${st.text}") — a coverage line whose parts do not sum to its whole is ` +
+         `describing some other station`);
+      if (withheld) {
+        ok(/withheld — the source did not return/.test(st.text),
+           `${st.group}: a withheld panel says the source did not RETURN`);
+      }
+      if (quiet) {
+        ok(/quiet — the source answered and measured nothing/.test(st.text),
+           `${st.group}: a quiet panel says the source ANSWERED and measured nothing — ` +
+           `the two silences stay two sentences here as they do everywhere else`);
+      }
+    }
+
+    /* AND THE LINE IS REWRITTEN PER CARD, not accumulated. drawAll runs again
+       on every name the picker loads, and a coverage line that appended rather
+       than replaced would read as a station twice its own size. */
+    const other = withChain.find((c) => c.ticker !== card.ticker) || fixtures[0];
+    await mount(page, other, { ticker: other.ticker, station: "all" });
+    const again = await page.evaluate(() =>
+      [...document.querySelectorAll("#ftGrid .ft-station[data-group]")].map((st) => ({
+        group: st.dataset.group,
+        text: String((st.querySelector(":scope > .ft-station-lead") || {}).textContent || "").trim(),
+        panels: st.querySelectorAll(":scope > .ft-panel[data-panel]").length,
+      })));
+    for (const st of again) {
+      const drawn = /(\d+) of (\d+) drawn/.exec(st.text);
+      ok(drawn !== null && Number(drawn[2]) === st.panels,
+         `${st.group}: a second card rewrites the line rather than appending to it ` +
+         `("${st.text}")`);
+      eq((st.text.match(/drawn/g) || []).length, 1,
+         `${st.group}: and says "drawn" exactly once, so nothing accumulated`);
+    }
+
+    /* THE PANEL SLOTS STAY EMPTY, ASSERTED RATHER THAN LEFT TO CHANCE — until
+       the nineteen one-liners exist, a filled slot would mean something is
+       writing to them that this change did not put there. */
+    const ones = await page.evaluate(() =>
+      [...document.querySelectorAll("#ftGrid .ft-panel-one")]
+        .map((n) => String(n.textContent || "").trim()).filter(Boolean));
+    eq(ones.length, 0,
+       `no panel slot is written yet (${ones.length}) — this line is the marker for the ` +
+       `change that fills them, and it has to be deleted deliberately`);
+
+    eq(errors.length, 0, `the station walk throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
   /* ---------- 3. the minus sign, on numbers only ------------------ */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });

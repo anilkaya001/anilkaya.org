@@ -4888,8 +4888,92 @@
     for (const section of grid.querySelectorAll(".ft-panel[data-panel] > div")) {
       markExplained(section);
     }
+    writeStationLeads();
     if (missing.length) {
       console.error("flows-ticker: no drawing host for panel(s): " + missing.join(", "));
+    }
+  }
+
+  /* ---------- the served slots, filled -------------------------------
+
+     `.ft-panel-one` is served on all 23 panels and `.ft-station-lead` on all
+     five stations. Both are styled, both guarded with `:empty{display:none}`,
+     both asserted by the contract suite — and until now NOTHING WROTE TO
+     EITHER. Their own comment in flows.css read "PR 4's one-line answer. Empty
+     until then", and PR 4 shipped something else. Twenty-eight slots the
+     design reserved and never filled.
+
+     THE STATION LINES LAND FIRST, AND THE PANEL SLOTS DO NOT, BECAUSE THE
+     SUITE REFUSED THE OBVIOUS IMPLEMENTATION TWICE AND WAS RIGHT BOTH TIMES.
+
+     The obvious one: a panel already writes its finding as
+     `.fc-reading.is-lead` at the top of its drawing, so lift that sentence
+     into the slot. It fails, and the failures name the reason. skewTerm leads
+     on TWO readings kept deliberately separate (a withheld skew beside a
+     published term has to stay digit-free, and the suite scopes that check to
+     the FIRST `.fc-reading`); ivSurface is asserted to lead "on exactly one
+     reading" IN ITS DRAWING, and lifting takes that count to zero.
+
+     Reading those two failures together says something better than either: the
+     slot sits IMMEDIATELY ABOVE the drawing, so moving a sentence from the top
+     of the drawing into it changes nothing a reader can see, while breaking
+     invariants that encode real rules about where a panel's finding lives. A
+     copy would be worse — one claim in two places, free to drift.
+
+     So the rule this change establishes is: EVERY PANEL LEADS EXACTLY ONCE,
+     and the slot is for the panels that do not lead in their drawing at all.
+     Nineteen of the twenty-three are in that group, and each needs a one-line
+     answer authored from its own payload rather than lifted from somewhere it
+     already exists. That is the next change, not this one. This one ships the
+     five station lines, which carry information no panel holds and therefore
+     duplicate nothing. */
+
+  /* The station's own line: what its panels came back with, counted.
+
+     NOT A FIFTH COPY OF A PANEL'S SENTENCE. Repeating the lead panel's reading
+     under the heading would put one claim in two places on one screen, and the
+     station heading already carries the group's question. This answers the one
+     thing no panel can: WHAT IS MISSING HERE, before a reader scrolls through
+     six boxes to find out. It is counted off the DOM the renderers actually
+     emitted rather than off the payload, so a panel that draws nothing is
+     counted as silent however it came to be silent.
+
+     THE FOUR SILENCES ARE NOT COLLAPSED. `data-empty` carries the kind —
+     `unavailable` for a source that did not return, `quiet` for one that
+     answered and measured nothing — and the two are counted and named
+     separately, because a reader deciding whether to trust a thin station
+     needs to know which it is. A panel a card predates is neither: it is a
+     panel this payload has never carried, and it says so in its own words. */
+  function writeStationLeads() {
+    for (const station of grid.querySelectorAll(".ft-station[data-group]")) {
+      const slot = station.querySelector(":scope > .ft-station-lead");
+      if (!slot) continue;
+      slot.textContent = "";
+      const panels = [...station.querySelectorAll(":scope > .ft-panel[data-panel]")];
+      if (!panels.length) continue;
+      let unavailable = 0;
+      let quiet = 0;
+      let read = 0;
+      for (const panel of panels) {
+        const host = panel.querySelector(":scope > div");
+        if (!host) continue;
+        const empty = host.querySelector("[data-empty]");
+        const kind = empty && empty.getAttribute("data-empty");
+        if (kind === "unavailable") unavailable++;
+        else if (kind === "quiet") quiet++;
+        else read++;
+      }
+      /* A COUNT WITH NO DENOMINATOR IS NOT A COUNT. "two withheld" says
+         nothing about whether the station is thin or ordinary; "two of six"
+         does. */
+      const parts = [`${read} of ${panels.length} drawn`];
+      if (unavailable) {
+        parts.push(`${unavailable} withheld — the source did not return`);
+      }
+      if (quiet) {
+        parts.push(`${quiet} quiet — the source answered and measured nothing`);
+      }
+      slot.textContent = parts.join("; ") + ".";
     }
   }
 
