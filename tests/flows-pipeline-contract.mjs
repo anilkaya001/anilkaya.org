@@ -17,6 +17,7 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   describeTickFields, TICK_FIELDS_READ, republishWithChain, PUBLISH_RETRYABLE,
+  archiveDatedBoards,
   runPooled, foldCardOutcomes, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote,
@@ -653,6 +654,80 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `each line names the reason and the value that caused it (${lines.join(" | ")})`);
     ok(lines.some((l) => l.includes("board:long")) && lines.some((l) => l.includes("board:short")),
        "one line per side, so a log reader can see it was not one board that was skipped");
+  }
+
+  /* THE DATED KEY IS WRITTEN ONCE PER RUN, AND IT USED TO BE WRITTEN TWICE.
+
+     Step 7b wrote the dated copy before the chain leg; the chain leg then wrote
+     the same key with the columns merged in. The archive is immutable, so the
+     second write was refused 409 EVERY RUN — measured in production on
+     2026-09-04, both sides — and because the leg catches that throw, the LIVE
+     board never gained the columns either. `skew`, `term`, `atmIv` and
+     `skewDays` were reaching neither board on any session.
+
+     There is one writer per branch now and the branches are exclusive:
+     republishWithChain writes dated-then-live when the chain leg produced
+     something, archiveDatedBoards writes the dated copy alone when it did not.
+     Both are exercised here, because "written once" is a claim about both. */
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const lines = await archiveDatedBoards(payloads, "2026-08-24", async (key) => { seen.push(key); });
+    assert.deepEqual(seen, ["board:long:2026-08-24", "board:short:2026-08-24"],
+      "with no chain leg the dated copies are written, both sides, and NOTHING else — the " +
+      "live boards are already correct and republishing them would be a write with no " +
+      "change behind it"); checks++;
+    eq(lines.length, 0, "and a clean archive says nothing, so a log line means something happened");
+  }
+
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const lines = await archiveDatedBoards(payloads, null, async (key) => { seen.push(key); });
+    eq(seen.length, 0,
+       `an unresolved session date writes no dated key at all (${seen.join(", ") || "nothing"})`);
+    eq(lines.length, 1,
+       "and says so ONCE rather than twice — datedKey refuses on the session date, which " +
+       "both sides share, so a second sentence would be the same sentence");
+    ok(/refusing to write a dated key/.test(lines[0]),
+       `naming what it refused and why (${lines[0]})`);
+  }
+
+  {
+    /* A 409 IS A FINDING, NOT A FAILURE, and with one writer per run it can only
+       mean an earlier run wrote this session. The leg must keep going: the short
+       side's archive is not the long side's to abandon. */
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const lines = await archiveDatedBoards(payloads, "2026-08-24", async (key) => {
+      seen.push(key);
+      if (key.includes("long")) {
+        const error = new Error("ingest refused");
+        error.status = 409;
+        throw error;
+      }
+    });
+    eq(seen.length, 2,
+       "a refused long side does not abandon the short side's archive");
+    eq(lines.length, 1, "and exactly one line is reported, for the side that was refused");
+    ok(/ALREADY WRITTEN by an earlier run/.test(lines[0]) && /KEEPS THE FIRST/.test(lines[0]),
+       `which says the archive keeps what the earlier run published (${lines[0].slice(0, 80)}…)`);
+  }
+
+  {
+    /* ANY OTHER FAILURE IS REPORTED WITH ITS OWN MESSAGE rather than as a 409's
+       sentence — a store that is unwell and a day that is already written are
+       different facts, and the Worker now returns different statuses for them. */
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const lines = await archiveDatedBoards(payloads, "2026-08-24", async () => {
+      const error = new Error("the store did not answer");
+      error.status = 503;
+      throw error;
+    });
+    eq(lines.length, 2, "both sides report");
+    ok(lines.every((l) => /the store did not answer/.test(l) && !/ALREADY WRITTEN/.test(l)),
+       `each carrying the failure's own message rather than the immutability sentence ` +
+       `(${lines[0]})`);
   }
 
   /* THE TWO ARCHIVE REFUSALS FALL ON OPPOSITE SIDES OF THIS FILE'S RETRY SET,

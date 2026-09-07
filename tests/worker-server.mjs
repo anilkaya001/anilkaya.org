@@ -101,18 +101,44 @@ function signalGroup(child, signal) {
   try { child.kill(signal); } catch { /* already gone */ }
 }
 
+function sweepGroups() {
+  /* SIGKILL and not SIGTERM: this runs as the process is leaving, there is no
+     time left to wait for a graceful stop, and a wrangler that ignores the
+     TERM is exactly the case that produced the orphans. */
+  for (const child of LIVE_GROUPS) {
+    try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
 let sweepArmed = false;
 function armSweep() {
   if (sweepArmed) return;
   sweepArmed = true;
-  /* SIGKILL and not SIGTERM: this runs as the process is leaving, there is no
-     time left to wait for a graceful stop, and a wrangler that ignores the
-     TERM is exactly the case that produced the orphans. */
-  process.on("exit", () => {
-    for (const child of LIVE_GROUPS) {
-      try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
-    }
-  });
+  process.on("exit", sweepGroups);
+
+  /* AND ON THE SIGNALS, because `exit` alone leaves a real hole. A suite that
+     is INTERRUPTED — Ctrl-C, a CI job cancellation, a harness stopping a
+     background run — gets a signal, and a signal whose only listener is the
+     default one terminates the process without ever running `exit` handlers.
+     The groups would then outlive the run exactly as they did before this
+     file was fixed, on the one path where nobody is watching to notice.
+
+     RE-RAISED RATHER THAN SWALLOWED, and this is the part that is easy to get
+     wrong: merely ADDING a listener for SIGINT or SIGTERM suppresses Node's
+     default termination, so a handler that only cleans up turns Ctrl-C into a
+     process that will not die. Removing this listener and re-sending the same
+     signal hands it back to the default disposition, so the exit code and the
+     shell's own accounting are what they would have been with no handler at
+     all. Only THIS listener is removed — removeAllListeners would take a
+     suite's own handler with it. */
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    const onSignal = () => {
+      sweepGroups();
+      process.off(signal, onSignal);
+      process.kill(process.pid, signal);
+    };
+    process.on(signal, onSignal);
+  }
 }
 
 async function stopProcess(child) {
