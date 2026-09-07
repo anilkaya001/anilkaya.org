@@ -24,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
-import { buildLevels, buildContext, buildDisplacement, buildPath } from "../shared/flows-card.js";
+import { buildLevels, buildContext, buildDisplacement, buildPath, buildCalendar } from "../shared/flows-card.js";
 import {
   TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS, TICKER_GROUPS, PANEL_TIERS,
   STATION_SIDE_COUNTS,
@@ -1390,6 +1390,15 @@ try {
       tape_time: new Date(Date.UTC(2026, 7, 24, 13, 31 + i)).toISOString(),
       net_delta: 250000, net_call_premium: 2500000, net_put_premium: 0,
     })), { sessionDate: "2026-08-24" });
+    /* THE ROLL-OFF, WITH A HALF-LIFE THAT IS NOT THE FIRST OR THE LAST EXPIRY.
+       Three expiries weighted 150/100/50 put the cumulative-share crossing on
+       the SECOND, so the sentence is exercised against a median it had to walk
+       to rather than one it would have found by taking either end. */
+    led.panels.calendar = buildCalendar([
+      { expiry: "2026-08-28", call_gamma: 100, put_gamma: 50 },
+      { expiry: "2026-09-04", call_gamma: 60, put_gamma: 40 },
+      { expiry: "2026-10-16", call_gamma: 30, put_gamma: 20 },
+    ], { asOf: "2026-08-24" });
     await mount(page, led, { ticker: led.ticker, station: "all" });
 
     const ones = await page.evaluate(() =>
@@ -1405,7 +1414,7 @@ try {
        deliberately, which is the only way a slot cannot quietly stop being
        filled. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
-      ["context", "displacement", "levels", "path"],
+      ["calendar", "context", "displacement", "levels", "path"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
