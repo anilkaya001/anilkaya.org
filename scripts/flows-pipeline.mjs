@@ -2921,6 +2921,55 @@ function boardRow(r, s, rank, memory = null, origin = null) {
  * exact sequence of keys, and hands it a failing one to prove the live board
  * is not written when its own archive copy could not be.
  */
+/**
+ * Write each side's dated archive copy — the session's ONE dated write.
+ *
+ * IT USED TO RUN BEFORE THE CHAIN LEG AND THE CHAIN LEG WROTE THE KEY AGAIN.
+ * Two writes of one immutable key with different bytes: the second was refused
+ * 409 every run, and the catch around it meant the live board never gained the
+ * columns either. See the long note at the point 7b used to do this.
+ *
+ * A 409 HERE IS STILL A FINDING AND STILL NOT A FAILURE. With one writer per
+ * run it can only mean an EARLIER RUN wrote this session — the crons fire twice
+ * for the two US timezones and have been observed running hours late — so the
+ * archive keeps the first, which is the board that session's reader saw and the
+ * one the record scorer will grade.
+ *
+ * @param {object} payloads — the SAME payload objects the live boards were
+ *   published from, never a reconstruction: two builders for one payload is how
+ *   an archive comes to describe a session the reader never saw.
+ * @returns {Promise<string[]>} log lines, so a caller reports rather than prints.
+ */
+async function archiveDatedBoards(payloads, sessionDate, publishFn) {
+  const lines = [];
+  for (const side of ["long", "short"]) {
+    const key = datedKey(side, sessionDate);
+    if (!key) {
+      lines.push(`  archive: session date is ${sessionDate === null ? "unresolved" : `"${sessionDate}"`}` +
+                 " — refusing to write a dated key no prune could ever name");
+      /* BREAK, NOT CONTINUE: datedKey refuses on the SESSION DATE, which is the
+         same for both sides, so a second pass could only reprint the sentence. */
+      break;
+    }
+    try {
+      await publishFn(key, payloads[side]);
+    } catch (error) {
+      if (error && error.status === 409) {
+        lines.push(
+          `  archive ${key}: ALREADY WRITTEN by an earlier run today, and this run's board ` +
+          `differs from it — the archive is immutable and KEEPS THE FIRST, which is the ` +
+          `board the reader saw and the one the record will be scored against. This run's ` +
+          `board is live on board:${side} regardless. Two runs on one session disagreeing ` +
+          `is worth understanding: usually a second run against a later tape, but it is ` +
+          `also what a scoring change mid-session would look like from here.`);
+      } else {
+        lines.push(`  archive ${key}: ${error.message}`);
+      }
+    }
+  }
+  return lines;
+}
+
 async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn) {
   const lines = [];
   for (const side of ["long", "short"]) {
@@ -2968,6 +3017,9 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
           `rather than gaining columns its own archive will never carry`);
         continue;
       }
+      /* THE DATED COPY IS THIS SESSION'S FIRST AND ONLY ONE. 7b used to have
+         written it already, pre-chain, which made this write a revision of an
+         immutable key and cost the columns on both boards. */
       await publishFn(key, payload);
       await publishFn("board:" + side, payload);
       lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)`);
@@ -6384,43 +6436,37 @@ async function main() {
      copies are the record and go first; the watch list is a new product
      surface and goes second; the prune is housekeeping for data already safely
      written and goes last. */
-  for (const side of ["long", "short"]) {
-    const key = datedKey(side, sessionDate);
-    if (!key) {
-      console.warn(`  archive: session date is ${sessionDate === null ? "unresolved" : `"${sessionDate}"`}` +
-                   " — refusing to write a dated key no prune could ever name");
-      break;
-    }
-    try {
-      /* The SAME payload object the live board was published from, not a
-         reconstruction of it. Two builders for one payload is how the archive
-         comes to describe a session the reader never saw. */
-      await publish(key, payloads[side]);
-    } catch (error) {
-      if (error && error.status === 409) {
-        /* TWO RUNS ON ONE DAY THAT DISAGREE, which is a finding rather than a
-           failure — and it is the finding the immutability guard was added to
-           surface. The archive keeps what the FIRST run published, because
-           that is what the reader saw and what the record scorer will grade;
-           this run's board is live on the undated key either way.
+  /* 7b's ARCHIVE WRITE HAS MOVED TO 7f', AND THE MOVE IS THE FIX FOR A DEFECT
+     THIS RUN HAS BEEN COMMITTING EVERY SESSION.
 
-           Loud, because the interesting question is why they differ. The
-           crons fire twice for the two US timezones and have been observed
-           running hours late, so the ordinary cause is a second run against a
-           later tape — but a same-session disagreement is also exactly what a
-           scoring bug looks like from outside. */
-        console.warn(
-          `  archive ${key}: ALREADY WRITTEN by an earlier run today, and this run's board ` +
-          `differs from it — the archive is immutable and KEEPS THE FIRST, which is the ` +
-          `board the reader saw and the one the record will be scored against. This run's ` +
-          `board is live on board:${side} regardless. Two runs on one session disagreeing ` +
-          `is worth understanding: usually a second run against a later tape, but it is ` +
-          `also what a scoring change mid-session would look like from here.`);
-      } else {
-        console.warn(`  archive ${key}: ${error.message}`);
-      }
-    }
-  }
+     It used to write the dated copy here, before the chain leg — and 7f then
+     wrote the SAME key again with the chain columns merged in. Two writes of
+     one dated key with different bytes, and the archive is immutable, so the
+     second was refused with a 409 every single run. Measured in production
+     (2026-09-04), both sides:
+
+       re-publish long:  board:long:2026-09-04  -> HTTP 409 archive_immutable
+                         — the store keeps the pre-chain board
+
+     And because that throw is caught by the leg, the LIVE board never gained
+     the columns either. So `skew`, `term`, `atmIv` and `skewDays` have been
+     reaching neither board, on every run, while 7f's own comment explains why
+     they must: "a skew percentile exists only from the first session that
+     archived a skew, and every run that publishes the board without one is a
+     session that can never be recovered."
+
+     THE ARCHIVE IS A COPY OF WHAT THE READER SAW, so it is written once, from
+     the payload as it finally stands, at the point where the live board stops
+     changing. That is after the chain leg — whether the leg ran, was skipped,
+     or failed — and archiveDatedBoards is the one writer.
+
+     WHAT IT COSTS, STATED RATHER THAN BURIED: the dated copy now lands after
+     the chain leg's fifty calls instead of before them, so a run that dies
+     inside that leg leaves the session with NO archive where it used to leave
+     a pre-chain one. That is the honest trade. A pre-chain archive beside a
+     post-chain live board is a record of a board no reader ever saw, and the
+     invariant the whole mechanism rests on — dated and live byte-identical at
+     final state — is worth more than a partial row. */
 
   try {
     const watchRows = toWatchRows(sides.neutralRows, screenerByTicker, tiltByTicker);
@@ -7296,6 +7342,15 @@ async function main() {
      reports it without anyone having to remember. */
   if (chainByTicker.size) {
     for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish)) {
+      console.log(line);
+    }
+  } else {
+    /* 7f'. THE ARCHIVE, WHEN THE CHAIN LEG DID NOT RUN.
+       republishWithChain writes the dated copy itself, dated-first-then-live,
+       so calling this after it would be the second write that started all of
+       this. The two branches are exclusive on purpose and the assertion that
+       the key is written AT MOST ONCE per run is in the contract suite. */
+    for (const line of await archiveDatedBoards(payloads, sessionDate, publish)) {
       console.log(line);
     }
   }
@@ -8899,6 +8954,7 @@ export {
   fakeSectorEtfs, fakeNewsHeadlines,
   MOVER_ROWS, moverRow, buildMovers,
   describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
+  archiveDatedBoards,
   /* PUBLISH_RETRYABLE is exported for one assertion and it is worth the line:
      the Worker's archive refusals choose their statuses BECAUSE of what is in
      this set — 503 for a store that did not answer, so the run comes back;
