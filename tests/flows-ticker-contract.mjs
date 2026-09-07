@@ -3755,24 +3755,36 @@ try {
          "enlarging a panel puts that panel in the URL, so a reader can send the chart " +
          "they are looking at");
       await page.keyboard.press("Escape");
-      /* WAIT FOR THE HANDLER, NOT FOR THE FLAG.
+      /* WAIT FOR THE HANDLER, NOT FOR ANYTHING THE BROWSER DOES ON ITS OWN.
+
          `dialog.open` is set to false SYNCHRONOUSLY inside close(); the
          `close` EVENT is queued and fires a task later, and it is that
-         handler (flows-ticker.js:4988-4994) which restores the hash and
-         returns focus. So a wait on `.open` alone can win the race and read
-         location.hash one task too early — which is exactly what happened:
-         this assertion passed locally and failed in CI on the same commit,
-         reading '#panel-gamma' where it expected the arrival hash. The race
-         was always here; a change elsewhere in this file only altered how the
-         coin landed.
+         handler (assets/js/flows-ticker.js, the "close" listener) which
+         restores the hash. So a wait on `.open` alone reads location.hash one
+         task too early.
 
-         FOCUS IS THE THING TO WAIT ON, because it is a DIFFERENT effect of
-         the SAME handler — so this is a wait on the handler having run, not a
-         wait on the assertion below, which would assert nothing. */
+         AND FOCUS IS NOT THE FIX, WHICH IS WHAT THE PREVIOUS VERSION OF THIS
+         WAIT GOT WRONG. It waited on `.open === false` AND focus being back
+         on the opener, on the reasoning that focus is "a different effect of
+         the same handler". It is not: closing a modal dialog runs the
+         browser's own focus-restoring steps, SYNCHRONOUSLY, inside close().
+         The handler's `zoomOpener.focus()` is belt-and-braces over something
+         that has already happened. Measured, sampling in the same microtask
+         that close() returns in:
+
+           open false | focused true | hash "#panel-gamma" | host 6 children
+
+         — both conditions of the old wait already true, the hash not yet
+         restored. That wait asserted nothing, and main went red on it.
+
+         THE HOST EMPTYING IS THE SIGNAL, because nothing but the handler
+         empties it, and it happens AFTER the writeHash inside the same
+         handler. `hostChildren === 0` therefore proves the hash has already
+         been written. Arm B below pins the browser behaviour that made the
+         old wait wrong, so it cannot be reintroduced as a simplification. */
       await page.waitForFunction(
         () => !document.getElementById("ftZoom").open &&
-          document.activeElement ===
-            document.querySelector('.ft-panel[data-panel="gamma"] .ft-zoom-open'),
+          document.getElementById("ftZoomHost").childElementCount === 0,
         null, { timeout: 3000 });
       const closed = await page.evaluate(() => location.hash);
       eq(closed, before,
@@ -3786,6 +3798,42 @@ try {
       eq(refocused, "gamma",
          "and returns focus to the button that opened it, so a keyboard reader " +
          "keeps their place in the grid");
+
+      /* ARM B: THE RACE ITSELF, PINNED. Reopen and call close() from inside
+         the page, sampling in the SAME synchronous turn it returns in. This
+         is not a test of the product — it is a test of the assumption the
+         wait above depends on, written down so the shorter wait cannot come
+         back. If a future browser (or a future handler) makes focus restore
+         late, this arm fails and says the wait may be simplified. */
+      await page.click('.ft-panel[data-panel="gamma"] .ft-zoom-open');
+      await page.waitForFunction(
+        () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
+      const sync = await page.evaluate(() => {
+        const zoom = document.getElementById("ftZoom");
+        const host = document.getElementById("ftZoomHost");
+        const opener = document.querySelector('.ft-panel[data-panel="gamma"] .ft-zoom-open');
+        zoom.close();
+        return { open: zoom.open, hash: location.hash,
+                 focused: document.activeElement === opener,
+                 hostChildren: host.childElementCount };
+      });
+      eq(sync.open, false, "close() clears .open synchronously, so .open is not a wait");
+      eq(sync.focused, true,
+         "and the BROWSER has already restored focus to the opener in that same turn — " +
+         "which is why focus is not a wait either, however much it looks like one");
+      eq(sync.hash, "#panel-gamma",
+         "while the hash is still the panel's: the close HANDLER has not run yet, so a " +
+         "wait satisfied by the two facts above reads the hash one task too early");
+      ok(sync.hostChildren > 0,
+         `and the enlarge host still holds its drawing (${sync.hostChildren} children) — ` +
+         "emptying it is the handler's own work and happens after the hash is written, " +
+         "which is what makes it the signal to wait on");
+      await page.waitForFunction(
+        () => document.getElementById("ftZoomHost").childElementCount === 0,
+        null, { timeout: 3000 });
+      eq(await page.evaluate(() => location.hash), before,
+         "and once the host IS empty the hash is restored, every time");
+
       eq(errors.length, 0, `the enlarge round trip throws nothing (${errors.join("; ")})`);
       await page.close();
     }
@@ -4968,6 +5016,175 @@ try {
        "unit are two different facts about the payload");
 
     eq(errors.length, 0, `the IV rank arms throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  /* ---------- 14. a strip that scrolls says so, and says it in the right
+     direction ------------------------------------------------------------
+
+     THREE CHROME STRIPS SCROLL HORIZONTALLY ON A PHONE and each hides real
+     readings behind the cut: at 320px the identity row hides 648px (the
+     conviction, the gamma regime, both session dates), `.flows-rail` 249px
+     (the later sections) and the tab strip 142px (a whole station). Nothing
+     told anyone to swipe, so assets/css/flows.css now paints a CSS-only edge:
+     two background layers per side, one attached `local` painting the page
+     ground and one attached `scroll` painting the light edge, so the edge
+     appears exactly when there IS something past it.
+
+     THIS IS ASSERTED IN PIXELS, NOT IN CSS TEXT, because the bug it exists to
+     catch is invisible to a text check. The technique as published paints a
+     BLACK shadow, which assumes a light page; on `--bg: #0a0a08` the first
+     draft of this rule was structurally perfect and measured 7.07 against a
+     10.92 ground — a four-count drop out of 255, and a text assertion that
+     the four layers exist would have passed on it happily. So the page is
+     screenshotted at both scroll extremes and the columns are read.
+
+     `.flows-rail` IS THE STRIP THAT CARRIES THE MEASUREMENT, and the choice
+     is forced rather than convenient: its first item clears the strip's own
+     padding, so the leftmost columns are page ground and the edge is readable
+     there. The identity row and the tab strip put a chip border in column 2,
+     which is content and would be measured as an edge. Their right edges are
+     covered by the coverage assertion below, which is the general fact; this
+     is the mechanism, and it only needs one strip to prove.
+
+     FOUR ROWS, AND THE FLAT TWO ARE THE POINT. A static fade can light an
+     edge; only the local/scroll pairing can put the edge away when there is
+     nothing past it. An assertion that checked only the lit rows would pass
+     on a permanent fade sitting over the last chip, telling a reader to swipe
+     at the end of the strip. */
+  {
+    const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, withChain[0], { ticker: withChain[0].ticker });
+
+    /* THE GROUND IS DERIVED, NOT TYPED: --bg's own resolved value put through
+       the same coefficients as the samples, so a token change moves the
+       baseline with it instead of stranding this test on a stale constant. */
+    const ground = await page.evaluate(() => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      const hex = raw.replace("#", "");
+      const n = hex.length === 3 ? [...hex].map((c) => parseInt(c + c, 16))
+                                 : [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+      return 0.2126 * n[0] + 0.7152 * n[1] + 0.0722 * n[2];
+    });
+    ok(ground > 0 && ground < 40,
+       `--bg resolves to a dark ground (${ground.toFixed(2)} of 255) — the whole ` +
+       "polarity argument below assumes it, so it is checked rather than assumed");
+
+    /* Decoded in the browser under test: this box has no image library, and
+       the page already has a canvas. */
+    const columns = async (shot) => page.evaluate(async (b64) => {
+      const bin = atob(b64), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const bmp = await createImageBitmap(new Blob([u8], { type: "image/png" }));
+      const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext("2d");
+      x.drawImage(bmp, 0, 0);
+      const d = x.getImageData(0, 0, bmp.width, bmp.height).data;
+      const cols = [];
+      for (let px = 0; px < bmp.width; px++) {
+        let sum = 0;
+        for (let y = 0; y < bmp.height; y++) {
+          const i = (bmp.width * y + px) << 2;
+          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        }
+        cols.push(sum / bmp.height);
+      }
+      return cols;
+    }, shot.toString("base64"));
+
+    const rail = await page.$(".flows-rail");
+    ok(rail, "the ticker page serves the section rail this measurement reads");
+    const overflow = await page.evaluate(() => {
+      const el = document.querySelector(".flows-rail");
+      el.scrollLeft = 0;
+      return el.scrollWidth - el.clientWidth;
+    });
+    ok(overflow > 40,
+       `and at 320px it actually scrolls, hiding ${overflow}px — an edge on a strip ` +
+       "with nothing past it would be a lie, so the premise is measured first");
+
+    const atStart = await columns(await rail.screenshot());
+    await page.evaluate(() => {
+      const el = document.querySelector(".flows-rail");
+      el.scrollLeft = el.scrollWidth;
+    });
+    await page.waitForTimeout(120);
+    const atEnd = await columns(await rail.screenshot());
+
+    const W = atStart.length;
+    eq(atEnd.length, W, "both screenshots are the same width, so the columns line up");
+    /* The bands are the edge treatment's own footprint: 0.9rem is 14px at this
+       root size, and the last column is the strip's own border rather than the
+       gradient. */
+    const band = (cols, side) => Math.max(...(side === "left"
+      ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
+    const LIT = 15, FLAT = 3;
+
+    const startRight = band(atStart, "right"), startLeft = band(atStart, "left");
+    const endRight = band(atEnd, "right"), endLeft = band(atEnd, "left");
+
+    ok(startRight - ground >= LIT,
+       `scrolled to the start, the RIGHT edge stands off the ground ` +
+       `(${startRight.toFixed(2)} against ${ground.toFixed(2)}) — this is the assertion ` +
+       "a black shadow on a black page fails, and did: it measured four counts");
+    ok(startLeft - ground <= FLAT,
+       `and the LEFT edge is the ground itself (${startLeft.toFixed(2)} against ` +
+       `${ground.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
+    ok(endLeft - ground >= LIT,
+       `scrolled to the end, the LEFT edge stands off the ground ` +
+       `(${endLeft.toFixed(2)} against ${ground.toFixed(2)})`);
+    ok(endRight - ground <= FLAT,
+       `and the RIGHT edge has PUT ITSELF AWAY (${endRight.toFixed(2)} against ` +
+       `${ground.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
+       "telling a reader to swipe past the last item in the strip");
+
+    /* COVERAGE, so the next scrolling strip cannot ship without an edge. This
+       reads the DOM rather than a list: anything in the ticker's chrome that
+       overflows horizontally at 320px is in scope by construction. */
+    const strips = await page.evaluate(() => {
+      /* SPLIT ON DEPTH, NOT ON A REGEX. The computed value is
+         `linear-gradient(to right, rgb(10, 10, 8) 30%, rgba(0, 0, 0, 0)), ...`
+         — commas nested two deep. A lookahead that steps over one level of
+         parens counts twelve layers where there are four, which is how the
+         first draft of this assertion failed against correct CSS. */
+      const layersOf = (value) => {
+        if (!value || value === "none") return 0;
+        let depth = 0, n = 1;
+        for (const ch of value) {
+          if (ch === "(") depth++;
+          else if (ch === ")") depth--;
+          else if (ch === "," && depth === 0) n++;
+        }
+        return n;
+      };
+      const out = [];
+      for (const el of document.querySelectorAll(".ft-bar .ft-head, .flows-rail, .ft-tabs, .ft-topline, .ft-chips")) {
+        if (el.scrollWidth - el.clientWidth < 8) continue;
+        const cs = getComputedStyle(el);
+        out.push({
+          sel: el.className,
+          hides: el.scrollWidth - el.clientWidth,
+          layers: layersOf(cs.backgroundImage),
+          attach: cs.backgroundAttachment.replace(/\s+/g, " "),
+        });
+      }
+      return out;
+    });
+    ok(strips.length >= 3,
+       `at 320px the chrome has ${strips.length} strips that scroll inside themselves ` +
+       "— the three this rule was written for, at least");
+    for (const s of strips) {
+      eq(s.layers, 4,
+         `"${s.sel}" hides ${s.hides}px and carries four background layers — two ground, ` +
+         "two edge. A scrolling strip with fewer is one a reader is never told to swipe");
+      eq(s.attach, "local, local, scroll, scroll",
+         `and pairs them local/local/scroll/scroll ("${s.sel}") — the ground rides with ` +
+         "the content and uncovers the edge, which is the entire mechanism; all-scroll " +
+         "is a permanent fade and all-local never shows one");
+    }
+
+    eq(errors.length, 0, `the scroll-affordance measurement throws nothing (${errors.join("; ")})`);
     await page.close();
   }
 
