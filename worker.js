@@ -28,6 +28,7 @@ import {
 import { buildFlowAlerts, mergeAlerts } from "./shared/flows-alerts.js";
 import { shapeTide } from "./shared/flows-pulse.js";
 import { isRefreshWindow } from "./shared/flows-freshness.js";
+import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 // Edge-memoization window for rendered course pages. Kept short so a deploy
@@ -3495,23 +3496,54 @@ async function route(request, env, url, ctx) {
        above accepts exactly these dated keys. Correcting a genuinely bad
        archive day is therefore possible, visible, and impossible to do by
        accident — which is the whole difference between a record and a draft. */
+    /* AND THE READ THAT DECIDES IT IS NOW ASKED WHETHER IT ANSWERED. This
+       call passed no `trace` for the whole life of the guard above, so a D1
+       SELECT that threw returned null, read as "never written", and fell
+       through to the unconditional upsert — which rewrote the archived board
+       this comment says cannot be rewritten. shared/flows-archive.js carries
+       the argument and the four states; the branch that only a failed read
+       can reach is asserted there, because no test holding an HTTP client can
+       make a SELECT throw. */
     if (DATED_ARCHIVE_KEY_RE.test(key)) {
-      const existing = await readFlowsPayload(env, key);
-      if (existing && existing.payload !== payload) {
-        throw new HttpError(409, "archive_immutable",
-          "A dated archive key already holds a different payload. The dated boards are " +
-          "the record this product's accuracy claims are computed from, so a write that " +
-          "would change what a past session said is refused. Delete the key first if it " +
-          "genuinely must be corrected.");
-      }
-      if (existing) {
+      const trace = {};
+      const existing = await readFlowsPayload(env, key, trace);
+      const action = archiveWriteAction({
+        readable: !trace.failed,
+        exists: !!existing,
+        same: !!existing && existing.payload === payload,
+      });
+      if (action === "unchanged") {
         /* Byte-identical: nothing to do, and saying so is more useful than a
            bare ok — a run that reports `unchanged` on a key it thought it was
            publishing is a retry, and a reader of the log should see that. */
         return json({ ok: true, key, bytes: payload.length, stored: "unchanged" });
       }
+      if (action !== "write") {
+        const refusal = ARCHIVE_REFUSALS[action];
+        throw new HttpError(refusal.status, refusal.code, refusal.message);
+      }
+
+      /* THE DECISION IS NOW ALSO STRUCTURAL, not only correct. Every read
+         above is a fact about a moment that has passed by the time the write
+         lands, so a dated key inserts with DO NOTHING: the statement itself
+         is incapable of replacing a row, whatever the read believed. A
+         conflict here means a writer arrived in between — reported as its own
+         code rather than as a success, because this run cannot claim the
+         archive holds what it published. */
+      const written = await env.DB.prepare(
+        "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
+        "ON CONFLICT(id) DO NOTHING"
+      ).bind(key, payload, Date.now()).run();
+      const rows = written && written.meta ? Number(written.meta.changes) || 0 : 0;
+      if (!rows) {
+        const refusal = ARCHIVE_REFUSALS.refuse_raced;
+        throw new HttpError(refusal.status, refusal.code, refusal.message);
+      }
+      return json({ ok: true, key, bytes: payload.length, stored: "created" });
     }
 
+    /* THE UNDATED KEYS ARE VIEWS OF TODAY and rewriting one every morning is
+       the product working, so they keep the upsert the archive just gave up. */
     await env.DB.prepare(
       "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"

@@ -2953,7 +2953,22 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
          reverse order would publish a live board the history can never
          reproduce, which is the one state the archive exists to prevent. */
       const key = datedKey(side, sessionDate);
-      if (key) await publishFn(key, payload);
+      /* AND `if (key)` WAS THE ONE ORDERING THE PARAGRAPH ABOVE FORBIDS. It
+         reads as a guard and behaves as a skip: on a session date datedKey
+         refuses (it tests ARCHIVE_DATE_RE and returns null), the archive write
+         is stepped over and the LIVE board is re-published anyway — a board
+         with chain columns and no archive copy that can ever reproduce it,
+         which is the exact state named four lines up as the one the archive
+         exists to prevent. A malformed date is rare and silent, which is what
+         made it survive. Neither write happens now, and the run says why. */
+      if (!key) {
+        lines.push(`  re-publish board:${side}: SKIPPED — the session date ` +
+          `${JSON.stringify(sessionDate)} is not an archive date, so the dated copy ` +
+          `cannot be written and the live board is left as the store already has it, ` +
+          `rather than gaining columns its own archive will never carry`);
+        continue;
+      }
+      await publishFn(key, payload);
       await publishFn("board:" + side, payload);
       lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)`);
     } catch (error) {
@@ -8884,6 +8899,13 @@ export {
   fakeSectorEtfs, fakeNewsHeadlines,
   MOVER_ROWS, moverRow, buildMovers,
   describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
+  /* PUBLISH_RETRYABLE is exported for one assertion and it is worth the line:
+     the Worker's archive refusals choose their statuses BECAUSE of what is in
+     this set — 503 for a store that did not answer, so the run comes back;
+     409 for a day already written, so it does not. Nothing checked that the
+     two files agreed, and a retry policy whose comment and code disagree is
+     the only defect this repository has shipped twice. */
+  PUBLISH_RETRYABLE,
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote, fakePriorUnusual,

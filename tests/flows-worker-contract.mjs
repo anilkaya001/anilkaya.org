@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
 import { TICKER_PANELS } from "../shared/flows-panels.js";
+import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER,
 } from "./worker-server.mjs";
@@ -1012,8 +1013,64 @@ try {
     const archGet = () => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(ARCH)),
       { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
 
-    eq((await post(ARCH, boardA, INGEST_TOKEN)).status, 200,
+    /* THE FOUR STATES, INCLUDING THE ONE NO HTTP CLIENT CAN REACH.
+
+       Every assertion below this block drives the route, and the route can
+       only be driven into three of the guard's four states: a read that
+       ANSWERED absent, answered same, answered different. The fourth — a read
+       that did not answer at all — is what a thrown SELECT produces, and
+       nothing holding a fetch() can cause one. That is exactly why the branch
+       was wrong for the whole life of the guard: `readFlowsPayload(env, key)`
+       was called with no trace, so an unreadable row arrived at the guard
+       spelled identically to an absent one, fell through, and the
+       unconditional upsert below REWROTE an archived board.
+
+       The decision is a pure function now, so the unreachable branch is an
+       ordinary argument. */
+    eq(archiveWriteAction({ readable: true, exists: false, same: false }), "write",
+       "a dated key the store says is ABSENT is written — this is the first publish of a " +
+       "session and the ordinary path");
+    eq(archiveWriteAction({ readable: true, exists: true, same: true }), "unchanged",
+       "a byte-identical row is left alone rather than rewritten, so the pipeline's own " +
+       "retry is not an outage");
+    eq(archiveWriteAction({ readable: true, exists: true, same: false }), "refuse_immutable",
+       "a DIFFERENT row is refused — the write would revise what a past session said");
+    eq(archiveWriteAction({ readable: false, exists: false, same: false }), "refuse_unreadable",
+       "AND A READ THAT DID NOT ANSWER IS REFUSED TOO, rather than read as an absence. " +
+       "This is the branch the route could not reach and the defect this module exists " +
+       "for: null from a thrown SELECT and null from a missing row are the same value, " +
+       "and treating them as the same claim overwrites the record the deck's accuracy is " +
+       "computed from");
+    eq(archiveWriteAction({ readable: false, exists: true, same: true }), "refuse_unreadable",
+       "and unreadable OUTRANKS every other state — if the read did not answer, nothing " +
+       "it seems to say about the row is a fact");
+    eq(archiveWriteAction(), "refuse_unreadable",
+       "called with nothing at all it still refuses: the default for `did the store " +
+       "answer` is no, so a caller that forgets to pass the trace fails closed");
+
+    /* THE TWO REFUSALS ARE DIFFERENT FACTS AND CARRY DIFFERENT STATUSES, because
+       a caller that cannot tell them apart retries the wrong one — giving up on
+       a transient store failure, or hammering a permanent conflict. */
+    eq(ARCHIVE_REFUSALS.refuse_immutable.status, 409,
+       "a revision is 409 and final — the correction path is the deliberate two-step DELETE");
+    eq(ARCHIVE_REFUSALS.refuse_unreadable.status, 503,
+       "an unreadable store is 503 and transient — the pipeline retries 5xx, so the same " +
+       "request succeeds once the store answers, and nothing was written in the meantime");
+    ok(ARCHIVE_REFUSALS.refuse_unreadable.message.includes("Nothing was stored"),
+       "and the unreadable refusal says so out loud, because a caller reading a 503 needs " +
+       "to know whether to worry about a half-written archive");
+    eq(new Set(Object.values(ARCHIVE_REFUSALS).map((r) => r.code)).size,
+       Object.keys(ARCHIVE_REFUSALS).length,
+       "every refusal has its own code — a shared code is a switch statement that cannot " +
+       "switch");
+
+    const firstWrite = await post(ARCH, boardA, INGEST_TOKEN);
+    eq(firstWrite.status, 200,
        "the first write of a dated key succeeds — immutability is not read-only");
+    eq((await firstWrite.json()).stored, "created",
+       "and says it CREATED the row, which is the other half of the `unchanged` a retry " +
+       "reports: a dated write now always names which of the two happened, so a log line " +
+       "cannot be read as a publish when it was a no-op");
 
     const clash = await post(ARCH, boardZ, INGEST_TOKEN);
     eq(clash.status, 409,
