@@ -389,6 +389,37 @@
   font-size: var(--fs-note);
   color: var(--ink-faint);
   border-bottom: 1px solid var(--hairline);
+}
+
+/* AND THE DESK IS EXCLUDED, WHICH CI TAUGHT ME RATHER THAN THE OTHER WAY
+   ROUND. The first version of this applied to every wrapper and turned
+   flows-desk-contract red on "and leave the height alone" — 262 against an
+   expected 239.
+
+   That assertion is right and the change was real. #deskTableWrap is a
+   user-resizable pane, and its width grip is contracted to be SINGLE-AXIS:
+   dragging it must not move the height. A caption sized to the PORT couples
+   the two, because narrowing the pane rewraps the caption. Measured on a
+   wrapper whose port I shrank by hand, caption height against port width:
+
+     caption at table width   74px at 900, 700, 560, 460 and 380 — pinned to
+                              the 969px table, so the height never moves
+     caption at 100cqw        74px at 900/700/560, then 96px at 460 and
+                              119px at 380 — one extra line, then two
+
+   74 -> 96 is +22px against the +23px CI measured. The old stability was an
+   accident of the table's own 46rem floor, but the desk's contract depends
+   on it, and a contract that exists is worth more than a caption that
+   rewraps on one route.
+
+   SO THE DESK KEEPS THE OLD BEHAVIOUR AND ITS CAPTION IS STILL CUT ON A
+   PHONE. That is a stated trade, not an oversight. The fix that would serve
+   both is to move the caption OUT of the scroll wrapper entirely, where it
+   wraps at the page width and stops contributing to the wrapper's height at
+   all — which would help the desk's contract rather than fight it. That is a
+   markup change across `shared/flows-pages.js` and several renderers, and it
+   is not this PR. */
+.flows-tablewrap:not(.desk-tablewrap) .flows-caption {
   width: 100cqw;
   box-sizing: border-box;
 }
