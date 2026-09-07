@@ -1180,6 +1180,88 @@ try {
     await page.close();
   }
 
+  /* ---------- 2e. the sparkline says what window it is drawn over ------
+     THE PUBLISHER COMPUTED A WARNING AND THE RENDERER THREW IT AWAY.
+     buildContext publishes `sessions`, `datedSessions`, `dropped` and
+     `closeDates`, and its own comment on `dropped` reads: "Non-zero means
+     index is NOT time in the arrays above, which is precisely when a reader
+     needs the dates." renderContext placed every close by INDEX and read none
+     of the four, so on a name with a dropped session the line was drawn
+     straight across the gap at the same slope as a real move.
+
+     ALL THREE PAYLOADS ARE BUILT HERE BECAUSE THE CORPUS CANNOT REACH TWO OF
+     THEM. Every emitted card carries `dropped: 0`, so the gap branch — the
+     one the whole fix exists for — would never run against a fixture, and the
+     legacy branch cannot exist in a corpus emitted by today's publisher at
+     all. An assertion that cannot fire is not a check, and this file has been
+     bitten by that shape twice already.
+
+     THE THIRD CASE IS THE ONE WORTH THE MOST. A card built before these
+     fields existed must say NOTHING about gaps rather than printing "none
+     dropped" — `dropped` absent and `dropped === 0` are different claims, and
+     collapsing them is exactly the confident zero this codebase refuses. */
+  {
+    const errors = [];
+    const base = withChain[0];
+    const ctxOf = (patch) => {
+      const card = JSON.parse(JSON.stringify(base));
+      card.panels.context = { ...card.panels.context, ...patch };
+      return card;
+    };
+    /* A FRESH PAGE PER CASE, AND THAT IS NOT TIDINESS.
+       mount() calls page.addInitScript and page.route, and both ACCUMULATE on
+       a page: three mounts leave three fetch stubs and three route handlers,
+       and which card the page actually receives stops being this test's to
+       decide. Written the other way — one page, three mounts — this block
+       passed against a renderer deliberately broken to report gaps as "none
+       dropped", which is the whole defect it exists to catch. An assertion
+       that survives its own mutation is not a check, so the page is new every
+       time and the mutation fails it. */
+    const readCtx = async (card) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, station: "all" });
+      const out = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="context"] div');
+        const q = host && host.querySelector(".fc-note.is-qualifier");
+        return { text: q ? q.textContent : null, all: host ? host.textContent : "" };
+      });
+      await page.close();
+      return out;
+    };
+
+    const clean = await readCtx(ctxOf({ dropped: 0, sessions: 42, datedSessions: 42 }));
+    ok(clean.text && /42 consecutive close/.test(clean.text),
+       `a gapless window says so and says how many sessions (${clean.text})`);
+    ok(clean.text && /none dropped/.test(clean.text),
+       "and states the absence of gaps as a measurement rather than by silence");
+
+    const gappy = await readCtx(ctxOf({ dropped: 3, sessions: 39, datedSessions: 39 }));
+    ok(gappy.text && /3 session\(s\) dropped/.test(gappy.text),
+       `a window with gaps names how many were dropped (${gappy.text})`);
+    ok(gappy.text && /ORDER, not on a time axis/.test(gappy.text),
+       "and warns that the axis is order rather than time, which is what makes a " +
+       "segment spanning a gap indistinguishable from one spanning a session");
+
+    /* A CARD FROM BEFORE THE FIELDS EXISTED. delete, not set-to-null: null is
+       a measurement of nothing and absent is no measurement, and the renderer
+       must tell them apart. */
+    const legacyCard = JSON.parse(JSON.stringify(base));
+    delete legacyCard.panels.context.dropped;
+    delete legacyCard.panels.context.sessions;
+    delete legacyCard.panels.context.datedSessions;
+    delete legacyCard.panels.context.closeDates;
+    const legacy = await readCtx(legacyCard);
+    eq(legacy.text, null,
+       `a card that predates these fields says NOTHING about gaps — "none dropped" ` +
+       `would be a confident zero about a filter that never ran (${legacy.text})`);
+    ok(legacy.all.length > 0 && !/dropped/.test(legacy.all),
+       "and the panel still draws its returns, so the absence costs a caveat and " +
+       "not the reading");
+
+    eq(errors.length, 0, `none of the three windows throws (${errors.join("; ")})`);
+  }
+
   /* ---------- 3. the minus sign, on numbers only ------------------ */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
