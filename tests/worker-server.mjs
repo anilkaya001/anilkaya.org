@@ -67,19 +67,80 @@ function waitForPort(port, child, output) {
   });
 }
 
+/* =============================================================
+   THE HARNESS LEAKED A SPINNING WORKERD ON EVERY RUN, AND THE KILL
+   THAT WAS SUPPOSED TO STOP IT WAS AIMED ONE LEVEL TOO HIGH.
+
+   `wrangler dev` is a supervisor: it spawns `workerd` (the runtime) and
+   `esbuild` (the bundler) as its OWN children. `child.kill()` signals
+   wrangler and nothing else, so on any path where wrangler does not pass the
+   signal on — a SIGKILL, or a wrangler already wedged — both grandchildren
+   are reparented to init and keep running. Observed here, not theorised: two
+   orphaned pairs from two earlier runs, 430 and 535 seconds old, holding a
+   two-core box at load 2 and pushing the next suite's first request past
+   undici's 300-second headers timeout. That reads exactly like a hang and is
+   not one, which is why it survived so long: the symptom appears in the NEXT
+   run, and a session's own logs look clean.
+
+   The fix is to signal the process GROUP. `detached: true` makes the child a
+   group leader, and `process.kill(-pid, sig)` then reaches every descendant,
+   so the runtime dies with its supervisor. It also makes the group survive
+   this process, which is why the exit hook below exists: a suite that throws
+   before its `finally` — or is interrupted — must not leave the box worse
+   than it found it. Registered on spawn, removed on stop, and swept
+   synchronously on exit, because an async cleanup in an `exit` handler never
+   runs.
+   ============================================================= */
+const LIVE_GROUPS = new Set();
+
+function signalGroup(child, signal) {
+  /* The group first, the process second. Once the child has exited, its
+     group id is no longer valid and process.kill throws ESRCH — expected,
+     not exceptional, so it is swallowed rather than reported. */
+  try { process.kill(-child.pid, signal); return; } catch { /* fall through */ }
+  try { child.kill(signal); } catch { /* already gone */ }
+}
+
+let sweepArmed = false;
+function armSweep() {
+  if (sweepArmed) return;
+  sweepArmed = true;
+  /* SIGKILL and not SIGTERM: this runs as the process is leaving, there is no
+     time left to wait for a graceful stop, and a wrangler that ignores the
+     TERM is exactly the case that produced the orphans. */
+  process.on("exit", () => {
+    for (const child of LIVE_GROUPS) {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+  });
+}
+
 async function stopProcess(child) {
-  if (child.exitCode != null) return;
-  child.kill("SIGTERM");
+  LIVE_GROUPS.delete(child);
+  if (child.exitCode != null) {
+    /* THE SUPERVISOR CAN EXIT WITHOUT ITS RUNTIME. A wrangler that crashed
+       leaves workerd behind exactly as a killed one does, so the group is
+       swept even on the path that used to return immediately. */
+    signalGroup(child, "SIGKILL");
+    return;
+  }
+  signalGroup(child, "SIGTERM");
   const exited = await Promise.race([
     new Promise((resolve) => child.once("exit", () => resolve(true))),
     new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
   ]);
-  if (exited || child.exitCode != null) return;
-  child.kill("SIGKILL");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    new Promise((resolve) => setTimeout(resolve, 3000)),
-  ]);
+  if (!exited && child.exitCode == null) {
+    signalGroup(child, "SIGKILL");
+    await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  }
+  /* AND ONE MORE, AFTER THE SUPERVISOR IS GONE. wrangler exiting is not
+     workerd exiting: the whole defect is that the two are separate processes,
+     so the group gets a final sweep whether or not the parent went quietly.
+     Signalling an already-empty group throws ESRCH and is swallowed. */
+  signalGroup(child, "SIGKILL");
 }
 
 async function flowsCredentialsJSON() {
@@ -101,6 +162,7 @@ export async function startWorker({ extraVars = [] } = {}) {
     throw error;
   }
 
+  armSweep();
   const child = spawn(process.execPath, [
     WRANGLER, "dev", "--local", "--ip", "127.0.0.1", "--port", String(port),
     "--persist-to", persist,
@@ -129,7 +191,12 @@ export async function startWorker({ extraVars = [] } = {}) {
     cwd: REPO_ROOT,
     env: { ...process.env, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"],
+    /* Its own process group, so stopProcess can reach workerd and esbuild.
+       See the block above stopProcess for what this fixes and how it was
+       observed. */
+    detached: true,
   });
+  LIVE_GROUPS.add(child);
   const output = capture(child);
 
   try {

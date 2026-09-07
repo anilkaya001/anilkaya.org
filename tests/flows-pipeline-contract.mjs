@@ -9,13 +9,14 @@
    "this flow is high quality" read as "this name is bullish". */
 
 import assert from "node:assert/strict";
+import { ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { readFileSync } from "node:fs";
 import {
   candlesAscending, selectExtremes, atr14, partitionSides, scoreBoard,
   medianDollarVolume, eligible, daysToEarnings, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
-  describeTickFields, TICK_FIELDS_READ, republishWithChain,
+  describeTickFields, TICK_FIELDS_READ, republishWithChain, PUBLISH_RETRYABLE,
   runPooled, foldCardOutcomes, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote,
@@ -619,16 +620,80 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(lines.length, 0, "and says nothing it did not do");
   }
 
-  /* An unresolved session date must not mint an unpruneable key. */
+  /* An unresolved session date must not mint an unpruneable key — AND MUST
+     NOT PUBLISH THE LIVE BOARD EITHER, WHICH THIS BLOCK USED TO ASSERT THE
+     OPPOSITE OF.
+
+     The second assertion here read "though the live boards still gain the
+     columns", and it passed, and it was wrong. Twenty lines above the code it
+     tests, republishWithChain's own comment states the rule:
+
+       "THE DATED COPY GOES FIRST, and that order is the whole design ... The
+        reverse order would publish a live board the history can never
+        reproduce, which is the one state the archive exists to prevent."
+
+     `if (key) await publishFn(key, payload)` reads as a guard and behaves as a
+     skip: with no session date the archive write is stepped over and the live
+     board is published anyway — producing exactly the state that sentence
+     forbids, and this test held it in place. A check that pins the defect is
+     worse than no check, because it answers the question before anyone asks
+     it. Both writes are refused now, and the run says which and why. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
     const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
-    await republishWithChain(payloads, chains, null, async (key) => { seen.push(key); });
-    ok(!seen.some((k) => /board:(long|short):/.test(k)),
-       `with no session date, no dated key is written at all (${seen.join(", ")})`);
-    ok(seen.includes("board:long") && seen.includes("board:short"),
-       "though the live boards still gain the columns");
+    const lines = await republishWithChain(payloads, chains, null, async (key) => { seen.push(key); });
+    eq(seen.length, 0,
+       `with no session date NOTHING is published — not the dated copy, and not the live ` +
+       `board that would then carry columns its own archive can never reproduce ` +
+       `(${seen.join(", ") || "nothing written"})`);
+    eq(lines.length, 2,
+       "and the run reports the skip for both sides rather than passing over it in silence");
+    ok(lines.every((l) => /SKIPPED/.test(l) && /not an archive date/.test(l)),
+       `each line names the reason and the value that caused it (${lines.join(" | ")})`);
+    ok(lines.some((l) => l.includes("board:long")) && lines.some((l) => l.includes("board:short")),
+       "one line per side, so a log reader can see it was not one board that was skipped");
+  }
+
+  /* THE TWO ARCHIVE REFUSALS FALL ON OPPOSITE SIDES OF THIS FILE'S RETRY SET,
+     AND UNTIL NOW NOTHING CHECKED THAT THE TWO FILES AGREED.
+
+     worker.js chose 503 for a dated key it could not READ and 409 for a dated
+     key that is already written and says something else. Those are not
+     stylistic choices: 503 is in PUBLISH_RETRYABLE, so a run that meets a sick
+     store comes back and the session's board still lands; 409 is not, so a run
+     that meets a written day stops instead of hammering a permanent refusal.
+     A status picked without reading this set would either abandon a retryable
+     failure or retry a final one, and both look fine in the file where the
+     number is typed. */
+  {
+    ok(PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_unreadable.status),
+       `an unreadable archive is retryable (${ARCHIVE_REFUSALS.refuse_unreadable.status}) — ` +
+       `nothing was written, the store is simply not answering, and the next attempt is ` +
+       `the right move`);
+    ok(!PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_immutable.status),
+       `a written day is NOT retryable (${ARCHIVE_REFUSALS.refuse_immutable.status}) — ` +
+       `retrying cannot change the answer, and the correction path is the deliberate ` +
+       `two-step DELETE rather than persistence`);
+    ok(!PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_raced.status),
+       `and neither is a raced key (${ARCHIVE_REFUSALS.refuse_raced.status}): another ` +
+       `writer got there, nothing was overwritten, and a retry would only ask the same ` +
+       `question again`);
+  }
+
+  /* AND THE ORDINARY PATH IS PINNED BESIDE IT, so the refusal above cannot be
+     satisfied by a function that has stopped publishing anything at all —
+     which is the failure mode every "and nothing happened" assertion invites. */
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
+    await republishWithChain(payloads, chains, "2026-08-24", async (key) => { seen.push(key); });
+    eq(seen.indexOf("board:long:2026-08-24") < seen.indexOf("board:long"), true,
+       `on a real session date the DATED copy is written before the live board ` +
+       `(${seen.join(", ")}) — the order the archive's whole design rests on`);
+    ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
+       "and both sides publish, dated copy first");
   }
 }
 
