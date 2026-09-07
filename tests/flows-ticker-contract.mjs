@@ -24,7 +24,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
-import { buildLevels, buildContext, buildDisplacement, buildPath, buildCalendar } from "../shared/flows-card.js";
+import {
+  buildLevels, buildContext, buildDisplacement, buildPath, buildCalendar, buildPricedMove,
+} from "../shared/flows-card.js";
 import {
   TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS, TICKER_GROUPS, PANEL_TIERS,
   STATION_SIDE_COUNTS,
@@ -1399,6 +1401,15 @@ try {
       { expiry: "2026-09-04", call_gamma: 60, put_gamma: 40 },
       { expiry: "2026-10-16", call_gamma: 30, put_gamma: 20 },
     ], { asOf: "2026-08-24" });
+    /* THE PRICED MOVE, WITH BOTH BANDS AND THE VENDOR QUOTE PRESENT, so the
+       lead is exercised on the branch that has to CHOOSE between them: the
+       fixed horizon is comparable across the board and the vendor's quote
+       runs to its own undated expiry, and a lead that led on the second when
+       the first exists would be putting an incomparable figure at the top of
+       a panel a reader reaches from a ranked list. */
+    led.panels.pricedMove = buildPricedMove({
+      spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025, vrp: 0.11,
+    });
     await mount(page, led, { ticker: led.ticker, station: "all" });
 
     const ones = await page.evaluate(() =>
@@ -1414,7 +1425,7 @@ try {
        deliberately, which is the only way a slot cannot quietly stop being
        filled. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
-      ["calendar", "context", "displacement", "levels", "path"],
+      ["calendar", "context", "displacement", "levels", "path", "pricedMove"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
