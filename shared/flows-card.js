@@ -97,6 +97,36 @@ export function ok(values, asOf) {
   return { status: "ok", asOf: asOf || null, ...values };
 }
 
+/**
+ * A panel's ONE-LINE ANSWER, and the numbers it is made of.
+ *
+ * WHY THE SENTENCE IS BUILT HERE AND NOT IN THE RENDERER. `.ft-panel-one` is
+ * served on all 23 ticker panels, styled, guarded with `:empty{display:none}`,
+ * and was written to by nothing for the life of the markup. The obvious fix —
+ * have each renderer compose its own one-liner — puts twenty-three sentences
+ * and their formatting on the one route this repository weighs, on the reader's
+ * own CPU, to say things the publisher already measured. This module runs where
+ * CPU is free, the same argument shared/flows-brief.js makes for the briefing,
+ * and `shared/` is in .assetsignore so none of it is ever served.
+ *
+ * `n` IS THE SENTENCE'S ARITHMETIC, CARRIED SEPARATELY, and the rule is the one
+ * flows-brief.js states for its facts: a figure in prose that is not also in `n`
+ * is unpinned, and a rephrasing could change it silently. The contract suite
+ * scans every numeral in `say` against `n` — masking out string values first,
+ * because a ticker like SYN046 carries digits inside a symbol that is itself
+ * pinned, and a naive digit scan accuses the module of an unpinned "046".
+ *
+ * A LEAD IS NEVER A PLACE TO PUT A NUMBER THIS FILE DOES NOT HAVE. Where a
+ * reading is absent the sentence says so or the lead is omitted entirely; the
+ * slot is `:empty`-hidden, so an omitted lead costs a reader nothing, while an
+ * invented one costs them the thing this whole codebase is built to protect.
+ */
+export function panelLead(say, n) {
+  const sentence = String(say === null || say === undefined ? "" : say).trim();
+  if (!sentence) return null;
+  return { say: sentence, n: n && typeof n === "object" ? { ...n } : {} };
+}
+
 /** A panel whose source did not arrive. Never carries numbers. */
 export function unavailable(reason) {
   return { status: "unavailable", reason: reason || "no data", asOf: null };
@@ -237,7 +267,33 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
   if (!levels.length) return unavailable("no levels resolved");
   // Nearest first: the level a move reaches next is the one that matters.
   levels.sort((x, y) => Math.abs(x.distPct) - Math.abs(y.distPct));
-  return ok({ spot: s, atr: a, levels });
+
+  /* THE PANEL'S ONE-LINE ANSWER IS THE NEAREST LEVEL, and the sort above is
+     what makes "nearest" a fact rather than a claim — it is the first element
+     by construction. The table has said this since the panel shipped and has
+     never said it in words, so a reader met four rows and had to work out
+     which one a move reaches next.
+
+     THE ATR DISTANCE IS THE ONE A TRADER SIZES WITH, and it is omitted rather
+     than defaulted when ATR is absent: a distance in sigma units with no sigma
+     is no number, not a small one — the same sentence buildLevels' own
+     `measure` uses for the field. */
+  const near = levels[0];
+  const above = near.distPct >= 0;
+  const pct = Math.abs(near.distPct * 100);
+  const lead = panelLead(
+    `Nearest: ${near.label.toLowerCase()} at ${near.px.toFixed(2)}, ` +
+    `${pct.toFixed(1)}% ${above ? "above" : "below"} spot ${s.toFixed(2)}` +
+    (near.distAtr === null
+      ? " (ATR unavailable, so no sigma distance)."
+      : ` — ${Math.abs(near.distAtr).toFixed(2)}\u03c3.`),
+    {
+      px: Number(near.px.toFixed(2)),
+      spot: Number(s.toFixed(2)),
+      distPct: Number(pct.toFixed(1)),
+      distAtr: near.distAtr === null ? null : Number(Math.abs(near.distAtr).toFixed(2)),
+    });
+  return ok({ spot: s, atr: a, levels, lead });
 }
 
 /**
@@ -577,7 +633,44 @@ export function buildContext(
     return unavailable("no price history");
   }
   const dated = dates.filter(Boolean).length;
+
+  /* THE ONE-LINE ANSWER IS WHERE TODAY SITS IN ITS OWN YEAR, which is the
+     question this station closes on and the one the sparkline draws without
+     ever stating. `week52Pos` is a fraction of the 52-week range, so it is
+     multiplied once, here, and never again by a renderer — the "1352% of its
+     year" scar is what a second rescaling looks like.
+
+     THE 21-SESSION RETURN RIDES ALONG BECAUSE POSITION ALONE IS AMBIGUOUS: a
+     name at 90% of its year that has fallen for a month is a different
+     sentence from one that has climbed there, and the position is identical in
+     both. Either reading absent, the sentence says only what it has; both
+     absent, there is no lead and the slot stays empty rather than carrying a
+     sentence with no number in it. */
+  const posPct = fields.week52Pos === null ? null : fields.week52Pos * 100;
+  const r21Pct = fields.r21 === null ? null : fields.r21 * 100;
+  const where = posPct === null ? null
+    : `Sitting at ${posPct.toFixed(0)}% of its 52-week range`;
+  const moved = r21Pct === null ? null
+    : `${r21Pct >= 0 ? "up" : "down"} ${Math.abs(r21Pct).toFixed(1)}% over 21 sessions`;
+  const lead = panelLead(
+    where === null && moved === null ? ""
+      : where === null ? `Price is ${moved}.`
+      : moved === null ? `${where}.`
+      : `${where}, ${moved}.`,
+    {
+      week52Pos: posPct === null ? null : Number(posPct.toFixed(0)),
+      r21: r21Pct === null ? null : Number(Math.abs(r21Pct).toFixed(1)),
+      sessions: 21,
+      /* THE WINDOW LENGTH IS PINNED TOO, and the scan is what asked for it: 52
+         is a numeral in the prose, so it is a figure a rephrasing could change.
+         It is also a real parameter of the reading — week52Pos is a fraction OF
+         a 52-week range — and pinning it is where a vendor quietly redefining
+         that field would be caught. */
+      weeks: 52,
+    });
+
   return ok({
+    ...(lead ? { lead } : {}),
     ...fields,
     closes: series.map((c) => Number(c.toFixed(4))),
     /* Same length as `closes` by construction, with null where the candle

@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
+import { buildLevels, buildContext } from "../shared/flows-card.js";
 import {
   TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS, TICKER_GROUPS, PANEL_TIERS,
   STATION_SIDE_COUNTS,
@@ -1361,15 +1362,77 @@ try {
          `${st.group}: and says "drawn" exactly once, so nothing accumulated`);
     }
 
-    /* THE PANEL SLOTS STAY EMPTY, ASSERTED RATHER THAN LEFT TO CHANCE — until
-       the nineteen one-liners exist, a filled slot would mean something is
-       writing to them that this change did not put there. */
+    /* THE PANEL SLOTS, NOW THAT TWO PANELS PUBLISH A LEAD.
+
+       THE FIXTURES ARE REAL EMITTED CARDS AND PREDATE THE FIELD, so the leads
+       are built in-test by calling the publisher's OWN builders — never by
+       writing a sentence here, which would test this file against itself. Same
+       reason section 2e builds its three context payloads rather than hunting
+       for them in a corpus that cannot contain them. */
+    const led = JSON.parse(JSON.stringify(card));
+    led.panels.levels = buildLevels({
+      spot: 180, atr: 4.2, gammaFlip: 182.5, maxPain: 175, callWall: 195, putWall: 165,
+    });
+    led.panels.context = buildContext({
+      closes: Array.from({ length: 40 }, (_, i) => 150 + i * 0.8),
+      r5: 0.012, r21: 0.084, r42: 0.11, week52Pos: 0.91, changePct: 0.004,
+    });
+    await mount(page, led, { ticker: led.ticker, station: "all" });
+
     const ones = await page.evaluate(() =>
+      [...document.querySelectorAll("#ftGrid .ft-panel[data-panel]")]
+        .map((section) => ({
+          key: section.dataset.panel,
+          one: String((section.querySelector(":scope > .ft-panel-one") || {}).textContent || "").trim(),
+        }))
+        .filter((p) => p.one));
+
+    /* PINNED AS A SET, NOT A COUNT, and as a STANDING FACT rather than a
+       target: the day a panel gains a lead this line fails and is rewritten
+       deliberately, which is the only way a slot cannot quietly stop being
+       filled. */
+    assert.deepEqual(ones.map((p) => p.key).sort(), ["context", "levels"],
+      `exactly the panels that publish a lead have a filled slot ` +
+      `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
+
+    for (const p of ones) {
+      const published = led.panels[p.key].lead;
+      eq(p.one, published.say,
+         `${p.key}: the slot prints the publisher's sentence VERBATIM — a renderer that ` +
+         `composed or edited it would be a second author for one reading`);
+      /* EVERY NUMERAL IN THE SENTENCE IS PINNED IN `n` — the rule
+         shared/flows-brief.js states for its facts, and the reason a figure can
+         be set large, or re-read, without a regex over the prose.
+
+/* NUMBERS AND STRINGS ARE MASKED DIFFERENTLY, and conflating them is a
+         defect this panel's own data exposed. The mask exists for STRING
+         values — a ticker like SYN046 carries digits inside a symbol that is
+         itself pinned, and a naive digit scan accuses the module of an
+         unpinned "046". But a NUMBER stringified is still a string, so a
+         single set masks "182.5" out of the prose's "182.50" and leaves a bare
+         "0" behind, which is then reported as unpinned. The two sets are kept
+         apart: only string values mask, and numbers are matched by value. */
+      const quotedNums = new Set();
+      const quotedText = new Set();
+      for (const v of Object.values(published.n)) {
+        if (typeof v === "number") quotedNums.add(String(v));
+        else if (typeof v === "string" && /\D/.test(v)) quotedText.add(v);
+      }
+      let stripped = published.say;
+      for (const v of quotedText) stripped = stripped.split(v).join(" ");
+      for (const lit of stripped.match(/-?\d+(?:\.\d+)?/g) || []) {
+        ok(quotedNums.has(lit) || quotedNums.has(String(Number(lit))),
+           `${p.key}: "${lit}" in "${published.say.slice(0, 52)}" is pinned in n — an ` +
+           `unpinned figure is one a rephrasing could change silently`);
+      }
+    }
+
+    /* AND NO SLOT HOLDS WHITESPACE, which would defeat `:empty{display:none}`
+       and leave a reader a blank line where a reading would be. */
+    const blank = await page.evaluate(() =>
       [...document.querySelectorAll("#ftGrid .ft-panel-one")]
-        .map((n) => String(n.textContent || "").trim()).filter(Boolean));
-    eq(ones.length, 0,
-       `no panel slot is written yet (${ones.length}) — this line is the marker for the ` +
-       `change that fills them, and it has to be deleted deliberately`);
+        .filter((n) => n.textContent !== "" && !String(n.textContent).trim()).length);
+    eq(blank, 0, "no slot holds whitespace that would defeat :empty");
 
     eq(errors.length, 0, `the station walk throws nothing (${errors.join("; ")})`);
     await page.close();
