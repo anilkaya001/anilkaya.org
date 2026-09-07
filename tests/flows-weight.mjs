@@ -234,8 +234,59 @@ const CEILING_KIB = {
      reduction below; until it lands, the next change here has to move this
      number in the open rather than find room waiting for it.
 
-     THIS CEILING IS OWED A REDUCTION, AND THE FIGURE THAT SENTENCE USED TO
-     CARRY WAS NOT A MEASUREMENT EITHER. It read "the deferral PRs (the eight
+     496 -> 500, AND THIS IS THE THIRD CONSECUTIVE RAISE, WHICH IS THE PATTERN
+     THIS FILE'S HEADER WARNS ABOUT. Saying so is the point: 480 -> 493 -> 496
+     -> 500, three PRs in a row, each argued and each measured, and a series
+     that only goes one way is a ratchet pointing the wrong direction however
+     good each individual argument was. Measured: 510,955 B = 498.98 KiB,
+     leaving 1,045 B under 500.
+
+     WHAT IT BOUGHT: five of the twenty-eight slots the design reserved and
+     never filled. `.ft-station-lead` is served on all five stations and
+     `.ft-panel-one` on all 23 panels; all of them styled, all
+     `:empty{display:none}`, all asserted to arrive empty — and NOTHING had
+     ever written to any of them. The stylesheet's own comment read "PR 4's
+     one-line answer. Empty until then", and PR 4 shipped something else. Each
+     station now carries a coverage line counted off the DOM the renderers
+     actually emitted, answering the one question no panel can — what is
+     missing here, before a reader scrolls six boxes to find out — with
+     `unavailable` and `quiet` counted and named separately rather than
+     collapsed.
+
+     4,430 B of flows-ticker.js, AND MOST OF IT IS THE ARGUMENT FOR WHAT IS NOT
+     THERE. The panel slots are not filled, because the obvious implementation
+     — lift each panel's existing lead reading into its slot — was refused
+     twice by the ticker contract, and reading the two failures together is
+     what produced the rule now written beside the code: the slot sits
+     immediately above the drawing, so moving a sentence up by one element
+     changes nothing a reader sees while breaking invariants about where a
+     finding lives. The nineteen panels that do not lead in their drawing are
+     the ones the slot is for. Recording why the cheap version was wrong costs
+     more bytes than the cheap version would have, and is worth them.
+
+     THE REDUCTION IS NOT A HOPE, IT IS TWO MEASURED PATHS AND A BLOCKER EACH:
+
+       comment-stripping the served copy   -229.96 KiB  (route 498.98 -> 269.03)
+       a station-scoped panel deferral     -114.07 KiB  (upper bound, first paint)
+
+     The first is measured here, byte-accurate: 235,481 B of this route's
+     510,955 is comment, 46.1%. It is also the RIGHT reduction — gzip already
+     handles transfer, and only stripping touches the parse this file's own
+     header calls "the part that happens on the reader's own CPU". It is
+     blocked on one field in the Workers Builds dashboard: Cloudflare's docs
+     state twice that Workers Builds "does not honor the configurations set in
+     Custom Builds within your Wrangler configuration file", so a `[build]`
+     step in wrangler.toml would never run and the change would ship as a
+     silent no-op behind a diff claiming the win. That is written down here so
+     the next person does not spend the day discovering it.
+
+     THE TRIGGER, AND IT IS NOT A PROMISE IN PROSE: the next change that would
+     take this route past 500 does the reduction FIRST. Not alongside, not
+     after. A fourth raise with neither path landed is this file failing at the
+     one job it has.
+
+     WHAT THE PREVIOUS RAISE SAID, AND THE FIGURE THAT SENTENCE USED TO CARRY
+     WAS NOT A MEASUREMENT EITHER. It read "the deferral PRs (the eight
      ticker-only drawers out of flows-panels.js) take roughly 230k off this
      route". Nothing in the repository defines those eight drawers or that
      number — it appears here and nowhere else — and the table below now makes
@@ -260,7 +311,7 @@ const CEILING_KIB = {
      sentence back out of the source and checks it against this table. A
      deferral of the panel library states its cost the same way, or it has
      moved bytes out of a measurement rather than off a reader's CPU. */
-  tickerPage: 496,
+  tickerPage: 500,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
