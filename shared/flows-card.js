@@ -432,10 +432,52 @@ export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
     };
   });
 
+  /* THE PANEL ASKS "how much of the book expires, and when?" AND THEN DREW A
+     LADDER. Both halves of the answer are already computed here — the median
+     expiry under the gamma measure, and the identified mean life — so the
+     sentence states them and the ladder becomes the working.
+
+     THE HALF-LIFE IS THE MEDIAN, NOT THE MEAN, and the sentence says "half"
+     rather than "average" because that is what the cumulative-share walk
+     above finds: the first expiry at which cumShare crosses 0.5. Mean life is
+     carried second and named separately, since a book with one far-dated
+     cluster has a mean well past its median and calling either "when it
+     expires" would be wrong about the other.
+
+     DAYS ARE OMITTED RATHER THAN DEFAULTED WHEN `asOf` IS ABSENT. daysTo()
+     returns null with no session date, and a horizon of "0 days" is a claim
+     that the book expires today — the confident zero this file exists to
+     refuse. The expiry DATE is still known in that case, so the sentence
+     keeps it and drops only the count. */
+  const lead = (() => {
+    if (halfLifeExpiry === null) return null;
+    const when = halfLifeDays === null
+      ? `by ${halfLifeExpiry} (no session date, so no horizon in days)`
+      : `by ${halfLifeExpiry}, ${halfLifeDays} day${halfLifeDays === 1 ? "" : "s"} out`;
+    const meanLife = total > 0 && Number.isFinite(base)
+      ? Number((lifeWeighted / total).toFixed(1))
+      : null;
+    return panelLead(
+      `Half the book's gamma expires ${when}, across ${schedule.length} ` +
+      `expir${schedule.length === 1 ? "y" : "ies"}` +
+      (meanLife === null ? "." : ` — mean life ${meanLife} days.`),
+      {
+        /* PINNED AS A STRING SO THE SCAN MASKS IT. "2026-09-11" is three
+           numerals to a naive digit walk and none of them is a figure this
+           sentence is claiming — the same reason the contract above pins a
+           ticker like SYN046. */
+        halfLifeExpiry,
+        halfLifeDays,
+        expiries: schedule.length,
+        meanLifeDays: meanLife,
+      });
+  })();
+
   return ok({
     // The first `maxRows` expiries carry the decision; the tail is a footnote.
     schedule: schedule.slice(0, maxRows),
     expiries: schedule.length,
+    lead,
     halfLifeExpiry,
     halfLifeDays,
     /* frontLoad is PARTITION-DEPENDENT — it is the first LISTED expiry's
