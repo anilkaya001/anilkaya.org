@@ -194,8 +194,38 @@
 
    A caveat is read once, carefully, beside the figure it qualifies. Newspaper
    columns are for text read continuously, and none of this text is. */
+/* AND THE LIST ABOVE LEFT OUT EVERY CLASS THAT ACTUALLY GETS LONG, which is
+   an oversight rather than a policy — `.rec-note`, the paragraph directly
+   above `.rec-empty` in its own block, IS capped at 62ch. Measured at 1920
+   with the real faces, characters per line, all with `max-width: none`:
+
+     .cc-quiet.cc-lede      288   a 423-character lede set two lines deep
+     caption.flows-caption  259   13 instances across seven routes
+     p.flows-stale          259   8 instances
+     p.flows-empty          249
+     p.rec-empty            239
+     p.desk-help            217
+
+   All multi-sentence explanatory prose, and the defect is monotonic in
+   viewport width: the watch caption measures 154 cpl at 1280, 259 at 1920
+   and 318 at 2560. Measured cost of exactly this patch, per route: overview
+   +9.0%, history +8.9%, political +5.4%, unusual +3.8%, ask +3.2%, strategy
+   +2.1%, market +1.9%, track +1.8%, events +1.6%, side +0.8%, ticker +0.8%,
+   watch and desk +0.0%; zero horizontal overflow anywhere. That is inside
+   the +5..9% band the paragraph above already accepted when it adopted the
+   cap over columns.
+
+   `.flows-status` IS DELIBERATELY NOT HERE, and it is the worst measure left
+   afterwards — 156-226 cpl on nine of thirteen routes. This file argues it as
+   "a state line, not prose". Reading that argument, it is about how the line
+   is MARKED — a hairline and dimmed ink saying "this sentence is about the
+   page, not about the market" — rather than about how wide it should be. That
+   is a real question and it is not this rule's to settle, so the number is
+   recorded here rather than acted on. */
 @media (min-width: 92rem) {
-  .fc-note, .fc-q, .flows-foot, .flows-lede, .fc-reading { max-width: 68ch; }
+  .fc-note, .fc-q, .flows-foot, .flows-lede, .fc-reading,
+  .flows-caption, .flows-stale, .flows-empty, .rec-empty, .desk-help,
+  .cc-quiet { max-width: 68ch; }
 }
 
 .flows-head {
@@ -5190,6 +5220,54 @@ body.is-stale .flows-tablewrap {
   .mk-pulse-card.is-wide { grid-column: span 2; }
 }
 
+/* AND THE WIDTH WAS GOING TO THE PANELS THAT CAN SET THEIR OWN, WHICH IS
+   BACKWARDS. `is-wide` is passed by flows-market.js to exactly two cards —
+   the tide chart and the volume/premium chart — and a chart sizes itself to
+   whatever host it is given. The four TABLE cards get no span at all, and a
+   table is the thing that cannot shrink: .flows-table carries a 46rem floor,
+   so a 20-column pulse table sits in a 305px track and hides two thirds of
+   itself. That is the rule this file already established once, in the ticker
+   grid: WIDEN THE PANEL WHOSE LAYOUT CAN ABSORB WIDTH, not the one that
+   spends it on white space.
+
+   The grid makes it worse the wider the monitor gets, because
+   `repeat(auto-fit, minmax(min(19rem, 100%), 1fr))` is a 304px FLOOR WITH NO
+   CEILING: more width buys more tracks, never wider ones. Measured hidden
+   header cells at 1920 — the Open-interest change card shows a column of
+   contract names and NONE of its four numbers; Dark pool prints shows names
+   and times and none of price, size or premium.
+
+   108rem, AND THE TIER IS WHERE IT IS FOR A MEASURED REASON. At that width
+   there are enough tracks for the two charts to keep their span AND the
+   tables to take one. Below it nothing changes at all:
+
+              before                  at and above 108rem
+      390     11 of 20 hidden         (unchanged — 11 of 20)
+      768     13 of 20 hidden         (unchanged — 13 of 20)
+     1280     11 of 20 hidden         (unchanged — 11 of 20)
+     1728     11 of 20 hidden         0 of 20, tables >= 693px, +11.8% height
+     1920     11 of 20 hidden         0 of 20, tables >= 628px, +11.1% height
+     2560     11 of 20 hidden         0 of 20, tables >= 653px, -1.6% height
+
+   `min-width: 0` IS SCOPED TO THE SAME TIER, AND THAT IS THE POINT RATHER
+   THAN A TIDY-UP. Applied unconditionally it does take the phone from 11
+   hidden to 6 — but it gets there by compressing cells to 45px, and these
+   cells hold dollar figures under `text-overflow: ellipsis`. That trades a
+   number hidden behind an honest scroll, which is intact when a reader
+   swipes to it, for a number TRUNCATED IN PLACE and read as complete: $24
+   where the figure is $24.0M. Inside this tier the same rule leaves cells at
+   71-79px, which is the width the figures were designed at. So the narrow
+   case keeps its 46rem floor and its scroll — and since the wrapper now
+   carries a scroll edge, a reader is finally told the row continues.
+
+   `:has()` RATHER THAN A CLASS FROM THE RENDERER, because tests/flows-weight
+   .mjs has the market route at 102k of a 102k ceiling — zero headroom. A
+   class string in flows-market.js is bytes on that route; a selector is not. */
+@media (min-width: 108rem) {
+  #mkPulseGrid .mk-pulse-card:has(.mk-pulse-table) { grid-column: span 2; }
+  .mk-pulse-table { min-width: 0; }
+}
+
 .mk-pulse-card {
   min-width: 0;              /* a grid child may not widen its track */
   padding: var(--space-2) 0 0;
@@ -7297,7 +7375,18 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    it has no max-width partner — so reusing it neither invents an eleventh
    width nor risks the 60/60 collision flows-motion.mjs caught. */
 @media (min-width: 76rem) {
-  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+  /* NO `align-items: start`. Three bordered panels side by side under one
+     heading are row-mates, and the word left them visibly ragged: measured
+     447/564/639 at 1920 (a 192px worst pair), 552/763/881 at 1280 (329px)
+     and 426/564/592 at 2560 (166px). Grid's default stretch makes all three
+     equal at every width and costs NOTHING — document height 1966 -> 1966,
+     grid height 1167 -> 1167 at 1920, and the same at 1280 and 2560, because
+     the row was already as tall as its tallest member. The paragraph above
+     argues the three columns and their chronological order; it never argued
+     this word. (.ak-warns below is `1 / -1`, so it is alone on its own row
+     and is not a row-mate of the three — comparing it against them measures
+     across two ROWS, which is not an evenness question.) */
+  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ak-brief .ak-warns { grid-column: 1 / -1; }
   .ak-region .ak-facts { grid-template-columns: 1fr; }
   .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
