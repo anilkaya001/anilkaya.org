@@ -116,6 +116,15 @@ export function ok(values, asOf) {
  * because a ticker like SYN046 carries digits inside a symbol that is itself
  * pinned, and a naive digit scan accuses the module of an unpinned "046".
  *
+ * NO THOUSANDS SEPARATORS IN `say`, AND THE REASON IS THE SCAN. A grouped
+ * "1,250,000" reads to the numeral scan as three figures — 1, 250 and 000 —
+ * none of which matches the pinned 1250000, so the sentence fails a check it
+ * has not actually broken. Where a magnitude wants shortening, STATE A ROUNDED
+ * FIGURE AND PIN THE ROUNDED FIGURE ("1.25M" beside `shown: 1.25`), carrying
+ * the exact value in its own key. buildPath does this and the comment there
+ * records how it was found: every fixture in the branch check happened to
+ * produce a number too small to be grouped.
+ *
  * A LEAD IS NEVER A PLACE TO PUT A NUMBER THIS FILE DOES NOT HAVE. Where a
  * reading is absent the sentence says so or the lead is omitted entirely; the
  * slot is `:empty`-hidden, so an omitted lead costs a reader nothing, while an
@@ -472,14 +481,51 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   const vol = centroid("call_gamma_vol", "put_gamma_vol");
   if (!oi || !vol) return unavailable("no open-interest or volume gamma");
 
+  const gapPx = Number((vol.c - oi.c).toFixed(2));
+  const gapAtr = a !== null && a > 0 ? Number(((vol.c - oi.c) / a).toFixed(3)) : null;
+
+  /* THE PANEL SAYS WHICH WAY THE REGIME IS MOVING, WHICH IT HAS NEVER SAID IN
+     WORDS. This function's own header draws the distinction — "Conventional GEX
+     describes the regime you are in; this says the regime is moving, and which
+     way" — and then published two centroids and a gap, leaving a reader to work
+     the direction out of a chart.
+
+     THE SIGN IS THE READING, NOT THE MAGNITUDE. Today's flow building gamma
+     ABOVE where the book already sits is a different statement from below it,
+     and it is the whole point of comparing the two as distributions. So the
+     sentence leads on the direction and carries the size second.
+
+     ATR UNITS WHERE THERE IS AN ATR, PRICE WHERE THERE IS NOT — never a sigma
+     figure with no sigma behind it, the rule `gapAtr` is already null for. A
+     gap of zero is a MEASURED zero and says so: the two distributions sit on
+     top of each other, which is a finding about the book rather than a missing
+     reading. */
+  const dir = gapPx > 0 ? "above" : gapPx < 0 ? "below" : "on top of";
+  const size = gapAtr === null
+    ? `${Math.abs(gapPx).toFixed(2)} in price`
+    : `${Math.abs(gapAtr).toFixed(2)}\u03c3`;
+  const lead = panelLead(
+    gapPx === 0
+      ? `Today's flow is building gamma exactly where the book already sits — ` +
+        `both centroids at ${oi.c.toFixed(2)}.`
+      : `Today's flow is building gamma ${size} ${dir} the book, at ` +
+        `${vol.c.toFixed(2)} against ${oi.c.toFixed(2)}.`,
+    {
+      volCentroid: Number(vol.c.toFixed(2)),
+      oiCentroid: Number(oi.c.toFixed(2)),
+      gapPx: Math.abs(gapPx),
+      gapAtr: gapAtr === null ? null : Math.abs(gapAtr),
+    });
+
   return ok({
+    lead,
     oiCentroid: Number(oi.c.toFixed(2)),
     volCentroid: Number(vol.c.toFixed(2)),
     spot: numOrNull(spot),
-    gapPx: Number((vol.c - oi.c).toFixed(2)),
+    gapPx,
     // null, not Infinity, when there is no sigma: a distance in sigma units
     // with no sigma is not a small number, it is no number.
-    gapAtr: a !== null && a > 0 ? Number(((vol.c - oi.c) / a).toFixed(3)) : null,
+    gapAtr,
   });
 }
 
@@ -786,7 +832,62 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
      is the running sum of `net_call_premium - net_put_premium`: dollars,
      with put buying entering negative, which is why it is side-signed too
      and not a gross spend. */
+  /* THE SESSION'S NET DIRECTION, AND WHETHER THE TAPE MEANT IT.
+
+     THE UNIT TRAVELS WITH THE NUMBER, always: netDelta is delta-weighted
+     contracts SIDE-SIGNED, not a contract count, and the two published
+     `*Unit` strings exist because reading it as either would be wrong in a
+     different direction. The sentence names the unit rather than assuming a
+     reader has read the legend.
+
+     PERSISTENCE IS READ AGAINST 0.5, NOT AGAINST ZERO. It is the share of
+     minutes moving WITH the day's net direction, so a directionless tape is
+     0.5 and not 0 — quoting it bare invites a reader to treat 0.55 as weak
+     when it is a majority. It rides along only when it is present, and the
+     sentence stands without it.
+
+     A MEASURED ZERO IS A FINDING. A session that ends flat on net delta is a
+     tape that bought and sold in balance, which is worth a sentence; it is
+     `netDelta === 0`, distinct from a session that produced no readable
+     minutes at all — that returns before this point. */
+  const nd = Math.round(cumD);
+  const mins = rows.length;
+  const pers = sig && sig.persistence !== null && sig.persistence !== undefined
+    ? Number(sig.persistence) : null;
+  const held = pers === null ? ""
+    : ` — ${Math.round(pers * 100)}% of minutes ran with it, against 50% for a directionless tape`;
+  /* NO THOUSANDS SEPARATORS, AND THIS WAS CAUGHT BY THE SCAN RATHER THAN BY
+     READING. The first version printed toLocaleString("en-US"), so a net delta
+     of 1,250,000 reached the prose as "1,250,000" and the numeral scan read it
+     as THREE unpinned figures — 1, 250, 000 — none of which matches 1250000.
+     Every fixture in the branch check happened to produce 870, which needs no
+     separator, so all three branches passed and the defect would have surfaced
+     on the first real card with a large tape.
+
+     A ROUNDED FIGURE IS STATED AND THE ROUNDED FIGURE IS PINNED. `shown` is
+     what the sentence says and what `n` carries; `netDelta` travels beside it
+     exact, so a reader gets a readable magnitude and a machine gets the value
+     the rounding came from. */
+  const mag = Math.abs(nd);
+  const shown = mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
+    : mag >= 1e3 ? Number((mag / 1e3).toFixed(1))
+      : mag;
+  const suffix = mag >= 1e6 ? "M" : mag >= 1e3 ? "k" : "";
+  const lead = panelLead(
+    nd === 0
+      ? `The tape closed FLAT on net delta over ${mins} minute(s): what was bought was sold.`
+      : `Net ${nd > 0 ? "buying" : "selling"} of ${shown}${suffix} delta-weighted ` +
+        `contracts over ${mins} minute(s)${held}.`,
+    {
+      shown,
+      netDelta: mag,
+      minutes: mins,
+      persistencePct: pers === null ? null : Math.round(pers * 100),
+      directionless: 50,
+    });
+
   return ok({
+    lead,
     series,
     netDelta: Math.round(cumD),
     netDeltaUnit: "delta-weighted contracts, side-signed",
