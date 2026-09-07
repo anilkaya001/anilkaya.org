@@ -234,10 +234,32 @@ const CEILING_KIB = {
      reduction below; until it lands, the next change here has to move this
      number in the open rather than find room waiting for it.
 
-     THIS CEILING IS OWED A REDUCTION. The deferral PRs (the eight ticker-only
-     drawers out of flows-panels.js) take roughly 230k off this route, and when
-     they land 496 becomes exactly the inherited headroom this file's header
-     warns about. Re-derive it downward then; do not leave it. */
+     THIS CEILING IS OWED A REDUCTION, AND THE FIGURE THAT SENTENCE USED TO
+     CARRY WAS NOT A MEASUREMENT EITHER. It read "the deferral PRs (the eight
+     ticker-only drawers out of flows-panels.js) take roughly 230k off this
+     route". Nothing in the repository defines those eight drawers or that
+     number — it appears here and nowhere else — and the table below now makes
+     it arithmetically impossible: flows-panels.js is 161,628 B ENTIRE and, by
+     the panelRoutes assertion further down, is on this route alone, so moving
+     parts of it cannot take 230k off anything. The claim dates from when the
+     bundle was on four routes and its cross-route total was the number in
+     view.
+
+     WHAT IS ACTUALLY DEFERRABLE, measured: the library splits at line 465 into
+     22,589 B of scaffolding and 137,457 B of drawers. The default address
+     shows ONE station, and the signal station needs exactly two of those
+     drawers — renderOverlay and renderScore, 20,645 B — so an upper bound on
+     what a station-scoped deferral takes off FIRST PAINT is 116,812 B =
+     114.07 KiB. Upper bound, not a target: it assumes the switch to any other
+     station pays the fetch, and the reader who arrives at #panel-gamma pays it
+     immediately.
+
+     AND A DEFERRED COST IS STILL A COST, WHICH THIS SUITE ALREADY KNOWS HOW TO
+     HOLD. assets/js/flows-dock.js states in its own header what it defers and
+     what that weighs, and the block at the foot of this file reads that
+     sentence back out of the source and checks it against this table. A
+     deferral of the panel library states its cost the same way, or it has
+     moved bytes out of a measurement rather than off a reader's CPU. */
   tickerPage: 496,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
