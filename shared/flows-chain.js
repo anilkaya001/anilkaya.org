@@ -28,6 +28,11 @@ import {
   SURFACE_MAX_EXPIRIES, SURFACE_MAX_ROWS,
 } from "./flows-premium.js";
 import { buildUnusualRows, describeOiBasis } from "./flows-unusual.js";
+/* THE LEAD HELPERS, AND THE IMPORT IS ONE-WAY. flows-card.js does not import
+   this module — the pipeline hands it these four panels — so taking panelLead
+   from there closes no cycle. The stock panels could not do the same and their
+   leads are built card-side for exactly that reason. */
+import { panelLead, saidMagnitude } from "./flows-card.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -614,8 +619,57 @@ export function buildTopContracts(rows, {
   if (!parsed.length) return dead("no contract on this chain reported volume today");
   parsed.sort((a, b) => b.vol - a.vol);
   const shown = parsed.slice(0, limit);
+
+  /* THE TABLE RANKS THE LINES AND THE READER STILL HAS TO READ NINE COLUMNS.
+     The registry asks which single lines carried the volume; the drawing
+     answers the ranking half and leaves the rest to a horizontal scroll —
+     the aggressor column is the one the panel's own comment records as
+     scrolling off at span 1. So the lead names the top line, what share of
+     the drawn rows it is, and which way it was aggressed.
+
+     THE SHARE IS OF THE ROWS DRAWN, NOT OF THE CHAIN. `shown` is what the
+     table holds and `total` is every contract that traded; a share against
+     the chain would be a different, larger denominator than the rows a
+     reader can see under the sentence. The count said is the one drawn.
+
+     A BALANCED SPLIT AND AN UNREPORTED ONE ARE DIFFERENT FACTS, and `aggr`
+     is null for the second by construction a few lines above. Zero prints as
+     a measured balance; null says the vendor reported no split on that line
+     rather than implying one of nothing. */
+  const top = shown[0];
+  const volTotal = shown.reduce((a, r) => a + r.vol, 0);
+  const v = saidMagnitude(top.vol);
+  const share = volTotal > 0 ? Math.round((top.vol / volTotal) * 100) : null;
+  const aggrClause = top.aggr === null
+    ? " (the vendor reported no aggressor split on that line)"
+    : top.aggr === 0
+      ? ", with its two sides exactly balanced"
+      : (() => { const a = saidMagnitude(top.aggr);
+        return `, net ${a.shown}${a.suffix} contracts ` +
+          (top.aggr > 0 ? "taken at the offer" : "sold into the bid"); })();
+  const lead = panelLead(
+    `${top.cp === "P" ? "Put" : "Call"} ${top.k} expiring ${top.expiry} carried ` +
+    `the day: ${v.shown}${v.suffix} contracts` +
+    (share === null ? "" : `, ${share}% of the volume in the ${shown.length} ` +
+      `row${shown.length === 1 ? "" : "s"} below`) + aggrClause + ".",
+    {
+      /* Pinned as STRINGS so the numeral scan masks them: an expiry is three
+         numerals to a digit walk and none is a figure this sentence claims,
+         and the right carries the reading rather than a number. */
+      expiry: top.expiry,
+      right: top.cp === "P" ? "Put" : "Call",
+      strike: top.k,
+      shownVol: v.shown,
+      topVolume: top.vol,
+      sharePct: share,
+      rows: shown.length,
+      aggrShown: top.aggr === null || top.aggr === 0
+        ? null : saidMagnitude(top.aggr).shown,
+      aggr: top.aggr,
+    });
   return {
     status: "ok",
+    lead,
     rows: shown,
     shown: shown.length,
     total: parsed.length,
@@ -699,8 +753,97 @@ export function buildAggressor(rows, {
     ladder = ladder.slice(0, maxStrikes);
   }
 
+  /* THE LADDER IS THIRTY SIGNED BARS AND A ZERO RULE, and answering "which
+     strikes were taken at the offer" from it means eyeballing the longest bar
+     and working out which side of the rule it sits on. The lead states the
+     side, the size and the strike.
+
+     SIGNED BY WHAT THE BUYER IS LONG, which the `relation` string above
+     defines: calls positive, puts negative. The sentence says "to the call
+     side" / "to the put side" rather than repeating that convention, which is
+     already published beside the drawing.
+
+     A ZERO NET IS NOT EVIDENCE OF EQUAL LIFTING, and the sentence must not
+     say it is. `net` is Σ (ask − bid) signed by what the buyer is long, so a
+     call at ask 100 / bid 0 against a put at ask 0 / bid 100 nets to zero
+     with only the call ever lifted at the offer. What a zero proves is that
+     the two aggressor differences cancel — which is what the sentence says
+     now. The per-strike `calls`/`puts` fields are VOLUME, not aggressor, so
+     they cannot recover the offer-side split either.
+
+     A NET OF ZERO IS A READING AND IT IS THE INTERESTING ONE. The build
+     comment two blocks up says why the wings are kept: a strike where a put
+     and a call were each lifted sixty-forty nets to zero and is drawn
+     identically to a strike where nothing happened. So a measured zero says
+     it is measured, and the two cases — the ladder netting zero with live
+     bars, and every bar netting zero — are told apart rather than collapsed.
+
+     THE POPULATION IS THE BARS DRAWN, and the sentence says when that is a
+     cut of the chain: `strikesUnreported` counts strikes that carried no
+     split at all, and a lead claiming the ladder is the chain would be the
+     completeness claim the build comment above refuses. */
+  const aggrLead = (() => {
+    const bars = ladder.map((c) => Math.round(c.net));
+    const net = bars.reduce((a, n) => a + n, 0);
+    /* THE CUT CLAUSE NAMES THE SELECTION THAT ACTUALLY HAPPENED. The cap above
+       keeps the strikes NEAREST THE MONEY only when spot is positive; with no
+       usable spot it falls through to `ladder.slice(0, maxStrikes)`, which
+       keeps the LOWEST strikes. Saying "nearest the money" over that is a
+       claim about which part of the chain a reader is looking at, and it
+       would be wrong in the one case where it matters most. */
+    const cut = ladder.length < measuredStrikes
+      ? (spot > 0 ? " drawn nearest the money" : " drawn from the low-strike end")
+      : " drawn";
+    const nonZero = bars.filter((n) => n !== 0);
+    if (!nonZero.length) {
+      return panelLead(
+        `Every one of the ${ladder.length} strike` +
+        `${ladder.length === 1 ? "" : "s"}${cut} nets exactly zero: at each one, ` +
+        `the call and put aggressor cancel.`,
+        { strikes: ladder.length, ladderNet: 0 });
+    }
+    let bi = 0;
+    for (let i = 1; i < bars.length; i++) {
+      if (Math.abs(bars[i]) > Math.abs(bars[bi])) bi = i;
+    }
+    const heavy = ladder[bi], heavyNet = bars[bi];
+    const hm = saidMagnitude(heavyNet);
+    const heavySide = heavyNet > 0 ? "call" : "put";
+    /* THE HEAVIEST BAR IS THE LARGEST BY MAGNITUDE, WHICHEVER SIDE IT IS ON,
+       and on live cards it is regularly on the OPPOSITE side to the ladder's
+       net — the ladder leaning to puts while the single biggest strike went
+       to calls. That is a finding, not a contradiction, and it is one of the
+       more useful things this panel can say: the pressure is broad on one
+       side and concentrated on the other. But read without a hinge the
+       sentence looks like it contradicts its own opening clause, so the
+       contrast is stated in words when the two sides differ. */
+    const said = (n) => `${round(heavy.k, 2)}, ${hm.shown}${hm.suffix} contracts ` +
+      `net to the ${heavySide} side`;
+    const contrast = (netSide) => netSide === heavySide
+      ? `heaviest at ${said()}`
+      : `the heaviest single strike went the other way: ${said()}`;
+    if (net === 0) {
+      return panelLead(
+        `The ${ladder.length} strike${ladder.length === 1 ? "" : "s"}${cut} net ` +
+        `exactly zero: the call and put aggressor cancel across them — ` +
+        `heaviest at ${said()}.`,
+        { strikes: ladder.length, ladderNet: 0, strike: round(heavy.k, 2),
+          topNet: hm.shown, topNetExact: Math.abs(heavyNet) });
+    }
+    const nm = saidMagnitude(net);
+    return panelLead(
+      `${net > 0 ? "Calls" : "Puts"} were taken at the offer here: the ` +
+      `${ladder.length} strike${ladder.length === 1 ? "" : "s"}${cut} net ` +
+      `${nm.shown}${nm.suffix} contracts to the ${net > 0 ? "call" : "put"} ` +
+      `side — ${contrast(net > 0 ? "call" : "put")}.`,
+      { strikes: ladder.length, ladderNet: nm.shown, ladderNetExact: Math.abs(net),
+        strike: round(heavy.k, 2), topNet: hm.shown,
+        topNetExact: Math.abs(heavyNet) });
+  })();
+
   return {
     status: "ok",
+    lead: aggrLead,
     bars: ladder.map((c) => ({
       k: round(c.k, 2),
       net: Math.round(c.net),

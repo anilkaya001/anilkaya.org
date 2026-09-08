@@ -24,6 +24,7 @@ import {
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
 import { horizonMove } from "../shared/flows-features.js";
+import { buildAggressor } from "../shared/flows-chain.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -1433,6 +1434,110 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and names both clocks, which is the whole of the timing trap");
   ok(/population/.test(CROSS_NOTES.rank),
      "and says a rank is meaningless without the population beside it");
+}
+
+/* ---------------------------------------------------------------- *
+ * THE THREE CLAIMS THAT OUTRAN THEIR MEASUREMENT                     *
+ *                                                                    *
+ * Each of these was shipped, read back off fifty live cards, and     *
+ * called correct — and each asserted something the field underneath  *
+ * it does not establish. They were caught by a reviewer rather than  *
+ * by this file, and the fixes were first proven by a throwaway       *
+ * script, which in this repository is not proof at all. So the       *
+ * branches are pinned here, where they fail if the wording drifts    *
+ * back toward the confident version.                                 *
+ * ---------------------------------------------------------------- */
+{
+  const greekLadder = (call, put) => [
+    { expiry: "2026-09-18", call_vanna: call, put_vanna: put },
+    { expiry: "2026-10-16", call_vanna: 10, put_vanna: -10 },
+  ];
+  const vannaSay = (call, put) => {
+    const card = buildCard({
+      ticker: "T", row: {}, features: {},
+      expiries: greekLadder(call, put), sessionDate: "2026-09-08",
+    });
+    const lead = card.panels.vanna && card.panels.vanna.lead;
+    return lead ? lead.say : "";
+  };
+
+  /* EQUAL LEGS ARE NOT A WINNER. The leg was picked with `>=`, so a tie
+     selected "call" and the sentence then claimed the expiry was carried
+     MOSTLY by a leg that is not larger than the other — a claim of dominance
+     over a measured balance. */
+  ok(/split evenly between the call and put legs/.test(vannaSay(500, -500)),
+     "a greek expiry whose call and put legs are equal in magnitude says they are " +
+     "split evenly, never that one carries it"); checks++;
+  ok(!/mostly/.test(vannaSay(500, -500)),
+     "and the word 'mostly' does not appear on a measured balance"); checks++;
+  ok(/carried mostly by the call leg/.test(vannaSay(900, -100)),
+     "a strictly larger call leg is named as carrying it"); checks++;
+  ok(/carried mostly by the put leg/.test(vannaSay(100, -900)),
+     "and so is a strictly larger put leg — the tie-break is not a default to calls"); checks++;
+
+  /* THE CUT CLAUSE NAMES THE SELECTION THAT HAPPENED. buildAggressor keeps
+     the strikes nearest spot ONLY when spot is positive; with no usable spot
+     it falls through to slice(0, maxStrikes), which keeps the LOWEST strikes.
+     Rows are built past the cap so the clause is exercised at all. */
+  const aggrRows = [];
+  for (let i = 0; i < 40; i++) {
+    aggrRows.push({
+      /* OCC format: eight strike digits, thousandths. (100+i)*1000 padded to 8. */
+      option_symbol: `T260918C${String((100 + i) * 1000).padStart(8, "0")}`,
+      volume: 100, ask_volume: 60, bid_volume: 40,
+    });
+  }
+  /* NO `if (status === "ok")` GUARD. The first draft of this block wrapped
+     every assertion in one, and the symbols it built did not parse — so five
+     checks reported nothing and the suite still went green. A guard that can
+     skip an assertion silently is the defect this file exists to catch,
+     turned on the file itself. A panel that comes back anything but ok here
+     is a broken fixture and must FAIL. */
+  const noSpot = buildAggressor(aggrRows, { spot: 0 });
+  eq(noSpot.status, "ok", "the no-spot aggressor fixture builds a live ladder"); checks++;
+  ok(noSpot.lead, "and carries a lead to assert against"); checks++;
+  {
+    ok(/low-strike end/.test(noSpot.lead.say),
+       "with no usable spot the ladder keeps the LOWEST strikes, and the lead says so " +
+       "rather than claiming they were drawn nearest the money"); checks++;
+    ok(!/nearest the money/.test(noSpot.lead.say),
+       "and never claims a selection the code did not make"); checks++;
+  }
+  const withSpot = buildAggressor(aggrRows, { spot: 120 });
+  eq(withSpot.status, "ok", "and so does the with-spot one"); checks++;
+  {
+    ok(!/low-strike end/.test(withSpot.lead.say),
+       "and with a usable spot the low-strike wording is not used instead"); checks++;
+  }
+
+  /* A ZERO NET IS NOT EVIDENCE OF EQUAL LIFTING. `net` is Σ (ask − bid)
+     signed by what the buyer is long, so a call at ask 100 / bid 0 against a
+     put at ask 0 / bid 100 nets to zero with only the call ever lifted at the
+     offer. The sentence may say the two cancel; it may not say they were
+     lifted in the same size. */
+  /* THE FIXTURE IS THE COUNTER-EXAMPLE, and deriving it corrected the
+     reviewer who found the defect. Their example — a call at ask 100 / bid 0
+     against a put at ask 0 / bid 100 — does NOT net to zero here: `signed` is
+     (ask − bid) × (put ? −1 : +1), so both legs come to +100 and the ladder
+     nets +200. The CONCLUSION was right anyway, and this is a case that
+     actually shows it: the call is lifted 100 at the offer (+100) and the put
+     150 at the offer ((150 − 50) × −1 = −100), so the ladder nets exactly
+     zero while 100 calls and 150 puts were taken at the offer. "Lifted in the
+     same size" would have been flatly false on this strike. */
+  const cancelling = [
+    { option_symbol: "T260918C00100000", volume: 100, ask_volume: 100, bid_volume: 0 },
+    { option_symbol: "T260918P00100000", volume: 200, ask_volume: 150, bid_volume: 50 },
+  ];
+  const zeroed = buildAggressor(cancelling, { spot: 100 });
+  eq(zeroed.status, "ok", "the cancelling-aggressor fixture builds a live ladder"); checks++;
+  ok(zeroed.lead, "and carries a lead"); checks++;
+  {
+    ok(/cancel/.test(zeroed.lead.say),
+       "a strike whose call and put aggressor cancel says exactly that"); checks++;
+    ok(!/(same|equal) size/.test(zeroed.lead.say),
+       "and never that calls and puts were lifted in the same size, which a zero " +
+       "signed net does not establish"); checks++;
+  }
 }
 
 console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, a cohort panel that finally names the cross-section the score was neutralised against, and a market-wide join whose ordering and unit are MEASURED rather than assumed, whose absences are quiet with the cut they missed, and whose rank never claims the session it was not read in`);
