@@ -763,6 +763,14 @@ export function buildAggressor(rows, {
      side" / "to the put side" rather than repeating that convention, which is
      already published beside the drawing.
 
+     A ZERO NET IS NOT EVIDENCE OF EQUAL LIFTING, and the sentence must not
+     say it is. `net` is Σ (ask − bid) signed by what the buyer is long, so a
+     call at ask 100 / bid 0 against a put at ask 0 / bid 100 nets to zero
+     with only the call ever lifted at the offer. What a zero proves is that
+     the two aggressor differences cancel — which is what the sentence says
+     now. The per-strike `calls`/`puts` fields are VOLUME, not aggressor, so
+     they cannot recover the offer-side split either.
+
      A NET OF ZERO IS A READING AND IT IS THE INTERESTING ONE. The build
      comment two blocks up says why the wings are kept: a strike where a put
      and a call were each lifted sixty-forty nets to zero and is drawn
@@ -777,13 +785,21 @@ export function buildAggressor(rows, {
   const aggrLead = (() => {
     const bars = ladder.map((c) => Math.round(c.net));
     const net = bars.reduce((a, n) => a + n, 0);
-    const cut = ladder.length < measuredStrikes ? " drawn nearest the money" : " drawn";
+    /* THE CUT CLAUSE NAMES THE SELECTION THAT ACTUALLY HAPPENED. The cap above
+       keeps the strikes NEAREST THE MONEY only when spot is positive; with no
+       usable spot it falls through to `ladder.slice(0, maxStrikes)`, which
+       keeps the LOWEST strikes. Saying "nearest the money" over that is a
+       claim about which part of the chain a reader is looking at, and it
+       would be wrong in the one case where it matters most. */
+    const cut = ladder.length < measuredStrikes
+      ? (spot > 0 ? " drawn nearest the money" : " drawn from the low-strike end")
+      : " drawn";
     const nonZero = bars.filter((n) => n !== 0);
     if (!nonZero.length) {
       return panelLead(
         `Every one of the ${ladder.length} strike` +
         `${ladder.length === 1 ? "" : "s"}${cut} nets exactly zero: at each one, ` +
-        `calls and puts were lifted in the same size.`,
+        `the call and put aggressor cancel.`,
         { strikes: ladder.length, ladderNet: 0 });
     }
     let bi = 0;
@@ -809,7 +825,7 @@ export function buildAggressor(rows, {
     if (net === 0) {
       return panelLead(
         `The ${ladder.length} strike${ladder.length === 1 ? "" : "s"}${cut} net ` +
-        `exactly zero: calls and puts were taken at the offer in equal size — ` +
+        `exactly zero: the call and put aggressor cancel across them — ` +
         `heaviest at ${said()}.`,
         { strikes: ladder.length, ladderNet: 0, strike: round(heavy.k, 2),
           topNet: hm.shown, topNetExact: Math.abs(heavyNet) });

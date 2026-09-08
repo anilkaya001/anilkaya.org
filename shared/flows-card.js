@@ -1447,14 +1447,23 @@ function greekLead(name, built) {
   const share = Math.round((gross(top) / built.grossAbs) * 100);
   /* WHICH LEG CARRIES IT, by magnitude, and never netted — the two legs'
      conventions differ by greek on this endpoint, which is why the builder
-     publishes them apart. */
-  const leg = Math.abs(top.call ?? 0) >= Math.abs(top.put ?? 0) ? "call" : "put";
+     publishes them apart.
+
+     EQUAL LEGS ARE NOT A WINNER. A `>=` tie-break picks "call" and the
+     sentence would then say the expiry is carried MOSTLY by a leg that is
+     not larger than the other — a claim of dominance over a measured
+     balance. The balanced case gets its own clause and "mostly" is said only
+     where one magnitude is strictly greater. */
+  const c = Math.abs(top.call ?? 0), pu = Math.abs(top.put ?? 0);
+  const leg = c === pu ? null : c > pu ? "call" : "put";
   return panelLead(
     `${subject} concentrates at ${top.expiry}` +
     (top.dte === null ? " (the vendor sent no horizon in days)"
       : top.dte === 0 ? ", expiring today" : `, ${top.dte} days out`) +
     `: ${share}% of the ${scope}'s gross size sits on that one expiry, ` +
-    `carried mostly by the ${leg} leg.`,
+    (leg === null
+      ? "split evenly between the call and put legs."
+      : `carried mostly by the ${leg} leg.`),
     {
       expiry: top.expiry,
       dte: top.dte,
