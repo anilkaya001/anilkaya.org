@@ -136,6 +136,32 @@ export function panelLead(say, n) {
   return { say: sentence, n: n && typeof n === "object" ? { ...n } : {} };
 }
 
+/**
+ * A magnitude a sentence can say, and the exact value it was rounded from.
+ *
+ * WRITTEN ONCE BECAUSE IT WAS ALREADY WRITTEN TWICE. buildPath and the
+ * aggressor lead each carried their own copy of this ladder, and the comment
+ * on the first records the defect that produced it: a grouped "1,250,000"
+ * reads to the contract's numeral scan as three figures, so a lead that wants
+ * a readable magnitude has to STATE A ROUNDED FIGURE AND PIN THE ROUNDED
+ * FIGURE. Two copies of that rule are two places for the thresholds to drift
+ * apart, and a third was about to be written.
+ *
+ * Returns `{ shown, suffix, exact }` — `shown` and `suffix` are what the
+ * sentence says, `exact` is the magnitude they came from, and the sign is the
+ * caller's to state in words, never in the number.
+ */
+export function saidMagnitude(value) {
+  const mag = Math.abs(value);
+  return {
+    shown: mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
+      : mag >= 1e3 ? Number((mag / 1e3).toFixed(1))
+        : Number(mag.toFixed(2)),
+    suffix: mag >= 1e6 ? "M" : mag >= 1e3 ? "k" : "",
+    exact: mag,
+  };
+}
+
 /** A panel whose source did not arrive. Never carries numbers. */
 export function unavailable(reason) {
   return { status: "unavailable", reason: reason || "no data", asOf: null };
@@ -1098,14 +1124,55 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   const kept = rows.slice(0, limit).map(({ _sort, ...r }) => r);
 
   const lags = kept.map((r) => r.disclosureLagDays).filter((n) => n !== null);
+  const buys = kept.filter((r) => r.side === "buy").length;
+  const sells = kept.filter((r) => r.side === "sell").length;
+
+  /* THE LEAD COUNTS OVER `kept`, AND SAYS SO WHENEVER THAT IS NOT ALL OF THEM.
+     `total` is every disclosed row; `buys` and `sells` are counted over the
+     `limit` rows the panel actually draws, because that is the population the
+     table below the sentence shows. Stating a split of the drawn rows against
+     a total of all rows would be two populations in one line — the mistake
+     this file's own truncation notes exist to prevent — so the scope clause
+     names the count the split is over the moment the two differ.
+
+     LATE IS COUNTED, NEVER IMPUTED. A row whose lag is null (either date
+     missing) is not late and is not on-time: it is unmeasured, and it is
+     excluded from both the numerator and the denominator, with the
+     denominator stated so a reader can see how many rows were datable. The
+     45-day window is the STOCK Act's, named in the panel's own note. */
+  const dated = kept.filter((r) => r.disclosureLagDays !== null);
+  const late = dated.filter((r) => r.disclosureLagDays > 45).length;
+  const scope = rows.length === kept.length
+    ? ""
+    : ` — the ${kept.length} largest of them shown`;
+  const lateClause = dated.length === 0
+    ? ", and no filing here carries both dates, so none can be timed against " +
+      "the 45-day window"
+    : `, and ${late} of the ${dated.length} that can be timed ` +
+      `${late === 1 ? "was" : "were"} filed after the 45-day window had lapsed`;
+  const lead = panelLead(
+    `Congress disclosed ${rows.length} trade${rows.length === 1 ? "" : "s"} ` +
+    `in this name${scope}: ${buys} buy${buys === 1 ? "" : "s"} against ` +
+    `${sells} sell${sells === 1 ? "" : "s"}${lateClause}.`,
+    {
+      total: rows.length,
+      shown: kept.length,
+      buys,
+      sells,
+      datable: dated.length,
+      late,
+      lateWindowDays: 45,
+    });
+
   return ok({
     trades: kept,
     total: rows.length,
-    buys: kept.filter((r) => r.side === "buy").length,
-    sells: kept.filter((r) => r.side === "sell").length,
+    buys,
+    sells,
     medianLagDays: lags.length
       ? lags.slice().sort((a, b) => a - b)[lags.length >> 1]
       : null,
+    lead,
   }, asOf);
 }
 
@@ -1148,13 +1215,66 @@ function scoreOverlayPanel(history, contextPanel) {
     };
   }
   const ctx = contextPanel && contextPanel.status === "ok" ? contextPanel : null;
-  return joinScoreToPrice({
+  const join = joinScoreToPrice({
     closes: ctx ? ctx.closes : null,
     closeDates: ctx ? ctx.closeDates : null,
     sessions: history.sessions,
     scores: history.scores,
     deadBand: history.deadBand,
   });
+  if (join.status !== "ok") return join;
+
+  /* THE LEAD IS THE COMPARISON THE PANEL EXISTS TO MAKE, and it is written
+     from the SCORED rows only.
+  
+     The join's `rows` are ordered by the price side's days and a row inside the
+     overlap can still carry a null score — `gaps` counts exactly those. Taking
+     the first and last ROW would therefore compare a score that may not exist
+     against a price that does, so the two ends are the first and last row whose
+     score is a reading. Where fewer than two rows are scored there is no move
+     to state and the lead is omitted: the slot is `:empty`-hidden, and an
+     omitted lead costs a reader nothing while an invented one costs them the
+     thing the panel is for.
+  
+     "AGREE" IS A STATEMENT ABOUT TWO SIGNS AND NOTHING MORE. It does not claim
+     the score predicted the move, or that either caused the other; the panel's
+     own notes carry that, and the sentence deliberately stops at the sign so it
+     cannot be read as a track record. Where either side is unchanged over the
+     window the sentence says so rather than picking a direction for it.
+  
+     THE DEAD BAND IS NOT APPLIED HERE. It is the drawing's threshold for what
+     counts as a move worth colouring; re-deriving a second one in prose would
+     be two definitions of "moved" on one panel. */
+  const scoredRows = join.rows.filter((r) => r.score !== null);
+  if (scoredRows.length < 2) return join;
+  const a = scoredRows[0], z = scoredRows[scoredRows.length - 1];
+  const ds = z.score - a.score;
+  const dp = z.close - a.close;
+  const word = (v) => (v > 0 ? "rose" : v < 0 ? "fell" : "is unchanged");
+  const points = Math.abs(ds);
+  const move = ds === 0
+    ? "Score is unchanged"
+    : `Score ${ds > 0 ? "up" : "down"} ${points} point${points === 1 ? "" : "s"}`;
+  const agreement = (ds === 0 || dp === 0)
+    ? ""
+    : ` — the two ${(ds > 0) === (dp > 0) ? "agree" : "disagree"}`;
+  const px = (v) => Number(v.toFixed(2));
+  join.lead = panelLead(
+    `${move} across ${scoredRows.length} scored session` +
+    `${scoredRows.length === 1 ? "" : "s"}, ${a.d} to ${z.d}, while price ` +
+    `${word(dp)}` + (dp === 0 ? ` at ${px(z.close)}` : ` from ${px(a.close)} to ${px(z.close)}`) +
+    `${agreement}.`,
+    {
+      scoredSessions: scoredRows.length,
+      firstScored: a.d,
+      lastScored: z.d,
+      scorePoints: points,
+      scoreFrom: a.score,
+      scoreTo: z.score,
+      priceFrom: px(a.close),
+      priceTo: px(z.close),
+    });
+  return join;
 }
 
 /**
@@ -1982,7 +2102,81 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
     const f = index[feed];
     coverage[feed] = f && f.coverage ? f.coverage : null;
   }
-  return ok({ feeds, coverage, notes: CROSS_NOTES }, asOf);
+  /* THE LEAD IS ABOUT MEMBERSHIP, WHICH IS THIS PANEL'S WHOLE READING, and it
+     never lets an unread feed pass as a name's absence from it. The four
+     states below are the four different facts a reader can be in:
+
+       both feeds read, name in both      → two ranks, each with its population
+       both read, name in one             → the rank, and the other named as a
+                                            list this name is NOT in
+       one read, the other unavailable    → the rank, and the plain statement
+                                            that only one list was checked
+       both read, name in neither         → the populations, so "not in" is
+                                            sized rather than left absolute
+
+     A FEED THAT WAS NOT READ IS NEVER COUNTED AS A LIST THIS NAME MISSED.
+     That is the collapse CROSS_NOTES.absence exists to refuse, and a lead
+     saying "in neither list" over one feed that failed would reinstate it in
+     the one sentence a reader is most likely to read.
+
+     NO RANK IS PRESENTED AS TODAY'S. `sameSession` is the feed's own answer to
+     whether its rows describe the session this card describes, and where it is
+     false or unknown the lead carries the feed's date instead of implying the
+     card's. CROSS_NOTES.timing is the argument; this is it applied. */
+  const rankLead = (() => {
+    const placed = CROSS_FEEDS.filter((f) => feeds[f].status === "ok"
+      && feeds[f].rank !== null && feeds[f].population !== null);
+    const read = CROSS_FEEDS.filter((f) => feeds[f].status !== "unavailable");
+    const dark = CROSS_FEEDS.filter((f) => feeds[f].status === "unavailable");
+    const said = (f) => {
+      const r = feeds[f];
+      const when = r.sameSession === true ? ""
+        : r.asOf ? ` on ${r.asOf}`
+          : ", which states no session of its own";
+      return `${r.rank} of ${r.population} in ${r.label}${when}`;
+    };
+    const pins = {};
+    for (const f of CROSS_FEEDS) {
+      const r = feeds[f];
+      pins[f + "Rank"] = r.status === "ok" ? r.rank : null;
+      pins[f + "Population"] = r.population === undefined ? null : r.population;
+      /* PINNED AS A STRING SO THE SCAN MASKS IT, the same reason buildCalendar
+         pins its half-life expiry that way: "2026-08-21" is three numerals to
+         a naive digit walk and none of them is a figure this sentence claims.
+         It is pinned at all because the sentence PRINTS it whenever the feed
+         is not describing the card's own session. */
+      pins[f + "AsOf"] = r.asOf || null;
+    }
+    if (placed.length === CROSS_FEEDS.length) {
+      return panelLead(`Places in both market-wide lists: ${said(placed[0])}, ` +
+        `and ${said(placed[1])}.`, pins);
+    }
+    if (placed.length === 1) {
+      const other = CROSS_FEEDS.filter((f) => f !== placed[0])[0];
+      /* NOT "Places in ...": said() already opens with the rank, so the
+         preposition belongs only to the both-lists branch, where it governs
+         "both market-wide lists" rather than the rank itself. */
+      return panelLead(`Places ${said(placed[0])}` +
+        (dark.indexOf(other) !== -1
+          ? `; ${feeds[other].label} was not read this run, so only one list was checked.`
+          : `, and is not in ${feeds[other].label}.`), pins);
+    }
+    if (!read.length) return null;
+    if (dark.length) {
+      return panelLead(`Not in ${read.map((f) => feeds[f].label).join(" or ")}` +
+        `; ${dark.map((f) => feeds[f].label).join(" or ")} was not read this ` +
+        `run, so the other list was never checked.`, pins);
+    }
+    const sized = read.filter((f) => feeds[f].population !== null);
+    return panelLead(sized.length
+      ? `In neither market-wide list this run: ` +
+        sized.map((f) => `${feeds[f].label} held ${feeds[f].population} rows`)
+          .join(", ") + `, and this name is in neither.`
+      : `In neither market-wide list this run, and neither feed published the ` +
+        `size of the list it returned.`, pins);
+  })();
+
+  return ok({ feeds, coverage, lead: rankLead, notes: CROSS_NOTES }, asOf);
 }
 
 export const CROSS_NOTES = Object.freeze({
@@ -2249,8 +2443,10 @@ export function buildCard({
          the run already pays for. Zero marginal vendor calls: the pulse leg
          fetches both once and this reads the same two responses. */
       marketRank: buildMarketCross(marketCross, ticker, { asOf: sessionDate }),
-      darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool),
-      oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas),
+      darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool,
+        darkpoolLead),
+      oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas,
+        oiDeltasLead),
       volContext: darkNull(termStructure) && darkNull(ivRank)
         ? { status: "unavailable", reason: "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
@@ -2258,9 +2454,83 @@ export function buildCard({
            read never landed into an empty list, and the shaper called it
            quiet — "the feed answered with nothing" over a feed that did
            not answer. Each shaper now tells null from a list itself. */
-        : { ...buildVolContext(termStructure, ivRank), note: STOCK_NOTES.volContext },
+        : withVolLead({ ...buildVolContext(termStructure, ivRank),
+            note: STOCK_NOTES.volContext }),
     },
   };
+}
+
+/**
+ * The volatility-context panel's one line: which end of the term is bid, and
+ * by how much.
+ *
+ * THE SPREAD IS THE ONLY FIGURE ON THIS PANEL THAT IS NEW, and everything
+ * else a lead could say here is already drawn. Checked in the renderer rather
+ * than assumed: assets/js/flows-ticker.js prints `.fvc-rank` as
+ * "57.5 / 100 · <date>", so a rank clause would restate that number, that
+ * scale and that date verbatim; the mini-table prints each listed expiry
+ * beside its volatility for the first four rows, so the front level is
+ * literally row one; and the chart's own aria-label already reads "N listed
+ * expiries, from 34.2% ... out to 28.1%". A lead that repeats the drawing is
+ * noise, and this panel's drawing states both levels and the rank but never
+ * subtracts them.
+ *
+ * SO THE SENTENCE STATES THE DIFFERENCE AND WHICH END CARRIES IT, names the
+ * two expiries because a spread without its ends is not a measurement, and
+ * stops. The levels stay in `n` for a machine reader without being said.
+ *
+ * THE RANK HALF IS DELIBERATELY SILENT HERE. buildVolContext lets either half
+ * survive the other's absence, and a name with a rank but no curve therefore
+ * carries no lead — correctly: its one rank figure is already the panel's
+ * headline, and repeating it in a slot directly above would put one claim
+ * twice on one screen.
+ */
+function withVolLead(panel) {
+  if (panel.status !== "ok") return panel;
+  const term = panel.term && panel.term.status === "ok" ? panel.term : null;
+  const rows = term ? term.rows.filter((r) => r.vol !== null) : [];
+  if (!rows.length) return panel;
+  const pct = (v) => Number((v * 100).toFixed(1));
+  const listed = rows.length;
+
+  /* ONE LISTED EXPIRY IS NOT A CURVE, and saying its slope is zero would be
+     the confident zero this file refuses — there is no second point to have a
+     slope against. */
+  if (listed === 1) {
+    const lead = panelLead(
+      `The chain lists one expiry, ${rows[0].expiry}, at ${pct(rows[0].vol)}% ` +
+      `— one point, so there is no term slope to read.`,
+      { frontExpiry: rows[0].expiry, frontPct: pct(rows[0].vol), listed: 1 });
+    return lead ? { ...panel, lead } : panel;
+  }
+
+  const f = rows[0], b = rows[rows.length - 1];
+  const spread = Number(Math.abs(pct(f.vol) - pct(b.vol)).toFixed(1));
+  const lead = panelLead(
+    (spread === 0
+      ? `The curve is flat across ${listed} listed expiries: the chain charges ` +
+        `the same from ${f.expiry} out to ${b.expiry}`
+      : `${f.vol > b.vol ? "The front is bid" : "The back is bid"}: the chain ` +
+        `charges ${spread} points more at ${f.vol > b.vol ? f.expiry : b.expiry} ` +
+        `than at ${f.vol > b.vol ? b.expiry : f.expiry}, across ${listed} ` +
+        `listed expiries`) + ".",
+    {
+      /* PINNED UNSIGNED, WITH THE SIGN IN THE WORDS, which is buildPath's
+         pattern and is forced by the contract's numeral scan: a pin of -6.1
+         against prose carrying "6.1" matches neither `lit` nor
+         String(Number(lit)), so a signed pin under an absolute figure is an
+         UNPINNED figure by the scan's own rule. */
+      spreadPts: spread,
+      frontExpiry: f.expiry,
+      backExpiry: b.expiry,
+      /* Carried for a machine reader and deliberately NOT said: both levels
+         are already on the panel — the mini-table prints the front row's
+         volatility and the chart's aria-label reads "from X% ... out to Y%". */
+      frontPct: pct(f.vol),
+      backPct: pct(b.vol),
+      listed,
+    });
+  return lead ? { ...panel, lead } : panel;
 }
 
 /* A raw of null is a failed READ; a raw of [] is a vendor answering nothing.
@@ -2268,11 +2538,117 @@ export function buildCard({
    sentences for them. */
 const darkNull = (raw) => raw === null || raw === undefined;
 
-function stockPanel(raw, shaper, note) {
+function stockPanel(raw, shaper, note, lead) {
   if (darkNull(raw)) {
     return { status: "unavailable", reason: "the feed could not be read this run", note };
   }
-  return { ...shaper(raw), note };
+  const panel = { ...shaper(raw), note };
+  /* THE LEAD IS BUILT HERE RATHER THAN IN THE SHAPER, and the reason is an
+     import cycle rather than taste: this module already imports the shapers
+     out of shared/flows-stock.js, so a shaper reaching back for panelLead
+     would close the loop. The shapers stay pure readings of a vendor body and
+     the sentence is written on this side, where panelLead already lives.
+
+     A LEAD BUILDER IS ONLY CALLED ON AN `ok` PANEL. Quiet and unreadable
+     carry their own reasons and no numbers, and a sentence over either would
+     be the confident zero this whole file refuses. */
+  if (lead && panel.status === "ok") {
+    const said = lead(panel);
+    if (said) panel.lead = said;
+  }
+  return panel;
+}
+
+/**
+ * The off-exchange print panel's one line: the size, and how much of it is one
+ * print.
+ *
+ * WHAT THE TABLE ALREADY SAYS IS NOT REPEATED. The rows below carry time,
+ * price, size, dollars and the NBBO for each print, sorted by premium — so the
+ * biggest single print is row one and naming it would be a caption. What no
+ * cell states is the AGGREGATE and the CONCENTRATION: the ranked prints are
+ * never summed, and nothing says whether the total is one block or forty.
+ *
+ * THE SUM IS OVER THE ROWS THAT ARE DRAWN, and the sentence says so the
+ * moment the feed shed any. `shed` is exactly that count, `unpriced` is the
+ * prints that arrived with no premium at all — dropped from the ranking
+ * because they cannot be ranked, and named rather than silently absorbed.
+ *
+ * ZERO IS A READING HERE. A total of zero dollars across prints that were
+ * measured is a measured zero, not a missing one, and it says so.
+ */
+function darkpoolLead(panel) {
+  const rows = panel.rows || [];
+  if (!rows.length) return null;
+  const total = rows.reduce((a, r) => a + (r.prem || 0), 0);
+  const top = rows[0].prem;
+  const scope = panel.shed > 0
+    ? `the ${rows.length} largest of ${panel.seen} rankable prints`
+    : `all ${rows.length} rankable print${rows.length === 1 ? "" : "s"}`;
+  const unpriced = panel.unpriced > 0
+    ? ` ${panel.unpriced} further print${panel.unpriced === 1 ? "" : "s"} ` +
+      `carried no premium and could not be ranked.`
+    : "";
+  if (!(total > 0)) {
+    return panelLead(
+      `Off-exchange prints in this name carry $0 across ${scope} — a measured ` +
+      `zero, not a missing reading.${unpriced}`,
+      { kept: rows.length, seen: panel.seen, shed: panel.shed,
+        unpriced: panel.unpriced, dollars: 0 });
+  }
+  const t = saidMagnitude(total);
+  const topPct = Math.round((top / total) * 100);
+  return panelLead(
+    `Off-exchange prints carry $${t.shown}${t.suffix} in this name across ` +
+    `${scope} — ${topPct}% of it in the single largest.${unpriced}`,
+    { shown: t.shown, dollars: t.exact, topPct, topDollars: top,
+      kept: rows.length, seen: panel.seen, shed: panel.shed,
+      unpriced: panel.unpriced });
+}
+
+/**
+ * The open-interest change panel's one line: the net, and which side it is on.
+ *
+ * THE TABLE IS IN VENDOR ORDER, WHICH IS NOT A RANKING. A reader wanting the
+ * net would have to add ten signed integers in their head across two contract
+ * types, so that is the finding: which way open interest moved, and by how
+ * much, over the lines the vendor surfaced.
+ *
+ * `diff` AND NOT `ratio`. The shaper's own comment records why the two must
+ * never be confused — `oi_change` reads like a difference and is a RATIO, and
+ * publishing it as a contract count printed "+16" for a book that went 2,119
+ * to 35,207. A line whose count the vendor omitted is EXCLUDED from the sum
+ * rather than reconstructed from curr minus last, for the same reason the
+ * shaper refuses to derive it: one field, one provenance.
+ *
+ * IT IS ONE CLEARING DAY LATE AND THE SENTENCE SAYS SO. Open interest is
+ * published by the clearing house overnight, so this is never today's tape,
+ * and a lead that let a reader take it for today would be the panel's worst
+ * available failure.
+ */
+function oiDeltasLead(panel) {
+  const rows = (panel.rows || []).filter((r) => r.diff !== null);
+  if (!rows.length) return null;
+  const calls = rows.filter((r) => r.cp === "C");
+  const puts = rows.filter((r) => r.cp === "P");
+  const sum = (list) => list.reduce((a, r) => a + r.diff, 0);
+  const c = sum(calls), pu = sum(puts), net = c + pu;
+  const sign = (v) => (v > 0 ? "+" : v < 0 ? "\u2212" : "");
+  const say = (v) => { const m = saidMagnitude(v); return sign(v) + m.shown + m.suffix; };
+  const side = net > 0 ? "grew" : net < 0 ? "fell" : "is unchanged on net";
+  return panelLead(
+    `Of the ${rows.length} line${rows.length === 1 ? "" : "s"} the vendor ` +
+    `surfaced with a contract count, open interest ${side}: ` +
+    `${say(c)} across ${calls.length} call line${calls.length === 1 ? "" : "s"} ` +
+    `against ${say(pu)} across ${puts.length} put line${puts.length === 1 ? "" : "s"} ` +
+    `— one clearing day late, never today's tape.`,
+    {
+      counted: rows.length,
+      callLines: calls.length,
+      putLines: puts.length,
+      callNet: Math.abs(c), putNet: Math.abs(pu), net: Math.abs(net),
+      callShown: saidMagnitude(c).shown, putShown: saidMagnitude(pu).shown,
+    });
 }
 
 /**
@@ -2437,8 +2813,73 @@ export function buildSurface(rows, {
     if (total < 0 && (putWall === null || total < putWall.gamma)) putWall = { strike: k, gamma: total };
   }
 
+  /* THE LEAD READS THE COLUMN MARGINALS OF THE GRID THAT IS DRAWN, and says
+     which grid that is whenever it is a window rather than the book. Summing
+     the full `cells` map instead would put a sentence over a picture that
+     does not contain the strikes it is talking about — the same defect the
+     wall comment above records and refuses.
+
+     A null CELL IS NOT A ZERO in the sum, because it is not a zero anywhere
+     else in this function: `grid` writes null for a strike-expiry pair the
+     vendor returned nothing for, and adding it in as zero would let an
+     unmeasured column read as a measured balance.
+
+     THE SENTENCE IS ABOUT SIGN, WHICH IS THE PANEL'S SUBJECT. Where the front
+     expiry and the rest of the term carry gamma of opposite signs, that is
+     the reading — dealers long the front and short the back hedge in opposite
+     directions as the near expiry rolls off. Where they agree, the lead says
+     so plainly rather than manufacturing a flip. */
+  const colNet = expiries.map((_, j) => {
+    let sum = null;
+    for (const row of grid) if (row[j] !== null) sum = (sum ?? 0) + row[j];
+    return sum;
+  });
+  const surfaceLead = (() => {
+    const front = colNet[0];
+    if (front === null) return null;
+    const rest = colNet.slice(1).filter((v) => v !== null);
+    const window = expiries.length === cells.size
+      ? ""
+      : ` — over the ${strikes.length} strikes and ${expiries.length} of ` +
+        `${cells.size} expiries drawn`;
+    const word = (v) => (v > 0 ? "long" : v < 0 ? "short" : "flat");
+    const f = saidMagnitude(front);
+    if (!rest.length) {
+      return panelLead(
+        `The grid holds one measured expiry, ${expiries[0]}: dealers are net ` +
+        `${word(front)} ${f.shown}${f.suffix} of gamma there${window}.`,
+        { frontShown: f.shown, frontGamma: f.exact, frontExpiry: expiries[0],
+          expiriesShown: expiries.length, expiriesTotal: cells.size,
+          strikesShown: strikes.length });
+    }
+    const back = rest.reduce((a, v) => a + v, 0);
+    const b = saidMagnitude(back);
+    const flips = (front > 0 && back < 0) || (front < 0 && back > 0);
+    return panelLead(
+      (flips
+        ? `The book flips sign along the term: ${expiries[0]} is net ${word(front)} `
+        : `The book keeps its sign along the term: ${expiries[0]} is net ${word(front)} `) +
+      `${f.shown}${f.suffix} of gamma, and the ${rest.length} measured ` +
+      `expir${rest.length === 1 ? "y" : "ies"} out to ` +
+      `${expiries[expiries.length - 1]} are net ${word(back)} ` +
+      `${b.shown}${b.suffix} together${window}.`,
+      {
+        frontExpiry: expiries[0],
+        lastExpiry: expiries[expiries.length - 1],
+        frontShown: f.shown,
+        frontGamma: f.exact,
+        backShown: b.shown,
+        backGamma: b.exact,
+        backExpiries: rest.length,
+        expiriesShown: expiries.length,
+        expiriesTotal: cells.size,
+        strikesShown: strikes.length,
+      });
+  })();
+
   return ok({
     spot: s,
+    lead: surfaceLead,
     expiries,
     strikes,
     grid,
