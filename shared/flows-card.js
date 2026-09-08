@@ -2461,74 +2461,75 @@ export function buildCard({
 }
 
 /**
- * The volatility-context panel's one line: what the chain charges across
- * tenors, and where that level sits in its own year.
+ * The volatility-context panel's one line: which end of the term is bid, and
+ * by how much.
  *
- * THE PANEL IS A JOIN OF TWO FEEDS AND NEITHER DRAWING ANSWERS ITS QUESTION.
- * The term half draws a polyline with a min/max rail and never states the
- * slope, its direction, or its size in volatility points. The rank half prints
- * the newest rank1y, which on its own is a percentile with no level beside it.
- * The lead states the slope first, because that is the half that is a reading
- * about THIS chain rather than about this name's history.
+ * THE SPREAD IS THE ONLY FIGURE ON THIS PANEL THAT IS NEW, and everything
+ * else a lead could say here is already drawn. Checked in the renderer rather
+ * than assumed: assets/js/flows-ticker.js prints `.fvc-rank` as
+ * "57.5 / 100 · <date>", so a rank clause would restate that number, that
+ * scale and that date verbatim; the mini-table prints each listed expiry
+ * beside its volatility for the first four rows, so the front level is
+ * literally row one; and the chart's own aria-label already reads "N listed
+ * expiries, from 34.2% ... out to 28.1%". A lead that repeats the drawing is
+ * noise, and this panel's drawing states both levels and the rank but never
+ * subtracts them.
  *
- * THE SLOPE IS FRONT MINUS BACK OVER THE ROWS THAT ARE DRAWN, and the two
- * expiries are named, because "the curve is steep" without its ends is not a
- * measurement. A single listed expiry is not a curve and says so rather than
- * reporting a slope of zero, which would be the confident zero this file
- * exists to refuse.
+ * SO THE SENTENCE STATES THE DIFFERENCE AND WHICH END CARRIES IT, names the
+ * two expiries because a spread without its ends is not a measurement, and
+ * stops. The levels stay in `n` for a machine reader without being said.
  *
- * THE RANK CARRIES ITS UNIT OR IT IS WITHHELD. shapeIvRank publishes
- * `rankUnit` as observed and explicitly does NOT rescale — the vendor's rank
- * fields have already produced a "1352% of its year" once. Where the unit is
- * not the 0-100 this sentence would print, the rank clause is dropped and the
- * slope stands alone.
- *
- * EITHER HALF SURVIVES THE OTHER'S ABSENCE, which is the whole design of
- * buildVolContext: a name with a curve but no rank still leads on the curve.
+ * THE RANK HALF IS DELIBERATELY SILENT HERE. buildVolContext lets either half
+ * survive the other's absence, and a name with a rank but no curve therefore
+ * carries no lead — correctly: its one rank figure is already the panel's
+ * headline, and repeating it in a slot directly above would put one claim
+ * twice on one screen.
  */
 function withVolLead(panel) {
   if (panel.status !== "ok") return panel;
   const term = panel.term && panel.term.status === "ok" ? panel.term : null;
-  const ir = panel.ivRank && panel.ivRank.status === "ok" ? panel.ivRank : null;
   const rows = term ? term.rows.filter((r) => r.vol !== null) : [];
+  if (!rows.length) return panel;
   const pct = (v) => Number((v * 100).toFixed(1));
+  const listed = rows.length;
 
-  let slope = null;
-  if (rows.length === 1) {
-    slope = { say: `The chain lists one expiry, ${rows[0].expiry}, at ` +
-      `${pct(rows[0].vol)}%`, n: { frontExpiry: rows[0].expiry, frontPct: pct(rows[0].vol) } };
-  } else if (rows.length > 1) {
-    const f = rows[0], b = rows[rows.length - 1];
-    const spread = Number(Math.abs(pct(f.vol) - pct(b.vol)).toFixed(1));
-    const n = { frontExpiry: f.expiry, backExpiry: b.expiry,
-      frontPct: pct(f.vol), backPct: pct(b.vol), spreadPts: spread };
-    slope = {
-      say: spread === 0
-        ? `The curve is flat: the chain charges ${pct(f.vol)}% at both ` +
-          `${f.expiry} and ${b.expiry}`
-        : f.vol > b.vol
-          ? `Front expiry is bid: the chain charges ${spread} points more at ` +
-            `${f.expiry} (${pct(f.vol)}%) than at ${b.expiry} (${pct(b.vol)}%)`
-          : `The back is bid: the chain charges ${spread} points more at ` +
-            `${b.expiry} (${pct(b.vol)}%) than at ${f.expiry} (${pct(f.vol)}%)`,
-      n,
-    };
+  /* ONE LISTED EXPIRY IS NOT A CURVE, and saying its slope is zero would be
+     the confident zero this file refuses — there is no second point to have a
+     slope against. */
+  if (listed === 1) {
+    const lead = panelLead(
+      `The chain lists one expiry, ${rows[0].expiry}, at ${pct(rows[0].vol)}% ` +
+      `— one point, so there is no term slope to read.`,
+      { frontExpiry: rows[0].expiry, frontPct: pct(rows[0].vol), listed: 1 });
+    return lead ? { ...panel, lead } : panel;
   }
 
-  const latest = ir && ir.rows.length ? ir.rows[0] : null;
-  const unitOk = ir && typeof ir.rankUnit === "string" && /0-100/.test(ir.rankUnit);
-  const rank = latest && unitOk && latest.rank1y !== null
-    /* NOT "that level": the rank is the NAME'S implied volatility against its
-       own year, not the front expiry's or the back's, and a pronoun after two
-       quoted levels points at whichever one the reader read last. */
-    ? { say: `, and this name's implied volatility ranks ` +
-        `${Number(latest.rank1y.toFixed(1))} of 100 in its own year on ${latest.date}`,
-      n: { rank1y: Number(latest.rank1y.toFixed(1)), rankOf: 100, rankDate: latest.date } }
-    : null;
-
-  if (!slope) return panel;
-  const lead = panelLead(slope.say + (rank ? rank.say : "") + ".",
-    { ...slope.n, ...(rank ? rank.n : {}) });
+  const f = rows[0], b = rows[rows.length - 1];
+  const spread = Number(Math.abs(pct(f.vol) - pct(b.vol)).toFixed(1));
+  const lead = panelLead(
+    (spread === 0
+      ? `The curve is flat across ${listed} listed expiries: the chain charges ` +
+        `the same from ${f.expiry} out to ${b.expiry}`
+      : `${f.vol > b.vol ? "The front is bid" : "The back is bid"}: the chain ` +
+        `charges ${spread} points more at ${f.vol > b.vol ? f.expiry : b.expiry} ` +
+        `than at ${f.vol > b.vol ? b.expiry : f.expiry}, across ${listed} ` +
+        `listed expiries`) + ".",
+    {
+      /* PINNED UNSIGNED, WITH THE SIGN IN THE WORDS, which is buildPath's
+         pattern and is forced by the contract's numeral scan: a pin of -6.1
+         against prose carrying "6.1" matches neither `lit` nor
+         String(Number(lit)), so a signed pin under an absolute figure is an
+         UNPINNED figure by the scan's own rule. */
+      spreadPts: spread,
+      frontExpiry: f.expiry,
+      backExpiry: b.expiry,
+      /* Carried for a machine reader and deliberately NOT said: both levels
+         are already on the panel — the mini-table prints the front row's
+         volatility and the chart's aria-label reads "from X% ... out to Y%". */
+      frontPct: pct(f.vol),
+      backPct: pct(b.vol),
+      listed,
+    });
   return lead ? { ...panel, lead } : panel;
 }
 
