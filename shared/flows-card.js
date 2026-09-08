@@ -1396,9 +1396,80 @@ function chainPanel(chain, key) {
  * defect, in one place, and it belongs to the renderer rather than here;
  * fixing it widens this union deliberately and for every panel at once.
  */
+const GREEK_SUBJECT = Object.freeze({
+  vanna: "Vol sensitivity",
+  charm: "Time decay",
+  delta: "Dealer delta",
+});
+
+/**
+ * One greek ladder's lead: WHERE it is concentrated, and nothing else.
+ *
+ * THE MAGNITUDE IS DELIBERATELY NOT SAID, and this is the correction an
+ * adversarial pass over the design produced. greekTermPanel
+ * (assets/js/flows-panels.js) already prints the peak leg and the gross size
+ * in its stat list, through `compact()` — which rounds to ONE decimal, while
+ * saidMagnitude() rounds to two. A lead stating the same figure would put
+ * "1.42M" directly above a stat list reading "1.4M": two authors for one
+ * number, disagreeing on the same card. The share is the reading that exists
+ * nowhere else on the panel, so the share is what the sentence carries.
+ *
+ * THE UNIT AND THE SIGN CONVENTION ARE NOT REPEATED EITHER. The drawer
+ * appends `panel.unit` and `panel.signConvention` as their own notes, and the
+ * convention's own closing clause already says the legs are never netted. A
+ * lead restating it would be a third copy of a sentence the payload publishes
+ * verbatim.
+ *
+ * THE SHARE IS OF THE LADDER DRAWN, and says so when rows were shed. `shed`
+ * is the count the builder cut at its cap, so a concentration measured over
+ * ten expiries of forty is a concentration in a window, not in the book.
+ *
+ * A SINGLE EXPIRY IS NOT A CONCENTRATION. One row is trivially 100% of
+ * itself, which is arithmetic rather than a finding, so that branch states
+ * the ladder's extent instead and leaves the share unsaid.
+ */
+function greekLead(name, built) {
+  const subject = GREEK_SUBJECT[name];
+  const rows = built.rows || [];
+  if (!subject || !rows.length || !(built.grossAbs > 0)) return null;
+  const gross = (r) => Math.abs(r.call ?? 0) + Math.abs(r.put ?? 0);
+  const scope = built.shed > 0 ? "drawn ladder" : "ladder";
+  if (rows.length === 1) {
+    const only = rows[0];
+    return panelLead(
+      `${subject} sits entirely in one expiry, ${only.expiry}` +
+      (only.dte === null ? " (the vendor sent no horizon in days)"
+        : only.dte === 0 ? ", expiring today" : `, ${only.dte} days out`) + ".",
+      { expiry: only.expiry, dte: only.dte, expiries: 1 });
+  }
+  let top = rows[0];
+  for (const r of rows) if (gross(r) > gross(top)) top = r;
+  const share = Math.round((gross(top) / built.grossAbs) * 100);
+  /* WHICH LEG CARRIES IT, by magnitude, and never netted — the two legs'
+     conventions differ by greek on this endpoint, which is why the builder
+     publishes them apart. */
+  const leg = Math.abs(top.call ?? 0) >= Math.abs(top.put ?? 0) ? "call" : "put";
+  return panelLead(
+    `${subject} concentrates at ${top.expiry}` +
+    (top.dte === null ? " (the vendor sent no horizon in days)"
+      : top.dte === 0 ? ", expiring today" : `, ${top.dte} days out`) +
+    `: ${share}% of the ${scope}'s gross size sits on that one expiry, ` +
+    `carried mostly by the ${leg} leg.`,
+    {
+      expiry: top.expiry,
+      dte: top.dte,
+      sharePct: share,
+      expiries: rows.length,
+      leg,
+    });
+}
+
 function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
   const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate });
-  if (built.status === "ok") return built;
+  if (built.status === "ok") {
+    const lead = greekLead(name, built);
+    return lead ? { ...built, lead } : built;
+  }
   return {
     status: "unavailable",
     reason: built.reason || `no ${name} exposure was readable on this response`,
