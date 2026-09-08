@@ -1423,9 +1423,13 @@ try {
     /* PINNED AS A SET, NOT A COUNT, and as a STANDING FACT rather than a
        target: the day a panel gains a lead this line fails and is rewritten
        deliberately, which is the only way a slot cannot quietly stop being
-       filled. */
+       filled. Six became ten when congress, marketRank, scoreOverlay and
+       surface gained leads; the four that arrived with them each answer their
+       panel's own question out of a field the payload already carried, and
+       none of them is a sentence lifted from a drawing. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
-      ["calendar", "context", "displacement", "levels", "path", "pricedMove"],
+      ["calendar", "congress", "context", "displacement", "levels", "marketRank",
+        "path", "pricedMove", "scoreOverlay", "surface"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
