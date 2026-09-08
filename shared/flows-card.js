@@ -2443,8 +2443,10 @@ export function buildCard({
          the run already pays for. Zero marginal vendor calls: the pulse leg
          fetches both once and this reads the same two responses. */
       marketRank: buildMarketCross(marketCross, ticker, { asOf: sessionDate }),
-      darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool),
-      oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas),
+      darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool,
+        darkpoolLead),
+      oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas,
+        oiDeltasLead),
       volContext: darkNull(termStructure) && darkNull(ivRank)
         ? { status: "unavailable", reason: "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
@@ -2452,9 +2454,82 @@ export function buildCard({
            read never landed into an empty list, and the shaper called it
            quiet — "the feed answered with nothing" over a feed that did
            not answer. Each shaper now tells null from a list itself. */
-        : { ...buildVolContext(termStructure, ivRank), note: STOCK_NOTES.volContext },
+        : withVolLead({ ...buildVolContext(termStructure, ivRank),
+            note: STOCK_NOTES.volContext }),
     },
   };
+}
+
+/**
+ * The volatility-context panel's one line: what the chain charges across
+ * tenors, and where that level sits in its own year.
+ *
+ * THE PANEL IS A JOIN OF TWO FEEDS AND NEITHER DRAWING ANSWERS ITS QUESTION.
+ * The term half draws a polyline with a min/max rail and never states the
+ * slope, its direction, or its size in volatility points. The rank half prints
+ * the newest rank1y, which on its own is a percentile with no level beside it.
+ * The lead states the slope first, because that is the half that is a reading
+ * about THIS chain rather than about this name's history.
+ *
+ * THE SLOPE IS FRONT MINUS BACK OVER THE ROWS THAT ARE DRAWN, and the two
+ * expiries are named, because "the curve is steep" without its ends is not a
+ * measurement. A single listed expiry is not a curve and says so rather than
+ * reporting a slope of zero, which would be the confident zero this file
+ * exists to refuse.
+ *
+ * THE RANK CARRIES ITS UNIT OR IT IS WITHHELD. shapeIvRank publishes
+ * `rankUnit` as observed and explicitly does NOT rescale — the vendor's rank
+ * fields have already produced a "1352% of its year" once. Where the unit is
+ * not the 0-100 this sentence would print, the rank clause is dropped and the
+ * slope stands alone.
+ *
+ * EITHER HALF SURVIVES THE OTHER'S ABSENCE, which is the whole design of
+ * buildVolContext: a name with a curve but no rank still leads on the curve.
+ */
+function withVolLead(panel) {
+  if (panel.status !== "ok") return panel;
+  const term = panel.term && panel.term.status === "ok" ? panel.term : null;
+  const ir = panel.ivRank && panel.ivRank.status === "ok" ? panel.ivRank : null;
+  const rows = term ? term.rows.filter((r) => r.vol !== null) : [];
+  const pct = (v) => Number((v * 100).toFixed(1));
+
+  let slope = null;
+  if (rows.length === 1) {
+    slope = { say: `The chain lists one expiry, ${rows[0].expiry}, at ` +
+      `${pct(rows[0].vol)}%`, n: { frontExpiry: rows[0].expiry, frontPct: pct(rows[0].vol) } };
+  } else if (rows.length > 1) {
+    const f = rows[0], b = rows[rows.length - 1];
+    const spread = Number(Math.abs(pct(f.vol) - pct(b.vol)).toFixed(1));
+    const n = { frontExpiry: f.expiry, backExpiry: b.expiry,
+      frontPct: pct(f.vol), backPct: pct(b.vol), spreadPts: spread };
+    slope = {
+      say: spread === 0
+        ? `The curve is flat: the chain charges ${pct(f.vol)}% at both ` +
+          `${f.expiry} and ${b.expiry}`
+        : f.vol > b.vol
+          ? `Front expiry is bid: the chain charges ${spread} points more at ` +
+            `${f.expiry} (${pct(f.vol)}%) than at ${b.expiry} (${pct(b.vol)}%)`
+          : `The back is bid: the chain charges ${spread} points more at ` +
+            `${b.expiry} (${pct(b.vol)}%) than at ${f.expiry} (${pct(f.vol)}%)`,
+      n,
+    };
+  }
+
+  const latest = ir && ir.rows.length ? ir.rows[0] : null;
+  const unitOk = ir && typeof ir.rankUnit === "string" && /0-100/.test(ir.rankUnit);
+  const rank = latest && unitOk && latest.rank1y !== null
+    /* NOT "that level": the rank is the NAME'S implied volatility against its
+       own year, not the front expiry's or the back's, and a pronoun after two
+       quoted levels points at whichever one the reader read last. */
+    ? { say: `, and this name's implied volatility ranks ` +
+        `${Number(latest.rank1y.toFixed(1))} of 100 in its own year on ${latest.date}`,
+      n: { rank1y: Number(latest.rank1y.toFixed(1)), rankOf: 100, rankDate: latest.date } }
+    : null;
+
+  if (!slope) return panel;
+  const lead = panelLead(slope.say + (rank ? rank.say : "") + ".",
+    { ...slope.n, ...(rank ? rank.n : {}) });
+  return lead ? { ...panel, lead } : panel;
 }
 
 /* A raw of null is a failed READ; a raw of [] is a vendor answering nothing.
@@ -2462,11 +2537,117 @@ export function buildCard({
    sentences for them. */
 const darkNull = (raw) => raw === null || raw === undefined;
 
-function stockPanel(raw, shaper, note) {
+function stockPanel(raw, shaper, note, lead) {
   if (darkNull(raw)) {
     return { status: "unavailable", reason: "the feed could not be read this run", note };
   }
-  return { ...shaper(raw), note };
+  const panel = { ...shaper(raw), note };
+  /* THE LEAD IS BUILT HERE RATHER THAN IN THE SHAPER, and the reason is an
+     import cycle rather than taste: this module already imports the shapers
+     out of shared/flows-stock.js, so a shaper reaching back for panelLead
+     would close the loop. The shapers stay pure readings of a vendor body and
+     the sentence is written on this side, where panelLead already lives.
+
+     A LEAD BUILDER IS ONLY CALLED ON AN `ok` PANEL. Quiet and unreadable
+     carry their own reasons and no numbers, and a sentence over either would
+     be the confident zero this whole file refuses. */
+  if (lead && panel.status === "ok") {
+    const said = lead(panel);
+    if (said) panel.lead = said;
+  }
+  return panel;
+}
+
+/**
+ * The off-exchange print panel's one line: the size, and how much of it is one
+ * print.
+ *
+ * WHAT THE TABLE ALREADY SAYS IS NOT REPEATED. The rows below carry time,
+ * price, size, dollars and the NBBO for each print, sorted by premium — so the
+ * biggest single print is row one and naming it would be a caption. What no
+ * cell states is the AGGREGATE and the CONCENTRATION: the ranked prints are
+ * never summed, and nothing says whether the total is one block or forty.
+ *
+ * THE SUM IS OVER THE ROWS THAT ARE DRAWN, and the sentence says so the
+ * moment the feed shed any. `shed` is exactly that count, `unpriced` is the
+ * prints that arrived with no premium at all — dropped from the ranking
+ * because they cannot be ranked, and named rather than silently absorbed.
+ *
+ * ZERO IS A READING HERE. A total of zero dollars across prints that were
+ * measured is a measured zero, not a missing one, and it says so.
+ */
+function darkpoolLead(panel) {
+  const rows = panel.rows || [];
+  if (!rows.length) return null;
+  const total = rows.reduce((a, r) => a + (r.prem || 0), 0);
+  const top = rows[0].prem;
+  const scope = panel.shed > 0
+    ? `the ${rows.length} largest of ${panel.seen} rankable prints`
+    : `all ${rows.length} rankable print${rows.length === 1 ? "" : "s"}`;
+  const unpriced = panel.unpriced > 0
+    ? ` ${panel.unpriced} further print${panel.unpriced === 1 ? "" : "s"} ` +
+      `carried no premium and could not be ranked.`
+    : "";
+  if (!(total > 0)) {
+    return panelLead(
+      `Off-exchange prints in this name carry $0 across ${scope} — a measured ` +
+      `zero, not a missing reading.${unpriced}`,
+      { kept: rows.length, seen: panel.seen, shed: panel.shed,
+        unpriced: panel.unpriced, dollars: 0 });
+  }
+  const t = saidMagnitude(total);
+  const topPct = Math.round((top / total) * 100);
+  return panelLead(
+    `Off-exchange prints carry $${t.shown}${t.suffix} in this name across ` +
+    `${scope} — ${topPct}% of it in the single largest.${unpriced}`,
+    { shown: t.shown, dollars: t.exact, topPct, topDollars: top,
+      kept: rows.length, seen: panel.seen, shed: panel.shed,
+      unpriced: panel.unpriced });
+}
+
+/**
+ * The open-interest change panel's one line: the net, and which side it is on.
+ *
+ * THE TABLE IS IN VENDOR ORDER, WHICH IS NOT A RANKING. A reader wanting the
+ * net would have to add ten signed integers in their head across two contract
+ * types, so that is the finding: which way open interest moved, and by how
+ * much, over the lines the vendor surfaced.
+ *
+ * `diff` AND NOT `ratio`. The shaper's own comment records why the two must
+ * never be confused — `oi_change` reads like a difference and is a RATIO, and
+ * publishing it as a contract count printed "+16" for a book that went 2,119
+ * to 35,207. A line whose count the vendor omitted is EXCLUDED from the sum
+ * rather than reconstructed from curr minus last, for the same reason the
+ * shaper refuses to derive it: one field, one provenance.
+ *
+ * IT IS ONE CLEARING DAY LATE AND THE SENTENCE SAYS SO. Open interest is
+ * published by the clearing house overnight, so this is never today's tape,
+ * and a lead that let a reader take it for today would be the panel's worst
+ * available failure.
+ */
+function oiDeltasLead(panel) {
+  const rows = (panel.rows || []).filter((r) => r.diff !== null);
+  if (!rows.length) return null;
+  const calls = rows.filter((r) => r.cp === "C");
+  const puts = rows.filter((r) => r.cp === "P");
+  const sum = (list) => list.reduce((a, r) => a + r.diff, 0);
+  const c = sum(calls), pu = sum(puts), net = c + pu;
+  const sign = (v) => (v > 0 ? "+" : v < 0 ? "\u2212" : "");
+  const say = (v) => { const m = saidMagnitude(v); return sign(v) + m.shown + m.suffix; };
+  const side = net > 0 ? "grew" : net < 0 ? "fell" : "is unchanged on net";
+  return panelLead(
+    `Of the ${rows.length} line${rows.length === 1 ? "" : "s"} the vendor ` +
+    `surfaced with a contract count, open interest ${side}: ` +
+    `${say(c)} across ${calls.length} call line${calls.length === 1 ? "" : "s"} ` +
+    `against ${say(pu)} across ${puts.length} put line${puts.length === 1 ? "" : "s"} ` +
+    `— one clearing day late, never today's tape.`,
+    {
+      counted: rows.length,
+      callLines: calls.length,
+      putLines: puts.length,
+      callNet: Math.abs(c), putNet: Math.abs(pu), net: Math.abs(net),
+      callShown: saidMagnitude(c).shown, putShown: saidMagnitude(pu).shown,
+    });
 }
 
 /**

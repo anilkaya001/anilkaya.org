@@ -1428,8 +1428,9 @@ try {
        panel's own question out of a field the payload already carried, and
        none of them is a sentence lifted from a drawing. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
-      ["calendar", "congress", "context", "displacement", "levels", "marketRank",
-        "path", "pricedMove", "scoreOverlay", "surface"],
+      ["calendar", "congress", "context", "darkpool", "displacement", "levels",
+        "marketRank", "oiDeltas", "path", "pricedMove", "scoreOverlay",
+        "surface", "volContext"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
