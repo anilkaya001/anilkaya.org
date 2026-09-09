@@ -1378,11 +1378,15 @@
     into.append(wrap);
 
     /* THE DERIVATION KEEPS EVERY WORD, below the numbers it explains: moved,
-       not trimmed. `.ft-how` and `.ft-how-s` are already in flows.css and not
-       route-scoped (:3434-3442, :3763), so this reuses the disclosure
-       vocabulary rather than inventing one, and adds no CSS — which matters
-       on a route this close to its ceiling. <summary> is natively focusable,
-       so the method is reachable by keyboard and touch. */
+       not trimmed. `.ft-how` and `.ft-how-s` are already in flows.css and are
+       not route-scoped, so this reuses the disclosure vocabulary rather than
+       inventing one, and adds no CSS. <summary> is natively focusable, so the
+       method is reachable by keyboard and touch.
+
+       NAMED, NOT CITED BY LINE. Two line numbers stood here and both had
+       drifted — onto `.ft-link` and onto `.ft-tab::after` — so the comment
+       pointed confidently at the wrong rules. tests/contracts.mjs argues the
+       convention in full and fails a citation that outlives its file. */
     const how = el("details", "ft-how");
     how.append(el("summary", "ft-how-s", "How this lean was derived"));
     how.append(el("p", "cc-quiet cc-ln-note", said.join(" ")));

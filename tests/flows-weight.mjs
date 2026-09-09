@@ -210,7 +210,7 @@ const CEILING_KIB = {
      WHAT IT BOUGHT, AND IT IS A FIX RATHER THAN A FEATURE. renderContext
      positioned the price sparkline BY INDEX and read none of `dropped`,
      `sessions`, `datedSessions` or `closeDates` — four fields buildContext
-     (shared/flows-card.js:575-596) publishes, the last of them carrying its own
+     (shared/flows-card.js, `buildContext`) publishes, the last of them carrying its own
      note: "Non-zero means index is NOT time in the arrays above, which is
      precisely when a reader needs the dates." So on a name with a session
      dropped from the window, the line was drawn straight across the hole as
