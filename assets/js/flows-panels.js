@@ -319,6 +319,14 @@
    * flows-ticker.js's appendNotes is the string-shaped adapter over this, and
    * it is the only one.
    */
+  /* WHICH NOTES GO BEHIND THE WALL, decided once here rather than argued at
+     every call site. A note is METHOD when it says how a reading was built —
+     the scaling rule, the units, the summation convention — and folds. A note
+     is a QUALIFIER when it could change what the reading MEANS: a withheld
+     input, a truncated population, a session date, a horizon that is not the
+     panel's, a NOT CLAIMED list. Qualifiers stay open, as `qualifier()` below.
+     Folding is never deletion: the node is MOVED, so a folded sentence is
+     still in textContent and still found by find-in-page. */
   function appendMethod(host, nodes, summary) {
     const list = (nodes || []).filter(Boolean);
     if (!list.length) return;
@@ -981,7 +989,7 @@
         "a meaning they did not have. They return on the next published session."));
     }
 
-    host.append(el("p", "fc-note",
+    appendMethod(host, [el("p", "fc-note",
       "The three signed axes are blended by EFFECTIVE breadth — a family of five " +
       "columns that all restate the same tape counts as one signal, not five — and " +
       "the blend is then multiplied by the quality gate, which is bounded above by " +
@@ -992,7 +1000,7 @@
       "quiet day prints quiet scores. The composite is a weighted mean of columns each " +
       "measured in its own median-absolute-deviation units, so 2.0 is two of those, " +
       "not two standard deviations of anything. This is a ranked attention signal, " +
-      "not a return forecast."));
+      "not a return forecast.")], "How the score is computed");
   }
 
   /* ---------- the one deliberate global ----------------------------- */
