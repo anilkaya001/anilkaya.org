@@ -73,7 +73,56 @@ export function stripComments(src) {
   const n = src.length;
   let prev = "";                         // last significant char
 
+  /* KEYWORDS AFTER WHICH A SLASH OPENS A REGEX, not a division. `return /x/`
+     and `typeof /x/` are the common ones; without this list the slash reads
+     as a divide and the literal is scanned as code. */
+  const REGEX_KEYWORD = /(?:^|[^\w$])(return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+
+  /* A `)` ENDS A VALUE — unless it closed the head of a control statement, in
+     which case what follows is a fresh expression and a slash opens a regex:
+     `if (x) /re/.test(s)`. Deciding that needs the token BEFORE the matching
+     `(`, so this walks back to it. */
+  function parenIsControlHead(upto) {
+    let depth = 0;
+    let j = upto;
+    for (; j >= 0; j--) {
+      if (src[j] === ")") depth++;
+      else if (src[j] === "(") { depth--; if (depth === 0) break; }
+    }
+    if (j < 0) return false;
+    const before = src.slice(Math.max(0, j - 12), j).trimEnd();
+    return /(?:^|[^\w$])(if|while|for|with)$/.test(before);
+  }
+
   const isValueEnd = (c) => /[A-Za-z0-9_$)\]]/.test(c);
+
+  /* Is a `/` here a regex literal or a division? Decided from the last
+     significant character and, where that is ambiguous, from the token before
+     the matching paren. The one shape still out of reach is a slash after an
+     identifier that happens to be a keyword-like property name; the tree is
+     re-parsed and re-rendered afterwards precisely because this is a
+     heuristic and not a parser. */
+  function regexAllowed() {
+    if (!prev) return true;
+    if (prev === ")") return parenIsControlHead(i - 1);
+    if (!isValueEnd(prev)) return true;
+    return REGEX_KEYWORD.test(src.slice(Math.max(0, i - 14), i).trimEnd());
+  }
+
+  function scanRegex() {
+    out += src[i]; i++;
+    let inClass = false;
+    while (i < n) {
+      const r = src[i];
+      if (r === "\\") { out += r + (src[i + 1] ?? ""); i += 2; continue; }
+      if (r === "\n") break;              // an unterminated literal is not one
+      if (r === "[") inClass = true;
+      else if (r === "]") inClass = false;
+      out += r; i++;
+      if (r === "/" && !inClass) break;
+    }
+    prev = "/";
+  }
 
   function scanString(quote) {
     out += src[i]; i++;
@@ -82,6 +131,11 @@ export function stripComments(src) {
       if (c === "\\") { out += c + (src[i + 1] ?? ""); i += 2; continue; }
       if (quote === "`" && c === "$" && src[i + 1] === "{") {
         out += "${"; i += 2;
+        /* THE INTERPOLATION STARTS A FRESH EXPRESSION, so the last significant
+           character is the brace and not whatever preceded the template.
+           Without this, the regex in `${ /re/.test(s) }` inherited a stale
+           value-ish `prev` and was scanned as a division. */
+        prev = "{";
         scanBalanced();
         continue;
       }
@@ -103,6 +157,11 @@ export function stripComments(src) {
         i += 2; out += " "; continue;
       }
       if (c === '"' || c === "'" || c === "`") { scanString(c); prev = c; continue; }
+      /* REGEX INSIDE AN INTERPOLATION, which the first draft did not scan for
+         at all: `${ /[/*]/.test(s) }` has a comment opener inside a character
+         class, and without this branch the `/*` starts a comment that eats
+         the rest of the template. */
+      if (c === "/" && regexAllowed()) { scanRegex(); continue; }
       if (c === "{") depth++;
       else if (c === "}") { depth--; if (depth === 0) { out += "}"; i++; return; } }
       out += c;
@@ -116,27 +175,29 @@ export function stripComments(src) {
     if (c === "/" && d === "/") { while (i < n && src[i] !== "\n") i++; continue; }
     if (c === "/" && d === "*") {
       i += 2;
+      const from = i;
       while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      const body = src.slice(from, i);
       i += 2;
-      /* ONE SPACE, NOT NOTHING. `a/* c *\/b` is `a b`, and joining the two
-         halves would invent an identifier that was never written. */
-      out += " ";
+      /* ONE SPACE, AND EVERY NEWLINE THE COMMENT CONTAINED.
+         The space is so `a/*c*\/b` stays `a b` rather than becoming an
+         identifier nobody wrote. The NEWLINES are load-bearing in a way that
+         cost this script a silent behaviour change: automatic semicolon
+         insertion fires on a line terminator, so
+
+             return /* a
+                       comment *\/ 42;
+
+         returns UNDEFINED, and collapsing that comment to a single space
+         turns it into `return 42`. Both parse; they compute different things,
+         and no size check or parse check can tell them apart. `return`,
+         `throw`, `break`, `continue`, `yield` and postfix `++`/`--` all read
+         the line break, so the count of newlines is preserved exactly. */
+      out += " " + "\n".repeat((body.match(/\n/g) || []).length);
       continue;
     }
     if (c === '"' || c === "'" || c === "`") { scanString(c); prev = c; continue; }
-    if (c === "/" && !isValueEnd(prev || "\n")) {
-      out += c; i++;
-      let inClass = false;
-      while (i < n) {
-        const r = src[i];
-        if (r === "\\") { out += r + (src[i + 1] ?? ""); i += 2; continue; }
-        if (r === "[") inClass = true;
-        else if (r === "]") inClass = false;
-        out += r; i++;
-        if (r === "/" && !inClass) break;
-      }
-      prev = "/"; continue;
-    }
+    if (c === "/" && regexAllowed()) { scanRegex(); continue; }
     out += c;
     if (!/\s/.test(c)) prev = c;
     i++;
@@ -158,19 +219,28 @@ export function stripTree({ check = false, dir = "assets/js" } = {}) {
   const files = fs.readdirSync(abs).filter((f) => f.endsWith(".js")).sort();
   let before = 0, after = 0;
   const broken = [];
+  const staged = [];
+  /* TWO PASSES, AND THE SECOND ONLY RUNS IF THE FIRST WAS CLEAN. Writing each
+     file as it passed left a workspace half-stripped when a later file failed,
+     under an error message that said "nothing written" — a deploy could then
+     ship a mix of stripped and unstripped assets from a run that reported
+     failure. Everything is staged in memory; one bad file writes none. */
   for (const f of files) {
     const p = path.join(abs, f);
     const src = fs.readFileSync(p, "utf8");
     const out = stripComments(src);
     before += Buffer.byteLength(src);
     after += Buffer.byteLength(out);
-    /* EVERY OUTPUT IS RE-PARSED BEFORE IT IS WRITTEN. A scanner that gets one
-       regex wrong produces a file that is still text and no longer code; the
-       deploy would succeed and the route would be dead. */
+    /* EVERY OUTPUT IS RE-PARSED BEFORE ANYTHING IS WRITTEN. A scanner that
+       gets one regex wrong produces a file that is still text and no longer
+       code; the deploy would succeed and the route would be dead. */
     try { new Function(out); } catch (e) { broken.push(`${f}: ${e.message}`); continue; }
-    if (!check) fs.writeFileSync(p, out);
+    staged.push([p, out]);
   }
-  return { files: files.length, before, after, broken };
+  if (!check && broken.length === 0) {
+    for (const [p, out] of staged) fs.writeFileSync(p, out);
+  }
+  return { files: files.length, before, after, broken, wrote: check || broken.length ? 0 : staged.length };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
