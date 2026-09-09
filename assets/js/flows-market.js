@@ -34,7 +34,15 @@
  * THE LENGTHS. flows-panels.js puts a method group behind a disclosure past
  * 420 characters, because "a one-line decoder behind a click is a click for
  * nothing". Measured after the sort, the method groups left on this page are
- * 322, 230, 143, 119 and 81 characters. Every one is under that wall.
+ * 322, 230, 119, 105 and 81 characters. Every one is under that wall.
+ *
+ * THAT LIST READ "322, 230, 143, 119 AND 81" FOR ONE COMMIT, and the 143 was
+ * a group that no longer existed. It was measured honestly, then an
+ * adversarial pass moved the not-comparable verdict out of the half-zero
+ * branch's method and into its lead, which cut that group to 105 — and the
+ * figure was not re-derived after the edit it describes. Recorded here
+ * because it is the exact failure this file's own header is about, committed
+ * inside the change that argues against it.
  *
  * THE STRUCTURE, WHICH WOULD RULE IT OUT EVEN IF THEY WERE LONG. Eleven
  * sentences on this page read as foldable derivation. Every one of them
@@ -440,6 +448,7 @@
        never measured, and the aria-label said "0 names net bought". If any
        leg is missing there is no whole, and the honest drawing is none. The
        tilt above is published as a ratio and is unaffected. */
+    var splitDrew = false;
     if (bull === null || bear === null || flat === null) {
       var absent = [];
       if (bull === null) absent.push("net bought");
@@ -457,6 +466,7 @@
         "No screened name quoted both a call and a put leg this session, so there is no " +
         "priced population to split. The three counts were published and all three are zero."));
     } else {
+      splitDrew = true;
       var total = bull + bear + flat;
 
       var bar = el("div", "mk-stack");
@@ -497,11 +507,19 @@
     var lead = document.getElementById("mktBreadthLead");
     var qual = document.getElementById("mktBreadthQual");
     var note = document.getElementById("mktBreadthNote");
-    if (lead) {
-      lead.textContent = share === null ? ""
-        : "The five largest names account for " + pct(share) + " of all net premium moved.";
-    }
+    /* THE CONCENTRATION LEADS ONLY WHEN THE SPLIT DREW. It is a breadth
+       reading — concentration is what breadth is the opposite of — but it is
+       measured over the PREMIUM totals, while the drawing under it is a count
+       of NAMES. When that count could not be drawn, this panel's answer is
+       the silence saying so, and a figure at lead size above it reads as
+       though the panel were whole. The figure is still true and still said:
+       it becomes the first caveat, which is where a reading that is not the
+       panel's own finding belongs. */
     var caveats = [];
+    var concentration = share === null ? null
+      : "The five largest names account for " + pct(share) + " of all net premium moved.";
+    if (lead) lead.textContent = splitDrew && concentration ? concentration : "";
+    if (!splitDrew && concentration) caveats.push(concentration);
     if (share !== null && share > 0.5) {
       caveats.push("More than half the total is five names: read the aggregate as those " +
         "names, not as the universe.");
@@ -1857,9 +1875,22 @@
     var host = document.getElementById("mktAgainst");
     var panel = document.getElementById("mktAgainstPanel");
     var note = document.getElementById("mktAgainstNote");
+    var againstLead = document.getElementById("mktAgainstLead");
+    var againstQual = document.getElementById("mktAgainstQual");
     if (!host || !panel) return;
     host.textContent = "";
+    /* ALL THREE SLOTS CLEAR TOGETHER, the same as paintSectors and for the
+       same reason: there are four early returns below and every one of them
+       is a silence. Clearing only the note left the PREVIOUS paint's "7 of
+       214 published board names appear in the opposite premium extreme this
+       session" standing at lead size above "the boards this panel is joined
+       against did not come back", with the capped-extremes qualifier still
+       under it — a finding, a caveat about it, and a silence saying neither
+       was measured, all in one panel. Latent while the route paints once per
+       load; a refresh or an intraday poll makes it live. */
     if (note) note.textContent = "";
+    if (againstLead) againstLead.textContent = "";
+    if (againstQual) againstQual.textContent = "";
 
     /* Named `boardLong`/`boardShort` rather than `long`/`short`: both bare
        words are ES3 future reserved words and this file is plain ES5 served
@@ -1966,8 +1997,6 @@
        adjacent in one paragraph and are opposite kinds: the first is the
        finding, the second is the reason the finding is weaker than it looks.
        The residual sentence between them is the only method here. */
-    var againstLead = document.getElementById("mktAgainstLead");
-    var againstQual = document.getElementById("mktAgainstQual");
     if (againstLead) {
       againstLead.textContent = !population
         /* NO POPULATION, NO RATIO. "0 of 0 published board names appear" is a

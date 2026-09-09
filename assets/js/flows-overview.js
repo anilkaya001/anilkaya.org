@@ -1041,7 +1041,7 @@
     }
   }
 
-  /* ---------- the freshest flagged windows -------------------------
+  /* ---------- the largest flagged windows --------------------------
 
      The vendor's own rules, not this pipeline's. Tickers here are PLAIN
      TEXT: a detail card exists only for the names the board went deep on,
@@ -1056,23 +1056,40 @@
 
     const drawn = rows.slice(0, LIST_MAX);
     /* WHAT THIS LIST IS SORTED BY IS THE FINDING, because the sort decides
-       what the biggest number on screen means: the largest premium HERE is
-       the largest among the freshest, not the largest the feed flagged. The
-       table has no way to say that and the subtitle counts rows rather than
-       describing them. A row with no premium is not a premium of zero, so it
-       is excluded from the search and the sentence says so when every row
-       was. */
-    const priced = drawn.filter((row) => isNum(row && row.prem) !== null);
-    const biggest = priced.length
-      ? priced.reduce((a, b) => (Math.abs(isNum(b.prem)) > Math.abs(isNum(a.prem)) ? b : a))
-      : null;
-    lead(into, "These " + drawn.length + " are the FRESHEST flags rather than the largest" +
-      (biggest
-        ? ", and the biggest premium among them is " + (biggest.t || DASH) + " at " +
-          usd(biggest.prem) + "."
-        : ", and none of them quoted a premium, so there is no largest to name."));
+       what the biggest number on screen means.
 
-    const wrap = tableWrap("Flagged option windows, freshest first");
+       AND THE ANSWER IS NOT WHAT THIS REGION SAID FOR AS LONG AS IT EXISTED.
+       The heading read "Freshest flagged windows", the table's aria-label read
+       "freshest first", and the first version of this lead said "These 8 are
+       the FRESHEST flags rather than the largest". The rows are ordered by
+       PREMIUM, descending: shared/flows-alerts.js sorts `byPremium` when it
+       shapes the read and again when the intraday merge unions the reads, and
+       there is no time-ordered sort anywhere in that file. So every one of
+       those three sentences asserted the opposite of the payload's own
+       ordering — and the lead's second clause, "the biggest premium among
+       them", was necessarily row one of the table directly beneath it.
+
+       WHAT LEADS INSTEAD is the concentration, which the table cannot show
+       because it prints each premium and not the share: eight windows of
+       $1M each and one of $8M beside seven of $30k are the same eight rows
+       and a different session. Unsigned and formatted here rather than
+       through pct(), which signs — a share of a total has no direction, and
+       "+61.2% of the premium" reads as a change in it. A row with no premium
+       is not a premium of zero, so it is out of both the numerator and the
+       denominator, and the sentence says so when every row was. */
+    const priced = drawn.map((row) => isNum(row && row.prem)).filter((one) => one !== null);
+    const pool = priced.reduce((sum, one) => sum + Math.abs(one), 0);
+    const top = priced.length ? Math.max(...priced.map(Math.abs)) : null;
+    const share = pool > 0 && top !== null ? top / pool : null;
+    lead(into, (drawn.length === 1
+      ? "This is the largest flagged window by premium, not the newest"
+      : "These " + drawn.length + " are the largest flagged windows by PREMIUM, not the newest") +
+      (share === null
+        ? " — and no row here quoted a premium, so nothing ranks them and the order is the " +
+          "feed's own tie-break."
+        : ", and the biggest is " + (share * 100).toFixed(1) + "% of the premium across them."));
+
+    const wrap = tableWrap("Flagged option windows, largest premium first");
     const table = el("table", "cc-tbl");
     table.append(headRow([["Name", null], ["Contract", null], ["Premium", "c-num"], ["Rule", null]]));
     const body = el("tbody");
@@ -1116,7 +1133,8 @@
        below applies through isNum. */
     const scored = drawn.filter((row) => isNum(row && row.s) !== null).length;
     const opinionless = drawn.length - scored;
-    lead(into, scored + " of the " + drawn.length + " names drawn carr" +
+    lead(into, scored + " of the " + drawn.length + " name" +
+      (drawn.length === 1 ? "" : "s") + " drawn carr" +
       (scored === 1 ? "ies" : "y") + " a score" +
       (opinionless
         ? " and " + opinionless + " reached this calendar with none, so the boards hold no " +
@@ -1196,11 +1214,12 @@
     const below = sides.filter((one) => one === -1).length;
     const onRule = sides.filter((one) => one === 0).length;
     const unplaced = sides.filter((one) => one === null).length;
+    const nearest = drawn.length + " name" + (drawn.length === 1 ? "" : "s") +
+      " nearest the edge";
     lead(into, above + below + onRule === 0
-      ? "None of the " + drawn.length + " names nearest the edge published a number to place " +
-        "against the zero rule, so this list is ordered and unsided."
-      : above + " of the " + drawn.length + " names nearest the edge sit above the zero rule " +
-        "and " + below + " below it" +
+      ? "None of the " + nearest + " published a number to place against the zero rule, so " +
+        "this list is ordered and unsided."
+      : above + " of the " + nearest + " sit above the zero rule and " + below + " below it" +
         (onRule ? ", " + onRule + " exactly on it" : "") +
         (unplaced ? "; " + unplaced + " published no number to place" : "") + ".");
 
@@ -1457,12 +1476,14 @@
           " of its own premium."
         : basket(hi) + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
           basket(lo) + " most bearish at " + pct(lo.leanRatio, 1) + ".";
-      /* THE PANEL'S FINDING, AT THE SIZE A FINDING GETS. `.is-lead` is the
-         same element one step up in --fs-lead: this sentence was already
-         first and already the reading, and was drawn at note size beneath a
-         subtitle, so it read as a caption for the table rather than as the
-         answer to the region's question. */
-      into.append(el("p", "fc-reading is-lead", finding));
+      /* THE PANEL'S FINDING, AT THE SIZE A FINDING GETS, through the same
+         helper as the other three. `.is-lead` is the same element one step up
+         in --fs-lead: this sentence was already first and already the
+         reading, and was drawn at note size beneath a subtitle, so it read as
+         a caption for the table rather than as the answer to the region. It
+         appended the pair by hand until the fourth lead site made that a
+         second spelling of what a lead is. */
+      lead(into, finding);
     } else {
       into.append(el("p", "cc-quiet",
         "No basket carried a readable lean this session, so none is named."));

@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "132";
+export const ASSET_VERSION = "133";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -288,7 +288,7 @@ ${topbar(true)}
  *
  * NINE REGIONS NOW, FROM NINE ENDPOINTS THAT ALREADY EXISTED. A verdict
  * bar, both ranked sides ten deep with a score strip per row, what moved
- * since the prior session, the freshest flagged windows, what reports next,
+ * since the prior session, the largest flagged windows, what reports next,
  * what is a hair outside the band, where the eleven sector baskets leaned in
  * OPTION premium, the headline tape with its age on it, and the spine. No new
  * vendor call, no pipeline change: the difference is that the page stopped
@@ -370,7 +370,7 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
          and an opener that usually opens nothing is worse than no opener. -->
     <section class="cc-region cc-alerts" aria-labelledby="ccAlertsH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccAlertsH">Freshest flagged windows</h2>
+        <h2 class="cc-h-t" id="ccAlertsH">Largest flagged windows</h2>
         <span class="cc-h-s" id="ccAlertsSub"></span>
       </div>
       <div class="cc-body" id="ccAlerts"></div>

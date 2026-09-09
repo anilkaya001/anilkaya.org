@@ -3934,8 +3934,8 @@ export function sectorLean(rows) {
    the rows in memory instead; the join key is already on every row.
 
    FRESHNESS IS THE HONEST PROBLEM HERE AND IT IS NOT SOLVED BY THIS LEG.
-   This pipeline runs on a weekday-morning cron (.github/workflows/flows-
-   pipeline.yml:26-27 — 05:15 America/New_York) and news is a stream: a
+   This pipeline runs on a weekday-morning cron (05:15 America/New_York; the
+   schedule is in .github/workflows/flows-pipeline.yml) and news is a stream: a
    headline fetched at 05:15 and read at 15:00 is nearly ten hours old. The
    Worker DOES have an intraday refresh path — worker.js refreshFlowsIntraday
    re-reads the market tide and the vendor's flow alerts on the fifteen-minute
