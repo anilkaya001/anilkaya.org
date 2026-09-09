@@ -780,6 +780,50 @@ try {
        worse than no link. */
     eq(await page.locator("#ccWatch .cc-open").count(), 0,
        "the watch region mints no opener, because no watched name has a card");
+
+    /* ---- three regions that drew a table and said nothing about it ----
+
+       EACH OF THESE LEADS NOW, and the lead is the one sentence the drawing
+       cannot carry: what the alerts list is SORTED by (so the biggest number
+       in it is the biggest among the freshest, not the biggest flagged), how
+       many names on the calendar the board holds any opinion about (a gated
+       name arrives with no score and prints an em dash a reader would have
+       to count down the column), and which side of the zero rule the dead
+       band is holding (the rows are ordered on the SIZE of the residual, so
+       the signs are scattered).
+
+       A LEAD WITH NO NUMBER IN IT IS PROSE, NOT A READING, so that is
+       asserted for all three at once rather than trusted per sentence — the
+       same rule the ticker's station slots are held to. And FIRST is checked
+       structurally: a finding under the marks it describes is a caption. */
+    for (const [region, pattern] of [
+      ["#ccAlerts", /FRESHEST/],
+      ["#ccEvents", /carr(y|ies) a score/],
+      ["#ccWatch", /zero rule|unsided/],
+    ]) {
+      const said = (await page.locator(`${region} .fc-reading.is-lead`).textContent()).trim();
+      ok(pattern.test(said), `${region} leads with its own finding (${said})`);
+      ok(/\d/.test(said),
+         `and the ${region} lead carries a figure (${said}) — a one-liner with no number in ` +
+         "it is prose, and this slot is for the region's reading");
+      const first = await page.evaluate((sel) => {
+        const host = document.querySelector(sel);
+        return host && host.firstElementChild
+          ? host.firstElementChild.className : null;
+      }, region);
+      ok(first !== null && /\bis-lead\b/.test(first),
+         `and it is the FIRST thing in ${region} (${first}) — a finding drawn under the rows ` +
+         "it is about is a caption, whatever class it carries");
+    }
+
+    /* COUNTED OVER WHAT DREW, NOT OVER THE PAYLOAD. The events fixture puts
+       three rows on the wire and all three draw, so the denominator the lead
+       states must be the three a reader can see. A lead counting a capped
+       population would read as a measurement of a list that is not there. */
+    const evLead = (await page.locator("#ccEvents .fc-reading.is-lead").textContent()).trim();
+    const evRows = await page.locator("#ccEvents tbody tr").count();
+    ok(new RegExp(`of the ${evRows} names drawn`).test(evLead),
+       `and the events lead counts over the ${evRows} rows it drew (${evLead})`);
   }
 
   /* ---------- a failed request is not a quiet market ------------- */
@@ -2644,8 +2688,20 @@ try {
        "and the word `bp` appears nowhere in this region — that is the OTHER sector panel's " +
        "unit, and the two quantities must not be confusable");
 
-    /* ---- and it says outright which of the two sector panels it is ---- */
-    const note = (await page.locator("#ccLean .cc-ln-note").textContent()).trim();
+    /* ---- and it says outright which of the two sector panels it is ----
+
+       THE REGION'S PROSE IS TWO PARAGRAPHS NOW, so this collects both. Nine
+       sentences used to go behind one disclosure and only two of them were
+       method; the other seven — the horizon, what the table is ordered on,
+       that a ratio carries no size, the quiet baskets, the unreadable ones,
+       the basis, and which of the site's two sector panels this is — sit in
+       the open. Reading only the first would have left this file certifying
+       whichever half it happened to match. */
+    const noteParts = await page.locator("#ccLean .cc-ln-note").allTextContents();
+    const note = noteParts.join(" ").trim();
+    ok(noteParts.length >= 1,
+       `the region prints its prose somewhere (${noteParts.length} paragraphs) — a selector ` +
+       "matching nothing would pass every regex below by having no text to contradict them");
     ok(/sector:trix/.test(note),
        `the note names the other key by name (${note.slice(0, 90)}…)`);
     ok(/\/flows\/market\//.test(note),
@@ -2668,6 +2724,56 @@ try {
        "and states why the quiet basket has no ratio, on the panel rather than only in a title");
     ok(/POSITION/.test(note),
        "and that the sign is carried by position, which is what survives greyscale");
+
+    /* ---- and NOTHING THAT WITHHOLDS IS BEHIND THE DISCLOSURE ----------
+
+       THE ASYMMETRY IS THE WHOLE RULE and it was being broken here. Fold the
+       reassurance, never the withholding: a reassurance unread costs a
+       reader nothing, and a caveat unread is a caveat deleted. This panel
+       folded nine sentences of which four were withholdings — the quiet
+       baskets, the unreadable ones, what the table is ordered on (which
+       otherwise lives only in an aria-label), and that a ratio carries no
+       size. Asserted by SUBSTRING against the disclosure's own text rather
+       than by counting paragraphs, so it fails whichever way a future edit
+       puts one of them back inside. */
+    const foldedText = (await page.locator("#ccLean details").allTextContents()).join(" ");
+    for (const [what, pattern] of [
+      ["the quiet baskets and why 0/0 is not a neutral lean", /0\/0 is undefined/],
+      ["the baskets that could not be read", /could not be read at all/],
+      ["what the table is ordered on", /Ordered on the RATIO/],
+      ["that a ratio carries no size", /a ratio carries no size/],
+      ["which of the two sector panels this is", /\/flows\/market\//],
+      ["the horizon the quantity is over", /today only/],
+    ]) {
+      ok(!pattern.test(foldedText),
+         `${what} is NOT behind the disclosure — it changes what a drawn bar means, and a ` +
+         "sentence like that folded away is a caveat deleted rather than a caveat quiet");
+      ok(pattern.test(note),
+         `and it is still said (${what}) — the sort moved sentences, it deleted none`);
+    }
+    const openQual = await page.locator("#ccLean p.is-qualifier").count();
+    ok(openQual === 1,
+       `the caveats are one paragraph marked as qualifiers (${openQual}) — the class is what ` +
+       "draws the rule down the left, and a caveat that reads as method is one nobody weighs");
+
+    /* THE WALL IS ONE NUMBER IN TWO FILES, so it is compared rather than
+       trusted. flows-overview.js cannot import flows-panels.js — that file is
+       on the ticker route alone and is 54k — so the constant is copied, and a
+       copy nothing checks is a copy that drifts. */
+    const wallOf = (file) => {
+      const m = readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
+        .match(/NOTE_WALL_CHARS\s*=\s*(\d+)/);
+      return m ? Number(m[1]) : null;
+    };
+    const here = wallOf("assets/js/flows-overview.js");
+    const there = wallOf("assets/js/flows-panels.js");
+    ok(here !== null && there !== null,
+       `both files still declare the wall (${here} / ${there}) — a rename would make the ` +
+       "comparison below pass by comparing null to null");
+    eq(here, there,
+       "and the two are the same number: the overview copies the ticker library's threshold " +
+       "because it cannot import it, and a threshold that drifts means two pages disagree " +
+       "about how long a wall of prose is");
 
     /* THE FINDING NAMES ITS SUBJECTS. The lead sentence read `hi.t`, the
        board row's key, on rows keyed `etf`/`sector` — so it printed
