@@ -793,12 +793,19 @@ try {
        the signs are scattered).
 
        A LEAD WITH NO NUMBER IN IT IS PROSE, NOT A READING, so that is
-       asserted for all three at once rather than trusted per sentence — the
-       same rule the ticker's station slots are held to. And FIRST is checked
-       structurally: a finding under the marks it describes is a caption. */
+       asserted for both at once rather than trusted per sentence — the same
+       rule the ticker's station slots are held to. And FIRST is checked
+       structurally: a finding under the marks it describes is a caption.
+
+       NOT #ccEvents HERE, AND THE FIRST RUN OF THIS FILE SAID SO. In this
+       scenario the calendar is a PENDING silence — the block above asserts
+       its [data-empty] mark, and the comment beside the two counts calls
+       only the other two regions populated. A silent region draws no lead,
+       which is the rule rather than a gap; the events lead is asserted
+       further down, in the phase that publishes a calendar and waits for
+       its rows. */
     for (const [region, pattern] of [
       ["#ccAlerts", /FRESHEST/],
-      ["#ccEvents", /carr(y|ies) a score/],
       ["#ccWatch", /zero rule|unsided/],
     ]) {
       const said = (await page.locator(`${region} .fc-reading.is-lead`).textContent()).trim();
@@ -815,15 +822,6 @@ try {
          `and it is the FIRST thing in ${region} (${first}) — a finding drawn under the rows ` +
          "it is about is a caption, whatever class it carries");
     }
-
-    /* COUNTED OVER WHAT DREW, NOT OVER THE PAYLOAD. The events fixture puts
-       three rows on the wire and all three draw, so the denominator the lead
-       states must be the three a reader can see. A lead counting a capped
-       population would read as a measurement of a list that is not there. */
-    const evLead = (await page.locator("#ccEvents .fc-reading.is-lead").textContent()).trim();
-    const evRows = await page.locator("#ccEvents tbody tr").count();
-    ok(new RegExp(`of the ${evRows} names drawn`).test(evLead),
-       `and the events lead counts over the ${evRows} rows it drew (${evLead})`);
   }
 
   /* ---------- a failed request is not a quiet market ------------- */
@@ -1672,6 +1670,27 @@ try {
     eq(evRows[1][4], "—",
        "a gated name has no score, and an em dash is not a zero");
     eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
+
+    /* AND THE REGION LEADS WITH THAT COUNT, which is the one thing the table
+       cannot show: the em dash in the Score column is a mark a reader has to
+       find by scanning down it. This fixture is exactly one scored row and
+       one gated one, so the sentence is checked against both halves rather
+       than against a shape.
+
+       COUNTED OVER WHAT DREW. The denominator is the rows a reader can see,
+       not `payload.rows` and not `inWindow` — the subtitle beside it carries
+       the published population and is a different claim. */
+    const evLead = (await page.locator("#ccEvents .fc-reading.is-lead").textContent()).trim();
+    eq(evLead,
+       "1 of the 2 names drawn carries a score and 1 reached this calendar with none, " +
+       "so the boards hold no opinion on it going into the print.",
+       "the calendar leads with how many of the names it drew the board has an opinion about");
+    const evFirst = await page.evaluate(() => {
+      const host = document.getElementById("ccEvents");
+      return host && host.firstElementChild ? host.firstElementChild.className : null;
+    });
+    ok(evFirst !== null && /\bis-lead\b/.test(evFirst),
+       `and it is the FIRST thing in the region (${evFirst})`);
 
     /* AND THE FOURTH BADGE FILLS, NOW THAT THERE IS A CALENDAR TO BADGE.
        This is the arm the phase above could not reach: the same page, the
@@ -2733,9 +2752,24 @@ try {
        folded nine sentences of which four were withholdings — the quiet
        baskets, the unreadable ones, what the table is ordered on (which
        otherwise lives only in an aria-label), and that a ratio carries no
-       size. Asserted by SUBSTRING against the disclosure's own text rather
-       than by counting paragraphs, so it fails whichever way a future edit
-       puts one of them back inside. */
+       size.
+
+       ASSERTED POSITIVELY, INTO THE OPEN PARAGRAPH, because the negative form
+       alone can pass by matching nothing. This fixture's method group is 204
+       characters — a 63-character relation plus a 141-character sign decoder,
+       joined by one space — which
+       is UNDER the 420-character wall, so appendMethod writes a plain
+       paragraph and creates no <details> at all. Every "not inside the fold"
+       check would then be comparing against an empty string and passing for
+       the wrong reason, in the file whose header is about exactly that. So
+       each sentence is required to be IN the qualifier paragraph, which no
+       absence can satisfy; the fold check is kept beside it for the payload
+       whose method DOES pass the wall. */
+    const openQual = await page.locator("#ccLean p.is-qualifier").count();
+    eq(openQual, 1,
+       "the caveats are exactly one paragraph marked as qualifiers — the class is what draws " +
+       "the rule down the left, and a caveat that reads as method is one nobody weighs");
+    const qualText = (await page.locator("#ccLean p.is-qualifier").textContent()).trim();
     const foldedText = (await page.locator("#ccLean details").allTextContents()).join(" ");
     for (const [what, pattern] of [
       ["the quiet baskets and why 0/0 is not a neutral lean", /0\/0 is undefined/],
@@ -2745,16 +2779,15 @@ try {
       ["which of the two sector panels this is", /\/flows\/market\//],
       ["the horizon the quantity is over", /today only/],
     ]) {
+      ok(pattern.test(qualText),
+         `${what} is in the OPEN qualifier paragraph — it changes what a drawn bar means, ` +
+         "and a sentence like that behind a disclosure is a caveat deleted rather than quiet");
       ok(!pattern.test(foldedText),
-         `${what} is NOT behind the disclosure — it changes what a drawn bar means, and a ` +
-         "sentence like that folded away is a caveat deleted rather than a caveat quiet");
-      ok(pattern.test(note),
-         `and it is still said (${what}) — the sort moved sentences, it deleted none`);
+         `and it is not also inside the fold (${what})`);
     }
-    const openQual = await page.locator("#ccLean p.is-qualifier").count();
-    ok(openQual === 1,
-       `the caveats are one paragraph marked as qualifiers (${openQual}) — the class is what ` +
-       "draws the rule down the left, and a caveat that reads as method is one nobody weighs");
+    ok(/Derived:/.test(note) && !/Derived:/.test(qualText),
+       "while the publisher's own relation — how the three numbers are made, and nothing " +
+       "about what they mean — is the method, and is not in the qualifier paragraph");
 
     /* THE WALL IS ONE NUMBER IN TWO FILES, so it is compared rather than
        trusted. flows-overview.js cannot import flows-panels.js — that file is
