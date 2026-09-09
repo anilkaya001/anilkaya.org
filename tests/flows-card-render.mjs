@@ -106,6 +106,17 @@ ok(panel.status === "ok", "the fixture builds a surface");
    on disk is rewritten. */
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
 assert.ok(panelsSrc.lastIndexOf("})();") > 0, "flows-panels.js is still an IIFE");
+/* THE LIBRARY IS TWO FILES NOW, and this harness injects both because it is
+   testing the DRAWERS rather than the loader. Nine of the eleven live in
+   flows-drawers.js and reach the registry through FlowsPanels.need(), which
+   fetches over the network — something this page has no server for. Injecting
+   the second file is the same registration by a different route: __register
+   runs either way, and what this file asserts is what the drawers put on a
+   page, not how they got there. The loader itself is exercised by
+   tests/flows-ticker-contract.mjs against a real worker. */
+const drawersSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-drawers.js"), "utf8");
+assert.ok(/__register\(/.test(drawersSrc),
+  "flows-drawers.js hands its drawers back through FlowsPanels.__register");
 
 const browser = await chromium.launch();
 try {
@@ -137,6 +148,7 @@ try {
      to open it first. */
   await page.evaluate(() => { document.getElementById("ftGrid").hidden = false; });
   await page.addScriptTag({ content: panelsSrc });
+  await page.addScriptTag({ content: drawersSrc });
 
   /* THE DRAWERS, DISPATCHED FROM THE REGISTRY RATHER THAN FROM A HOOK. The
      sweep below called flows-card.js's private paint(), which chose which
