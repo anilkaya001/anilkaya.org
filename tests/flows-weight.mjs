@@ -352,9 +352,33 @@ const CEILING_KIB = {
      1,880 B, which is room for a fix and not for a feature, the same standard
      every raise above claimed and the 496 paragraph made real.
 
-     WHAT IS STILL OWED: the comment-stripping path measured at -229.96 KiB is
-     unspent and still blocked on the Workers Builds dashboard field, and the
-     route is 46.1% comment. This reduction does not retire that one.
+     WHAT IS STILL OWED, AND IT IS NOW BUILT RATHER THAN PROPOSED.
+     scripts/strip-comments.mjs removes the comments from the SERVED copy and
+     nothing else, and tests/flows-strip.mjs proves it: every output re-parsed,
+     the pass proven idempotent, seven hand-written traps that look like
+     comments and are not, and — the assertion that actually settles it —
+     twenty emitted cards rendered through fourteen drawers TWICE, stripped
+     and unstripped, with byte-equality of the drawn DOM.
+
+     MEASURED OVER assets/js: 2,310,246 B -> 1,536,285 B, so 755.82 KiB and
+     33.5% of the tree is prose the browser parses and no reader sees. Per
+     route, against the ceilings in this table:
+
+       ticker    403k -> 188k        market    102k ->  60k
+       overview  146k ->  71k        ask        97k ->  49k
+       unusual    93k ->  55k
+
+     THE ONE THING IT WAITS ON IS NOT CODE. Cloudflare documents twice that
+     Workers Builds ignores wrangler.toml's [build], so the command goes in
+     the dashboard — Workers Builds -> Settings -> Build command ->
+     `node scripts/strip-comments.mjs`. Until someone sets that field the
+     script runs in CI and never in a deploy, which is why flows-strip proves
+     CORRECTNESS and claims nothing about what production is serving.
+
+     AND THE CEILINGS HERE GO ON MEASURING THE REPOSITORY. Once the field is
+     set the served tree is smaller than every number this file prints, and
+     that asymmetry is deliberate: a ceiling measured against the stripped
+     output is one nobody editing this repository could check.
 
      404 LEAVES 2,042 B. The four raises above each claimed "room for a fix,
      not for a feature" and the 496 paragraph made that real by leaving 1,379;
