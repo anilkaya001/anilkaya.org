@@ -4780,28 +4780,39 @@
     host.append(statList(pairs));
   }
 
+  /* A STRING IS A DEFERRED DRAWER, A FUNCTION IS ONE THAT IS ALREADY HERE.
+     The nine library drawers below now arrive from assets/js/flows-drawers.js
+     after a fetch, so naming them by registry key rather than capturing
+     `P.gamma` at module load is what makes the table survive being built
+     before they register. `drawerFor` resolves a string against the registry
+     at CALL time, which is the only time the answer is knowable.
+
+     THE TWO THAT STAY FUNCTIONS ARE NOT AN EXCEPTION TO THE RULE, they are
+     the two the default station needs: `scoreOverlay` and `__score` draw the
+     signal station a reader lands on, and flows-panels.js keeps both so that
+     first paint owes nothing to the network. */
   const DRAW = {
-    gamma: P.gamma,
+    gamma: "gamma",
     aggressor: drawAggressor,
     ivSurface: drawIvSurface,
     skewTerm: drawSkewTerm,
     topContracts: drawTopContracts,
-    levels: P.levels,
-    surface: P.surface,
-    displacement: P.displacement,
-    calendar: P.calendar,
-    pricedMove: P.pricedMove,
-    path: P.path,
-    context: P.context,
-    congress: P.congress,
+    levels: "levels",
+    surface: "surface",
+    displacement: "displacement",
+    calendar: "calendar",
+    pricedMove: "pricedMove",
+    path: "path",
+    context: "context",
+    congress: "congress",
     marketRank: drawMarketRank,
     darkpool: drawDarkpool,
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
     scoreOverlay: P.overlay,
-    deltaExposure: P.deltaExposure,
-    charm: P.charm,
-    vanna: P.vanna,
+    deltaExposure: "deltaExposure",
+    charm: "charm",
+    vanna: "vanna",
     /* THE TWO SENTINELS, IN THE SAME TABLE AND UNDER THE SAME CALL SHAPE.
        `__score` used to sit here as `null` beside an `if (key === "__score")`
        branch in each of the two walks below — a table entry that was not a
@@ -4827,9 +4838,47 @@
    *   the first's pattern. Today the two tiles happen to be identical; the
    *   moment one scales, it is wrong and nothing looks wrong.
    */
-  function drawAll(card, mount) {
+  /* WHICH STATIONS HAVE BEEN DRAWN, so a switch draws once and a re-switch
+     draws nothing. Cleared on every new card, because the panels then hold the
+     previous name's readings. */
+  const drawnStations = new Map();
+
+  /**
+   * Draw the panels of one station, or of the whole grid.
+   *
+   * IT STAYS SYNCHRONOUS, AND THAT IS NOT AN OVERSIGHT. The drawers this walk
+   * may need are fetched by `loadDrawersFor` BEFORE it is called, because
+   * `withAllStations` re-hides the stations it revealed in a `finally` — so an
+   * async walk would return at its first await, the stations would be hidden
+   * again, and every chart after that point would measure its width inside a
+   * box with no layout. The fetch is the caller's job; the drawing is this
+   * function's, and it happens in one synchronous pass with every station in
+   * flow.
+   *
+   * @param {string|null} only — a station's data-group, or null for the grid.
+   */
+  function panelSections(only) {
+    return [...(only
+      ? grid.querySelectorAll('.ft-station[data-group="' + only + '"] .ft-panel[data-panel]')
+      : grid.querySelectorAll(".ft-panel[data-panel]"))];
+  }
+
+  /**
+   * Fetch the deferred library if these sections need it, and never otherwise.
+   *
+   * A FAILED FETCH IS NOT A THROWN PAGE. `need()` rejects if the asset does not
+   * load, and the catch is deliberate: the walk already has a branch for a key
+   * with no registered drawer, and that branch says so panel by panel — a
+   * better answer than an exception that takes the station down with it.
+   */
+  async function loadDrawersFor(sections) {
+    if (!sections.some((s) => typeof DRAW[s.dataset.panel] === "string")) return;
+    try { await P.need(); } catch { /* the walk reports it panel by panel */ }
+  }
+
+  function drawAll(card, mount, only) {
     const missing = [];
-    for (const section of grid.querySelectorAll(".ft-panel[data-panel]")) {
+    for (const section of panelSections(only)) {
       const key = section.dataset.panel;
       const question = section.dataset.question || "";
       const host = section.querySelector("div");
@@ -4838,7 +4887,8 @@
          page for a release without anyone noticing. */
       if (!host) { missing.push(key); continue; }
 
-      const drawer = DRAW[key];
+      const entry = DRAW[key];
+      const drawer = typeof entry === "string" ? P[entry] : entry;
       if (typeof drawer !== "function") {
         deadPanel(host, question, "no renderer is registered for this panel.");
         continue;
@@ -4885,6 +4935,12 @@
        marker a reader learns to distrust. Reading the DOM back is what keeps
        it honest — it marks what a renderer ACTUALLY emitted, so a tooltip
        added tomorrow is marked tomorrow. */
+    /* THE SWEEPS STAY GRID-WIDE even when the draw was one station. Both read
+       the DOM back rather than the payload, so running them over the whole
+       grid after a partial draw marks what has actually been drawn and leaves
+       the rest exactly as it was — and writeStationLeads counts silences off
+       the same DOM, so a station that has not drawn yet keeps the empty lead
+       its `:empty` rule already hides. */
     for (const section of grid.querySelectorAll(".ft-panel[data-panel] > div")) {
       markExplained(section);
     }
@@ -5042,7 +5098,12 @@
        would multiply every absolute unit — 9px axis type to 24px, the 112px
        rail to 298px — and break the one-viewBox-unit-is-one-CSS-pixel
        invariant in the one place a reader is looking hardest. */
-    const drawer = DRAW[zoomKey];
+    /* THROUGH THE SAME RESOLUTION AS THE GRID WALK, because DRAW now holds a
+       STRING for every deferred drawer and calling one would throw. The dialog
+       never has to fetch: it opens from a panel that is already drawn, and a
+       panel is only drawn once its station's drawers have registered. */
+    const zoomEntry = DRAW[zoomKey];
+    const drawer = typeof zoomEntry === "string" ? P[zoomEntry] : zoomEntry;
     const panel = painted.panels && painted.panels[zoomKey];
     if (typeof drawer !== "function") {
       deadPanel(zoomHost, question, "no renderer is registered for this panel.");
@@ -5115,7 +5176,13 @@
          at a different count on every width — a stale height puts the panel a
          reader jumped to underneath the bar that took them there. */
       syncBarHeight();
-      withAllStations(() => drawAll(painted, "grid"));
+      /* REDRAWS ONLY WHAT IS DRAWN. A resize must not fetch the library for
+         stations the reader has never opened — they will measure the new
+         width when they are first drawn, because they have not been drawn at
+         all yet. */
+      for (const key of [...drawnStations.keys()]) {
+        withAllStations(() => { drawAll(painted, "grid", key === ALL_STATIONS ? null : key); });
+      }
       if (zoomKey) drawZoom();
     }, 160);
   });
@@ -5656,6 +5723,49 @@
        fills the band, exactly as it did when the page was one scroll. */
     if (next !== ALL_STATIONS) markCurrentGroup(next);
     if (opts && opts.url) writeStation(next, !!opts.push);
+    /* AFTER THE REVEAL, NEVER BEFORE IT. The panels of a hidden station have
+       no box, so a chart drawn into one measures zero width — which is why
+       drawStation goes through withAllStations, and why it is called here
+       rather than at the top of this function. */
+    drawStation(painted, "grid");
+  }
+
+  /**
+   * Draw whatever the current station shows, once.
+   *
+   * THE MEMO IS PER STATION AND PER CARD. `drawnStations` is cleared when a
+   * new card paints, because the panels then hold the previous name's
+   * readings; within one card, switching away and back draws nothing and
+   * fetches nothing.
+   *
+   * `?s=all` IS ONE ENTRY, NOT FIVE. It draws the whole grid in a single walk
+   * and records itself, so a reader who asked for everything pays one fetch
+   * and one pass rather than five of each.
+   */
+  function drawStation(card, mount) {
+    if (!card) return Promise.resolve();
+    const key = station === ALL_STATIONS ? ALL_STATIONS : station;
+    if (key === null) return Promise.resolve();
+    /* THE MEMO RETURNS THE IN-FLIGHT PROMISE, NOT A FRESH RESOLVED ONE, and
+       that distinction is a bug this cost. paint() calls applyStation — which
+       switches station and starts this draw — and then awaits drawStation
+       itself. Handing the second caller Promise.resolve() let honourHash run
+       while the panels were still empty, so a deep link scrolled to a heading
+       with nothing under it and the observer marked the wrong station. One
+       station, one promise, however many callers ask for it. */
+    const already = drawnStations.get(key);
+    if (already) return already;
+    /* THE PROMISE IS RETURNED, and paint() awaits it. honourHash scrolls to a
+       panel, and a panel that has not drawn is a heading over an empty box —
+       so the fragment would land short by exactly the height of the drawing.
+       The station switch below does not await: there the reader is already
+       looking at the page and the panels filling in is the expected motion. */
+    const only = key === ALL_STATIONS ? null : key;
+    const drawing = loadDrawersFor(panelSections(only)).then(() => {
+      withAllStations(() => { drawAll(card, mount, only); });
+    });
+    drawnStations.set(key, drawing);
+    return drawing;
   }
 
   function applyStation(opts) {
@@ -6230,8 +6340,11 @@
     window.addEventListener("hashchange", honourHash);
   }
 
-  function paint(card) {
+  async function paint(card) {
     painted = card;
+    /* A NEW NAME INVALIDATES EVERY DRAWN STATION: the panels still hold the
+       previous card's readings until they are drawn again. */
+    drawnStations.clear();
     if (headEl) headEl.hidden = false;
     if (barEl) barEl.hidden = false;
     grid.hidden = false;
@@ -6259,7 +6372,18 @@
     const chg = paintChange(card);
     paintIdentity(card, chg);
 
-    drawAll(card, "grid");
+    /* THE STATION IS CHOSEN BEFORE THE DRAW NOW, AND THAT REORDERING IS THE
+       DEFERRAL. Panels used to be drawn for all five stations and the
+       selection applied afterwards; the walk is scoped to one station, so it
+       has to know which one first. applyStation still runs BEFORE honourHash,
+       which is the ordering the bug note below records — ?s=all#ftg-convexity
+       has to lose the hash to the query, not the other way round.
+
+       WIDTH IS STILL MEASURED WITH EVERY STATION IN FLOW. withAllStations
+       reveals the hidden ones for the duration of the draw, so each chart
+       measures the width the affordance sweep asserts, exactly as before. */
+    applyStation({ url: true, push: false });
+    await drawStation(card, "grid");
     setStale(assessAge(card));
 
     /* AFTER THE PANELS EXIST, NOT BEFORE. The grid is `hidden` while the card
@@ -6278,7 +6402,6 @@
        because the hash was read before the query existed to lose to.
        wantedStation() already ranks them correctly (?s= first, hash second);
        running it first is what lets that ranking apply. */
-    applyStation({ url: true, push: false });
     honourHash();
 
     statusEl.textContent = (card.ticker || "This name") +

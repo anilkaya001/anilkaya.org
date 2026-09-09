@@ -355,6 +355,7 @@ const truncated = cards.filter((c) =>
 const pageHTML = FLOWS_PAGES.tickerPage({ username: "test" })
   .replace(/<script[^>]*><\/script>/g, "");
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
+const drawersSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-drawers.js"), "utf8");
 const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
 
 /* ---------- ONE FOLD, ONE LEAD, ONE FILE --------------------------
@@ -550,8 +551,23 @@ async function mount(page, card,
   /* `html` IS FOR ONE THING ONLY: serving DELIBERATELY WRONG markup, so a
      check that exists to notice it can be proven to. Everyone else gets the
      page the worker emits. */
+  /* THE DEFERRED LIBRARY IS SERVED, BECAUSE IN PRODUCTION IT IS. The catch-all
+     below answers every request with the page's own HTML, which is right for a
+     harness that has no server — but flows-panels.js now FETCHES
+     assets/js/flows-drawers.js when a station needs it, and an HTML body
+     parses as script, throws, and fires onload. That is a real failure mode
+     and the loader is asserted against it elsewhere; here it would only mean
+     the harness never draws nine of the panels. This route goes first so the
+     one asset the page really asks for comes back as itself. */
   await page.route("**/*",
     (route) => route.fulfill({ contentType: "text/html", body: html || pageHTML }));
+  /* REGISTERED AFTER THE CATCH-ALL ON PURPOSE: Playwright gives precedence to
+     the MOST RECENTLY added route, so a specific pattern registered first is
+     shadowed by a later catch-all and never runs. Written down because the
+     natural reading — specific before general, as in a router — is backwards
+     here, and the symptom is the harness silently serving HTML for a script. */
+  await page.route("**/assets/js/flows-drawers.js*",
+    (route) => route.fulfill({ contentType: "text/javascript", body: drawersSrc }));
   await page.goto(url);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });

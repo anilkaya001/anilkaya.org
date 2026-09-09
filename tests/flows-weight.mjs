@@ -311,7 +311,57 @@ const CEILING_KIB = {
      sentence back out of the source and checks it against this table. A
      deferral of the panel library states its cost the same way, or it has
      moved bytes out of a measurement rather than off a reader's CPU. */
-  tickerPage: 500,
+
+  /* 500 -> 404, AND IT IS THE FIRST TIME THIS NUMBER HAS EVER GONE DOWN.
+     Four raises are recorded above — 470, 480, 493, 496, 500 — and the last of
+     them set a trigger rather than a hope: "the next change that would take
+     this route past 500 does the reduction FIRST. Not alongside, not after."
+     The note fold that wanted 914 bytes was held behind that sentence and is
+     still waiting; this is the reduction it was waiting for.
+
+     MEASURED, `stat` on disk against `git cat-file -s` at the merge base:
+
+       file                before      after
+       flows-dock.js        6,003      6,003
+       nav.js               2,560      2,560
+       flows-panels.js    161,628     54,525
+       flows-ticker.js    341,689    348,566
+       total              511,880    411,654 B = 402.01 KiB
+
+     97.88 KiB OFF FIRST PAINT, AND NOT THE 105.6 THE PLAN PREDICTED. The
+     deferred file is 110.57 KiB, but the walk that defers it GREW: drawing one
+     station instead of twenty-three panels, plus resolving each deferred
+     drawer by name at call time, cost flows-ticker.js 6,877 bytes. The route's
+     number is the honest one — the file's would credit this change with bytes
+     it did not take off the page.
+
+     AND THIS PARAGRAPH WAS WRITTEN TWICE, which is worth recording in the file
+     whose whole subject is figures going stale. Its first draft said 99.70 KiB
+     against a 400.18 KiB route and a 402 ceiling — measured before three
+     defects surfaced in the loader: the enlarge dialog still called a drawer
+     that had become a string, the station memo handed its second caller a
+     resolved promise instead of the in-flight one, and a script tag answered
+     with HTML fires onload rather than onerror. Fixing them added bytes, and a
+     ceiling derived before the fixes would have been measured against code
+     that never shipped.
+
+     AND THE CEILING FOLLOWS THE ROUTE DOWN RATHER THAN STAYING WHERE IT WAS.
+     Leaving it at 500 would bank 99.70 KiB of unargued room on the one route
+     whose whole history is room being spent with nobody re-deriving the
+     number — the 470 paragraph records exactly that happening. 402 leaves
+     1,880 B, which is room for a fix and not for a feature, the same standard
+     every raise above claimed and the 496 paragraph made real.
+
+     WHAT IS STILL OWED: the comment-stripping path measured at -229.96 KiB is
+     unspent and still blocked on the Workers Builds dashboard field, and the
+     route is 46.1% comment. This reduction does not retire that one.
+
+     404 LEAVES 2,042 B. The four raises above each claimed "room for a fix,
+     not for a feature" and the 496 paragraph made that real by leaving 1,379;
+     this leaves a comparable margin on a route that has just given back 97.88
+     KiB, rather than banking the lot where the next change would find it
+     waiting. */
+  tickerPage: 404,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -686,6 +736,39 @@ for (const name of Object.keys(CEILING_KIB)) {
    exactly how "55k" survived two rewrites of the file it describes.
    ============================================================= */
 {
+  /* THE SECOND DEFERRAL, HELD TO THE SAME STANDARD AS THE FIRST.
+     assets/js/flows-drawers.js is fetched on demand and therefore appears in
+     no route's total — which is precisely why it has to state its own weight
+     where a reader will meet it, and why that sentence is read back here. A
+     deferral nobody can audit is a way of moving bytes out of a measurement
+     rather than off a reader's CPU, and this file's tickerPage comment says so
+     in terms. */
+  {
+    const drawersBytes = sizeOf("/assets/js/flows-drawers.js");
+    const drawersKib = Math.round(drawersBytes / 1024);
+    const src = readFileSync(new URL("./assets/js/flows-drawers.js", REPO), "utf8");
+    const says = /this file is (\d+)k as\s+measured on (\d{4}-\d{2}-\d{2})/.exec(src);
+    ok(says !== null,
+       `flows-drawers.js states its own size and the date it was measured — it is on no ` +
+       `route's total, so this sentence is the only place its cost is written down`);
+    if (says) {
+      eq(Number(says[1]), drawersKib,
+         `flows-drawers.js says it is ${says[1]}k and it measures ${drawersKib}k ` +
+         `(${drawersBytes} bytes). A figure left at the size a file used to be is worse ` +
+         `than no figure, because a reader takes it for a measurement`);
+    }
+    /* AND IT IS DEFERRED, NOT LINKED. The moment a page emits a script tag for
+       it the whole argument collapses: the bytes would be back on first paint
+       AND still absent from the table, which is the one outcome worse than
+       never having split the file. */
+    for (const route of measured) {
+      ok(!route.parts.some((part) => /^flows-drawers\.js/.test(part)),
+         `no route links flows-drawers.js — it is fetched by FlowsPanels.need() when a ` +
+         `station that needs it is drawn, and a page that linked it would pay the bytes ` +
+         `on arrival while this table went on not counting them (${route.name})`);
+    }
+  }
+
   const askBytes = sizeOf("/assets/js/flows-ask.js");
   const askKib = Math.round(askBytes / 1024);
   const dockSrc = readFileSync(new URL("./assets/js/flows-dock.js", REPO), "utf8");

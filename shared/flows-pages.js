@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "129";
+export const ASSET_VERSION = "130";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
