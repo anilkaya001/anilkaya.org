@@ -734,14 +734,15 @@
 
     host.append(el("p", "fc-reading", reading));
 
-    host.append(el("p", "fc-note",
+    appendMethod(host, [el("p", "fc-note",
       "Open interest is the book that already exists; today's volume is what was " +
       "added to it. Comparing them as DISTRIBUTIONS rather than as totals — the gap " +
       "between their gamma-weighted centroids — is what turns a static regime reading " +
       "into a statement that the regime is moving, and which way. The gap is measured " +
       "in ATR so it compares across names: half a point means one thing in a $9 stock " +
       "and another in a $900 one. This is descriptive; it enters the score through the " +
-      "positioning axis, which is the only signed thing the gamma block contributes."));
+      "positioning axis, which is the only signed thing the gamma block contributes.")],
+      "How this gap is measured");
   }
 
   /* ---------- gamma roll-off ---------------------------------------- */
@@ -1268,14 +1269,15 @@
       ["Expiries", String(panel.expiries)],
     ]));
 
-    host.append(el("p", "fc-note",
+    appendMethod(host, [el("p", "fc-note",
       "Gross gamma rolling off, so the two legs are summed in magnitude: put gamma " +
       "arrives already dealer-signed, and a front week of one billion call against " +
       "minus 999 million put is two billion of gamma about to expire, not the one " +
       "million their signed sum leaves behind. " +
       "Mean life is the gamma-weighted average days to expiry — unlike the front " +
       "expiry's share it does not change when the chain is cut differently, so it " +
-      "is the number that compares across names."));
+      "is the number that compares across names.")],
+      "How this roll-off was summed");
   }
 
   /* ---------- the priced move ---------------------------------------- */
@@ -1497,8 +1499,10 @@
         fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
     ]));
 
-    host.append(el("p", "fc-note",
-      `THIS IS A PRICE, NOT A FORECAST. The wide band is 30-day implied volatility ` +
+    /* Split: the frame and NOT CLAIMED stay open; the rest is method. */
+    host.append(qualifier("THIS IS A PRICE, NOT A FORECAST."));
+    appendMethod(host, [el("p", "fc-note",
+      `The wide band is 30-day implied volatility ` +
       `scaled to ${sessions} trading sessions by the square-root-of-time rule, which ` +
       `is exact whenever successive returns are uncorrelated — no fitted parameter, ` +
       `every input observable, and an assumption the term structure of implied ` +
@@ -1509,9 +1513,11 @@
       `units. The vendor's own quote is marked separately because it is priced to the ` +
       `nearest end-of-week expiry — the vendor's documented default when no expiry is ` +
       `supplied, and the screener accepts none — which is a different horizon from this ` +
-      `panel's and not comparable across the board. ` +
-      `NOT CLAIMED: a direction, a probability, a point target, or that the stock will ` +
-      `stay inside any of these bands.`));
+      `panel's and not comparable across the board.`)],
+      "How these bands were built");
+    host.append(qualifier(
+      "NOT CLAIMED: a direction, a probability, a point target, or that the stock will " +
+      "stay inside any of these bands."));
   }
 
   /* ---------- price context ------------------------------------------ */
