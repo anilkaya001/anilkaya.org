@@ -576,8 +576,52 @@ const CEILING_KIB = {
      1,439 bytes of its own block comment and the route measures 102k
      against 102 with 249 bytes in hand. That margin is thin and it is
      stated so nobody spends it twice: the next thing that wants space on
-     this route should expect to argue for it. */
-  marketPage: 102,
+     this route should expect to argue for it.
+
+     102 -> 109, AND THIS IS THAT ARGUMENT. Re-derived rather than quoted,
+     `stat` on disk against `git cat-file -s` at the merge base:
+
+       file                before      after
+       flows-dock.js        6,003      6,003
+       nav.js               2,560      2,560
+       flows-market.js     95,824    101,923
+       total              104,387    110,486 B = 107.90 KiB
+
+     WHAT IT BOUGHT. Four panels — tilt, breadth, sector momentum and against
+     the tape — each wrote ONE paragraph holding three different kinds of
+     sentence: the finding, the caveats that change what the drawing means,
+     and the decoder. A reader met them as an undifferentiated block BELOW
+     the marks they were about. They are sorted now: the finding leads above
+     the drawing as `.fc-reading.is-lead`, the caveats sit under it as
+     `.fc-note.is-qualifier` with the rule down their left, and the method is
+     last. Not one sentence was deleted, and tests/flows-market-contract.mjs
+     asserts the placement separately from the wording, because every regex
+     it already had would pass with all three kinds back in one paragraph.
+
+     THE SPLIT IS 6,099 BYTES AND ONLY 1,045 OF THEM ARE CODE. The rest is
+     the argument for it, and the two figures are given separately because
+     they have different futures: measured through scripts/strip-comments.mjs
+     the route goes 60.44 -> 61.46 KiB, so once the Workers Builds command is
+     set the comment costs a reader nothing at all and this ceiling is
+     measuring a file no browser will parse.
+
+     THE ARGUMENT IS THE LARGEST SINGLE ITEM IN IT, and that is deliberate.
+     An adversarial pass over the eleven sentences on this page that read as
+     foldable derivation refuted ALL ELEVEN, and for one structural reason:
+     seven are the `cost` argument of pendingLine(what, cost), which puts
+     both halves in one <p data-empty="pending">, so folding one splits a
+     silence and moves half of it outside the mark every test and every
+     reader finds it by. That finding is worth more than the bytes it costs,
+     because the next person to look at this page will otherwise reach for
+     the fold again. It is written down once, in flows-market.js's header,
+     rather than at the five sites that would each have restated it.
+
+     109 LEAVES 1,130 BYTES, which is room for a fix and not for a feature —
+     the reserve the ticker's 496 left, for the same reason. Two leads this
+     route was measured to be missing, on the tape and over the pulse grid,
+     are NOT in this change: they are new sentences rather than sorted ones,
+     and they should arrive with their own argument. */
+  marketPage: 109,
   /* THE +7 ON THIS AND THE FOUR ENTRIES BELOW IS THE DOCKED ASSISTANT.
      assets/js/flows-dock.js now ships on every gated route but /flows/ask,
      and these were the routes with less than that in hand. The reasoning is

@@ -911,13 +911,16 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
 
   <section class="fc-panel" id="mktTiltPanel" hidden>
     <h2 class="fc-panel-h">Bought or sold, two ways</h2>
+    <p class="fc-reading is-lead" id="mktTiltLead"></p>
     <div id="mktTilt"></div>
     <p class="fc-note" id="mktTiltNote"></p>
   </section>
 
   <section class="fc-panel" id="mktBreadthPanel" hidden>
     <h2 class="fc-panel-h">Breadth, and what it is made of</h2>
+    <p class="fc-reading is-lead" id="mktBreadthLead"></p>
     <div id="mktBreadth"></div>
+    <p class="fc-note is-qualifier" id="mktBreadthQual"></p>
     <p class="fc-note" id="mktBreadthNote"></p>
   </section>
 
@@ -946,7 +949,9 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
 
   <section class="fc-panel" id="mktSectorPanel" hidden>
     <h2 class="fc-panel-h">Sector momentum</h2>
+    <p class="fc-reading is-lead" id="mktSectorLead"></p>
     <div id="mktSectors"></div>
+    <p class="fc-note is-qualifier" id="mktSectorQual"></p>
     <p class="fc-note" id="mktSectorNote"></p>
   </section>
 
