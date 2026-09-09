@@ -121,6 +121,13 @@ const emitDir = path.join(ROOT, "tests/.review-emit");
 const listCards = () => (fs.existsSync(emitDir)
   ? fs.readdirSync(emitDir).filter((f) => /card/.test(f)) : []);
 if (!listCards().length) {
+  /* THE DIRECTORY FIRST, AND THIS COST A RED CI RUN. `--emit` writes files
+     into the path it is given and does not create it, so on a clean checkout
+     the dry run died with ENOENT on its first card while every local run
+     passed — the directory was already there from earlier work. A fixture
+     bootstrap that only works on a machine that did not need it is not a
+     bootstrap. */
+  fs.mkdirSync(emitDir, { recursive: true });
   const r = spawnSync(process.execPath,
     ["scripts/flows-pipeline.mjs", "--dry-run", "--emit", "tests/.review-emit/"],
     { cwd: ROOT, encoding: "utf8" });
