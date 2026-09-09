@@ -1087,6 +1087,12 @@ let citationsChecked = 0;
 {
   const citing = [
     ...readdirSync(path.join(ROOT, "assets/js")).filter((f) => f.endsWith(".js")).map((f) => `assets/js/${f}`),
+    /* THE STYLESHEETS CITE TOO, and leaving them out of this list was not a
+       scoping decision — it was an oversight that cost a real catch. The
+       first version scanned only JavaScript, and assets/css/flows.css was
+       carrying "The rule at :189 splits `.fc-note` … into 32rem columns
+       above 92rem" for a rule that lives at :225. */
+    ...readdirSync(path.join(ROOT, "assets/css")).filter((f) => f.endsWith(".css")).map((f) => `assets/css/${f}`),
     ...readdirSync(path.join(ROOT, "shared")).filter((f) => f.endsWith(".js")).map((f) => `shared/${f}`),
     ...readdirSync(path.join(ROOT, "tests")).filter((f) => f.endsWith(".mjs")).map((f) => `tests/${f}`),
     ...readdirSync(path.join(ROOT, "scripts")).filter((f) => f.endsWith(".mjs")).map((f) => `scripts/${f}`),
@@ -1105,17 +1111,32 @@ let citationsChecked = 0;
   };
   /* ONE MATCH TAKES THE WHOLE LIST, because the house form is
      "flows-pipeline.mjs:4720, 4826, 5319" and a pattern that stopped at the
-     first number would check a third of what it appeared to. */
-  const CITE = /([A-Za-z0-9_./-]+\.(?:js|mjs|css|html|toml|json|yml|py)):(\d+(?:\s*[-–]\s*\d+)?(?:,\s*\d+(?:\s*[-–]\s*\d+)?)*)/g;
+     first number would check a third of what it appeared to. The repository
+     also writes that list as "shared/flows-market.js:157, :168", with the
+     colon repeated, so the continuation group accepts an optional one — the
+     first version did not, and silently checked the head of every such
+     citation and none of its tail. */
+  const CITE = /([A-Za-z0-9_./-]+\.(?:js|mjs|css|html|toml|json|yml|py)):(\d+(?:\s*[-–]\s*\d+)?(?:,\s*:?\d+(?:\s*[-–]\s*\d+)?)*)/g;
   const stale = [];
   for (const file of citing) {
     const src = readFileSync(path.join(ROOT, file), "utf8");
     for (const m of src.matchAll(CITE)) {
       const targets = PREFIXES.map((p) => p + m[1]).filter((c) => heightOf(c) !== null);
-      if (!targets.length) continue;
       const at = src.slice(0, m.index).split("\n").length;
+      /* A CITATION WHOSE FILE DOES NOT EXIST IS THE STRONGEST FORM OF THIS
+         DEFECT, AND THE FIRST VERSION SKIPPED IT. `continue` here meant a
+         comment pointing at a renamed or deleted file was not checked and was
+         not even counted — so the motivating bug was catchable only by the
+         accident that flows-panels.js still exists. Had #104 renamed it
+         rather than moved renderPath out of it, this suite would have passed. */
+      if (!targets.length) {
+        citationsChecked += 1;
+        stale.push(`${file}:${at} cites ${m[1]}, and no file of that name exists ` +
+          `under ${PREFIXES.filter(Boolean).join(", ")} or the repository root`);
+        continue;
+      }
       for (const part of m[2].split(",")) {
-        const ends = part.split(/[-–]/).map((n) => Number(n.trim()));
+        const ends = part.replace(/^\s*:/, "").split(/[-–]/).map((n) => Number(n.trim()));
         citationsChecked += 1;
         if (targets.some((t) => ends.every((n) => n >= 1 && n <= heightOf(t)))) continue;
         stale.push(`${file}:${at} cites ${m[1]}:${part.trim()}, and ` +
@@ -1123,9 +1144,35 @@ let citationsChecked = 0;
       }
     }
   }
-  assert(citationsChecked >= 60,
-    `the scan resolved ${citationsChecked} line citations, so it is matching almost nothing and would ` +
-    `pass by seeing nothing — the pattern has drifted from how these comments cite each other`);
+  /* THE GUARD IS ON THE PATTERN, NOT ON A HEADCOUNT, and the headcount that
+     stood here was self-defeating. It read `citationsChecked >= 60` — but
+     this block's own argument is that the fix is to cite the SYMBOL rather
+     than the line, and this change converts five citations to that form.
+     Doing more of what the comment prescribes drives the count DOWN, so a
+     successful migration would eventually fail the suite with "the pattern
+     has drifted", which is a false diagnosis blocking the correct change.
+
+     A PROBE CANNOT PASS BY SEEING NOTHING and does not care how many real
+     citations are left. It holds one example of every form this repository
+     actually writes — a bare filename, a comma list, a comma list with the
+     colon repeated, a path with a range — so a pattern that stops reading any
+     of them fails here, naming the form it lost. */
+  const PROBE = [
+    "the write is at worker.js:1224",
+    "refused in flows-pipeline.mjs:4720, 4826, 5319",
+    "both halves ride in shared/flows-market.js:157, :168",
+    "the break is assets/js/flows-drawers.js:1712-1720",
+  ].join("\n");
+  assert.deepEqual(
+    [...PROBE.matchAll(CITE)].map((m) => `${m[1]}:${m[2]}`),
+    [
+      "worker.js:1224",
+      "flows-pipeline.mjs:4720, 4826, 5319",
+      "shared/flows-market.js:157, :168",
+      "assets/js/flows-drawers.js:1712-1720",
+    ],
+    "the citation pattern still reads every form these comments are written in — a bare " +
+    "filename, a comma list, a comma list with the colon repeated, and a path with a range");
   assert.deepEqual(stale, [],
     `a comment cites a line its file does not have, which is a pointer at nothing: ` +
     `${stale.join("; ")}. Cite the SYMBOL rather than re-deriving the number, so the next ` +

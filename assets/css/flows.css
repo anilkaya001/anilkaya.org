@@ -3339,8 +3339,9 @@ body.is-stale .flows-tablewrap {
 
    BOUNDED, NEVER TRUNCATED. Every row stays in the DOM, so find-in-page still
    reaches them and scrolls the region to them; the wrapper already carries
-   tabIndex 0, role="region" and its own aria-label (flows-panels.js:2011,
-   flows-ticker.js:3739), so a keyboard reaches the scroller too; and each of
+   tabIndex 0, role="region" and its own aria-label (`fc-tablewrap` is built
+   that way in both flows-drawers.js and flows-ticker.js), so a keyboard
+   reaches the scroller too; and each of
    these panels prints its total in a note OUTSIDE the wrapper, so a reader is
    told what they are scrolling through before they scroll it. 26rem is not a
    new number — .sg-chainwrap has bounded the strategy page's chain that way
@@ -6935,8 +6936,8 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    /flows/ask — the briefing and the question box.
 
    THIS ROUTE'S PROSE IS SHORT ON PURPOSE, SO IT DOES NOT TAKE COLUMNS.
-   The rule at :189 splits `.fc-note`, `.fc-q`, `.flows-foot` and
-   `.flows-lede` into 32rem columns above 92rem, and the reasoning there
+   The `@media (min-width: 92rem)` rule above splits `.fc-note`, `.fc-q`,
+   `.flows-foot` and `.flows-lede` into 32rem columns, and the reasoning there
    is sound for the pages it was written for: a long method paragraph
    costs 5-9% more height when capped at 68ch, and columns buy that back.
    But columns only pay when there is enough text to fill them. This

@@ -620,8 +620,34 @@ const CEILING_KIB = {
      the reserve the ticker's 496 left, for the same reason. Two leads this
      route was measured to be missing, on the tape and over the pulse grid,
      are NOT in this change: they are new sentences rather than sorted ones,
-     and they should arrive with their own argument. */
-  marketPage: 109,
+     and they should arrive with their own argument.
+
+     109 -> 111, AND IT IS THE FIX THAT 1,130 WAS RESERVED FOR — spent within
+     the hour, on the same route, which is worth saying plainly rather than
+     burying. Measured: 110,486 -> 112,515 B = 109.88 KiB, of which 280 bytes
+     are code. Two defects and one stale figure, all three found by a review
+     of the merged diff after BOTH bot reviewers declined it:
+
+       paintAgainst cleared only its note, so the four early returns below it
+       left the previous paint's join count standing at lead size above a
+       silence. paintSectors had been given exactly this fix in the change
+       that introduced the slots; paintAgainst had not.
+
+       paintBreadth led with the premium concentration even when the name
+       split it sits above could not be drawn, so a figure at lead size stood
+       over the panel's own "cannot be drawn".
+
+       And the header's list of measured method groups read "322, 230, 143,
+       119 and 81" when the 143 no longer existed — measured honestly, then
+       invalidated by an edit in the same PR and not re-derived.
+
+     THE RATCHET IS REAL AND THIS IS THE SECOND RAISE IN TWO PRs. What ends
+     it is not shedding prose — the header of flows-market.js now records why
+     nothing on that route folds — but the Workers Builds command, which
+     takes the route to 61.74 KiB and makes every byte of this argument free.
+     Until then the ceiling measures a file no reader will parse once it is
+     set, and 111 leaves 1,149 bytes. */
+  marketPage: 111,
   /* THE +7 ON THIS AND THE FOUR ENTRIES BELOW IS THE DOCKED ASSISTANT.
      assets/js/flows-dock.js now ships on every gated route but /flows/ask,
      and these were the routes with less than that in hand. The reasoning is

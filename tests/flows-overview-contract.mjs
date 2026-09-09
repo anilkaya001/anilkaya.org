@@ -784,8 +784,9 @@ try {
     /* ---- three regions that drew a table and said nothing about it ----
 
        EACH OF THESE LEADS NOW, and the lead is the one sentence the drawing
-       cannot carry: what the alerts list is SORTED by (so the biggest number
-       in it is the biggest among the freshest, not the biggest flagged), how
+       cannot carry: how concentrated the alerts list's premium is (the table
+       prints each premium and never the share, so eight windows of $1M and
+       one of $8M beside seven of $30k are the same eight rows), how
        many names on the calendar the board holds any opinion about (a gated
        name arrives with no score and prints an em dash a reader would have
        to count down the column), and which side of the zero rule the dead
@@ -805,7 +806,7 @@ try {
        further down, in the phase that publishes a calendar and waits for
        its rows. */
     for (const [region, pattern] of [
-      ["#ccAlerts", /FRESHEST/],
+      ["#ccAlerts", /largest flagged window/i],
       ["#ccWatch", /zero rule|unsided/],
     ]) {
       const said = (await page.locator(`${region} .fc-reading.is-lead`).textContent()).trim();
@@ -821,6 +822,37 @@ try {
       ok(first !== null && /\bis-lead\b/.test(first),
          `and it is the FIRST thing in ${region} (${first}) — a finding drawn under the rows ` +
          "it is about is a caption, whatever class it carries");
+    }
+
+    /* ---- AND THE ORDERING CLAIM IS PINNED TO WHAT IS ON SCREEN ----
+
+       THIS REGION SAID THE OPPOSITE OF ITS PAYLOAD FOR ITS WHOLE LIFE. The
+       heading read "Freshest flagged windows", tableWrap's aria-label read
+       "freshest first", and the first version of the lead said "These 8 are
+       the FRESHEST flags rather than the largest". The rows are ordered by
+       PREMIUM, descending — shared/flows-alerts.js sorts `byPremium` when it
+       shapes a read and again when the intraday merge unions two, and there
+       is no time-ordered sort anywhere in that file.
+
+       ASSERTED OFF THE RENDERED COLUMN rather than off the fixture, because
+       the fixture is written by the same hand as the claim. usd() is the only
+       thing between the payload's number and this string, so parsing it back
+       is reading exactly what a reader sees. */
+    const asUsd = (text) => {
+      const m = /^\$([\d.]+)([BMK]?)$/.exec(text.trim());
+      if (!m) return null;
+      return Number(m[1]) * ({ B: 1e9, M: 1e6, K: 1e3 }[m[2]] || 1);
+    };
+    const premCells = (await page.locator("#ccAlerts tbody tr td:nth-child(3)")
+      .allTextContents()).map(asUsd);
+    ok(premCells.length >= 2 && premCells.every((one) => one !== null),
+       `every drawn premium parses (${premCells.join(", ")}) — a column this check could not ` +
+       "read would let it pass by comparing nothing");
+    for (let i = 1; i < premCells.length; i++) {
+      ok(premCells[i] <= premCells[i - 1],
+         `the flagged windows are drawn largest premium first (${premCells.join(" ")}) — the ` +
+         "region's heading, its aria-label and its lead all now say so, and the sentence a " +
+         "reader is given about the order has to be the order they are in");
     }
   }
 
