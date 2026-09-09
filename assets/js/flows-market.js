@@ -10,6 +10,43 @@
  * is the SCREENED UNIVERSE, never "the market". The vendor's screener caps
  * each band at about fifty rows, so what is measured is whatever this run's
  * ladder returned and the gate admitted; every heading says so.
+ *
+ * THE THREE KINDS OF SENTENCE, AND WHERE EACH GOES. Four panels here each
+ * wrote ONE paragraph holding all three kinds, so a reader met the finding,
+ * the caveat and the decoder as one undifferentiated block under a drawing.
+ * They are sorted now, by the rule assets/js/flows-panels.js states over
+ * `appendMethod` — which this file follows rather than restates:
+ *
+ *   the FINDING leads, ABOVE the drawing, as `.fc-reading.is-lead`;
+ *   a QUALIFIER — anything that changes what a drawn mark MEANS: a
+ *     population, a cap, an axis that compares one session only, a withheld
+ *     input — sits under the drawing as `.fc-note.is-qualifier`, with the
+ *     rule down its left;
+ *   the METHOD — how the reading was built — is last, a plain `.fc-note`.
+ *
+ * NOT ONE SENTENCE WAS DELETED. What changed is which of them a reader meets
+ * first and whether the kind is legible without reading it.
+ *
+ * AND NOTHING ON THIS ROUTE FOLDS, WHICH IS THAT RULE RATHER THAN A
+ * SHORTFALL. Two independent reasons, and the second is the one that
+ * matters.
+ *
+ * THE LENGTHS. flows-panels.js puts a method group behind a disclosure past
+ * 420 characters, because "a one-line decoder behind a click is a click for
+ * nothing". Measured after the sort, the method groups left on this page are
+ * 322, 230, 143, 119 and 81 characters. Every one is under that wall.
+ *
+ * THE STRUCTURE, WHICH WOULD RULE IT OUT EVEN IF THEY WERE LONG. Eleven
+ * sentences on this page read as foldable derivation. Every one of them
+ * turned out to be the second half of a SILENCE rather than a note beside
+ * one. Seven are the `cost` argument of pendingLine(what, cost), which
+ * concatenates both halves into a single <p data-empty="pending">; one is
+ * the tail of feedSilence's single "unavailable" text node; one is a clause
+ * after a colon inside a sentence that also carries the visible rank. There
+ * is no separate paragraph under any of them to fold, and manufacturing one
+ * would move half of a silence OUT of the [data-empty] mark that is how
+ * every test and every reader finds it. A silence cannot be split, so on
+ * this page the fold has nothing to act on and the sort is the whole change.
  */
 (function () {
   "use strict";
@@ -323,41 +360,67 @@
     /* THE DISAGREEMENT IS THE READING, and it is the reason both are drawn.
        They are the same ratio under two weightings; when they part company the
        session was a lot of small buying against a little large selling, or the
-       reverse, and no single number can say that. */
+       reverse, and no single number can say that.
+
+       IT NOW LEADS, WHICH CHANGES WHAT THE SENTENCE HAS TO SAY. The finding
+       used to sit under the two rows as `.fc-note`, where "more names leaned
+       one way while the dollars leaned the other" was decodable: the rows
+       were above it, with their signs. Above the rows it is not. A lead is
+       read BEFORE the drawing, so it cannot lean on marks the reader has not
+       reached yet — both branches now NAME the direction they are talking
+       about, which is one clause longer and the only version that stands
+       alone. */
+    var lead = document.getElementById("mktTiltLead");
     var note = document.getElementById("mktTiltNote");
     var b = isNum(breadth.tilt), p = isNum(premium.tilt);
-    if (note) {
-      if (b === null || p === null) {
-        note.textContent = "One of the two weightings could not be measured this session, " +
-          "so they cannot be compared.";
-      } else if (b === 0 || p === 0) {
-        /* A MEASURED ZERO IS A THIRD ANSWER, not a quiet member of the
-           majority. The disagreement test guarded itself with `b !== 0 &&
-           p !== 0` — correctly, because a zero has no sign to disagree with —
-           and then fell through to "Both weightings agree in sign", which is
-           a confident claim about a reading that has no sign at all. A
-           session where the dollars came back exactly level while the names
-           leaned is neither agreement nor disagreement, and it is the third
-           sentence rather than the wrong one of two. */
-        note.textContent = (b === 0 && p === 0
-          ? "Both weightings came back exactly level: the names split evenly and so did the " +
-            "dollars. There is no lean to agree or disagree about."
-          : (b === 0 ? "Counting names, the session was exactly level" +
-              " while the dollars leaned " + (p > 0 ? "positive" : "negative") + "."
-            : "The dollars were exactly level while more names leaned " +
-              (b > 0 ? "positive" : "negative") + ".") +
-            " One weighting has a sign and the other does not, so they neither agree nor " +
-            "disagree — which is itself a reading, and the reason both are drawn.");
-      } else if ((b > 0) !== (p > 0)) {
-        note.textContent = "The two weightings DISAGREE in sign. More names leaned one way " +
-          "while the dollars leaned the other — breadth without size, or size without " +
-          "breadth. That disagreement is the session's most informative reading, and it is " +
-          "why both are drawn rather than one being chosen.";
+    var said = "";
+    var how = "";
+    if (b === null || p === null) {
+      /* AN ABSENCE LEADS TOO. Demoting a withheld comparison below the rows
+         would make a silence cheaper to publish than a reading. */
+      said = "One of the two weightings could not be measured this session, " +
+        "so they cannot be compared.";
+    } else if (b === 0 || p === 0) {
+      /* A MEASURED ZERO IS A THIRD ANSWER, not a quiet member of the
+         majority. The disagreement test guarded itself with `b !== 0 &&
+         p !== 0` — correctly, because a zero has no sign to disagree with —
+         and then fell through to "Both weightings agree in sign", which is
+         a confident claim about a reading that has no sign at all. A
+         session where the dollars came back exactly level while the names
+         leaned is neither agreement nor disagreement, and it is the third
+         sentence rather than the wrong one of two. */
+      if (b === 0 && p === 0) {
+        said = "Both weightings came back exactly level: the names split evenly and so did " +
+          "the dollars. There is no lean to agree or disagree about.";
       } else {
-        note.textContent = "Both weightings agree in sign. Counting names and weighting them " +
-          "by dollars tell the same story this session.";
+        /* THE VERDICT TRAVELS WITH THE LEAD, in this branch as in the other
+           three. "so they neither agree nor disagree" is the panel's answer
+           to its own question — a NOT-COMPARABLE verdict, the sibling of
+           "DISAGREE in sign" and "agree in sign" — and it read as method only
+           because it happened to sit in the same sentence as the reason both
+           bars are drawn. That reason is the method, and it is what stays
+           below. */
+        said = (b === 0
+          ? "Counting names, the session was exactly level while the dollars leaned " +
+            (p > 0 ? "positive" : "negative")
+          : "The dollars were exactly level while more names leaned " +
+            (b > 0 ? "positive" : "negative")) +
+          ", so the two weightings neither agree nor disagree.";
+        how = "One weighting has a sign and the other does not, which is itself a reading " +
+          "and the reason both are drawn.";
       }
+    } else if ((b > 0) !== (p > 0)) {
+      said = "The two weightings DISAGREE in sign: more names leaned " +
+        (b > 0 ? "positive" : "negative") + " while the dollars leaned " +
+        (p > 0 ? "positive" : "negative") + " — breadth without size, or size without breadth.";
+      how = "That disagreement is the session's most informative reading, and it is why " +
+        "both are drawn rather than one being chosen.";
+    } else {
+      said = "Both weightings agree in sign: names and dollars both leaned " +
+        (b > 0 ? "positive" : "negative") + " this session.";
     }
+    if (lead) lead.textContent = said;
+    if (note) note.textContent = how;
     panel.hidden = false;
   }
 
@@ -423,26 +486,38 @@
 
     /* CONCENTRATION, BESIDE THE TOTAL IT QUALIFIES. A market-wide sum is a
        number one takeover print can own; without this, "the universe bought
-       calls" and "one name bought calls" are the same sentence. */
+       calls" and "one name bought calls" are the same sentence.
+
+       THREE SENTENCES, THREE KINDS, AND THEY USED TO BE ONE PARAGRAPH. The
+       share leads. "More than half the total is five names" changes what
+       every total above it means, and the names excluded for quoting no
+       usable premium are a population, so both qualify. What is left — that
+       the total is spread rather than owned — is the reassuring branch. */
     var share = isNum(p.topShare);
+    var lead = document.getElementById("mktBreadthLead");
+    var qual = document.getElementById("mktBreadthQual");
     var note = document.getElementById("mktBreadthNote");
+    if (lead) {
+      lead.textContent = share === null ? ""
+        : "The five largest names account for " + pct(share) + " of all net premium moved.";
+    }
+    var caveats = [];
+    if (share !== null && share > 0.5) {
+      caveats.push("More than half the total is five names: read the aggregate as those " +
+        "names, not as the universe.");
+    }
+    // A zero one-legged count drops the clause on purpose: it adds nothing.
+    var unpriced = isNum(b.unpriced), oneLeg = isNum(p.oneLegged);
+    if (unpriced !== null) {
+      caveats.push(unpriced + " of " + count(m.n) + " screened names quoted no usable " +
+        "net premium and are excluded from every total above rather than counted as level" +
+        (oneLeg ? " — " + oneLeg + " of them quoted one leg only." : "."));
+    }
+    if (qual) qual.textContent = caveats.join(" ");
     if (note) {
-      var parts = [];
-      if (share !== null) {
-        parts.push("The five largest names account for " + pct(share) +
-          " of all net premium moved. " +
-          (share > 0.5
-            ? "More than half the total is five names: read the aggregate as those names, not as the universe."
-            : "The total is spread across the universe rather than owned by a handful of prints."));
-      }
-      // A zero one-legged count drops the clause on purpose: it adds nothing.
-      var unpriced = isNum(b.unpriced), oneLeg = isNum(p.oneLegged);
-      if (unpriced !== null) {
-        parts.push(unpriced + " of " + count(m.n) + " screened names quoted no usable " +
-          "net premium and are excluded from every total above rather than counted as level" +
-          (oneLeg ? " — " + oneLeg + " of them quoted one leg only." : "."));
-      }
-      note.textContent = parts.join(" ");
+      note.textContent = share !== null && share <= 0.5
+        ? "The total is spread across the universe rather than owned by a handful of prints."
+        : "";
     }
     panel.hidden = false;
   }
@@ -517,9 +592,16 @@
     var host = document.getElementById("mktSectors");
     var panel = document.getElementById("mktSectorPanel");
     var note = document.getElementById("mktSectorNote");
+    var lead = document.getElementById("mktSectorLead");
+    var qual = document.getElementById("mktSectorQual");
     if (!host || !panel) return;
     host.textContent = "";
+    /* ALL THREE SLOTS CLEAR TOGETHER. Every branch below returns early on a
+       silence, and a lead left over from the previous paint would sit above
+       an "unreadable" line claiming a coverage this run never measured. */
     if (note) note.textContent = "";
+    if (lead) lead.textContent = "";
+    if (qual) qual.textContent = "";
 
     /* THE FIELD THE PIPELINE ACTUALLY WRITES. This read `sectors.rows` for as
        long as the panel existed; the payload has never carried `rows` — the
@@ -666,44 +748,58 @@
     host.append(list);
 
     var unmeasured = entries.length - measured.length - scoreOnly;
+
+    /* ONE PARAGRAPH OF NINE SENTENCES, SORTED INTO THE THREE KINDS IT ALWAYS
+       HELD. The coverage count leads: it is the one figure that says whether
+       the eleven bars below are the sector map or a third of it. What the
+       axis compares, what a railed bar is not, the basis, and which sectors
+       are listed without a bar all change what a drawn bar MEANS, so they
+       qualify. Only the two decoder sentences are METHOD.
+
+       Only the two decoder sentences are METHOD, and at 322 characters they
+       are the longest group left on the route. */
+    if (lead) {
+      lead.textContent = measured.length + " of " + entries.length + " sector" +
+        (entries.length === 1 ? "" : "s") + " settled a reading.";
+    }
+
+    var caveats = [];
+    if (fixedAxis) {
+      caveats.push("The axis is the payload's own published band, " + MINUS + axis + " to +" +
+        axis + " bp, which is the same band every session: a bar can be read against " +
+        "another sector and against this sector last week.");
+      if (railed) {
+        caveats.push(railed + " sector" + (railed === 1 ? " sits" : "s sit") +
+          " beyond that band and " + (railed === 1 ? "is" : "are") +
+          " drawn at full width; the number beside " + (railed === 1 ? "it" : "them") +
+          " is the true reading, not the rail.");
+      }
+    } else {
+      caveats.push("This payload published no full-scale band, so the axis is scaled to the " +
+        "widest reading of this session only — it compares sectors with each other and " +
+        "never with another day.");
+    }
+    if (sectors.basis) caveats.push("Basis: " + sectors.basis + ".");
+    if (unmeasured > 0) {
+      caveats.push(unmeasured + " of " + entries.length + " sector" +
+        (entries.length === 1 ? "" : "s") + " had too little history to settle and " +
+        (unmeasured === 1 ? "is" : "are") + " listed without a bar, with the payload's " +
+        "own reason beside the name, rather than drawn at zero.");
+    }
+    if (scoreOnly > 0) {
+      caveats.push(scoreOnly + " sector" + (scoreOnly === 1 ? "" : "s") +
+        " published a clamp score with no raw reading beside it and cannot be drawn " +
+        "signed; that is a payload defect rather than a quiet sector.");
+    }
+    if (qual) qual.textContent = caveats.join(" ");
+
     if (note) {
-      var parts = [
-        measured.length + " of " + entries.length + " sector" +
-        (entries.length === 1 ? "" : "s") + " settled a reading.",
+      note.textContent =
         "TRIX in basis points per session: a triple-smoothed momentum reading on each " +
         "sector ETF's own log closes, so it describes the sector's trend rather than its " +
-        "level.",
+        "level. " +
         "Sign is carried by POSITION — left of the centre rule is negative — and by the " +
-        "glyph on the number, so the panel survives greyscale and a monochrome printout.",
-      ];
-      if (fixedAxis) {
-        parts.push("The axis is the payload's own published band, " + MINUS + axis + " to +" +
-          axis + " bp, which is the same band every session: a bar can be read against " +
-          "another sector and against this sector last week.");
-        if (railed) {
-          parts.push(railed + " sector" + (railed === 1 ? " sits" : "s sit") +
-            " beyond that band and " + (railed === 1 ? "is" : "are") +
-            " drawn at full width; the number beside " + (railed === 1 ? "it" : "them") +
-            " is the true reading, not the rail.");
-        }
-      } else {
-        parts.push("This payload published no full-scale band, so the axis is scaled to the " +
-          "widest reading of this session only — it compares sectors with each other and " +
-          "never with another day.");
-      }
-      if (sectors.basis) parts.push("Basis: " + sectors.basis + ".");
-      if (unmeasured > 0) {
-        parts.push(unmeasured + " of " + entries.length + " sector" +
-          (entries.length === 1 ? "" : "s") + " had too little history to settle and " +
-          (unmeasured === 1 ? "is" : "are") + " listed without a bar, with the payload's " +
-          "own reason beside the name, rather than drawn at zero.");
-      }
-      if (scoreOnly > 0) {
-        parts.push(scoreOnly + " sector" + (scoreOnly === 1 ? "" : "s") +
-          " published a clamp score with no raw reading beside it and cannot be drawn " +
-          "signed; that is a payload defect rather than a quiet sector.");
-      }
-      note.textContent = parts.join(" ");
+        "glyph on the number, so the panel survives greyscale and a monochrome printout.";
     }
     panel.hidden = false;
   }
@@ -1861,30 +1957,39 @@
     });
     host.append(grid);
 
-    if (note) {
-      /* THE DENOMINATOR TRAVELS WITH THE COUNT, and so does the reason a
-         zero here is weak evidence: the mover lists are capped extremes, not
-         the universe, so a name can disagree with the tape and simply not be
-         extreme enough to appear in either of them. */
-      var parts = [];
-      if (!population) {
+    /* THE DENOMINATOR TRAVELS WITH THE COUNT, and so does the reason a
+       zero here is weak evidence: the mover lists are capped extremes, not
+       the universe, so a name can disagree with the tape and simply not be
+       extreme enough to appear in either of them.
+
+       THE COUNT LEADS AND THE CAP QUALIFIES IT. Those two sentences were
+       adjacent in one paragraph and are opposite kinds: the first is the
+       finding, the second is the reason the finding is weaker than it looks.
+       The residual sentence between them is the only method here. */
+    var againstLead = document.getElementById("mktAgainstLead");
+    var againstQual = document.getElementById("mktAgainstQual");
+    if (againstLead) {
+      againstLead.textContent = !population
         /* NO POPULATION, NO RATIO. "0 of 0 published board names appear" is a
            fraction over an empty set: it looks like a measurement of
            agreement and is a statement that nothing was compared. */
-        parts.push("No board name was joined against the tape this session, so there is no " +
-          "population to state a count against.");
-      } else {
-        parts.push(hits + " of " + population + " published board names (" +
-          joined.join(", ") + ") appear in the opposite premium extreme this session.");
-      }
-      if (skipped.length) parts.push(skipped.join("; ") + ".");
-      parts.push("The board score is a residual — sector and size are divided out before the " +
-        "ranking — while these premium lists are the raw level, so the two are allowed " +
-        "to disagree; a name where they do is one to read twice, not a signal to fade.");
-      parts.push("Both mover lists are CAPPED extremes rather than the universe, so a name " +
+        ? "No board name was joined against the tape this session, so there is no " +
+          "population to state a count against."
+        : hits + " of " + population + " published board names (" +
+          joined.join(", ") + ") appear in the opposite premium extreme this session.";
+    }
+    if (againstQual) {
+      var caveats = [];
+      if (skipped.length) caveats.push(skipped.join("; ") + ".");
+      caveats.push("Both mover lists are CAPPED extremes rather than the universe, so a name " +
         "absent from them has not been shown to agree with the tape: it has only been " +
         "shown not to be one of the session's loudest disagreements.");
-      note.textContent = parts.join(" ");
+      againstQual.textContent = caveats.join(" ");
+    }
+    if (note) {
+      note.textContent = "The board score is a residual — sector and size are divided out " +
+        "before the ranking — while these premium lists are the raw level, so the two are " +
+        "allowed to disagree; a name where they do is one to read twice, not a signal to fade.";
     }
     panel.hidden = false;
   }
@@ -1901,9 +2006,18 @@
     section.id = "mktAgainstPanel";
     section.hidden = true;
     section.append(el("h2", "fc-panel-h", "Against the tape"));
+    /* THE SAME THREE SLOTS THE MARKUP GIVES THE OTHER PANELS, built here
+       because this panel is built here. The lead is ABOVE the grid and the
+       two notes below it, which is the order the reader meets them in. */
+    var readingP = el("p", "fc-reading is-lead");
+    readingP.id = "mktAgainstLead";
+    section.append(readingP);
     var body = el("div");
     body.id = "mktAgainst";
     section.append(body);
+    var qualP = el("p", "fc-note is-qualifier");
+    qualP.id = "mktAgainstQual";
+    section.append(qualP);
     var p = el("p", "fc-note");
     p.id = "mktAgainstNote";
     section.append(p);

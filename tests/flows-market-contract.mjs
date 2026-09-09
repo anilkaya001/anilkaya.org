@@ -528,6 +528,26 @@ try {
 
   const read = await page.evaluate(() => {
     const txt = (sel) => (document.querySelector(sel) || {}).textContent || "";
+    /* THE PANEL'S PROSE, WHEREVER IN THE PANEL IT SITS. Four panels used to
+       write one paragraph; the finding now leads ABOVE the drawing in
+       `.fc-reading.is-lead` and the caveats sit in a `.fc-note.is-qualifier`
+       beside the method note. A test that kept reading #mktTiltNote alone
+       would have started proving that sentences the page still says had gone
+       away — the assertion passing for the wrong reason, in the file whose
+       header is about exactly that. These read the whole panel; WHERE each
+       sentence sits is proved separately, below, so a regression in the
+       placement fails with its own message rather than hiding in a regex. */
+    const say = (...ids) => ids
+      .map((id) => (document.getElementById(id) || {}).textContent || "")
+      .filter((one) => one.trim())
+      .join(" ");
+    const leadsBefore = (leadId, drawId) => {
+      const lead = document.getElementById(leadId);
+      const draw = document.getElementById(drawId);
+      if (!lead || !draw) return null;
+      return !!(lead.compareDocumentPosition(draw) & Node.DOCUMENT_POSITION_FOLLOWING);
+    };
+    const classOf = (id) => (document.getElementById(id) || {}).className || null;
     const bars = [...document.querySelectorAll("#mktTilt .mk-bar")].map((b) => ({
       cls: b.className, width: b.style.width, left: b.style.left,
     }));
@@ -563,8 +583,22 @@ try {
         text: txt("#mktStale"),
         bodyClass: document.body.className,
       },
-      tiltNote: txt("#mktTiltNote"),
-      breadthNote: txt("#mktBreadthNote"),
+      tiltLead: txt("#mktTiltLead"),
+      tiltNote: say("mktTiltLead", "mktTiltNote"),
+      breadthLead: txt("#mktBreadthLead"),
+      breadthQual: txt("#mktBreadthQual"),
+      breadthNote: say("mktBreadthLead", "mktBreadthQual", "mktBreadthNote"),
+      leadFirst: {
+        tilt: leadsBefore("mktTiltLead", "mktTilt"),
+        breadth: leadsBefore("mktBreadthLead", "mktBreadth"),
+        sector: leadsBefore("mktSectorLead", "mktSectors"),
+        against: leadsBefore("mktAgainstLead", "mktAgainst"),
+      },
+      qualifierClass: {
+        breadth: classOf("mktBreadthQual"),
+        sector: classOf("mktSectorQual"),
+        against: classOf("mktAgainstQual"),
+      },
       foot: txt("#mktFoot"),
       tape: [...document.querySelectorAll("#mktTapeBody tr")].map((tr) => ({
         k: tr.querySelector("th").textContent,
@@ -592,7 +626,9 @@ try {
             ? li.querySelector(".mk-track").getAttribute("aria-label") : null,
         };
       }),
-      sectorNote: txt("#mktSectorNote"),
+      sectorLead: txt("#mktSectorLead"),
+      sectorQual: txt("#mktSectorQual"),
+      sectorNote: say("mktSectorLead", "mktSectorQual", "mktSectorNote"),
       unsettled: [...document.querySelectorAll(".mk-sector.is-unsettled")].map((li) => ({
         name: li.querySelector(".mk-sector-k").firstChild.textContent,
         etf: (li.querySelector(".mk-sector-etf") || {}).textContent || null,
@@ -617,7 +653,9 @@ try {
       againstTickers: [...document.querySelectorAll("#mktAgainst .mk-mv-t")].map((n) => n.textContent),
       againstEmpties: [...document.querySelectorAll("#mktAgainst [data-empty]")]
         .map((n) => ({ kind: n.getAttribute("data-empty"), text: n.textContent })),
-      againstNote: txt("#mktAgainstNote"),
+      againstLead: txt("#mktAgainstLead"),
+      againstQual: txt("#mktAgainstQual"),
+      againstNote: say("mktAgainstLead", "mktAgainstQual", "mktAgainstNote"),
       pulseStamp: txt("#mkPulseStamp"),
       pulseRank: txt(".mk-pulse-rank"),
       /* Per CARD, not per document: four of the seven cards draw a table and
@@ -639,6 +677,44 @@ try {
   ok(/disagree/i.test(read.tiltNote),
      "two tilts of opposite sign are reported AS a disagreement — breadth without size is a " +
      "different session from size without breadth, and no single number can say which");
+
+  /* ---------- the finding leads, and the caveat is marked as one ----
+     THE SORT IS THE CHANGE, so it is asserted rather than left to the
+     regexes above, every one of which now reads the whole panel and would
+     pass with all three kinds back in one paragraph under the drawing.
+
+     FOUR PANELS, EACH CHECKED THE SAME WAY: the lead element exists, holds a
+     sentence, comes BEFORE the drawing in document order, and the caveats sit
+     in an element carrying `is-qualifier`. The order check is
+     compareDocumentPosition rather than a pixel: this file starts no layout
+     and a lead that is first in the DOM is first for a screen reader too,
+     which is the reading order that cannot be undone by a stylesheet. */
+  for (const [where, before] of Object.entries(read.leadFirst)) {
+    ok(before === true,
+       `the ${where} panel's finding is drawn BEFORE its drawing (${before}) — a lead that ` +
+       "sits under the marks it describes is a note, whatever class it carries, and null " +
+       "here means the slot is missing from the page altogether");
+  }
+  ok(/leaned/.test(read.tiltLead) && /DISAGREE/.test(read.tiltLead),
+     `the tilt panel's lead names both directions (${read.tiltLead}) — it is read ABOVE the ` +
+     "two rows now, so \"one way ... the other\" no longer has the marks beside it to decode");
+  ok(/%/.test(read.breadthLead) && /five largest names/.test(read.breadthLead),
+     `the breadth lead carries the concentration figure (${read.breadthLead})`);
+  ok(/sectors settled a reading/.test(read.sectorLead),
+     `the sector lead carries the settled count with its denominator (${read.sectorLead})`);
+  ok(/published board names/.test(read.againstLead),
+     `the against lead carries the join count with its denominator (${read.againstLead})`);
+  for (const [where, cls] of Object.entries(read.qualifierClass)) {
+    ok(cls !== null && /\bis-qualifier\b/.test(cls),
+       `the ${where} panel's caveats carry is-qualifier (${cls}) — the class is what draws ` +
+       "the rule down the left, and a caveat that reads as method is a caveat nobody weighs");
+  }
+  ok(/not as the universe/.test(read.breadthQual),
+     `and the concentration warning is one of them (${read.breadthQual})`);
+  ok(/CAPPED extremes/.test(read.againstQual),
+     `as is the cap on both mover lists (${read.againstQual})`);
+  ok(/same band every session/.test(read.sectorQual),
+     `as is what the sector axis can be compared against (${read.sectorQual.slice(0, 80)})`);
 
   /* SIGN IS CARRIED BY POSITION. Both bars must be placed on the fixed axis
      such that the negative one sits left of the centre rule; hue is
@@ -1551,13 +1627,22 @@ try {
             ? document.querySelector("#mktBreadth .mk-stack").getAttribute("aria-label") : null,
         },
         tiltNote: (document.querySelector("#mktTilt .mk-tilt-n") || {}).textContent || "",
-        tiltVerdict: (document.getElementById("mktTiltNote") || {}).textContent || "",
+        /* Lead AND note, for the same reason the main read joins them: the
+           "exactly level" verdict is the finding and now leads the panel. */
+        tiltVerdict: [
+          (document.getElementById("mktTiltLead") || {}).textContent || "",
+          (document.getElementById("mktTiltNote") || {}).textContent || "",
+        ].filter((one) => one.trim()).join(" "),
         movers: col("mktMovers"),
         against: col("mktAgainst"),
-        againstNote: (document.getElementById("mktAgainstNote") || {}).textContent || "",
+        againstNote: ["mktAgainstLead", "mktAgainstQual", "mktAgainstNote"]
+          .map((id) => (document.getElementById(id) || {}).textContent || "")
+          .filter((one) => one.trim()).join(" "),
         rank: (document.querySelector(".mk-pulse-rank") || {}).textContent || "",
         stamp: (document.getElementById("mkPulseStamp") || {}).textContent || "",
-        sectorNote: (document.getElementById("mktSectorNote") || {}).textContent || "",
+        sectorNote: ["mktSectorLead", "mktSectorQual", "mktSectorNote"]
+          .map((id) => (document.getElementById(id) || {}).textContent || "")
+          .filter((one) => one.trim()).join(" "),
         moverPop: document.querySelector("#mktMovers > [data-empty]") ? {
           kind: document.querySelector("#mktMovers > [data-empty]").getAttribute("data-empty"),
           text: document.querySelector("#mktMovers > [data-empty]").textContent,
@@ -1710,7 +1795,9 @@ try {
     await bare.goto(url("/flows/market/"), { waitUntil: "networkidle" });
     await bare.waitForSelector("#mktAgainstPanel:not([hidden])");
     const none = await bare.evaluate(() => ({
-      note: (document.getElementById("mktAgainstNote") || {}).textContent || "",
+      note: ["mktAgainstLead", "mktAgainstQual", "mktAgainstNote"]
+        .map((id) => (document.getElementById(id) || {}).textContent || "")
+        .filter((one) => one.trim()).join(" "),
       kinds: [...document.querySelectorAll("#mktAgainst [data-empty]")]
         .map((n) => n.getAttribute("data-empty")),
       texts: [...document.querySelectorAll("#mktAgainst [data-empty]")]
@@ -2035,7 +2122,9 @@ try {
         v: tr.querySelectorAll("td")[0].textContent,
         cls: tr.querySelectorAll("td")[0].className,
       })),
-      note: (document.getElementById("mktBreadthNote") || {}).textContent || "",
+      note: ["mktBreadthLead", "mktBreadthQual", "mktBreadthNote"]
+        .map((id) => (document.getElementById(id) || {}).textContent || "")
+        .filter((one) => one.trim()).join(" "),
     }));
     await blank.close();
 

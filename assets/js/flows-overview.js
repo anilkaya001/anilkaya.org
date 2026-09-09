@@ -154,6 +154,21 @@
   }
 
   /**
+   * The region's FINDING, first and at the size a finding gets.
+   *
+   * COUNTED OVER WHAT DREW, ALWAYS. Every caller below builds its sentence
+   * from the rows it is about to render — `rows.slice(0, LIST_MAX)` — and
+   * never from `rows`, because a lead that counts over forty rows above a
+   * table showing eight is describing a list the reader cannot see. Where a
+   * published denominator is the honest one it is already in the subtitle,
+   * which says "8 of ≥200" and is a different claim.
+   */
+  function lead(into, text) {
+    if (!text) return;
+    into.append(el("p", "fc-reading is-lead", text));
+  }
+
+  /**
    * Word the two silences that are about the fetch rather than the session.
    * Returns true when it wrote one, so a caller only has to word the rest.
    */
@@ -288,6 +303,44 @@
       (said ? " · " + said : "") +
       ". A signal carried into a print stops being the signal that was ranked.";
     return mark;
+  }
+
+  /* ---------- the method wall, on this route's terms ----------------
+
+     THE THRESHOLD IS assets/js/flows-panels.js's AND IS COPIED RATHER THAN
+     IMPORTED: that file is on the ticker route alone and is 54k, so reaching
+     it for one number would put 54k on this route to save forty bytes.
+     tests/flows-overview-contract.mjs asserts the two constants are the same
+     number, so the copy cannot drift in silence.
+
+     WHY A WALL AT ALL. Every sentence behind a disclosure is load-bearing —
+     that is the rule for what may go there — but a wall of prose under a
+     chart is a rule nobody finishes, and a rule nobody finishes is a rule
+     nobody was told. A SHORT SET STAYS OPEN: a one-line decoder behind a
+     click is a click for nothing. */
+  const NOTE_WALL_CHARS = 420;
+
+  /**
+   * Method paragraphs, behind a disclosure once they are a wall.
+   *
+   * ONLY METHOD REACHES HERE. What a reading MEANS — a population, a
+   * horizon, a unit, a truncation, a NOT-CLAIMED — never does, and the
+   * asymmetry is the whole point: folding a reassurance costs a reader
+   * nothing and folding a withholding is how a caveat unread becomes a
+   * caveat deleted.
+   */
+  function appendMethod(host, lines, summary) {
+    const list = (lines || []).filter((one) => typeof one === "string" && one.trim());
+    if (!list.length) return;
+    const chars = list.reduce((n, one) => n + one.length, 0);
+    if (chars <= NOTE_WALL_CHARS) {
+      host.append(el("p", "cc-quiet cc-ln-note", list.join(" ")));
+      return;
+    }
+    const box = el("details", "ft-how");
+    box.append(el("summary", "ft-how-s", summary || "How this reading was made"));
+    box.append(el("p", "cc-quiet cc-ln-note", list.join(" ")));
+    host.append(box);
   }
 
   /** A table that scrolls inside its own box rather than widening the page. */
@@ -1001,11 +1054,29 @@
       return;
     }
 
+    const drawn = rows.slice(0, LIST_MAX);
+    /* WHAT THIS LIST IS SORTED BY IS THE FINDING, because the sort decides
+       what the biggest number on screen means: the largest premium HERE is
+       the largest among the freshest, not the largest the feed flagged. The
+       table has no way to say that and the subtitle counts rows rather than
+       describing them. A row with no premium is not a premium of zero, so it
+       is excluded from the search and the sentence says so when every row
+       was. */
+    const priced = drawn.filter((row) => isNum(row && row.prem) !== null);
+    const biggest = priced.length
+      ? priced.reduce((a, b) => (Math.abs(isNum(b.prem)) > Math.abs(isNum(a.prem)) ? b : a))
+      : null;
+    lead(into, "These " + drawn.length + " are the FRESHEST flags rather than the largest" +
+      (biggest
+        ? ", and the biggest premium among them is " + (biggest.t || DASH) + " at " +
+          usd(biggest.prem) + "."
+        : ", and none of them quoted a premium, so there is no largest to name."));
+
     const wrap = tableWrap("Flagged option windows, freshest first");
     const table = el("table", "cc-tbl");
     table.append(headRow([["Name", null], ["Contract", null], ["Premium", "c-num"], ["Rule", null]]));
     const body = el("tbody");
-    for (const row of rows.slice(0, LIST_MAX)) {
+    for (const row of drawn) {
       const tr = el("tr");
       tr.append(el("td", "cc-t", row.t || DASH));
       tr.append(el("td", null,
@@ -1036,6 +1107,22 @@
       return;
     }
 
+    const drawn = rows.slice(0, LIST_MAX);
+    /* HOW MANY OF THESE THE BOARD HAS AN OPINION ON, which is the one thing
+       this calendar cannot show by drawing: a gated name arrives with NO
+       score, and the Score column prints the em dash for it — a mark a
+       reader has to scan the whole column to count. A score of exactly 0 is
+       a measurement and counts as scored, which is the same rule the cell
+       below applies through isNum. */
+    const scored = drawn.filter((row) => isNum(row && row.s) !== null).length;
+    const opinionless = drawn.length - scored;
+    lead(into, scored + " of the " + drawn.length + " names drawn carr" +
+      (scored === 1 ? "ies" : "y") + " a score" +
+      (opinionless
+        ? " and " + opinionless + " reached this calendar with none, so the boards hold no " +
+          "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
+        : ", so every name here can be read against the ranking above."));
+
     const wrap = tableWrap("Names reporting inside the window");
     const table = el("table", "cc-tbl");
     table.append(headRow([
@@ -1045,7 +1132,7 @@
         "the board was forbidden from holding an opinion on it, not that it had none."],
     ]));
     const body = el("tbody");
-    for (const row of rows.slice(0, LIST_MAX)) {
+    for (const row of drawn) {
       const tr = el("tr");
       tr.append(el("td", "cc-t", row.t || DASH));
       tr.append(el("td", null, row.d || DASH));
@@ -1088,8 +1175,37 @@
         "is more likely a key that did not publish than a market with no middle.");
       return;
     }
+    const drawn = rows.slice(0, LIST_MAX);
+    /* WHICH SIDE THE BAND IS HOLDING, which is what a reader wants from a
+       list of names that are nearly out of it and which the rows cannot
+       show: they are ordered on the SIZE of the residual, so the signs are
+       scattered down a column and have to be counted by eye.
+
+       READ THROUGH THE SAME FALLBACK THE CELL USES — residual first, score
+       only where the payload predates it — so the lead and the column can
+       never disagree about a row. THREE OUTCOMES, NOT TWO: a residual of
+       exactly 0 is ON the rule rather than above it, and a row that
+       published neither number is not placed at all. Number(null) === 0
+       would have put both of those on the bullish side. */
+    const sideOf = (row) => {
+      const value = isNum(row && row.resid) !== null ? isNum(row.resid) : isNum(row && row.s);
+      return value === null ? null : (value > 0 ? 1 : value < 0 ? -1 : 0);
+    };
+    const sides = drawn.map(sideOf);
+    const above = sides.filter((one) => one === 1).length;
+    const below = sides.filter((one) => one === -1).length;
+    const onRule = sides.filter((one) => one === 0).length;
+    const unplaced = sides.filter((one) => one === null).length;
+    lead(into, above + below + onRule === 0
+      ? "None of the " + drawn.length + " names nearest the edge published a number to place " +
+        "against the zero rule, so this list is ordered and unsided."
+      : above + " of the " + drawn.length + " names nearest the edge sit above the zero rule " +
+        "and " + below + " below it" +
+        (onRule ? ", " + onRule + " exactly on it" : "") +
+        (unplaced ? "; " + unplaced + " published no number to place" : "") + ".");
+
     const list = el("ul", "cc-moves");
-    for (const row of rows.slice(0, LIST_MAX)) {
+    for (const row of drawn) {
       const li = el("li");
       li.append(el("span", "cc-t", row.t || DASH));
       /* THE RESIDUAL, NOT THE SCORE, BECAUSE THE SCORE HAS NO BITS HERE.
@@ -1266,36 +1382,58 @@
     saySub(leaned + " of " + ordered.length + " leaned");
 
     const lean = payload.lean && typeof payload.lean === "object" ? payload.lean : null;
-    const said = [];
-    said.push("Bullish minus bearish OPTION premium on the eleven SPDR sector baskets, " +
+
+    /* NINE SENTENCES WERE BEHIND THE DISCLOSURE AND ONLY TWO WERE METHOD.
+       An adversarial pass over what this panel folds found seven of the nine
+       failing the meaning test outright — four of them WITHHOLDINGS, which
+       is the one direction the fold rule forbids in as many words: fold the
+       reassurance, never the withholding. Sorted here rather than argued at
+       each push, and the two lists are what the panel prints:
+
+         QUALIFIERS, open, under the table. The quantity and its horizon
+         ("today only"); what the table is ORDERED on, which otherwise
+         appears only in tableWrap's aria-label and so was invisible to a
+         sighted reader; that a ratio carries no size, which is a
+         NOT-COMPARABLE about the ranking itself; the quiet baskets and why
+         0/0 is not a neutral lean; the baskets that could not be read; the
+         basis; and which of the site's TWO sector panels this is.
+
+         METHOD, folded past the wall. The publisher's own relation, and how
+         the sign is drawn. */
+    const caveats = [];
+    const method = [];
+
+    caveats.push("Bullish minus bearish OPTION premium on the eleven SPDR sector baskets, " +
       "today only.");
     /* THE PUBLISHER'S OWN ARGUMENT FOR THE RANKING, CARRIED RATHER THAN
        PARAPHRASED: a paraphrase is a second copy of a claim that lives on the
        payload, and the two drift the first time the publisher revises it. */
     if (lean && typeof lean.relation === "string" && lean.relation) {
-      said.push("Derived: " + lean.relation + ".");
+      method.push("Derived: " + lean.relation + ".");
     }
-    said.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
+    caveats.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
       "that leaned one way — because that is what the publisher ranks on" +
       (lean && typeof lean.rejected === "string" && lean.rejected
         ? ", having rejected " + lean.rejected : "") + ".");
-    said.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
+    caveats.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
       "premium and +90% on $300M are not the same fact.");
-    said.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
+    method.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
       "and by the glyph on every number, so the panel survives greyscale.");
     if (quietN) {
-      said.push(quietN + (quietN === 1 ? " basket was" : " baskets were") +
+      caveats.push(quietN + (quietN === 1 ? " basket was" : " baskets were") +
         " read with both premium sums at zero: measured and empty, printed as the $0 they " +
         "are rather than dropped, and left off the axis because 0/0 is undefined and not a " +
         "neutral lean.");
     }
     if (badN) {
-      said.push(badN + (badN === 1 ? " basket" : " baskets") + " could not be read at all " +
+      caveats.push(badN + (badN === 1 ? " basket" : " baskets") + " could not be read at all " +
         "and print the em dash instead; the publisher's reason is on the row.");
     }
-    if (typeof payload.basis === "string" && payload.basis) said.push("Basis: " + payload.basis + ".");
+    if (typeof payload.basis === "string" && payload.basis) {
+      caveats.push("Basis: " + payload.basis + ".");
+    }
     if (typeof payload.notSameAs === "string" && payload.notSameAs) {
-      said.push("This is not " + payload.notSameAs + " — that is the key the sector panel " +
+      caveats.push("This is not " + payload.notSameAs + " — that is the key the sector panel " +
         "on /flows/market/ draws, in basis points per session.");
     }
 
@@ -1319,7 +1457,12 @@
           " of its own premium."
         : basket(hi) + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
           basket(lo) + " most bearish at " + pct(lo.leanRatio, 1) + ".";
-      into.append(el("p", "fc-reading", finding));
+      /* THE PANEL'S FINDING, AT THE SIZE A FINDING GETS. `.is-lead` is the
+         same element one step up in --fs-lead: this sentence was already
+         first and already the reading, and was drawn at note size beneath a
+         subtitle, so it read as a caption for the table rather than as the
+         answer to the region's question. */
+      into.append(el("p", "fc-reading is-lead", finding));
     } else {
       into.append(el("p", "cc-quiet",
         "No basket carried a readable lean this session, so none is named."));
@@ -1377,16 +1520,21 @@
     wrap.append(table);
     into.append(wrap);
 
-    /* THE DERIVATION KEEPS EVERY WORD, below the numbers it explains: moved,
-       not trimmed. `.ft-how` and `.ft-how-s` are already in flows.css and not
-       route-scoped (:3434-3442, :3763), so this reuses the disclosure
-       vocabulary rather than inventing one, and adds no CSS — which matters
-       on a route this close to its ceiling. <summary> is natively focusable,
-       so the method is reachable by keyboard and touch. */
-    const how = el("details", "ft-how");
-    how.append(el("summary", "ft-how-s", "How this lean was derived"));
-    how.append(el("p", "cc-quiet cc-ln-note", said.join(" ")));
-    into.append(how);
+    /* THE CAVEATS IN THE OPEN, THE DERIVATION BELOW THEM, AND EVERY WORD
+       KEPT EITHER WAY: moved, not trimmed. `.ft-how` and `.ft-how-s` are
+       already in flows.css and are not route-scoped, so this reuses the
+       disclosure vocabulary rather than inventing one, and adds no CSS.
+       <summary> is natively focusable, so the method is reachable by
+       keyboard and touch.
+
+       NAMED, NOT CITED BY LINE. Two line numbers stood here and both had
+       drifted — onto `.ft-link` and onto `.ft-tab::after` — so the comment
+       pointed confidently at the wrong rules. tests/contracts.mjs argues the
+       convention in full and fails a citation that outlives its file. */
+    if (caveats.length) {
+      into.append(el("p", "fc-note is-qualifier cc-ln-note", caveats.join(" ")));
+    }
+    appendMethod(into, method, "How this lean was derived");
   }
 
   /* ---------- the headline tape, with its age on it -----------------

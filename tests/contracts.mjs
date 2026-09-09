@@ -1042,4 +1042,94 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     `what has to give — use an em dash.`);
 }
 
-console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);
+/* ---------- a line citation that outlived its file ----------------
+
+   THE COMMENTS IN THIS REPOSITORY CITE EACH OTHER BY LINE, about seventy
+   times, and a citation is a claim like any other: it says "the thing I am
+   describing is at that line". Nothing re-derived it, so it went stale the
+   way every unchecked claim in this codebase has gone stale, and three did.
+
+   ALL THREE WERE SELF-INFLICTED, BY THE THREE PRs BEFORE THIS ONE. They are
+   written out below WITHOUT the colon form, because this scan reads every
+   file in the list including this one, and its own worked examples would
+   otherwise be three more stale pointers — which is how the first run of it
+   failed:
+
+     assets/js/flows-ticker.js sent a reader to flows-panels.js, lines 1707
+       to 1715, for `renderPath`. That file is 1091 lines. The drawer split
+       moved renderPath to assets/js/flows-drawers.js and left the pointer
+       past the end of the file it named.
+
+     assets/js/flows-overview.js sent a reader to flows.css, lines 3434 to
+       3442 and line 3763, for `.ft-how` and `.ft-how-s`. Those lines exist
+       and hold `.ft-link` and `.ft-tab::after`. The rules are at 3850 to
+       3854 and 4311 to 4323.
+
+     tests/flows-weight.mjs sent a reader to shared/flows-card.js, lines 575
+       to 596, for `buildContext` — which is now buildGamma's lead.
+       buildContext is at line 773.
+
+   WHAT THIS CAN CHECK AND WHAT IT CANNOT. A line that no longer EXISTS is a
+   fact, so it is asserted. A line that MOVED still exists and still reads as
+   a confident pointer at the wrong code — only one of the three above was
+   catchable here, and a heuristic that tried to catch the other two
+   (does the cited range contain a name the comment backticks?) fired on 23
+   of 40 real citations, so it is not in this file. THE CONVENTION IS THE
+   FIX: cite the file and the SYMBOL, which grep finds and which cannot
+   drift. This assertion is the floor under the convention, not a substitute.
+
+   AMBIGUITY IS RESOLVED PERMISSIVELY AND COUNTED. A bare basename can mean
+   two files — flows-ask.js is both assets/js/ and shared/ — so a citation
+   passes if the line exists in ANY file it could name. That is the weak
+   form on purpose: this suite refuses a citation nothing could justify, and
+   leaves a reader to disambiguate one that something could. */
+let citationsChecked = 0;
+{
+  const citing = [
+    ...readdirSync(path.join(ROOT, "assets/js")).filter((f) => f.endsWith(".js")).map((f) => `assets/js/${f}`),
+    ...readdirSync(path.join(ROOT, "shared")).filter((f) => f.endsWith(".js")).map((f) => `shared/${f}`),
+    ...readdirSync(path.join(ROOT, "tests")).filter((f) => f.endsWith(".mjs")).map((f) => `tests/${f}`),
+    ...readdirSync(path.join(ROOT, "scripts")).filter((f) => f.endsWith(".mjs")).map((f) => `scripts/${f}`),
+    "worker.js",
+  ];
+  const PREFIXES = ["", "assets/js/", "assets/css/", "shared/", "tests/", "scripts/"];
+  const heights = new Map();
+  const heightOf = (rel) => {
+    if (!heights.has(rel)) {
+      const full = path.join(ROOT, rel);
+      heights.set(rel, existsSync(full) && statSync(full).isFile()
+        ? readFileSync(full, "utf8").split("\n").length
+        : null);
+    }
+    return heights.get(rel);
+  };
+  /* ONE MATCH TAKES THE WHOLE LIST, because the house form is
+     "flows-pipeline.mjs:4720, 4826, 5319" and a pattern that stopped at the
+     first number would check a third of what it appeared to. */
+  const CITE = /([A-Za-z0-9_./-]+\.(?:js|mjs|css|html|toml|json|yml|py)):(\d+(?:\s*[-–]\s*\d+)?(?:,\s*\d+(?:\s*[-–]\s*\d+)?)*)/g;
+  const stale = [];
+  for (const file of citing) {
+    const src = readFileSync(path.join(ROOT, file), "utf8");
+    for (const m of src.matchAll(CITE)) {
+      const targets = PREFIXES.map((p) => p + m[1]).filter((c) => heightOf(c) !== null);
+      if (!targets.length) continue;
+      const at = src.slice(0, m.index).split("\n").length;
+      for (const part of m[2].split(",")) {
+        const ends = part.split(/[-–]/).map((n) => Number(n.trim()));
+        citationsChecked += 1;
+        if (targets.some((t) => ends.every((n) => n >= 1 && n <= heightOf(t)))) continue;
+        stale.push(`${file}:${at} cites ${m[1]}:${part.trim()}, and ` +
+          targets.map((t) => `${t} is ${heightOf(t)} lines`).join(" / "));
+      }
+    }
+  }
+  assert(citationsChecked >= 60,
+    `the scan resolved ${citationsChecked} line citations, so it is matching almost nothing and would ` +
+    `pass by seeing nothing — the pattern has drifted from how these comments cite each other`);
+  assert.deepEqual(stale, [],
+    `a comment cites a line its file does not have, which is a pointer at nothing: ` +
+    `${stale.join("; ")}. Cite the SYMBOL rather than re-deriving the number, so the next ` +
+    `move cannot break it again.`);
+}
+
+console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, ${citationsChecked} line citations resolved against the files they name, session hardening`);

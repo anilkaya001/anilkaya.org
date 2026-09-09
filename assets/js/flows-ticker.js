@@ -1132,7 +1132,7 @@
         the axis, outside the plot, each wrapped in a `<g>` carrying that
         expiry's own stated reason as a `<title>`, and the polyline BREAKS
         across them rather than drawing a segment through a value nobody
-        measured — the break is `renderPath`'s, `flows-panels.js:1707-1715`.
+        measured — the break is `renderPath`'s, in `flows-drawers.js`.
 
      5. THE TWO SCALARS ARE TEXT, NOT MARKS, AND CARRY NO HUE. `skew` has
         polarity −1 (put iv − call iv, the same construction as

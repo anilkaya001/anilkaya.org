@@ -991,6 +991,16 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   line-height: 1.4;
 }
 
+/* A SLOT WITH NOTHING IN IT RESERVES NOTHING. Both of these are served in the
+   page markup and filled by a renderer, so a branch that writes no sentence
+   leaves an empty <p> holding its own margins — 0.55rem of nothing under a
+   drawing, which reads as a gap rather than as an absence. `.ft-panel-one`
+   and `.ft-station-lead` already do this; the two classes every Flows route
+   fills now do it too, so a slot can be served before every branch that fills
+   it exists. `:empty` matches only an element with NO children, so a note
+   built out of a <strong> and a reason is untouched. */
+.fc-reading:empty, .fc-note:empty { display: none; }
+
 /* A NOTE THAT COULD CHANGE WHAT THE READING MEANS, as opposed to one that
    explains how the reading was made. The method now lives behind the panel's
    disclosure; these stay in the open, and they have to be legible as a
