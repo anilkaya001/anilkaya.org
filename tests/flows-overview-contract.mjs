@@ -308,6 +308,15 @@ try {
   ]);
   await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
 
+  // Progressive disclosure preserves the population while reducing the first read.
+  ok(await page.locator(".cc-change-summary").isVisible(), "change counts are visible");
+  eq(await page.locator(".cc-change-detail").getAttribute("open"), null, "audit detail starts folded");
+  await page.locator(".cc-change-detail summary").click();
+  ok(await page.locator(".cc-lede").isVisible(), "scope opens with a native keyboard-accessible disclosure");
+  await page.locator(".cc-change-detail summary").click();
+  eq(await page.locator(".cc-score-scale").count(), 9, "each measured candidate score has a signed scale");
+  eq(await page.locator(".cc-jump a").count(), 6, "overview sections have direct navigation");
+
   /* ---------- the verdict bar ------------------------------------ */
   {
     /* SIX READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
@@ -2983,14 +2992,16 @@ try {
       const body = document.getElementById("ccNews");
       return {
         first: body.firstElementChild && body.firstElementChild.className,
+        summary: body.firstElementChild.textContent,
         note: body.querySelector(".cc-nw-note").textContent.trim(),
         sub: document.getElementById("ccNewsSub").textContent.trim(),
       };
     });
-    ok(/cc-nw-note/.test(seat.first),
+    ok(/cc-news-status/.test(seat.first),
        `the age note is the FIRST node in the region (${seat.first}) — under the last ` +
        "headline it is a footnote, and a reader who reaches a headline without having read " +
        "the age reads it as news");
+    ok(/Fetched 3h \d+m ago.*Morning snapshot/.test(seat.summary), "visible summary preserves age and snapshot status");
     ok(/^Fetched at \d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
        `it states when the feed was fetched AND how long ago, on a 24-hour clock that names ` +
        `its zone (${seat.note.slice(0, 60)}…)`);

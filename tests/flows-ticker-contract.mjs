@@ -496,7 +496,9 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
 async function mount(page, card,
                      { ticker = null, boards = null, hash = "", events = null,
                        html = null, station = "all" } = {}) {
-  await page.addInitScript(({ card, boards, events }) => {
+  // Install after navigation: multiple addInitScript callbacks have no defined order.
+  // Reusing a page must not let an earlier fixture replace this mount’s payload.
+  const installFetch = ({ card, boards, events }) => {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
@@ -520,7 +522,7 @@ async function mount(page, card,
         json: () => Promise.resolve(JSON.parse(JSON.stringify(body))),
       });
     };
-  }, { card, boards, events });
+  };
   /* THE HASH IS PART OF THE URL THE READER WAS SENT, so it has to be on the
      goto rather than assigned afterwards: the controller reads it once the
      card has painted, and a hash set after load would test a different code
@@ -569,13 +571,15 @@ async function mount(page, card,
   await page.route("**/assets/js/flows-drawers.js*",
     (route) => route.fulfill({ contentType: "text/javascript", body: drawersSrc }));
   await page.goto(url);
+  await page.evaluate(installFetch, { card, boards, events });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
   await page.addScriptTag({ content: panelsSrc });
   await page.addScriptTag({ content: tickerSrc });
   await page.waitForFunction(() => {
     const g = document.getElementById("ftGrid");
-    return g && (!g.hidden || document.getElementById("ftStatus").textContent !== "Loading the name…");
+    // The grid is unhidden before lazy drawers finish. The final status is written after them.
+    return g && document.getElementById("ftStatus").textContent !== "Loading the name…";
   }, null, { timeout: 5000 });
 }
 

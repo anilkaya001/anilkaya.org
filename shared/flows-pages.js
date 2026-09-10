@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "133";
+export const ASSET_VERSION = "135";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -203,10 +203,11 @@ const dock = (active) => (active === "ask" ? "" : `
 <script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
 
 const shell = (title, kicker, active, username, body) => `
-<body class="flows-body has-rail">
+<body class="flows-body has-rail" data-flows-page="${active}">
+<a class="flows-skip" href="#flowsMain">Skip to content</a>
 ${topbar(true)}
 ${rail(active)}
-<main class="flows-main">
+<main class="flows-main" id="flowsMain" tabindex="-1">
   <header class="flows-head">
     <div>
       <p class="flows-kicker">${kicker}</p>
@@ -320,6 +321,11 @@ ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
        that stays empty says which of the three silences it is in — the key was
        never published, the request never came back, or the pipeline measured
        and found nothing — because only the last of those is about the market. -->
+  <nav class="cc-jump" aria-label="Overview sections">
+    <a href="#ccChgH">Changes</a><a href="#ccBullH">Candidates</a>
+    <a href="#ccAlertsH">Activity</a><a href="#ccEventsH">Catalysts</a>
+    <a href="#ccLeanH">Sectors</a><a href="#ccSpineH">Distribution</a>
+  </nav>
   <div class="cc">
 
     <!-- Six readings the rest of the page then explains. Any of them may be an

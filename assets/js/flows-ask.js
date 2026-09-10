@@ -1170,7 +1170,7 @@
   var gated = false;
 
   function get(path) {
-    return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
+    return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } })
       .then(function (r) {
         if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
         if (!r.ok) throw new Error("HTTP " + r.status);

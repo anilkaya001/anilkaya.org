@@ -7412,3 +7412,184 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   font-size: var(--fs-micro);
   color: var(--ink-dim);
 }
+
+/* Shared Flows reading hierarchy. Data caveats remain visible. */
+.flows-skip {
+  position:fixed;
+  top:-5rem;
+  left:1rem;
+  z-index:1000;
+  padding:.75rem 1rem;
+  background:var(--bg-elev);
+  color:var(--ink);
+}
+.flows-skip:focus {
+  top:1rem;
+}
+.flows-body {
+  --flow-reading-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+.flows-body .flows-status,.flows-body .cc-quiet,.flows-body[data-flows-page="overview"] .fc-note,.flows-body[data-flows-page="overview"] .fc-reading,.flows-body .ak-warn-say,.flows-body .cc-tile-s {
+  font-family:var(--flow-reading-font);
+  line-height:1.6;
+}
+.flows-body .flows-status {
+  font-size:var(--fs-data);
+}
+.flows-body .cc-quiet,.flows-body .fc-note,.flows-body .cc-tile-s {
+  color:var(--ink-dim);
+}
+.flows-body .cc-verdict {
+  display:flex;
+  flex-wrap:wrap;
+  gap:0;
+  background:var(--panel-bg);
+}
+.flows-body .cc-tile {
+  flex:1 1 22%;
+  border:1px solid var(--panel-border);
+  padding:.85rem 1rem;
+}
+.flows-body .cc-tile-v {
+  margin-block:.25rem;
+}
+.cc-jump {
+  display:flex;
+  flex-wrap:wrap;
+  gap:.4rem;
+  margin:0 0 1rem;
+}
+.cc-jump a {
+  display:inline-flex;
+  align-items:center;
+  min-height:44px;
+  padding:.4rem .85rem;
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-2);
+  font-family:var(--flow-reading-font);
+  font-size:var(--fs-data);
+  color:var(--ink-dim);
+  text-decoration:none;
+}
+.cc-jump a:hover {
+  background:var(--panel-head);
+  color:var(--ink);
+}
+.cc-jump a:focus-visible,.flows-body summary:focus-visible {
+  outline:2px solid var(--gold-harvest);
+  outline-offset:3px;
+}
+.flows-body .cc-h {
+  padding:.8rem 1rem;
+}
+.flows-body .cc-h-t {
+  color:var(--ink);
+  letter-spacing:.08em;
+  scroll-margin-top:6rem;
+}
+.flows-body .cc-tbl tbody tr:hover {
+  background:color-mix(in srgb,var(--ink) 5%,transparent);
+}
+.flows-body .cc-tbl td {
+  padding-block:.55rem;
+}
+.cc-change-summary {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:.75rem;
+  padding:1rem 1rem .2rem;
+}
+.cc-change-metric {
+  display:flex;
+  flex-direction:column;
+  gap:.2rem;
+  border-left:2px solid var(--gold-celadon);
+  padding-left:.75rem;
+}
+.cc-change-metric strong {
+  font-family:var(--font-mono);
+  font-size:var(--fs-head);
+  line-height:1.2;
+}
+.cc-change-metric span {
+  font-family:var(--flow-reading-font);
+  font-size:var(--fs-label);
+  color:var(--ink-dim);
+}
+.cc-score-scale {
+  position:relative;
+  display:block;
+  width:3.5rem;
+  height:3px;
+  background:color-mix(in srgb,var(--ink) 12%,transparent);
+  margin:.3rem 0 0 auto;
+}
+.cc-score-scale::after {
+  content:"";
+  position:absolute;
+  left:50%;
+  top:-1px;
+  width:1px;
+  height:5px;
+  background:var(--ink-dim);
+}
+.cc-score-scale i {
+  position:absolute;
+  height:100%;
+  background:currentColor;
+}
+.flows-body[data-flows-page="overview"] .ft-how-s,.flows-body[data-flows-page="ask"] .ft-how-s {
+  min-height:44px;
+  align-content:center;
+}
+.flows-body .ak-warns-list {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.75rem;
+}
+.flows-body .ak-warn {
+  padding:.85rem;
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-2);
+}
+@media(max-width:47.99rem) {
+  .flows-body .cc-tile {
+    flex-basis:40%;
+  }
+  .cc-change-summary {
+    gap:.4rem;
+    padding-inline:.75rem;
+  }
+  .cc-change-metric {
+    padding-left:.5rem;
+  }
+  .flows-body .ak-warns-list {
+    grid-template-columns:minmax(0,1fr);
+  }
+  .cc-jump {
+    gap:.3rem;
+  }
+  .cc-jump a {
+    flex:1 1 28%;
+    justify-content:center;
+    padding-inline:.4rem;
+  }
+}
+@media (max-width:59.99rem) {
+  .flows-body .flows-rail {
+    flex-direction:row;
+    align-items:center;
+    gap:.75rem;
+    padding-bottom:.6rem;
+  }
+  .flows-body .rail-items {
+    flex:0 0 auto;
+  }
+}
+.cc-news-status {
+  border-left:2px solid var(--gold-celadon);
+  padding-left:.75rem;
+}
+.cc-change-detail {
+  margin-inline:1rem;
+}
