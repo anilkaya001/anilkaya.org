@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "135";
+export const ASSET_VERSION = "136";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1560,6 +1560,8 @@ ${shell("Track Record", "Options-flow intelligence", "history", username, `
     <p class="flows-lede">${lede}</p>
   </div>
 
+  <section class="rec-block" id="recValidation" aria-label="Signal validation"></section>
+
   <section class="rec-block" aria-labelledby="recCurveH">
     <h2 id="recCurveH">Forward return by horizon</h2>
     <p class="rec-note" id="recCurveNote"></p>
@@ -1574,8 +1576,8 @@ ${shell("Track Record", "Options-flow intelligence", "history", username, `
         <caption class="flows-caption">
           One row per published session, once enough sessions have passed to
           measure it. Return is the equal-weighted price return of that
-          session&#39;s names, long side minus short side, from the close the
-          board was published at. Not a strategy: no costs, no slippage, no
+          session&#39;s names, long side minus short side, from the reference close preceding
+          publication. Not a strategy: no costs, no slippage, no
           borrow, and no position sizing.
         </caption>
         <thead>
@@ -1585,7 +1587,7 @@ ${shell("Track Record", "Options-flow intelligence", "history", username, `
             <th scope="col" class="c-num">Short</th>
             <th scope="col" class="c-num"><abbr title="Equal-weighted price return of the long names minus that of the short names, over the stated horizon">L&#8722;S</abbr></th>
             <th scope="col" class="c-num"><abbr title="Share of published names whose price moved in the direction the board leaned">Hit</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Names that could not be scored because they left the screened universe before the horizon closed. A high number makes the row&#39;s return unreliable, not merely noisy">Lost</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Names without a valid entry or exit price at the closed horizon. A high number makes the row&#39;s return unreliable, not merely noisy">Lost</abbr></th>
           </tr>
         </thead>
         <tbody id="recBody"></tbody>
@@ -1594,7 +1596,7 @@ ${shell("Track Record", "Options-flow intelligence", "history", username, `
   </section>
 
   <section class="rec-block" aria-labelledby="recFeatH">
-    <h2 id="recFeatH">What actually predicted, feature by feature</h2>
+    <h2 id="recFeatH">Feature associations, measured retrospectively</h2>
     <div class="flows-tablewrap" id="recFeatWrap" tabindex="0" role="region"
          aria-label="Feature information coefficients" hidden>
       <table class="flows-table rec-table rec-feat">

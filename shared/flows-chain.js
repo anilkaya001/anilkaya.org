@@ -897,9 +897,10 @@ export function buildChainPanels(chainRows, {
      caller — the desk route, the card leg, every fixture — is unchanged. See
      buildUnusualRows for why the feed needs it and why null omits the key. */
   stage = null,
+  chainCoverage = null,
 } = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
-  const truncated = all.length >= CHAIN_PAGE_SIZE;
+  const truncated = chainCoverage ? chainCoverage.complete !== true : all.length >= CHAIN_PAGE_SIZE;
 
   /* ADJUSTED SERIES ARE A DIFFERENT INSTRUMENT AND THEY WIN EVERY RANKING.
      After a split or a special dividend the vendor lists a second root — AAPL1
@@ -1009,7 +1010,9 @@ export function buildChainPanels(chainRows, {
     surface.expiries.length === 1 && surface.expiries[0].expiry === requestedExpiry;
 
   if (truncated && !answersRequest) {
-    const why = `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no ` +
+    const why = (chainCoverage
+      ? `the chain read is incomplete (${chainCoverage.reason}; ${all.length} unique contracts) in no `
+      : `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no `) +
       "documented order, so this is an arbitrary subset of the book and \"the nearest " +
       "expiry\" cannot be identified within it";
     scalars = {
@@ -1024,6 +1027,7 @@ export function buildChainPanels(chainRows, {
     status: "ok",
     reason: null,
     truncated,
+    chainCoverage,
     /* Whether the scalars survived the truncation check, and why. A reader of
        the payload can otherwise only infer it from the scalars being present. */
     identifiedExpiry: answersRequest ? requestedExpiry : null,

@@ -1,26 +1,6 @@
-/* =============================================================
-   flows-history.js — the track record.
-
-   For months this product asserted "expect a hit rate near 51–52%" in
-   a footer and measured nothing. It could not have: flows_payload was
-   keyed by id alone, so every morning `board:long` overwrote
-   `board:long`, and by the time any forward return existed there was
-   no surviving record of what had been claimed. A signal you cannot
-   score is a claim, not a measurement.
-
-   THIS PAGE IS DESIGNED TO BE HONEST WHILE EMPTY, which is the state
-   it ships in and will hold for weeks. Retention begins with the first
-   pipeline run after deploy; nothing can be scored at the shortest
-   horizon until that many sessions have passed. Everything here is
-   built so that "not yet measurable" and "measured and poor" render
-   differently — a track record that appeared fully formed on the day
-   it shipped would be a backtest wearing a live-results label.
-
-   THE SAMPLE SIZE IS THE HEADLINE. Every figure on this page is
-   printed with the n it came from, and n is never hidden behind a
-   percentage. Eight sessions of a coin flip produce a 62% hit rate
-   about a quarter of the time.
-   ============================================================= */
+/* Archived reference-close returns: descriptive research, not trade fills.
+   Keep missing values distinct from zero, publish denominators, and separate
+   selection epochs. The shared scorer owns the statistical conventions. */
 (() => {
   "use strict";
 
@@ -125,29 +105,9 @@
      hollow dots, named in the note and named in the aria-label — so the
      distinction survives greyscale and a monochrome printout. */
 
-  /**
-   * The drawing width, MEASURED FROM THE HOST and never floored above it.
-   *
-   * This emitted `width:"100%"` for its whole life, which is the chart
-   * invariant's quieter failure: the viewBox says W units, the box says
-   * whatever CSS gives it, and one viewBox unit stops being one CSS pixel the
-   * moment those disagree — 9px axis type rendering at 5px on a phone. The
-   * width attribute is now explicit. It is also clamped DOWN to the host,
-   * because an explicit width larger than the box it sits in is horizontal
-   * overflow at 320px, which the old 300-unit floor would have produced the
-   * moment the floor stopped being masked by width:100%.
-   */
+  // Explicit chart width keeps chart type at CSS-pixel size on narrow screens.
   function curveWidth() {
-    /* MEASURED TWO WAYS AND THE SMALLER TAKEN, because `clientWidth` alone
-       broke the promise the comment above makes. It ROUNDS: a 284.813px host
-       reports 285, so the svg went out with width="285" over a 285-unit
-       viewBox into a 284.813px box — wider than the box it is "clamped DOWN
-       to", with the `max-width:100%` rule that exists for the 160ms of a
-       resize holding it in permanently and one viewBox unit worth 0.99934 CSS
-       pixels. getBoundingClientRect() is the border box, so it is the
-       truthful reading only while this host carries no padding or border (it
-       carries neither); if that changes, the larger reading loses and this
-       falls back to exactly what it did before. */
+    // Use the smaller rounded size to prevent subpixel horizontal overflow.
     const rect = Math.floor(curveHost.getBoundingClientRect().width);
     const client = Math.floor(curveHost.clientWidth);
     const host = rect > 0 && client > 0 ? Math.min(rect, client)
@@ -404,7 +364,7 @@
     }
     if (curveNote) {
       const note = ["Equal-weighted price return of the published long names minus the " +
-        "short names, measured from the close each board was published at."];
+        "short names, measured from the reference close preceding publication; not an executable entry."];
       if (pri.length) {
         note.push("The dashed line with hollow dots is the record under the PRIOR " +
           "selection rule" + (drawnMeta.epoch ? ", before " + drawnMeta.epoch : "") +
@@ -590,7 +550,8 @@
     const k = isNum(features.k);
     const minN = isNum(features.minN);
     meta.textContent = "Horizon: " + (k === null ? DASH : k + " sessions") +
-      " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") + ".";
+      " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") + "." +
+      (features.epoch ? " Current selection rule since " + features.epoch + ". Prior-rule pairs excluded from these columns." : " Selection epoch not supplied by this payload; populations may be pooled.");
     notes.append(meta);
     for (const key of ["method", "selection", "overlap", "calendar"]) {
       if (typeof features[key] !== "string" || !features[key]) continue;
@@ -599,6 +560,56 @@
       p.textContent = features[key];
       notes.append(p);
     }
+  }
+
+  function renderValidation(validation) {
+    const host = document.getElementById("recValidation");
+    if (!host) return;
+    host.replaceChildren();
+    const title = document.createElement("h2");
+    title.textContent = "Signal validation · research only";
+    host.append(title);
+    const lead = document.createElement("p");
+    lead.className = "rec-note";
+    lead.textContent = validation?.basis || "Validation audit pending the next pipeline run. Reference-close returns are descriptive; they are not executable trade returns.";
+    host.append(lead);
+    if (!Array.isArray(validation?.horizons)) return;
+    const region = document.createElement("div");
+    region.className = "flows-tablewrap";
+    region.tabIndex = 0;
+    region.setAttribute("role", "region");
+    region.setAttribute("aria-label", "Outcome coverage and non-overlapping windows");
+    const table = document.createElement("table");
+    table.className = "flows-table rec-table";
+    const head = document.createElement("thead"), hr = document.createElement("tr");
+    for (const label of ["Horizon", "Measured / eligible", "Missing", "Hit bounds", "Disjoint windows", "Spread"]) {
+      const th = document.createElement("th"); th.scope = "col"; th.textContent = label; hr.append(th);
+    }
+    head.append(hr); table.append(head);
+    const body = document.createElement("tbody");
+    for (const h of validation.horizons) {
+      const row = document.createElement("tr");
+      const share = v => isNum(v) === null ? DASH : (v * 100).toFixed(1) + "%";
+      for (const value of [kSaid(h.k), h.measured + " / " + h.names, String(h.lost),
+        share(h.hitLower) + " – " + share(h.hitUpper), h.disjointMeasured + " / " + h.disjointWindows, pct(h.disjointSpread)]) row.append(cell(value, "c-num"));
+      body.append(row);
+    }
+    table.append(body); region.append(table); host.append(region);
+    const details = document.createElement("details");
+    details.className = "cc-details";
+    const summary = document.createElement("summary"); summary.textContent = "Validation method and limits";
+    details.append(summary);
+    for (const text of ["Hit bounds treat every missing outcome as a miss, then as a hit; they are missing-data bounds, not confidence intervals. Disjoint windows are chosen chronologically before observing returns; the count shows measured / selected windows.", validation.uncertainty, validation.costs]) {
+      if (!text) continue;
+      const p = document.createElement("p"); p.className = "rec-note"; p.textContent = text; details.append(p);
+    }
+    const r = validation.outcomeRecovery;
+    if (r) {
+      const p = document.createElement("p"); p.className = "rec-note";
+      p.textContent = "Outcome recovery: " + r.attempted + " / " + r.needed + " names checked; " + r.recoveredDates + " missing closes recovered; " + r.failed + " failed requests. Remaining gaps stay excluded and counted.";
+      details.append(p);
+    }
+    host.append(details);
   }
 
   /* ---------- load -------------------------------------------------- */
@@ -684,6 +695,7 @@
   fetch("/api/flows/record", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(15000),
   }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
     if (!response.ok) throw new Error("HTTP " + response.status);
@@ -703,6 +715,7 @@
     const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
     const retained = isNum(payload.retained);
 
+    renderValidation(payload.validation);
     renderStale(payload);
     renderCurve(horizons, {
       epoch: typeof payload.epoch === "string" ? payload.epoch : null,

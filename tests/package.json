@@ -22,7 +22,7 @@
     "test:flows-desk": "node flows-desk-contract.mjs",
     "test:flows-overview": "node flows-overview-contract.mjs",
     "test:flows-sections": "node flows-sections-contract.mjs",
-    "test:flows-record": "node flows-record-contract.mjs",
+    "test:flows-record": "node flows-record-contract.mjs && node flows-coverage-validation.mjs",
     "test:flows-chain-panels": "node flows-chain-panels.mjs",
     "test:flows-motion": "node flows-motion.mjs",
     "test:flows-universe": "node flows-universe-contract.mjs",

@@ -63,7 +63,7 @@ export function forwardClose(closesByTicker, calendar, calendarIdx, ticker, d, k
   if (j >= calendar.length) return { state: "unclosed" };
   const date = calendar[j];
   const exit = fin(closesByTicker.get(ticker)?.get(date));
-  return exit === null ? { state: "lost" } : { state: "ok", exit, date };
+  return exit === null || exit <= 0 ? { state: "lost" } : { state: "ok", exit, date };
 }
 
 /**

@@ -1,47 +1,7 @@
-/* =============================================================
-   flows-unusual.js — the contract-aggregate feed.
-
-   WHAT THE SOURCE IS, BECAUSE IT DECIDES EVERY STRING BELOW.
-
-   Each row on the wire is one listed strike, carrying a volume
-   counter, an open interest, a previous open interest and a
-   two-sided quote. There is no size, no timestamp, no execution
-   price and no counterparty anywhere in it. shared/flows-unusual.js
-   states the two refusals that follow; this file is the surface
-   that keeps them in front of a reader.
-
-   REFUSAL 1 — THE UNIT. The counter is every contract that changed
-   hands at that strike, summed. It is not one event, so the words a
-   per-execution feed uses are not available to any string this file
-   writes — worked out at the vocabulary note below, which also says
-   why the payload's own prose is a separate case.
-
-   REFUSAL 2 — THE DATE, and it is the load-bearing one. The
-   endpoint accepts no date and returns none, and the pipeline reads
-   it four and a quarter hours before the opening bell, so at read
-   time the current date has not happened yet. What the counter
-   spans is unobserved. Everything this page stamps is `readAt` —
-   when the chain was read — beside `volumeAsOfReason`, which says
-   why there is nothing else to stamp. The one date that IS legal is
-   the expiry horizon, and it is anchored to `dteAnchor` in writing.
-
-   THE MISSING-VALUE TEST COMES BEFORE THE COERCION, everywhere.
-   Number(null) is 0 and 0 is finite, so the naive shape prints a
-   balanced split where the vendor classified nothing, an unchanged
-   open interest where none was reported, and a notional of zero
-   where no quote existed. Five shipped defects in this repo have
-   had exactly that shape.
-
-   HUE IS THE LAST CHANNEL, NEVER THE ONLY ONE. Every signed number
-   here carries its sign in a glyph — U+2191/U+2193 for a price move,
-   U+002B/U+2212 for a count — before any class is added that CSS may
-   tint. U+25B2/U+25BC are NOT in the mono webfont subset and would
-   drop to the system stack mid-column, so they are not used.
-
-   NO BAR BEHIND vol/oi: the ranking key spans several powers of
-   ten on a live chain, so any fixed scale flattens most of the
-   column into nothing. The feed's own note tells the reader so.
-   ============================================================= */
+/* Contract aggregates, not execution prints. The source supplies no volume
+   session date: stamp the read time and preserve the unknown basis. Missing
+   numeric values must be checked before coercion; colour never carries sign
+   alone. See shared/flows-unusual.js for population and vocabulary rules. */
 (() => {
   "use strict";
 
@@ -435,6 +395,11 @@
     const m = isNum(row.m);
     const cov = ctx.coverage.get(ticker);
     const said = [];
+    if (cov?.retrieval) {
+      const r = cov.retrieval;
+      said.push("Chain coverage: " + (r.complete ? "complete filtered book" : "partial") +
+        "; " + r.uniqueRows + " unique contracts across " + r.pages + " pages; " + r.reason + ".");
+    }
     if (iv !== null) {
       said.push("Implied volatility " + (iv * 100).toFixed(1) + "%" +
         (cov && cov.ivBasis ? ", on this name's own convention (" + cov.ivBasis + ")" : "") +
@@ -1164,6 +1129,7 @@
       const distinct = new Set(rows.map((r) => String(r.t || ""))).size;
       const namesSeen = isNum(payload.namesSeen);
       const truncated = isNum(payload.namesTruncated);
+      const pagedCoverage = (payload.coverage || []).some(c => c.retrieval);
       const complete = isNum(payload.namesComplete);
 
       /* WHICH CAP BOUND THE LIST, NAMED. A reader looking at "50 shown" against
@@ -1195,7 +1161,7 @@
         strip.push(count(namesSeen) + (namesSeen === 1 ? " chain read" : " chains read") +
           (truncated === null ? "" : truncated === 0
             ? ", all of them whole"
-            : ", " + count(truncated) + " of them cut short by the vendor"));
+            : ", " + count(truncated) + (pagedCoverage ? " with incomplete reads" : " of them cut short by the vendor")));
       }
       strip.push(readAt
         ? "chain read " + readAt + ", and the counter carries no date of its own"
@@ -1229,8 +1195,9 @@
         capParts.push("Drawn from " + count(namesSeen) +
           (namesSeen === 1 ? " chain" : " chains") +
           (complete === null || truncated === null ? "" :
-            ": " + count(complete) + " the vendor returned whole and " + count(truncated) +
-            " it cut short at its page limit") + ".");
+            (pagedCoverage
+              ? ": " + count(complete) + " complete filtered books and " + count(truncated) + " partial reads; per-name stop reasons are available on rows"
+              : ": " + count(complete) + " the vendor returned whole and " + count(truncated) + " it cut short at its page limit")) + ".");
       }
       if (listed !== null && eligible !== null && listed > eligible) {
         capParts.push("Those chains listed " + count(listed) + " strikes between them; the " +

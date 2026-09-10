@@ -569,6 +569,13 @@ try {
     {
       await put("record", {
         status: "ok", retained: 40, firstSession: "2026-07-01", lastSession: "2026-08-24",
+        validation: {
+          basis: "Reference-close returns; not executable trades.",
+          uncertainty: "Overlapping observations are dependent.",
+          costs: "No costs included.",
+          horizons: [{k:10, names:100, measured:30, lost:70, hitLower:0.2, hitUpper:0.9,
+            disjointMeasured:1, disjointWindows:2, disjointSpread:-0.01}],
+        },
         horizons: [
           { k: 1, ls: 0.002, n: 39 },
           { k: 5, ls: -0.011, n: 35 },
@@ -605,6 +612,13 @@ try {
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#recCurve svg", { timeout: 15000 });
+
+      const audit = await page.locator("#recValidation").innerText();
+      ok(audit.includes("30 / 100") && audit.includes("20.0% – 90.0%"), "validation preserves missing-outcome denominators and bounds");
+      eq(await page.locator("#recValidation details").getAttribute("open"), null, "method begins folded");
+      await page.locator("#recValidation summary").click();
+      ok(await page.getByText("Overlapping observations are dependent.",{exact:true}).isVisible(), "method disclosure opens to the uncertainty caveat");
+      await page.locator("#recValidation summary").click();
 
       const plot = await page.evaluate(() => {
         const svg = document.querySelector("#recCurve svg");
@@ -748,6 +762,13 @@ try {
     {
       await put("record", {
         status: "ok", retained: 40, firstSession: "2026-07-01", lastSession: "2026-08-24",
+        validation: {
+          basis: "Reference-close returns; not executable trades.",
+          uncertainty: "Overlapping observations are dependent.",
+          costs: "No costs included.",
+          horizons: [{k:10, names:100, measured:30, lost:70, hitLower:0.2, hitUpper:0.9,
+            disjointMeasured:1, disjointWindows:2, disjointSpread:-0.01}],
+        },
         horizons: [
           { k: 1, ls: -0.004, n: 39 },
           { k: 5, ls: -0.012, n: 35 },

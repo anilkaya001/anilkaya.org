@@ -34,6 +34,8 @@ import {
   buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
 } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
+import { missingOutcomePlan, recoverOutcomes, validateRecord } from "../shared/flows-validation.js";
+import { readChainPages } from "../shared/flows-coverage.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
@@ -221,11 +223,15 @@ export const RATE = {
         answered ok with ZERO rows on 2026-08-31, so it re-probes with a
         dated param until it shows a row shape or proves empty by design;
         the five confirmed probes retired into the sections they scouted)
-   = 1079 modelled. (This line read 1076 while the thirteen terms above it
+   + 140 bounded chain continuation pages
+   + 30 archived-name outcome recovery calls
+   = 1249 modelled. (This line read 1076 while the thirteen terms above it
    summed to 1077 — an off-by-one in a total nobody re-added after a term was
    revised. It is the number every budget argument in this file starts from,
    so re-add the column rather than adjusting the total. The two market-wide
-   terms added above take it from 1077 to 1079, still 171 under CALL_BUDGET.)
+   base terms take it from 1077 to 1079; the two bounded recovery allowances
+   use 170 of the remaining 171 calls under CALL_BUDGET. Retries can still
+   exceed the model and are measured separately.)
 
    MEASURED AGAINST IT: the 2026-08-26 18:04 run made 1022 attempts, of which
    170 were 429s that were then retried — so ~852 attempts carried a distinct
@@ -2768,11 +2774,11 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
  * finally the enriched names' own candle year, which is authoritative where
  * it exists. All three are the same close-to-close basis.
  */
-function buildRecordCloses(enriched, universe, datedBoards, sessionDate) {
+export function buildRecordCloses(enriched, universe, datedBoards, sessionDate) {
   const closes = new Map();
   const put = (t, d, c) => {
     const v = num(c);
-    if (!t || !d || !(v > 0)) return;
+    if (!t || !d || d > sessionDate || !(v > 0)) return;
     if (!closes.has(t)) closes.set(t, new Map());
     closes.get(t).set(d, v);
   };
@@ -6725,7 +6731,22 @@ async function main() {
       ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
       datedBoards.map((b) => b.d),
       [sessionDate],
-    ]);
+    ]).filter(d => d <= sessionDate);
+    // Recover outcomes for archived names that today's enrichment no longer sees.
+    // Calendar and selection stay frozen; recovered prices never enter scores.
+    const missingOutcomes = missingOutcomePlan(datedBoards, recordCloses, recordCalendar, RECORD_HORIZONS);
+    const recovery = await recoverOutcomes(missingOutcomes, recordCloses, ticker =>
+      uw(`/api/stock/${ticker}/ohlc/1d`, {
+        timeframe: "1Y", ...(dating.endDate ? { end_date: sessionDate } : {}),
+      }), {
+      cap: 30,
+      allowNext: () => !DRY_RUN && Date.now() < stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS,
+    });
+    const validation = validateRecord(datedBoards, recordCloses, recordCalendar, {
+      horizons: RECORD_HORIZONS, epoch: SELECTION_EPOCH,
+    });
+    validation.outcomeRecovery = recovery;
+    console.log(`  outcome recovery: ${recovery.attempted}/${recovery.needed} names checked, ${recovery.recoveredDates} closes recovered, ${recovery.failed} requests failed`);
     const rec = scoreSessions(datedBoards, recordCloses, recordCalendar, {
       horizons: RECORD_HORIZONS,
       statedK: HORIZON_SESSIONS,
@@ -6737,6 +6758,7 @@ async function main() {
     });
     const features = icTable(datedBoards, recordCloses, recordCalendar, {
       k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
+      epoch: SELECTION_EPOCH,
     });
     await publish("record", {
       v: BOARD_SCHEMA_VERSION,
@@ -6751,11 +6773,13 @@ async function main() {
          distinguishable to anyone holding the payload. */
       archiveFailed, archiveAbsent, archiveRecovered,
       archiveStatuses, archiveAbandoned,
+      validation,
       attrition: RECORD_NOTES.attrition,
       epochNote: RECORD_NOTES.epoch,
       ...rec,
       features: {
         k: features.k,
+        epoch: features.epoch || null,
         minN: features.minN,
         method: RECORD_NOTES.method,
         selection: RECORD_NOTES.selection,
@@ -6981,6 +7005,9 @@ async function main() {
   /* The truncation probe is spent once per run, on the first name that fills
      the page. One call, and it answers the question for all fifty. */
   let chainProbed = false;
+  // Shared allowance: additional pages cannot consume the card reserve.
+  let chainPageCalls = 0;
+  const CHAIN_EXTRA_PAGE_BUDGET = 140;
   const expiriesByTicker = new Map(liquid.map((e) => [e.features.ticker, e.raw.expiries || []]));
 
   /* 7e. THE OPTION CHAIN, ONE CALL PER BOARD NAME.
@@ -7081,7 +7108,20 @@ async function main() {
           }
         }
 
-        let panels = buildChainPanels(rows, {
+        const paged = await readChainPages(rows, (page) =>
+          uw(`/api/stock/${ticker}/option-contracts`, {
+            exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE, page,
+          }), {
+          // Synthetic wide chains deliberately retain the partial-data path.
+          maxPages: DRY_RUN ? 1 : 8,
+          allowNext: () => {
+            if (Date.now() >= chainDeadline || chainPageCalls >= CHAIN_EXTRA_PAGE_BUDGET) return false;
+            chainPageCalls++;
+            return true;
+          },
+        });
+        let panels = buildChainPanels(paged.rows, {
+          chainCoverage: paged.coverage,
           spot: spotByTicker.get(ticker) || null,
           asOf: sessionDate,
           ticker,
@@ -7244,6 +7284,8 @@ async function main() {
         `— within ${CHAIN_RESERVE_MS / 60000}min of the deadline and the cards still need it`);
     }
     const built = [...chainByTicker.entries()].filter(([, c]) => c.status === "ok");
+    console.log(`  chain coverage: ${built.filter(([,c]) => !c.truncated).length}/${built.length} complete filtered books; ${chainPageCalls}/${CHAIN_EXTRA_PAGE_BUDGET} extra pages`);
+    for (const [t,c] of built) if (c.chainCoverage && !c.chainCoverage.complete) console.log(`    chain coverage ${t}: ${c.chainCoverage.reason}, ${c.chainCoverage.uniqueRows} contracts in ${c.chainCoverage.pages} pages`);
     const levelled = built.filter(([, c]) => c.scalars.atmIv !== null).length;
     const skewed = built.filter(([, c]) => c.scalars.skew !== null).length;
     console.log(
@@ -7382,6 +7424,7 @@ async function main() {
         p: c.truncated ? 1 : 0,
         ivDivisor: Number.isFinite(c.ivDivisor) ? c.ivDivisor : null,
         ivBasis: c.ivBasis || null,
+        retrieval: c.chainCoverage || null,
       });
     }
     const namesSeen = coverage.length;
