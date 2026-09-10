@@ -367,8 +367,9 @@ export function briefYesterday(store) {
 
   if (prior === null) {
     silences.push({ kind: "pending", what: "board memory",
-      say: "No previous board was available to compare against, so no name is called new " +
-           "or returning. That is the ordinary state on a first run and after a gap." });
+      say: "This board carries no dated prior-board comparison, so no name is called new " +
+           "or returning here. The score archive on Overview may still carry earlier readings." +
+           (memory && typeof memory.note === "string" ? " " + memory.note : "") });
     return { prior, facts, silences };
   }
 

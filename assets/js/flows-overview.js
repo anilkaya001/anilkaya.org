@@ -400,7 +400,9 @@
     const wrap = tableWrap(label);
     const table = el("table", "cc-tbl");
     table.append(headRow([
-      ["", "cc-rank"], ["Name", null], ["Score", "c-num"], ["Conv", "c-num"],
+      ["", "cc-rank"], ["Name", null],
+      ["Score", "c-num", "Signed attention score on a fixed −100 to +100 scale; not a return forecast."],
+      ["Conv", "c-num", "Conviction measures agreement in the published inputs, not a probability of profit."],
       /* TWO DIFFERENT CHANGES, TWELVE PIXELS APART. This cell is a session
          PRICE return — close over the prior close — and the region seated
          directly above this table is headed "What changed" and carries a
@@ -429,7 +431,18 @@
       tr.append(el("td", "cc-rank", isNum(row.r) === null ? DASH : String(row.r)));
       tr.append(nameCell(row, knowsDeep, earningsMark(row, evBy.get(String(row.t || ""))),
         mv && mv.current && typeof mv.d1.cross === "string" ? mv.d1.cross : null));
-      tr.append(el("td", "c-num cc-score" + tone(row.s), fmtSigned(row.s)));
+      const score = el("td", "c-num cc-score" + tone(row.s), fmtSigned(row.s));
+      const value = isNum(row.s);
+      if (value !== null) {
+        const scale = el("span", "cc-score-scale");
+        scale.setAttribute("aria-hidden", "true");
+        const mark = el("i");
+        mark.style.width = Math.min(50, Math.abs(value) / 2) + "%";
+        mark.style.left = (value < 0 ? 50 - Math.min(50, Math.abs(value) / 2) : 50) + "%";
+        scale.append(mark);
+        score.append(scale);
+      }
+      tr.append(score);
       tr.append(el("td", "c-num", isNum(row.cnv) === null ? DASH : String(Math.round(row.cnv))));
       tr.append(el("td", "c-num" + tone(row.chg), pct(row.chg)));
       tr.append(el("td", "c-num" + tone(row.netPrem), usd(row.netPrem)));
@@ -740,8 +753,29 @@
       return;
     }
 
-    const p = el("p", "cc-quiet cc-lede", lede);
-    into.append(p);
+    // Summarise the measured population visually; retain the full audit text.
+    if (change) {
+      const summary = el("div", "cc-change-summary");
+      const crossings = change.crossings || {};
+      for (const [label, value] of [["Moved", change.moved], ["Cleared", crossings.cleared],
+        ["Faded", crossings.faded], ["Flipped", crossings.flipped]]) {
+        const metric = el("div", "cc-change-metric");
+        metric.append(el("strong", null, isNum(value) === null ? DASH : value));
+        metric.append(el("span", null, label));
+        summary.append(metric);
+      }
+      into.append(summary);
+      into.append(el("p", "cc-quiet", "Compared: " + (isNum(change.comparable) ?? DASH) +
+        " names · " + (isNum(change.consecutive) ?? DASH) + " single-session comparisons. " +
+        "Each row states its comparison span. " +
+        (change.prior && change.session ? change.prior + " → " + change.session + ". " : "") +
+        (band === null ? "Band unavailable." : "Band: ±" + band + " score points.") +
+        (shed ? " " + shed + " counted names omitted from this payload." : "")));
+    }
+    const detail = el("details", "ft-how cc-change-detail");
+    detail.append(el("summary", "ft-how-s", "Comparison scope and methodology"));
+    detail.append(el("p", "cc-quiet cc-lede", lede));
+    into.append(detail);
 
     /* THE MOVERS ON THIS PAYLOAD, not the pooled population the lede states.
        The two are different numbers whenever the row ceiling shed rows, and
@@ -1709,7 +1743,17 @@
         (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
         " no major/minor flag at all, which is not the same as having been flagged not-major.");
     }
-    into.append(el("p", "cc-quiet cc-nw-note", said.join(" ")));
+    const cadence = typeof payload.cadence === "string" && /morning/i.test(payload.cadence)
+      ? "Morning snapshot" : "Snapshot; cadence not specified";
+    const coverage = [readAge ? "Fetched " + readAge : "Fetch age unknown", cadence];
+    if (payload.atVendorLimit === true) coverage.push("Vendor ceiling reached; total unknown");
+    if (payload.capped === true && shed > 0) coverage.push(shed + " received rows omitted");
+    if (undatedKept > 0) coverage.push(undatedKept + " undated rows");
+    into.append(el("p", "cc-quiet cc-news-status", coverage.join(" · ")));
+    const newsDetail = el("details", "ft-how");
+    newsDetail.append(el("summary", "ft-how-s", "News freshness and coverage"));
+    newsDetail.append(el("p", "cc-quiet cc-nw-note", said.join(" ")));
+    into.append(newsDetail);
 
     const list = el("ul", "cc-nw");
     for (const row of rows.slice(0, LIST_MAX)) {
@@ -2153,7 +2197,7 @@
      rule the two boards were exempt from. */
   function loadBoard(side) {
     return fetch("/api/flows/board?side=" + side, {
-      credentials: "same-origin", headers: { Accept: "application/json" },
+      credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" },
     }).then((r) => {
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
       if (!r.ok) return null;
@@ -2162,7 +2206,7 @@
   }
 
   function loadRegion(path) {
-    return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
+    return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } })
       .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body)) : null))
       .catch(() => null);
   }
