@@ -19,7 +19,7 @@
    tests/flows-weight.mjs prints — one file measured once reads as
    one number in both places. On all twelve dock routes it would
    break every ceiling; the widest headroom of the twelve is side's
-   15k. flows-weight measures what a route loads ON ARRIVAL, so the
+   14k. flows-weight measures what a route loads ON ARRIVAL, so the
    deferred 94k is absent there: a real cost, paid on open, said here
    rather than left to look free.
 

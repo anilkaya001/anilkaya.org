@@ -16,6 +16,12 @@
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
   const viewButtons = Array.from(document.querySelectorAll(".flows-view"));
+  /* How many cards get their own step in the entrance stagger before the rest
+     share the last one. Ten steps at the stylesheet's --stagger is 260ms of
+     lead-in, which is one --dur-open — long enough to read as sequence, short
+     enough that nobody waits for the board. */
+  const ARRIVE_STEPS = 10;
+
   const deck = document.getElementById("flowsDeck");
   const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl) return;
@@ -644,6 +650,16 @@
     card.className = deep ? "fd-card" : "fd-card fd-flat";
     card.setAttribute("role", "listitem");
     if (deep) card.href = readerHref(row.t);
+
+    /* WHERE THIS CARD SITS IN THE ARRIVAL, and the clamp is the whole point.
+       flows.css staggers the entrance by --i, and an unclamped index on a
+       fifty-name board would start the last card 1.3s after the first — a
+       reader watching the interface rather than reading it. Past ARRIVE_STEPS
+       every remaining card shares the final delay and lands together, so the
+       board is always complete within one bounded window regardless of how
+       many names the run published. The cap lives here rather than in the
+       stylesheet because CSS cannot clamp a value it does not compute. */
+    card.style.setProperty("--i", String(Math.min(index, ARRIVE_STEPS)));
 
     const score = isNum(row.s);
 

@@ -166,6 +166,75 @@
     radial-gradient(62% 48% at 8% 0%, rgba(155, 196, 210, 0.06), transparent 70%),
     radial-gradient(62% 48% at 92% 100%, rgba(201, 168, 120, 0.06), transparent 70%),
     linear-gradient(180deg, #121214 0%, #141312 38%, #131110 62%, #12100d 100%);
+
+  /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
+
+     THIS SECTION HAD NO MOTION SYSTEM, IT HAD FOURTEEN OPINIONS. Before this
+     block `assets/css/flows.css` carried fourteen `transition` declarations
+     between them naming SIX different durations — 120ms, 160ms, 0.2s and
+     three more in the dock — and four separate `prefers-reduced-motion`
+     blocks, each responsible for remembering to stand down the rules near it.
+     The note on `.fd-card` two thousand lines below records what that costs:
+     the deck card carried a hover transform for two years that the early
+     reduced-motion block could not reach, and it "reads as handled" while
+     doing nothing. Six durations is not a system either — it is what happens
+     when each rule picks a number at the moment it is written, and a reader
+     feels the inconsistency as cheapness without being able to name it.
+
+     SO THE DURATIONS ARE TOKENS AND THE PREFERENCE ZEROES THE TOKENS, which
+     is the same correctness argument the glass hatch above makes at length: a
+     custom property is resolved on the element that uses it, so a `:root`
+     override reaches a rule five thousand lines away that a selector override
+     at the top of the file cannot. A block of tokens cannot be out-ordered.
+
+     THE FOUR BANDS ARE PERCEPTUAL, NOT AESTHETIC, and each is named for what
+     it is allowed to move rather than for how long it takes — a rule that
+     says `var(--dur-open)` has to argue that it is opening something.
+
+       --dur-tap    A state echoing the pointer: a colour, a border, an
+                    opacity. Deliberately under the ~100ms at which a change
+                    stops reading as a response and starts reading as an
+                    animation. The reader should feel the surface answer, not
+                    watch it.
+       --dur-move   An element changing position or size. Long enough that the
+                    eye tracks one object moving instead of seeing two states.
+       --dur-open   A REGION changing — a panel, a drawer, the dock. Longer
+                    because there is more to follow, and capped well under the
+                    point at which a reader starts waiting for the interface
+                    rather than reading it.
+       --dur-enter  First arrival only, and the only band above a quarter of a
+                    second. It is spent once per element per page.
+
+     `--stagger` IS BOUNDED BY ITS OWN WORST CASE. A board draws up to fifty
+     cards; at 26ms each, the fiftieth would arrive 1.3s after the first, which
+     is a reader waiting. `.fd-card` therefore caps the index it staggers on
+     (see `--i`), so the arrival always completes inside --dur-enter plus ten
+     steps no matter how long the board is.
+
+     TWO EASES, BECAUSE ARRIVING AND LEAVING ARE NOT THE SAME EVENT. A thing
+     that comes to rest decelerates hard and settles; a thing that leaves
+     should get out of the way and not be watched. `--ease` in base.css is the
+     symmetric curve for the things that do neither — a colour, a filter.
+
+     `--lift` AND `--rise` ARE DISPLACEMENTS, held here so the preference can
+     zero the DISTANCE as well as the duration. A lift that happens in zero
+     seconds is still a lift; a reader who asked for no motion is asking about
+     the movement, not about its schedule.
+
+     `--decor` IS A SWITCH AND NOT A DURATION. The pointer-following spotlight
+     carries no information (the `.fd-card::after` note says so), so under a
+     reduced-motion preference the honest answer is not to draw it faster but
+     not to draw it. */
+  --dur-tap:   90ms;
+  --dur-move:  170ms;
+  --dur-open:  260ms;
+  --dur-enter: 420ms;
+  --stagger:    26ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.30, 1);
+  --ease-in:  cubic-bezier(0.55, 0, 1, 0.45);
+  --lift: -2px;
+  --rise:  6px;
+  --decor:   1;
 }
 
 /* ---- THE WAY OUT OF THE GLASS ----
@@ -202,6 +271,39 @@
     --flows-ground:     var(--bg);
     --table-head-glass: var(--bg-deep);
     --glass-edge:       0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+/* ---- THE WAY OUT OF THE MOTION ----
+
+   ONE BLOCK, FOR EVERY ANIMATED RULE IN THIS FILE AND EVERY ONE STILL TO BE
+   WRITTEN. It sets tokens only, for the reason the glass hatch above sets
+   tokens only: a custom property resolves on the element that uses it, so this
+   reaches a `transition` declared five thousand lines below, which a selector
+   here could never do.
+
+   ZEROING A DURATION IS NOT THE WHOLE ANSWER, so the displacements go to zero
+   beside it. `transition: transform 0s` still moves the element — instantly,
+   which is a jump rather than an animation and is not what the preference
+   asked for. `--lift` and `--rise` at 0 mean there is nothing to move.
+
+   AND IT IS THE BELT, NOT THE BRACES. The per-component blocks further down
+   stay: `.fd-card` must compute `transform: none` and not `translateY(0px)`,
+   because the identity transform still promotes a compositing layer and
+   tests/flows-motion.mjs asserts the literal string. A reader who asked for no
+   motion is covered twice over and neither half can leak past the other —
+   which is the same argument that file already makes about the CSS and the JS
+   halves of the spotlight. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-tap:   0s;
+    --dur-move:  0s;
+    --dur-open:  0s;
+    --dur-enter: 0s;
+    --stagger:   0s;
+    --lift: 0px;
+    --rise: 0px;
+    --decor:  0;
   }
 }
 
@@ -313,7 +415,7 @@
   border: 0;
   border-radius: 3px;
   cursor: pointer;
-  transition: filter 0.2s var(--ease);
+  transition: filter var(--dur-tap) var(--ease);
 }
 
 .flows-submit:hover { filter: brightness(1.08); }
@@ -436,7 +538,7 @@
   border: 1px solid var(--hairline);
   border-radius: 999px;
   cursor: pointer;
-  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+  transition: color var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease);
 }
 
 .flows-signout:hover { color: var(--ink); border-color: var(--gold-mystic); }
@@ -474,7 +576,7 @@
   border: 0;
   border-radius: 999px;
   cursor: pointer;
-  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+  transition: color var(--dur-tap) var(--ease), background var(--dur-tap) var(--ease);
 }
 
 .flows-side:hover { color: var(--ink); }
@@ -1736,6 +1838,25 @@ body.is-stale .flows-tablewrap {
      stretches three cards across a 1600px monitor, and a 500px-wide card of
      six numbers is not a card. */
   grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
+  /* EVERY CARD THE SAME SIZE, AND IT IS THE GRID THAT GUARANTEES IT RATHER
+     THAN THE CONTENT HAPPENING TO BE THE SAME LENGTH.
+
+     Grid already equalised cards WITHIN a row — `align-items: stretch` is the
+     default — so a board looked even until the eye crossed a row boundary,
+     where a row containing one card with a memory line stood taller than the
+     row below it. `1fr` on the implicit rows makes every row resolve to the
+     same height: the tallest card on the board sets it, and the other
+     forty-nine match. Nothing is clipped, because the height is DERIVED from
+     the content rather than asserted over it — which is the difference
+     between this and a fixed rem value that is right at one font size.
+
+     THE SLACK COLLECTS ABOVE THE FOOT, not inside the drawing. `.fd-foot`
+     takes `margin-top: auto`, so the extra height a short card gains goes
+     into one gap and the last line of every card sits on the same baseline.
+     Putting it in the sparkline instead would stretch a price series
+     vertically by a different factor on every card, which is a chart lying
+     about its own volatility to satisfy a layout. */
+  grid-auto-rows: 1fr;
   gap: 0.75rem;
   margin: 1.1rem 0 0;
 }
@@ -1758,7 +1879,9 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
   box-shadow: var(--glass-edge), var(--shadow-card);
-  transition: border-color 120ms ease, transform 120ms ease, box-shadow 160ms ease;
+  transition: border-color var(--dur-tap) var(--ease),
+              transform var(--dur-move) var(--ease-out),
+              box-shadow var(--dur-move) var(--ease-out);
 }
 
 /* THE CURSOR SPOTLIGHT.
@@ -1780,7 +1903,7 @@ body.is-stale .flows-tablewrap {
   border-radius: inherit;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 160ms var(--ease);
+  transition: opacity var(--dur-move) var(--ease);
   background: radial-gradient(
     16rem 12rem at calc(var(--mx, 50) * 1%) calc(var(--my, 50) * 1%),
     color-mix(in srgb, var(--gold-mystic) 13%, transparent),
@@ -1789,11 +1912,43 @@ body.is-stale .flows-tablewrap {
 
 .fd-card:hover {
   border-color: color-mix(in srgb, var(--gold-mystic) 55%, var(--panel-border));
-  transform: translateY(-2px);
+  /* THE DISTANCE IS A TOKEN so the preference can zero the MOVEMENT and not
+     merely its schedule. The block below still says `transform: none` outright
+     — see its note for why an identity matrix is not good enough. */
+  transform: translateY(var(--lift));
   box-shadow: 0 12px 30px rgba(6, 6, 4, 0.5);
 }
-.fd-card:hover::after { opacity: 1; }
+/* Decoration, and --decor is a switch rather than a duration: a reader who
+   declined motion is not asking for a faster spotlight. */
+.fd-card:hover::after { opacity: var(--decor); }
 .fd-card:focus-visible { outline: 2px solid var(--gold-mystic); outline-offset: 2px; }
+
+/* THE ARRIVAL, AND WHY A BOARD IS THE ONE PLACE A STAGGER EARNS ITS KEEP.
+
+   Fifty cards appearing at once is a wall a reader has to find their way into;
+   the same fifty arriving in reading order hand the eye a starting point and a
+   direction, which is the entire job of the first half-second. It is opacity
+   and transform only — both composited, neither touching layout — so the
+   stagger costs no reflow however long the board is.
+
+   THE INDEX IS CAPPED BY THE RENDERER, NOT BY THIS RULE, and the cap is the
+   difference between choreography and a wait. Ungated, the fiftieth card of a
+   fifty-name board would start 1.3s after the first at --stagger, which is a
+   reader watching an interface instead of reading one. assets/js/flows-board.js
+   clamps `--i` (see its note), so the whole board has arrived inside
+   --dur-enter plus ten steps no matter how many names the run published.
+
+   `backwards` IS LOAD-BEARING. Without it a card with a delay is painted in
+   its FINAL state for the length of that delay and then jumps back to the
+   start to animate — the flash this rule exists to avoid. */
+@keyframes fd-arrive {
+  from { opacity: 0; transform: translateY(var(--rise)); }
+  to   { opacity: 1; transform: none; }
+}
+.fd-card {
+  animation: fd-arrive var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
 
 /* A ROW WITH NO DETAIL CARD.
 
@@ -1857,7 +2012,16 @@ body.is-stale .flows-tablewrap {
    Hiding the layer is the belt to that braces: neither half can leak past
    the other. */
 @media (prefers-reduced-motion: reduce) {
-  .fd-card { transition: none; }
+  /* `transition: none` AND NOT A ZEROED TOKEN, because the assertion this
+     answers reads the computed string. The token block at the top of the file
+     already takes every duration to 0s; a three-property shorthand built from
+     them computes `transitionDuration: "0s, 0s, 0s"`, which is the same
+     behaviour and a different string, and tests/flows-motion.mjs pins the
+     literal. Same reasoning one line down: `translateY(0px)` computes to an
+     identity matrix rather than to `none`, and an identity transform still
+     promotes the card to its own compositing layer — so the distance being
+     zero is not the same as there being no transform. */
+  .fd-card { transition: none; animation: none; }
   .fd-card:hover { transform: none; box-shadow: var(--shadow-card); }
   .fd-card::after { display: none; }
 }
@@ -1973,6 +2137,10 @@ body.is-stale .flows-tablewrap {
    last one past the padding rather than wrapping. Measured at 390px: the
    regime label lost its glyph. Wrapping is the honest failure mode. */
 .fd-foot {
+  /* Where the extra height of a short card goes. See .flows-deck's
+     grid-auto-rows note: one gap grows, and every card's last line lands on
+     the same baseline as its neighbours'. */
+  margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -2132,7 +2300,7 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--hairline);
   background: var(--flow-surface);
   color: var(--ink-dim);
-  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+  transition: color var(--dur-tap) var(--ease), background var(--dur-tap) var(--ease);
 }
 
 .desk-add {
@@ -3720,7 +3888,8 @@ body.is-stale .flows-tablewrap {
 /* --- pointer response (decoration only) ------------------------------ */
 .ft-panel {
   position: relative;
-  transition: border-color 120ms ease, box-shadow 160ms ease;
+  transition: border-color var(--dur-tap) var(--ease),
+              box-shadow var(--dur-move) var(--ease-out);
 }
 .ft-panel:hover {
   border-color: color-mix(in srgb, var(--gold-mystic) 55%, var(--panel-border));
@@ -3728,7 +3897,7 @@ body.is-stale .flows-tablewrap {
 }
 .ft-panel::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit;
-  pointer-events: none; opacity: 0; transition: opacity 160ms var(--ease);
+  pointer-events: none; opacity: 0; transition: opacity var(--dur-move) var(--ease);
   background: radial-gradient(16rem 12rem at calc(var(--mx, 50) * 1%) calc(var(--my, 50) * 1%),
     color-mix(in srgb, var(--gold-mystic) 13%, transparent), transparent 70%);
 }
@@ -5343,7 +5512,7 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--hairline);
   border-radius: 999px;
   cursor: pointer;
-  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+  transition: color var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease);
 }
 .st-more:hover { color: var(--ink); border-color: var(--gold-mystic); }
 
@@ -7532,7 +7701,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .ak-dock .ak-meter-say { max-width: none; }
 
 @media (prefers-reduced-motion: no-preference) {
-  .ak-dock-panel { transition: transform 160ms var(--ease, ease); }
+  .ak-dock-panel { transition: transform var(--dur-open) var(--ease-out); }
   .ak-dock:not(.is-open) .ak-dock-panel { transform: translateX(100%); }
 }
 
