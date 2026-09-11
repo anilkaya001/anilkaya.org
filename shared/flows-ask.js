@@ -1559,7 +1559,54 @@ export function selectFacts(index, question, options) {
    because a fact reading "the median IV rank is 0.31 on a zero-to-one
    scale" hands the model the word and no bare 0, and refusing it
    there would be the guard firing on a faithful restatement. */
-const ZERO_WORD = /\bzero\b/i;
+/* SPELLED-OUT NUMBERS ARE STILL NUMBERS, and this scan knew exactly one of
+   them until a second caller arrived. numeralsIn() is a digit regex, so
+   "three of the five surfaces answered" passed the guard with nothing behind
+   it — the one shape of invented figure the numeral scan is blind to. A
+   two-sentence answer to a typed question rarely spells a count; a summary
+   over thirty-eight facts is exactly where prose reaches for words instead of
+   digits, which is why this had to grow before that lane opened.
+
+   "ONE" IS DELIBERATELY NOT ON THIS LIST, and the omission is the interesting
+   part. It is the only number word that is usually not a number in English —
+   "on the one hand", "the one thing that matters", "no one" — so scanning for
+   it would refuse honest prose far more often than it would catch an invented
+   count. A false refusal is not free: it throws away a good answer and shows
+   the reader the deterministic reading instead. The rest of the list has no
+   such second life; a summary that says "seven" means seven.
+
+   Each word is mapped to its digit form so a fact that writes "12" licenses an
+   answer that writes "twelve" — the fact and the prose are the same claim, and
+   refusing that would be pedantry rather than honesty. */
+const WORD_NUMBERS = new Map([
+  ["zero", "0"], ["two", "2"], ["three", "3"], ["four", "4"], ["five", "5"],
+  ["six", "6"], ["seven", "7"], ["eight", "8"], ["nine", "9"], ["ten", "10"],
+  ["eleven", "11"], ["twelve", "12"], ["thirteen", "13"], ["fourteen", "14"],
+  ["fifteen", "15"], ["sixteen", "16"], ["seventeen", "17"], ["eighteen", "18"],
+  ["nineteen", "19"], ["twenty", "20"], ["thirty", "30"], ["forty", "40"],
+  ["fifty", "50"], ["sixty", "60"], ["seventy", "70"], ["eighty", "80"],
+  ["ninety", "90"],
+]);
+
+/**
+ * The number words an answer uses that no supplied fact supports.
+ *
+ * A word is supported when the fact says it in words, or says the same number
+ * in digits. Both directions matter: the facts are written by the pipeline in
+ * digits and the prose is written by a model in whichever it likes.
+ */
+function unsupportedWordNumbers(text, facts, allowed) {
+  const said = (f) => (f && typeof f.say === "string" ? f.say : "");
+  const out = [];
+  for (const [word, digits] of WORD_NUMBERS) {
+    const re = new RegExp("\\b" + word + "\\b", "i");
+    if (!re.test(text)) continue;
+    if (allowed.has(digits)) continue;
+    if (facts.some((f) => re.test(said(f)))) continue;
+    out.push(word);
+  }
+  return out;
+}
 
 function whitelisted(token, allowSmall) {
   if (/^\d{4}$/.test(token)) {
@@ -1610,11 +1657,10 @@ export function guardAnswer(answer, picked, options) {
     if (whitelisted(token, allowSmall)) continue;
     rejected.push(token);
   }
-  if (ZERO_WORD.test(text) &&
-      !allowed.has("0") &&
-      !facts.some((f) => ZERO_WORD.test(f && typeof f.say === "string" ? f.say : ""))) {
-    rejected.push("zero");
-  }
+  /* "zero" used to be scanned for on its own here; it is now the first entry
+     in WORD_NUMBERS and travels with the rest. The behaviour for that one word
+     is unchanged — same test, same rejected token. */
+  for (const word of unsupportedWordNumbers(text, facts, allowed)) rejected.push(word);
   const invented = rejected.length;
 
   const verbs = text.match(new RegExp(FORECAST.source, "gi")) || [];
@@ -1759,9 +1805,9 @@ export function renderFactsPlain(picked, question) {
        run and this page could not read a word of it. */
     return "No reading this index holds speaks to this question, so there is nothing to " +
       "quote. Whether nothing has been published for this session, whether what was " +
-      "published could not be read, or whether what was measured was empty are three " +
-      "different facts, and this sentence is not where they are told apart — the " +
-      "silences beside it name each surface one at a time. None of the three is a " +
+      "published could not be read, or whether what was measured was empty are " +
+      "different facts from one another, and this sentence is not where they are told apart — the " +
+      "silences beside it name each surface one at a time. None of them is a " +
       "statement about the market.";
   }
 
@@ -1884,4 +1930,139 @@ export function promptFor(picked, question) {
     facts.map((f) => "- " + f.say).join("\n");
 
   return { system, user };
+}
+
+/* =================================================================
+   THE STANDING SUMMARY
+
+   The question box answers what a reader typed. This lane answers the
+   question nobody types — "what does today's board say?" — and it runs
+   without a reader, on the cron, once per set of facts.
+
+   IT NEEDS ITS OWN PROMPT AND ITS OWN FALLBACK, and that is a finding
+   rather than a preference. Both of the existing pair are built around a
+   question, and handed an empty one they do not degrade, they lie:
+   `renderFactsPlain(picked, "")` opens "Nothing in the question matched a
+   name or a topic the published payloads carry", which is false prose for a
+   surface where nobody asked anything, and `promptFor(picked, "")` emits a
+   bare "Question: " and then asks the model to answer it. tickerCoverage is
+   not reused for the same reason: coverage is a claim about a QUESTION, and
+   there is no question here, so there is no name that went unanswered.
+
+   WHAT IS SHARED IS THE PART THAT MATTERS. guardAnswer() takes no question
+   argument and applies unchanged — with `smallIntegers: false`, because the
+   default whitelist passes 1..12 unquoted and a summary over dozens of facts
+   is exactly where an unsupported small count reads as authoritative.
+   ================================================================= */
+
+/**
+ * The prompt for a summary of everything, with no question in it.
+ *
+ * The rules the question lane states are mostly the same here — they are about
+ * what may be written, not about what was asked — minus the two that only mean
+ * something beside a question, and plus one that only means something without
+ * one: a summary CHOOSES what to lead with, and choosing is where a model
+ * reaches for a superlative nobody measured.
+ */
+export function promptForSummary(picked) {
+  const facts = Array.isArray(picked) ? picked : [];
+  const system = [
+    "You write a short standing summary of a stock options briefing using ONLY the " +
+      "facts supplied in the next message. You are the prose; the numbers are already " +
+      "decided. Nobody asked a question: you are summarising what was measured.",
+    "",
+    "1. NEVER write a number that does not already appear, character for character, in " +
+      "one of the supplied facts. Do not add, subtract, total, average, rank, round, " +
+      "convert a ratio into a percentage, or turn a figure into millions. There is no " +
+      "arithmetic you are permitted to do — and that includes COUNTING the facts " +
+      "themselves. How many readings there are is not one of the readings.",
+    "2. NEVER say what the market is going to do. No prediction, no expectation, no " +
+      "likelihood. The facts are measurements and calendar entries that already exist.",
+    "3. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS and may never be merged into " +
+      "one sentence. PENDING means the payload has not been published for this session. " +
+      "UNREADABLE means it was published and could not be read, which is a fault on our " +
+      "side rather than a fact about the session. QUIET means it was measured and holds " +
+      "nothing, which is a reading in its own right. UNAVAILABLE means the payload was " +
+      "published and this reading is not on it. Never summarise a market as quiet when " +
+      "the truth is that a job has not run.",
+    "4. UNITS TRAVEL WITH NUMBERS. A ratio and a dollar sum are not interchangeable; " +
+      "quote the unit the fact itself uses, in the fact's own words.",
+    "5. A capped list is not a population. If a fact says a count was capped or came " +
+      "back at a vendor's limit, keep that qualification.",
+    "6. YOU ARE CHOOSING WHAT TO LEAD WITH, AND THAT IS THE ONE THING THIS TASK ASKS " +
+      "OF YOU THAT THE FACTS DO NOT DECIDE. Lead with what a reader would want first. " +
+      "But never call a reading the largest, the biggest, the most unusual or a record " +
+      "unless a supplied fact says so in those words — a superlative is a claim about " +
+      "every reading you were NOT given.",
+    "7. Name the symbol a reading belongs to. A market-wide figure is not a reading for " +
+      "one name, and attaching it to one is the same as inventing it.",
+    "",
+    "Write three or four plain sentences. No lists, no headings, no markdown, no " +
+      "preamble such as \"here is a summary\", and do not refer to the facts by number " +
+      "or position.",
+  ].join("\n");
+
+  const user = "Facts measured for this session:\n" +
+    facts.map((f) => "- " + f.say).join("\n");
+
+  return { system, user };
+}
+
+/**
+ * The summary that ships when no model was reached, when the day's allowance
+ * is spent, or when the guard refused the wording.
+ *
+ * IT IS A REAL SUMMARY, NOT AN ERROR, for the same reason renderFactsPlain is
+ * a real answer: every figure below it was measured by the pipeline and is
+ * worth the same whether or not a model ever phrased it. The only thing the
+ * reader loses is the prose.
+ */
+export function renderSummaryPlain(picked) {
+  const facts = Array.isArray(picked) ? picked : [];
+  if (!facts.length) {
+    /* WHICH SILENCE THIS IS, THIS FUNCTION CANNOT KNOW — it is handed facts
+       and never the store — so it names the three and asserts none, exactly
+       as renderFactsPlain does for the question lane. */
+    return "No readings are in hand for this session, so there is nothing to summarise. " +
+      "Whether nothing has been published, whether what was published could not be " +
+      "read, or whether what was measured was empty are different facts from one " +
+      "another, and this sentence is not where they are told apart. None of them is a " +
+      "statement about the market.";
+  }
+  return "The readings below were measured by the pipeline for this session and are " +
+    "shown as they were published. The sentence that usually stands here is written " +
+    "by a model over them, and on this session there is none to show — every figure " +
+    "below is the pipeline's own either way.";
+}
+
+/**
+ * What this summary is a summary OF — a fingerprint of the facts themselves.
+ *
+ * THE CRON FIRES 96 TIMES A DAY AND THE FACTS CHANGE ONCE. The briefing is
+ * published once a weekday and the intraday refresh never rewrites that key,
+ * so a summary regenerated on every firing would spend ninety-six times what
+ * it needs to AND hand two readers of the same board two different sentences
+ * about it. Fingerprinting the facts — not the clock, not the session date —
+ * makes the spend proportional to what actually changed and makes the summary
+ * stable for exactly as long as the thing it describes is.
+ *
+ * It is built from the `say` strings because those ARE the facts as the model
+ * receives them: two payloads differing only in a field no fact quotes produce
+ * the same prompt, and re-running the model on them would buy nothing.
+ *
+ * djb2 rather than a crypto hash: this is a cache key and not a signature, and
+ * a cron invocation's CPU budget is measured in milliseconds. The fact COUNT
+ * is appended because a hash alone cannot distinguish a collision from a
+ * match, and the count is free.
+ */
+export function summaryFingerprint(picked) {
+  const facts = Array.isArray(picked) ? picked : [];
+  /* U+001F UNIT SEPARATOR: a joiner that cannot occur inside a `say` string,
+     so two different fact lists can never join to the same input. */
+  const joined = facts
+    .map((f) => (f && typeof f.say === "string" ? f.say : ""))
+    .join("");
+  let h = 5381;
+  for (let i = 0; i < joined.length; i++) h = (((h << 5) + h) ^ joined.charCodeAt(i)) >>> 0;
+  return h.toString(36) + "." + facts.length;
 }

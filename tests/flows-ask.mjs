@@ -29,7 +29,8 @@
 
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
-         tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS }
+         tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
+         promptForSummary, renderSummaryPlain, summaryFingerprint }
   from "../shared/flows-ask.js";
 
 let checks = 0;
@@ -2130,3 +2131,99 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `about the briefing for the mount they are drawn on, opens the docked rail onto three ` +
   `examples built from names a payload named rather than onto a folded guarantee, and ` +
   `reads the name of the page it is docked to off that page's own URL`);
+
+/* ---------- the standing summary ---------------------------------
+
+   The question box answers what a reader typed. This lane answers the
+   question nobody types, on the cron, with no reader present — so every
+   protection the question lane gets from having been ASKED something has to
+   be re-established here from nothing. */
+{
+  const FACTS = [
+    { id: "a", say: "NVDA net gamma is +847,213 contracts for the 2026-09-11 session." },
+    { id: "b", say: "SPY put/call ratio is 0.72, against a 20-day average of 0.91." },
+    { id: "c", say: "The dark-pool surface was quiet: it was measured and holds nothing." },
+  ];
+
+  /* THE EXISTING PAIR CANNOT BE REUSED, and this is why there is a second
+     pair at all rather than a default argument. Handed no question they do
+     not degrade — they assert something false about a question nobody
+     asked. */
+  ok(/question/i.test(renderFactsPlain([], "")),
+     "renderFactsPlain with no question still talks about the question, which is why " +
+     "the summary lane needs its own fallback rather than an empty string");
+  ok(!/question/i.test(renderSummaryPlain([])),
+     "and renderSummaryPlain names no question, because none was asked");
+  ok(!/Question:/.test(promptForSummary(FACTS).user),
+     "promptForSummary emits no empty `Question:` line for a model to answer");
+  ok(promptForSummary(FACTS).user.includes("+847,213"),
+     "and it hands the model the facts verbatim, which is what the guard checks against");
+
+  /* THE FALLBACK PASSES ITS OWN GUARD, the invariant the question lane holds
+     and the one a fallback that violates its own rule would break. Checked on
+     both branches, and with smallIntegers off, which is how the lane calls
+     it. */
+  for (const [label, picked] of [["with nothing in hand", []], ["with facts in hand", FACTS]]) {
+    const verdict = guardAnswer(renderSummaryPlain(picked), picked, { smallIntegers: false });
+    ok(verdict.ok, `the plain summary ${label} passes the guard the model's wording must ` +
+       `pass (refused: ${verdict.rejected.join(", ")})`);
+  }
+
+  /* SPELLED-OUT COUNTS ARE THE HOLE THIS LANE OPENED. numeralsIn is a digit
+     regex, so a summary over dozens of facts could write a count in words and
+     the scan would never see it — the one shape of invented figure that is
+     likelier in a summary than in a two-sentence answer. */
+  const spelled = guardAnswer("Three of the surfaces answered this session.", FACTS,
+                              { smallIntegers: false });
+  ok(!spelled.ok && spelled.rejected.includes("three"),
+     "a count spelled in words is refused when no fact supports it, exactly as the same " +
+     "count in digits would be");
+  ok(spelled.invented === true,
+     "and it is reported as an invented figure rather than as a claim about the future");
+
+  const digitBacked = guardAnswer("The ratio is 0.72 against a 20-day average.", FACTS,
+                                  { smallIntegers: false });
+  ok(digitBacked.ok, "a figure quoted from a fact still passes");
+
+  const wordFromDigits = guardAnswer("The average covers twenty days.", FACTS,
+                                     { smallIntegers: false });
+  ok(wordFromDigits.ok,
+     "and a fact written in digits licenses the same number written in words — `20` in a " +
+     "fact and `twenty` in the prose are one claim, and refusing that would be pedantry " +
+     "rather than honesty");
+
+  /* "ONE" IS DELIBERATELY NOT SCANNED. It is the only number word that is
+     usually not a number in English, so scanning it would refuse honest prose
+     far more often than it would catch an invented count — and a false
+     refusal throws away a good answer. */
+  ok(guardAnswer("The one reading that matters is NVDA's.", FACTS, { smallIntegers: false }).ok,
+     "`one` is not scanned, because it is a pronoun at least as often as it is a count");
+
+  /* THE SMALL-INTEGER WHITELIST IS OFF FOR THIS LANE, and the default proves
+     it had to be: 1..12 pass unquoted by default, which is precisely the
+     range a summary's invented counts live in. */
+  ok(guardAnswer("There are 3 surfaces.", FACTS).ok,
+     "the default whitelist lets a bare small integer through");
+  ok(!guardAnswer("There are 3 surfaces.", FACTS, { smallIntegers: false }).ok,
+     "and the summary lane turns it off, because an unsupported small count in a summary " +
+     "reads as authoritative");
+
+  /* THE FINGERPRINT IS WHAT MAKES THE LANE CHEAP. The cron fires 96 times a
+     day and the facts change once; a summary keyed on the clock would spend
+     ninety-six times what it needs and hand two readers of the same board two
+     different sentences about it. */
+  eq(summaryFingerprint(FACTS), summaryFingerprint(FACTS.slice()),
+     "the same facts fingerprint the same, so a firing that changed nothing spends nothing");
+  ok(summaryFingerprint(FACTS) !== summaryFingerprint(FACTS.slice(0, 2)),
+     "a fact dropping out moves it");
+  ok(summaryFingerprint(FACTS) !== summaryFingerprint(
+       [FACTS[0], { id: "b", say: "SPY put/call ratio is 0.73, against a 20-day average of 0.91." }, FACTS[2]]),
+     "and so does a figure changing inside one, which is the case the clock would miss");
+  ok(summaryFingerprint([]) !== summaryFingerprint(FACTS),
+     "an empty session is not the same fingerprint as a full one");
+  /* ORDER IS PART OF THE IDENTITY: the facts reach the model as an ordered
+     list and the lead sentence is chosen from the top of it, so two orderings
+     are two different prompts. */
+  ok(summaryFingerprint(FACTS) !== summaryFingerprint([FACTS[2], FACTS[1], FACTS[0]]),
+     "and re-ordering the same facts is a different prompt, so it is a different fingerprint");
+}
