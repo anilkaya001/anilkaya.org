@@ -36,7 +36,7 @@
      printout, so freshness cannot be a tint. The glyph sits at the front of
      the filing-date cell — the same place on every row it appears on, absent
      everywhere else — and carries a title naming the date it means. */
-  var FRESH = "◆";
+  var FRESH = "•";
 
   /* Normalise a symbol the way the card store keys it.
 

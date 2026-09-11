@@ -1088,10 +1088,10 @@ try {
        `key statistics draws its rows rather than a pending note (${r ? Object.keys(r).length : 0})`);
     eq(r.Spot.text, "$100.00", `spot is this card's spot (${r.Spot.text})`);
     eq(r.ATR.text, "$2.50", `the ATR is this card's (${r.ATR.text})`);
-    eq(r["Max pain"].text, "$105.00 · +2.00\u03c3",
+    eq(r["Max pain"].text, "$105.00 · +2.00 ATR",
        `a wall carries its price AND its distance in ATR, the unit that compares ` +
        `across names where a percentage does not (${r["Max pain"].text})`);
-    eq(r["Put wall"].text, "$90.00 · \u22124.00\u03c3",
+    eq(r["Put wall"].text, "$90.00 · \u22124.00 ATR",
        `and a wall below spot is signed (${r["Put wall"].text})`);
     eq(r["Gamma flip"].text, "$101.25", `the flip when it is published (${r["Gamma flip"].text})`);
     eq(r["Priced move"].text, "\u00b17.3%", `the priced move (${r["Priced move"].text})`);
@@ -1510,7 +1510,13 @@ try {
        not fixed. */
     const bad = await page.evaluate(() => {
       const out = [];
-      const numeric = /^[−+-]?[\d.,]+\s*[%σd]?$/;
+      /* THE UNIT ALTERNATION IS WIDENED, NOT LEFT TO ROT. This read
+         `[%σd]?` — one optional character — and the ATR-normalised
+         distances it was written to cover now print "2.00 ATR" rather
+         than "2.00σ". A stale pattern here does not fail: the strings
+         simply stop matching, `continue` skips them, and the hyphen
+         check quietly covers fewer cells than its name claims. */
+      const numeric = /^[−+-]?[\d.,]+\s*(?:%|d|ATR|SD)?$/;
       const nodes = [...document.querySelectorAll(".ft-panel .c-num, .ft-panel .fc-reading"),
                      ...document.querySelectorAll(".ft-panel svg text")];
       for (const n of nodes) {
@@ -3333,7 +3339,7 @@ try {
       ok(fg.flip && /to flip/.test(fg.flip.text),
          "and names what the distance is TO — a signed percent alone, in a header of " +
          "prices and score points, does not say which of them it is measured against");
-      ok(fg.flip && /\+2\.00σ/.test(fg.flip.text),
+      ok(fg.flip && /\+2\.00 ATR/.test(fg.flip.text),
          `and carries the same distance in this name's own ATR (${fg.flip && fg.flip.text}), ` +
          "which is the figure that compares across names: 4% is a routine day in one book " +
          "and a three-sigma move in another");

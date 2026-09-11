@@ -1249,8 +1249,12 @@ try {
     ok(/How this profile was drawn/.test(gr.two.howSummary),
        `the disclosure names what is under it ("${gr.two.howSummary.trim()}") — a summary ` +
        "that says nothing is a click a reader will not spend");
-    ok(/normalised separately from the bars/.test(gr.two.all) && /is ATR\(14\)/.test(gr.two.all),
-       "and the curve-scale and sigma sentences survived the move too, in full");
+    /* "Distances are in ATR(14)" was "σ is ATR(14)" until the section became
+       one typeface. Latin Modern does not draw σ, so the unit is spelled now
+       — see flows-panels.js's atrDist. The sentence still has to survive the
+       fold, which is what this asserts; only the wording it looks for moved. */
+    ok(/normalised separately from the bars/.test(gr.two.all) && /Distances are in ATR\(14\)/.test(gr.two.all),
+       "and the curve-scale and unit sentences survived the move too, in full");
 
     /* A DOOR THAT LOOKS LIKE ONE. The marker, pointer and focus ring live in
        flows.css under bare `.ft-how-s` selectors, so a panel inherits them

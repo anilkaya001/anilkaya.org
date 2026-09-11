@@ -362,7 +362,7 @@
   /**
    * WHERE THIS NAME WAS YESTERDAY, in a glyph and a number.
    *
-   * SIGN IN POSITION AND GLYPH, NEVER IN HUE: ▲/▼ carry the direction and the
+   * SIGN IN POSITION AND GLYPH, NEVER IN HUE: ↑/↓ carry the direction and the
    * digits carry the size, so the mark survives greyscale, a monochrome
    * printout and every form of colour blindness. The class is confirmation
    * for everyone else, never the carrier.
@@ -394,11 +394,11 @@
     const now = isNum(row.r);
     const ends = from !== null && now !== null ? ", from rank " + from + " to rank " + now : "";
     if (dr > 0) {
-      return { cls: "fb-mem is-up", glyph: "▲" + dr,
+      return { cls: "fb-mem is-up", glyph: "↑" + dr,
                say: "climbed " + places(dr) + " since " + comparand() + ends };
     }
     if (dr < 0) {
-      return { cls: "fb-mem is-down", glyph: "▼" + Math.abs(dr),
+      return { cls: "fb-mem is-down", glyph: "↓" + Math.abs(dr),
                say: "fell " + places(Math.abs(dr)) + " since " + comparand() + ends };
     }
     return { cls: "fb-mem is-same", glyph: "=",
@@ -445,8 +445,8 @@
 
   /* A mark as a DOM node. role="img" plus aria-label, the same pattern the
      family glyph already uses: the glyph is a picture to a screen reader and
-     the words are the accessible name, so "▲7" is never announced as "black
-     up-pointing triangle seven" and never announced as nothing. */
+     the words are the accessible name, so "↑7" is never announced as
+     "upwards arrow seven" and never announced as nothing. */
   function markNode(mark) {
     const span = document.createElement("span");
     span.className = mark.cls;

@@ -9,50 +9,66 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=136") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=136") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=136") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=136") format("woff2");
 }
 
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
 
-   THE NUMBERS ON THIS SITE ARE A TABLE EVEN WHEN THEY ARE NOT IN ONE. The
+   THIS IS THE ACADEMY'S FACE NOW, NOT THE SITE'S. It was both until Flows
+   moved to one family: assets/css/flows.css defines --font-figure as Latin
+   Modern and its 158 rules resolve there, so nothing under /flows/ reaches
+   --font-mono any more (tests/contracts.mjs asserts that it cannot). What
+   still does: lab.css, article.css, placement.css and review.css. Scoping
+   the claim is the point — a comment that says "this site" about two
+   sections when it is true of one is the kind of sentence this repository
+   treats as a defect, and the token below is still named for the job it does
+   HERE.
+
+   THE NUMBERS IN THE ACADEMY ARE A TABLE EVEN WHEN THEY ARE NOT IN ONE. The
    system mono stack resolves to a different face on every platform, so a
    column of figures that lines up on one machine wanders on the next, and the
    axis labels the charts size their margins against are measured from a font
    the measuring code has never seen. Self-hosting fixes the width to one
-   known number: 0.6 em per character, everywhere.
+   known number: 0.6 em per character, everywhere. (Flows keeps the same
+   guarantee by a different route: Latin Modern's digits are tabular WITHIN a
+   weight — measured 0.500 em at 400, 0.570 em at 700, spread 0.0000px — so a
+   column there aligns as long as its cells share a weight.)
 
    Two files, not four. The Google build is variable on the weight axis, so
    one file per subset covers the 400 and the 700 this site uses, and
    `font-weight: 100 800` is what tells the browser so. The Greek subset is
-   not decoration: Γ and σ are this section's own notation, and one glyph
+   not decoration, and the notation it serves is the ACADEMY's: σ, β and ε run
+   through the curriculum, and Latin Modern draws none of them. Flows used to
+   need it too, for σ on its ATR-normalised distances; those print "2.00 ATR"
+   now, precisely because Latin Modern does not draw the glyph and one letter
    falling back to the system stack changes width mid-line. */
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=136") format("woff2");
   /* The latin range carries U+2212 MINUS SIGN, which every negative number on
      this site is written with rather than a hyphen. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -64,7 +80,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=135") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=136") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }

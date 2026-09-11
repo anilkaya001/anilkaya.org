@@ -2,8 +2,8 @@
    flows-drawers.js — the nine panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 111k as
-   measured on 2026-09-09, and deferring it takes the ticker route
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 112k as
+   measured on 2026-09-11, and deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and
@@ -65,7 +65,7 @@
           qualifier,
           quantileAbs,
           quietPanel,
-          sigma,
+          atrDist,
           signed,
           statList,
           svgEl,
@@ -456,7 +456,7 @@
       const lv = (card.panels.levels && card.panels.levels.status === "ok"
         ? card.panels.levels.levels.find((l) => l.kind === "gamma_flip") : null);
       svg.append(plate(y, "Γ₀", px2(flip),
-        lv ? pct(lv.distPct) + " · " + sigma(lv.distAtr) : null, "is-flip"));
+        lv ? pct(lv.distPct) + " · " + atrDist(lv.distAtr) : null, "is-flip"));
     }
 
     /* PRICE TICKS. The labels below are earned rather than gridded, which
@@ -533,8 +533,23 @@
        left the canvas at whichever end lost. The caption is an axis label,
        not plot furniture; it may use the whole canvas, and it drops to a
        short form if even that will not hold it. */
-    const axisLong = "◀ short   net dealer Γ (log scale)   long ▶";
-    const axisShort = "◀ short   Γ, log scale   long ▶";
+    /* ARROWS, NOT TRIANGLES, AND SINGLE SPACES. Two defects sat in these two
+       strings and neither could fail a test.
+
+       U+25C0 and U+25B6 are drawn by NEITHER face this site ships — measured
+       in Chromium against all four Latin Modern faces and both JetBrains
+       subsets — so they have always fallen back to whatever the platform
+       offered, at a width this caption's own estimator could not know. U+2190
+       and U+2192 ARE in Latin Modern (measured present, 1.000 em), say the
+       same thing, and keep the caption inside one face.
+
+       The three-space runs were worse than useless: SVG collapses them to one
+       when it DRAWS, but `.length` counts all three when the line above
+       decides whether the long form fits. The caption was charged for four
+       characters it never rendered and dropped to its short form sooner than
+       it needed to. */
+    const axisLong = "← short · net dealer Γ (log scale) · long →";
+    const axisShort = "← short · Γ, log scale · long →";
     const axisText = axisLong.length * AXIS_CH <= W - 8 ? axisLong : axisShort;
     const axisHalf = (axisText.length * AXIS_CH) / 2;
     const axisX = Math.min(W - 4 - axisHalf, Math.max(4 + axisHalf, x0));
@@ -645,7 +660,7 @@
         "The cumulative curve is normalised separately from the bars — only its ZERO CROSSING " +
         "is comparable to them, which is the flip. Read the curve for shape, not height. The " +
         "at-spot reading is a share of this ladder's peak rather than a dollar figure, which " +
-        "is what makes it comparable across names. σ is ATR(14)." +
+        "is what makes it comparable across names. Distances are in ATR(14)." +
         (panel.bucketed ? ` ${panel.strikes} strikes are aggregated into ${bars.length} bars.` : "")),
     ], "How this profile was drawn");
   }
@@ -719,12 +734,12 @@
        and prose belongs in HTML that reflows. */
     const gapAtr = isNum(panel.gapAtr);
     const cap = svgEl("text", { class: "bd-axis-lab", x: W / 2, y: H - 4, "text-anchor": "middle" });
-    cap.textContent = gapAtr === null ? "gap " + px2(panel.gapPx) : "gap " + sigma(gapAtr);
+    cap.textContent = gapAtr === null ? "gap " + px2(panel.gapPx) : "gap " + atrDist(gapAtr);
     svg.append(cap);
     const reading = gapAtr === null
-      ? "The gap is " + px2(panel.gapPx) + ", with no ATR to state it in, so there is no sigma reading."
+      ? "The gap is " + px2(panel.gapPx) + ", with no ATR to state it in, so there is no normalised reading."
       : "New gamma is building " + (vol >= oi ? "ABOVE" : "BELOW") + " the standing book, " +
-        sigma(gapAtr) + " away from it.";
+        atrDist(gapAtr) + " away from it.";
 
     svg.setAttribute("aria-label",
       `The standing gamma book is centred at ${px2(oi)} and today's traded gamma at ${px2(vol)}` +
@@ -1650,7 +1665,7 @@
       // coloured with the directional palette.
       d.classList.add(l.distPct >= 0 ? "is-above" : "is-below");
       tr.append(d);
-      tr.append(el("td", "c-num", sigma(l.distAtr)));
+      tr.append(el("td", "c-num", atrDist(l.distAtr)));
       tb.append(tr);
     }
     table.append(tb);
@@ -1671,8 +1686,8 @@
 
     const note = el("p", "fc-note");
     note.textContent = isNum(panel.atr) === null
-      ? "ATR(14) was unavailable, so sigma distances are not shown — a distance in sigma units with no sigma is no number, not a small one."
-      : `Distances are from spot ${px2(panel.spot)}. σ is ATR(14) = ${px2(panel.atr)}, which is what makes a move comparable between a quiet name and a volatile one.`;
+      ? "ATR(14) was unavailable, so normalised distances are not shown — a distance in ATR units with no ATR is no number, not a small one."
+      : `Distances are from spot ${px2(panel.spot)}. One ATR is ATR(14) = ${px2(panel.atr)}, which is what makes a move comparable between a quiet name and a volatile one.`;
     host.append(note);
   }
 

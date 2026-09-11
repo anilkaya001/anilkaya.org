@@ -143,10 +143,24 @@
     return (n < 0 ? MINUS : "") + s + "%";
   }
 
-  function fmtSigmas(v) {
+  /* THE UNIT IS SPELLED, NOT LETTERED — and it is NOT the card's unit.
+     Both surfaces printed "σ" and they were never the same quantity: the
+     card's is ATR(14), a realised range, while this one is
+     `iv * sqrt(days/365)` (shared/flows-premium.js:243) — the standard
+     deviation of the log move the option's OWN implied vol prices over its
+     OWN remaining life. One glyph over two denominators let a reader carry
+     a number from one page to the other, and retiring the glyph is what
+     exposed it. "SD" here, "ATR" there, and the prose beside each still
+     names which.
+
+     The payload's field names (cushionSigmas, capSigmas) are the pipeline's
+     and are NOT renamed: they are what the publisher calls them, and a
+     renderer inventing its own spelling for a published field is how the
+     two stop being greppable together. */
+  function fmtSd(v) {
     const n = isNum(v);
     if (n === null) return DASH;
-    return (n < 0 ? MINUS : "") + Math.abs(n).toFixed(2) + "σ";
+    return (n < 0 ? MINUS : "") + Math.abs(n).toFixed(2) + " SD";
   }
 
   function fmtInt(v) {
@@ -1761,7 +1775,7 @@
        from a line that traded all morning is the same omission as showing a
        cached row as live. Marked, not withheld: it is still the best reading
        available, and hiding it would be the worse lie. */
-    const cushion = cell(fmtSigmas(r.cushionSigmas), "c-num" + (r.ivTraded === false ? " is-stale-iv" : ""));
+    const cushion = cell(fmtSd(r.cushionSigmas), "c-num" + (r.ivTraded === false ? " is-stale-iv" : ""));
     if (r.ivTraded === false) {
       cushion.title = "This contract has not traded today, so its implied volatility is the " +
         "last transaction's — of unknown age. The cushion is as old as that print.";
@@ -1784,7 +1798,7 @@
     if (r.strategy === "cc") {
       if (isNum(r.capSigmas) !== null) {
         called.title = "Called away at " + fmt2(r.strike) + ", the whole position returns " +
-          fmtPct(r.assignedReturn, 1) + ". The market has to run " + fmtSigmas(r.capSigmas) +
+          fmtPct(r.assignedReturn, 1) + ". The market has to run " + fmtSd(r.capSigmas) +
           " — in this option's own implied moves — to get there.";
       }
     } else {
