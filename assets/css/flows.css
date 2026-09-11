@@ -6146,10 +6146,17 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   text-transform: uppercase;
   cursor: help;
 }
+/* THE TICKER TRAILS THE NAME NOW, so the gutter that used to lead is gone.
+   `min-width: 3.2rem` existed to give the leading ticker a fixed column so the
+   sector labels beside it lined up; with the name first the labels align on the
+   cell edge by themselves, and a min-width here would only pad the row's right
+   side. It is a secondary reading in a cell whose primary is the name, so it
+   takes the quiet ink and a size below it. */
 .cc-etf {
-  display: inline-block;
-  min-width: 3.2rem;
-  letter-spacing: 0.04em;
+  margin-left: 0.5rem;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
 }
 /* ONE LINE PER BASKET. "Consumer Discretionary" wrapping turns an eleven-row
    panel into a seventeen-line one and pushes the three numeric columns further
