@@ -28,10 +28,23 @@
      chrome ONLY, so the signed pair no longer has to defer to it and can be
      the loudest thing on the page, which is what a direction column is for.
 
-     Checked against --panel-bg (#100f0b), which is what they now sit on:
-     green #57a866 -> 6.2:1, red #e06a52 -> 5.0:1. Both clear AA for body
-     text. Neither is the saturated #3fb950/#f85149 of a pure terminal clone:
-     those wash out the warm blacks this site is built on.
+     THE TWO FIGURES THAT USED TO BE HERE WERE WRONG, and not stale-wrong —
+     wrong on arrival. This read "green -> 6.2:1, red -> 5.0:1" against
+     --panel-bg #100f0b; re-derived twice independently with the sRGB
+     relative-luminance formula, the same pair measures 6.573 and 5.801. No
+     single backdrop yields both of the old numbers, and git shows they landed
+     in the same commit as --panel-bg itself, so they were never a measurement
+     of anything. Corrected rather than carried forward, with the method named
+     so the next reader can redo it: WCAG 2.x relative luminance,
+     (L1+0.05)/(L2+0.05), sRGB channels linearised before weighting.
+
+       against --panel-bg #100f0b (opaque)   green 6.573   red 5.801
+       against the glass panel at alpha 0.38 green 5.841   red 5.155
+
+     The second row is the one that matters now — see --panel-glass below for
+     why the panel is translucent and what set its alpha. Both clear AA for
+     body text on either ground. Neither is the saturated #3fb950/#f85149 of a
+     pure terminal clone: those wash out the warm blacks this site is built on.
 
      HUE IS STILL THE LAST CHANNEL. Every chart that uses these also carries
      the sign in position or hatch, because a reader who cannot separate them
@@ -84,11 +97,130 @@
      makes the fallback faces above tabular too, on the one path where this
      token does not resolve to Latin Modern at all. */
   --font-figure: "Latin Modern", "Latin Modern Roman", "Times New Roman", Times, serif;
+
+  /* ---- GLASS, AND THE FLOOR THAT SET ITS ALPHA ----
+
+     A translucent panel changes the background every number on it is measured
+     against, so the alpha is DERIVED here rather than chosen by eye. Computed
+     with the same sRGB relative-luminance formula the suite uses, compositing
+     in encoded sRGB because that is what a browser does for `background:
+     rgba(...)` — it blends the 8-bit channels, not the linear-light ones.
+
+     THE BINDING TOKEN IS --ink-faint #8a8571. It is the quietest ink on the
+     page and base.css:89 claims ">=4.5:1 (WCAG AA) on all site surfaces",
+     which is a promise this change could have quietly broken. Everything else
+     clears with room to spare; measured over the worst ground at alpha 0.38:
+     --ink 13.876, --ink-dim 7.980, --flow-up 5.841, --flow-down 5.155,
+     --ink-faint 4.604.
+
+     WHY 0.38 AND NOT REAL GLASS. Over the gradient AS FIRST DRAWN — glows at
+     0.10 on lighter stops — --ink-faint measures 3.279 at alpha 0.05, 3.684 at
+     0.30 and still only 3.840 at 0.38. Every value anyone would call glass
+     fails, and it fails because the GROUND is too light, not because the panel
+     is too thin. So the ground moved: glow alpha 0.10 -> 0.06 and the stops
+     darkened. On that ground 0.30 already clears at 4.515, and 0.38 is chosen
+     over it so the number is not sitting on the line.
+
+     THE GLOWS MUST NOT MEET, and this is the constraint that is invisible in a
+     screenshot. Text on the BARE page under one dimmed glow measures 4.525
+     (cyan) and 4.585 (gold); where the two overlap it is 4.100, which fails.
+     They are bounded to their own corners in .flows-body below. Anyone
+     widening them has to re-derive this or stop using --ink-faint outside a
+     panel.
+
+     backdrop-filter changes DETAIL, not luminance, so it does not enter the
+     arithmetic above — the composite is the whole story for contrast. */
+  --panel-glass:      rgba(13, 12, 9, 0.38);
+  /* THE HEADER CANNOT STAY LIGHTER THAN ITS PANEL. --panel-head #16150f is a
+     step UP from --panel-bg, which reads as a raised band on an opaque card
+     and costs contrast on a translucent one: at 0.38 it lands --ink-faint at
+     4.420, under the floor. Same tint as the panel, division carried by the
+     border-bottom that was always there. */
+  --panel-head-glass: rgba(13, 12, 9, 0.38);
+  /* THE RECESSED STEP IS A TOKEN, NOT A LITERAL, for the same reason the two
+     above are: the preference block below has to be able to reach it. */
+  --panel-recessed:   rgba(13, 12, 9, 0.20);
+  /* AND THE FILTER IS A TOKEN TOO — `none`, not `blur(0px)`. A zero blur still
+     establishes a containing block and still pays for a compositing layer,
+     which is most of what a reader asking for reduced transparency is trying
+     to avoid. */
+  --glass-filter:     blur(18px) saturate(120%);
+  /* A TABLE HEAD ON GLASS CANNOT BE OPAQUE. `.flows-table thead th` painted
+     --bg-deep #060604, which recesses nicely against a solid panel and punches
+     a black hole through a translucent one — the blur stops dead at the band.
+     Measured over the glass panel: --ink-faint reads 5.251 at 0.55 against
+     5.479 fully opaque, so the band recesses just as far and the light still
+     passes. Same token for the hover row, which had the same problem. */
+  --table-head-glass: rgba(6, 6, 4, 0.55);
+  /* THE ONE-PIXEL LIGHT EDGE IS WHAT MAKES GLASS READ AS GLASS. A dark
+     translucent panel on a dark ground is a rectangle of slightly different
+     darkness; the highlight along its top edge is the cue the eye actually
+     uses. It is pure decoration on a 1px line with no text on it, so it costs
+     the contrast floor nothing — and it is deliberately faint enough that
+     nothing reads it as a border, which --panel-border still is. */
+  --glass-edge:       inset 0 1px 0 rgba(236, 232, 216, 0.055);
+  /* The page's own ground, as a token for the same reason — the preference
+     block returns it to the flat --bg. The glows are bounded to opposite
+     corners so they never meet; see .flows-body. */
+  --flows-ground:
+    radial-gradient(62% 48% at 8% 0%, rgba(155, 196, 210, 0.06), transparent 70%),
+    radial-gradient(62% 48% at 92% 100%, rgba(201, 168, 120, 0.06), transparent 70%),
+    linear-gradient(180deg, #121214 0%, #141312 38%, #131110 62%, #12100d 100%);
 }
 
+/* ---- THE WAY OUT OF THE GLASS ----
+
+   Translucency is a preference some readers have told their operating system
+   to turn off, and until now this stylesheet answered none of them: grep finds
+   no `prefers-contrast`, `forced-colors` or `prefers-reduced-transparency`
+   anywhere in the repository. The reduced-motion block further down states the
+   convention this follows — the override sits where the reader can see what it
+   overrides.
+
+   IT REDEFINES TOKENS AND NOTHING ELSE, AND THAT IS A CORRECTNESS POINT
+   RATHER THAN A TIDINESS ONE. The first draft of this block restated the
+   rules — `.fd-card.fd-flat { background: ... }`, `backdrop-filter: none` on
+   three selectors — and a screenshot proved it did not work: this block sits
+   near the top of the file, the glass rules are 700 to 5,700 lines below it,
+   and at equal specificity the LATER rule wins. The panel went opaque (its
+   value travels through a token, which resolves wherever it is used) while
+   the recessed card stayed translucent, which is the ladder inverted again in
+   the one mode a reader chose deliberately. Everything the preference has to
+   change is therefore a token, and this block sets six of them. Do not add a
+   selector here; add a token instead.
+
+   The alphas are the only thing that changes. Every border, dash, shadow and
+   position stays, so the four silences and the recessed step still read
+   exactly as they do with glass on — which is the point of never letting alpha
+   be the only channel. */
+@media (prefers-contrast: more), (prefers-reduced-transparency: reduce) {
+  :root {
+    --panel-glass:      var(--panel-bg);
+    --panel-head-glass: var(--panel-head);
+    --panel-recessed:   color-mix(in srgb, var(--panel-bg) 82%, transparent);
+    --glass-filter:     none;
+    --flows-ground:     var(--bg);
+    --table-head-glass: var(--bg-deep);
+    --glass-edge:       0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+/* THE ATMOSPHERE LIVES HERE, NOT IN --bg. The token stays a flat hex on
+   purpose: tests/flows-ticker-contract.mjs:5117 reads --bg's resolved value and
+   PARSES IT AS HEX to derive the ground its polarity samples are measured
+   against, so a gradient value there yields NaN and strands the whole
+   measurement. Putting the gradient on the body leaves the token a colour and
+   gives the page its light.
+
+   TWO GLOWS, IN OPPOSITE CORNERS, BOUNDED SO THEY NEVER MEET. The radii are
+   not decoration: text on the bare page measures 4.525 under the cyan glow
+   alone and 4.585 under the gold, and 4.100 where the two overlap — which
+   fails AA. 62% of the viewport each, anchored at opposite corners, leaves the
+   middle on the base stops. See the derivation beside --panel-glass. */
 .flows-body {
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--flows-ground);
+  background-attachment: fixed;
 }
 
 .flows-kicker {
@@ -520,13 +652,13 @@
   letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--ink-faint);
-  background: var(--bg-deep);
+  background: var(--table-head-glass);
 }
 
 .flows-table thead abbr { text-decoration: none; border-bottom: 0; cursor: help; }
 
 .flows-table tbody tr:last-child td { border-bottom: 0; }
-.flows-table tbody tr:hover { background: var(--bg-deep); }
+.flows-table tbody tr:hover { background: var(--table-head-glass); }
 
 .c-rank { width: 3rem; }
 
@@ -955,10 +1087,12 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   --panel-pad-x: var(--space-3);
   margin: var(--space-3) 0 0;
   padding: var(--space-2) var(--panel-pad-x) var(--space-3);
-  background: var(--panel-bg);
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--glass-edge), var(--shadow-card);
 }
 
 @media (max-width: 30rem) {
@@ -971,7 +1105,10 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
   padding: var(--space-1) var(--panel-pad-x);
   border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-head);
+  /* The same tint as the panel, not a lighter band — see --panel-head-glass.
+     The border-bottom above was always the real division; it now carries it
+     alone. */
+  background: var(--panel-head-glass);
   border-radius: var(--radius-2) var(--radius-2) 0 0;
   font-family: var(--font-figure);
   font-size: var(--fs-label);
@@ -1615,10 +1752,12 @@ body.is-stale .flows-tablewrap {
   gap: 0.5rem;
   padding: 0.85rem 0.9rem 0.75rem;
   position: relative;                 /* the spotlight layer is absolute inside */
-  background: var(--panel-bg);
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--glass-edge), var(--shadow-card);
   transition: border-color 120ms ease, transform 120ms ease, box-shadow 160ms ease;
 }
 
@@ -1669,10 +1808,27 @@ body.is-stale .flows-tablewrap {
    .fd-flat is a <div>, so :hover, the spotlight and the focus ring never apply
    and none of them need unsetting. The cursor is the one property that has to
    be said, because .fd-card sets `cursor: pointer` on the shared class. */
+/* THE RECESSED STEP HAD TO BE RE-DERIVED, NOT CARRIED OVER. This was
+   `color-mix(--panel-bg 82%, transparent)` — 82% of an OPAQUE token, which
+   recessed the card against its solid neighbours. Against a 0.38 glass panel
+   the same declaration is MORE present than the thing it is supposed to sit
+   below, so the ladder inverted and the silence read as emphasis.
+
+   The ladder, measured over the realistic worst ground (one glow, since the
+   two are bounded apart in .flows-body), all clearing --ink-faint's 4.5:1:
+
+     bare page / a reading-tier panel   alpha 0    4.585
+     recessed, no detail to open        alpha 0.20 4.742   <- this rule
+     a panel with a drawing in it       alpha 0.38 4.882
+
+   The dashed border and box-shadow:none stay exactly as they were: they are
+   the channels that survive greyscale, and tests/flows-motion.mjs separates
+   the six silence kinds on border-style and border-width ALONE. Alpha is the
+   third channel here, never the only one. */
 .fd-card.fd-flat {
   cursor: default;
   border-style: dashed;
-  background: color-mix(in srgb, var(--panel-bg) 82%, transparent);
+  background: var(--panel-recessed);
   box-shadow: none;
 }
 
@@ -5062,7 +5218,7 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--ink-faint);
-  background: var(--bg-deep);
+  background: var(--table-head-glass);
   vertical-align: bottom;
 }
 
@@ -5676,10 +5832,12 @@ body.is-stale .flows-tablewrap {
 /* ---------- a region ---------- */
 
 .cc-region {
-  background: var(--panel-bg);
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--glass-edge), var(--shadow-card);
   padding: 0 0 0.7rem;
   display: flex;
   flex-direction: column;
@@ -5696,7 +5854,7 @@ body.is-stale .flows-tablewrap {
   flex-wrap: wrap;
   padding: 0.45rem 0.85rem;
   border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-head);
+  background: var(--panel-head-glass);
   border-radius: var(--radius-2) var(--radius-2) 0 0;
 }
 .cc-h-t {
@@ -6616,7 +6774,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
   padding: var(--space-1) var(--panel-pad-x);
   border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-head);
+  /* The same tint as the panel, not a lighter band — see --panel-head-glass.
+     The border-bottom above was always the real division; it now carries it
+     alone. */
+  background: var(--panel-head-glass);
   border-radius: var(--radius-2) var(--radius-2) 0 0;
   font-family: var(--font-figure);
   font-size: var(--fs-label);
@@ -7198,7 +7359,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   height: 0.375rem;
   border-radius: var(--radius-1);
   background: var(--bg-deep);
-  border: var(--hairline) solid var(--panel-border);
+  /* --hairline is a COLOUR, and it was sitting in the shorthand's WIDTH slot,
+     which makes the whole declaration invalid — so this element has been
+     painting no border at all rather than the faint one it asks for. */
+  border: 1px solid var(--panel-border);
   overflow: hidden;
   max-width: 62rem;
 }
