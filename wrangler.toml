@@ -28,7 +28,19 @@ database_name = "iewt"
 database_id = "73c8c626-e971-44da-b8c1-21d6062cb9f2"
 migrations_dir = "migrations"
 
-# Workers AI, for the question box at /flows/ask. It is included in the Workers
+# Workers AI, for TWO callers now: the question box at /flows/ask, and the
+# standing summary the scheduled() handler generates. Both write the same
+# flows_ai_usage row, so the meter on the ask page stays a true subtraction of
+# everything this site spent rather than of one route's share — which is what
+# `assumesSoleSpender` claims and would quietly stop being if the second lane
+# kept its own books.
+#
+# THE SECOND CALLER IS GATED ON CONTENT, NOT ON THE CRON. It fires 96 times a
+# day and the briefing it summarises changes once, so 95 of those wakes
+# fingerprint the facts, find them unmoved and spend nothing. Board-wide that
+# is ~21 neurons a day against the allowance below.
+#
+# It is included in the Workers
 # FREE plan: 10,000 Neurons per day, account-wide, reset at 00:00 UTC. Nothing
 # else on this account spends them today, and the route is built so that
 # running out costs a reader the phrasing and not the answer — every figure it
