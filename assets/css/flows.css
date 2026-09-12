@@ -6888,6 +6888,22 @@ body.is-stale .flows-tablewrap {
 .cc-tile-v.is-pos { color: var(--flow-up); }
 .cc-tile-v.is-neg { color: var(--flow-down); }
 .cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
+/* THE DEMOTED READING. Same size as the silence line above it, but it is a
+   figure rather than a sentence, so it takes the tabular figures and can
+   carry a sign-tone of its own — a tile whose value and whose sub disagree in
+   sign is the whole reason both are on screen. */
+.cc-tile-q {
+  font-size: var(--fs-label); color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.cc-tile-q.is-pos  { color: var(--flow-up); }
+.cc-tile-q.is-neg  { color: var(--flow-down); }
+.cc-tile-q.is-flat { color: var(--ink-dim); }
+/* A demoted reading that is SILENT wears the same marks the tile's own
+   silence does, on its own element, so the two kinds stay legible apart. */
+.cc-tile-q[data-empty] { color: var(--ink-faint); }
+.cc-tile-q[data-empty]::before { content: "\2014\00a0"; }
+.cc-tile-q[data-empty="pending"]::before { content: "\2026\00a0"; }
 
 /* THE SHAPE OF THE TILE'S OWN NUMBER. A 100x8 viewBox stretched to the tile
    with preserveAspectRatio:none — the bar carries a proportion, not a length,

@@ -967,7 +967,36 @@ const CEILING_KIB = {
      invented reading. The sparkline carries the direction instead.
 
      207 LEAVES 1,368 B. */
-  overviewPage: 207,
+  /* 207 -> 209, AND THE BYTES ARE A SILENCE THAT WAS NEARLY LOST TWICE.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-ui.js       25,136   flows-overview.js 178,098
+       total            211,801 B = 206.84 KiB, 167 B under 207
+
+     The five-tile strip demotes the equal-weight tilt into the dollar tilt's
+     tile. Demoting a reading is where silences die, and this one nearly died
+     twice in one sitting:
+
+       - FIRST as a bare pct() rendered only when the value was non-null, so
+         unreadable / pending / unavailable / empty all became "no sub-line".
+         CI caught the missing VALUE. It would not have caught the missing
+         silences.
+       - THEN as an `else if` against the tile's own silence span, so on a
+         market key that failed to read — where BOTH tilts are silent — the
+         tile's sentence won and the demoted one was never rendered at all.
+         Two facts shown as one, which is the same collapse in a new place.
+
+     What ships is two slots that are not alternatives: `.cc-tile-s` is the
+     tile's own silence, `.cc-tile-q` is the demoted reading with its own
+     figure, its own sign-tone and its own data-empty. The contract asserts
+     the sub's kind and wording on all four phases, not just the tile's,
+     because the first draft passed every assertion that only looked at the
+     tile.
+
+     209 LEAVES 2,215 B. Deliberately a little wider than this route's last
+     two raises: it is now carrying a second reading per tile and the next
+     edit here should not have to argue for forty bytes. */
+  overviewPage: 209,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

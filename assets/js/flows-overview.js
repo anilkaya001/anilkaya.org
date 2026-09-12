@@ -1043,8 +1043,8 @@
       if (a === null || b === null) return null;
       const whole = a + b;
       if (!(whole > 0)) return null;
-      return Math.round((a / whole) * 100) + "% bull / " +
-        Math.round((b / whole) * 100) + "% bear";
+      return [Math.round((a / whole) * 100) + "% bull / " +
+        Math.round((b / whole) * 100) + "% bear", null, null];
     };
 
     /* THE NEWEST SESSION'S TOTAL, for the Premium tile. Taken off the end of
@@ -1166,22 +1166,31 @@
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
         null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears],
         shareOf(bulls, bears)],
-      /* FIVE TILES, AND THE TWO LEANS ARE ONE TILE NOW — WITHOUT LOSING ONE.
+      /* FIVE TILES, AND THE DEMOTED READING KEEPS EVERYTHING IT HAD.
 
          The target strip reads BREADTH / CLEARED / FLOW BIAS / PREMIUM /
-         FLAGGED: one bias tile and one dollar total. This page had TWO bias
-         tiles, names-weighted and dollars-weighted, and the payload publishes
-         both on purpose — shared/flows-market.js says publishing both is what
-         removes the choice between them. Matching the target by deleting one
-         would have made that choice silently, on the reader's behalf.
+         FLAGGED. This page publishes two tilts — names-weighted and
+         dollars-weighted — and shared/flows-market.js says publishing both is
+         what removes the choice between them, so neither is deleted.
 
-         So the dollar lean takes the tile (it is the one with a history to
-         draw) and the NAME lean moves to its sub-line. Both readings survive,
-         the strip is the target's five, and the two are beside each other
-         where they are actually comparable rather than two cards apart. */
+         THE FIRST ATTEMPT AT THIS FOLD WAS A SILENCE COLLAPSE. The name lean
+         went into the dollar tile's sub-line as a bare `pct(bt, 1)` rendered
+         only when the value was non-null — so unreadable, pending,
+         unavailable and empty all became "no sub-line", four facts flattened
+         into one absence. CI caught the missing VALUE; it would not have
+         caught the missing silences for much longer, which is the worse half,
+         and it is the same defect this branch opened with.
+
+         So the sub-line carries what the tile carried: the figure when there
+         is one, that reading's OWN silence sentence when there is not, its
+         own kind on data-empty for the mark, and its own sign-tone. A
+         qualifier slot that cannot do those three things is not somewhere a
+         reading can be moved to. */
       ["Flow bias", pct(pt, 1), tone(pt), ptSilence,
         daily && daily.lean ? ["spark", daily.lean] : ["signed", pt],
-        bt === null ? null : pct(bt, 1) + " weighting names equally"],
+        bt !== null
+          ? [pct(bt, 1) + " weighting names equally", null, tone(bt)]
+          : (btSilence ? ["Names equally weighted: " + btSilence[1], btSilence[0], null] : null)],
       /* THE DOLLAR TOTAL, FROM THE SERIES THE RING AND THE CHART ALREADY
          READ. `daily.gross` is |callPrem| + |putPrem| a session, built two
          hundred lines up from the same pulse rows paintSplit takes its ring
@@ -1319,8 +1328,21 @@
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
       const bar = silence ? null : viz(spec);
       if (bar) tile.append(bar);
+      /* TWO SLOTS, NOT ONE, AND THEY ARE NOT ALTERNATIVES.
+
+         `.cc-tile-s` is the TILE's own silence. `.cc-tile-q` is a READING
+         that was demoted into this tile and carries its own figure, its own
+         sign and its own silence. An `else if` between them was the second
+         version of the same collapse: on a market key that failed to read,
+         BOTH tilts are silent, the tile's sentence won, and the equal-weight
+         tilt's silence was never rendered at all — two facts shown as one,
+         which is the thing this strip exists to refuse. */
       if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
-      else if (sub) tile.append(el("span", "cc-tile-s", sub));
+      if (sub) {
+        const se = el("span", "cc-tile-q" + (sub[2] || ""), sub[0]);
+        if (sub[1]) se.dataset.empty = sub[1];
+        tile.append(se);
+      }
       into.append(tile);
     }
   }

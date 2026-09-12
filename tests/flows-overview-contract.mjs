@@ -371,10 +371,14 @@ try {
        the landing page showed the opposite sign to /flows/market/ over the
        same payload — and it printed a bounded ratio to four decimals with no
        unit at all. U+2212, not a hyphen, in both. */
-    eq(by["Lean · names"]?.v, "−1.4%",
-       "the equal-weight tilt is a share of names, with its unit");
-    eq(by["Lean · dollars"]?.v, "−2.1%",
-       "and the dollar-weight tilt is a share of premium, on the same tile row");
+    /* THE STRIP IS FIVE TILES NOW, ON AN EXPLICIT DESIGN DIRECTIVE, and the
+       dollar tilt is the one that keeps a tile. The equal-weight tilt is
+       still printed — demoted to that tile's sub-line, not deleted — so both
+       weightings still reach the reader on one screen. */
+    eq(by["Flow bias"]?.v, "−2.1%",
+       "the dollar-weight tilt is a share of premium, with its unit");
+    ok(/−1\.4%/.test(by["Flow bias"]?.q || ""),
+       `and the equal-weight tilt is printed beneath it rather than dropped (${by["Flow bias"]?.q})`);
     /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
 
        Five tiles each carrying a line of definition underneath is a
@@ -385,12 +389,23 @@ try {
        standing when the difference between the two weightings can change a
        reading. Asserted over EVERY tile, not just the two that prompted it,
        so a definition cannot creep back one tile at a time. */
-    eq(tiles.filter((t) => t.s).length, 0,
-       `no tile explains itself while its value is a measurement (${
-         tiles.filter((t) => t.s).map((t) => t.k + ": " + t.s).join(" | ")})`);
-    ok(/is-neg/.test(by["Lean · names"]?.cls || "") &&
-       /is-neg/.test(by["Lean · dollars"]?.cls || ""),
-       `and a sold tape is toned as one on both (${by["Lean · names"]?.cls})`);
+    /* THE RULE IS ABOUT DEFINITIONS, AND IT STANDS. What it forbade was a
+       tile GLOSSING itself — a line of prose under a live number, five of
+       which turn a strip meant to be read at a glance into a paragraph. What
+       sits under these tiles now is not a gloss: it is a second READING, with
+       its own figure, its own sign and its own silence. So the assertion
+       narrows from "no sub-line" to "no sub-line that is prose": every sub
+       under a live value must carry a digit. */
+    const glosses = tiles.filter((t) => t.q && !/\d/.test(t.q));
+    eq(glosses.length, 0,
+       `no tile explains itself in prose while its value is a measurement (${
+         glosses.map((t) => t.k + ": " + t.q).join(" | ")})`);
+    /* BOTH STILL CARRY THEIR OWN SIGN, one on the value and one on the sub —
+       the demotion cost the equal-weight tilt its tile, and it was not
+       allowed to cost it its tone. */
+    ok(/is-neg/.test(by["Flow bias"]?.cls || "") &&
+       /is-neg/.test(by["Flow bias"]?.subCls || ""),
+       `and a sold tape is toned as one on both (${by["Flow bias"]?.cls} / ${by["Flow bias"]?.subCls})`);
     /* AND THE VALUE READS IN ONE DIRECTION. "9 / 12" needed a line
        underneath saying "bull / bear" and could be divided the wrong way
        round by anyone who did not read it; the words are inside the value
@@ -1873,10 +1888,11 @@ try {
         { v: t.querySelector(".cc-tile-v")?.textContent.trim(),
           s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
           cls: t.querySelector(".cc-tile-v")?.className || "" }])));
-    eq(tiles["Lean · names"]?.v, "+5.0%", "both weightings are printed, each as its own share");
-    eq(tiles["Lean · dollars"]?.v, "−3.0%", "so the page cannot show one sign and hide the other");
-    ok(/is-pos/.test(tiles["Lean · names"]?.cls || "") &&
-       /is-neg/.test(tiles["Lean · dollars"]?.cls || ""),
+    eq(tiles["Flow bias"]?.v, "−3.0%", "the dollar weighting is the tile's value");
+    ok(/\+5\.0%/.test(tiles["Flow bias"]?.q || ""),
+       "and the equal weighting is printed beneath it, so the page cannot show one sign and hide the other");
+    ok(/is-neg/.test(tiles["Flow bias"]?.cls || "") &&
+       /is-pos/.test(tiles["Flow bias"]?.subCls || ""),
        "and each carries its own sign in the glyph before any hue is applied");
     /* THE DISAGREEMENT IS SHOWN, NOT ANNOUNCED — and the shape it used to be
        announced in was wrong twice over.
@@ -1889,14 +1905,24 @@ try {
        lost both denominators — the one thing that explains how the same
        ratio can carry two signs.
 
-       What actually communicates it is the thing asserted two lines up: two
-       tiles, side by side, one +5.0% and one −3.0%, each carrying its own
-       sign in the glyph before any hue. A reader who can see both cannot
-       miss that they differ; a sentence saying so is the page narrating its
-       own screenshot. So the assertion is that NEITHER tile grows a
-       sentence, on the one session that used to produce two. */
-    eq((tiles["Lean · names"]?.s || "") + (tiles["Lean · dollars"]?.s || ""), "",
-       "neither tilt narrates the disagreement its own two glyphs already show");
+       What actually communicates it is the thing asserted two lines up: one
+       −3.0% and one +5.0% on the same tile, each carrying its own sign in
+       the glyph before any hue. A reader who can see both cannot miss that
+       they differ; a sentence saying so is the page narrating its own
+       screenshot. So the assertion is that the tile grows no SENTENCE about
+       the disagreement, on the one session that used to produce two.
+
+       AND THIS PARAGRAPH USED TO ARGUE FOR TWO SIBLING TILES, which is worth
+       recording rather than quietly rewriting. Its case was that peers side
+       by side are what make a disagreement unmissable, and that case was
+       sound. It was overridden by an explicit design directive for a
+       five-tile strip — not by a better argument — and what the override had
+       to preserve was carried across deliberately: both figures still on one
+       screen, each still signed, each still carrying its own silence. What
+       it did cost is the peerage, and that is a real cost, stated here so
+       the next reader knows it was paid rather than overlooked. */
+    ok(!/disagree/i.test(tiles["Flow bias"]?.q || ""),
+       "the tilt does not narrate the disagreement its own two glyphs already show");
     await post("market", market);
   }
 
@@ -1920,11 +1946,32 @@ try {
           v: t.querySelector(".cc-tile-v")?.textContent.trim(),
           s: sub ? sub.textContent.trim() : "",
           kind: t.dataset.empty || null,
+          /* THE SUB'S OWN KIND AND CLASSES. A demoted reading lives here and
+             carries its own silence and its own sign — asserting only the
+             TILE's data-empty would have let the name lean lose all four
+             silences without a single assertion noticing, which is exactly
+             what the first draft of that fold did. */
+          /* THE DEMOTED READING IS ITS OWN ELEMENT (.cc-tile-q), never the
+             tile's silence span — reading both off one selector is how the
+             two get conflated, and on a failed key they are both present. */
+          q: t.querySelector(".cc-tile-q")?.textContent.trim() || "",
+          subKind: t.querySelector(".cc-tile-q")?.dataset.empty || null,
+          subCls: t.querySelector(".cc-tile-q")?.className || "",
           mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " + glyph,
         }];
       })));
     const marks = new Map();
-    const TILTS = ["Lean · names", "Lean · dollars"];
+    /* ONE TILE AND ONE SUB-LINE, AND BOTH ARE CHECKED HERE.
+
+       The strip is five tiles now, so the equal-weight tilt lives under the
+       dollar tilt rather than beside it. That demotion is exactly the kind of
+       move that loses silences — the first draft of it rendered the sub only
+       when the value was non-null, which turned four distinct facts into one
+       absent line — so this phase asserts the sub's OWN kind and its OWN
+       wording on every one of the four, not just the tile's. */
+    const TILTS = ["Flow bias"];
+    const subKindOf = (t) => t["Flow bias"]?.subKind || null;
+    const subTextOf = (t) => t["Flow bias"]?.q || "";
 
     /* 1. UNREADABLE: the request did not come back. This page's fault. */
     allowFetchFailure = true;
@@ -1940,6 +1987,11 @@ try {
       ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
          `worded as the fetch silence, never as a reading about the session (${tiles[k]?.s})`);
     }
+    /* AND THE DEMOTED TILT CARRIES THE SAME SILENCE ON ITS OWN SLOT. */
+    eq(subKindOf(tiles), "unreadable",
+       "the equal-weight tilt is marked unreadable on its own sub-line, not merely absent");
+    ok(/could not be read/.test(subTextOf(tiles)),
+       `and worded as the fetch silence there too (${subTextOf(tiles)})`);
     /* THE SCREENED POPULATION LEFT THE STRIP FOR THE CAPTION AND KEPT ALL
        FOUR SILENCES, which is the only reason it is allowed to leave. It
        reads the same keySilence() the three tiles above do, so a market key
@@ -1971,8 +2023,12 @@ try {
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash on an unpublished market key`);
       eq(tiles[k]?.kind, "pending", `and is marked pending (${k})`);
-      eq(tiles[k]?.s, "not published yet", `in the pipeline's own silence (${k})`);
+      ok(/not published yet/.test(tiles[k]?.s), `in the pipeline's own silence (${k})`);
     }
+    eq(subKindOf(tiles), "pending",
+       "and the equal-weight tilt is pending on its own sub-line rather than absent");
+    ok(/not published yet/.test(subTextOf(tiles)),
+       `in the same words (${subTextOf(tiles)})`);
     marks.set("pending", tiles[TILTS[0]].mark);
     await page.unroute("**/api/flows/market");
 
@@ -1987,8 +2043,13 @@ try {
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash when the payload carries no tilt`);
       eq(tiles[k]?.kind, "unavailable", `and is marked as the payload's gap (${k})`);
-      eq(tiles[k]?.s, "not on this payload", `worded as one, not as a session that measured nothing (${k})`);
+      ok(/not on this payload/.test(tiles[k]?.s),
+         `worded as one, not as a session that measured nothing (${k})`);
     }
+    eq(subKindOf(tiles), "unavailable",
+       "and the equal-weight tilt marks the payload's gap on its own sub-line");
+    ok(/not on this payload/.test(subTextOf(tiles)),
+       `in the same words (${subTextOf(tiles)})`);
     eq(tiles.Breadth?.v, "9 bull / 12 bear",
        "while the breadth the same payload does carry still prints");
     eq(tiles.Breadth?.kind, null, "with no mark on a tile that has its reading");
@@ -2005,10 +2066,17 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles["Lean · names"]?.kind, "empty", "a session in which no name leaned is measured-empty");
-    eq(tiles["Lean · names"]?.s, "no name leaned", "and says so as a reading about the session");
-    eq(tiles["Lean · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
-    eq(tiles["Lean · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
+    /* THE ONE SILENCE THAT IS A READING, AND BOTH WEIGHTINGS STILL CARRY IT
+       SEPARATELY — the tile for the dollar denominator, the sub for the name
+       denominator, each in its own denominator's words. Collapsing these two
+       into one sentence would say a session measured nothing when in fact two
+       different quantities each measured zero. */
+    eq(tiles["Flow bias"]?.kind, "empty", "the dollar weighting over a zero gross is measured-empty");
+    ok(/no net premium was priced/.test(tiles["Flow bias"]?.s || ""),
+       "in its own denominator's words");
+    eq(subKindOf(tiles), "empty", "a session in which no name leaned is measured-empty too");
+    ok(/no name leaned/.test(subTextOf(tiles)),
+       `and says so as a reading about the session (${subTextOf(tiles)})`);
     eq(tiles.Breadth?.v, "0 bull / 0 bear", "and the measured zeros behind it print as zeros");
     eq(tiles.Breadth?.kind, null, "which are a reading, not a silence");
     marks.set("empty", tiles[TILTS[0]].mark);
