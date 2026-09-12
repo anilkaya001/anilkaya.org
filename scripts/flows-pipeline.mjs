@@ -6831,6 +6831,10 @@ async function main() {
      skipped or threw, which every card then says in its own words rather than
      drawing an empty chart. */
   let scoreTrack = null;
+  /* The per-name net-premium series that rides alongside the track and never
+     enters its payload. Null whenever `scoreTrack` is null, by construction:
+     both are set on the same line of the same try. */
+  let scoreTrackPremium = null;
 
   /* 7c-ter. THE SCORE TRACK — each name's daily score, traced.
 
@@ -6866,7 +6870,14 @@ async function main() {
       dayMap.set(sessionDate, { d: sessionDate, rows: scoresRows(sides), source: "scores" });
     }
 
-    const track = buildScoreTrack([...dayMap.values()], {
+    /* `premium` IS DESTRUCTURED OFF HERE AND THAT IS THE WHOLE GUARD.
+
+       buildScoreTrack returns each name's net-premium series beside the
+       track because it is built in the same pass against the same calendar,
+       and it is removed here because the track payload cannot afford it —
+       the reasoning is written where it is built. The spread below publishes
+       whatever is left, so anything NOT taken off this line ships. */
+    const { premium: premiumByName, ...track } = buildScoreTrack([...dayMap.values()], {
       deadBand: sides.deadBand,
       epoch: SELECTION_EPOCH,
     });
@@ -6892,6 +6903,7 @@ async function main() {
        per-ticker map because `sessions` is the calendar all of them are
        index-aligned to, and splitting the two apart is how they drift. */
     scoreTrack = track;
+    scoreTrackPremium = premiumByName;
   } catch (error) {
     console.warn(`  scoretrack: ${error.message}`);
   }
@@ -8604,6 +8616,11 @@ async function main() {
             sessions: scoreTrack.sessions,
             scores: (scoreTrack.names.find((n) => n && n.t === ticker) || {}).s,
             deadBand: scoreTrack.deadBand,
+            /* Undefined — not null, not [] — when the archive holds no priced
+               session for this name, which is the ordinary state for every
+               name until the dated key has carried `p` for a session or two.
+               buildCard tells that apart from the track never being read. */
+            premium: scoreTrackPremium ? scoreTrackPremium.get(ticker) : undefined,
           }
           : null,
         weights: first.weights || null,

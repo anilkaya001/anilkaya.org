@@ -203,7 +203,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=158") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=160") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -1578,6 +1578,36 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
    like a positive would be a direction the number does not carry. */
 .ovl-bar.is-neg { fill: var(--flow-down); }
 .ovl-bar.is-zero { fill: var(--ink-faint); }
+
+/* ---------- net premium by session --------------------------------
+   THE SAME OBJECT AS THE OVERLAY'S SCORE BARS, ON A DIFFERENT QUANTITY, and
+   it reuses the flow palette rather than the gold: these are dollars of call
+   flow against dollars of put flow, which is exactly what --flow-up and
+   --flow-down are the tokens for. The overlay's gold means "score", and a
+   second meaning on the same colour is how a page stops having a legend. */
+.pt-chart { display: block; width: 100%; height: auto; }
+.pt-bar {
+  fill: var(--flow-up);
+  stroke: none;
+  shape-rendering: crispEdges;
+}
+.pt-bar.is-neg { fill: var(--flow-down); }
+/* A SESSION PRICED FLAT, WHICH IS NOT A DIRECTION. Neutral ink and the 0.8
+   sliver the drawer gives it: visible, so it cannot be mistaken for the
+   nothing an unpriced session draws, and colourless, so it cannot be read as
+   a small move either way. */
+.pt-bar.is-zero { fill: var(--ink-faint); }
+.pt-zero {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.pt-date {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.02em;
+}
 
 /* ---------- session path ------------------------------------------ */
 
@@ -6310,6 +6340,21 @@ body.is-stale .flows-tablewrap {
   gap: var(--space-3);
   grid-template-columns: repeat(12, minmax(0, 1fr));
   margin-top: var(--space-3);
+  /* ALIGN-ITEMS: START, AND THIS IS THE CASE THE TICKER'S PANELS ARE NOT.
+
+     The argument recorded at .ft-panel — that `start` converts filled dead
+     space into ragged dead space and reclaims nothing, so the surplus should
+     be GIVEN to the drawing instead — holds for a panel whose chart can grow
+     into whatever height its row has. It does not hold here, and the bearish
+     region is the proof: on a session with three bearish names beside ten
+     bullish ones, that region is a three-row table stretched to a ten-row
+     one. There is no drawing to give the surplus to and no eleventh name to
+     put in it; the region has said everything it has to say by row three.
+
+     So the two rules disagree on purpose, and the thing that separates them
+     is whether the content can use the height. A chart can. A list of every
+     name there was cannot. */
+  align-items: start;
 }
 /* MIN-WIDTH:0 IS LOAD-BEARING. A grid item's default min-width is auto, so
    a region holding a wide table would refuse to shrink below that table and
@@ -6321,6 +6366,164 @@ body.is-stale .flows-tablewrap {
    One hairline grid: the 1px gap over a border-coloured background draws
    every divider, so the tiles need no borders of their own and cannot
    double up at the seams. */
+/* ---------- a region's own qualifier ------------------------------
+   THE SENTENCE THAT SAYS WHAT THE DRAWING ABOVE IT IS OF: which series, in
+   which unit, over which population. It sits at the reading size and in dim
+   ink because it is apparatus, not prose — the figure is the content and
+   this is its caption. Constrained to a measure: a qualifier running the
+   full width of a 12-column region is a paragraph, and a reader skips
+   paragraphs. */
+.cc-note {
+  margin: 0.6rem 0 0;
+  max-width: 68ch;
+  color: var(--ink-dim);
+  font-size: var(--fs-note);
+  line-height: 1.5;
+}
+
+/* A REGION WHOSE WHOLE BODY IS A SILENCE IS A LINE, NOT A PANEL.
+
+   "What changed" on a session with no change layer was a full-width card
+   holding one italic apology, as tall as a card holding ten ranked names —
+   the page's most prominent empty statement. The silence still says all four
+   of the things it has to say; it just stops being furniture. */
+.cc-body:has(> .flows-empty:only-child) { padding-block: 0; }
+.cc-body > .flows-empty:only-child { margin-top: 0.35rem; max-width: 90ch; }
+
+/* ---------- the session's caption --------------------------------
+   THE DATE AND THE POPULATION EVERY FIGURE BELOW IS OF. Set as metadata, not
+   as a reading: small, letterspaced, faint — the register of a slug line, so
+   the eye passes over it on the way to the numbers and can come back to it
+   when it needs to know which session it is reading. */
+.cc-meta {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0.4rem 1rem;
+  margin: 0 0 -0.35rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cc-meta-d { color: var(--ink-dim); }
+.cc-meta-d[data-empty] { font-style: italic; }
+/* THE READ STAMP CARRIES A DOT, and the dot is the only thing on this line
+   that is not text: a reader scanning for "how fresh is this" finds it
+   without reading the line. */
+.cc-meta-live::before {
+  content: ""; display: inline-block;
+  width: 0.42em; height: 0.42em; margin-right: 0.45em;
+  border-radius: 50%;
+  background: var(--flow-up);
+  vertical-align: 0.05em;
+}
+
+/* ---------- the period / basis segmented control -----------------
+   THE SAME OBJECT AS THE PANEL WINDOW PICKER (.fp-win), in a region heading
+   rather than inside a drawing, so it sits on one line with the heading and
+   right-aligns to the region's edge. Same face, same size, same current
+   state: two controls that do the same thing must not look like two things. */
+.cc-seg { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-left: auto; }
+.cc-seg-b {
+  font: inherit;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.04em;
+  padding: 0.16rem 0.5rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.cc-seg-b:hover { color: var(--ink); border-color: var(--ink-faint); }
+.cc-seg-b[aria-current="true"] {
+  color: var(--ground);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+}
+
+/* ---------- the intraday flow ------------------------------------
+   TWO SIGNED BARS A SLOT AGAINST A MARKED ZERO. The flow palette carries the
+   meaning — green is call premium, red is put premium — and it is the same
+   pair used by every other call/put reading on this site, so the legend is a
+   reminder rather than a key a reader has to learn. */
+.cc-tide { grid-column: 1 / -1; }
+.cc-tide-c {
+  display: block; width: 100%; height: 220px;
+  margin: 0.2rem 0 0;
+}
+.cc-tide-b { shape-rendering: crispEdges; }
+.cc-tide-b.is-call { fill: var(--flow-up); }
+.cc-tide-b.is-put { fill: var(--flow-down); }
+.cc-tide-z {
+  stroke: var(--hairline); stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.cc-tide-x {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.cc-tide-k {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 1.1rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+}
+.cc-tide-key::before {
+  content: ""; display: inline-block;
+  width: 0.55em; height: 0.55em; margin-right: 0.4em;
+  border-radius: 2px;
+  vertical-align: 0.02em;
+}
+.cc-tide-key.is-call::before { background: var(--flow-up); }
+.cc-tide-key.is-put::before { background: var(--flow-down); }
+.cc-tide-scale { margin-left: auto; color: var(--ink-faint); }
+
+/* ---------- the call/put ring ------------------------------------
+   AN ARC, NOT A PIE: the hole is where the total goes, so the share and the
+   quantity it is a share of are read in one place. Stroke-drawn from two
+   circles — the put arc is the whole ring and the call arc is laid over it,
+   which is what guarantees the two close with no seam of background between
+   them that would read as a third slice. */
+.cc-ring { display: block; width: 128px; height: 128px; flex: none; }
+.cc-ring-put { fill: none; stroke: var(--flow-down); }
+.cc-ring-call { fill: none; stroke: var(--flow-up); }
+.cc-ring-v {
+  fill: var(--ink);
+  font-family: var(--font-figure);
+  font-size: 19px;
+}
+.cc-ring-c {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.cc-split-w { display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap; }
+.cc-split-l { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.cc-split-r {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+}
+.cc-split-dot {
+  width: 0.55em; height: 0.55em; border-radius: 2px;
+  align-self: center;
+}
+.cc-split-r.is-call .cc-split-dot { background: var(--flow-up); }
+.cc-split-r.is-put .cc-split-dot { background: var(--flow-down); }
+.cc-split-n { color: var(--ink-dim); }
+.cc-split-p { color: var(--ink); font-variant-numeric: tabular-nums; }
+.cc-split-d { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
 .cc-verdict {
   grid-column: 1 / -1;
   display: grid;
@@ -6335,7 +6538,7 @@ body.is-stale .flows-tablewrap {
      construction at any viewport that can hold seven, and the two media
      steps below hand it 4 and 2 — counts that divide the row evenly and
      leave no short final row. */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   /* AND THE SAME FOR HEIGHT. The tiles are peers — one label, one figure,
      the same two lines of content — so a tile that happens to wrap its
      value must not leave its row-mates short. This is the .flows-deck rule
@@ -6345,15 +6548,21 @@ body.is-stale .flows-tablewrap {
      — the comment further down records what happened when it was copied
      there. */
   grid-auto-rows: 1fr;
-  background: var(--panel-glass);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-2);
-  box-shadow: var(--glass-edge), var(--shadow-card);
-  overflow: hidden;
 }
-/* SEVEN TILES ONLY WHERE SEVEN FIT, AND 1100px WAS MEASURED AGAINST THE
+/* FIVE CARDS, NOT ONE PANE WITH FOUR DIVIDERS IN IT.
+
+   The strip carried the glass and each tile was a hole cut in it, which is
+   why the row read as a single block of numbers: a reader scanning it had to
+   find the boundaries before they could compare anything, and the 1px gaps
+   doing that work disappear against a translucent ground at any scale below
+   full size. Five separate surfaces make the comparison the strip exists for
+   — this figure against that one — the first thing the layout says.
+
+   The gap grows from 1px to a real one for the same reason: a hairline
+   between two panes is a divider, and space between two cards is what makes
+   them two objects. */
+.cc-verdict { gap: var(--space-2); }
+/* FIVE TILES ONLY WHERE FIVE FIT, AND 1100px WAS MEASURED AGAINST THE
    WRONG FACE. The rule above is unchanged and correct — a value may not wrap,
    and a viewport that cannot hold one gets fewer columns — but the threshold
    it relies on was set with a preview harness that served no webfont and
@@ -6366,16 +6575,39 @@ body.is-stale .flows-tablewrap {
    width each and the longest value needs more; above it main grows with the
    viewport and seven fit. Tying the strip to the tier that decides its width
    is what stops these two drifting apart again. */
-@media (max-width: 91.99rem) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* THE STEPS MOVED WITH THE COUNT. Five no longer divides into four, so the
+   old first step left a single tile alone on a second row — the ragged final
+   row the rule above exists to prevent. Three and one both divide five
+   without leaving a short row at a DIFFERENT track width from the row above
+   it: three leaves a row of two on the same tracks, and one is a column. */
+/* AND THE THRESHOLD CAME DOWN WITH THE COUNT, because 91.99rem was measured
+   against SEVEN tiles and kept while the strip became five.
+
+   Measured at 1440px with the real Latin Modern: the strip is ~1416px of
+   inner width, so five tracks are ~283px and the longest value on it,
+   "41 bull / 48 bear", sets ~230px. It fits with room, and the old threshold
+   was dropping a five-tile strip to three columns on the widest desk this
+   site is designed for — three tiles on the first row, two on the second, and
+   two empty cells where the eye expects the row to continue.
+
+   60rem is where five tracks fall under ~190px, which is the width that value
+   needs at this face. Below it the strip goes to two even columns and then to
+   one; three is skipped entirely, since five over three always leaves the
+   ragged final row the comment above refuses. */
+@media (max-width: 59.99rem) { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 30rem)    { .cc-verdict { grid-template-columns: minmax(0, 1fr); } }
 .cc-tile {
-  /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
-     tile on a translucent strip doubles the blur and the wash, and seven of
-     them draw seven slightly different greys where the 1px gap is supposed
-     to be the only line. The strip carries the surface; the tile carries a
-     hairline of it so the dividers read. */
-  background: rgba(255, 255, 255, 0.012);
-  padding: 0.6rem 0.85rem;
+  /* THE TILE IS THE PANE NOW. The strip above carries no surface at all, so
+     there is exactly one layer of glass under any figure here — the doubling
+     the old note worried about is gone by construction rather than by keeping
+     the tile nearly transparent. */
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: 0.7rem 0.9rem 0.8rem;
   display: flex;
   flex-direction: column;
   /* LABELS ON ONE BASELINE, NOT CENTRED IN THEIR OWN BOX. With
@@ -6428,6 +6660,10 @@ body.is-stale .flows-tablewrap {
    not carry — the same rule the score bars follow. */
 .cc-viz.is-zero .cc-viz-t { fill: var(--ink-faint); }
 /* The split reads bull-first because the value beside it does. */
+/* THE DISTRIBUTION BARS ARE NEUTRAL ON PURPOSE. Every value in a `hist` is a
+   magnitude — a premium, never a direction — so tinting them with the flow
+   palette would assert a side the numbers do not carry. */
+.cc-viz-h { fill: var(--ink-dim); shape-rendering: crispEdges; }
 .cc-viz-a { fill: var(--flow-up); }
 .cc-viz-b { fill: var(--flow-down); }
 
@@ -6527,7 +6763,22 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    narrow than wide — a headline set across seven columns of a 132rem canvas
    is one line of forty words, which is the shape nobody reads. */
 .cc-lean   { grid-column: span 7; }
-.cc-news   { grid-column: span 5; }
+/* THE RING TAKES THE SLOT THE TAPE HELD, because it is the lean table's
+   natural row-mate: the table says where each basket leaned and the ring says
+   what the whole session's two sides came to, which is the denominator every
+   row of that table is a slice of. Five columns is what the figure needs —
+   a 128px ring beside a four-column legend — and no more. */
+.cc-split  { grid-column: span 5; }
+/* AND THE TAPE MOVED DOWN TO ITS OWN ROW AT FULL WIDTH, which its own note
+   argued against — "a headline set across seven columns is one line of forty
+   words" — so the fix that note was reaching for is applied where it belongs:
+   the measure is constrained on the TEXT, below, rather than by starving the
+   region of width. A region narrowed to control its line length also narrows
+   its meta line, its status and its rules, which is why that trade never
+   worked. */
+.cc-news   { grid-column: span 12; }
+.cc-news .cc-tbl td:first-child,
+.cc-news li { max-width: 74ch; }
 .cc-spine  { grid-column: 1 / -1; }
 .cc-spine > .spine { padding: 0.6rem 0.85rem; margin: 0.4rem 0 0; }
 
@@ -6556,7 +6807,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   /* Both go full width here rather than 7/5 of a pinned main: at this tier the
      lean table's six columns and the tape's meta line each need the whole
      width more than they need to sit side by side. */
-  .cc-lean, .cc-news { grid-column: span 12; }
+  /* THE LEAN TABLE AND THE RING STAY ROW-MATES AT THIS TIER. Sending both to
+     full width leaves the ring — a 128px figure with a four-line legend — in
+     an expanse of empty region at 1440px, which is the width most desks
+     actually are. The pair fits: seven columns of a pinned 78rem main is
+     ~700px for the table's six columns, and five is ~500px for a figure that
+     needs ~420. */
+  .cc-lean { grid-column: span 7; }
+  .cc-split { grid-column: span 5; }
+  .cc-news { grid-column: span 12; }
 }
 /* One column. A phone gets the same nine regions in the same order, not a
    shrunken twelve-column desk.

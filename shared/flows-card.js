@@ -1183,6 +1183,99 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
  * live gamma panel, and no panel failure can remove the name from the board.
  */
 /**
+ * This name's net premium, session by session, signed.
+ *
+ * THE QUESTION THE INTRADAY PATH CANNOT ANSWER. `path` draws cumulative
+ * signed premium inside ONE session, minute by minute, and it dies with the
+ * run — so "is today's bid unusual for this name" had no surface at all. This
+ * is that surface, and it is a DIFFERENT MEASUREMENT rather than a wider
+ * window on the same one: the unit of the x-axis is a session, not a minute,
+ * and the two are never offered from one picker.
+ *
+ * FIVE STATES, kept apart for the same reason the overlay keeps its four:
+ *   - the track was never read this run      → unavailable, pipeline-side
+ *   - the track was read, this name absent   → quiet, a fact about the name
+ *   - the name is in the track, nothing priced → quiet, and says WHY it is
+ *     the ordinary state for a young archive rather than a defect
+ *   - one priced session                     → quiet: a single bar is a
+ *     reading, but "over time" needs two
+ *   - two or more                            → ok
+ *
+ * The series is handed out index-aligned to `sessions` and stays that way:
+ * the dates travel WITH the values, so a renderer never has to assume the
+ * calendar and a gap keeps its date.
+ */
+function premiumTrackPanel(history) {
+  if (!history || !Array.isArray(history.sessions)) {
+    return {
+      status: "unavailable",
+      reason: "the score track was not assembled this run, and the net-premium history " +
+        "is read out of the same archive walk — it is a leg of its own and can be " +
+        "skipped without costing any other panel",
+    };
+  }
+  if (!Array.isArray(history.scores)) {
+    return {
+      status: "unavailable",
+      reason: "the score track was assembled but holds no session for this name — it " +
+        "covers only names that appeared on a board inside its window",
+    };
+  }
+  const series = Array.isArray(history.premium) ? history.premium : null;
+  const priced = series ? series.filter((v) => typeof v === "number" && Number.isFinite(v)) : [];
+  if (!series || priced.length === 0) {
+    return {
+      status: "quiet",
+      reason: "no session in this name's window carries an archived net premium — the " +
+        "figure is read from the dated score key and, before that key existed, from " +
+        "the archived boards, and this name appears in neither with a premium on it",
+    };
+  }
+  if (priced.length < 2) {
+    return {
+      status: "quiet",
+      reason: "exactly one session in this window carries an archived net premium. One " +
+        "reading is a level, not a path, and this panel is about the path",
+    };
+  }
+
+  /* SIDE-SIGNED, AND THE SIGN IS THE READING. Calls minus puts in whole
+     dollars, exactly as the archive holds it — no rescaling here, because a
+     unit converted in a renderer is a unit two readers disagree about. */
+  const rows = history.sessions.map((x, i) => ({
+    d: x && x.d,
+    source: x && x.source,
+    preEpoch: !!(x && x.preEpoch),
+    p: typeof series[i] === "number" && Number.isFinite(series[i]) ? series[i] : null,
+  }));
+
+  let net = 0, up = 0, down = 0, flat = 0;
+  for (const r of rows) {
+    if (r.p === null) continue;
+    net += r.p;
+    if (r.p > 0) up++; else if (r.p < 0) down++; else flat++;
+  }
+
+  return {
+    status: "ok",
+    unit: "dollars of net premium, calls minus puts",
+    rows,
+    sessions: rows.length,
+    priced: priced.length,
+    /* GAPS ARE COUNTED, NOT DRAWN AS ZERO. A session with no archived premium
+       is a session nobody priced this name in, which is not the same shape as
+       a session that priced it flat — and `flat` below is the count that
+       proves the two are being told apart. */
+    gaps: rows.length - priced.length,
+    up, down, flat,
+    net,
+    /* THE WINDOW'S OWN EXTREME, so a renderer scales to what it drew rather
+       than to a constant nobody measured. */
+    peak: priced.reduce((m, v) => (Math.abs(v) > m ? Math.abs(v) : m), 0),
+  };
+}
+
+/**
  * The score history laid over the dated price window, or a stated absence.
  *
  * A THIN WRAPPER ON PURPOSE. The join itself lives in shared/flows-overlay.js
@@ -2478,6 +2571,12 @@ export function buildCard({
          first, so an index zip draws a plausible chart out of two windows
          that need not describe the same days. */
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
+      /* NET PREMIUM ACROSS SESSIONS — the archive's answer to a question the
+         intraday tape cannot reach. Same input as the overlay, different
+         column of it, and deliberately NOT joined to price: premium is a flow
+         reading and laying it over a close would invite a causal reading the
+         panel does not support. */
+      premiumTrack: premiumTrackPanel(scoreHistory),
       ivSurface: chainPanel(chain, "ivSurface"),
       skewTerm: chainPanel(chain, "skewTerm"),
       topContracts: chainPanel(chain, "topContracts"),

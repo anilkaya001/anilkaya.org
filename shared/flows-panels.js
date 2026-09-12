@@ -348,6 +348,22 @@ export const TICKER_PANELS = Object.freeze([
   { key: "path", id: "ftPath", span: 1, group: "tape", tier: "chart",
     title: "Session path",
     question: "How did the flow accumulate through the session?" },
+  /* THE SAME QUANTITY ON THE OTHER AXIS, AND IT GOES DIRECTLY BELOW `path`
+     FOR THAT REASON. `path` draws net premium minute by minute inside today;
+     this draws one bar a session across the archive's window. A reader who
+     has just seen today's shape asks "is that unusual for this name" next,
+     and until now nothing on this site could answer it — the figure was
+     published on the board for today and died with the run.
+
+     SPAN 2, ON THE ARGUMENT topContracts MAKES BELOW: the axis is up to
+     forty-two sessions. In a span-1 host at 1216px (456px) that is under
+     eleven pixels a bar including its gap, at which point the sign is still
+     legible but the MAGNITUDE — which is the reading — is a rounding error.
+     A full-width host doubles it. This is the one panel here whose x-axis
+     length is set by the archive rather than by the name. */
+  { key: "premiumTrack", id: "ftPrem", span: 2, group: "tape", tier: "chart",
+    title: "Net premium by session",
+    question: "How has this name’s net premium moved across sessions?" },
   /* SPAN 2 BECAUSE THE COLUMN THAT PAYS IS THE LAST ONE. Nine columns in a
      span-1 host (456px at a 1216px viewport) push `Net aggr` outside the
      scroll wrapper's visible width, so the panel's whole answer — which lines

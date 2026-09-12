@@ -1,10 +1,11 @@
 /* =============================================================
-   flows-drawers.js — the nine panel renderers that are NOT on the
+   flows-drawers.js — the ten panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 114k as
-   measured on 2026-09-12 — it was 112k, and the session path's window
-   picker is the 2k — and deferring it takes the ticker route
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 122k as
+   measured on 2026-09-12 — it was 112k, the session path's window
+   picker is 2k of the rise and renderPremiumTrack, the tenth drawer,
+   is the other 8k — and deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and
@@ -2221,6 +2222,167 @@
     }
   }
 
+  /* ---------- net premium, session by session ----------------------
+     THE CROSS-SESSION READING OF THE QUANTITY `renderPath` DRAWS INTRADAY,
+     and a separate drawer rather than a wider window on that one. The x-axis
+     here is a SESSION and there it is a MINUTE: offering both from one picker
+     would put "30m" and "20 sessions" on one control, which reads as a
+     continuum and is two different measurements.
+
+     WHAT A BAR IS. One archived session's net premium, calls minus puts, in
+     whole dollars, signed. A session nobody priced this name in has NO BAR —
+     never a zero-height one — for the reason every chart on this page draws
+     an absence as nothing: a flat bar and a measured-flat bar are the same
+     pixels, and the archive went to the trouble of keeping them apart. */
+  function renderPremiumTrack(host, panel, card, questionIn) {
+    const question = questionIn ||
+      "How has this name’s net premium moved across sessions?";
+    if (!panel || panel.status !== "ok" || !Array.isArray(panel.rows) || panel.rows.length < 2) {
+      return emptyPanel(host, question, panel);
+    }
+    panelHead(host, question);
+
+    /* THE WINDOWS ARE COUNTS OF SESSIONS, NOT SPANS OF TIME, and the labels
+       say "sessions" for that reason: twenty sessions is four calendar weeks
+       only if no holiday falls in them, and this axis has no calendar gaps to
+       spend on saying so. Sliced from the END, like the session path's, and
+       re-entered rather than rescaled so the extremes renormalise inside the
+       window a reader actually chose. A window is a measurement. */
+    const whole = Array.isArray(panel.__whole) ? panel.__whole : panel.rows;
+    const wins = [["All", whole.length]]
+      .concat([20, 10, 5].map((n) => [n + " sessions", n]))
+      .filter(([, n], i) => i === 0 || (n >= 2 && n < whole.length));
+    if (wins.length > 1) {
+      const bar = el("div", "fp-win");
+      bar.setAttribute("role", "group");
+      bar.setAttribute("aria-label", "Sessions this premium history is drawn over");
+      const active = isNum(panel.__win) || whole.length;
+      for (const [lab, n] of wins) {
+        const b = el("button", "fp-win-b", lab);
+        b.type = "button";
+        if (n === active) b.setAttribute("aria-current", "true");
+        b.addEventListener("click", () => {
+          host.replaceChildren();
+          renderPremiumTrack(host, { ...panel, rows: whole.slice(-n), __win: n, __whole: whole },
+            card, questionIn);
+        });
+        bar.append(b);
+      }
+      host.append(bar);
+    }
+
+    const rows = panel.rows;
+    const vals = rows.map((r) => isNum(r && r.p)).filter((v) => v !== null);
+    if (vals.length < 2) {
+      return quietPanel(host, question,
+        "this window holds fewer than two priced sessions — one reading is a level, " +
+        "not a path, and the window picker above can widen it");
+    }
+
+    /* A SYMMETRIC DOMAIN AROUND ZERO, off the window's own extreme. Scaling
+       each side to its own extreme would make a −$2M bar and a +$40M bar the
+       same length, which is the one thing a signed chart must not do. */
+    const peak = vals.reduce((m, v) => (Math.abs(v) > m ? Math.abs(v) : m), 0) || 1;
+    const W = panelWidth(host), H = 128;
+    const padT = 10, padB = 26, padL = 4, padR = 4;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const yOf = (v) => padT + (1 - (Math.max(-peak, Math.min(peak, v)) + peak) / (2 * peak)) * plotH;
+    const step = rows.length > 1 ? plotW / rows.length : plotW;
+    const barW = Math.max(1.2, Math.min(22, step * 0.7));
+    const xOf = (i) => padL + step * (i + 0.5);
+
+    const svg = svgEl("svg", {
+      class: "pt-chart", viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "none", role: "img",
+    });
+    const zeroY = yOf(0);
+    const g = svgEl("g", { class: "pt-bars" });
+    for (let i = 0; i < rows.length; i++) {
+      const v = isNum(rows[i] && rows[i].p);
+      if (v === null) continue;
+      const y = yOf(v);
+      g.append(svgEl("rect", {
+        class: "pt-bar" + (v < 0 ? " is-neg" : v > 0 ? " is-pos" : " is-zero"),
+        x: (xOf(i) - barW / 2).toFixed(1), width: barW.toFixed(1),
+        y: Math.min(y, zeroY).toFixed(1),
+        /* A MEASURED ZERO KEEPS A VISIBLE BAR — 0.8px of it. A session priced
+           flat is a reading, and drawing it as nothing would hand it the one
+           appearance this panel reserves for a session nobody priced. */
+        height: Math.max(0.8, Math.abs(zeroY - y)).toFixed(1),
+      }));
+    }
+    svg.append(g);
+    svg.append(svgEl("line", { class: "pt-zero", x1: padL, x2: W - padR, y1: zeroY, y2: zeroY }));
+
+    /* TWO DATE LABELS, THE ENDS. A tick per session is unreadable at forty-two
+       and arbitrary at any smaller number; the ends are what a reader needs to
+       know which window they are looking at, and the window control above
+       already says how many sessions sit between them. */
+    const ends = [[rows[0], padL + 2, "start"], [rows[rows.length - 1], W - padR - 2, "end"]];
+    for (const [r, x, anchor] of ends) {
+      if (!r || !r.d) continue;
+      const t = svgEl("text", { class: "pt-date", x, y: H - 8, "text-anchor": anchor });
+      t.textContent = r.d;
+      svg.append(t);
+    }
+
+    const gaps = rows.length - vals.length;
+    const net = vals.reduce((a, b) => a + b, 0);
+    const up = vals.filter((v) => v > 0).length;
+    const down = vals.filter((v) => v < 0).length;
+    svg.setAttribute("aria-label",
+      vals.length + " priced session" + (vals.length === 1 ? "" : "s") +
+      " from " + (rows[0] && rows[0].d) + " to " + (rows[rows.length - 1] && rows[rows.length - 1].d) +
+      ", net " + money(net) + " across the window, " + up + " session" + (up === 1 ? "" : "s") +
+      " call-side and " + down + " put-side." +
+      (gaps ? " " + gaps + " session" + (gaps === 1 ? "" : "s") +
+        " in that window carry no archived premium and are drawn as no bar at all." : ""));
+    host.append(svg);
+
+    /* THE LEAD IS THE COMPARISON, and it is two numbers a reader can check
+       against the bars: where the window ends up, and how lopsided it got
+       there. Neither claims the flow predicted anything. */
+    leadReading(host,
+      "Across " + vals.length + " priced session" + (vals.length === 1 ? "" : "s") +
+      " this name's net premium sums to " + signed(net, (a) => "$" + compact(a)) +
+      ", " + up + " session" + (up === 1 ? "" : "s") + " call-side against " +
+      down + " put-side.");
+
+    host.append(statList([
+      ["Net, window", signed(net, (a) => "$" + compact(a))],
+      ["Largest session", "$" + compact(peak)],
+      ["Call-side / put-side", up + " / " + down],
+      ["Priced sessions", vals.length + " of " + rows.length],
+    ]));
+
+    /* THE POPULATION AND THE UNIT STAY OPEN. Both change what a bar MEANS: a
+       reader who does not know these are whole dollars of calls-minus-puts,
+       or that a missing bar is an unpriced session rather than a flat one,
+       reads a different chart from the one that is drawn. */
+    host.append(el("p", "fc-note is-qualifier",
+      "Each bar is one session's net premium — call premium minus put premium, in " +
+      "dollars, as the board published it that morning. The sign is the reading; " +
+      "the bars are drawn against a common scale so the two sides are comparable " +
+      "by height." +
+      (gaps
+        ? " " + gaps + " session" + (gaps === 1 ? " in" : "s in") + " this window carr" +
+          (gaps === 1 ? "ies" : "y") + " no archived premium and are drawn as no bar at " +
+          "all — that is a session this name was not priced in, which is not a session " +
+          "it was priced flat in."
+        : "")));
+
+    appendMethod(host, [
+      "The history is read out of the dated archive: the session's own score key where " +
+      "one was written, and the archived boards for every session before that. Both " +
+      "carry the same figure the board published that morning, so this window is as " +
+      "long as the archive is, not as long as the field is old.",
+      "A session reconstructed from the boards alone covers only the names that MADE a " +
+      "board that day, so a gap in the older half of a window is more often a name " +
+      "that missed the board than a name nobody priced. That sparseness is a fact " +
+      "about the archive and not about this name's flow.",
+    ], "Where this history comes from", true);
+  }
+
   P.__register({
     gamma: renderGamma,
     displacement: renderDisplacement,
@@ -2230,6 +2392,7 @@
     context: renderContext,
     levels: renderLevels,
     path: renderPath,
+    premiumTrack: renderPremiumTrack,
     congress: renderCongress,
     /* THREE PANELS, ONE DRAWER. They differ only in what the number means,
        and the payload carries that as `unit` — so three copies of this

@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "158";
+export const ASSET_VERSION = "160";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -464,14 +464,49 @@ ${neuronDock(summary)}
   <nav class="cc-jump" aria-label="Overview sections">
     <a href="#ccChgH">Changes</a><a href="#ccBullH">Candidates</a>
     <a href="#ccAlertsH">Activity</a><a href="#ccEventsH">Catalysts</a>
-    <a href="#ccLeanH">Sectors</a><a href="#ccSpineH">Distribution</a>
+    <a href="#ccTideH">Intraday</a><a href="#ccLeanH">Sectors</a>
+    <a href="#ccSplitH">Split</a><a href="#ccSpineH">Distribution</a>
   </nav>
   <div class="cc">
 
     <!-- Six readings the rest of the page then explains. Any of them may be an
          em dash: a tile whose endpoint did not answer says so by not saying a
          number. -->
+    <!-- THE SESSION'S OWN IDENTITY, ABOVE THE READINGS RATHER THAN AMONG THEM.
+         "Session" and "Screened" were tiles, sitting in a row of five
+         MEASUREMENTS as though a date were one. They are the row's caption:
+         which session these numbers are of, and how many names it looked at.
+         A reader checking "is this today" should not have to scan a grid of
+         figures to find out, and a tile that can never be compared to its
+         neighbours does not belong beside them. -->
+    <div class="cc-meta" id="ccMeta" hidden>
+      <span class="cc-meta-d" id="ccMetaDate"></span>
+      <span class="cc-meta-n" id="ccMetaScreened"></span>
+      <span class="cc-meta-live" id="ccMetaLive" hidden></span>
+    </div>
+
     <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
+
+    <!-- THE SESSION AS IT HAPPENED, WHICH THIS PAGE HAS NEVER DRAWN.
+         Every other region here reports a LEVEL at the close; the pulse key
+         has carried a timestamped net-premium series all along and no route
+         asked for it. Call and put premium are drawn as two bars from a marked
+         zero at each interval, each on its own sign, because both are net
+         figures that go negative and an unsigned bar would turn premium sold
+         into premium bought.
+
+         THE PERIOD CONTROL SWITCHES THE SOURCE, NOT THE ZOOM, and the note
+         under the chart says which one is drawn: 1D is the intraday tide at
+         the vendor's own cadence, and the wider periods are DAILY totals. Two
+         different quantities on two different clocks — offering them from one
+         control is only honest if the control says so. -->
+    <section class="cc-region cc-tide" aria-labelledby="ccTideH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccTideH">Intraday flow</h2>
+        <div class="cc-seg" id="ccTideSeg" role="group" aria-label="Period this flow is drawn over"></div>
+      </div>
+      <div class="cc-body" id="ccTide"></div>
+    </section>
 
     <section class="cc-region cc-bull" aria-labelledby="ccBullH">
       <div class="cc-h">
@@ -614,6 +649,20 @@ ${neuronDock(summary)}
          headline and a name this product ranks — but a detail card exists only
          for the names the run went deep on, so the rest are printed plain. A
          link to a reader with nothing to read is worse than no link. -->
+    <!-- THE SESSION'S CALL/PUT SPLIT AS ONE FIGURE. The two numbers are on
+         market.premium and were reachable only as a signed tilt ratio in a
+         tile — a reader who wanted "how much of the session was calls" had to
+         invert a percentage. A ring states the share and the two dollar totals
+         beside it state what it is a share OF, so neither can be read without
+         the other. -->
+    <section class="cc-region cc-split" aria-labelledby="ccSplitH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccSplitH">Flow distribution</h2>
+        <span class="cc-h-s" id="ccSplitSub"></span>
+      </div>
+      <div class="cc-body" id="ccSplit"></div>
+    </section>
+
     <section class="cc-region cc-news" aria-labelledby="ccNewsH">
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccNewsH">Headlines</h2>

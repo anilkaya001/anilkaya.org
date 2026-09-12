@@ -662,7 +662,42 @@ const CEILING_KIB = {
 
      166 LEAVES 586 B, which is tight on purpose: this route is still owed the
      comment strip, and the next change should have to come here too. */
-  overviewPage: 166,
+  /* 185, FOR THE THREE THINGS THIS PAGE PUBLISHED, SERVED AND NEVER DREW:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 154,731
+       total         188,434 B = 184.02 KiB, 18,450 B over 166
+
+     The raise is one number and it buys three regions, so it is worth saying
+     what each cost and what each is:
+
+       - INTRADAY FLOW. The `pulse` key has carried a timestamped net-premium
+         series — 78 intraday intervals plus twenty sessions of daily totals —
+         since the intraday wave, worker.js has answered /api/flows/pulse
+         since then, and the landing page's fetch list never asked for it. The
+         one series in this product with TIME on an axis reached no reader at
+         all. Two signed bars a slot against a marked zero, plus a period
+         control that switches SOURCE and says which source is drawn.
+       - FLOW DISTRIBUTION. `market.premium` publishes the two premium pools
+         and the page's only reading of them was a signed tilt ratio in a
+         tile — a reader who wanted "how much of this session was calls" had
+         to invert a percentage. A ring, with the total in its hole and both
+         dollar pools beside it.
+       - THE SESSION'S CAPTION. Two tiles that were never measurements — a
+         date and a population — moved out of the verdict strip into the
+         line above it, and took the newest read stamp across the payloads
+         with them.
+
+     THE ROUTE PARSES MORE AND THE READER GETS THREE SURFACES THAT DID NOT
+     EXIST, out of keys already fetched or one fetch added. That is the trade
+     and it is a good one; what makes it a decision rather than a drift is
+     that it is written here.
+
+     185 LEAVES 1,006 B. The paragraph above still stands and is now overdue:
+     the structural fix this route is owed is the comment strip — measured,
+     merged, and waiting on one Workers Builds field — and until it lands
+     every raise here is paid for in a reader's parse time. */
+  overviewPage: 185,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
