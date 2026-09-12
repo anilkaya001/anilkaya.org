@@ -1178,8 +1178,14 @@ try {
     eq(await page.locator("#ccAlerts tbody tr").count(), 8,
        "a feed longer than the cap is listed eight deep");
     const capped = (await page.locator("#ccAlertsSub").textContent()).trim();
-    ok(/^8 of 44 · read /.test(capped),
-       `and the subtitle states the read's whole population beside the eight it drew (${capped})`);
+    /* AND THE CADENCE IS ON THIS LINE, asserted rather than assumed. It used
+       to sit under the Flagged tile; it was removed with the strip's prose on
+       the claim that this subtitle carried it, and this subtitle carried only
+       the INSTANT. The regex now pins the cadence WORD in front of "read", so
+       the same deletion cannot be made again by anyone reading these tests. */
+    ok(/^8 of 44 · nightly read /.test(capped),
+       `and the subtitle states the read's whole population, its cadence and its instant ` +
+       `beside the eight rows it drew (${capped})`);
     const flagged = await page.evaluate(() => {
       const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
         (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
@@ -1222,7 +1228,7 @@ try {
        unfolded. So the tile's gloss is gone and the region's is asserted
        harder: the floor and the read's provenance are both read off it. */
     eq(ceiling.s, "", "and the tile prints the floor without a sentence under it");
-    ok(/^8 of ≥44 · read /.test(ceiling.sub),
+    ok(/^8 of ≥44 · nightly read /.test(ceiling.sub),
        `the region subtitle carries the same floor, so the two cannot disagree (${ceiling.sub})`);
     ok(/nightly/.test(ceiling.sub),
        `and carries when the read was taken, which is where that belongs (${ceiling.sub})`);
@@ -1236,7 +1242,8 @@ try {
         .querySelector(".cc-tile-v").textContent.trim(),
       sub: document.getElementById("ccAlertsSub").textContent.trim() }));
     eq(under.v, "44", "a read published as NOT truncated prints the bare count");
-    ok(/^8 of 44 · read /.test(under.sub), `on the tile and in the subtitle alike (${under.sub})`);
+    ok(/^8 of 44 · nightly read /.test(under.sub),
+       `on the tile and in the subtitle alike (${under.sub})`);
 
     /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. Both
        current writers set `refreshed`; the else-branch printed "nightly

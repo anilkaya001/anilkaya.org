@@ -137,6 +137,16 @@ await shot("overview",
       return { regions: r.length,
         regionHeights: [...new Set(r.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
         tiles: document.querySelectorAll(".cc-tile").length,
+        /* THE TWO FACTS THE STRIP STOPPED CARRYING, read back off the page
+           they moved to. The Flagged tile lost "nightly read" with the rest
+           of the strip's prose, on the claim that this subtitle already
+           carried the cadence — it carried only the instant, and for one
+           commit the cadence was published nowhere. Rendered here so the
+           claim is checked against a picture rather than repeated. */
+        alertsSub: document.getElementById("ccAlertsSub")?.textContent.trim() || "",
+        flaggedTile: [...document.querySelectorAll(".cc-tile")]
+          .filter((t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows")
+          .map((t) => t.querySelector(".cc-tile-v")?.textContent.trim())[0] || "",
         tileSubs: document.querySelectorAll(".cc-tile-s").length,
         verdictNotes: document.querySelectorAll(".cc-verdict-note").length,
         /* EVENNESS IS MEASURED, NOT ASSERTED. The strip drew four tiles then

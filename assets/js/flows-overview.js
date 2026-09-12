@@ -2345,8 +2345,39 @@
          wall clock is the viewer's, so /flows/unusual/ and this page still
          show the same number for the same instant; the zone is stated so the
          number means something. */
+      /* THE CADENCE RIDES THIS LINE, AND IT DID NOT UNTIL CI SAID SO.
+
+         The Flagged tile used to carry "nightly read" as a subtitle. That
+         subtitle was removed with the rest of the strip's prose, on the
+         stated grounds that this subtitle already carried the cadence. It
+         did not — it carried an INSTANT ("read 10:28 UTC"), which is a
+         different fact — so for one commit the cadence was published
+         nowhere, and a reader could not tell a feed refreshed every few
+         minutes from one taken once overnight. flows-overview-contract:1227
+         caught it, which is exactly the failure the .ft-how rule names: a
+         caveat believed to be carried elsewhere, and not.
+
+         It goes here rather than back on the tile because it belongs beside
+         the rows it describes, and because a modifier on a word this line
+         already prints costs no new text: "nightly read 10:28 UTC". The
+         strip stays clean and nothing is lost.
+
+         AND THE UNPUBLISHED CASE IS STATED, NOT DEFAULTED. A payload that
+         predates `refreshed` says so; it does not get "nightly" as a
+         confident default wearing a ternary. When no readAt parsed there is
+         no instant to modify, so the cadence is pushed as its own clause
+         rather than silently dropping with the clock. */
+      const cadence = alerts && alerts.status !== "pending"
+        ? (alerts.refreshed === "intraday" ? "intraday"
+          : alerts.refreshed === "nightly" ? "nightly" : null)
+        : null;
       const read = alerts && typeof alerts.readAt === "string" ? Date.parse(alerts.readAt) : NaN;
-      if (Number.isFinite(read)) said.push("read " + clockSaid(read));
+      if (Number.isFinite(read)) {
+        said.push((cadence ? cadence + " read " : "read ") + clockSaid(read)
+          + (alrRows && !cadence ? ", cadence not published" : ""));
+      } else if (alrRows) {
+        said.push(cadence ? cadence + " read" : "cadence not published");
+      }
       alrSub.textContent = said.join(" · ");
     }
 

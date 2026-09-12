@@ -1010,7 +1010,6 @@
     },
     "flowalerts": {
       "sessionDate": "2026-09-10",
-      "atVendorLimit": true,
       "seen": 232,
       "rows": [
         {
@@ -1025,7 +1024,12 @@
           "startedAt": "2026-09-10T15:10:00Z",
           "minutes": 3
         }
-      ]
+      ],
+      "vendorTruncated": true,
+      "vendorLimit": 232,
+      "refreshed": "intraday",
+      "readAt": "2026-09-10T16:28:00Z",
+      "status": "ok"
     },
     "sector-premium": {
       "sessionDate": "2026-09-10",
