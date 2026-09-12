@@ -230,6 +230,12 @@
   --dur-open:  260ms;
   --dur-enter: 420ms;
   --stagger:    26ms;
+  /* The cadence of the standing summary, which is the only type on this site
+     that arrives a word at a time. Slower than --stagger because a word is a
+     bigger unit than a card and the eye reads rather than scans it: 42ms over
+     the 32-word clamp is 1.3s to the last word, inside the ~2s a reader waits
+     before deciding a page is broken. */
+  --word:       42ms;
   --ease-out: cubic-bezier(0.16, 1, 0.30, 1);
   --ease-in:  cubic-bezier(0.55, 0, 1, 0.45);
   --lift: -2px;
@@ -275,6 +281,13 @@
   --sect-re:      #8aa9a0;
   --sect-util:    #9d9ec7;
   --sect-none:    #6f6a5a;
+
+  /* THE CYAN HALF OF THE BRAND PAIR, AS A REAL TOKEN. It was already in this
+     file four times as a raw hex and twice more inside the page ground's
+     rgba(), with nothing naming it — so `var(--blue-mystic)` was
+     sending a reader to look for a token that did not exist. --gold-mystic is
+     the other half and has had a name since it shipped. */
+  --blue-mystic: #9bc4d2;
 }
 
 /* ---- THE WAY OUT OF THE GLASS ----
@@ -341,6 +354,7 @@
     --dur-open:  0s;
     --dur-enter: 0s;
     --stagger:   0s;
+    --word:      0s;
     --lift: 0px;
     --rise: 0px;
     --decor:  0;
@@ -8071,4 +8085,165 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 }
 .cc-change-detail {
   margin-inline:1rem;
+}
+
+/* ================================================================
+   NEURON — the standing summary, as a reader meets it.
+
+   IT IS SERVER-RENDERED AND THERE IS NO SCRIPT BEHIND IT. Every word below
+   arrives in the HTML with its own delay index; these rules do the rest. That
+   is not an optimisation, it is the correctness property: a paragraph cannot
+   arrive half-written, cannot fail to arrive, and a reader with JavaScript
+   off gets the whole thing immediately — which is the right degradation for
+   a sentence. shared/flows-pages.js states why a client fetch could not have
+   paid for itself (486 bytes of headroom across the twelve dock routes).
+   ================================================================ */
+.ak-neuron {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+  margin: 0 0 1.2rem;
+  padding: 0.95rem 1.15rem;
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+}
+
+/* THE ONE PLACE THE TWO BRAND COLOURS MEET AS A GRADIENT. Everywhere else
+   they are corners of the page ground, bounded so they never touch (see
+   .flows-body). Here they wash across one panel, because this is the one
+   element that speaks for the whole session rather than for a reading in it.
+
+   THE ALPHA IS DERIVED FROM THE TEXT FLOOR, NOT CHOSEN, and the first draft of
+   it FAILED. At 10%/9% the wash lightens the panel enough to drop
+   --ink-faint — the provenance line directly on top of it — to 4.318:1, under
+   the 4.5 floor for text at this size. The sentence and the label were never
+   at risk; the small grey line under them was, which is exactly the element an
+   eye checking a decorative gradient skips.
+
+   Re-derived (WCAG 2.x relative luminance, (L1+0.05)/(L2+0.05), sRGB channels
+   linearised), composited over the glass panel at alpha 0.38 over each of the
+   ground's four stops, at both ends of the wash:
+
+     cyan 0.10 / gold 0.09   --ink-faint 4.318   FAIL
+     cyan 0.08 / gold 0.07   --ink-faint 4.495   FAIL, and it looks like a pass
+     cyan 0.07 / gold 0.06   --ink-faint 4.582   pass
+     cyan 0.05 / gold 0.04   --ink-faint 4.749   pass
+
+   The ceiling is 0.079. 0.05 is taken rather than 0.078 to leave room for the
+   page ground's own two glows, which are 0.06 each in the corners and are NOT
+   in the arithmetic above — a value tuned to three decimal places against an
+   incomplete model is a number that will fail somewhere nobody measured. At
+   0.05 the label reads 9.392 and the sentence itself 14.314. */
+.ak-neuron::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--blue-mystic) 5%, transparent),
+    transparent 46%,
+    color-mix(in srgb, var(--gold-mystic) 4%, transparent));
+}
+.ak-neuron > * { position: relative; }
+
+/* THE MARK. Three layers, 3-4-2, every edge drawn. It pulses only while a
+   sentence is arriving and then stops — a logo that animates forever is one
+   a reader learns to ignore, which is the opposite of what this one is for.
+   On the pending state it does not pulse at all, because nothing is coming. */
+.ak-nn { display: block; flex-shrink: 0; width: 34px; height: 34px; margin-top: 0.1rem; }
+.ak-nn-e line { stroke-width: 0.5; opacity: 0.42; }
+.ak-nn-n { opacity: 0.92; }
+.ak-nn.is-live .ak-nn-e line {
+  stroke-width: 0.6;
+  stroke-dasharray: 3 22;
+  animation: ak-nn-flow 2.6s linear infinite;
+}
+.ak-nn.is-live .ak-nn-n {
+  animation: ak-nn-pulse 2.6s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+@keyframes ak-nn-flow  { to { stroke-dashoffset: -25; } }
+@keyframes ak-nn-pulse { 0%, 70%, 100% { opacity: 0.55; } 20% { opacity: 1; } }
+
+.ak-neuron-body { min-width: 0; }
+.ak-neuron-h {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--blue-mystic);
+}
+.ak-neuron-when {
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+.ak-neuron-say {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.52;
+  color: var(--ink);
+  max-width: 104ch;
+}
+.ak-neuron-none { color: var(--ink-dim); font-size: 0.94rem; }
+.ak-neuron-src {
+  margin: 0.45rem 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--ink-faint);
+  max-width: 104ch;
+}
+
+/* THE WRITING. One span per word, each carrying its own integer index; the
+   delay is that index multiplied by the cadence token, so the preference
+   block that zeroes --word stops the whole effect without this rule knowing
+   about it.
+
+   `backwards` IS LOAD-BEARING, for the reason .fd-card's arrival states:
+   without it a delayed word paints in its FINAL state for the length of its
+   delay and then jumps back to animate. */
+@keyframes ak-word-in {
+  from { opacity: 0; filter: blur(3px); transform: translateY(0.14em); }
+  to   { opacity: 1; filter: blur(0);   transform: none; }
+}
+.ak-w {
+  display: inline-block;
+  animation: ak-word-in var(--dur-move) var(--ease-out) backwards;
+  animation-delay: calc(var(--d, 0) * var(--word));
+}
+
+/* THE CARET STOPS. Eight blinks and gone: the sentence is finished and
+   nothing more is coming. A caret that blinks forever is promising a second
+   paragraph that never arrives. */
+.ak-caret {
+  display: inline-block;
+  width: 0.44em;
+  height: 1em;
+  vertical-align: -0.14em;
+  margin-left: 0.12em;
+  background: var(--blue-mystic);
+  opacity: 0;
+  animation: ak-caret-on 0.01s linear forwards, ak-caret-blink 0.9s steps(1) 8;
+  animation-delay: calc(var(--d, 0) * var(--word)), calc(var(--d, 0) * var(--word));
+}
+@keyframes ak-caret-on    { to { opacity: 0.85; } }
+@keyframes ak-caret-blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The sentence is simply THERE, whole, at once. Zeroing --word above
+     already collapses the stagger; these two take the animation off entirely
+     so nothing is left mid-blur, and remove the caret, which is a motion
+     affordance with nothing to say when there is no motion. */
+  .ak-w { animation: none; }
+  .ak-caret { display: none; }
+  .ak-nn.is-live .ak-nn-e line, .ak-nn.is-live .ak-nn-n { animation: none; }
 }

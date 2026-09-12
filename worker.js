@@ -3469,7 +3469,7 @@ async function route(request, env, url, ctx) {
      never a redirect: bouncing them to /flows/ loses the page they wanted, and
      the section's existence is not the secret. */
   const FLOWS_ROUTES = {
-    "/flows/": (u) => FLOWS_PAGES.overviewPage({ username: u }),
+    "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
     "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
     "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
@@ -3500,8 +3500,34 @@ async function route(request, env, url, ctx) {
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
     const session = await currentFlowsUser(request, env);
+    /* THE SUMMARY IS READ FOR ONE ROUTE, AND IT IS THE FRONT DOOR.
+
+       refreshFlowsSummary has been generating this on the cron and
+       /api/flows/summary serving it, with nothing anywhere reading either. It
+       is rendered into the HTML rather than fetched because the twelve routes
+       carrying flows-dock.js share 486 bytes of headroom at the tightest, so
+       the smallest honest client fetcher would break three ceilings on
+       arrival; server-side it costs no client bytes at all.
+
+       ONE ROUTE AND NOT THIRTEEN, deliberately. readFlowsSummary is one
+       indexed read of one short row and its docstring calls that cheap enough
+       for a page load — which it is, once. Thirteen times is thirteen reads
+       per reader per visit against a free-tier quota shared with a live app,
+       for a sentence about the session as a whole. The overview is the page
+       whose stated job is the whole session on one screen, so it is the page
+       that pays. Per-card summaries will arrive on the routes that show
+       cards, keyed by their own scope, rather than by putting this one
+       everywhere.
+
+       A THROWN READ IS A PENDING SUMMARY, NOT A BROKEN PAGE. readFlowsSummary
+       already catches and answers null, and neuronDock renders null as the
+       pending state — which says the briefing has not been published, and
+       claims nothing about the market. */
+    const summary = session && path === "/flows/"
+      ? await readFlowsSummary(env, "board")
+      : null;
     const body = session
-      ? FLOWS_ROUTES[path](session.username)
+      ? FLOWS_ROUTES[path](session.username, summary)
       : FLOWS_PAGES.loginPage();
     return new Response(body, {
       status: 200,
