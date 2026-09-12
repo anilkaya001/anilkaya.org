@@ -713,7 +713,44 @@ const CEILING_KIB = {
      merged and waits on one dashboard field, and until that lands every
      feature on this route is paying for prose the browser parses and no
      reader reads. */
-  tickerPage: 454,
+  /* 454 -> 464 FOR THE CURSOR EVERY CHART SHARES. Derived on disk:
+
+       file                  before      after
+       flows-cursor.js            0     10,016   (new)
+       flows-panels.js       69,370     70,841
+       flows-ticker.js      385,079    385,079
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                463,016    474,503 B = 463.38 KiB
+
+     WHAT IT BOUGHT, AND WHY IT IS A FILE RATHER THAN A FUNCTION. Every chart
+     in this section draws a series and labels a handful of ticks, which
+     answers "what is the shape" and refuses "what was it on the 14th" — the
+     values were all in hand when the marks were placed. Some charts carried a
+     native title per mark: a tooltip a mouse can find, after a delay, one
+     mark at a time, and one a keyboard cannot reach at all.
+
+     flows-cursor.js is that reading, once: a renderer hands over the points
+     it already computed and gets a rule, a readout, arrow-key navigation and
+     a live region. It is a separate file because the same cursor belongs on
+     the overview and the market charts next, and a copy per bundle is how two
+     charts end up disagreeing about what a hover means.
+
+     VERIFIED BY DRIVING IT, not by reading it: on the rendered ticker page a
+     pointer at 35% of the score chart reports 2026-08-04, close 34.47, score
+     +13, and the rule lands at x=265.8; moving to 75% reports 2026-08-17 and
+     the rule moves to x=560.4. Focus plus Home then ArrowRight reports
+     2026-07-24 in both the readout and the live region, and Escape clears
+     both. The values come from the same rows array the marks were drawn from,
+     so the readout cannot disagree with the drawing.
+
+     464 LEAVES 897 B, which is not room for the next thing and is not meant
+     to be. This route is 463 KiB of JavaScript of which roughly 253 KiB is
+     comment that the merged comment-stripping build already knows how to
+     remove; until that is switched on, every feature here is paying to ship
+     prose the browser parses and no reader reads. The next raise on this
+     route should be that switch, not another ten kilobytes. */
+  tickerPage: 464,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

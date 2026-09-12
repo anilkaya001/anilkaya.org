@@ -9707,3 +9707,65 @@ ul.cc-ln-note > li::before {
   color: var(--flow-down);
   background: color-mix(in srgb, var(--flow-down) 16%, transparent);
 }
+
+
+/* ---------- the chart cursor ----------
+
+   THE READOUT IS FIXED-POSITIONED, so a panel that clips or scrolls cannot
+   clip it, and it is removed on leave rather than hidden behind the thing it
+   was reading. It never takes pointer events: a box that follows the cursor
+   and eats the cursor's own events is a box that flickers.
+
+   THE RULE IS THE CHART'S OWN INK, one step brighter than its grid, drawn
+   with a non-scaling stroke so it stays a hairline in a panel scaled up. */
+.fx-cursor line {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.9;
+}
+.fx-cursor[hidden] { display: none; }
+
+.fx-read {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  min-width: 8rem;
+  max-width: 18rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.fx-read[hidden] { display: none; }
+.fx-read-k {
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.fx-read-r {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.9rem;
+  margin: 0;
+}
+.fx-read-rk { color: var(--ink-dim); }
+.fx-read-rv { font-variant-numeric: tabular-nums; }
+.fx-read-rv.is-pos { color: var(--flow-pos, var(--ink)); }
+.fx-read-rv.is-neg { color: var(--flow-neg, var(--ink)); }
+
+/* A CHART THAT TAKES FOCUS MUST SHOW IT. The ring is on the SVG itself
+   rather than a wrapper, because the SVG is what the tab stop is. */
+svg[data-fx-cursor="on"]:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+svg[data-fx-cursor="on"] { touch-action: pan-y; }

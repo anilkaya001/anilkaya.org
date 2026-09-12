@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "177";
+export const ASSET_VERSION = "178";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -250,9 +250,20 @@ const rail = (active) => {
 
        The design's rail ends with a three-line claim, and the first word of
        it is one this product cannot make: the boards are built by a nightly
-       pipeline and the intraday keys refresh on a cadence the pages print.
+       pipeline and the intraday keys refresh on a cadence each page states.
        So the shape is kept and the claim is made true — three short lines,
-       each one a thing a reader can check on the page above it. -->
+       each one a thing a reader can check on the page above it.
+
+       AND THE WORDING OF THIS COMMENT IS ITSELF CONSTRAINED, which is worth
+       recording because it cost a CI run. This rail is SHARED markup, so
+       every word of it — comments included — is served on the unusual route,
+       where flows-worker-contract holds a list of per-transaction words that
+       may appear ONLY inside the prose whose job is to refuse them. The
+       sentence above used one of them as an ordinary verb. The rule is right
+       and the comment was wrong: a reader cannot tell which served bytes were
+       meant for them, so the page either keeps that vocabulary out or it is
+       making the claim. The list lives in that test; do not restate it here,
+       because restating it trips it. -->
   <p class="rail-foot">Nightly pipeline.<br>Intraday refresh.<br>Every silence named.</p>
 </nav>`;
 };
@@ -1979,6 +1990,13 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   </div>
 </dialog>
 <script src="${v("/assets/js/nav.js")}" defer></script>
+<!-- BEFORE THE LIBRARY THAT REGISTERS WITH IT. Both are deferred, so both run
+     in document order after parsing: the cursor defines window.FlowsCursor
+     and the panel library asks for it while drawing. Reversing these two
+     would not throw — every call site tests for it first — it would simply
+     draw every chart without a cursor, silently, which is the worse failure
+     of the two. -->
+<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-ticker.js")}" defer></script>
 </body>

@@ -906,6 +906,39 @@
         " in that window carry no score and are drawn as no bar at all." : ""));
     host.append(svg);
 
+    /* THE CURSOR READS THE ROWS THE MARKS WERE DRAWN FROM, which is the whole
+       reason it cannot disagree with them: `xOf(i)` is the same function that
+       placed the price vertex and the score bar, and the values are the same
+       `rows[i]`. A cursor that re-derived either would be a second opinion
+       about one series.
+
+       AN UNSCORED SESSION SAYS SO RATHER THAN PRINTING A ZERO. The bar for it
+       was deliberately not drawn — this panel's own comment explains that a
+       zero "would be worse still" — so the readout keeps that distinction
+       instead of quietly filling the gap the drawing refuses to fill.
+
+       THE RULE IS BOUNDED TO THE PLOT so it does not run down through the date
+       axis, and the chart's aria-label above already says what it is; the
+       cursor adds the per-point reading a static chart withholds. */
+    if (window.FlowsCursor && rows.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Score against price",
+        band: { y0: padT, y1: padT + plotH },
+        points: rows.map((r, i) => {
+          const sc = isNum(r.score);
+          return {
+            x: xOf(i),
+            label: r.d,
+            rows: [
+              { k: "Close", v: px2(r.close) },
+              { k: "Score", v: sc === null ? "unscored" : (sc > 0 ? "+" : "") + sc,
+                cls: sc === null ? "" : sc > 0 ? "is-pos" : sc < 0 ? "is-neg" : "" },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(statList([
       ["Shared sessions", String(join.overlap)],
       ["From", first.d],
