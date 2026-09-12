@@ -477,7 +477,36 @@ const CEILING_KIB = {
      set on the belief the defect was closed, and it was not, so the next
      attempt should not also have to spend its first hour here. The route is
      still owed the comment strip. */
-  tickerPage: 408,
+  /* 412, AND WHAT IT BOUGHT IS A DRAWING THAT DELETED THREE PATCHES:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   59,479      flows-ticker.js  352,124
+       total            420,170 B = 410.32 KiB, 2,378 B over 408
+
+     The score over price panel drew the score as a second LINE, and three
+     defects in the file were each patched around that choice: a gap had to be
+     PROGRAMMED to break the path (a bridged hole is a score nobody computed,
+     and a zero would be worse — zero is NEUTRAL and this system means it); a
+     lone scored session between two holes drew a zero-length subpath, which
+     renders as nothing, so a real measurement needed a hand-placed dot; and
+     two strokes on one date axis look comparable, so the units note had to
+     end by saying the two crossing means nothing at all.
+
+     Drawn as BARS all three go away, and the code for two of them with it. A
+     session with no score has no rect — the refusal is structural, and there
+     is no stroke that could bridge anything. A lone bar is a bar. And a set
+     of filled rects beside a dashed line is visibly not two comparable
+     series, so shared/flows-overlay.js gave that clause back.
+
+     THE BYTES ARE THE ARGUMENT, NOT THE DRAWING. The bar loop is shorter than
+     the path loop plus the dot loop it replaced; what grew is the reasoning
+     above each — including the one recording that the FIRST render of this
+     came out unreadable, bars four pixels tall on a ±100 domain for a name
+     scoring +16, which is why the domain is now the name's own extent with a
+     floor and why that floor is PRINTED in the panel's own stat list.
+
+     412 LEAVES 1,718 B. The route is still owed the comment strip. */
+  tickerPage: 412,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

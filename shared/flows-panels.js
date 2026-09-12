@@ -173,6 +173,28 @@ export const TICKER_PANELS = Object.freeze([
      browser; fetching the track in the page would put an untested date join
      inside a drawing function. The header strip's overnight move comes off
      these same rows, so this panel is the working that strip summarises. */
+  /* SPAN 2, AND IT STAYS 2 — TRIED AT 1, MEASURED, REVERTED.
+
+     The reasoning for 1 was good: `__score` is the only other span-1 panel in
+     this station, so it sat alone in a row with a column of white space
+     beside it while this panel took a whole row, and pairing them is one row
+     instead of two. The suite refused it, with the number:
+
+       signal: "scoreOverlay" (506px) and "__score" (1034px) are row-mates at
+       two columns, so the shorter is stretched 528px — past the 250px a
+       panel can fill honestly
+
+     528px of stretched nothing inside a bordered card is exactly the ragged,
+     unequal box this station spent three PRs removing, and it is the single
+     thing the reader of this page complains about most. A shorter panel does
+     not become a good row-mate by being shorter; it becomes a worse one.
+
+     THE HEIGHT CAME OUT OF THE DRAWING INSTEAD, which is where it belonged:
+     the chart went 190 -> 132 and the score became bars, so this panel is
+     ~60px shorter on its own row without any panel being stretched to meet
+     it. The row-mate for `__score` has to be a panel near 1034px, and none
+     exists in this station — that is a real finding about `__score`, whose
+     1034px is three prose blocks, and it is not fixed from here. */
   { key: "scoreOverlay", id: "ftOverlay", span: 2, group: "signal", tier: "lead",
     title: "Score over price",
     /* THE TYPOGRAPHIC APOSTROPHE, as every other question on this page uses.

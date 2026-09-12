@@ -1520,20 +1520,25 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   vector-effect: non-scaling-stroke;
 }
 
-/* Score: solid and full weight — this is the series the panel is about. */
-.ovl-score {
-  fill: none;
-  stroke: var(--gold-harvest);
-  stroke-width: 1.8;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
+/* Score: BARS from the marked zero, and the group is the series. This was a
+   solid gold stroke, which made the panel two lines on one date axis and cost
+   the units note a whole sentence saying they must not be read as crossing.
+   Bars are filled shapes beside a dashed line: two different kinds of object,
+   so the eye does not try to compare them. */
+.ovl-score { fill: none; stroke: none; }
+.ovl-bar {
+  fill: var(--gold-harvest);
+  stroke: none;
+  /* The sides do not scale with the viewBox, so a 40-session name and a
+     6-session one get bars that read as the same object. */
+  shape-rendering: crispEdges;
 }
-
-/* A scored session with an unscored one on either side. A one-point subpath
-   has no length and renders as nothing, so a real measurement would vanish
-   between two gaps; the dot is that session, drawn. */
-.ovl-dot { fill: var(--gold-harvest); }
+/* SIGNED, AND THE ZERO CASE IS NEITHER. A score of zero is a measurement —
+   the centre of the dead band — and it draws as a 0.8-unit sliver on the axis
+   rather than as nothing, which is what an UNSCORED session draws. Tinting it
+   like a positive would be a direction the number does not carry. */
+.ovl-bar.is-neg { fill: var(--flow-down); }
+.ovl-bar.is-zero { fill: var(--ink-faint); }
 
 /* ---------- session path ------------------------------------------ */
 
@@ -3963,6 +3968,16 @@ body.is-stale .flows-tablewrap {
 @media (min-width: 76rem) {
   .ft-station { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: 1 / -1; }
+}
+
+/* SEVEN FIGURES ARE PRIME, SO SOME ROW IS ALWAYS SHORT — the question is only
+   how short. `.fc-stats` is auto-fit over a 8.5rem minimum, which in this
+   block's full-width host measured FIVE then TWO: a full row and a stub, read
+   as two unrelated groups. Four then three is the least ragged split seven
+   admits, and every cell keeps the same width, which is the property the
+   raggedness was breaking. */
+@media (min-width: 76rem) {
+  #ftChange .fc-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* --- the identity block --------------------------------------------- */

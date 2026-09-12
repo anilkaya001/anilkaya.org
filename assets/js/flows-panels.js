@@ -760,7 +760,13 @@
         (rows.length === 1 ? "exactly one session" : "no session") + " so far.");
     }
 
-    const W = panelWidth(host), H = 190, padL = 4, padR = 4, padT = 10, padB = 18;
+    /* 132, DOWN FROM 190. The panel is a dense card on a page a reader wants
+       whole, and the score is now drawn as bars against a marked zero — a bar
+       chart reads its sign and its magnitude at a height a line needs slope
+       room for. The price line loses amplitude with it, which is the right
+       trade: the price is CONTEXT on this panel and the units note has always
+       said the two cannot be compared by height. */
+    const W = panelWidth(host), H = 132, padL = 4, padR = 4, padT = 10, padB = 18;
     const plotW = W - padL - padR, plotH = H - padT - padB;
 
     let lo = Infinity, hi = -Infinity;
@@ -768,10 +774,34 @@
     const span = hi - lo || 1;
     const xOf = (i) => padL + (i / (rows.length - 1)) * plotW;
     const yPrice = (v) => padT + (1 - (v - lo) / span) * plotH;
-    /* SYMMETRIC ABOUT ZERO by construction, so the zero line is at the exact
-       middle on every name and the eye can compare two panels without
-       re-reading an axis. */
-    const yScore = (v) => padT + (1 - (Math.max(-100, Math.min(100, v)) + 100) / 200) * plotH;
+    /* SYMMETRIC ABOUT ZERO, AND NO LONGER FIXED AT ±100.
+
+       The full ±100 domain was right for a LINE: the zero sat at the exact
+       middle on every name and two panels could be compared without reading
+       an axis. Drawn as BARS it is wrong, and the first render said so — a
+       name scoring +9 to +16 got bars four pixels tall sitting on the zero
+       line, which reads as a dashed rule rather than as a chart. Most names
+       are not extreme, so most panels showed nothing.
+
+       THE DOMAIN IS THE NAME'S OWN EXTENT, FLOORED AT 25. Zero stays centred
+       and the scale stays symmetric, so the sign still reads off the axis and
+       the dead band is still drawn in place. The floor is what stops a quiet
+       name being amplified into drama: a name whose scores never leave ±3
+       draws against ±25 and looks like the small readings they are, rather
+       than filling the panel.
+
+       AND THE DOMAIN IS PRINTED, in the stat list below, because losing
+       cross-name comparability silently would be the worse trade. A reader
+       holding two panels can now see in one figure whether they share a
+       scale. */
+    let peak = 0;
+    for (const r of rows) {
+      const v = isNum(r.score);
+      if (v !== null && Math.abs(v) > peak) peak = Math.abs(v);
+    }
+    const scoreMax = Math.min(100, Math.max(25, Math.ceil(peak)));
+    const yScore = (v) => padT +
+      (1 - (Math.max(-scoreMax, Math.min(scoreMax, v)) + scoreMax) / (2 * scoreMax)) * plotH;
 
     const svg = svgEl("svg", {
       class: "ovl", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
@@ -802,34 +832,53 @@
       d: rows.map((r, i) => (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yPrice(r.close).toFixed(1)).join(" "),
     }));
 
-    /* THE SCORE LINE BREAKS AT EVERY GAP. A run of consecutive scored
-       sessions is one subpath; a null ends it. Bridging a hole would draw a
-       score on a day nobody scored, and filling it with zero would be worse —
-       zero is NEUTRAL, a reading this system publishes and defends. */
-    let d = "", open = false, segments = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const v = isNum(rows[i].score);
-      if (v === null) { open = false; continue; }
-      d += (open ? "L" : "M") + xOf(i).toFixed(1) + " " + yScore(v).toFixed(1) + " ";
-      if (!open) segments++;
-      open = true;
-    }
-    if (d) svg.append(svgEl("path", { class: "ovl-score", d: d.trim() }));
+    /* THE SCORE IS BARS FROM ITS OWN ZERO, NOT A SECOND LINE.
 
-    /* A LONE SCORED SESSION BETWEEN TWO GAPS DRAWS NO LINE — a one-point
-       subpath has no length and renders as nothing at all, which is a
-       measured score disappearing. It gets a dot. */
+       A bar chart is what this quantity actually is: bounded, signed, and
+       measured once per session with nothing between two sessions to
+       interpolate. The line it replaced had three defects a rect does not
+       have, and each was patched in code that this change deletes:
+
+         - A GAP HAD TO BE PROGRAMMED. A run of scored sessions was one
+           subpath and a null ended it, because bridging would draw a score on
+           a day nobody scored and a zero would be worse still — zero is
+           NEUTRAL, a reading this system publishes and defends. A session
+           with no score now simply has no bar. The refusal is structural:
+           there is nothing to bridge.
+         - A LONE SCORED SESSION BETWEEN TWO GAPS DREW NOTHING. A one-point
+           subpath has no length and renders as empty, which is a measured
+           score disappearing off a chart; it needed a hand-placed dot. A lone
+           bar is a bar like any other.
+         - TWO LINES INVITED A CROSSING. The units note has always had to end
+           by saying that the two crossing means nothing at all, because two
+           strokes on one date axis look like two comparable series. Bars
+           against a marked zero beside a price LINE are visibly two different
+           kinds of object, and the note is shorter for it.
+
+       THE BARS ARE GROUPED, and the group keeps the class the suite and the
+       stylesheet already know. A minimum height of 0.8 keeps a score of zero
+       — a real measurement, and the centre of the dead band — from rendering
+       as no bar at all, which would make it indistinguishable from the
+       unscored session next to it. */
+    const step = rows.length > 1 ? plotW / (rows.length - 1) : plotW;
+    const barW = Math.max(1, Math.min(9, step * 0.62));
+    const bars = svgEl("g", { class: "ovl-score" });
+    const zeroY = yScore(0);
+    let drawn = 0;
     for (let i = 0; i < rows.length; i++) {
       const v = isNum(rows[i].score);
       if (v === null) continue;
-      const prev = i > 0 ? isNum(rows[i - 1].score) : null;
-      const next = i < rows.length - 1 ? isNum(rows[i + 1].score) : null;
-      if (prev === null && next === null) {
-        svg.append(svgEl("circle", {
-          class: "ovl-dot", cx: xOf(i), cy: yScore(v), r: 2,
-        }));
-      }
+      const y = yScore(v);
+      drawn++;
+      bars.append(svgEl("rect", {
+        class: "ovl-bar" + (v < 0 ? " is-neg" : v > 0 ? " is-pos" : " is-zero"),
+        x: (xOf(i) - barW / 2).toFixed(1), width: barW.toFixed(1),
+        y: Math.min(y, zeroY).toFixed(1),
+        height: Math.max(0.8, Math.abs(zeroY - y)).toFixed(1),
+      }));
     }
+    if (drawn) svg.append(bars);
+    const segments = drawn;
 
     const first = rows[0], last = rows[rows.length - 1];
     svg.setAttribute("aria-label",
@@ -838,7 +887,7 @@
       "score from " + (isNum(first.score) === null ? "unscored" : first.score) +
       " to " + (isNum(last.score) === null ? "unscored" : last.score) + "." +
       (join.gaps ? " " + join.gaps + " session" + (join.gaps === 1 ? "" : "s") +
-        " in that window carry no score and the line breaks at each." : ""));
+        " in that window carry no score and are drawn as no bar at all." : ""));
     host.append(svg);
 
     host.append(statList([
@@ -847,6 +896,11 @@
       ["To", last.d],
       ["Scored", join.scored + " of " + join.overlap],
       ["Dead band", band === null ? DASH : "±" + band],
+      /* THE SCALE THE BARS ARE DRAWN AGAINST. It is the name's own extent
+         floored at 25, not a constant, so two panels are only comparable by
+         height when this figure matches on both. Stating it is what makes the
+         adaptive domain honest rather than a silent rescale. */
+      ["Scale", "±" + scoreMax + " score points"],
     ]));
 
     /* WHAT THE OVERLAP LEFT OUT, in both directions and as counts. "23
@@ -877,7 +931,7 @@
     if (segments === 0) {
       const dead = el("p", "fc-note ovl-none",
         "No session in the shared window carries a score for this name, so only the " +
-        "price is drawn.");
+        "price line is drawn and there are no bars.");
       dead.setAttribute("data-empty", "quiet");
       host.append(dead);
     }

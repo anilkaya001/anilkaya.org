@@ -2546,8 +2546,10 @@ try {
           viewBox: svg ? svg.getAttribute("viewBox") : null,
           par: svg ? svg.getAttribute("preserveAspectRatio") : null,
           box: svg ? (({ width, height }) => ({ width, height }))(svg.getBoundingClientRect()) : null,
-          scoreD: score ? score.getAttribute("d") : null,
-          dots: host.querySelectorAll(".ovl-dot").length,
+          bars: host.querySelectorAll(".ovl-bar").length,
+          negBars: host.querySelectorAll(".ovl-bar.is-neg").length,
+          zeroBars: host.querySelectorAll(".ovl-bar.is-zero").length,
+          hasScore: !!score,
           band: !!host.querySelector(".ovl-band"),
           said: host.textContent,
           aria: svg ? svg.getAttribute("aria-label") : null,
@@ -2567,42 +2569,56 @@ try {
     ok(Math.abs(ratio - 1) < 0.02,
        `one viewBox unit is one CSS pixel (drawn ${vbW}, laid out ${good.box.width.toFixed(1)}, ` +
        `ratio ${ratio.toFixed(3)})`);
-    ok(/\bM/.test(good.scoreD), "the score line is drawn");
+    ok(good.hasScore && good.bars > 0, "the score is drawn, as bars");
     ok(good.aria && /sessions from/.test(good.aria),
        "and the chart names its own window to a screen reader");
 
-    /* ---- THE GAP. A hole must break the path, not bridge it. ---- */
+    /* ---- THE GAP. A session nobody scored draws NOTHING.
+
+       This used to count subpaths in a path `d`, because the score was one
+       stroke and a hole had to be programmed to break it. Bars make the
+       refusal structural: one rect per scored session, so an unscored one has
+       no rect and there is no stroke that could have bridged it. Counting
+       bars is therefore a STRONGER test than counting moves — a path could
+       always have been made to bridge by a later edit, and a missing rect
+       cannot be. ---- */
     const holed = JSON.parse(JSON.stringify(base));
     const mid = Math.floor(holed.panels.scoreOverlay.rows.length / 2);
     holed.panels.scoreOverlay.rows[mid].score = null;
     holed.panels.scoreOverlay.scored -= 1;
     holed.panels.scoreOverlay.gaps += 1;
     const gapped = await readOvl(holed);
-    const moveCount = (d) => (d.match(/M/g) || []).length;
-    eq(moveCount(gapped.scoreD), moveCount(good.scoreD) + 1,
-       "a hole in the middle splits the score path into one more subpath — the line " +
-       "BREAKS rather than bridging a session nobody scored");
+    eq(gapped.bars, good.bars - 1,
+       "a hole in the middle draws one FEWER bar — the session nobody scored is " +
+       "absent from the drawing rather than bridged across");
     ok(/no score/i.test(gapped.said),
        "and the panel says in words how many sessions carry no score");
 
-    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. A one-point subpath has
-       no length and renders as nothing at all, so a real measurement would
-       simply vanish. It gets a dot instead. ---- */
+    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. This was the line's worst
+       case and is the bar chart's ordinary one: a one-point subpath has no
+       length and rendered as nothing at all, so a real measurement vanished
+       and needed a hand-placed dot. A lone bar is a bar. ---- */
     const island = JSON.parse(JSON.stringify(base));
     const rows = island.panels.scoreOverlay.rows;
     for (let i = 0; i < rows.length; i++) if (i !== 2) rows[i].score = null;
     island.panels.scoreOverlay.scored = 1;
     island.panels.scoreOverlay.gaps = rows.length - 1;
     const lone = await readOvl(island);
-    eq(lone.dots, 1, "a scored session with holes on both sides is drawn as a dot, not lost");
+    eq(lone.bars, 1,
+       "a scored session with holes on both sides draws exactly one bar, and is not lost");
 
-    /* ---- A ZERO IS A READING, NOT A HOLE. ---- */
+    /* ---- A ZERO IS A READING, NOT A HOLE, and on a bar chart that needs
+       saying twice: it must draw a bar AND that bar must not be tinted like a
+       direction it does not carry. ---- */
     const zeroed = JSON.parse(JSON.stringify(base));
     zeroed.panels.scoreOverlay.rows[mid].score = 0;
     const atZero = await readOvl(zeroed);
-    eq(moveCount(atZero.scoreD), moveCount(good.scoreD),
-       "a measured zero does NOT break the line: it is a name sitting at neutral, " +
-       "which is a reading this system publishes and means");
+    eq(atZero.bars, good.bars,
+       "a measured zero still draws its bar: it is a name sitting at neutral, which " +
+       "is a reading this system publishes and means, not an unscored session");
+    ok(atZero.zeroBars >= 1,
+       "and it is drawn in the neutral ink rather than as a positive or a negative — " +
+       "the centre of the dead band carries no direction");
 
     /* ---- THE TWO EMPTY STATES, which are not the same sentence. ---- */
     const disjoint = JSON.parse(JSON.stringify(base));

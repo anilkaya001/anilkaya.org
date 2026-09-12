@@ -5572,11 +5572,33 @@
      --ft-bar-h agree at 148 here with or without the webfont — so the fix is
      not a better guess at the missing call site. The observer measures
      because it changed. The hand calls stay for the first paint. */
-  if (typeof ResizeObserver === "function" && barEl) {
-    new ResizeObserver(() => {
+  if (typeof ResizeObserver === "function") {
+    const settle = new ResizeObserver(() => {
       syncBarHeight();
       reHonourJump();
-    }).observe(barEl);
+    });
+    if (barEl) settle.observe(barEl);
+    /* AND THE GRID, WHICH IS WHERE THE DEFECT ACTUALLY WAS.
+
+       Observing the bar alone was a fix for a cause I had inferred from one
+       number and never measured. Measured, with the failing case reproduced:
+
+         panel top 172.2, bar bottom 217.7, --ft-bar-h 147px,
+         scroll-margin-top 227px, scrollY 9481
+
+       The variable was RIGHT and the scroll margin was RIGHT. The panel was
+       simply 55px higher than the margin it had been scrolled to — so nothing
+       about the bar was ever wrong, and every byte spent on measuring the bar
+       harder could not have moved that panel. What happened is that content
+       ABOVE the target reflowed after the jump and pulled it up underneath a
+       scrollY that stayed put. A bar that does not change size reports
+       nothing while that happens.
+
+       The grid's own height changes whenever any panel inside it reflows,
+       which is the one signal that covers every cause without enumerating
+       them — the same argument the bar observer makes, finally pointed at the
+       right element. */
+    if (grid) settle.observe(grid);
   }
 
   /* ---------- deep links -------------------------------------------
