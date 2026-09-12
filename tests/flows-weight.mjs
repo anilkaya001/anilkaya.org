@@ -996,7 +996,41 @@ const CEILING_KIB = {
      209 LEAVES 2,215 B. Deliberately a little wider than this route's last
      two raises: it is now carrying a second reading per tile and the next
      edit here should not have to argue for forty bytes. */
-  overviewPage: 209,
+  /* 209 -> 213 FOR THE SECTOR STRIP'S THREE QUANTITIES. Re-derived rather
+     than reasoned from the paragraph above — `stat` on disk against
+     `git cat-file -s HEAD:` at the branch head:
+
+       file                  before      after
+       flows-overview.js    178,098    182,865
+       flows-ui.js           25,136     25,136
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                211,801    216,568 B = 211.49 KiB
+
+     The room under 209 was 2,215 B and this change needs 4,767, so 209 is
+     2,552 B short and no amount of re-reading makes it fit.
+
+     WHAT IT BOUGHT. The sector strip could be read three ways — net premium
+     in dollars, net contracts, and the share of a basket's own premium that
+     leaned — and drew only the third, which is the one quantity that carries
+     no size. The other two were already published per basket
+     (`netPremiumUsd`; `callVolume` and `putVolume`, whose difference is
+     arithmetic on two counts in one unit), so what was missing was a way to
+     ask for them. It is a toggle rather than three strips because eleven
+     baskets drawn three times is a region nobody scrolls past.
+
+     AND THE SILENCES ARE PER MODE, which is the half that cost the bytes. A
+     row's `read` state is about its PREMIUM pair, and the volumes are read
+     independently of it, so each mode counts its own reporting baskets, names
+     its own missing ones in its own sentence, and scales its own axis — a
+     ratio is bounded to +/-1 by construction and a dollar sum is not. One
+     shared count over three quantities would have been wrong in two of them.
+
+     213 LEAVES 1,544 B, which is less than the last raise left on purpose:
+     this route has now taken three raises in a row, and the next edit to it
+     should have to make its argument in the open rather than find room
+     already cleared for it. */
+  overviewPage: 213,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

@@ -7327,6 +7327,24 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-ln-name { white-space: nowrap; }
 .cc-ln-note { border-bottom: 1px solid var(--panel-border); }
 
+/* ---------- the sector strip's three modes ----------
+   THE GLANCE IS ONE BLOCK so the toggle redraws the reading, the strip and the
+   sentence about the mode together; the table below it never moves, which is
+   what makes the record stable while the glance changes hands. */
+.cc-lean-glance { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 0.9rem; }
+/* THE MODE'S OWN SENTENCE IS NOT A SECTION RULE. It sits under its strip and
+   belongs to it, so it takes the note's type and drops the note's border —
+   a rule here would read as the end of the region rather than the end of a
+   paragraph. */
+.cc-ln-note.is-mode {
+  border-bottom: 0;
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--fs-note);
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
 /* ---------- the headline tape ----------
    THE AGE IS THE FIRST THING IN THE REGION AND IT IS STYLED AS A WARNING
    RATHER THAN AS A CAPTION. These rows are read once on a morning cron, so by

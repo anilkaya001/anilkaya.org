@@ -343,6 +343,16 @@ try {
         k: t.querySelector(".cc-tile-k")?.textContent.trim(),
         v: t.querySelector(".cc-tile-v")?.textContent.trim(),
         s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
+        /* THE DEMOTED READING, WHICH THIS PROJECTION DID NOT COLLECT.
+           `.cc-tile-q` is a reading moved into another tile's sub-line — the
+           equal-weight tilt lives there — and the assertion below reads it by
+           name. Without this field it read `undefined` and failed on a strip
+           that was drawing the sentence correctly: the second reader further
+           down this file had been taught about the slot and this one had not,
+           so the file asserted the fold against a projection that could not
+           see it. */
+        q: t.querySelector(".cc-tile-q")?.textContent.trim() || "",
+        subKind: t.querySelector(".cc-tile-q")?.dataset.empty || null,
         cls: t.querySelector(".cc-tile-v")?.className || "",
       })));
     /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.

@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "172";
+export const ASSET_VERSION = "173";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -616,6 +616,14 @@ ${neuronDock(summary)}
              of baskets that actually leaned is a measurement and is written
              by flows-overview.js. -->
         <span class="cc-h-s" id="ccLeanSub">options premium, not price momentum</span>
+        <!-- THREE QUANTITIES, ONE STRIP. The baskets can be ranked on the
+             dollars they cleared, on the contracts they traded, or on the
+             share of their own premium that leaned — and each answers a
+             different question, so none of them is the strip's "real" number.
+             The buttons are written by flows-overview.js, which is the only
+             place that knows which of the three actually read. -->
+        <div class="cc-seg" id="ccLeanSeg" role="group"
+             aria-label="Which quantity the sector strip draws"></div>
       </div>
       <div class="cc-body" id="ccLean"></div>
     </section>

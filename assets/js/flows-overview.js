@@ -2125,7 +2125,11 @@
   /**
    * Eleven sectors on one axis: where the option premium leaned today.
    */
-  function paintLean(into, payload) {
+  function paintLean(into, payload, seg) {
+    /* THE BUTTONS BELONG TO THE STRIP, so they are cleared before any of the
+       silences below can return: a toggle standing over a region that could
+       not be drawn offers a reader three ways to select nothing. */
+    if (seg) seg.replaceChildren();
     const sub = host("ccLeanSub");
     const saySub = (said) => { if (sub) sub.textContent = said; };
     saySub("options premium, not price momentum");
@@ -2203,7 +2207,9 @@
     caveats.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
       "that leaned one way — because that is what the publisher ranks on" +
       (lean && typeof lean.rejected === "string" && lean.rejected
-        ? ", having rejected " + lean.rejected : "") + ".");
+        ? ", having rejected " + lean.rejected : "") +
+      " — the table below keeps that rank in every mode; the strip above it is ordered " +
+      "on whichever quantity its toggle is showing.");
     caveats.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
       "premium and +90% on $300M are not the same fact.");
     method.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
@@ -2226,105 +2232,191 @@
         "on /flows/market/ draws, in basis points per session.");
     }
 
-    /* THE READING LEADS, THE DERIVATION FOLLOWS — the first draft put ~1,100
-       characters of method above the table, the shape this product's own
-       prose audit named. Built from the rows the table draws, through the
-       same pct() the cells use, so lead and column cannot disagree; and only
-       when something leaned, since `ordered` keeps the quiet and unreadable
-       baskets at its tail. */
-    const leaners = ordered.filter((r) => isNum(r && r.leanRatio) !== null);
-    if (leaners.length) {
-      const hi = leaners[0], lo = leaners[leaners.length - 1];
-      /* NAMED BY THE FIELD THE ROW CARRIES. Sector rows are keyed `etf` and
-         `sector` (the name cell below reads the same two); this read `.t`,
-         the board row's key, so the region's lead reading printed "undefined
-         leans most bullish at +27.8% …; undefined most bearish at −22.1%."
-         on every session.
+    /* ---- THREE QUANTITIES, ONE STRIP, AND THE TABLE UNDER IT UNCHANGED ----
 
-         THE NAME LEADS NOW, AND THE TICKER USED TO. The old order was argued
-         — "the ticker is what can be looked up" — and it is the wrong trade
-         in a SENTENCE: "XLE leans most bearish" asks a reader to expand an
-         abbreviation mid-clause, while "Energy leans most bearish" is already
-         the reading. The ticker is still the better handle in a TABLE, where
-         it is a key rather than prose, and the name cell below keeps it —
-         one step quieter. flows-market.js:710 has always ordered it this way,
-         so this also ends two routes disagreeing about the same row. */
-      const basket = (r) => r.sector || r.fullName || r.etf || DASH;
-      const finding = leaners.length === 1
-        ? basket(hi) + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
-          " of its own premium."
-        : basket(hi) + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
-          basket(lo) + " most bearish at " + pct(lo.leanRatio, 1) + ".";
-      /* THE PANEL'S FINDING, AT THE SIZE A FINDING GETS, through the same
-         helper as the other three. `.is-lead` is the same element one step up
-         in --fs-lead: this sentence was already first and already the
-         reading, and was drawn at note size beneath a subtitle, so it read as
-         a caption for the table rather than as the answer to the region. It
-         appended the pair by hand until the fourth lead site made that a
-         second spelling of what a lead is. */
-      lead(into, finding);
-    } else {
-      into.append(el("p", "cc-quiet",
-        "No basket carried a readable lean this session, so none is named."));
-    }
+       A BASKET CAN BE RANKED THREE WAYS AND NONE OF THEM IS THE REAL ONE.
+       The dollars it cleared, the contracts it traded, and the share of its
+       own premium that leaned are three different questions, and a page that
+       picks one for the reader has answered the other two by hiding them.
+       So the strip takes a toggle and the buttons name the quantity.
 
-    /* ---- THE STRIP: ELEVEN BASKETS AT A GLANCE --------------------
+       THE SILENCES ARE PER MODE, AND THAT IS THE PROPERTY WORTH HAVING.
+       `read` on a row is about the PREMIUM pair — bullish and bearish — and
+       the volumes are read independently of it, so a basket can carry a
+       readable call and put volume while its premium is unreadable, and the
+       other way round. Each mode therefore counts its OWN reporting baskets
+       and names its own missing ones; switching modes honestly changes which
+       sectors report, and a shared count would have been a lie in two of the
+       three.
 
-       THE TABLE BELOW IS THE RECORD AND THIS IS THE READING. Eleven rows of
-       five columns is the right shape for "what exactly did Energy clear" and
-       the wrong one for "where did the money go this session", which is the
-       question a reader opens this region with — and answering it from a
-       table means reading eleven names, finding the numeric column, and
-       ranking eleven figures by eye.
+       THE TABLE DOES NOT MOVE. It is the record, it is ordered on the
+       publisher's own rank, and it prints all three quantities at once —
+       which is what a reader asking about one basket needs. The toggle is
+       the glance, not the record. */
 
-       A CHIP IS A BASKET: its name, its signed lean, and a bar of its own
-       share. Ordered exactly as the table is — the publisher's ranking,
-       untouched — so the strip and the record cannot disagree about which
-       basket leads.
+    /* CONTRACTS AT THE SCALE THEY LIVE ON, SIGNED, and abbreviated the same
+       way usd() abbreviates: sector volumes run to the low millions, and
+       "1961758" in a chip is a number nobody reads. */
+    const cts = (v) => {
+      const n = isNum(v);
+      if (n === null) return DASH;
+      const sign = n < 0 ? MINUS : n > 0 ? "+" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + (a / 1e6).toFixed(2) + "M";
+      if (a >= 1e3) return sign + (a / 1e3).toFixed(0) + "K";
+      return sign + String(Math.round(a));
+    };
+    /* ARITHMETIC ON TWO PUBLISHED COUNTS IN ONE UNIT, not a derived signal:
+       both terms are required, because a net needs both sides and a missing
+       put volume is not zero puts. */
+    const netCts = (r) => {
+      const c = isNum(r && r.callVolume), p = isNum(r && r.putVolume);
+      return c === null || p === null ? null : c - p;
+    };
+    const basket = (r) => r.sector || r.fullName || r.etf || DASH;
 
-       THE BAR IS THE LEAN RATIO AND NOTHING ELSE. Not the dollars: the
-       dollars span three orders of magnitude across eleven baskets, so a bar
-       scaled to them would draw nine baskets as a hairline and say only that
-       Technology is large, which every reader already knows. The ratio is
-       bounded to ±1 by construction and is what the publisher ranks on. The
-       dollar size rides in the chip's title, because a ratio with no size is
-       the half-reading this region's own qualifier warns about — and it is in
-       the table, in full, one scroll down. */
-    const strip = el("div", "cc-chips");
-    strip.setAttribute("role", "list");
-    for (const r of ordered) {
-      const v = isNum(r && r.leanRatio);
-      const chip = el("div", "cc-chip" + (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
-      chip.setAttribute("role", "listitem");
-      chip.append(el("span", "cc-chip-n", r.sector || r.fullName || r.etf || DASH));
-      chip.append(el("span", "cc-chip-v", v === null ? DASH : pct(v, 1)));
+    const MODES = [
+      { label: "$ Premium", noun: "net option premium",
+        val: (r) => isNum(r && r.netPremiumUsd), fmt: usd, axis: null,
+        said: (n, d) => n + " of " + d + " cleared readable premium",
+        one: (b, v) => b + " is the only basket with a readable premium sum, at " +
+          usd(v) + " net.",
+        two: (bh, vh, bl, vl) => bh + " cleared the most bullish net premium at " + usd(vh) +
+          "; " + bl + " the most bearish at " + usd(vl) + ".",
+        none: "No basket carried a readable premium sum this session, so none is named.",
+        why: "Showing NET PREMIUM in dollars — bullish minus bearish — so basket size is in " +
+          "the bar. The bars are scaled to the largest figure on this strip rather than to a " +
+          "fixed axis, so heights compare baskets within this session and not one session " +
+          "with another." },
+      { label: "# Contracts", noun: "net contracts",
+        val: netCts, fmt: cts, axis: null,
+        said: (n, d) => n + " of " + d + " reported both volumes",
+        one: (b, v) => b + " is the only basket that reported both volumes, at " + cts(v) +
+          " contracts net.",
+        two: (bh, vh, bl, vl) => bh + " traded the most calls over puts at " + cts(vh) +
+          " contracts; " + bl + " the most puts over calls at " + cts(vl) + ".",
+        none: "No basket reported both a call and a put volume this session, so none is named.",
+        why: "Showing NET CONTRACTS — call volume minus put volume, arithmetic on two counts " +
+          "the publisher carries per basket, in one unit. A count says nothing about what the " +
+          "contracts cost: a million five-cent contracts and a thousand fifty-dollar ones are " +
+          "the same figure here. Volumes are read independently of the premium sums, so this " +
+          "mode can report a basket the other two cannot, and the other way round." },
+      { label: "Flow Ratio", noun: "share of its own premium",
+        val: (r) => isNum(r && r.leanRatio), fmt: (v) => pct(v, 1), axis: 1,
+        said: (n, d) => n + " of " + d + " leaned",
+        one: (b, v) => b + " is the only basket with a readable lean, at " + pct(v, 1) +
+          " of its own premium.",
+        two: (bh, vh, bl, vl) => bh + " leans most bullish at " + pct(vh, 1) +
+          " of its own premium; " + bl + " most bearish at " + pct(vl, 1) + ".",
+        none: "No basket carried a readable lean this session, so none is named.",
+        why: "Showing the FLOW RATIO — the share of each basket's own two-sided premium that " +
+          "leaned one way — on a fixed ±1 axis, which is the one mode whose bar heights " +
+          "mean the same thing on every session. It carries no size: +90% on $30K of premium " +
+          "and +90% on $300M are not the same fact, and the dollars are in the table below." },
+    ];
+    /* THE DEFAULT IS THE RATIO, AND THE MOCKUP LEADS WITH THE DOLLARS. The
+       ratio is what the publisher ranks on and what the table under the strip
+       is ordered by, so opening on it is the one choice where the glance and
+       the record agree before a reader touches anything. */
+    let mode = 2;
 
-      /* THE SHARE BAR, CENTRED ON ZERO, on the same ±1 scale for every chip
-         — so two chips side by side are comparable, which is the whole point
-         of putting them side by side. A basket with no readable lean gets NO
-         bar: a zero-width one at the centre is what a measured 0/0 would draw,
-         and 0/0 is undefined rather than neutral. */
-      if (v !== null) {
-        const bar = el("span", "cc-chip-bar");
-        const fill = el("i");
-        const half = Math.min(50, Math.abs(v) * 50);
-        fill.style.width = Math.max(1.5, half) + "%";
-        fill.style.left = (v < 0 ? 50 - half : 50) + "%";
-        bar.append(fill);
-        chip.append(bar);
+    const glance = el("div", "cc-lean-glance");
+    into.append(glance);
+
+    const drawGlance = () => {
+      const M = MODES[mode];
+      glance.replaceChildren();
+      if (seg) {
+        seg.replaceChildren();
+        MODES.forEach((m, i) => {
+          const b = el("button", "cc-seg-b", m.label);
+          b.type = "button";
+          if (i === mode) b.setAttribute("aria-current", "true");
+          b.addEventListener("click", () => { mode = i; drawGlance(); });
+          seg.append(b);
+        });
       }
 
-      const net = isNum(r && r.netPremiumUsd), gross = isNum(r && r.grossPremiumUsd);
-      chip.title = v === null
-        ? (typeof r.reason === "string" && r.reason ? r.reason
-          : "This basket carried no readable pair of premium sums, so it has no lean.")
-        : (r.etf ? r.etf + ": " : "") + pct(v, 1) + " of its own two-sided premium leaned " +
-          (v > 0 ? "bullish" : v < 0 ? "bearish" : "neither way") +
-          (net === null ? "" : ", on " + usd(net) + " net") +
-          (gross === null ? "" : " of " + usd(gross) + " gross") + ".";
-      strip.append(chip);
-    }
-    into.append(strip);
+      /* READ THROUGH THE MODE ONCE, so the count, the lead, the ordering and
+         every chip are the same set of numbers by construction. */
+      const vals = new Map();
+      for (const r of ordered) vals.set(r, M.val(r));
+      const reporting = ordered.filter((r) => vals.get(r) !== null);
+      saySub(M.said(reporting.length, ordered.length));
+
+      /* ORDERED ON THE QUANTITY BEING DRAWN, nulls at the tail rather than
+         seated at zero — an absent reading is not a middling one. In ratio
+         mode this reproduces the publisher's own rank, which is what the
+         table draws, so the default strip and the record cannot disagree. */
+      const strung = reporting.slice().sort((a, b) => vals.get(b) - vals.get(a));
+      const rank = strung.concat(ordered.filter((r) => vals.get(r) === null));
+
+      if (reporting.length) {
+        const hi = strung[0], lo = strung[strung.length - 1];
+        lead(glance, reporting.length === 1
+          ? M.one(basket(hi), vals.get(hi))
+          : M.two(basket(hi), vals.get(hi), basket(lo), vals.get(lo)));
+      } else {
+        glance.append(el("p", "cc-quiet", M.none));
+      }
+
+      /* THE AXIS IS THE MODE'S. A ratio is bounded to ±1 by construction
+         and gets that fixed axis; a dollar sum and a contract count are not
+         bounded by anything, so their bars are scaled to the largest MAGNITUDE
+         on the strip — and the mode's own sentence says so, because a bar whose
+         scale changes between sessions is a bar a reader must be told about. */
+      const peak = M.axis !== null ? M.axis
+        : reporting.reduce((m, r) => Math.max(m, Math.abs(vals.get(r))), 0);
+
+      const strip = el("div", "cc-chips");
+      strip.setAttribute("role", "list");
+      for (const r of rank) {
+        const v = vals.get(r);
+        const chip = el("div", "cc-chip" +
+          (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
+        chip.setAttribute("role", "listitem");
+        chip.append(el("span", "cc-chip-n", basket(r)));
+        chip.append(el("span", "cc-chip-v", v === null ? DASH : M.fmt(v)));
+
+        /* A basket with no readable figure in THIS mode gets no bar: a
+           zero-width mark at the centre is what a measured zero draws, and an
+           absence is not a measured zero. A peak of 0 — every reporting basket
+           measured exactly even — leaves every bar at the rule, which is the
+           reading. */
+        if (v !== null) {
+          const bar = el("span", "cc-chip-bar");
+          const fill = el("i");
+          const half = peak > 0 ? Math.min(50, Math.abs(v) / peak * 50) : 0;
+          fill.style.width = Math.max(1.5, half) + "%";
+          fill.style.left = (v < 0 ? 50 - half : 50) + "%";
+          bar.append(fill);
+          chip.append(bar);
+        }
+
+        /* THE OTHER TWO QUANTITIES RIDE IN THE TITLE, so a reader hovering a
+           chip in one mode is not cut off from the other two — and the row's
+           own published reason is what an unreadable chip says, never a
+           sentence this file invented about it. */
+        const net = isNum(r && r.netPremiumUsd), ratio = isNum(r && r.leanRatio);
+        const nc = netCts(r);
+        chip.title = v === null
+          ? (typeof r.reason === "string" && r.reason ? r.reason
+            : "This basket carried no readable " + M.noun + ", so it is not placed.")
+          : (r.etf ? r.etf + ": " : "") + M.fmt(v) + " " + M.noun + " · " +
+            "net " + usd(net) + " · " + cts(nc) + " contracts" +
+            " · " + pct(ratio, 1) + " of its own premium.";
+        strip.append(chip);
+      }
+      glance.append(strip);
+
+      /* WHAT THIS MODE IS MADE OF, IN THE OPEN, UNDER ITS OWN STRIP. It
+         changes what a drawn bar means — the axis, the unit, and which
+         baskets could report at all — so it cannot live in the region's
+         static prose, which is written once and would then describe whichever
+         mode happened to be selected when it was written. */
+      glance.append(el("p", "cc-ln-note is-mode", M.why));
+    };
+    drawGlance();
 
     /* THE TABLE STAYS OPEN UNDER THE STRIP, and the first draft folded it.
 
@@ -3248,7 +3340,7 @@
        identically must not print different ages. */
     const drawnAt = Date.now();
     const lea = host("ccLean");
-    if (lea) { lea.replaceChildren(); paintLean(lea, lean); }
+    if (lea) { lea.replaceChildren(); paintLean(lea, lean, host("ccLeanSeg")); }
     const nws = host("ccNews");
     if (nws) { nws.replaceChildren(); paintNews(nws, news, cards, drawnAt); }
 
