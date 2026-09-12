@@ -1555,7 +1555,12 @@ try {
         (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Cleared");
       return {
         v: tile.querySelector(".cc-tile-v").textContent.trim(),
-        s: tile.querySelector(".cc-tile-s").textContent.trim(),
+        /* OPTIONAL, BECAUSE A MEASURED TILE NO LONGER HAS ONE. The three
+           other reads of .cc-tile-s in this file were guarded when the subs
+           were removed and this one was not, so it threw a TypeError rather
+           than failing an assertion — which is worse, because the run dies
+           before the assertions after it are reached. */
+        s: tile.querySelector(".cc-tile-s")?.textContent.trim() || "",
         status: document.getElementById("flowsStatus").textContent.trim(),
         bullSub: document.getElementById("ccBullSub").textContent.trim(),
         bearSub: document.getElementById("ccBearSub").textContent.trim(),
