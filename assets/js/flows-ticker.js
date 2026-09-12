@@ -6790,6 +6790,16 @@
              nobody had opened, which is the exact collapse this product
              refuses everywhere else. */
           ? "Reading today's boards for the other names in " + mine + "\u2026"
+        : boardsWhy === "unreadable"
+          ? "Today's boards did not come back, so the other " + mine +
+            " names cannot be named. That is this page's failure to read them, " +
+            "not a quiet sector."
+        : boardsWhy === "pending"
+          ? "Today's boards have not been published yet, so there is nothing to " +
+            "compare this name against."
+        : boardsWhy
+          ? "Today's boards were read and carried no rows at all, so no " + mine +
+            " peer can be named."
         : ranked.length
           ? (ranked.length > CAP ? CAP + " of " + ranked.length : String(ranked.length)) +
             " other " + mine + " name" + (ranked.length === 1 ? "" : "s") +
@@ -7433,6 +7443,7 @@
      opening the switcher twice is not two different questions. */
   let switchRows = null;
   let boardsAsked = null;
+  let boardsWhy = null;
 
   /* THE BOARDS, FETCHED ONCE, AND NOW FOR TWO READERS RATHER THAN ONE.
 
@@ -7456,6 +7467,26 @@
       getJSON("/api/flows/board?side=short").catch(() => null),
     ]).then(([long, short]) => {
       switchRows = boardRows(long, short);
+      /* WHICH SILENCE AN EMPTY LIST IS, WHICH boardRows CANNOT SAY. It maps
+         `payload.rows || []`, so a board that has not published yet, one that
+         failed to read, and one that genuinely ranked nobody all arrive here
+         as the same empty array — and a renderer handed that array will say
+         "nobody was ranked", which is a measurement over a key it never saw.
+         The three are told apart from the envelopes, once, here.
+
+         A FETCH THAT THREW IS null (the callers catch), and that is the
+         page's own failure rather than the publisher's — the one silence
+         this product calls unreadable. */
+      const side = (p) => {
+        if (!p || typeof p !== "object") return "unreadable";
+        if (p.status && p.status !== "ok") return p.status;
+        return Array.isArray(p.rows) ? "ok" : "unavailable";
+      };
+      const states = [side(long), side(short)];
+      boardsWhy = states.includes("ok") ? null
+        : states.includes("unreadable") ? "unreadable"
+        : states.includes("pending") ? "pending"
+        : states[0];
       paintRank();
       if (painted) paintRelated(painted);
       return switchRows;

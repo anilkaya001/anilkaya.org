@@ -552,7 +552,43 @@ if (CARDS && existsSync(CARDS)) {
         statusBoxH: Math.round(((document.getElementById("ftStatus") || {})
           .getBoundingClientRect ? document.getElementById("ftStatus")
           .getBoundingClientRect().height : 0)),
-        stations: document.querySelectorAll(".ft-station").length };
+        stations: document.querySelectorAll(".ft-station").length,
+
+        /* ---- THE FOUR SURFACES THIS WAVE ADDED, EACH COUNTED RATHER THAN
+               TRUSTED. All four are written by the controller, so "the markup
+               is served" says nothing about whether a reader sees anything;
+               what these report is what actually drew. ---- */
+
+        /* Six cards, or fewer when a panel did not read — a panel that did
+           not read gets no card on purpose, so this is a floor rather than a
+           fixed number. A ZERO here means the strip is served and empty,
+           which is the state worth seeing. */
+        cards: document.querySelectorAll(".ft-card").length,
+        /* A card whose figure is the em dash is a card that should not have
+           been drawn: its panel read, and then it had nothing to say. */
+        cardsDash: [...document.querySelectorAll(".ft-card-v")]
+          .filter((v) => v.textContent.trim() === "\u2014").length,
+
+        /* The findings index, and the denominator it states. A list with no
+           denominator reads as a census, so the sentence is captured whole
+           rather than counted. */
+        brief: document.querySelectorAll(".ft-brief-i").length,
+        briefSaid: (document.getElementById("ftBriefS") || {}).textContent || "",
+        /* Every finding must be a link INTO the page; one that points at a
+           panel this document does not contain is a door onto nothing. */
+        briefDead: [...document.querySelectorAll(".ft-brief-a")]
+          .filter((a) => !document.querySelector(a.getAttribute("href"))).length,
+
+        /* The sector peers arrive on an idle fetch, so at this instant they
+           may legitimately be absent; what must never happen is the strip
+           claiming an EMPTY sector before the boards have been read. */
+        related: document.querySelectorAll(".ft-rel-c").length,
+        relatedSaid: (document.getElementById("ftRelS") || {}).textContent || "",
+
+        /* THE CHARTS A READER CAN ACTUALLY INTERROGATE. This went from 1 to 7
+           in one wave and nothing but a count would have noticed if a
+           registration stopped running. */
+        cursors: document.querySelectorAll('svg[data-fx-cursor="on"]').length };
     });
     await page.screenshot({ path: path.join(OUT, "ticker.png") });
     await ctx.close();

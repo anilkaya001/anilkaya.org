@@ -819,8 +819,18 @@ const CEILING_KIB = {
      had simply never looked — which it did, in the first render, until the
      pending silence was given its own sentence.
 
-     482 LEAVES 1,260 B. */
-  tickerPage: 482,
+     482 -> 483 IN THE SAME WAVE, FOR A SILENCE ONE LEVEL DOWN. The peer
+     strip's pending sentence fixed the case where the boards had not been
+     FETCHED; the preview harness then showed the case underneath it, because
+     it stubs those fetches with a payload that carries no rows: boardRows
+     maps `payload.rows || []`, so a board that has not published, one that
+     failed to read, and one that genuinely ranked nobody all arrive as the
+     same empty array — and the strip announced an empty sector for all three.
+     The envelopes are read once now and the three get three sentences.
+     493,943 B = 482.37 KiB.
+
+     483 LEAVES 649 B. */
+  tickerPage: 483,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
