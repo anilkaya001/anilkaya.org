@@ -353,13 +353,22 @@
      panel's, a NOT CLAIMED list. Qualifiers stay open, as `qualifier()` below.
      Folding is never deletion: the node is MOVED, so a folded sentence is
      still in textContent and still found by find-in-page. */
-  function appendMethod(host, nodes, summary) {
+  /**
+   * @param always — fold even under the wall. The wall asks "is this enough
+   *   text to be worth a disclosure", which is the right question for a caller
+   *   that hands over everything it has and lets length decide. A caller that
+   *   has ALREADY applied the split rule above has answered the better one, so
+   *   its method note folds at any length. The overlay is the first: its three
+   *   sentences cleared the wall together, and separating out the two that
+   *   must stay open would otherwise have put the third back on the panel.
+   */
+  function appendMethod(host, nodes, summary, always) {
     const list = (nodes || []).filter(Boolean);
     if (!list.length) return;
     /* THE COUNT IS OF THE TEXT A READER MEETS, punctuation included — the
        wall is a reading-length judgement, not a measurement of the inputs. */
     const chars = list.reduce((n, node) => n + String(node.textContent || "").length, 0);
-    if (chars <= NOTE_WALL_CHARS) {
+    if (!always && chars <= NOTE_WALL_CHARS) {
       for (const node of list) host.append(node);
       return;
     }
@@ -915,13 +924,32 @@
       outside.push(join.scoreOnly + " scored session" + (join.scoreOnly === 1 ? "" : "s") +
         " with no close on this card");
     }
+    /* THE PANEL'S OWN SPLIT RULE, FINALLY APPLIED HERE. This was ONE
+       paragraph of three unrelated sentences and the largest block of text on
+       the ticker page, which is what made the card too big to take in. The
+       rule at NOTE_WALL_CHARS says which of the three may fold:
+
+         OPEN — the population and what it left out ("drawn over the 23
+         sessions the two windows share; outside it, 19 of price with no
+         score"): the qualifier case by the letter of the rule.
+         OPEN — the units, since separate scales and no comparison by height
+         is a thing that changes what the drawing MEANS.
+         FOLDS — the join ("matched by session date, not zipped by position")
+         is HOW the series were brought together, and is the longest.
+
+       Nothing is deleted: appendMethod MOVES the node, so the sentence is
+       still in textContent for a find-in-page, which the suite asserts. */
     const notes = (join.notes || {});
-    host.append(el("p", "fc-note ovl-note",
+    host.append(el("p", "fc-note is-qualifier ovl-note",
       (outside.length
         ? "Drawn over the " + join.overlap + " sessions the two windows share. Outside it: " +
           outside.join(", ") + ". "
         : "The two windows cover the same " + join.overlap + " sessions exactly. ") +
-      (notes.join || "") + " " + (notes.axes || "")));
+      (notes.axes || "")));
+    if (notes.join) {
+      appendMethod(host, [el("p", "fc-note ovl-join", notes.join)],
+        "How the two series were joined", true);
+    }
 
     if (join.gaps > 0) {
       host.append(el("p", "fc-note ovl-gaps",

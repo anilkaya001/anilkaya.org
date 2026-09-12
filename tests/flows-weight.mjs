@@ -506,7 +506,39 @@ const CEILING_KIB = {
      floor and why that floor is PRINTED in the panel's own stat list.
 
      412 LEAVES 1,718 B. The route is still owed the comment strip. */
-  tickerPage: 412,
+  /* 415, AND THE PATTERN IS NOW THE POINT. Measured:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   62,280      flows-ticker.js  352,124
+       total            422,971 B = 413.06 KiB, 1,086 B over 412
+
+     WHAT IT BOUGHT. The overlay's closing note was ONE paragraph of three
+     unrelated sentences and the largest block of text on the ticker page.
+     This file's own rule at NOTE_WALL_CHARS says which may fold, and the
+     panel had never applied it: the population and what it left out stay
+     OPEN (qualifier), the units stay OPEN (they change what the drawing
+     means), and the join — how the two series were matched — FOLDS into the
+     disclosure appendMethod already builds. Nothing is deleted; the node is
+     moved, so the sentence is still in textContent for a find-in-page, which
+     the ticker suite asserts. The card measured ~1000px and now measures
+     ~490px, which is the whole reason for the change.
+
+     appendMethod gained an `always` flag: the 420-character wall is the right
+     question for a caller that hands over everything and lets length decide,
+     and the wrong one for a caller that has already sorted method from
+     qualifier itself.
+
+     AND THE PATTERN: this is the third raise on this route in one session,
+     each of a kilobyte or two, each of it reasoning rather than behaviour —
+     my own comments were trimmed twice before this number was touched and
+     still cost more than the code. The route's real fix is the comment strip:
+     built, merged, measured at ~253 KB of comment on this route, and waiting
+     on one Workers Builds field that is not mine to set. Until it is set,
+     this ceiling will keep climbing a kilobyte at a time and every raise will
+     be honest and pointless in the same breath.
+
+     415 LEAVES 1,973 B. */
+  tickerPage: 415,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
