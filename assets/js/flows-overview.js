@@ -508,11 +508,58 @@
            rescales to its own extremes, and a name drifting ±2 draws the
            same picture as one swinging ±40 — so a bull strip and a bear
            strip could not be read against each other at all. */
-        scoreStrip(cell, {
+        const strip = scoreStrip(cell, {
           values: series, width: 150, height: 22,
           domain: track.domain, deadBand: track.deadBand, prefix: "cc",
           ariaLabel: "Score for " + row.t + " across " + measured + " archived sessions",
         });
+        /* REGISTERED HERE AND NOT INSIDE scoreStrip, which is the whole
+           reason this is four lines at a call site rather than one option on
+           the builder. flows-ui.js is served on four routes and only THIS one
+           links flows-cursor.js — /flows/long/, /flows/track/ and the strategy
+           tester do not — so a registration inside the builder would ship the
+           bytes to three routes where `window.FlowsCursor` is undefined and
+           the feature cannot exist. A deferred cost is still a cost, and so
+           is a cost that can never be spent.
+
+           WHAT THE STRIP WITHHOLDS. It is the name's whole archived score
+           run, and the row beside it prints ONLY the newest of those scores;
+           the aria-label names the population and no value in it. So the one
+           question the drawing invites — what was this on the 14th — had no
+           answer anywhere on the page, and the marks are 150px wide, which is
+           about seven pixels a session.
+
+           A SESSION THIS NAME WAS NOT SCORED IN IS NOT A ZERO. The strip
+           already refuses to bridge those — a run is drawn between adjacent
+           MEASURED points only — and the readout says so rather than
+           printing a number for a session that has none. */
+        if (window.FlowsCursor && strip) {
+          /* THE COLUMN CENTRES COME FROM THE FUNCTION THAT PLACED THEM.
+             flows-ui.js exports stripGeometry beside scoreStrip precisely so
+             a caller can ask where a column is instead of reproducing the
+             arithmetic — and the first draft of this block did reproduce it,
+             which is the one thing flows-cursor.js's contract forbids. Same
+             count, same width as the call above, so the same centres.
+
+             THE BAND IS THE WHOLE CANVAS HERE, and that is not an oversight:
+             this drawing is a bare 150x22 sparkline in a table cell with no
+             axis, no labels and no rail, so its plot rectangle and its canvas
+             are the same rectangle. */
+          const geo = UI.stripGeometry(series.length, 150);
+          window.FlowsCursor.attach(strip, {
+            name: "Score for " + row.t + " by session",
+            band: { y0: 0, y1: 22 },
+            points: series.map((raw, i) => {
+              const v = isNum(raw);
+              return {
+                x: geo.xMid(i),
+                label: track.dates[i] || "session " + (i + 1),
+                rows: [{ k: "Score", v: v === null ? "not scored" : fmtSigned(v, 0),
+                         cls: v === null ? "" : v > 0 ? "is-pos" : v < 0 ? "is-neg" : "" }],
+              };
+            }),
+          });
+        }
       } else {
         /* No trace for this name is an ABSENCE, not a flat line at zero. */
         cell.textContent = DASH;
@@ -566,6 +613,12 @@
     }
     return {
       byName, moveBy, domain: { lo, hi },
+      /* THE SESSION EACH COLUMN IS, in the series' own order. Every strip is
+         drawn against these indices and none of them names a date anywhere,
+         so a reader can see a name fall and not say when. `d` is what the
+         track publishes; a row that carries none stays null rather than
+         becoming an index worn as a date. */
+      dates: sessionRows.map((r) => (r && r.d) || null),
       deadBand: payload ? isNum(payload.deadBand) : null,
       /* The column header states the window it drew rather than a constant:
          a track that published nothing gets a header that promises nothing. */
@@ -1839,6 +1892,14 @@
     const cap = svgEl("text", { class: "cc-ring-c", x: C, y: C + 14, "text-anchor": "middle" });
     cap.textContent = "premium";
     svg.append(cap);
+    /* NO CURSOR: EVERY NUMBER THIS RING ENCODES IS ALREADY ON SCREEN. The
+       total sits in the hole and the legend below prints both shares and both
+       dollar figures, so there is nothing a cursor could reveal — it holds two
+       observations and would offer two stops that read back two labels the
+       reader is looking at. Declared rather than remembered, so the preview
+       harness's chart census can prove "every drawing reads out" instead of
+       carrying this as a standing exception. */
+    svg.dataset.fxRead = "face";
 
     const wrap = el("div", "cc-split-w");
     wrap.append(svg);
@@ -3025,6 +3086,7 @@
        that cleared the band, so the reader can see how far the tail actually
        reaches and how much of it arrived this morning. */
     let trails = 0;
+    const marks = [];
     for (const [rows, cls] of [[payload.__bull, "is-bull"], [payload.__bear, "is-bear"]]) {
       for (const r of rows || []) {
         const s = isNum(r.s);
@@ -3101,6 +3163,11 @@
           (usable && typeof mv.d1.cross === "string" ? " · " + mv.d1.cross : "");
         dot.append(label);
         svg.append(dot);
+        /* KEPT AS THE LOOP PLACES IT, so the cursor below reads the marks
+           this pass actually drew — including the `usable` decision, which
+           is what separates a real span from two payloads disagreeing. */
+        marks.push({ s, t, v, gap, cross: usable && typeof mv.d1.cross === "string"
+          ? mv.d1.cross : null, on: mv && mv.on ? mv.on : null });
       }
     }
 
@@ -3120,6 +3187,53 @@
       ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) +
       " bearish names cleared it." +
       (trails ? " " + trails + " of them trail the move since their previous scored session." : ""));
+
+    /* THE ONE AXIS ON THIS PAGE WHERE A MARK IS A NAME, AND THE ONLY PLACE
+       MOST OF THOSE NAMES APPEAR AT ALL. The regions above list the first ten
+       a side; a wide session puts dozens of dots here that are named nowhere
+       else, and each carries a <title> a mouse can find one at a time.
+
+       GROUPED BY SCORE, BECAUSE THE MARKS ARE. Two names on +62 are two
+       circles at one x — the axis cannot separate them and neither can a
+       pointer. A cursor that searched the flat list would report whichever
+       of them happened to be first and silently drop the rest, which is a
+       reading that is wrong rather than absent. One point per score, naming
+       everyone on it, is what the drawing actually shows.
+
+       THE ROWS ARE CAPPED AND THE CAP IS SAID. A crowded score can hold more
+       names than a readout can print; the count of what is not shown goes in
+       a row of its own rather than the list simply ending. */
+    if (window.FlowsCursor && marks.length) {
+      const byScore = new Map();
+      for (const m of marks) {
+        if (!byScore.has(m.s)) byScore.set(m.s, []);
+        byScore.get(m.s).push(m);
+      }
+      const SHOW = 6;
+      window.FlowsCursor.attach(svg, {
+        name: "Every cleared name on the score axis",
+        band: { y0: axisY - 16, y1: axisY + 16 },
+        points: [...byScore.keys()].sort((a, b) => a - b).map((score) => {
+          const at = byScore.get(score);
+          const rows = at.slice(0, SHOW).map((m) => ({
+            k: m.t,
+            /* THE MOVE ONLY WHERE THE SPAN CAME WITH IT — the same rule the
+               <title> follows, and the reason `usable` exists: a delta with
+               no span attached is the defect this layer replaced. */
+            v: m.v !== null && m.gap !== null
+              ? fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap)
+              : m.on ? "last scored " + m.on : "no earlier scored session",
+            cls: m.v === null ? "" : m.v > 0 ? "is-pos" : m.v < 0 ? "is-neg" : "",
+          }));
+          if (at.length > SHOW) {
+            rows.push({ k: "and " + (at.length - SHOW) + " more",
+                        v: "at this same score", cls: "" });
+          }
+          return { x: xOf(score), label: fmtSigned(score, 0), rows };
+        }),
+      });
+    }
+
     spineHost.append(svg);
   }
 

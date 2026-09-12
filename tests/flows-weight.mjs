@@ -1326,7 +1326,37 @@ const CEILING_KIB = {
      smaller made this one necessary — a net win across the two (+1,114 here
      against −2,600 there) but not a free one, and a ceiling that absorbed it
      quietly would hide the transfer. 231 leaves 817 B. */
-  overviewPage: 231,
+
+  /* 231 -> 237, AND THIS TIME THE ROUTE DID GAIN SOMETHING. The chart census
+     the ticker's raise describes was pointed at this page too — the directive
+     is about the section, not one route — and it read 1 cursor against 20
+     drawings. It reads 19 and 1 now, with nothing left in `bare`. Byte-exact,
+     `git cat-file -s HEAD:` against `stat`:
+
+       flows-dock.js    6,007   nav.js            2,560   flows-cursor.js 13,123
+       flows-ui.js     25,136   flows-overview.js 188,901 -> 195,296 (+6,395)
+       total          235,727 -> 242,122 B = 236.45 KiB — 5,578 B over
+
+     THREE DRAWINGS, THREE DIFFERENT ANSWERS. The call/put ring declares
+     data-fx-read="face": its total sits in the hole and its legend prints
+     both shares and both dollar figures, so a cursor would read back what is
+     already on screen. The spine takes one, grouped BY SCORE rather than by
+     mark — two names on +62 are two circles at one x, and a cursor over the
+     flat list would have named one of them and silently dropped the rest.
+
+     THE PER-ROW SCORE STRIPS ARE THE REST, AND THEY REGISTER AT THE CALL SITE
+     rather than inside scoreStrip. flows-ui.js is served on four routes and
+     only this one links flows-cursor.js — /flows/long/, /flows/track/ and the
+     strategy tester do not — so the shared builder would have shipped the
+     bytes to three routes where the feature cannot exist at all. That is the
+     mirror of the deferral trap this file already names: not a cost moved out
+     of a measurement, but a cost that could never be spent. Those three
+     ceilings are untouched by this change, which is the evidence the
+     placement was right.
+
+     237 LEAVES 566 B, tighter than the 817 above and deliberately so: this
+     route is owed the same comment strip the ticker is. */
+  overviewPage: 237,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

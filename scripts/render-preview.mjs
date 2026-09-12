@@ -188,6 +188,13 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
   });
   if (spill.length) { seen.textSpill = spill.slice(0, 8); failed++; }
   const file = path.join(OUT, name + ".png");
+  /* THE SHUTTER OPENS AT THE TOP OF THE PAGE, WHATEVER THE PROBE DID. A probe
+     that focuses an element scrolls it into view, and a full-page capture that
+     starts from wherever it was left renders a screenful of empty ground —
+     measured, on the ticker, after the cursor drive was added there.
+     `behavior: "instant"` because the section sets scroll-behavior: smooth and
+     an animated scroll is still moving when the capture starts. */
+  await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
   await page.screenshot({ path: file });
   await ctx.close();
   if (errs.length) failed++;
@@ -245,7 +252,49 @@ await shot("overview",
           .map((t) => Math.round(t.getBoundingClientRect().width))).size,
         tileHeights: new Set([...document.querySelectorAll(".cc-tile")]
           .map((t) => Math.round(t.getBoundingClientRect().height))).size,
-        neuronWords: document.querySelectorAll(".ak-w").length };
+        neuronWords: document.querySelectorAll(".ak-w").length,
+
+        /* THE SAME CHART CENSUS THE TICKER GETS, because the directive is
+           about the section and not about one page. Identical rules: a
+           drawing a reader is told to ignore is furniture, a drawing that
+           prints its own reading declares data-fx-read="face", and whatever
+           is left in `bare` is work nobody has done yet. */
+        charts: (() => {
+          const drawn = [...document.querySelectorAll("#flowsMain svg")]
+            .filter((s) => s.getAttribute("aria-hidden") !== "true")
+            .filter((s) => s.querySelector("path, rect, circle, line, polyline, polygon"));
+          const bare = drawn.filter((s) => s.dataset.fxCursor !== "on");
+          const left = bare.filter((s) => s.dataset.fxRead !== "face");
+          const where = (s) => {
+            const r = s.closest("section, .cc-region, [id]");
+            return (r && (r.id || r.className) || "?") + "." +
+              (s.getAttribute("class") || "-");
+          };
+          return { drawn: drawn.length, cursor: drawn.length - bare.length,
+                   face: bare.length - left.length,
+                   bare: [...new Set(left.map(where))].join(" ") };
+        })(),
+
+        /* DRIVEN, NOT COUNTED — the same check the ticker gets, and for the
+           reason it earned there: a spec whose points carry empty rows or a
+           label off the wrong field registers cleanly and announces nothing.
+           Seventeen of these are per-row score strips built from one shared
+           spec, so one sample of each KIND is the useful report rather than
+           nineteen near-identical lines. */
+        reads: (() => {
+          const seenKind = new Set(), out = [];
+          for (const s of document.querySelectorAll('svg[data-fx-cursor="on"]')) {
+            const kind = s.getAttribute("class") || "-";
+            if (seenKind.has(kind)) continue;
+            seenKind.add(kind);
+            s.focus();
+            s.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+            const box = document.querySelector(".fx-read");
+            out.push(kind + ": " + (box && !box.hidden ? box.textContent.trim() : "SAID NOTHING"));
+            s.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          }
+          return out;
+        })() };
     } });
 
 /* THE STRIP AT ITS TWO NARROWER COUNTS. The seven-column track hands the
