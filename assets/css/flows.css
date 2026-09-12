@@ -6470,6 +6470,22 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-rank { color: var(--ink-faint); width: 1.6rem; }
 .cc-t { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .cc-dim { color: var(--ink-faint); font-size: var(--fs-fine); }
+/* The company name under its symbol. It is allowed to wrap where the cell
+   itself is not: `.cc-t` sets nowrap so a ticker never breaks mid-symbol,
+   and a name of arbitrary length inheriting that would widen the column
+   past the table. Truncated to two lines, because a cell is not a place to
+   read a legal entity's full registered style. */
+.cc-nm {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-weight: 400;
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+  white-space: normal;
+  max-width: 12rem;
+}
 /* The crossing tag and the earnings mark follow the ticker inside one cell
    with no text node between them, so without a margin they rendered as one
    token — "SYN132cleared", "SYN182⚠38d" — at a gap of 0px, and a number
@@ -8214,17 +8230,17 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   padding-block:.55rem;
 }
 .cc-change-summary {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:.75rem;
-  padding:1rem 1rem .2rem;
+  display:flex;
+  flex-wrap:wrap;
+  gap:.5rem 1.6rem;
+  padding:.75rem 1rem .2rem;
 }
 .cc-change-metric {
   display:flex;
   flex-direction:column;
-  gap:.2rem;
+  gap:.1rem;
   border-left:2px solid var(--gold-celadon);
-  padding-left:.75rem;
+  padding-left:.6rem;
 }
 .cc-change-metric strong {
   font-family:var(--font-figure);

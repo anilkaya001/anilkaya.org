@@ -344,9 +344,9 @@ try {
        the landing page showed the opposite sign to /flows/market/ over the
        same payload — and it printed a bounded ratio to four decimals with no
        unit at all. U+2212, not a hyphen, in both. */
-    eq(by["Tilt · names"]?.v, "−1.4%",
+    eq(by["Lean · names"]?.v, "−1.4%",
        "the equal-weight tilt is a share of names, with its unit");
-    eq(by["Tilt · dollars"]?.v, "−2.1%",
+    eq(by["Lean · dollars"]?.v, "−2.1%",
        "and the dollar-weight tilt is a share of premium, on the same tile row");
     /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
 
@@ -361,9 +361,9 @@ try {
     eq(tiles.filter((t) => t.s).length, 0,
        `no tile explains itself while its value is a measurement (${
          tiles.filter((t) => t.s).map((t) => t.k + ": " + t.s).join(" | ")})`);
-    ok(/is-neg/.test(by["Tilt · names"]?.cls || "") &&
-       /is-neg/.test(by["Tilt · dollars"]?.cls || ""),
-       `and a sold tape is toned as one on both (${by["Tilt · names"]?.cls})`);
+    ok(/is-neg/.test(by["Lean · names"]?.cls || "") &&
+       /is-neg/.test(by["Lean · dollars"]?.cls || ""),
+       `and a sold tape is toned as one on both (${by["Lean · names"]?.cls})`);
     /* AND THE VALUE READS IN ONE DIRECTION. "9 / 12" needed a line
        underneath saying "bull / bear" and could be divided the wrong way
        round by anyone who did not read it; the words are inside the value
@@ -1841,10 +1841,10 @@ try {
         { v: t.querySelector(".cc-tile-v")?.textContent.trim(),
           s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
           cls: t.querySelector(".cc-tile-v")?.className || "" }])));
-    eq(tiles["Tilt · names"]?.v, "+5.0%", "both weightings are printed, each as its own share");
-    eq(tiles["Tilt · dollars"]?.v, "−3.0%", "so the page cannot show one sign and hide the other");
-    ok(/is-pos/.test(tiles["Tilt · names"]?.cls || "") &&
-       /is-neg/.test(tiles["Tilt · dollars"]?.cls || ""),
+    eq(tiles["Lean · names"]?.v, "+5.0%", "both weightings are printed, each as its own share");
+    eq(tiles["Lean · dollars"]?.v, "−3.0%", "so the page cannot show one sign and hide the other");
+    ok(/is-pos/.test(tiles["Lean · names"]?.cls || "") &&
+       /is-neg/.test(tiles["Lean · dollars"]?.cls || ""),
        "and each carries its own sign in the glyph before any hue is applied");
     /* THE DISAGREEMENT IS SHOWN, NOT ANNOUNCED — and the shape it used to be
        announced in was wrong twice over.
@@ -1863,7 +1863,7 @@ try {
        miss that they differ; a sentence saying so is the page narrating its
        own screenshot. So the assertion is that NEITHER tile grows a
        sentence, on the one session that used to produce two. */
-    eq((tiles["Tilt · names"]?.s || "") + (tiles["Tilt · dollars"]?.s || ""), "",
+    eq((tiles["Lean · names"]?.s || "") + (tiles["Lean · dollars"]?.s || ""), "",
        "neither tilt narrates the disagreement its own two glyphs already show");
     await post("market", market);
   }
@@ -1892,7 +1892,7 @@ try {
         }];
       })));
     const marks = new Map();
-    const TILTS = ["Tilt · names", "Tilt · dollars"];
+    const TILTS = ["Lean · names", "Lean · dollars"];
 
     /* 1. UNREADABLE: the request did not come back. This page's fault. */
     allowFetchFailure = true;
@@ -1957,10 +1957,10 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles["Tilt · names"]?.kind, "empty", "a session in which no name leaned is measured-empty");
-    eq(tiles["Tilt · names"]?.s, "no name leaned", "and says so as a reading about the session");
-    eq(tiles["Tilt · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
-    eq(tiles["Tilt · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
+    eq(tiles["Lean · names"]?.kind, "empty", "a session in which no name leaned is measured-empty");
+    eq(tiles["Lean · names"]?.s, "no name leaned", "and says so as a reading about the session");
+    eq(tiles["Lean · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
+    eq(tiles["Lean · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
     eq(tiles.Breadth?.v, "0 bull / 0 bear", "and the measured zeros behind it print as zeros");
     eq(tiles.Breadth?.kind, null, "which are a reading, not a silence");
     marks.set("empty", tiles[TILTS[0]].mark);

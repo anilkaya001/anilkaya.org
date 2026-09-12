@@ -376,6 +376,14 @@
     const t = String((row && row.t) || "");
     const deep = !knowsDeep || (row && row.dp === 1);
     td.append(nameNode(t, Boolean(t) && deep));
+    /* THE COMPANY BESIDE THE SYMBOL, WHEN THE BOARD CARRIES ONE. `nm` is a
+       vendor carry (scripts/flows-pipeline.mjs) and null wherever the vendor
+       sent no name, so a nameless row draws exactly the cell it always drew.
+       A SECOND LINE, not a parenthesis: the ticker is what the rank, the link
+       and every column are keyed on, and a forty-character name beside it
+       would push the symbol off the edge a reader scans down. */
+    const nm = row && typeof row.nm === "string" && row.nm.trim() ? row.nm.trim() : null;
+    if (nm && nm !== t) td.append(el("span", "cc-nm", nm));
     /* THE CROSSING, ON THE RANKED ROW ITSELF. A name that cleared the band
        this session is a new arrival on this board and a name that faded is
        on its way off it; both were visible only in the change region, which
@@ -1045,8 +1053,8 @@
       ["Session", sessionDate || DASH, null, boardsSilence(sessionDate !== null)],
       ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), null,
         tileSilence(market, isNum(market && market.n) !== null, null)],
-      ["Tilt · names", pct(bt, 1), tone(bt), btSilence],
-      ["Tilt · dollars", pct(pt, 1), tone(pt), ptSilence],
+      ["Lean · names", pct(bt, 1), tone(bt), btSilence],
+      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence],
       ["Breadth",
         (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
         null, tileSilence(market, bull !== null && bear !== null, null)],
@@ -2474,10 +2482,24 @@
     const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
       : pool !== null && pool > rows ? rows + " of " + pool + " " + word + " carried"
         : rows + " " + word;
+    /* THE STRIP SAYS IT, SO THIS LINE DOES NOT. The Session tile carries
+       meta.sessionDate and the Cleared tile both POOLS, so reprinting them
+       restated the readings sitting an inch above.
+
+       WHAT THE STRIP CANNOT SAY STAYS. "50 of 53 bearish carried" is a
+       TRUNCATION — the cap took names — and the tile prints the pool alone,
+       so this is the only place rows and pool are reconciled; it prints when
+       they part company and not otherwise. The band count is measured here
+       and nowhere else, and the unread-board sentence is a refusal: the em
+       dash five other absences print cannot say a fetch failed. */
+    const lngRows = rowCount(lng), shtRows = rowCount(sht);
+    const lngPool = poolCount(lng), shtPool = poolCount(sht);
+    const cut = (rows, pool) => rows !== null && pool !== null && pool > rows;
     const parts = [];
-    parts.push(sideSaid(rowCount(lng), poolCount(lng), "bullish") + " · " +
-      sideSaid(rowCount(sht), poolCount(sht), "bearish"));
-    if (meta.sessionDate) parts.push("session " + meta.sessionDate);
+    if (cut(lngRows, lngPool) || cut(shtRows, shtPool)) {
+      parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " +
+        sideSaid(shtRows, shtPool, "bearish"));
+    }
     if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
     /* AND A BOARD THAT DID NOT ANSWER IS NAMED HERE. The em dash the count
        falls back to is the right glyph for "not known" and it is the same
@@ -2485,8 +2507,9 @@
        that a fetch failed. The line that reports on this page is where that
        belongs. */
     const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
-    statusEl.textContent = parts.join(" · ") + "." + (unread.length
-      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
+    const said = parts.length ? parts.join(" · ") + "." : "";
+    statusEl.textContent = said + (unread.length
+      ? (said ? " " : "") + "The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
         " could not be read, so " + (unread.length > 1 ? "neither side is" : "that side is not") +
         " on this page. Refresh to try again."
       : "");

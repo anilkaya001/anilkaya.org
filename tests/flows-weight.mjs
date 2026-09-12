@@ -454,7 +454,30 @@ const CEILING_KIB = {
      406 LEAVES 344 B, tighter than the 739 above, deliberately: the observer
      closes the defect but the route is still owed the comment strip, and the
      next change to it should have to come here too. */
-  tickerPage: 406,
+  /* AND IT CAME, BECAUSE THE OBSERVER ALONE DID NOT CLOSE IT. 408 now:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   56,840      flows-ticker.js  351,521
+       total            416,928 B = 407.16 KiB, 165 B over 406
+
+     WHAT THE 1,193 B BOUGHT, and the measurement that says the previous fix
+     was incomplete rather than wrong. CI failed again at the same assertion
+     with the panel at 172 and the bar ending at 218 — and 172 is
+     4.4rem + 5.5rem + 0.6rem to the pixel, which is the STYLESHEET's
+     placeholder --ft-bar-h, not any height the bar ever had after paint. So
+     the jump happened while the tab row was one unwrapped line in the
+     fallback face, the webfont then swapped, the row wrapped, the bar grew
+     92 -> 148, and --ft-bar-h was dutifully updated by the observer for a
+     `scroll-margin-top` the browser had already read and would never read
+     again. Setting the variable was never going to move the page: only a
+     second scrollIntoView can, and only for a reader still sitting where the
+     first one left them, which is what `jumped` records and checks.
+
+     408 LEAVES 1,024 B. Wider than the 344 above on purpose: that margin was
+     set on the belief the defect was closed, and it was not, so the next
+     attempt should not also have to spend its first hour here. The route is
+     still owed the comment strip. */
+  tickerPage: 408,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -515,7 +538,34 @@ const CEILING_KIB = {
      the next one is the comment strip: measured, merged, and waiting on a
      single Workers Builds field. Until that lands, this route should have to
      come here and argue rather than find room waiting. */
-  overviewPage: 161,
+  /* AND IT CAME BACK, ONE BRANCH LATER, TO ARGUE. 163 now. Measured the same
+     way, `git cat-file -s HEAD:` against `stat`:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-ui.js       25,136      flows-overview.js 132,152
+       total            165,855 B = 161.97 KiB, 991 B over 161
+
+     WHAT THE 2,715 B BOUGHT. Three changes, and two of them DELETE what a
+     reader sees: the verdict strip's two tilt tiles are now "Lean · names"
+     and "Lean · dollars" (the word "tilt" is jargon this page never defined
+     and the value is already a signed per cent), and the status line above
+     the strip stopped reprinting the session date and both board counts,
+     which the Session and Cleared tiles carry twelve pixels below it. That
+     line now prints only what the strip cannot: the rows-against-pool
+     TRUNCATION when the two part company, the band count, and the
+     unread-board refusal. The third change ADDS: the company name under the
+     symbol on every ranked row, drawn only where the vendor sent one.
+
+     NOT BOUGHT BACK BY SHORTENING COMMENTS — except my own, twice, which is
+     a different act: both blocks written on this branch were over-written on
+     their first draft and were cut to what they had to say (−316 B) before
+     this number was touched. Nothing that predates this branch was trimmed.
+
+     163 LEAVES 1,057 B, which is room for a fix and not for a feature. The
+     paragraph above still stands: the structural fix owed here is the
+     comment strip, measured and merged and waiting on one Workers Builds
+     field, and until it lands this route argues for every raise. */
+  overviewPage: 163,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

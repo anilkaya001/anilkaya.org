@@ -5573,7 +5573,10 @@
      not a better guess at the missing call site. The observer measures
      because it changed. The hand calls stay for the first paint. */
   if (typeof ResizeObserver === "function" && barEl) {
-    new ResizeObserver(() => { syncBarHeight(); }).observe(barEl);
+    new ResizeObserver(() => {
+      syncBarHeight();
+      reHonourJump();
+    }).observe(barEl);
   }
 
   /* ---------- deep links -------------------------------------------
@@ -5609,6 +5612,34 @@
       : (direct.closest(".ft-panel") || direct);
   }
 
+  /* THE JUMP IS REDONE WHEN THE BAR IT CLEARED CHANGES HEIGHT.
+
+     Updating --ft-bar-h is not enough on its own, and CI proved it twice:
+     `scroll-margin-top` is read by the browser AT SCROLL TIME and never
+     again, so a bar that rewraps AFTER the scroll leaves the reader at an
+     offset computed against a height that no longer exists. The measurement
+     from the failing run says exactly that and nothing else: the panel sat at
+     172 against a bar ending at 218, and 172 is 4.4rem + 5.5rem + 0.6rem to
+     the pixel — the STYLESHEET's placeholder height, one unwrapped row of
+     tabs in the fallback face. The webfont then swapped, the tab row wrapped,
+     the bar went from 92 to 148, and nothing moved the page.
+
+     ONLY FOR A READER WHO HAS NOT MOVED. `jumped.y` is where the jump left
+     the page; a scrollY that has since changed by more than a pixel of
+     rounding means the reader is somewhere they chose, and yanking them back
+     to an anchor they have already scrolled past would be the worse bug. The
+     re-jump clears the record either way, so this fires once per jump. */
+  let jumped = null;
+  function reHonourJump() {
+    if (!jumped) return;
+    const { target, y } = jumped;
+    jumped = null;
+    if (!target.isConnected) return;
+    if (Math.abs(Math.round(window.scrollY) - y) > 1) return;
+    target.scrollIntoView({ block: "start" });
+    jumped = { target, y: Math.round(window.scrollY) };
+  }
+
   function honourHash() {
     const target = hashTarget();
     if (!target) return;
@@ -5621,6 +5652,9 @@
     }
     syncBarHeight();
     target.scrollIntoView({ block: "start" });
+    /* WHERE THE JUMP PUT US, so a later re-measure can tell a bar that grew
+       under a settled reader from a reader who has scrolled away. */
+    jumped = { target, y: Math.round(window.scrollY) };
     /* FOCUS FOLLOWS THE JUMP, or a keyboard reader lands visually on panel 14
        and carries on tabbing from panel 1. */
     if (!target.hasAttribute("tabindex")) target.tabIndex = -1;

@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "150";
+export const ASSET_VERSION = "151";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -280,32 +280,30 @@ function neuronWords(text) {
 /** Which silence, in the reader's words rather than in the column's. */
 function neuronProvenance(summary) {
   if (summary.llm) {
-    return "Wording by " + escapeHTML(summary.model || "a language model") +
-      ", over readings this page already carries. Every figure in it was measured by the " +
-      "pipeline and is published whether or not a model ever replies.";
+    return "Wording by " + escapeHTML(summary.model || "a language model") + "; figures measured by the pipeline.";
   }
   const guard = typeof summary.guard === "string" ? summary.guard : "";
-  if (guard === "invented") {
-    return "This is the deterministic reading. A model was asked for the wording and its answer " +
-      "named a figure no reading supports, so it was refused and is not shown.";
-  }
-  if (guard === "forecast") {
-    return "This is the deterministic reading. A model was asked for the wording and its answer " +
-      "made a claim about what happens next, which nothing here measures, so it was refused.";
-  }
+  /* EVERY BRANCH STILL NAMES WHICH OF THE TWO A READER IS HOLDING, because
+     that is the whole job of this line and it is a NOT-CLAIMED: a sentence
+     assembled by code in this repository must never be mistaken for one a
+     model wrote. What went is the paragraph around it — three lines of
+     reassurance under a two-line summary, restating on every page load that
+     the figures were measured, which the deterministic reading demonstrates
+     by existing. The refusals keep their reason: "refused" with no cause
+     would leave a reader unable to tell a guard from an outage. */
+  if (guard === "invented") return "Deterministic reading. A model\u2019s wording named an unsupported figure and was refused.";
+  if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
     const said = why === "3036"
-      ? "the day\u2019s free model allowance is spent; it resets at 00:00 UTC"
-      : why === "3040" ? "the model had no capacity at that moment, and nothing was spent"
-        : why === "5035" ? "the configured model is not available on this plan, which is a fault here rather than an outage"
+      ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
+      : why === "3040" ? "the model had no capacity, and nothing was spent"
+        : why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"
             : "the model did not answer";
-    return "This is the deterministic reading: " + said + ". The figures are unaffected \u2014 " +
-      "they were measured by the pipeline, and only the phrasing was ever at stake.";
+    return "Deterministic reading: " + said + ".";
   }
-  return "This is the deterministic reading, assembled from the published facts themselves. " +
-    "No model was asked.";
+  return "Deterministic reading. No model was asked.";
 }
 
 function neuronDock(summary, { scope = "this session" } = {}) {
@@ -319,8 +317,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
     <div class="ak-neuron-body">
       <p class="ak-neuron-h" id="akNeuronH">Neuron</p>
       <p class="ak-neuron-say ak-neuron-none">No summary has been written for ${escapeHTML(scope)} yet.</p>
-      <p class="ak-neuron-src">That says the briefing has not been published, not that the
-        session was quiet. Nothing is claimed about the market by this line.</p>
+      <p class="ak-neuron-src">Not published yet \u2014 not a quiet session. Nothing here is claimed about the market.</p>
     </div>
   </section>`;
   }
