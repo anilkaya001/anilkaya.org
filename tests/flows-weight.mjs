@@ -615,7 +615,55 @@ const CEILING_KIB = {
      what a browser would parse with the comment strip's one Workers Builds
      field set. Every kilobyte argued here is a kilobyte that field would
      return. */
-  tickerPage: 441,
+  /* 441 -> 449, THE FIFTH RAISE, and the first that buys a DRAWING.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   69,370   flows-ticker.js  380,664
+       total            458,601 B = 447.85 KiB, 6,857 B over 441
+
+     +7,052 B, all of it in flows-panels.js: the score gauge at the head of
+     the score-derivation panel.
+
+     WHAT IT BOUGHT IS A SCALE, NOT A NUMBER. The score is on this page twice
+     already — the hero states it, this panel's stat list repeats it — and a
+     third printing would have been worth nothing. What no surface stated was
+     the RANGE: the score is bounded to +/-100, and that bound appeared in
+     exactly one place on the whole route, a closing sentence inside the
+     score-over-price note. So "+16" arrived with no way to tell whether it
+     was most of the scale or a rounding error in it. The arc answers that by
+     construction, which is the only reason it earns bytes on this route.
+
+     AND IT ADDS NO VERDICT. "Bearish" and "Bullish" sit at the ends as axis
+     labels, naming what the ends of the scale mean; the word for THIS name
+     stays in the hero, which owns it. No dead band is drawn, because the card
+     does not publish one at this level and a guessed band is a free parameter
+     wearing a measurement's clothes. An absent score withholds the marker
+     rather than pointing it at zero.
+
+     1,924 OF THOSE BYTES ARE A DEFECT THE TICKER SUITE FOUND, and they are
+     the most useful ones in the raise. The first draft drew a fixed 128x78
+     box; flows-ticker-contract refused it in one line — "a span-1 panel at
+     least doubles when enlarged (128 to 128)" — because a fixed viewBox makes
+     the enlarge button a no-op on the panel it was pressed for. The shipped
+     version sizes through panelWidth() like every other drawing here, and
+     radius, stroke, marker inset, the number's lift and the end labels' width
+     are all derived from that one measurement rather than from constants that
+     would only be right at one host width. The suite counts 28 more
+     assertions than before this raise: the gauge is now a chart it checks.
+
+     449 LEAVES 1,175 B, AND 448 WAS REJECTED FOR LEAVING 151. A reserve below
+     the cost of one edited sentence is not a reserve — it is a promise that
+     the next typo fix on this route fails CI and gets "fixed" by deleting a
+     comment, which is the bookkeeping the unusualPage paragraph below refuses
+     by name. 1,175 B is the same order as the 917 and 750 the last two raises
+     left: room for a fix, not for a feature. The next change here still has
+     to come to this comment and argue.
+
+     THE STANDING ACCOUNT IS UNCHANGED AND IT IS STILL THE REAL ANSWER: this
+     route is 448 KiB of source and roughly 191 KiB of it is what a browser
+     would parse with the comment strip's one Workers Builds field set. Every
+     kilobyte argued here is a kilobyte that field would return. */
+  tickerPage: 449,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

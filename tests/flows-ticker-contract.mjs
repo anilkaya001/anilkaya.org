@@ -2906,9 +2906,32 @@ try {
     eq(TICKER_PANELS[0].span, 2,
        "the series keeps both columns, because a 60-session line in a 424px host is a " +
        "sparkline and the panel's whole claim is that a reading is new");
+    /* STILL 1, AND THIS TIME THE NUMBER WAS RE-MEASURED RATHER THAN INHERITED.
+
+       The gauge added ~125px to this panel, so span 2 was tried: the worst
+       side-by-side gap on the page fell from 607px to 433px and the
+       derivation stopped appearing in the worst pair at all. THAT READING WAS
+       AN ARTEFACT. A row holding one span-2 panel has a gap of zero because
+       it has nothing to differ from, so emptying a row scores as evening it.
+
+       Occupancy says what the gap could not, at 1440 on an emitted card:
+
+         span 1   scoreOverlay 763 + __score 373 = 1136 of 1152 — a full row
+         span 2   scoreOverlay 763 alone, __score 763 alone — 389px of void, twice
+
+       So span 2 traded one uneven row for two half-empty ones. The original
+       reasoning — five gauges and their weights set their own width — was
+       right about the outcome even though the panel has since gained a
+       drawing that does size to its host: the second column still buys more
+       void than arc, because the panel it would take it from is the one
+       span-1 panel that fills the row beside it.
+
+       The render harness now reports that occupancy beside the gap, because
+       this is the second time a layout change here was scored by a number
+       that could not see it. */
     eq(TICKER_PANELS[1].span, 1,
-       "and the derivation gives its second column up — five gauges and their weights set " +
-       "their own width, and a span-2 host spent the rest on white space");
+       "and the derivation gives its second column up — it is the span-1 panel that fills " +
+       "the series' row, and a span-2 host spends the difference on void, not on arc");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>

@@ -440,10 +440,16 @@ if (CARDS && existsSync(CARDS)) {
       for (const x of p) {
         const r = x.getBoundingClientRect(), top = Math.round(r.top);
         if (!rows.has(top)) rows.set(top, []);
-        rows.get(top).push(r);
+        /* THE KEY TRAVELS WITH THE RECT. A worst-gap number with no names is
+           a number nobody can act on: it says this page has an uneven row and
+           refuses to say which, so the next reader re-measures by hand. */
+        rows.get(top).push({ h: r.height, w: r.width, k: x.getAttribute("data-panel") });
       }
       const spread = [...rows.values()].map((rs) =>
-        Math.round(Math.max(...rs.map((r) => r.height)) - Math.min(...rs.map((r) => r.height))));
+        Math.round(Math.max(...rs.map((r) => r.h)) - Math.min(...rs.map((r) => r.h))));
+      const worstRow = [...rows.values()].sort((a, b) =>
+        (Math.max(...b.map((r) => r.h)) - Math.min(...b.map((r) => r.h))) -
+        (Math.max(...a.map((r) => r.h)) - Math.min(...a.map((r) => r.h))))[0] || [];
       /* #ftTicker, NOT .ft-tk. The badge the controller fills is an id; the
          class this probe asked for does not exist on this page, so it reported
          "?" whether the card had loaded or not — a probe that cannot tell its
@@ -456,6 +462,26 @@ if (CARDS && existsSync(CARDS)) {
            and verdict-strip probes: do two panels SIDE BY SIDE differ. */
         panelRows: rows.size,
         worstRowGapPx: spread.length ? Math.max(...spread) : 0,
+        worstRowPanels: worstRow.map((r) => r.k + " " + Math.round(r.h)).join(" | "),
+        /* AND WHETHER A ROW IS FULL, which the gap alone cannot say: a row
+           holding ONE span-2 panel in a three-column grid has a gap of zero
+           and a column of void beside it. Reporting evenness without
+           occupancy is how a layout gets "improved" by emptying rows. */
+        voidRows: (() => {
+          const g = document.querySelector(".ft-grid");
+          if (!g) return "no grid";
+          const cols = getComputedStyle(g).gridTemplateColumns.split(/\s+/).length;
+          const gw = g.getBoundingClientRect().width;
+          const short = [];
+          for (const rs of rows.values()) {
+            const span = rs.reduce((a, r) => a + r.w, 0);
+            /* 40px of slack for the column gap, so a genuinely full row is not
+               reported as short by the gutter between its two panels. */
+            if (span < gw - 40) short.push(rs.map((r) => r.k).join("+") + " " +
+              Math.round(span) + "/" + Math.round(gw));
+          }
+          return cols + "col " + (short.length ? short.join(" ; ") : "none");
+        })(),
         /* The two definition layers this commit stops drawing, read back off
            the page rather than asserted: both must still be in the document
            and both must be clipped out of the grid. */
