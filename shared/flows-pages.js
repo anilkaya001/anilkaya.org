@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "176";
+export const ASSET_VERSION = "177";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -134,6 +134,13 @@ const topbar = (active, username) => `
     </form>
     <span class="topbar__who" title="Signed in as ${escapeHTML(String(username || ""))}"
           aria-label="Signed in as ${escapeHTML(String(username || ""))}">${initials(username)}</span>
+    <!-- THE WAY OUT SITS WITH THE IDENTITY, WHICH IS WHERE A READER LOOKS FOR
+         IT, and it is a POST form rather than a link because signing out
+         changes state on the server — a GET that ends a session is one
+         prefetch away from ending it for a reader who never clicked. -->
+    <form method="POST" action="/flows/logout" class="topbar__out">
+      <button type="submit" class="flows-signout">Sign out</button>
+    </form>
   </div>` : ""}
 </header>`;
 
@@ -451,14 +458,24 @@ const shell = (title, kicker, active, username, body) => `
 ${topbar(true, username)}
 ${rail(active)}
 <main class="flows-main" id="flowsMain" tabindex="-1">
+  <!-- THE BREADCRUMB THE DESIGN OPENS WITH, AND IT REPLACES A SECOND COPY OF
+       THE READER'S NAME. The header carried the username and a Sign out
+       button; both now live beside the avatar in the top bar, which is where
+       the design puts them and where they are said once rather than twice.
+
+       IT IS A REAL TRAIL, NOT A DECORATION: the first crumb is a link to the
+       section's front door and the last is the page a reader is on, marked
+       aria-current so it is announced as the destination rather than read as
+       one more place to go. -->
+  <nav class="flows-crumbs" aria-label="Breadcrumb">
+    <a href="/flows/">Flows</a>
+    <span class="flows-crumbs-sep" aria-hidden="true">/</span>
+    <span aria-current="page">${title}</span>
+  </nav>
   <header class="flows-head">
     <div>
       <p class="flows-kicker">${kicker}</p>
       <h1>${title}</h1>
-    </div>
-    <div class="flows-session">
-      <span class="flows-user">${escapeHTML(username)}</span>
-      <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
     </div>
   </header>
 ${body}
@@ -1756,9 +1773,21 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        only. A hero that re-derived a score would be a header that can
        disagree with the panel under it. -->
   <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
+    <!-- THE IDENTITY IS THE SYMBOL AND WHAT IDENTIFIES IT, stacked, which is
+         where the design puts the company name and where a "Sector" column of
+         its own does not need to be. The strip wrapped to two rows at 1440
+         with seven blocks in it; folding the two identity lines under the
+         symbol is what puts it back on one — and it reads better, because a
+         sector is a property of the name rather than a fifth measurement
+         beside four figures. -->
     <div class="ft-hero-id">
       <span class="ft-hero-t" id="ftHeroT"></span>
       <span class="ft-hero-nm" id="ftHeroNm" hidden></span>
+      <span class="ft-hero-sub">
+        <span class="ft-hero-m" id="ftHeroSector"></span>
+        <!-- WHICH SESSION EVERY FIGURE ON THIS PAGE IS OF. -->
+        <span class="ft-hero-m is-faint" id="ftHeroWhen"></span>
+      </span>
     </div>
     <div class="ft-hero-px">
       <span class="ft-hero-k">Last</span>
@@ -1794,16 +1823,27 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
       </span>
     </div>
-    <div class="ft-hero-b ft-hero-meta" id="ftHeroMetaB" hidden>
-      <span class="ft-hero-k">Sector</span>
+    <!-- THE TWO VOLATILITY COLUMNS THE DESIGN PUTS BESIDE THE PRICE, and they
+         are the two of its four that this product actually publishes. The
+         reference's header carries IV, IV Rank, Volume and Mkt Cap; the card
+         carries at-the-money vol and an IV rank on every name, and carries
+         neither a whole-tape share volume nor a market capitalisation on any
+         name. Two real columns beat four with two invented ones. -->
+    <div class="ft-hero-b" id="ftHeroIvB" hidden>
+      <span class="ft-hero-k">ATM IV</span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-m" id="ftHeroSector"></span>
-        <!-- WHICH SESSION EVERY FIGURE ON THIS PAGE IS OF. It was the tail of
-             the sticky strip, where it cost pinned height on every screen to
-             say something a reader checks once. -->
-        <span class="ft-hero-m is-faint" id="ftHeroWhen"></span>
+        <span class="ft-hero-v" id="ftHeroIv"></span>
+        <span class="ft-hero-m is-faint" id="ftHeroIvSub" hidden></span>
       </span>
     </div>
+    <div class="ft-hero-b" id="ftHeroIvrB" hidden>
+      <span class="ft-hero-k">IV rank</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroIvr"></span>
+        <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
+      </span>
+    </div>
+
   </section>
   <!-- WHAT IS TRUE OF THIS NAME RIGHT NOW, AS A ROW OF MARKS.
 

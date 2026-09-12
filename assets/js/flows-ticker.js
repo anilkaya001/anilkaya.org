@@ -6418,18 +6418,84 @@
       }
     }
 
+    /* ---- THE TWO VOLATILITY COLUMNS ----------------------------------
+
+       BOTH ARE READ, NEITHER IS DERIVED. `atmVol` and `ivRank` are published
+       side by side on the priced-move panel, which also publishes the rule
+       that decides the horizon they are measured over — so the horizon is
+       quoted from `horizonRule` rather than described here, and the two
+       cannot drift.
+
+       THE RANK IS A FRACTION AND THE PIPELINE SAYS SO IN AS MANY WORDS:
+       ivRankFraction divides by 100 when the vendor sends 0..100, and its
+       comment records what happens when that is missed — "1352% of its year"
+       on a card. It is printed as a percentage of its own year here, with
+       the year named, because a bare "84" beside a vol of "44.2%" is two
+       units under one heading. */
+    const pm = card.panels && card.panels.pricedMove;
+    const pmOk = pm && pm.status === "ok";
+    const atmVol = pmOk ? isNum(pm.atmVol) : null;
+    const ivRank = pmOk ? isNum(pm.ivRank) : null;
+    const horizon = pmOk && typeof pm.horizonRule === "string" && pm.horizonRule
+      ? pm.horizonRule : null;
+
+    const ivB = $("ftHeroIvB"), ivEl = $("ftHeroIv"), ivSub = $("ftHeroIvSub");
+    if (ivB && ivEl) {
+      ivEl.textContent = atmVol === null ? DASH : (atmVol * 100).toFixed(1) + "%";
+      if (atmVol === null) ivEl.setAttribute("data-empty", "unavailable");
+      else ivEl.removeAttribute("data-empty");
+      if (ivSub) {
+        ivSub.textContent = horizon ? "at " + horizon : "";
+        ivSub.hidden = !horizon;
+      }
+      ivB.title = atmVol === null
+        ? "The priced-move panel published no at-the-money volatility for this name."
+        : "At-the-money implied volatility, over " + (horizon || "the panel's own horizon") +
+          ", as the priced-move panel measured it.";
+      /* THE BLOCK SHOWS WHENEVER THE PANEL READ, even where the figure did
+         not: a column that vanishes on an absent reading takes the silence
+         with it, and the strip's other blocks all print their own em dash. */
+      ivB.hidden = !pmOk;
+    }
+
+    const ivrB = $("ftHeroIvrB"), ivrEl = $("ftHeroIvr"), ivrSeg = $("ftHeroIvrSeg");
+    if (ivrB && ivrEl) {
+      ivrEl.textContent = ivRank === null ? DASH : Math.round(ivRank * 100) + "%";
+      if (ivRank === null) ivrEl.setAttribute("data-empty", "unavailable");
+      else ivrEl.removeAttribute("data-empty");
+      if (ivrSeg) {
+        ivrSeg.replaceChildren();
+        ivrSeg.hidden = ivRank === null;
+        if (ivRank !== null) {
+          /* FIVE SEGMENTS, THE SAME FIVE THE CONVICTION BLOCK BESIDE IT USES,
+             so two bounded 0-100 readings in one strip are read the same way
+             rather than each inventing a scale. */
+          for (let i = 0; i < 5; i++) {
+            ivrSeg.append(el("i", ivRank * 100 >= (i + 1) * 20 ? "is-on" : null));
+          }
+        }
+      }
+      ivrB.title = ivRank === null
+        ? "The priced-move panel published no IV rank for this name."
+        : "Where this name's implied volatility sits inside its own past year: " +
+          Math.round(ivRank * 100) + "% of that year was lower. A percentile of its own " +
+          "history, not a level comparable across names.";
+      ivrB.hidden = !pmOk;
+    }
+
     const sector = typeof card.sector === "string" && card.sector.trim()
       ? card.sector.trim() : null;
-    const metaB = $("ftHeroMetaB"), secEl = $("ftHeroSector"), whenEl = $("ftHeroWhen");
+    /* THE SECTOR AND THE SESSION SIT UNDER THE SYMBOL NOW, in the identity
+       block rather than in a sixth column of their own. Neither is a
+       measurement of the session — one is a property of the name and the
+       other says which day every figure above is of — so a column beside four
+       figures was the wrong shape for both, and it was the block that pushed
+       the strip onto two rows. Each still prints or stays empty on its own:
+       a card with no sector still has a session. */
+    const secEl = $("ftHeroSector"), whenEl = $("ftHeroWhen");
     const when = card.sessionDate ? "session " + fmtDate(card.sessionDate) : null;
     if (whenEl) whenEl.textContent = when || "";
-    if (metaB && secEl) {
-      secEl.textContent = sector || "";
-      /* THE BLOCK SHOWS IF EITHER LINE HAS SOMETHING. A card with no sector
-         still has a session, and hiding the session because the sector is
-         absent would withhold the one fact that qualifies the whole page. */
-      metaB.hidden = !(sector || when);
-    }
+    if (secEl) secEl.textContent = sector || "";
 
     hero.hidden = false;
   }

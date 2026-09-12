@@ -3879,6 +3879,44 @@ body.is-stale .flows-tablewrap {
 
 /* THE READER'S OWN INITIALS. No photo, no generated face: the session knows
    a username and nothing else about the person holding it. */
+/* THE TRAIL, ABOVE THE TITLE, at the size of the chrome rather than of the
+   page: it says where a reader is, and a breadcrumb that competes with the
+   H1 under it has misunderstood which of the two is the heading. */
+.flows-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+}
+.flows-crumbs a { color: var(--ink-faint); text-decoration: none; }
+.flows-crumbs a:hover, .flows-crumbs a:focus-visible { color: var(--ink); text-decoration: underline; }
+.flows-crumbs [aria-current="page"] { color: var(--ink-dim); }
+.flows-crumbs-sep { opacity: 0.55; }
+
+/* THE SIGN-OUT IN THE BAR IS CHROME, NOT A PRIMARY CONTROL. The 44px tap
+   floor this stylesheet keeps for primary controls would make it the tallest
+   thing in a 56px bar; it keeps a real target on a coarse pointer through
+   padding instead, and the bar gives it room. */
+.topbar__out { display: flex; }
+.topbar__out .flows-signout {
+  min-height: 0;
+  padding: 0.34rem 0.7rem;
+  font-size: var(--fs-micro);
+  border-color: var(--panel-border);
+}
+@media (pointer: coarse) {
+  .topbar__out .flows-signout { padding: 0.6rem 0.8rem; }
+}
+@media (max-width: 46rem) {
+  /* At phone width the pill's four destinations and the search are what a
+     reader came for; signing out is not, and it stays reachable from the
+     avatar's own title until this bar grows a menu. */
+  .topbar__out { display: none; }
+}
+
 .topbar__who {
   display: grid;
   place-items: center;
@@ -4132,7 +4170,14 @@ body.is-stale .flows-tablewrap {
    The floor is what stops the score block wrapping its pill under its bar. */
 .ft-hero {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, auto));
+  /* 11rem WAS SIZED FOR FIVE BLOCKS AND THERE ARE SIX. The strip gained the
+     two volatility columns the design puts beside the price, and at 1440 the
+     last of them wrapped onto a second row — a row of one, under five, which
+     is the shape this stylesheet spends the most words refusing everywhere
+     else. 8.5rem is the widest track that fits six at 1280 and still holds
+     the longest label ("Options score") on one line; `auto-fit` keeps the
+     old behaviour at every narrower width, where wrapping is correct. */
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, auto));
   /* TWO NAMED ROWS AND EVERY BLOCK SHARES THEM, which is what puts the
      labels on one line.
 
@@ -4171,6 +4216,17 @@ body.is-stale .flows-tablewrap {
 .ft-hero-id {
   display: flex; flex-direction: column; justify-content: flex-end;
   gap: 0.1rem; min-width: 0;
+}
+/* WHAT IDENTIFIES THE NAME, UNDER THE NAME: its sector and the session every
+   figure beside it is of, on one line, at the size of a caption. They were a
+   column in the strip and the strip wrapped to two rows at 1440 because of
+   it. */
+.ft-hero-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.5rem;
+  min-width: 0;
 }
 .ft-hero-t {
   font-family: var(--font-figure);

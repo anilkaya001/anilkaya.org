@@ -683,7 +683,37 @@ const CEILING_KIB = {
      route is 448 KiB of source and roughly 191 KiB of it is what a browser
      would parse with the comment strip's one Workers Builds field set. Every
      kilobyte argued here is a kilobyte that field would return. */
-  tickerPage: 450,
+  /* 450 -> 454 FOR THE TWO VOLATILITY COLUMNS. Re-derived on disk against
+     `git show HEAD:` rather than read off the paragraph above:
+
+       file                  before      after
+       flows-ticker.js     381,624    385,079
+       flows-panels.js      69,370     69,370
+       nav.js                2,560      2,560
+       flows-dock.js         6,007      6,007
+       total               459,561    463,016 B = 452.16 KiB
+
+     The room under 450 was 1,239 B and this needs 3,455.
+
+     WHAT IT BOUGHT: the header the owner's design specifies carries four
+     figures beside the price — IV, IV rank, volume and market cap — and this
+     card publishes two of them on every name and neither of the other two on
+     any name. So the strip grew the two that are real, each reading its own
+     published field and quoting the panel's own horizon rule rather than
+     describing it, and the two that are not published were left out rather
+     than filled with something adjacent. The sector and the session moved
+     under the symbol in the same pass, which is where the design puts a
+     name's identity and which is what keeps the strip on one row.
+
+     454 LEAVES 1,880 B, AND THE REST OF THIS WAVE WILL NOT FIT IN IT. The
+     stat cards and the chart interactivity the same design calls for are
+     several kilobytes each, and each will have to argue its own raise here.
+     That is the honest cost of this route carrying ~253 KB of comment that
+     the comment-stripping build already knows how to remove: it is built and
+     merged and waits on one dashboard field, and until that lands every
+     feature on this route is paying for prose the browser parses and no
+     reader reads. */
+  tickerPage: 454,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
