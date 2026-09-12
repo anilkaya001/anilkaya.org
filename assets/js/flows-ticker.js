@@ -5751,7 +5751,28 @@
     const target = hashTarget();
     const group = target && target.dataset ? target.dataset.group : null;
     if (group && keys.indexOf(group) !== -1) return group;
-    return keys[0];
+    /* THE DEFAULT IS ALL TWENTY-THREE, NOT THE FIRST THREE.
+
+       Opening on one station was the right answer to a real measurement: 23
+       panels stacked in a one- and two-column grid measured 11,468px at 1440
+       and 19,978px at 390, and clicking a tab moved the reader four thousand
+       pixels with the other four stations still underneath. But the fix for a
+       column count was made in the station selector, and it has been paying
+       for that ever since — the landing view is three panels, two of which
+       used to span the whole row, which is a page of bands rather than a
+       board of cards.
+
+       The grid is what changed: three columns at 76rem, four at 110, five at
+       132, and NO panel spans a full row at any width. Twenty-three cards
+       across three-to-five columns is eight rows, not twenty-three, and it is
+       the thing the reader of this page has asked for in every message — many
+       small cards, seen at once, without scrolling to find them.
+
+       THE TABS DO NOT GO AWAY. They still narrow to one station, they still
+       write ?s= , and every link already sent still opens the station it
+       names. What changed is only which view a reader who asked for nothing
+       gets, and the reason the old default existed no longer holds. */
+    return ALL_STATIONS;
   }
 
   /* A CLICK IS AN ACT AND A SCROLL IS NOT. pushState so Back returns the reader
@@ -5760,8 +5781,12 @@
   function writeStation(key, push) {
     let url;
     try { url = new URL(location.href); } catch { return; }
-    const first = stationKeys()[0];
-    if (key === first) url.searchParams.delete("s");
+    /* THE DEFAULT DROPS OUT OF THE URL, and the default is now ALL_STATIONS
+       — the same rule as before, pointed at the new default. Writing
+       `?s=all` onto a page that already shows all of them would put a
+       parameter in every reader's address bar that says what the page does
+       without it. */
+    if (key === ALL_STATIONS) url.searchParams.delete("s");
     else url.searchParams.set("s", key);
     const next = url.pathname + url.search + url.hash;
     try {

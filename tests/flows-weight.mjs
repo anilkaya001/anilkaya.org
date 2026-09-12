@@ -538,7 +538,21 @@ const CEILING_KIB = {
      be honest and pointless in the same breath.
 
      415 LEAVES 1,973 B. */
-  tickerPage: 415,
+  /* 417, for the change that made the page a card wall:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   64,465      flows-ticker.js  352,124
+       total            425,156 B = 415.19 KiB, 194 B over 415
+
+     The default view is now all 23 panels rather than the first station's
+     three, the station grid is three columns at 76rem and four at 110 with no
+     panel spanning a full row, nothing is stretched to a row it does not
+     fill, and the conviction arithmetic folds. The 194 B is the reasoning for
+     the default — the measurement that justified opening on one station, and
+     why a change in COLUMN COUNT is what retired it.
+
+     417 LEAVES 1,852 B. */
+  tickerPage: 417,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

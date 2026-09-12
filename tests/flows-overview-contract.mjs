@@ -2068,8 +2068,18 @@ try {
 
     const status = await page.evaluate(
       () => document.getElementById("flowsStatus").textContent.trim());
-    ok(new RegExp("session " + SESSION).test(status),
-       `and the status line still names the session it is describing (${status})`);
+    /* THE SESSION MOVED TO THE TILE THAT CARRIES IT, so the claim is asserted
+       where it now lives rather than deleted. The status line used to reprint
+       meta.sessionDate an inch under the Session tile; the page must still
+       name the session it is describing, and this is the element that does. */
+    const sessionTile = await page.evaluate(() => {
+      const t = [...document.querySelectorAll("#ccVerdict .cc-tile")].find(
+        (el) => el.querySelector(".cc-tile-k")?.textContent.trim() === "Session");
+      return t ? t.querySelector(".cc-tile-v")?.textContent.trim() : null;
+    });
+    eq(sessionTile, SESSION,
+       `and the page still names the session it is describing, on the Session tile ` +
+       `(${sessionTile})`);
     ok(/15 of 24 inside the band/.test(status),
        `and still states how much of the pool the band held (${status})`);
     ok(/\u2014 bullish · 4 bearish/.test(status),

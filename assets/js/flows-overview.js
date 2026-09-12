@@ -2495,8 +2495,20 @@
     const lngRows = rowCount(lng), shtRows = rowCount(sht);
     const lngPool = poolCount(lng), shtPool = poolCount(sht);
     const cut = (rows, pool) => rows !== null && pool !== null && pool > rows;
+    /* AND AN UNKNOWN SIDE PUTS THE COUNTS BACK, which the first draft of this
+       got wrong and CI caught. The Cleared tile prints the pools, so on an
+       ordinary session the counts here were a restatement — but a side that
+       has not published has NO pool either, and the line this replaced was
+       the only place "— bullish · 4 bearish" appeared. An em dash where a
+       count belongs is the difference between "not known" and "zero", which
+       is the distinction this whole page is built to keep, and dropping it to
+       save a line would be exactly the fold the DEFINITION-vs-REFUSAL rule
+       forbids. So: print when a side is TRUNCATED, print when a side is
+       UNKNOWN, and stay quiet only when both sides are whole and counted. */
+    const unknown = (rows) => rows === null;
     const parts = [];
-    if (cut(lngRows, lngPool) || cut(shtRows, shtPool)) {
+    if (cut(lngRows, lngPool) || cut(shtRows, shtPool) ||
+        unknown(lngRows) || unknown(shtRows)) {
       parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " +
         sideSaid(shtRows, shtPool, "bearish"));
     }

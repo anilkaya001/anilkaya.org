@@ -3857,6 +3857,21 @@ body.is-stale .flows-tablewrap {
 .ft-station {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
+  /* CARDS TAKE THE HEIGHT OF WHAT IS IN THEM. A grid item stretches to its
+     row by default, so a 500px card beside a 1000px one was DRAWN as a 1000px
+     card with 500px of nothing inside its own border — which is what made the
+     short panels look enormous, and it is the void the reader of this page
+     kept pointing at. `start` is what makes a grid of small cards look like
+     one: nothing is padded out to meet a neighbour it has nothing to do with.
+
+     THIS DOES NOT REPLACE THE EVENNESS RULE, it removes the thing that rule
+     was measuring. flows-ticker-contract asserts that row-mates do not differ
+     by more than 250px, and the argument for it was that the shorter panel is
+     STRETCHED that far past what its drawing can fill. With no stretch there
+     is no filled void; what remains is a ragged bottom edge, which is the
+     ordinary shape of a card wall and not a panel pretending to hold more
+     than it does. */
+  align-items: start;
 }
 /* THE SPACE BETWEEN TWO STATIONS IS THE SPACE TWO GROUPS USED TO HAVE, to the
    pixel: one row gap plus the top margin the group heading carried and no
@@ -3965,9 +3980,28 @@ body.is-stale .flows-tablewrap {
    plot: the same squeeze as a 320px phone, on a desktop. At 76rem the host
    is 424 and the plot is 266, which is where a 30-bar ladder's strike labels
    and volume rail stop colliding. */
+/* MANY SMALL CARDS, AND NO PANEL TAKES A ROW TO ITSELF.
+
+   Two columns with `.is-wide` spanning `1 / -1` meant seven of the
+   twenty-three panels — scoreOverlay, __stats, gamma, surface, ivSurface,
+   skewTerm, topContracts — each owned a whole row. A station of three panels
+   where two of them are full-width is three stacked bands, not a grid, and
+   shrinking the band only makes a shorter band. The reader of this page has
+   asked for many small cards four times; this is the rule that was refusing
+   them.
+
+   THE COLUMN COUNT CLIMBS WITH THE VIEWPORT and `is-wide` no longer opts out
+   of it at any width. The panel that "needs" width is the ladder, whose plot
+   is host − 46 − 112, and the note above this block measured its floor at a
+   424px host. Three columns at 1280 gives 300 and four at 1760 gives 380, so
+   the ladder keeps `is-wide` as a SPAN OF TWO — which is a wide card in a
+   dense grid, not a band across the page. */
 @media (min-width: 76rem) {
-  .ft-station { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ft-panel.is-wide { grid-column: 1 / -1; }
+  .ft-station { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ft-panel.is-wide { grid-column: span 2; }
+}
+@media (min-width: 110rem) {
+  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* SEVEN FIGURES ARE PRIME, SO SOME ROW IS ALWAYS SHORT — the question is only
@@ -6053,10 +6087,10 @@ body.is-stale .flows-tablewrap {
    grid of independently labelled regions is not worth a focus-order defect,
    so the 8% stays on the table deliberately. */
 @media (min-width: 132rem) {
-  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ft-station { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: span 2; }
   .ft-panel[data-panel="ivSurface"],
-  .ft-panel[data-panel="skewTerm"] { grid-column: 1 / span 2; }
+  .ft-panel[data-panel="skewTerm"] { grid-column: span 2; }
 }
 
 /* --- the quiet arm ---------------------------------------------------- */

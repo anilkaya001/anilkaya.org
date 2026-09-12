@@ -572,7 +572,14 @@
       "ones that were measured at all — so it moves in steps and never smoothly, and it " +
       "carries the heaviest of the three weights. Two names a few points apart on this " +
       "number may differ by a whole axis, or by nothing but coverage."));
-    host.append(note);
+    /* THE ARITHMETIC OF A PUBLISHED NUMBER IS METHOD, so it folds by the rule
+       at NOTE_WALL_CHARS. "Conviction 81 is 45% of 67% agreement, plus 35% of
+       100% source coverage, plus 20% of 78% persistence" is how the figure in
+       the stat list above was made; the reader who wants to check the weights
+       opens it, and the reader who wants the score does not scroll past a
+       paragraph to reach the next card. `always`, because this panel has
+       already sorted its own notes and its length should not decide. */
+    appendMethod(host, [note], "How conviction was computed", true);
   }
 
   /**
