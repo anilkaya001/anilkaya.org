@@ -845,9 +845,19 @@ try {
        Asserted in BOTH directions on purpose. A route quietly deleted and a
        route deliberately unlisted look identical from the rail alone, and
        only one of them is what was asked for. */
+    /* SCOPED TO THE RAIL, and the first run of this assertion is why. Tested
+       against the whole page it failed on /flows/history/, and the link it
+       found was the right one to find: the board's own footer says "whether
+       this board has been right is measured rather than asserted, session by
+       session, on the TRACK RECORD" and links it there. That is a refusal
+       pointing at its own evidence, and it is more useful now that the route
+       is not in the nav, not less. What was asked for was a shorter rail, not
+       a buried route. */
+    const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
+    ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
     for (const gone of ["/flows/history/", "/flows/track/"]) {
-      ok(!html.includes(`href="${gone}"`),
-         `the rail does NOT link to ${gone} — it was taken off deliberately`);
+      ok(!rail.includes(`href="${gone}"`),
+         `the RAIL does NOT link to ${gone} — it was taken off deliberately`);
       const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
       eq(still.status, 200,
          `but ${gone} still answers: unlisted is not deleted, and a link already ` +
