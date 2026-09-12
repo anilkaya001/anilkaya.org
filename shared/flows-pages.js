@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "174";
+export const ASSET_VERSION = "175";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -353,6 +353,33 @@ ${rail(active)}
       <h1>${title}</h1>
     </div>
     <div class="flows-session">
+      <!-- THE WAY TO A NAME, ON EVERY GATED PAGE, AND IT IS A PLAIN GET FORM.
+
+           The section has had a working /flows/ticker/?t= deep link for
+           months and no way to reach it by typing a name: a reader who wanted
+           NVDA had to find NVDA in a table first, which the boards only carry
+           when NVDA ranked. The form submits straight to the route, so it
+           works with JavaScript disabled, with the back button, and as a
+           bookmarkable URL — and flows-ticker.js already uppercases and
+           validates what arrives in ?t=, so a lowercase symbol is not a
+           second spelling of that rule here.
+
+           NO KEYBOARD ACCELERATOR, AND THAT IS A MEASURED DECISION RATHER
+           THAN AN OMISSION. The only script on every gated route is
+           flows-dock.js, and five routes stand within 1.5k of their weight
+           ceilings (ticker 449/450, overview 216/217, side 156/157, market
+           110/111, unusual 93/93 as tests/flows-weight.mjs prints them). One
+           accelerator would raise five ceilings, and a shortcut nobody is
+           told about is not an affordance anyway — so there is no hint
+           printed for a key that does not exist. -->
+      <form class="flows-find" method="GET" action="/flows/ticker/" role="search">
+        <label class="visually-hidden" for="flowsFind">Open a ticker page</label>
+        <input class="flows-find-i" id="flowsFind" name="t" type="search"
+               autocomplete="off" spellcheck="false" maxlength="10"
+               pattern="[A-Za-z][A-Za-z0-9.\-]{0,9}" placeholder="Ticker"
+               title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
+        <button type="submit" class="flows-find-b">Open</button>
+      </form>
       <span class="flows-user">${escapeHTML(username)}</span>
       <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
     </div>

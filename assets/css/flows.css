@@ -627,6 +627,52 @@
   gap: 0.8rem;
 }
 
+/* ---------- the way to a name ----------
+   ONE CONTROL, NOT A SEARCH PANEL. It sits in the header's right-hand
+   cluster beside the identity block, at the size of the chrome around it —
+   this is an address bar for one route, and drawing it as a product-wide
+   search box would promise a full-text search the section does not have. */
+.flows-find {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.flows-find-i {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink);
+  /* Transparent on purpose: the header sits on the shared ground, and a
+     filled field here would be the only opaque box in the chrome. */
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.3rem;
+  padding: 0.22rem 0.45rem;
+  /* SIZED IN CHARACTERS, because what goes in it is at most ten of them and
+     a field wider than its longest input invites a sentence. 11ch and not 8:
+     the first pass measured the LIMIT rather than the label, and the word
+     "Ticker" in this face came back clipped to "Tic" in the render. A
+     placeholder a reader cannot finish reading is worse than a wide field.
+     It does not grow on focus either — a control that changes size under the
+     cursor moves the two things beside it while they are being aimed at. */
+  width: 11ch;
+  min-width: 0;
+}
+.flows-find-i:focus-visible { border-color: var(--ink-faint); outline: none; }
+.flows-find-b {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  padding: 0.22rem 0.4rem;
+  cursor: pointer;
+}
+.flows-find-b:hover, .flows-find-b:focus-visible {
+  color: var(--ink);
+  border-color: var(--panel-border);
+}
+
 .flows-user {
   font-family: var(--font-figure);
   font-size: var(--fs-fine);
