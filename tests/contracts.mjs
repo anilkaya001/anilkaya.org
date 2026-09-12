@@ -891,6 +891,32 @@ if (diffBase) {
   assert(/U\+2212/.test(interLatin.slice(0, interLatin.indexOf("}"))),
     "base.css must declare U+2212 in Inter's latin unicode-range, or every minus sign " +
     "in Flows falls back to the system face");
+  /* EVERY DECLARED RANGE IS WELL FORMED, WHICH THE CHECKS AROUND THIS ONE
+     COULD NOT SEE. They assert that a particular codepoint range APPEARS in a
+     block; they cannot notice a second, malformed entry beside it — and one
+     was there: Inter's greek subset declared `U+038E-038A`, whose start is
+     above its end. Per CSS Fonts an invalid <urange> invalidates the WHOLE
+     descriptor, so that subset stopped being a subset and claimed every
+     codepoint, competing with the latin file for ordinary text. It shipped
+     because the correct `U+038E-03A1` sat next to it and satisfied the regex.
+
+     So this reads every range in every @font-face and checks the only thing
+     that makes one meaningful: that it runs forwards. */
+  for (const block of base.match(/@font-face\s*\{[^}]*\}/g) || []) {
+    const face = (block.match(/font-family:\s*"([^"]+)"/) || [])[1] || "a face";
+    const file = (block.match(/([A-Za-z0-9-]+\.woff2)/) || [])[1] || "?";
+    const list = (block.match(/unicode-range:([^;]+);/) || [])[1];
+    if (!list) continue;
+    for (const part of list.split(",")) {
+      const m = part.trim().match(/^U\+([0-9A-Fa-f]+)-([0-9A-Fa-f]+)$/);
+      if (!m) continue;
+      assert(parseInt(m[1], 16) <= parseInt(m[2], 16),
+        `${face} (${file}) declares ${part.trim()}, whose start is above its end — one ` +
+        `malformed range invalidates the whole unicode-range descriptor, and the subset ` +
+        `then claims every codepoint instead of its own`);
+    }
+  }
+
   const interGreek = base.slice(base.indexOf("Inter-greek.woff2"));
   const greekRange = interGreek.slice(0, interGreek.indexOf("}"));
   assert(/U\+038E-03A1/.test(greekRange),

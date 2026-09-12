@@ -6514,6 +6514,167 @@
      five silences into five negative claims, and most of these readings are
      missing on some card on some day. A flag appears when its reading is
      present AND past its line; otherwise there is nothing there. */
+  /* ---------- the six cards ------------------------------------------
+
+     THE SESSION'S FLOW, AT A GLANCE, AND NOT A SECOND COPY OF THE HEADER.
+     The strip above already carries price, score, conviction and the two
+     volatility figures. These six answer a different question — what the
+     flow DID — and every one of them is a figure some panel further down
+     states in full, lifted to the top where a reader looks first.
+
+     EACH CARD IS ONE PANEL'S READING, WITH THAT PANEL'S OWN UNIT. Not one
+     composite: a card that averaged premium with contracts would be a number
+     with no unit at all. Where a panel publishes a coverage caveat — a count
+     the vendor did not report, a clearing day's lag, rows shed to a cap —
+     that caveat is the card's sub-line rather than something a reader has to
+     scroll to find.
+
+     A PANEL THAT DID NOT READ GETS NO CARD. Six greyed-out boxes would turn
+     six silences into six claims that the session was quiet; the strip simply
+     carries fewer cards, and the panels below still say which of them are
+     absent and why. */
+  function paintCards(card) {
+    const host = $("ftCards");
+    if (!host) return;
+    host.replaceChildren();
+    const P0 = window.FlowsPanels;
+    if (!P0) { host.hidden = true; return; }
+    const panels = card.panels || {};
+    const ok = (k) => {
+      const p = panels[k];
+      return p && p.status === "ok" ? p : null;
+    };
+    const n = (v) => isNum(v);
+
+    const track = ok("premiumTrack"), path = ok("path"), aggr = ok("aggressor");
+    const oiD = ok("oiDeltas"), dark = ok("darkpool");
+
+    /* THE SPARKLINE IS THE PANEL'S OWN SERIES, drawn from the same rows the
+       premium-track panel draws in full — a shape, with the figure beside it
+       carrying the magnitude. A session the track could not price is a GAP in
+       the line rather than a zero, which is the same refusal the panel makes
+       in its own drawing. */
+    const spark = (vals) => {
+      const pts = vals.map((v, i) => [i, n(v)]).filter((x) => x[1] !== null);
+      if (pts.length < 2) return null;
+      const W = 76, H = 20;
+      let lo = Infinity, hi = -Infinity;
+      for (const [, v] of pts) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (lo === hi) { lo -= 1; hi += 1; }
+      const x = (i) => (i / Math.max(1, vals.length - 1)) * W;
+      const y = (v) => H - ((v - lo) / (hi - lo)) * H;
+      const svg = svgEl("svg", { class: "ft-card-spark", viewBox: "0 0 " + W + " " + H,
+        width: W, height: H, preserveAspectRatio: "none", "aria-hidden": "true" });
+      svg.append(svgEl("path", {
+        /* THREE ARMS, THROUGH THE SHARED HELPER. A two-arm sign puts a
+           measured zero — a session that cleared exactly even, which this
+           pipeline does assign — on the positive side, and flows-sign refuses
+           that everywhere in this section by structure rather than by
+           review. */
+        class: "ft-card-line " + P0.polarity(pts[pts.length - 1][1]),
+        fill: "none",
+        d: pts.map(([i, v], k) => (k ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" "),
+      }));
+      return svg;
+    };
+
+    /* A SIGNED BAR ONLY WHERE THERE IS SOMETHING TO BE A SHARE OF.
+
+       The first draft gave four cards a bar and passed each one its OWN
+       magnitude as the peak — so every bar came out exactly half full, in the
+       direction of its sign, on every card and every session. Read back off
+       the rendered page: width 50% left 0%, width 50% left 0%, width 50% left
+       50%. That is not a reading, it is a shape that looks like one, and the
+       one card with a real denominator (open interest, where the call side is
+       measured against the larger of the two sides) was hidden among three
+       that had none.
+
+       So the bar belongs to the card that has a comparison and nowhere else;
+       the rest print their figure and their unit, which is the whole of what
+       they know. */
+    const bar = (v, peak) => {
+      const val = n(v);
+      if (val === null || !(peak > 0)) return null;
+      const b = el("span", "ft-card-bar");
+      const fill = el("i", val < 0 ? "is-neg" : val > 0 ? "is-pos" : "");
+      const half = Math.min(50, (Math.abs(val) / peak) * 50);
+      fill.style.width = Math.max(1.5, half) + "%";
+      fill.style.left = (val < 0 ? 50 - half : 50) + "%";
+      b.append(fill);
+      return b;
+    };
+
+    const cards = [];
+
+    if (track) {
+      const rows = Array.isArray(track.rows) ? track.rows : [];
+      cards.push(["Premium run", P0.money(track.net),
+        P0.polarity(n(track.net)),
+        track.sessions + " sessions, " + track.priced + " priced" +
+          (track.gaps ? ", " + track.gaps + " unpriced" : ""),
+        spark(rows.map((r) => r && r.p)),
+        "Net premium — calls minus puts — summed over the sessions this card carries. " +
+        (track.unit || "")]);
+    }
+    if (path) {
+      cards.push(["Session premium", P0.money(path.netPremium),
+        P0.polarity(n(path.netPremium)),
+        path.netPremiumUnit || "",
+        null,
+        "What this one session cleared, side-signed, over " +
+          (n(path.minutes) === null ? "the session" : path.minutes + " minutes") + "."]);
+      cards.push(["Net delta", P0.fmtOr(path.netDelta, (v) => P0.signed(v, (a) => P0.compact(a))),
+        P0.polarity(n(path.netDelta)),
+        path.netDeltaUnit || "",
+        null,
+        "Delta-weighted contracts the tape ended holding, signed by side."]);
+    }
+    if (aggr && aggr.lead && aggr.lead.n) {
+      const net = n(aggr.lead.n.ladderNetExact);
+      cards.push(["Aggressor", P0.fmtOr(net, (v) => P0.signed(v, (a) => P0.compact(a))),
+        P0.polarity(net),
+        aggr.reported + " reported, " + aggr.unreported + " not",
+        /* THE TOP STRIKE AGAINST THE WHOLE LADDER, which the panel publishes
+           as two figures side by side — so this bar is a share of something
+           rather than a restatement of its own value. */
+        bar(n(aggr.lead.n.topNetExact), Math.abs(net) || 0),
+        aggr.relation || ""]);
+    }
+    if (oiD && oiD.lead && oiD.lead.n) {
+      const cN = n(oiD.lead.n.callNet), pN = n(oiD.lead.n.putNet);
+      const both = cN !== null && pN !== null;
+      cards.push(["Open interest", both ? P0.signed(cN - pN, (a) => P0.compact(a)) : DASH,
+        both ? P0.polarity(cN - pN) : "",
+        both ? P0.compact(Math.abs(cN)) + " call / " + P0.compact(Math.abs(pN)) + " put" : "",
+        both ? bar(cN - pN, Math.max(Math.abs(cN), Math.abs(pN))) : null,
+        "Contract-level open-interest change on the lines the vendor surfaced. An open " +
+        "interest change compares two clearing snapshots, so it is a settled fact a day " +
+        "late by construction — never today's tape."]);
+    }
+    if (dark && dark.lead && dark.lead.n) {
+      const d = n(dark.lead.n.dollars);
+      cards.push(["Off-exchange", P0.money(d), "",
+        dark.lead.n.kept + " of " + dark.lead.n.seen + " prints" +
+          (n(dark.lead.n.topPct) === null ? "" : ", top " + dark.lead.n.topPct + "%"),
+        null,
+        "Off-exchange equity executions in this name, by their own dollar size. The tape " +
+        "reports them with delay and attributes no side and no participant."]);
+    }
+
+    for (const [k, v, cls, sub, viz, why] of cards.slice(0, 6)) {
+      const c = el("div", "ft-card");
+      c.title = why || "";
+      c.append(el("span", "ft-card-k", k));
+      const row = el("span", "ft-card-row");
+      row.append(el("span", "ft-card-v" + (cls ? " " + cls : ""), v));
+      if (viz) row.append(viz);
+      c.append(row);
+      if (sub) c.append(el("span", "ft-card-s", sub));
+      host.append(c);
+    }
+    host.hidden = !cards.length;
+  }
+
   function paintFlags(card, chg) {
     const host = $("ftFlags");
     if (!host) return;
@@ -7078,6 +7239,7 @@
        the reason directly above: one derivation of this name's move, read by
        every surface that states it. */
     paintHero(card, chg);
+    paintCards(card);
     paintFlags(card, chg);
     paintIdentity(card, chg);
 

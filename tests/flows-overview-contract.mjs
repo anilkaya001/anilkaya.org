@@ -236,9 +236,30 @@ const market = {
 const alerts = {
   v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
   readAt: "2026-08-25T10:28:20.000Z", refreshed: "nightly", seen: 7, cap: 60,
+  /* THE SPAN AND THE SIDE SPLIT, WHICH THE SHAPER HAS ALWAYS PUBLISHED AND
+     THIS FIXTURE DID NOT CARRY. shared/flows-alerts.js writes `spanStart`,
+     `spanEnd`, `askPrem` and `bidPrem` on every row; the table now draws the
+     first two as an Eastern clock and the last two as the vendor's ask/bid
+     attribution. Without them here the two new columns would be asserted as
+     em dashes forever — a column exercised only in its absent state is a
+     column no test has actually read.
+
+     THE OFFSET IS EXPLICIT (-04:00) so the Eastern clock is deterministic:
+     an instant written as UTC would print a different hour depending on
+     where the suite runs, and the whole point of that column is that it
+     names its zone.
+
+     THE THIRD ROW KEEPS ITS SILENCES ON PURPOSE. KLA carries no span and no
+     split, so the table must print the em dash for both on that row while
+     the two above it print figures — which is what proves the columns
+     distinguish an absent reading from a measured one. */
   rows: [
-    { t: "ORCL", cp: "C", k: 250, exp: "2026-09-18", prem: 2980960, rule: "RepeatedHits" },
-    { t: "PFE", cp: "P", k: 24, exp: "2026-09-18", prem: 1450000, rule: "SteadyAccumulation" },
+    { t: "ORCL", cp: "C", k: 250, exp: "2026-09-18", prem: 2980960, rule: "RepeatedHits",
+      spanStart: "2026-08-24T13:47:00-04:00", spanEnd: "2026-08-24T13:52:00-04:00",
+      askPrem: 2235720, bidPrem: 745240 },
+    { t: "PFE", cp: "P", k: 24, exp: "2026-09-18", prem: 1450000, rule: "SteadyAccumulation",
+      spanStart: "2026-08-24T09:35:00-04:00", spanEnd: "2026-08-24T09:41:00-04:00",
+      askPrem: 348000, bidPrem: 1102000 },
     { t: "KLA", cp: "C", k: 820, exp: "2026-10-16", prem: 940000, rule: "LowHistoricVolume" },
   ],
 };
@@ -898,8 +919,28 @@ try {
        "the flagged-window region draws the vendor's rows");
     const alert = await page.locator("#ccAlerts tbody tr").first()
       .locator("td").allTextContents();
-    deep(alert.map((s) => s.trim()), ["ORCL", "C 250 09-18", "$3.0M", "RepeatedHits"],
-      "each flagged window names the contract, the premium and the rule that fired");
+    /* SIX COLUMNS NOW, AND THE TWO NEW ONES ARE THE POINT OF THE CHANGE. A
+       reader could see that $3.0M was flagged on ORCL and not WHEN inside the
+       session nor which side of the quote the vendor attributed it to — both
+       of which every row has carried since the feed shipped.
+
+       13:47 IS EASTERN, WHICH IS WHY THE FIXTURE WRITES ITS OFFSET. "ask 75%"
+       is 2,235,720 of 2,980,960 — the vendor's attribution as a share of the
+       two sides, which is the only reading either figure supports alone. */
+    deep(alert.map((s) => s.trim()),
+      ["13:47", "ORCL", "C 250 09-18", "$3.0M", "ask 75%", "RepeatedHits"],
+      "each flagged window names when it opened, the contract, the premium, which side " +
+      "of the quote the vendor attributed it to, and the rule that fired");
+
+    /* AND A ROW WITH NEITHER PRINTS NEITHER. KLA carries no span and no
+       split, so both columns are the em dash on that row while the row above
+       prints figures — an absent reading and a measured one are told apart in
+       the same column. */
+    const quietAlert = await page.locator("#ccAlerts tbody tr").nth(2)
+      .locator("td").allTextContents();
+    deep([quietAlert[0].trim(), quietAlert[4].trim()], ["\u2014", "\u2014"],
+      "a window the vendor timed and split for neither prints the em dash in both, " +
+      "rather than a zero o'clock and an even split nobody measured");
 
     eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
        "and the dead band's residents are listed rather than counted");

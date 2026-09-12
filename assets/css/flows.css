@@ -9769,3 +9769,83 @@ svg[data-fx-cursor="on"]:focus-visible {
   outline-offset: 2px;
 }
 svg[data-fx-cursor="on"] { touch-action: pan-y; }
+
+
+/* ---------- the six cards ----------
+   THE SESSION'S FLOW ABOVE THE STATIONS, in the shape the design specifies: a
+   row of equal cards, each a label, a figure, a small drawing and the coverage
+   that qualifies it. They wrap rather than scroll, and a card that has no
+   reading is not drawn at all — six greyed boxes would turn six silences into
+   six claims that the session was quiet. */
+.ft-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.ft-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+}
+.ft-card-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ft-card-v {
+  font-family: var(--font-figure);
+  font-size: var(--fs-lead);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ft-card-v.is-pos { color: var(--flow-pos, var(--ink)); }
+.ft-card-v.is-neg { color: var(--flow-neg, var(--ink)); }
+.ft-card-s {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+.ft-card-spark { flex: none; opacity: 0.85; }
+.ft-card-line { stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.ft-card-line.is-pos { stroke: var(--flow-pos, var(--ink-dim)); }
+.ft-card-line.is-neg { stroke: var(--flow-neg, var(--ink-dim)); }
+/* A SERIES THAT ENDED EXACTLY EVEN IS NEITHER, and it is a measurement rather
+   than an absence — so it draws, in the neutral ink, instead of borrowing the
+   positive colour the way a two-arm sign would have given it. */
+.ft-card-line.is-flat { stroke: var(--ink-dim); }
+/* The centred bar the tiles elsewhere use, at card scale: zero is the middle,
+   and a magnitude runs out from it on the side its sign says. */
+.ft-card-bar {
+  position: relative;
+  flex: none;
+  width: 4.5rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-faint) 22%, transparent);
+  overflow: hidden;
+}
+.ft-card-bar > i {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 999px;
+  background: var(--ink-dim);
+}
+.ft-card-bar > i.is-pos { background: var(--flow-pos, var(--ink-dim)); }
+.ft-card-bar > i.is-neg { background: var(--flow-neg, var(--ink-dim)); }

@@ -98,10 +98,24 @@
     if (!pt) return;
     var g = rule(svg), line = g.firstChild;
     var band = spec.band || {};
-    var y0 = typeof band.y0 === "number" ? band.y0 : 0;
-    var y1 = typeof band.y1 === "number" ? band.y1 : viewH(svg);
-    line.setAttribute("x1", pt.x); line.setAttribute("x2", pt.x);
-    line.setAttribute("y1", y0); line.setAttribute("y2", y1);
+    /* TWO ORIENTATIONS, BECAUSE NOT EVERY CHART HERE PUTS ITS INDEX ON X.
+       The gamma profile is transposed — its shared index is the STRIKE, and
+       strikes run down the side — so a cursor that only ever measured x would
+       have had nothing to say on it, or worse, would have been forced onto
+       the wrong axis to look like it worked. `axis: "y"` swaps which
+       coordinate is searched and which way the rule is drawn; everything
+       else, including the readout, is identical. */
+    if (spec.axis === "y") {
+      var x0 = typeof band.x0 === "number" ? band.x0 : 0;
+      var x1 = typeof band.x1 === "number" ? band.x1 : viewW(svg);
+      line.setAttribute("x1", x0); line.setAttribute("x2", x1);
+      line.setAttribute("y1", pt.y); line.setAttribute("y2", pt.y);
+    } else {
+      var y0b = typeof band.y0 === "number" ? band.y0 : 0;
+      var y1b = typeof band.y1 === "number" ? band.y1 : viewH(svg);
+      line.setAttribute("x1", pt.x); line.setAttribute("x2", pt.x);
+      line.setAttribute("y1", y0b); line.setAttribute("y2", y1b);
+    }
     g.removeAttribute("hidden");
 
     var el = readout();
@@ -133,17 +147,22 @@
        run past the viewport's right edge, and is clamped at the top. */
     var rect = svg.getBoundingClientRect();
     var ctm = svg.getScreenCTM();
-    var atX = rect.left + rect.width / 2;
+    var atX = rect.left + rect.width / 2, atY = rect.top;
     if (ctm) {
       var p = svg.createSVGPoint();
-      p.x = pt.x; p.y = y0;
-      atX = p.matrixTransform(ctm).x;
+      p.x = spec.axis === "y" ? (typeof band.x0 === "number" ? band.x0 : 0) : pt.x;
+      p.y = spec.axis === "y" ? pt.y : (typeof band.y0 === "number" ? band.y0 : 0);
+      var screen = p.matrixTransform(ctm);
+      atX = screen.x; atY = screen.y;
     }
     var w = el.offsetWidth, h2 = el.offsetHeight;
     var left = atX + 12;
     if (left + w > window.innerWidth - 8) left = atX - w - 12;
     if (left < 8) left = 8;
-    var top = rect.top + 8;
+    /* ON A TRANSPOSED CHART THE READOUT FOLLOWS THE ROW, because the whole
+       point of the rule there is which STRIKE is being read; pinned to the
+       top it would name a row the eye is nowhere near. */
+    var top = spec.axis === "y" ? atY - h2 / 2 : rect.top + 8;
     if (top + h2 > window.innerHeight - 8) top = window.innerHeight - h2 - 8;
     if (top < 8) top = 8;
     el.style.left = Math.round(left) + "px";
@@ -156,13 +175,20 @@
     return vb && vb.height ? vb.height : (svg.getBoundingClientRect().height || 100);
   }
 
+  function viewW(svg) {
+    var vb = svg.viewBox && svg.viewBox.baseVal;
+    return vb && vb.width ? vb.width : (svg.getBoundingClientRect().width || 100);
+  }
+
   /* THE NEAREST POINT BY X, AND A LINEAR SCAN IS THE RIGHT TOOL. These
      series are tens of points, rarely a few hundred; a binary search over
      an array that may not be sorted would be faster and wrong. */
-  function nearest(spec, x) {
+  function nearest(spec, at) {
+    var onY = spec.axis === "y";
     var best = -1, bestD = Infinity;
     for (var i = 0; i < spec.points.length; i++) {
-      var d = Math.abs(spec.points[i].x - x);
+      var v = onY ? spec.points[i].y : spec.points[i].x;
+      var d = Math.abs(v - at);
       if (d < bestD) { bestD = d; best = i; }
     }
     return best;
@@ -189,6 +215,14 @@
    */
   function attach(svg, spec) {
     if (!svg || !spec || !Array.isArray(spec.points) || !spec.points.length) return;
+    /* A point must carry the coordinate the cursor is going to search on.
+       A transposed spec whose points only have x would place every rule at
+       the same place and report the first point for every position — a
+       cursor that looks like it works and reads one row forever. */
+    var coord = spec.axis === "y" ? "y" : "x";
+    for (var q = 0; q < spec.points.length; q++) {
+      if (typeof spec.points[q][coord] !== "number") return;
+    }
     /* IDEMPOTENT, because every renderer here redraws on a toggle and a
        second attach would double every listener on the same element. */
     if (svg.dataset.fxCursor === "on") return;
@@ -214,7 +248,7 @@
       var p = svg.createSVGPoint();
       p.x = e.clientX; p.y = e.clientY;
       var u = p.matrixTransform(ctm.inverse());
-      show(nearest(spec, u.x));
+      show(nearest(spec, spec.axis === "y" ? u.y : u.x));
     });
     svg.addEventListener("pointerleave", clear);
 

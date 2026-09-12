@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "179";
+export const ASSET_VERSION = "180";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1866,6 +1866,19 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        appears only when its own reading is present and past its threshold —
        never as a greyed-out "no", which would turn five absences into five
        claims. The threshold rides in the title of each. -->
+  <!-- SIX CARDS, WHICH IS THE SHAPE OF THE DESIGN AND NOT A COPY OF THE STRIP
+       ABOVE IT. The header already carries price, score, conviction and the
+       two volatility figures; repeating any of them here would spend a card
+       on a number a reader has just read. These six are the name's FLOW —
+       what the session cleared, over how long, on which side of the quote,
+       where the open interest moved, how much printed off-exchange, and what
+       delta the tape ended up holding — each from its own panel and each
+       carrying that panel's own unit and coverage.
+
+       THE CARDS ARE WRITTEN BY flows-ticker.js. The host is served empty and
+       hidden, the same way the hero above is, so a page whose card never
+       arrives shows no empty furniture. -->
+  <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
   <div class="ft-flags" id="ftFlags" hidden></div>
 
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO

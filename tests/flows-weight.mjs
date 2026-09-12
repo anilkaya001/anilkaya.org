@@ -750,7 +750,38 @@ const CEILING_KIB = {
      remove; until that is switched on, every feature here is paying to ship
      prose the browser parses and no reader reads. The next raise on this
      route should be that switch, not another ten kilobytes. */
-  tickerPage: 464,
+  /* 464 -> 473 FOR THE SIX CARDS AND THE CURSOR'S SECOND AXIS. On disk:
+
+       file                  before      after
+       flows-cursor.js       10,016     12,009
+       flows-ticker.js      385,079    392,544
+       flows-panels.js       70,841     70,841
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                474,503    483,961 B = 472.62 KiB
+
+     THE CARDS ARE THE DESIGN'S SIX AND NOT THE HEADER'S FIVE AGAIN. The strip
+     above them carries price, score, conviction and the two volatility
+     figures; these six say what the FLOW did — the premium run and its gaps,
+     the session's own premium, the net delta the tape ended holding, the
+     aggressor ladder, where open interest moved, and what printed
+     off-exchange. Each is one panel's published figure with that panel's own
+     unit and coverage caveat, lifted to the top of the page; a panel that did
+     not read gets no card, because six greyed boxes would turn six silences
+     into six claims that the session was quiet.
+
+     THE CURSOR GREW A SECOND AXIS in the same pass. A reading agent sent to
+     spec the gamma profile's cursor came back with "not drawable": that chart
+     is transposed — its shared index is the STRIKE, down the y axis — so an
+     x-only cursor either had nothing to say there or would have been forced
+     onto the wrong axis to look like it worked. `axis: "y"` searches the
+     other coordinate and draws a horizontal rule; the readout is unchanged.
+
+     473 LEAVES 1,110 B. Third raise on this route in one wave, each measured,
+     and the reason is the same each time: 253 KiB of this route is comment
+     that the merged stripping build removes and that is waiting on one
+     dashboard field. */
+  tickerPage: 473,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -1150,10 +1181,18 @@ const CEILING_KIB = {
      to the measurement rather than trimming the note is this file's own rule
      — "bookkeeping rather than engineering" is what it calls the alternative.
 
-     228 LEAVES 892 B. As on the ticker route, the real answer to this route's
-     weight is the comment-stripping build that is already merged and waiting
-     on a switch, not a further raise here. */
-  overviewPage: 228,
+     228 -> 230, AND THIS ROUTE DID NOT CHANGE. flows-cursor.js grew from
+     10,016 to 12,009 B when it learned a second axis for the ticker's
+     transposed gamma profile, and this route serves the same file: 232,620 ->
+     234,613 B = 229.11 KiB. That is the cost of one implementation instead of
+     two, and it is worth saying out loud rather than discovering twice — a
+     change to the shared cursor lands on every route that serves it, so the
+     next feature added to it is a raise HERE as well as there.
+
+     230 LEAVES 1,907 B. As on the ticker route, the real answer to this
+     route's weight is the comment-stripping build that is already merged and
+     waiting on a switch, not a further raise here. */
+  overviewPage: 230,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
