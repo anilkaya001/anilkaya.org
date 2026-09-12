@@ -104,7 +104,46 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
-  await page.setContent(html, { waitUntil: "load" });
+  /* SERVED FROM AN ORIGIN, NOT setContent, SO THAT ASSET PATHS RESOLVE.
+
+     setContent renders on about:blank, where `url("/assets/img/...")` has no
+     base to resolve against: the browser never issues the request, and the
+     ground fell back to its colour with nothing reporting a thing. That is
+     the same blindness the font note in the ticker block records — a preview
+     that cannot load what the page loads is not previewing the page.
+
+     IMAGES AND FONTS BOTH. The first pass routed only images, on the argument
+     that serving fonts would move every measurement this file has recorded
+     for these pages. It moves them TOWARD the truth: the ticker block's own
+     note says CI loads the real face and this harness only ever rendered the
+     fallback, which is how a font-dependent layout failed on CI and passed
+     here. A number measured against a face no reader has is not a
+     measurement. Once an origin exists the fonts are requested for real, so
+     the choice is between serving them and logging a 404 per page. */
+  await page.route(/^https:\/\/preview\.local\//, (r) => {
+    const u = new URL(r.request().url());
+    if (u.pathname === "/") return r.fulfill({ contentType: "text/html", body: html });
+    const f = /^\/assets\/fonts\/([A-Za-z0-9._-]+\.(?:woff2?|ttf|otf))$/.exec(u.pathname);
+    if (f) {
+      try {
+        return r.fulfill({
+          contentType: f[1].endsWith(".woff2") ? "font/woff2" : "font/woff",
+          body: readFileSync(path.join(ROOT, "assets/fonts", f[1])),
+        });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    }
+    const m = /^\/assets\/img\/([A-Za-z0-9._-]+)$/.exec(u.pathname);
+    if (m) {
+      const ext = m[1].slice(m[1].lastIndexOf(".") + 1).toLowerCase();
+      const type = ext === "svg" ? "image/svg+xml"
+        : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/" + ext;
+      try {
+        return r.fulfill({ contentType: type, body: readFileSync(path.join(ROOT, "assets/img", m[1])) });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    }
+    return r.fulfill({ status: 404, body: "" });
+  });
+  await page.goto("https://preview.local/", { waitUntil: "load" });
   await page.waitForTimeout(settle);
   const seen = probe ? await page.evaluate(probe) : {};
   const file = path.join(OUT, name + ".png");
@@ -347,6 +386,22 @@ if (CARDS && existsSync(CARDS)) {
       try {
         return r.fulfill({ contentType: "text/css", body: readFileSync(path.join(ROOT, "assets/css", file), "utf8") });
       } catch { return r.fulfill({ contentType: "text/css", body: "" }); }
+    });
+
+    /* AND THE IMAGES, FOR THE SAME REASON THE FONTS ARE SERVED. The ground is
+       now an SVG file rather than a gradient written in the stylesheet, so a
+       harness that 404s it renders the FALLBACK colour and reports a page
+       nobody gets — the same class of blindness the font note above records,
+       and the reason the first atmosphere edit went into a token that was
+       never painted without anything catching it. */
+    await page.route(/\/assets\/img\/[A-Za-z0-9._-]+\.(svg|png|jpe?g|webp|avif)/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
+      const type = ext === "svg" ? "image/svg+xml"
+        : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/" + ext;
+      try {
+        return r.fulfill({ contentType: type, body: readFileSync(path.join(ROOT, "assets/img", file)) });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
     });
 
     /* THE CARD STUB IS INSTALLED BEFORE THE CONTROLLER RUNS, not after.

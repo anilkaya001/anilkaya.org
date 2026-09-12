@@ -162,40 +162,49 @@
   /* The page's own ground, as a token for the same reason — the preference
      block returns it to the flat --bg. The glows are bounded to opposite
      corners so they never meet; see .flows-body. */
-  /* THE GROUND IS AN ATMOSPHERE NOW, NOT FOUR SHADES OF NEAR-BLACK.
+  /* THE GROUND IS THE IMAGE, NOT A STYLESHEET'S IMPRESSION OF IT.
 
-     The four stops it replaces — #121214, #141312, #131110, #12100d — span
-     four units of lightness and two of hue across a whole page, which is a
-     flat black field with extra steps. A reader looking at this section all
-     day said so, and sent the reference: an atmosphere seen edge-on, deep
-     navy at altitude, a blue band beneath it, a thin gold horizon, dusty
-     brown below. These stops are read off it.
+     The four stops this replaces — #121214, #141312, #131110, #12100d —
+     spanned four units of lightness across a whole page, which is a flat
+     black field with extra steps and is where the fatigue came from. The
+     first attempt at fixing it was a hand-written gradient here, and that was
+     the wrong artefact: an imitation of a picture, maintained by hand, that
+     could never be the picture.
 
-     AND THEY STAY DARK ON PURPOSE. The ground is what shows in the gutters,
-     behind the rail and through the glass; the moment it competes with a
-     reading it has failed at the only job it has. The panels that carry text
-     are opaque (--panel-bg) and untouched, so no contrast ratio on this site
-     moves — what changed is the page behind the cards, which is exactly the
-     surface the fatigue was coming from.
+     assets/img/atmosphere.svg IS the picture, as a file. Vector, ~2.8 KB,
+     resolution-independent, and a real asset the version ritual stamps like
+     any other — the subject is light through air, which is what an SVG
+     gradient already is, so nothing is lost to not being a photograph.
 
-     THE TWO RADIAL ACCENTS SURVIVE, warmed slightly to sit with the horizon
-     rather than against it. They are what stops the linear ramp reading as a
-     gradient banner: the eye finds a corner-lit field rather than a stripe.
+     THE SCRIM IS WHAT MAKES IT A GROUND AND NOT A WALLPAPER. The image is
+     bright: a white sun at the left edge and a lit horizon across the middle.
+     Laid behind the page at full strength it would pull the eye off every
+     reading on it, which is the one thing a background must not do. The two
+     flat layers over it hold it to roughly a fifth of its own luminance —
+     enough that the navy, the band and the horizon are all still THERE and
+     the page is no longer black, and not enough to compete with a number.
 
-     THE FORCED-COLOURS AND REDUCED-TRANSPARENCY BRANCH at :331 still flattens
-     all of this to var(--bg), and it must keep doing so — an atmosphere is a
-     decoration and the first thing a reader who has asked for plainness
-     should stop being sent. */
+     THE COLOUR UNDERNEATH IS THE FALLBACK, for a printer, a forced-colours
+     mode, and any request where the asset does not arrive. `fixed` pins the
+     image to the viewport rather than the document: the longest route here
+     measures ten thousand pixels, and an unpinned cover image would show one
+     flat slice per screen, which is the thing this replaces. */
   --flows-ground:
-    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.10), transparent 70%),
-    radial-gradient(62% 48% at 92% 100%, rgba(214, 170, 104, 0.08), transparent 70%),
+    /* THE SCRIM IS A GRADIENT, NOT A FLAT WASH, because the image is not
+       evenly bright. A single opacity that let the navy through turned the
+       lit haze below the horizon into glare behind every card in the lower
+       two thirds of the page — the render showed the bullish table sitting on
+       brown. Light at the top where the sky is already dark, heavy below the
+       horizon where it is not. */
     linear-gradient(180deg,
-      #0a1020 0%,     /* deep navy, the top of the frame   */
-      #101c33 24%,    /* the blue band under it            */
-      #1d1d22 44%,    /* where the two meet, neutral       */
-      #2a2416 56%,    /* the gold horizon, heavily muted   */
-      #17120c 76%,    /* dusty brown below it              */
-      #100e0b 100%);  /* warm enough to meet --bg          */
+      rgba(8, 8, 10, 0.42) 0%,
+      rgba(8, 8, 10, 0.50) 34%,
+      rgba(8, 8, 10, 0.72) 52%,
+      rgba(9, 8, 7, 0.88) 68%,
+      rgba(9, 8, 7, 0.94) 100%),
+    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
+    url("/assets/img/atmosphere.svg?v=156") center / cover no-repeat,
+    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
 
@@ -6316,7 +6325,20 @@ body.is-stale .flows-tablewrap {
   box-shadow: var(--glass-edge), var(--shadow-card);
   overflow: hidden;
 }
-@media (max-width: 1100px) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* SEVEN TILES ONLY WHERE SEVEN FIT, AND 1100px WAS MEASURED AGAINST THE
+   WRONG FACE. The rule above is unchanged and correct — a value may not wrap,
+   and a viewport that cannot hold one gets fewer columns — but the threshold
+   it relies on was set with a preview harness that served no webfont and
+   rendered everything in the narrower fallback. With the real Latin Modern
+   the strip overflowed at 1440: "41 bull / 48 bear" ran straight through the
+   tile beside it and pushed the flagged count out of line.
+
+   91.99rem is not a new number: it is the canvas tier `.flows-main` already
+   uses. Below it main is pinned at 78rem, so seven tiles get ~150px of inner
+   width each and the longest value needs more; above it main grows with the
+   viewport and seven fit. Tying the strip to the tier that decides its width
+   is what stops these two drifting apart again. */
+@media (max-width: 91.99rem) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-tile {
   /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
