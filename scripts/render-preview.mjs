@@ -185,6 +185,81 @@ for (const [name, width] of [["overview-1000", 1000], ["overview-600", 600]]) {
       }) });
 }
 
+/* ---- the market level ----
+   THE ONE PAGE WHOSE GRIDS ARE FED BY SEVEN INDEPENDENT FEEDS. Each pulse
+   card answers its own silence, so a fixture short of a feed still draws
+   seven children and every count below still reads 7 — a card carrying a
+   silence line and a card carrying a table are indistinguishable from a
+   child count alone. The DISTINCT-SIZE counts are what separate them:
+   the seven cards hold a chart, four tables and a month strip, so their
+   heights are legitimately many, while their WIDTHS must collapse to the
+   number of columns the track is running — 1 while the grid is one column,
+   and no more than 2 where the tide and totals cards span two. Anything
+   above that is a card sized by what was left over rather than by the
+   track, which is the defect the .cc-strip measurements caught. */
+const marketProbe = () => {
+  const sizes = (sel) => {
+    const kids = [...document.querySelectorAll(sel)].flatMap((g) => [...g.children]);
+    const rect = (k) => k.getBoundingClientRect();
+    /* DISTINCT HEIGHTS ACROSS A WHOLE GRID IS NOT AN EVENNESS READING, and
+       reporting it as one nearly bought a fix this grid did not need. Seven
+       cards over four rows SHOULD show four heights: `align-items: stretch`
+       sizes each card to its own row, and a row holding a table is taller
+       than a row holding a month strip. That is the lesson the .cc comment
+       records from the other direction — `grid-auto-rows: 1fr` was copied
+       onto a grid of unlike regions and opened 200px of void under the
+       sparse ones.
+
+       The question a reader actually asks is whether two cards SIDE BY SIDE
+       differ. So the children are bucketed by their rounded top edge — one
+       bucket per rendered row, wraps included — and what is reported is the
+       worst row: how many distinct heights appear within a single row, and
+       how many pixels separate the tallest from the shortest there. 1 and 0
+       mean every row is internally even, whatever the grid totals. */
+    const rows = new Map();
+    for (const k of kids) {
+      const r = rect(k), top = Math.round(r.top);
+      if (!rows.has(top)) rows.set(top, []);
+      rows.get(top).push(r);
+    }
+    const spreads = [...rows.values()].map((rs) => ({
+      kinds: new Set(rs.map((r) => Math.round(r.height))).size,
+      gap: Math.round(Math.max(...rs.map((r) => r.height)) - Math.min(...rs.map((r) => r.height))),
+    }));
+    return { children: kids.length, rows: rows.size,
+      widths: new Set(kids.map((k) => Math.round(rect(k).width))).size,
+      heights: new Set(kids.map((k) => Math.round(rect(k).height))).size,
+      worstRowKinds: Math.max(...spreads.map((x) => x.kinds)),
+      worstRowGapPx: Math.max(...spreads.map((x) => x.gap)) };
+  };
+  /* The extremes' grid is addressed through its panel. `.mk-movers-grid` on
+     its own also matches the net-impact card's two-column split inside the
+     pulse, and pooling four columns with two would report six children and a
+     second width that belongs to a different track. */
+  return { pulse: sizes(".mk-pulse-grid"), movers: sizes("#mktMovers .mk-movers-grid"),
+    /* A silence is a card too, so the cards that actually DREW are counted
+       by what only a fed card emits: a table, a chart host or the month
+       strip. Seven means no feed fell back. */
+    pulseDrawn: [...document.querySelectorAll(".mk-pulse-grid > *")]
+      .filter((c) => c.querySelector(".flows-table, .mk-tide, .mk-sea, .mk-movers")).length,
+    docScroll: document.documentElement.scrollWidth <= window.innerWidth };
+};
+
+/* THE VIEWPORT IS THE PICTURE — shot() does not capture full page — and this
+   route runs 5391px at 1440, 6327 at 1000 and 7171 at 600 with the fixture
+   below. A 1400px viewport would have cut every pulse card out of the PNG
+   while the probe still reported all seven, which is the exact split between
+   a measurement and a rendering this file exists to close. */
+for (const [name, width, height] of
+     [["market", 1440, 5600], ["market-1000", 1000, 6500], ["market-600", 600, 7400]]) {
+  await shot(name,
+    inline(stubFetch(FIX.market) + pages.FLOWS_PAGES.marketPage({ username: "preview" }),
+      /* flows-ui.js is deliberately absent: the page emits no tag for it and
+         the controller mirrors what it needs rather than importing it. */
+      ["nav.js", "flows-market.js"]),
+    { width, height, probe: marketProbe });
+}
+
 /* ---- the reader, only when real cards were emitted ---- */
 if (CARDS && existsSync(CARDS)) {
   const { TICKER_PANEL_KEYS } = await import(path.join(ROOT, "shared/flows-panels.js"));
