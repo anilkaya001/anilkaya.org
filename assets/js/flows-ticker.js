@@ -6801,6 +6801,53 @@
       changeEl.append(tag);
     }
 
+    /* ---- THE VERDICT, IN TWO WORDS, BEFORE THE SENTENCE ----
+
+       WHAT THIS BLOCK ANSWERS IS "did anything happen", and a reader had to
+       read a sentence to find out. The sentence is good and it stays; what it
+       lacked is a headline — the one thing every other panel on this page has
+       and the block a reader lands on did not.
+
+       THE WORD IS DERIVED FROM WHAT THE PAYLOAD ALREADY DECIDED, never from a
+       fresh threshold invented here: a dead-band CROSSING is an event and
+       says which one; everything else is drift, and drift is named by its
+       direction and nothing more. So this adds no opinion — it promotes the
+       decision the change layer already published into the position a reader
+       reads first.
+
+       AND IT IS HONEST ABOUT THE FLAT CASE. A move of exactly zero is a
+       measurement, so it gets its own word rather than being rounded into one
+       of the two directions. A window with no earlier score gets no verdict
+       at all: there is nothing to be a verdict about, and "no change" would
+       be a claim.
+
+       THE MARK IS A GLYPH AND NOT A COLOUR. The arrow says the direction to a
+       reader who cannot see the hue, which is the rule every signed figure on
+       this section already follows. */
+    const mv = chg.d1 ? isNum(chg.d1.v) : null;
+    const verdict = (() => {
+      if (mv === null) return null;
+      if (chg.cross === "cleared") return ["Cleared the band", "\u2191", "is-pos"];
+      if (chg.cross === "faded") return ["Faded out of the band", "\u2193", "is-neg"];
+      if (chg.cross === "flipped") {
+        return mv > 0
+          ? ["Flipped bullish", "\u2191", "is-pos"]
+          : ["Flipped bearish", "\u2193", "is-neg"];
+      }
+      if (mv > 0) return ["Bullish drift", "\u2191", "is-pos"];
+      if (mv < 0) return ["Bearish drift", "\u2193", "is-neg"];
+      return ["Unchanged", "\u2192", "is-flat"];
+    })();
+    if (verdict) {
+      const [word, glyph, cls] = verdict;
+      const head = el("div", "ft-chg-verdict " + cls);
+      const mark = el("span", "ft-chg-mark", glyph);
+      mark.setAttribute("aria-hidden", "true");
+      head.append(mark);
+      head.append(el("span", "ft-chg-word", word));
+      changeEl.append(head);
+    }
+
     /* THE HEADLINE. The sign is in the glyph before it is in the hue, and the
        gap is in the same sentence as the delta. */
     const lead = el("p", "ft-chg-lead");

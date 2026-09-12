@@ -592,7 +592,30 @@ const CEILING_KIB = {
 
      439 LEAVES 917 B, which is deliberately not room for anything: the next
      change to this route should have to come here and argue in the open. */
-  tickerPage: 439,
+  /* 441, AND THE 917 B ABOVE IS WHY THIS PARAGRAPH EXISTS AT ALL.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   62,318   flows-ticker.js  379,949
+       total            450,834 B = 440.27 KiB, 1,298 B over 439
+
+     The change block leads on a two-word verdict now — "Bullish drift",
+     "Cleared the band" — with a glyph that says the direction without the
+     hue. The block answers "did anything happen" and a reader had to read a
+     sentence to find out; every other panel on this page has a headline and
+     the one a reader lands on did not.
+
+     IT ADDS NO OPINION, which is what made it cheap: the word is derived from
+     the crossing the change layer already published, and drift is named by
+     its own sign. A move of exactly zero gets its own word rather than being
+     rounded into a direction, and a window with no earlier score gets no
+     verdict at all — there is nothing for one to be about.
+
+     441 LEAVES 750 B. The reserve is smaller than the last raise left, on
+     purpose: this route is 440 KiB of source and roughly 187 KiB of it is
+     what a browser would parse with the comment strip's one Workers Builds
+     field set. Every kilobyte argued here is a kilobyte that field would
+     return. */
+  tickerPage: 441,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
