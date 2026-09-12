@@ -9779,7 +9779,17 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
    six claims that the session was quiet. */
 .ft-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  /* 8rem, NOT 10.5, AND THE NUMBER IS A PHONE MEASUREMENT. At 10.5rem (168px)
+     the track never fits twice inside a 320px viewport's content box — two
+     columns want 2x168 plus the gap against about 288px available — so all
+     six cards stacked and the row measured 576px tall. Six full-width boxes
+     is not a row of cards, it is a list, and it pushed the station tabs below
+     the fold on its own: see the note beside #ftBar in shared/flows-pages.js.
+     At 8rem (128px) two columns need 264px and fit, halving the block to
+     about 288px, and nothing changes above 320px because auto-fit still takes
+     as many tracks as the width allows. The floor is what a card's widest
+     figure needs, not a round number: --$220.7M sets it. */
+  grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
   gap: var(--space-2);
   margin: 0 0 var(--space-3);
 }

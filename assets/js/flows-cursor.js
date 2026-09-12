@@ -39,6 +39,28 @@
    Every move writes the same sentence into a polite live region, so a
    reader who cannot see the rule hears the reading rather than being
    told a chart exists.
+
+   ---- THE THREE RULES EVERY REGISTRATION FOLLOWS -------------------
+
+   Sixteen charts across three files register here, and the first draft
+   of that work restated these at each of them. They are properties of
+   the contract, so they live here; what stays beside a registration is
+   only what is peculiar to that chart.
+
+   1. NOTHING IN A SPEC IS RE-DERIVED. A registration passes the very
+      functions that placed the marks and the very values they were
+      placed from. Recomputing either is a second opinion about one
+      series, and the day the two disagree the page draws a rule on one
+      mark and prints the number of another.
+
+   2. AN ABSENT READING IS SAID, NEVER DRAWN AS A ZERO. A chart can
+      leave the ink out; a readout has a fixed row count and cannot, so
+      every registration prints the payload's own reason where there is
+      one and "not reported" where there is not.
+
+   3. THE BAND IS THE PLOT, NOT THE CANVAS, so the rule stops short of
+      the axis labels, the legend and any annotation rail — passed as
+      the same padding its renderer reserved them with.
    ============================================================= */
 (function () {
   "use strict";

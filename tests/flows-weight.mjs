@@ -830,7 +830,77 @@ const CEILING_KIB = {
      493,943 B = 482.37 KiB.
 
      483 LEAVES 649 B. */
-  tickerPage: 483,
+
+  /* 483 -> 494, AND THE ROUTE CAME HERE AND ARGUED, which is what every
+     paragraph above asks of it. Byte-exact, `git cat-file -s HEAD:` against
+     `stat` on disk:
+
+       flows-dock.js       6,007      nav.js             2,560
+       flows-cursor.js    12,009 ->  13,123  (+1,114)
+       flows-panels.js    70,841 ->  71,727  (+  886)
+       flows-ticker.js   402,526 -> 411,696  (+9,170)
+       total             493,943 -> 505,113 B = 493.27 KiB — 10,521 B over
+
+     AND THIS PARAGRAPH SAID 493 UNTIL TEN MINUTES AGO, which belongs in the
+     file whose subject is figures going stale — this time caught inside a
+     single change rather than a PR later. It was derived against a 503,715 B
+     route and read "493 leaves 1,117 B". Then CI failed a second assertion,
+     flows-ticker-contract's phone-width hit test, the fix for it added 1,398
+     B of reasoning to flows-ticker.js, and the ceiling I had just argued for
+     was 281 B short. Re-derived rather than re-quoted, and the trigger is the
+     same one every paragraph above records: editing this comment does not
+     change the file it describes.
+
+     WHAT THE 9,772 B BOUGHT: every drawing on this route now reads out. The
+     count is not a vibe — the preview harness censuses it, and before this
+     change it stood at 7 drawings of 21 with a cursor. It is 16 of 18 now,
+     and the other two are accounted for rather than outstanding: the score
+     dial and the priced-move band each hold ONE observation and print every
+     number they encode on their own face, which they now say in the markup
+     with data-fx-read="face" so the census can prove the claim instead of
+     carrying two remembered exceptions. Nothing is left in `bare`.
+
+     (21 became 18 because the first census counted three legend swatches as
+     charts. A swatch is an <svg> holding a drawn line; the discriminator is
+     aria-hidden, which is the renderer saying there is nothing here to read.)
+
+     THE FIVE NEW REGISTRATIONS ARE NOT FIVE COPIES OF ONE. Two are transposed
+     — gamma and aggressor share a strike ladder that runs DOWN the panel, and
+     they are the reason `axis: "y"` exists in flows-cursor.js at all. One
+     covers three panels at once, because vanna, charm and delta exposure
+     already share a drawer. One reads a heatmap's COLUMN headers rather than
+     its cells, because the cells print their own numbers and the columns
+     never printed theirs. Each of those is a decision that had to be argued
+     where the code is.
+
+     6,915 B OF THE 9,772 IS COMMENT, and 1,114 of the rest is the de-
+     duplication that made this raise smaller than it started. The first draft
+     restated the same three contract rules at each of five sites; they are
+     properties of the API, so they moved into flows-cursor.js's header once —
+     the trade greekTermPanel's own comment records making for its repeated
+     paragraph, measured there at 1,350 bytes. It cost this route 1,114 B in
+     flows-cursor.js and saved 2,600 in the two renderers, and it also costs
+     overviewPage 1,114 B, which is why that ceiling moves below.
+
+     THE EXECUTABLE COST IS 3,764 B, not 9,772: stripComments over the route's
+     five scripts gives 227,657 -> 231,421. That is context and not an excuse.
+     This table measures the REPOSITORY, deliberately — the paragraph on the
+     404 reduction says why, and the strip still waits on the dashboard field
+     — so 9,772 is the number that moves this ceiling.
+
+     THE SECOND FIX IS WHY THE CARDS AND THE BAR CHANGED PLACES. The six
+     cards, the findings index, the flag row and the sector strip all landed
+     above #ftBar in this wave, and at 320px they stack: measured on a fresh
+     load, the station tabs sat 1,941px down a 900px viewport, so the page's
+     whole navigation was two screens below the fold and the contract's
+     elementFromPoint walk reached it on zero rows of pixels. The bar moved
+     above the cards, the cards went two-up at phone width, and the "what
+     changed" region's insertion re-anchored from the bar to the cards so it
+     could not land between the identity and the figures. 639px now.
+
+     494 LEAVES 743 B, which is room for a fix and not for a feature, the
+     standard every raise above claimed and the 496 paragraph made real. */
+  tickerPage: 494,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -1241,7 +1311,22 @@ const CEILING_KIB = {
      230 LEAVES 1,907 B. As on the ticker route, the real answer to this
      route's weight is the comment-stripping build that is already merged and
      waiting on a switch, not a further raise here. */
-  overviewPage: 230,
+  /* 230 -> 231, AND THIS ROUTE DID NOT GAIN A FEATURE. flows-cursor.js is
+     shared with the ticker, and the ticker's cursor work moved three
+     contract rules out of five renderer comments and into that file's
+     header: 12,009 -> 13,123 B, +1,114, of which this route pays every byte
+     and gains nothing it can see. Measured:
+
+       flows-dock.js   6,007   nav.js         2,560   flows-ui.js     25,136
+       flows-cursor.js 12,009 -> 13,123       flows-overview.js  188,901
+       total         234,613 -> 235,727 B = 230.20 KiB — 207 B over
+
+     SAYING SO IS THE POINT. A shared file's comment is billed to every route
+     that serves it, and the de-duplication that made the ticker's raise
+     smaller made this one necessary — a net win across the two (+1,114 here
+     against −2,600 there) but not a free one, and a ceiling that absorbed it
+     quietly would hide the transfer. 231 leaves 817 B. */
+  overviewPage: 231,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

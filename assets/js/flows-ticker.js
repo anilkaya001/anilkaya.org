@@ -916,6 +916,53 @@
       "A solid border is a print from today, a dashed one did not trade today, a dotted one " +
       "carries no volume field at all.");
 
+    /* A HEATMAP HAS TWO INDICES AND THIS CURSOR SEARCHES ONE, so which one
+       is the whole design of this registration.
+
+       Reading a single CELL would need both, and a cell already shows its own
+       number wherever the column is wide enough for `withNumbers`; where it
+       is not, the honest fix is a wider panel, not a cursor that reads one
+       cell of thirteen.
+
+       WHAT THE PICTURE CANNOT STATE IS THE COLUMN. Each expiry carries
+       published readings of its own — atmIv, atmStrike, days, how many of its
+       cells printed today — and none is drawn anywhere in the grid, because
+       the column head has room for the tenor and little else. Every row below
+       is a field off `cols[j]`, so this is not a second opinion about the
+       surface; it is the column's own header data made reachable. */
+    if (window.FlowsCursor && cols.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Implied volatility surface, by expiry",
+        band: { y0: padT, y1: padT + gridH },
+        points: cols.map((e, j) => {
+          const atmIv = isNum(e && e.atmIv);
+          const days = isNum(e && e.days);
+          const k = isNum(e && e.atmStrike);
+          const fresh = isNum(e && e.fresh);
+          return {
+            x: plotL + j * colW + colW / 2,
+            label: String((e && e.expiry) || DASH) +
+              (days === null ? "" : " \u00b7 " + days + "d out"),
+            rows: [
+              /* ftsVol RETURNS THE NUMBER AND NOT THE UNIT — every other
+                 caller in this drawer appends the sign itself, and a readout
+                 that dropped it would print a bare 32.8 beside prices. */
+              { k: "At-the-money IV",
+                v: atmIv === null
+                  ? (e && e.atmReason ? String(e.atmReason) : "not published")
+                  : ftsVol(atmIv) + "%" },
+              /* No sign handling on a strike: a strike is a price and prices
+                 on this chain are positive, so there is no hyphen to promote
+                 to a minus and `neg` is not in this drawer's scope anyway. */
+              { k: "At the strike", v: k === null ? "not published" : k.toFixed(2) },
+              { k: "Traded today",
+                v: fresh === null ? "not published" : fresh + " of this column's cells" },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---- the numbers the picture cannot state exactly ---------------- */
@@ -1503,6 +1550,36 @@
             ? ` ${missing.length} of ${cols.length} columns carry no level and are marked ` +
               "on the rail below the axis."
             : ""));
+
+    /* THE AXIS HERE PRINTS TENORS, NOT LEVELS, so "what was the level at 53
+       days" had no answer short of measuring a bar against the rail. The
+       sentence above states the first and last measured columns, which is a
+       summary and not a substitute for reading the middle.
+
+       `tenorOf` is the phrase that closing sentence uses, so one column
+       cannot be named two ways on one panel; and a column with no level
+       prints its published reason, which is what the miss rail below the
+       axis exists to say in ink. */
+    if (window.FlowsCursor && cols.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "At-the-money level along the term",
+        band: { y0: padT, y1: baseY },
+        points: cols.map((col, j) => {
+          const v = levelOf(col);
+          const why = col.point && col.point.reason ? String(col.point.reason) : null;
+          return {
+            x: cxOf(j),
+            label: String((col.point && col.point.expiry) || DASH) +
+              " \u00b7 " + tenorOf(col),
+            rows: [
+              { k: "At-the-money IV",
+                v: v === null ? (why || "no level on this column") : vol1(v) },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---------- the two bases, under the readings they support -------
@@ -3422,6 +3499,51 @@
         ? `${partialRows} of ${bars.length} strikes publish an incomplete volume total.`
         : "Every strike drawn publishes a complete volume total."));
 
+    /* THE SECOND TRANSPOSED LADDER, AND `axis: "y"` FOR THE SAME REASON.
+       This panel's geometry is renderGamma's on purpose — same row pitch,
+       same rails, so one strike sits at one height across both — and the
+       cursor follows.
+
+       THREE NUMBERS, BECAUSE A NET WITHOUT A DENOMINATOR IS UNREADABLE. A net
+       of +400 on 500 contracts and the same net on 40,000 are opposite
+       findings, and the bar draws only the first of those.
+
+       AND THE OTHER TWO ARE NOT THE NET'S TERMS. `calls` and `puts` are the
+       CALL AND PUT VOLUME at the strike (shared/flows-chain.js sums them by
+       `p.type`), so they add to `vol` and do not subtract to `net` — `net` is
+       aggressor-signed, positive where a contract was bought. A first draft
+       of this readout labelled them "Bought / sold", which is a confident
+       statement of the wrong quantity, and the fixture caught it: 1,785 and
+       3,864 against a net of 1,247 and a volume of 5,649. They are the
+       composition of the volume, and that is what they are called. */
+    if (window.FlowsCursor && bars.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Net aggressor volume by strike",
+        axis: "y",
+        band: { x0: plotL, x1: plotR },
+        points: bars.map((b, i) => {
+          /* faGrouped IS THIS PANEL'S OWN FORMATTER and it carries the sign
+             and the absence itself — MINUS for a negative, the em dash for a
+             number that is not there. Reaching past it for a second spelling
+             is how one panel comes to print two forms of the same figure.
+             The strike goes to two decimals because this readout is an HTML
+             box with no 46px budget to clip it, unlike the rail label. */
+          const side = (v) => (isNum(v) === null ? "not split" : faGrouped(v));
+          return {
+            y: yOfIndex(i),
+            label: neg(b.k.toFixed(2)),
+            rows: [
+              { k: "Net aggressor", v: faGrouped(b.net),
+                cls: b.net > 0 ? "is-pos" : b.net < 0 ? "is-neg" : "" },
+              { k: "Call / put volume", v: side(b.calls) + " / " + side(b.puts) },
+              { k: "Volume at strike",
+                v: isNum(b.vol) === null ? "not reported" : faGrouped(b.vol) },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---------- what the panel does NOT show ---------------------------- */
@@ -4062,6 +4184,35 @@
         t.textContent = fvcPct(v);
         svg.append(t);
       }
+
+      /* THE CURVE ALREADY HELD THIS READING AND ONLY A MOUSE COULD REACH IT.
+         Every dot carries a <title> with these same values — a native
+         tooltip, which appears after a delay, one dot at a time, and which a
+         keyboard never reaches at all. Read off the same `pts` entries, so
+         the two cannot disagree; what this adds is arrow keys and no hover.
+
+         The title DROPS the implied-move clause when it is absent, which
+         reads as a curve that has no such thing. Rule 2 in flows-cursor.js
+         is why the readout says so instead. */
+      if (window.FlowsCursor && pts.length) {
+        window.FlowsCursor.attach(svg, {
+          name: "Implied volatility along the term",
+          band: { y0: padT, y1: H - padB },
+          points: pts.map((p) => {
+            const imp = isNum(p.r.impliedMovePerc);
+            return {
+              x: xOf(p.x),
+              label: String(p.r.expiry) +
+                (p.dte === null ? "" : " \u00b7 " + p.dte + "d out"),
+              rows: [
+                { k: "Implied vol", v: vol1(p.y) },
+                { k: "Implied move", v: imp === null ? "not reported" : vol1(imp) + " of spot" },
+              ],
+            };
+          }),
+        });
+      }
+
       termHost.append(svg);
 
       /* The mini-table: the FIRST rows in calendar order, stated as a slice
@@ -4196,6 +4347,30 @@
             cx: xO(i).toFixed(1), cy: yO(v).toFixed(1), r: i === n - 1 ? 2 : 1.5,
           }));
         });
+
+        /* THE STRIP DRAWS EVERY SESSION AND LABELS NONE OF THEM. It is
+           deliberately spare and the headline states only the latest, so
+           "what was it in March" had no answer on the page: dots are drawn
+           for two specific reasons and most sessions carry no mark to hover
+           even if hovering worked.
+
+           A SESSION WITH NO RANK KEEPS ITS PLACE IN THE LIST. Dropping it
+           would slide every later session left on a calendar axis; the line
+           already breaks rather than bridges across those sessions, and the
+           readout makes the same distinction. */
+        const dated = rankRows.slice().reverse();
+        window.FlowsCursor && window.FlowsCursor.attach(svg, {
+          name: "One-year implied-volatility rank by session",
+          band: { y0: sPadY, y1: SH - sPadY },
+          points: series.map((v, i) => ({
+            x: xO(i),
+            label: (dated[i] && dated[i].date) || "an unnamed session",
+            rows: [
+              { k: "IV rank", v: v === null ? "not published" : neg(v.toFixed(1)) },
+            ],
+          })),
+        });
+
         rankHost.append(svg);
       }
 
@@ -5711,7 +5886,20 @@
     changeEl.id = "ftChange";
     changeEl.hidden = true;
     changeEl.setAttribute("aria-labelledby", "ftChangeH");
-    barEl.parentNode.insertBefore(changeEl, barEl.nextSibling);
+    /* AFTER THE CARDS, NOT IMMEDIATELY AFTER THE BAR. The bar moved above the
+       six cards to keep the station tabs inside a phone's first screen (see
+       the note beside #ftBar in shared/flows-pages.js), and this insertion
+       had been written against the old order: anchored to the bar, it landed
+       BETWEEN the identity and the session's figures, so on a 320px page the
+       cards were 851px of prose below the header they belong to.
+
+       Anchored to the cards instead, the order reads the way the design lays
+       it out — identity, navigation, this session's figures, then what
+       changed. The bar stays the fallback: a card that publishes no figure at
+       all leaves #ftCards hidden, and inserting after a hidden element still
+       puts this region exactly where it used to be. */
+    const after = $("ftCards") || barEl;
+    after.parentNode.insertBefore(changeEl, after.nextSibling);
   }
 
   /**

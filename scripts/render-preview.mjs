@@ -585,12 +585,146 @@ if (CARDS && existsSync(CARDS)) {
         related: document.querySelectorAll(".ft-rel-c").length,
         relatedSaid: (document.getElementById("ftRelS") || {}).textContent || "",
 
-        /* THE CHARTS A READER CAN ACTUALLY INTERROGATE. This went from 1 to 7
-           in one wave and nothing but a count would have noticed if a
-           registration stopped running. */
-        cursors: document.querySelectorAll('svg[data-fx-cursor="on"]').length };
+        /* THE CHARTS A READER CAN ACTUALLY INTERROGATE, AS A CENSUS RATHER
+           THAN A SCORE. A bare count went from 1 to 7 in one wave, which
+           tells you a wave happened and not whether it finished: 7 of 7 and
+           7 of 14 print the same number. The directive is that every chart
+           reads out, so the number that matters is the REMAINDER, named.
+
+           An <svg> with no marks is furniture — a rule, a legend swatch, an
+           icon — and a cursor on it would read out nothing. So the census
+           counts only drawings that placed marks, and lists the panel each
+           uncovered one sits in, which is the address of the work left.
+
+           MARKS ALONE WERE NOT ENOUGH. A legend key is an <svg> holding a
+           drawn line, so the first census counted the path panel's two
+           swatches as charts and reported that panel short while both of its
+           real drawings already read out. The discriminator is the one the
+           renderers already set: a swatch carries aria-hidden, which is the
+           author saying in the markup that there is nothing here to read.
+           Anything a reader is told to ignore is furniture by the page's own
+           account, and a cursor on it would announce a colour. */
+        charts: (() => {
+          const drawn = [...document.querySelectorAll(".ft-panel svg, #ftGrid svg")]
+            .filter((s) => s.getAttribute("aria-hidden") !== "true")
+            .filter((s) => s.querySelector("path, rect, circle, line, polyline, polygon"));
+          const bare = drawn.filter((s) => s.dataset.fxCursor !== "on");
+          const where = (s) => {
+            const p = s.closest("[data-panel]");
+            /* THE PANEL AND THE DRAWING. A panel can hold more than one chart
+               — a path panel draws its delta and its premium separately — so
+               naming only the panel sends the next reader to a panel whose
+               other drawing already reads out, looking for a bug that is not
+               there. The class is which drawing. */
+            return ((p && p.dataset.panel) || (s.closest("section") || {}).id || "?") +
+              "." + (s.getAttribute("class") || "-");
+          };
+          /* A DRAWING THAT PRINTS ITS OWN READING NEEDS NO CURSOR, AND THAT
+             HAS TO BE A CLAIM THE RENDERER MAKES, NOT ONE THIS PROBE INFERS.
+             Two drawings here hold ONE observation each — the score dial and
+             the priced-move band — and each prints every number it encodes
+             on its own face. A cursor on either would step through a list of
+             one and announce a figure already on screen. The renderers say
+             so with data-fx-read="face", in the open and next to the reason,
+             so "every chart reads out" is checkable here instead of being a
+             remembered exception. Anything left in `bare` is work. */
+          const face = bare.filter((s) => s.dataset.fxRead === "face");
+          const left = bare.filter((s) => s.dataset.fxRead !== "face");
+          return { drawn: drawn.length, cursor: drawn.length - bare.length,
+                   face: face.length, bare: [...new Set(left.map(where))].join(" ") };
+        })(),
+        cursors: document.querySelectorAll('svg[data-fx-cursor="on"]').length,
+
+        /* REGISTERED IS NOT READING. The census above proves every drawing
+           asked for a cursor; it cannot tell a spec that reads out from one
+           whose points carry empty rows, a label off the wrong field, or a
+           coordinate the search never matches — all of which register
+           cleanly and announce nothing. So every cursor is DRIVEN here and
+           its first reading is captured.
+
+           BY KEYBOARD, NOT BY POINTER, and that is not merely convenient.
+           Playwright's mouse is viewport-relative, so a chart below the fold
+           reports nothing and looks broken; and the keyboard path is the one
+           a reader without a mouse actually takes, so driving it exercises
+           the live region and the arrow stepping at the same time. Focus,
+           one ArrowRight, read what the page says. A cursor that announces
+           an empty string is the defect this probe exists to catch. */
+        reads: [...document.querySelectorAll('svg[data-fx-cursor="on"]')].map((s) => {
+          s.focus();
+          s.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+          const box = document.querySelector(".fx-read");
+          const said = box && !box.hidden ? box.textContent.trim() : "";
+          s.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          const p = s.closest("[data-panel]");
+          return ((p && p.dataset.panel) || "?") + ": " + (said || "SAID NOTHING");
+        }) };
     });
+    /* BACK TO THE TOP BEFORE THE PICTURE, because the cursor drive above
+       calls focus() sixteen times and focus() scrolls its element into view —
+       the page is thousands of pixels down by this line, and the render came
+       out as a screenful of empty ground. `behavior: "instant"` because the
+       section sets scroll-behavior: smooth and an animated scroll is still
+       moving when the shutter opens. */
+    await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
     await page.screenshot({ path: path.join(OUT, "ticker.png") });
+
+    /* THE PHONE-WIDTH HIT TEST, BECAUSE A TOUCH TARGET IS NOT A GEOMETRY.
+       flows-ticker-contract walks a column of pixels with elementFromPoint
+       and counts the rows that actually reach the tab; a declared 44px
+       pseudo-element passes any rect assertion while being clipped, covered
+       or scrolled out of reach. Repeated here so the failure is visible in a
+       render rather than only in CI — and this version also names WHAT is at
+       the point when the tab is not, which is the fact the assertion cannot
+       carry and the one that identifies the cover. */
+    /* RELOADED AT 320, NOT RESIZED INTO IT. The cursor drive above calls
+       focus() on sixteen charts and focus() scrolls its element into view, so
+       by this line the page is thousands of pixels down — and a sticky bar on
+       a scrolled page reports the position it is STUCK at, which is not the
+       position a reader arriving at this address would find it in. Measured:
+       resizing gave the bar a top of 70 while a fresh load at the same width
+       gives it its real one. The contract mounts a fresh page; so does this. */
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(".ft-tab", { timeout: 15000 });
+    /* AND THE SCROLL IS RESET WITH behavior:"instant". The section sets
+       scroll-behavior: smooth, so a plain scrollTo(0, 0) ANIMATES and a read
+       on the next line sees the position the page is still leaving. Measured:
+       it reported the bar stuck at 70 with scrollY still 9,441. */
+    await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
+    seen.above = await page.evaluate(() => {
+      const bar = document.getElementById("ftBar");
+      const r = bar ? bar.getBoundingClientRect() : null;
+      const of = (id) => { const e = document.getElementById(id);
+        return e && !e.hidden ? id + " " + Math.round(e.getBoundingClientRect().height) : null; };
+      const cs = bar ? getComputedStyle(bar) : {};
+      return { barTop: r ? Math.round(r.top) : null, viewport: window.innerHeight,
+               pos: cs.position, top: cs.top, scrollY: Math.round(window.scrollY),
+               order: [...document.querySelectorAll("#flowsMain > *")]
+                 .map((e) => (e.id || e.className || e.tagName) + "@" +
+                   Math.round(e.getBoundingClientRect().top)).join(" "),
+               stack: ["ftHero", "ftCards", "ftBrief", "ftFlags", "ftRel"].map(of)
+                 .filter(Boolean).join(" | ") };
+    });
+    const tap = await page.evaluate(() => {
+      const b = document.querySelector(".ft-tab");
+      if (!b) return { box: 0, span: 0, over: "no .ft-tab in the document" };
+      const r = b.getBoundingClientRect();
+      const cx = Math.round(r.left + r.width / 2);
+      let span = 0;
+      for (let y = Math.round(r.top) - 25; y <= Math.round(r.bottom) + 25; y++) {
+        if (document.elementFromPoint(cx, y) === b) span++;
+      }
+      const mid = document.elementFromPoint(cx, Math.round(r.top + r.height / 2));
+      const name = (el) => !el ? "nothing"
+        : el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
+          (el.className && typeof el.className === "string"
+            ? "." + el.className.trim().split(/\s+/).join(".") : "");
+      return { box: Math.round(r.height), span,
+               at: Math.round(r.top) + "," + cx,
+               over: name(mid) + (mid && b.contains(mid) ? " (inside the tab)" : "") };
+    });
+    seen.tap = tap;
+
     await ctx.close();
     if (errs.length) failed++;
     report.push({ name: "ticker", file: path.join(OUT, "ticker.png"), errors: errs.slice(0, 3), ...seen });

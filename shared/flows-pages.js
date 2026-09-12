@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "184";
+export const ASSET_VERSION = "185";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1859,6 +1859,75 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </div>
 
   </section>
+  <!-- THE BAR SITS DIRECTLY UNDER THE HERO, AND IT USED TO SIT UNDER FOUR
+       MORE BLOCKS. The six cards, the findings index, the flag row and the
+       sector strip were all added above it in this wave, and on a phone they
+       are not a column beside the page — they stack. Measured at 320px on a
+       fresh load: hero 307 + cards 576 + brief 514 + flags 61 + related 87
+       put #ftBar's top at 1,941px in a 900px viewport, so the five station
+       tabs — this page's whole navigation — were nearly two screens below the
+       fold and could not be reached without scrolling past everything they
+       exist to skip. Moving it under the CARDS was not enough on its own:
+       that still measured 1,230px, because hero and cards alone are 883 of
+       it. Under the hero it measures 629.
+
+       IT WAS NOT MERELY UGLY, IT FAILED A CONTRACT. flows-ticker-contract
+       hit-tests a tab with elementFromPoint at 320px and counts the rows of
+       pixels that actually reach it; a rect 1,941px down returns null at
+       every one of them, so the assertion read "0px over a 25px box" — a
+       touch target that does not exist rather than one that is merely small.
+       A geometry assertion on the pseudo-element would have passed.
+
+       MOVED RATHER THAN SHRUNK: nothing above it was cut. The identity and
+       the tabs belong between the name's figures and the stations they index,
+       which is where the design puts them, and the three blocks read just as
+       well after the bar as before it — they are what this card FOUND, and a
+       reader reaches them by scrolling rather than by scrolling past. -->
+  <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
+       IT. The controller used to build this <div> from nothing on first paint,
+       which put the whole index — five tabs and their counts — behind a fetch
+       of a payload none of it depends on. It still re-parents #ftHead in as
+       the first child: a second markup for that block, built in the browser,
+       is the defect the registry exists to prevent. It is "hidden" for the
+       grid's reason — a bar of tabs over an empty page offers to move a
+       reader between five empty stations. -->
+  <div class="ft-bar" id="ftBar" hidden>
+    <nav class="ft-tabs" role="tablist" aria-label="Stations of this name">${tabs}
+    </nav>
+    <!-- ONE LINK OUT OF THE TABLIST AND DELIBERATELY NOT IN IT: "everything
+         at once" is not one of the five stations a tab selects. Today it
+         scrolls to the top of the grid, because every station is already
+         open; the change that hides four gives it the ?s=all address it
+         names, which this function cannot write, not knowing the ticker. -->
+    <a class="ft-all-link" id="ftAll" href="#ftGrid"
+       data-side="all">All ${TICKER_PANELS.length} panels</a>
+    <!-- THE FIXED BAND: seven slots, served EMPTY and HIDDEN. Each is a fact
+         this page already holds and has never shown in the bar — where the
+         reader came from, the name's sector, its ATR, its neighbours by rank,
+         a way to reach another name, the premium desk for this symbol, and
+         the next earnings date. They are emitted rather than created by the
+         controller so the rules that lay them out ship in the stylesheet the
+         page is versioned against, and so PR 4 fills slots rather than
+         inventing them. The row costs no height and no margin until it does
+         (see .ft-band in flows.css): every slot is hidden, and 9.6px of
+         nothing under the tabs is a gap, not a reserved height.
+
+         EMPTY AND HIDDEN IS THE HONEST SERVED STATE. A dash claims a
+         measurement came back empty; a label with no value claims one is
+         coming. Neither is true before a card lands. -->
+    <div class="ft-band" id="ftBand">
+      <a class="ft-band-b" id="ftFrom" hidden></a>
+      <span class="ft-band-v" id="ftSector" hidden></span>
+      <span class="ft-band-v" id="ftAtr" hidden></span>
+      <nav class="ft-band-nav" id="ftRankNav" hidden
+           aria-label="Neighbouring names by rank"></nav>
+      <input class="ft-band-find" id="ftFind" type="search" list="ftFindNames"
+             autocomplete="off" aria-label="Find another name" hidden>
+      <datalist id="ftFindNames"></datalist>
+      <a class="ft-band-b" id="ftPrem" hidden></a>
+      <span class="ft-band-v" id="ftEarn" hidden></span>
+    </div>
+  </div>
   <!-- WHAT IS TRUE OF THIS NAME RIGHT NOW, AS A ROW OF MARKS.
 
        Each one is a threshold already computed and already drawn somewhere on
@@ -1920,51 +1989,6 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <p class="ft-rel-s" id="ftRelS"></p>
   </aside>
 
-  <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
-       IT. The controller used to build this <div> from nothing on first paint,
-       which put the whole index — five tabs and their counts — behind a fetch
-       of a payload none of it depends on. It still re-parents #ftHead in as
-       the first child: a second markup for that block, built in the browser,
-       is the defect the registry exists to prevent. It is "hidden" for the
-       grid's reason — a bar of tabs over an empty page offers to move a
-       reader between five empty stations. -->
-  <div class="ft-bar" id="ftBar" hidden>
-    <nav class="ft-tabs" role="tablist" aria-label="Stations of this name">${tabs}
-    </nav>
-    <!-- ONE LINK OUT OF THE TABLIST AND DELIBERATELY NOT IN IT: "everything
-         at once" is not one of the five stations a tab selects. Today it
-         scrolls to the top of the grid, because every station is already
-         open; the change that hides four gives it the ?s=all address it
-         names, which this function cannot write, not knowing the ticker. -->
-    <a class="ft-all-link" id="ftAll" href="#ftGrid"
-       data-side="all">All ${TICKER_PANELS.length} panels</a>
-    <!-- THE FIXED BAND: seven slots, served EMPTY and HIDDEN. Each is a fact
-         this page already holds and has never shown in the bar — where the
-         reader came from, the name's sector, its ATR, its neighbours by rank,
-         a way to reach another name, the premium desk for this symbol, and
-         the next earnings date. They are emitted rather than created by the
-         controller so the rules that lay them out ship in the stylesheet the
-         page is versioned against, and so PR 4 fills slots rather than
-         inventing them. The row costs no height and no margin until it does
-         (see .ft-band in flows.css): every slot is hidden, and 9.6px of
-         nothing under the tabs is a gap, not a reserved height.
-
-         EMPTY AND HIDDEN IS THE HONEST SERVED STATE. A dash claims a
-         measurement came back empty; a label with no value claims one is
-         coming. Neither is true before a card lands. -->
-    <div class="ft-band" id="ftBand">
-      <a class="ft-band-b" id="ftFrom" hidden></a>
-      <span class="ft-band-v" id="ftSector" hidden></span>
-      <span class="ft-band-v" id="ftAtr" hidden></span>
-      <nav class="ft-band-nav" id="ftRankNav" hidden
-           aria-label="Neighbouring names by rank"></nav>
-      <input class="ft-band-find" id="ftFind" type="search" list="ftFindNames"
-             autocomplete="off" aria-label="Find another name" hidden>
-      <datalist id="ftFindNames"></datalist>
-      <a class="ft-band-b" id="ftPrem" hidden></a>
-      <span class="ft-band-v" id="ftEarn" hidden></span>
-    </div>
-  </div>
 
   <header class="ft-head" id="ftHead" hidden>
     <h2 id="ftTicker" tabindex="-1">&nbsp;</h2>

@@ -1107,6 +1107,21 @@
       if (at !== score) svg.append(svgEl("circle", {
         class: "fc-gauge-clip", cx: mx.toFixed(2), cy: my.toFixed(2), r: (SW * 0.4).toFixed(2) }));
     }
+    /* NO CURSOR HERE, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT.
+
+       Every other drawing in this section encodes a SERIES, where the value
+       at a given point is recoverable only by measuring pixels against an
+       axis — which is the whole case for the shared cursor. This dial
+       encodes ONE observation, and the box it sits in prints that number
+       over the arc's mouth with the scale's ends labelled beneath. A cursor
+       would step through a list of length one and announce a figure already
+       on screen an inch above it.
+
+       Said in the markup rather than left to be rediscovered: the preview
+       harness counts drawings against cursors, and without this attribute
+       that census reports a working panel as unfinished work every time it
+       runs. `face` means the drawing prints its own reading. */
+    svg.dataset.fxRead = "face";
     box.append(svg);
 
     const read = el("div", "fc-gauge-read");

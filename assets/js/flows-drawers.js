@@ -2,11 +2,12 @@
    flows-drawers.js — the ten panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 145k as
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 148k as
    measured on 2026-09-12 — it was 112k, the session path's window
    picker is 2k of the rise, renderPremiumTrack, the tenth drawer, is
-   9k of it, and the gamma rail's self-sizing is the last 2k — and
-   deferring it takes the ticker route
+   9k of it, the gamma rail's self-sizing is 2k, and the cursor
+   registrations on the gamma ladder and the shared greek drawer are
+   the last 3k — and deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and
@@ -644,6 +645,38 @@
         `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
         `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"}.`
       : "Where spot sits in the cumulative is not published on this card.");
+
+    /* THE CHART THAT PROMPTED `axis: "y"`. Every other drawing in the
+       section runs its shared index along x; here the ladder is the STRIKE
+       and strikes run down the side, while x is MAGNITUDE. A cursor searching
+       x would have landed by bar length and named whichever strike happened
+       to share that width — which is why the survey that found this panel
+       refused to register it rather than bend it onto the wrong axis.
+
+       BOTH SERIES AT THE STRIKE, because the panel's argument is the
+       relationship between them: the bar is that strike's own gamma, the
+       curve is the running total through it, and the zero crossing of the
+       second is the flip. Naming one would answer half the header's
+       question. */
+    if (window.FlowsCursor && bars.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Dealer gamma by strike",
+        axis: "y",
+        band: { x0: plotL, x1: plotR },
+        points: bars.map((b, i) => ({
+          y: yOfIndex(i),
+          label: px2(b.k),
+          rows: [
+            { k: "Gamma at strike",
+              v: (b.g < 0 ? MINUS : "") + compact(Math.abs(b.g)),
+              cls: b.g > 0 ? "is-pos" : b.g < 0 ? "is-neg" : "" },
+            { k: "Cumulative through",
+              v: (cum[i] < 0 ? MINUS : "") + compact(Math.abs(cum[i])),
+              cls: cum[i] > 0 ? "is-pos" : cum[i] < 0 ? "is-neg" : "" },
+          ],
+        })),
+      });
+    }
 
     host.append(svg);
 
@@ -1654,6 +1687,18 @@
       : [`±${(quoted * 100).toFixed(1)}% quoted to ${panel.horizonRule || "the vendor's own expiry"}`];
     const cap = svgEl("text", { class: "pm-axis", x: mid, y: H - 8, "text-anchor": "middle" });
     cap.textContent = capClauses.join("  ·  ");
+    /* NO CURSOR HERE EITHER, FOR THE SAME REASON AND A SECOND ONE.
+
+       This is one horizon, not a series: two bands and a spot rule, five
+       price levels in all. And every one of them is already printed on the
+       drawing's own face — both implied edges, both realized edges and spot
+       each carry a `pm-lab` beside the mark. A cursor would offer five stops
+       that read back the five labels the reader is already looking at.
+
+       The preview harness reads this attribute so the chart census can say
+       "every drawing reads out" and mean it, instead of carrying two
+       permanent exceptions in someone's memory. */
+    svg.dataset.fxRead = "face";
     svg.append(cap);
 
     svg.setAttribute("aria-label",
@@ -2526,6 +2571,42 @@
       "Largest single leg " + compact(peak) + ". " +
       (isNum(panel.grossAbs) === null ? ""
         : "Gross size across the ladder " + compact(panel.grossAbs) + "."));
+
+    /* ONE REGISTRATION, THREE PANELS, for the reason this drawer is shared:
+       vanna, charm and delta exposure differ in what the number means and in
+       nothing else, so a cursor written three times would be three places for
+       one reading to drift.
+
+       THE TWO LEGS STAY SEPARATE, because they are separate in the drawing
+       and this panel's aria-label says so in as many words — signed as the
+       vendor signed them, never added. A row summing them would invent a net
+       the chart refuses to draw.
+
+       THE LABEL IS THE WHOLE EXPIRY, not the thinned axis tick. The axis
+       prints one label in every few so the ticks do not smear; the cursor is
+       asked about one expiry at a time and can name all of it. */
+    if (window.FlowsCursor && rows.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Dealer exposure along the term",
+        band: { y0: padT, y1: padT + plotH },
+        points: rows.map((r, i) => {
+          const leg = (v) => (v === null
+            ? { v: "not reported", cls: "" }
+            : { v: compact(v), cls: v > 0 ? "is-pos" : v < 0 ? "is-neg" : "" });
+          const c = leg(isNum(r.call)), p2 = leg(isNum(r.put));
+          return {
+            x: padX + slot * (i + 0.5),
+            label: (r.expiry || "an unnamed expiry") +
+              (isNum(r.dte) === null ? "" : " \u00b7 " + r.dte + "d out"),
+            rows: [
+              { k: "Call leg", v: c.v, cls: c.cls },
+              { k: "Put leg", v: p2.v, cls: p2.cls },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* THE UNIT TRAVELS WITH THE NUMBERS. It is published on the panel — this
