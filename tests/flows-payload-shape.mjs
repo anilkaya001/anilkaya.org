@@ -765,7 +765,7 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `the card's panel-level renderers finally in scope: the market-wide join's drawer read ` +
   `against the panel the pipeline emits, on BOTH arms of its union, with the coverage of the ` +
   `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
-  `whole rather than half of it: the score index, the seven verdict tiles, the spine and the ` +
+  `whole rather than half of it: the score index, the five verdict tiles and the caption that carries the two readings they shed, the spine and the ` +
   `closure that writes the region subtitles all read against the payloads they are handed — ` +
   `and the two market-wide keys whose renderers have not been written yet pinned on the ` +
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +

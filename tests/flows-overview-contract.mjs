@@ -2134,18 +2134,29 @@ try {
 
     const status = await page.evaluate(
       () => document.getElementById("flowsStatus").textContent.trim());
-    /* THE SESSION MOVED TO THE TILE THAT CARRIES IT, so the claim is asserted
-       where it now lives rather than deleted. The status line used to reprint
-       meta.sessionDate an inch under the Session tile; the page must still
-       name the session it is describing, and this is the element that does. */
-    const sessionTile = await page.evaluate(() => {
-      const t = [...document.querySelectorAll("#ccVerdict .cc-tile")].find(
-        (el) => el.querySelector(".cc-tile-k")?.textContent.trim() === "Session");
-      return t ? t.querySelector(".cc-tile-v")?.textContent.trim() : null;
+    /* THE SESSION MOVED TWICE AND THIS ASSERTION FOLLOWED IT BOTH TIMES,
+       which is the only reason it is still worth anything. It began on the
+       status line, moved to a Session TILE in the verdict strip, and now sits
+       in the strip's caption — and each move it was rewritten to read the new
+       element rather than deleted. THE CLAIM NEVER CHANGED: the page must
+       name the session every figure on it is of.
+
+       THIS PHASE IS WHY THE CLAIM EXISTS. One pole is unpublished and the
+       other is live, and boardsRead takes the date off whichever half
+       ANSWERED — so the caption must print the short board's session, not
+       inherit the pending long board's silence. The kind is asserted beside
+       the text because a caption reading the date correctly while still
+       carrying a silence mark would be the same bug wearing the right
+       number. */
+    const metaLive = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
     });
-    eq(sessionTile, SESSION,
-       `and the page still names the session it is describing, on the Session tile ` +
-       `(${sessionTile})`);
+    eq(metaLive.text, SESSION,
+       `and the page still names the session it is describing, in the caption ` +
+       `(${metaLive.text})`);
+    eq(metaLive.kind, null,
+       "unmarked, because one half answering is enough to know which session this is");
     ok(/15 of 24 inside the band/.test(status),
        `and still states how much of the pool the band held (${status})`);
     ok(/\u2014 bullish · 4 bearish/.test(status),
@@ -2500,7 +2511,7 @@ try {
        section opens on. loadBoard read r.json() and dropped the
        X-Payload-Updated header the Worker stamps on every payload, so during
        a pipeline outage /flows/long/ warned and /flows/ rendered Tuesday's
-       board on Friday with a "Session" tile naming a date and no warning
+       board on Friday with a session date in its caption and no warning
        anywhere on the page.
 
        TWO INDEPENDENT FAILURES. A dead pipeline has an old WRITE time and a
