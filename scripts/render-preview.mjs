@@ -146,6 +146,47 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
   await page.goto("https://preview.local/", { waitUntil: "load" });
   await page.waitForTimeout(settle);
   const seen = probe ? await page.evaluate(probe) : {};
+  /* EVERY PAGE, NOT JUST THE ONE A SUITE SWEEPS: does any SVG draw text
+     outside its own canvas? SVG clips silently — no overflow, no error, no
+     console line — so a label that runs off the edge simply is not there and
+     the drawing looks finished.
+
+     THIS IS HERE BECAUSE THE TYPEFACE CHANGED. Setting Flows in Inter made
+     every string a little wider than the mono face the rails were sized
+     against, and the gamma plate's sub-line went 4px past its canvas.
+
+     AND IT WOULD NOT HAVE CAUGHT THAT ONE — stated plainly, because a check
+     whose reach is assumed is worse than no check. Verified by reverting the
+     fix and re-running: these pages render ONE ticker card, and the label
+     that clipped was on a different name in the corpus. What found it was
+     tests/flows-card-render, which sweeps every emitted card; that suite is
+     where this question is asked with real coverage.
+
+     This is the second net, and what it covers is whatever these pages
+     actually drew — every chart on the board, overview and market pages,
+     which no card sweep renders at all. A width constant that was right for
+     one face is wrong for the next one, and neither face announces it. */
+  const spill = await page.evaluate(() => {
+    const out = [];
+    for (const svg of document.querySelectorAll("svg")) {
+      const box = svg.getBoundingClientRect();
+      if (!(box.width > 0)) continue;
+      for (const t of svg.querySelectorAll("text")) {
+        if (!(t.textContent || "").trim()) continue;
+        const r = t.getBoundingClientRect();
+        if (!(r.width > 0)) continue;
+        /* 2px of slack, the same tolerance flows-card-render allows: an
+           antialiased glyph edge is not an overflowing label. */
+        if (r.left < box.left - 2 || r.right > box.right + 2) {
+          out.push((svg.getAttribute("class") || svg.parentElement?.id || "svg") +
+            ' "' + t.textContent.trim().slice(0, 32) + '" by ' +
+            Math.round(Math.max(box.left - r.left, r.right - box.right)) + "px");
+        }
+      }
+    }
+    return [...new Set(out)];
+  });
+  if (spill.length) { seen.textSpill = spill.slice(0, 8); failed++; }
   const file = path.join(OUT, name + ".png");
   await page.screenshot({ path: file });
   await ctx.close();
