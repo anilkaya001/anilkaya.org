@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "175";
+export const ASSET_VERSION = "176";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -38,7 +38,78 @@ const head = (title, description) => `<!doctype html>
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 </head>`;
 
-const topbar = (active) => `
+/* ---------- one icon set, drawn once ----------------------------
+
+   THE REPOSITORY HAD NO ICONS AT ALL and the design the section is being
+   built to has one on every rail item and in the search field. So this is
+   the set, and it is deliberately the smallest thing that can be: 16px
+   line glyphs on a 24-unit grid, stroked in currentColor so every one of
+   them inherits the state of the element it sits in — an active rail item
+   tints its icon by tinting its text, with no second rule.
+
+   INLINE AND NOT A SPRITE FILE. A sprite is a second request on a route
+   whose first paint is already the thing being optimised, and these are
+   HTML bytes rather than JavaScript ones: they cost no parse, and no
+   route's weight ceiling measures them. They are emitted once per page by
+   the server that already emits the markup around them.
+
+   `aria-hidden` ON EVERY ONE, WITHOUT EXCEPTION. Each of these sits beside
+   its own text label; an icon announced next to the word it duplicates is
+   one more thing for a screen reader to read and nothing more to know. */
+const ICONS = {
+  overview: "M4 5h7v6H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 13h7v6H4z",
+  ticker: "M4 19V9M9 19V5M14 19v-7M19 19V7",
+  unusual: "M12 3v3M12 18v3M3 12h3M18 12h3M7.8 7.8 5.6 5.6M18.4 18.4l-2.2-2.2M16.2 7.8l2.2-2.2M5.6 18.4l2.2-2.2",
+  watch: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z",
+  long: "M4 17 10 11l4 4 6-7M20 8v5M20 8h-5",
+  short: "M4 7l6 6 4-4 6 7M20 16v-5M20 16h-5",
+  events: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  market: "M3 17l5-6 4 3 4-6 5 4M3 21h18",
+  desk: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5",
+  strategy: "M9 3h6M10 3v6.2L4.8 17.6A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.4L14 9.2V3M7.2 14h9.6",
+  political: "M3 20h18M5 20V9M9.5 20V9M14.5 20V9M19 20V9M12 3 3 8h18Z",
+  ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-4.2-4.2",
+  bell: "M12 3a6 6 0 0 0-6 6c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6a6 6 0 0 0-6-6ZM10 19a2 2 0 0 0 4 0",
+};
+const icon = (name) => {
+  const d = ICONS[name];
+  return d
+    ? `<svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" ` +
+      `stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ` +
+      `stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`
+    : "";
+};
+
+/* THE INITIALS ARE THE READER'S OWN NAME, SHORTENED, AND NOTHING ELSE.
+
+   The design has a round avatar in the corner. There is no profile behind
+   it, no photo store and no display name — what the session carries is the
+   username the credential was issued for, so that is what it draws: one or
+   two letters taken off the name itself. A generated face, a gravatar or a
+   stock silhouette would each be a claim about a person this product has
+   never been told anything about. */
+const initials = (username) => {
+  const name = String(username || "").trim();
+  if (!name) return "\u2014";
+  const parts = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const said = parts.length >= 2
+    ? parts[0].slice(0, 1) + parts[1].slice(0, 1)
+    : name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2);
+  return escapeHTML(said.toUpperCase() || "\u2014");
+};
+
+/* THE TOP BAR CARRIES THE SESSION'S TOOLS ON THE GATED ROUTES ONLY.
+
+   The pill is the site's and is identical on all four sections; what joins
+   it here is a search that only means something behind the gate and a name
+   that only exists behind it. THE GATE IS THE USERNAME, NOT THE SECTION —
+   which is not a distinction I drew until the suite drew it: keyed on
+   `active`, the sign-in page rendered a ticker search and an avatar for a
+   session that does not exist yet, and referenced a name that is not in
+   scope there. `active` still marks the pill; the tools belong to whoever
+   is signed in. */
+const topbar = (active, username) => `
 <header class="topbar">
   <a class="topbar__brand" href="/" aria-label="Home">&#949;</a>
   <nav class="pill" aria-label="Primary">
@@ -46,7 +117,24 @@ const topbar = (active) => `
     <a href="/articles/">Articles</a>
     <a href="/lab/"><span class="lab-full">Econometrics&nbsp;Lab</span><span class="lab-short">Lab</span></a>
     <a href="/flows/"${active ? ' class="is-active" aria-current="page"' : ""}>Flows</a>
-  </nav>
+  </nav>${username ? `
+  <div class="topbar__tools">
+    <!-- A PLAIN GET FORM, WHICH IS THE WHOLE IMPLEMENTATION. It works with
+         JavaScript disabled, it works with the back button, and what it
+         produces is a bookmarkable URL rather than an in-page state.
+         flows-ticker.js already uppercases and validates what arrives in
+         ?t=, so nothing here is a second spelling of that rule. -->
+    <form class="flows-find" method="GET" action="/flows/ticker/" role="search">
+      <label class="visually-hidden" for="flowsFind">Open a ticker page</label>
+      ${icon("search")}
+      <input class="flows-find-i" id="flowsFind" name="t" type="search"
+             autocomplete="off" spellcheck="false" maxlength="10"
+             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Search a ticker"
+             title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
+    </form>
+    <span class="topbar__who" title="Signed in as ${escapeHTML(String(username || ""))}"
+          aria-label="Signed in as ${escapeHTML(String(username || ""))}">${initials(username)}</span>
+  </div>` : ""}
 </header>`;
 
 
@@ -106,43 +194,59 @@ const rail = (active) => {
        error, which is why it survived. The set and the fillers agree now. */
     const badge = key === "long" || key === "short" || key === "watch" || key === "events"
       ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
+    /* THE ICON IS BEFORE THE LABEL AND CARRIES NO INFORMATION OF ITS OWN.
+       It is a landmark for a reader who already knows where they are going —
+       which is what a rail is for on the fifth visit — and it is aria-hidden,
+       so the label remains the whole of what is announced. */
     return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
-      `<span class="rail-label">${label}</span>${badge}</a>`;
+      `${icon(key)}<span class="rail-label">${label}</span>${badge}</a>`;
   };
   return `
 <nav class="flows-rail" aria-label="Flows">
-  <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
-       question a reader already knew to ask; this one answers the question
-       they arrive with. A rail that buried it under a dozen destinations
-       would be a table of contents for a book nobody opened — which is also
-       why the track record and the score track came off it. -->
-  <p class="rail-group" id="railBrief">Briefing</p>
-  <div class="rail-items" role="group" aria-labelledby="railBrief">
+  <!-- TWO GROUPS, WHICH IS THE SHAPE OF THE DESIGN THIS IS BUILT TO, and the
+       destinations are this product's own. The reference rail names Scanner,
+       Strategies, Volatility and Macro; three of those are this section's
+       routes under different words and one of them is not built, so what is
+       drawn here is every route that exists and nothing that does not. A rail
+       item that leads nowhere is the one thing a rail must never contain.
+
+       THE SPLIT IS BY WHAT A READER IS ASKING, not by how the pipeline is
+       organised. The first group is the session and the names inside it: what
+       happened, to whom, and where to look next. The second is the market
+       around them — the whole tape, the desks that price it, and who
+       disclosed what.
+
+       THE ASSISTANT LEADS, AS IT DID. It answers the question a reader
+       arrives with rather than one they already knew to ask, so it stays
+       first, above both groups. -->
+  <div class="rail-items rail-items--lead" role="group" aria-label="Ask">
     ${item("/flows/ask/", "Ask the data", "ask")}
   </div>
-  <p class="rail-group" id="railSession">Session</p>
+  <p class="rail-group" id="railSession">Options flow</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
     ${item("/flows/", "Overview", "overview")}
+    ${item("/flows/ticker/", "Ticker", "ticker")}
+    ${item("/flows/unusual/", "Unusual", "unusual")}
+    ${item("/flows/watch/", "Watch", "watch")}
     ${item("/flows/long/", "Bullish", "long")}
     ${item("/flows/short/", "Bearish", "short")}
-    ${item("/flows/watch/", "Watch", "watch")}
-    ${item("/flows/market/", "Market", "market")}
-    ${item("/flows/unusual/", "Unusual", "unusual")}
     ${item("/flows/events/", "Events", "events")}
   </div>
-  <p class="rail-group" id="railName">Name</p>
-  <div class="rail-items" role="group" aria-labelledby="railName">
-    ${item("/flows/ticker/", "Ticker page", "ticker")}
-  </div>
-  <p class="rail-group" id="railDesk">Desk</p>
-  <div class="rail-items" role="group" aria-labelledby="railDesk">
+  <p class="rail-group" id="railMarket">Market</p>
+  <div class="rail-items" role="group" aria-labelledby="railMarket">
+    ${item("/flows/market/", "Market", "market")}
     ${item("/flows/desk/", "Premium desk", "desk")}
     ${item("/flows/strategy/", "Strategy tester", "strategy")}
-  </div>
-  <p class="rail-group" id="railDisclosures">Disclosures</p>
-  <div class="rail-items" role="group" aria-labelledby="railDisclosures">
     ${item("/flows/political/", "Political", "political")}
   </div>
+  <!-- THE FOOT SAYS WHAT THE PRODUCT IS, AND IT IS NOT "REAL-TIME".
+
+       The design's rail ends with a three-line claim, and the first word of
+       it is one this product cannot make: the boards are built by a nightly
+       pipeline and the intraday keys refresh on a cadence the pages print.
+       So the shape is kept and the claim is made true — three short lines,
+       each one a thing a reader can check on the page above it. -->
+  <p class="rail-foot">Nightly pipeline.<br>Intraday refresh.<br>Every silence named.</p>
 </nav>`;
 };
 
@@ -344,7 +448,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
 const shell = (title, kicker, active, username, body) => `
 <body class="flows-body has-rail" data-flows-page="${active}">
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
-${topbar(true)}
+${topbar(true, username)}
 ${rail(active)}
 <main class="flows-main" id="flowsMain" tabindex="-1">
   <header class="flows-head">
@@ -353,33 +457,6 @@ ${rail(active)}
       <h1>${title}</h1>
     </div>
     <div class="flows-session">
-      <!-- THE WAY TO A NAME, ON EVERY GATED PAGE, AND IT IS A PLAIN GET FORM.
-
-           The section has had a working /flows/ticker/?t= deep link for
-           months and no way to reach it by typing a name: a reader who wanted
-           NVDA had to find NVDA in a table first, which the boards only carry
-           when NVDA ranked. The form submits straight to the route, so it
-           works with JavaScript disabled, with the back button, and as a
-           bookmarkable URL — and flows-ticker.js already uppercases and
-           validates what arrives in ?t=, so a lowercase symbol is not a
-           second spelling of that rule here.
-
-           NO KEYBOARD ACCELERATOR, AND THAT IS A MEASURED DECISION RATHER
-           THAN AN OMISSION. The only script on every gated route is
-           flows-dock.js, and five routes stand within 1.5k of their weight
-           ceilings (ticker 449/450, overview 216/217, side 156/157, market
-           110/111, unusual 93/93 as tests/flows-weight.mjs prints them). One
-           accelerator would raise five ceilings, and a shortcut nobody is
-           told about is not an affordance anyway — so there is no hint
-           printed for a key that does not exist. -->
-      <form class="flows-find" method="GET" action="/flows/ticker/" role="search">
-        <label class="visually-hidden" for="flowsFind">Open a ticker page</label>
-        <input class="flows-find-i" id="flowsFind" name="t" type="search"
-               autocomplete="off" spellcheck="false" maxlength="10"
-               pattern="[A-Za-z][A-Za-z0-9.\-]{0,9}" placeholder="Ticker"
-               title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
-        <button type="submit" class="flows-find-b">Open</button>
-      </form>
       <span class="flows-user">${escapeHTML(username)}</span>
       <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
     </div>

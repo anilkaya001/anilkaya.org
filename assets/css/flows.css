@@ -627,51 +627,6 @@
   gap: 0.8rem;
 }
 
-/* ---------- the way to a name ----------
-   ONE CONTROL, NOT A SEARCH PANEL. It sits in the header's right-hand
-   cluster beside the identity block, at the size of the chrome around it —
-   this is an address bar for one route, and drawing it as a product-wide
-   search box would promise a full-text search the section does not have. */
-.flows-find {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-.flows-find-i {
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  color: var(--ink);
-  /* Transparent on purpose: the header sits on the shared ground, and a
-     filled field here would be the only opaque box in the chrome. */
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  border-radius: 0.3rem;
-  padding: 0.22rem 0.45rem;
-  /* SIZED IN CHARACTERS, because what goes in it is at most ten of them and
-     a field wider than its longest input invites a sentence. 11ch and not 8:
-     the first pass measured the LIMIT rather than the label, and the word
-     "Ticker" in this face came back clipped to "Tic" in the render. A
-     placeholder a reader cannot finish reading is worse than a wide field.
-     It does not grow on focus either — a control that changes size under the
-     cursor moves the two things beside it while they are being aimed at. */
-  width: 11ch;
-  min-width: 0;
-}
-.flows-find-i:focus-visible { border-color: var(--ink-faint); outline: none; }
-.flows-find-b {
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  color: var(--ink-dim);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 0.3rem;
-  padding: 0.22rem 0.4rem;
-  cursor: pointer;
-}
-.flows-find-b:hover, .flows-find-b:focus-visible {
-  color: var(--ink);
-  border-color: var(--panel-border);
-}
 
 .flows-user {
   font-family: var(--font-figure);
@@ -3836,6 +3791,116 @@ body.is-stale .flows-tablewrap {
   padding: 0 0.3rem;
   border: 1px solid var(--hairline);
   border-radius: 999px;
+  /* THE COUNT SITS AT THE FAR EDGE, which is what makes a column of them
+     scannable: eleven badges that each start where their label ended are
+     eleven positions to find. */
+  margin-left: auto;
+}
+
+/* ---------- the rail's icons, its lead group and its foot ----------
+
+   THE ICON IS A LANDMARK AND THE LABEL IS THE READING. It inherits colour
+   from the link, so the active item tints both with one rule and greyscale
+   loses nothing — the weight, the rule down the left and aria-current all
+   still say which page this is. */
+.flows-rail .ic {
+  flex: none;
+  opacity: 0.72;
+}
+.flows-rail a:hover .ic,
+.flows-rail a.is-on .ic { opacity: 1; }
+.rail-label { min-width: 0; }
+
+/* The assistant sits above both groups with no group label of its own: it
+   answers the question a reader arrives with rather than one of the two
+   this rail sorts destinations into. */
+.rail-items--lead { margin-bottom: 0.2rem; }
+
+/* WHAT THE PRODUCT IS, AT THE BOTTOM OF THE COLUMN, in the smallest type on
+   the page — three claims a reader can check against the pages above it
+   rather than a slogan. Hidden on the phone drawer, where the rail is a
+   horizontal strip of destinations and a three-line tagline would push the
+   destinations off-screen. */
+.rail-foot {
+  margin: auto 0 0.2rem;
+  padding: 0.9rem 0.75rem 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--hairline);
+}
+
+/* ---------- the top bar's session tools ----------
+
+   THE SEARCH, THE NAME, AND NOTHING THAT DOES NOT WORK. The design also
+   carries a notification bell; the warnings that would fill it are published
+   (shared/flows-warnings.js writes them into the briefing key, four raised
+   from twelve checks on the last dry run) but no page reads them yet, and a
+   bell that opens nothing is a promise the product does not keep. It lands
+   with the panel that reads them, not before. */
+.topbar__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.flows-find {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  color: var(--ink-faint);
+}
+.flows-find:focus-within { border-color: var(--ink-faint); color: var(--ink-dim); }
+.flows-find .ic { flex: none; }
+.flows-find-i {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 0.34rem 0;
+  /* SIZED IN CHARACTERS, because what goes in it is at most ten of them. The
+     first pass measured the LIMIT rather than the label and the render came
+     back with the placeholder clipped — twice: 8ch cut "Ticker" to "Tic",
+     and 11ch cut "Search a ticker" to "Search a". Sized to the words a
+     reader is shown, measured in the face they are shown in. */
+  width: 18ch;
+  min-width: 0;
+}
+.flows-find-i::placeholder { color: var(--ink-faint); }
+.flows-find-i::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.6); }
+
+/* THE READER'S OWN INITIALS. No photo, no generated face: the session knows
+   a username and nothing else about the person holding it. */
+.topbar__who {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--gold-harvest) 12%, transparent);
+  color: var(--ink-dim);
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 60rem) {
+  /* The rail is a horizontal drawer here; a column foot inside a row would
+     stretch the strip to three lines of type nobody asked for. */
+  .rail-foot { display: none; }
+  /* The search keeps its place in the bar and gives up width first: the
+     pill's four destinations are the thing that must not wrap. */
+  .flows-find-i { width: 7ch; }
 }
 
 @media (min-width: 60rem) {
@@ -8904,7 +8969,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   top:1rem;
 }
 .flows-body {
-  --flow-reading-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  /* A FIFTH STACK THAT NAMED NO WEBFONT AT ALL. This token set the section's
+     reading prose — statuses, silences, notes, leads, warnings — in whatever
+     system-ui resolves to on the reader's machine, which is a different face
+     on every platform and none of them the one the rest of the page is in. It
+     was invisible because it only reaches prose, and prose beside a figure in
+     another family reads as a style rather than as a defect. It resolves
+     through the one family now, and keeps its name so the rules below still
+     say what they are setting. */
+  --flow-reading-font: var(--font-ui);
 }
 .flows-body .flows-status,.flows-body .cc-quiet,.flows-body[data-flows-page="overview"] .fc-note,.flows-body[data-flows-page="overview"] .fc-reading,.flows-body .ak-warn-say,.flows-body .cc-tile-s {
   font-family:var(--flow-reading-font);

@@ -946,8 +946,15 @@
      overlapping labels for the first minute after a deploy is indistinguishable
      from one that is broken. currentColor rather than a token, so the fallback
      is the page's own ink and the palette lives in one file. */
+  /* THE FALLBACK NAMES THE SITE'S FAMILY FIRST AND KEEPS A GENERIC BEHIND IT.
+     It said "monospace" alone, which on the one surface this attribute exists
+     for — the minute after a deploy, before the cache-busted stylesheet has
+     landed — drew this chart's labels in a face that appears nowhere else on
+     the site. The whole site is set in one family now, so the belt should name
+     it; the generic stays last so an unstyled render still gets even columns
+     rather than nothing. */
   const TYPE = Object.freeze({
-    "font-family": "monospace", "font-size": 9, fill: "currentColor",
+    "font-family": "Inter, system-ui, sans-serif", "font-size": 9, fill: "currentColor",
   });
 
   /** A vol as a percent, one decimal. Unsigned — this is a level. */

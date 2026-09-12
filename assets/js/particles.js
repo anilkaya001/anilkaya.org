@@ -41,7 +41,22 @@
 
   const PALETTE = ["#af983f", "#da9100", "#c9c6ac", "#f1d27a", "#8a6f2e"];
   const LINK_COLOR = "#c9c6ac";
-  const TRAIL_BG = "rgba(8, 7, 4, 0.40)";
+/* THE TRAIL FADE ERASES; IT DOES NOT PAINT.
+
+   This was a translucent dark fill in source-over — rgba(8,7,4,0.40) across
+   the whole canvas every frame — which is a correct way to fade trails and a
+   fatal one for anything BEHIND the canvas: 0.40 per frame converges to
+   opaque in about a quarter of a second, so the page's shared ground (the
+   atmosphere gradient every other section shows) was painted out before a
+   reader could see it. The canvas is fixed and full-viewport, so what it hid
+   was the whole of Home's background.
+
+   `destination-out` fades by REMOVING alpha instead of adding ink: each
+   frame takes this fraction of what is already drawn, so the trail decays at
+   the same rate it always did and the untouched pixels stay transparent.
+   The ground shows through, and the trails are unchanged. */
+  const TRAIL_FADE = 0.40;
+  const TRAIL_FADE_OBSERVED = 0.60;
 
   // --- DOD buffers ---------------------------------------------
   const pX = new Float32Array(COUNT), pY = new Float32Array(COUNT), pZ = new Float32Array(COUNT);
@@ -131,9 +146,12 @@
     const cosY = Math.cos(state.yaw), sinY = Math.sin(state.yaw);
     const cosX = Math.cos(state.pitch), sinX = Math.sin(state.pitch);
 
-    ctx.globalCompositeOperation = "source-over";
+    ctx.globalCompositeOperation = "destination-out";
     ctx.globalAlpha = 1;   // a particle's depthAlpha leaks in from the prior frame and would dilute the trail clear
-    ctx.fillStyle = state.isObserved ? "rgba(8, 7, 4, 0.60)" : TRAIL_BG;
+    /* Only the ALPHA of this fill matters under destination-out; the colour
+       channels are ignored, and black is the conventional way to say so. */
+    ctx.fillStyle = "rgba(0, 0, 0, " +
+      (state.isObserved ? TRAIL_FADE_OBSERVED : TRAIL_FADE) + ")";
     ctx.fillRect(0, 0, state.width, state.height);
     ctx.globalCompositeOperation = FORCE_SRC_OVER ? "source-over" : "screen";
 

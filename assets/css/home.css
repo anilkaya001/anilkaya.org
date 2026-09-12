@@ -31,6 +31,13 @@
        actually composes the two, and it is the same token base.css paints, so
        Home cannot drift from the other three. */
     var(--site-ground);
+  /* AFTER THE SHORTHAND, FOR THE REASON base.css STATES ABOUT ITS OWN: a
+     `background` shorthand resets background-color to transparent, and this
+     rule outranks the body rule that declares it — so Home was the one
+     section with no bottom fallback colour under the composite. Measured, not
+     assumed: the computed body background-color came back rgba(0, 0, 0, 0)
+     here while Articles and the Lab both returned rgb(10, 10, 8). */
+  background-color: var(--bg);
 }
 
 /* Simulation canvas — bottom layer, receives pointer input */
@@ -101,7 +108,7 @@
 }
 
 .hero__title {
-  font-family: var(--font-serif);
+  font-family: var(--font-ui);
   font-weight: 700;
   /* Sized so the longest word ("Econometrics") fits even narrow phones,
      accounting for the wider Latin Modern bold that swaps in. */
