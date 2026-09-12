@@ -298,6 +298,21 @@ if (CARDS && existsSync(CARDS)) {
 
        Assets are now served as assets, from this working tree, so the page
        boots the way the Worker boots it. */
+    /* ORDER MATTERS AND IT IS BACKWARDS FROM READING ORDER. Playwright tries
+       route handlers in REVERSE registration order — the last one added is
+       consulted first. With the catch-all registered last it answered every
+       request before the asset handlers were reached, so each <script src>
+       got a 204 with an empty body: no controller, no fetch, no card. The
+       probe reported `fetches: 0`, which is the number that named this.
+
+       (The original harness accidentally relied on the same rule: its
+       flows-drawers route was registered AFTER the catch-all, which is the
+       only reason that one file ever loaded.)
+
+       So the catch-all goes FIRST and the specific handlers after it. */
+    await page.route("**/*", (r) => r.request().resourceType() === "document"
+      ? r.fulfill({ contentType: "text/html", body: pageHTML })
+      : r.fulfill({ status: 204, body: "" }));
     await page.route(/\/assets\/js\/[a-z0-9-]+\.js/i, (r) => {
       const file = new URL(r.request().url()).pathname.split("/").pop();
       try {
@@ -315,9 +330,6 @@ if (CARDS && existsSync(CARDS)) {
         return r.fulfill({ contentType: "text/css", body: readFileSync(path.join(ROOT, "assets/css", file), "utf8") });
       } catch { return r.fulfill({ contentType: "text/css", body: "" }); }
     });
-    await page.route("**/*", (r) => r.request().resourceType() === "document"
-      ? r.fulfill({ contentType: "text/html", body: pageHTML })
-      : r.fulfill({ status: 204, body: "" }));
 
     /* THE CARD STUB IS INSTALLED BEFORE THE CONTROLLER RUNS, not after.
        addInitScript lands in the page before any of its own script executes;
@@ -381,6 +393,13 @@ if (CARDS && existsSync(CARDS)) {
         blurbsDrawn: [...document.querySelectorAll(".ft-group-b")]
           .filter((b) => b.getBoundingClientRect().width > 2).length,
         statusLine: (document.getElementById("ftStatus") || {}).textContent || "",
+        /* AND THE BOX IT DRAWS. Emptying the text left a bordered, padded
+           element above the identity row, which reads as a region that
+           failed rather than one with nothing to say. Height, not text, is
+           what says whether it is gone. */
+        statusBoxH: Math.round(((document.getElementById("ftStatus") || {})
+          .getBoundingClientRect ? document.getElementById("ftStatus")
+          .getBoundingClientRect().height : 0)),
         stations: document.querySelectorAll(".ft-station").length };
     });
     await page.screenshot({ path: path.join(OUT, "ticker.png") });

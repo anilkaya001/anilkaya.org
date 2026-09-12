@@ -6993,6 +6993,19 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   border-left: 1px solid var(--hairline);
   padding-left: 0.6rem;
 }
+/* AN EMPTY STATUS LINE DRAWS NOTHING, INCLUDING ITS OWN FRAME.
+
+   The ticker's status sentence was removed as a definition, and setting its
+   textContent to "" left the element behind: a hairline, 0.6rem of left
+   padding and 1.8rem of vertical padding, drawing an empty bordered box
+   above the identity row. Rendered, that reads as a region that failed to
+   load rather than one that had nothing to say — which is the opposite of
+   what removing the sentence was for, and it is the kind of thing only a
+   picture shows. `:empty` matches an element with no children and no text,
+   so a controller that later writes into it brings the frame back with the
+   words, and every OTHER route's status line — which does say something —
+   is untouched. */
+.flows-status:empty { display: none; }
 
 /* Staleness keeps its band and gains a SHAPE. The 1px border plus a tinted
    ground was a colour reading twice; in greyscale a 10% wash on a near-black
