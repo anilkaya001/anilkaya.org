@@ -773,6 +773,28 @@ if (CARDS && existsSync(CARDS)) {
                over: name(mid) + (mid && b.contains(mid) ? " (inside the tab)" : "") };
     });
     seen.tap = tap;
+    /* THE BODY MUST NOT SCROLL SIDEWAYS, whatever scrolls inside it. The
+       rail, the tab strip and the identity line are each `overflow-x: auto`
+       on purpose — they are meant to run off their own edge — but the
+       DOCUMENT running off its edge is a different thing and it is a bug.
+       Reported with the widest offender named, since "true" alone sends the
+       next reader hunting through a 26,000px page. */
+    seen.wide = await page.evaluate(() => {
+      const de = document.documentElement;
+      if (de.scrollWidth <= de.clientWidth) return false;
+      const over = [...document.querySelectorAll("#flowsMain *")]
+        .map((e) => [e, Math.round(e.getBoundingClientRect().right)])
+        .filter(([, r]) => r > de.clientWidth + 1)
+        .sort((a, b) => b[1] - a[1])[0];
+      return de.scrollWidth + " > " + de.clientWidth +
+        (over ? ", widest: " + (over[0].id || over[0].className || over[0].tagName) +
+          " to " + over[1] : "");
+    });
+    /* AND A PICTURE AT THE WIDTH THE HIT TEST IS ABOUT. The probe above
+       reports a number; this is the page that number describes, which is
+       where a reader would see the bar sitting below four stacked blocks
+       rather than under the name it belongs to. */
+    await page.screenshot({ path: path.join(OUT, "ticker-320.png") });
 
     await ctx.close();
     if (errs.length) failed++;

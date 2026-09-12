@@ -3932,7 +3932,16 @@ body.is-stale .flows-tablewrap {
   letter-spacing: 0.04em;
 }
 
-@media (max-width: 60rem) {
+/* 59.99, NOT 60, AND base.css STATES WHY IN PROSE THIS FILE HAD TO RELEARN.
+   "A MIN AND A MAX AT THE SAME STEP are written `min-width: 60rem` and
+   `max-width: 59.99rem`. That is one tier, not two." Written 60/60 both
+   queries match at exactly 960px, so the page spends one whole tier applying
+   two mutually exclusive rail layouts and the winner is whichever rule sits
+   later in the file — here the rail would have been a horizontal drawer AND
+   a 13rem sticky column at once. The pair below was introduced with the
+   two-group rail in this wave and tests/flows-motion.mjs caught it, which is
+   what that scan exists for. */
+@media (max-width: 59.99rem) {
   /* The rail is a horizontal drawer here; a column foot inside a row would
      stretch the strip to three lines of type nobody asked for. */
   .rail-foot { display: none; }
