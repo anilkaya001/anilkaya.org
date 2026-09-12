@@ -1836,6 +1836,7 @@
      re-checked on change, so a reader who turns motion down mid-session gets
      a plain cut without reloading. */
   let deckPainted = false;
+  let flipFrame = 0;
 
   function flipDeck(draw) {
     const animate = deckPainted && deck && !calm.matches;
@@ -1846,13 +1847,30 @@
          re-sort from re-flashing all fifty cards — and, more sharply, what
          stops an `animation` on `transform` from overriding the inline
          transform this function sets. An animation beats an inline style; the
-         two cannot share the property. */
-      if (deck && !deckPainted) {
+         two cannot share the property.
+
+         `!calm.matches` IS NOT BELT-AND-BRACES HERE, IT IS THE FIX. The class
+         used to go on regardless, and the CSS alone stood the animation down —
+         which holds only while the preference does. A reader who loaded the
+         board with reduced motion ON and turned it OFF later had fifty cards
+         still carrying `is-arriving`, so the rule began matching and every one
+         of them re-ran its entrance: measured at `opacity: 0` the instant the
+         preference flipped back. A class that says "this card is arriving" must
+         not outlive the arrival, and must not be applied to a paint that is
+         never going to animate. */
+      if (deck && !deckPainted && !calm.matches) {
         for (const card of deck.children) card.classList.add("is-arriving");
       }
       deckPainted = true;
       return;
     }
+
+    /* A PENDING RELEASE MUST NOT OUTLIVE THE SORT THAT SCHEDULED IT. Two sorts
+       inside one frame — a double click on the order control — would leave the
+       first sort's callback holding cards this paint is about to detach, and
+       it would stamp `is-flipping` on them after they had left the document.
+       Cancelling is cheaper than reasoning about whether that is harmless. */
+    clearFlip();
 
     /* FIRST: where every card sits before the DOM changes. */
     const before = new Map();
@@ -1886,12 +1904,25 @@
        frame is one style computation and no animation at all — the browser
        never paints the inverted state, so there is nothing to transition
        from. */
-    requestAnimationFrame(() => {
+    flipFrame = requestAnimationFrame(() => {
+      flipFrame = 0;
       for (const { card } of moves) {
         card.classList.add("is-flipping");
         card.style.transform = "";
       }
     });
+  }
+
+  /* Put the deck back to rest: no pending release, no card still wearing the
+     moving state. Called before a new sort, and whenever the motion
+     preference changes. */
+  function clearFlip() {
+    if (flipFrame) { cancelAnimationFrame(flipFrame); flipFrame = 0; }
+    if (!deck) return;
+    for (const card of deck.querySelectorAll(".fd-card.is-flipping")) {
+      card.classList.remove("is-flipping");
+      card.style.removeProperty("transform");
+    }
   }
 
   /* THE CLASS COMES OFF WHEN THE MOVE ENDS, and it has to. `is-flipping`
@@ -1901,11 +1932,34 @@
      for. One delegated listener rather than fifty, and a `transform` guard so
      a transition on any other property does not clear it early. */
   if (deck) {
-    deck.addEventListener("transitionend", (event) => {
+    /* BOTH ENDINGS, AND THE SECOND ONE IS THE BUG. A transition that is
+       REMOVED rather than finished fires `transitioncancel`, not
+       `transitionend` — and the reduced-motion block removes exactly this
+       transition. So a reader who turned motion down while a re-sort was in
+       flight left every moving card wearing `is-flipping` permanently:
+       measured with `z-index: 1` still set, so those cards stacked over their
+       neighbours for the rest of the session. Listening for one ending and
+       not the other is listening for the easy half. */
+    const settleFlip = (event) => {
       if (event.propertyName !== "transform") return;
       const card = event.target;
       if (card && card.classList && card.classList.contains("is-flipping")) {
         card.classList.remove("is-flipping");
+      }
+    };
+    deck.addEventListener("transitionend", settleFlip);
+    deck.addEventListener("transitioncancel", settleFlip);
+
+    /* AND THE ARRIVAL TAKES ITS OWN CLASS OFF. `fd-draw` is the longer of the
+       two entrance animations, so it is the one that says the card has
+       finished arriving; a card with no price line to draw (the `is-empty`
+       placeholder) never fires it, and settles on `fd-arrive` instead. */
+    deck.addEventListener("animationend", (event) => {
+      const card = event.target && event.target.closest && event.target.closest(".fd-card");
+      if (!card || !card.classList.contains("is-arriving")) return;
+      if (event.animationName === "fd-draw"
+          || (event.animationName === "fd-arrive" && !card.querySelector(".fd-sparkline"))) {
+        card.classList.remove("is-arriving");
       }
     });
   }
@@ -2371,6 +2425,20 @@
   }
 
   function syncSpotlight() {
+    /* A PREFERENCE CHANGE LEAVES NOTHING MID-FLIGHT. Turning motion down
+       cancels the transform transition without an end event and stops the
+       entrance animations from matching; both would otherwise strand a class
+       on the card. Done first, and unconditionally, because the early return
+       below fires whenever the effective spotlight state has not changed —
+       which is exactly the case when only `calm` moved. */
+    if (calm.matches) {
+      clearFlip();
+      if (deck) {
+        for (const card of deck.querySelectorAll(".fd-card.is-arriving")) {
+          card.classList.remove("is-arriving");
+        }
+      }
+    }
     const want = fine.matches && !calm.matches;
     if (want === spotlightOn || !deck) return;
     spotlightOn = want;

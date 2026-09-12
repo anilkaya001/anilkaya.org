@@ -483,8 +483,48 @@ const CEILING_KIB = {
      307 -> 155 THE SAME DAY AND FOR THE SAME REASON AS overviewPage ABOVE:
      306.44k to 139.62k. What the reader loses is a modal; what they get is
      /flows/ticker/?t=, an address the row links to directly. 155 keeps 15.4k,
-     about the proportion the entry above kept. */
-  sidePage: 155,
+     about the proportion the entry above kept.
+
+     155 -> 157, AND THE FIRST THING TO SAY IS WHAT THIS ROUTE JUST SPENT.
+     Measured, `git cat-file -s` at the merge base against `stat` on disk:
+     flows-board.js 115,523 -> 125,607 B, a growth of 10,084 in one wave. The
+     route is 6,007 + 2,560 + 25,136 + 125,607 = 159,310 B against a 158,720 B
+     ceiling — 590 B OVER, which is why this number moves.
+
+     THE COMMENTS ARE NOT THE PLACE TO FIND 590 BYTES. unusualPage below
+     already settled that trade: buying a breach back by shortening prose "is
+     bookkeeping rather than engineering: it degrades the one thing this
+     codebase is strictest about to satisfy a number." The number moves in a
+     diff, where it can be argued with.
+
+     WHAT IT BOUGHT, IN TWO PARTS.
+       6,421 B — the re-sort became a MOVEMENT. Sorting fifty cards replaced
+       the deck in one call, so a name's new position carried no relation to
+       its old one and the only way to see that a name climbed was to have
+       memorised where it was. The emphasis is recomputed in the same instant,
+       so position and loudness change together; cutting between two such
+       states asks a reader to diff two boards from memory. Plus the price
+       line drawing itself on arrival, which is one CSS rule for all fifty
+       because the path declares pathLength="1".
+       3,663 B — three bug fixes on that code, two of them reproduced in a
+       browser before being written: an entrance that re-ran on every card
+       when a reader toggled reduced motion off (measured at opacity 0), and a
+       `is-flipping` class stranded forever when the preference cancelled a
+       transform transition without firing transitionend (measured with
+       z-index 1 still set). Neither is polish; both are the interactive layer
+       misbehaving for exactly the reader who asked it not to.
+
+     157 AND NOT 160, AND THE ROUTE IS OWED A REDUCTION. 157 leaves 1,458 B,
+     the same order the 493 -> 496 raise on tickerPage deliberately left, and
+     for the identical reason stated there: a reserve gets spent by whoever
+     finds it, so the next change to this route should have to argue in the
+     open rather than discover pre-authorised room waiting. The reduction that
+     exists and has not been taken: this file loads ONE script that renders
+     BOTH the deck and the thirteen-column table, and a reader sees one of
+     them — ?view= decides which. Deferring the table the way flows-dock.js
+     defers the assistant is the move, and it is a change of its own rather
+     than something to bundle into a bug fix. */
+  sidePage: 157,
   /* 240 -> 48, AND HERE THE COST WAS PUREST WASTE: assets/js/flows-watch.js
      does not contain the string `FlowsPanels`, so all 150.91k was fetched,
      parsed and compiled on every visit for a dialog flows-card.js drew.
