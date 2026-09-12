@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "181";
+export const ASSET_VERSION = "182";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1879,6 +1879,33 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        hidden, the same way the hero above is, so a page whose card never
        arrives shows no empty furniture. -->
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
+
+       The design puts a findings panel at the top right and calls it an AI
+       summary. This product has one of those — Neuron, on the overview — and
+       it is generated per SESSION, not per name; a per-name one is a pipeline
+       change, not a renderer change, so calling this that would be a claim
+       about how it was made. What this is instead: the leads the panels below
+       already publish, gathered at the top with a way into each.
+
+       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
+       line is the panel's own published lead — the same string the panel
+       prints, read from the same field — so
+       the two cannot disagree about a number; what this adds is that a reader
+       sees the findings before scrolling, and can go straight to the one that
+       matters. A second sentence ABOUT the same data, written here, is what
+       the rule forbids, and there is none.
+
+       NO SEVERITY DOTS. The design colours each bullet red, amber or green.
+       Nothing on this card ranks its findings by severity, so a coloured dot
+       would be this renderer inventing an opinion the payload does not carry;
+       the marks are neutral and the reading carries its own sign in its own
+       words. -->
+  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
+    <h2 class="ft-brief-h" id="ftBriefH">What this card found</h2>
+    <ol class="ft-brief-l" id="ftBriefL"></ol>
+    <p class="ft-brief-s" id="ftBriefS"></p>
+  </aside>
   <div class="ft-flags" id="ftFlags" hidden></div>
 
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO

@@ -6675,6 +6675,62 @@
     host.hidden = !cards.length;
   }
 
+  /* ---------- what this card found ----------------------------------
+
+     THE PANELS' OWN LEADS, GATHERED, WITH A WAY INTO EACH. Not a new
+     analysis and not a second sentence about the same numbers: every line is
+     `panels[key].lead.say`, the exact string the panel prints, so the index
+     and the panel cannot disagree about a figure. What it adds is that the
+     findings are visible before a reader scrolls, and that each one is a link
+     to the panel that made it.
+
+     THE ORDER IS THE PAGE'S. It walks `.ft-panel[data-panel]` in DOM order —
+     the same walk the grid uses — so the index reads down the page rather
+     than ranking findings by an importance nothing on this card publishes.
+
+     AND IT SAYS HOW MANY IT IS NOT SHOWING. A list of five under a card with
+     nineteen readings is a selection, and a selection that does not state its
+     own denominator reads as a census. */
+  function paintBrief(card) {
+    const host = $("ftBrief"), list = $("ftBriefL"), sub = $("ftBriefS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const panels = card.panels || {};
+    const found = [];
+    for (const section of document.querySelectorAll(".ft-panel[data-panel]")) {
+      const key = section.getAttribute("data-panel");
+      const p = key ? panels[key] : null;
+      const say = p && p.status === "ok" && p.lead && typeof p.lead.say === "string"
+        ? p.lead.say.trim() : "";
+      if (!say) continue;
+      const title = section.querySelector(".ft-panel-t");
+      found.push({ key, say, title: title ? title.textContent.trim() : key });
+    }
+    const CAP = 5;
+    for (const f of found.slice(0, CAP)) {
+      const li = el("li", "ft-brief-i");
+      const a = el("a", "ft-brief-a");
+      a.href = "#panel-" + f.key;
+      /* THE PANEL'S NAME IS THE LINK'S DESTINATION SAID OUT LOUD, because
+         "read more" repeated five times is five links a screen reader cannot
+         tell apart. */
+      a.setAttribute("aria-label", f.say + " \u2014 open " + f.title);
+      a.append(el("span", "ft-brief-t", f.say));
+      a.append(el("span", "ft-brief-c", "\u203a"));
+      li.append(a);
+      list.append(li);
+    }
+    if (sub) {
+      sub.textContent = found.length > CAP
+        ? "The first " + CAP + " of " + found.length + " findings on this card, in page order."
+        : (found.length
+          ? found.length + (found.length === 1 ? " finding" : " findings") +
+            " on this card, in page order."
+          : "");
+    }
+    host.hidden = !found.length;
+  }
+
   function paintFlags(card, chg) {
     const host = $("ftFlags");
     if (!host) return;
@@ -7240,6 +7296,7 @@
        every surface that states it. */
     paintHero(card, chg);
     paintCards(card);
+    paintBrief(card);
     paintFlags(card, chg);
     paintIdentity(card, chg);
 

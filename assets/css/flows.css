@@ -9849,3 +9849,61 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
 }
 .ft-card-bar > i.is-pos { background: var(--flow-pos, var(--ink-dim)); }
 .ft-card-bar > i.is-neg { background: var(--flow-neg, var(--ink-dim)); }
+
+
+/* ---------- what this card found ----------
+   THE INDEX AT THE TOP, in the shape the design gives its summary panel: a
+   short stack of findings, each one a link into the panel that made it. It is
+   a list rather than prose because a reader scans it for the one line that
+   matters and then leaves. */
+.ft-brief {
+  margin: 0 0 var(--space-3);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+}
+.ft-brief-h {
+  margin: 0 0 0.45rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-brief-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ft-brief-i + .ft-brief-i { border-top: 1px solid var(--hairline); }
+.ft-brief-a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  color: var(--ink-dim);
+  text-decoration: none;
+  /* A NEUTRAL MARK, NOT A SEVERITY DOT: nothing on this card ranks its own
+     findings, so the bullet says "one of several" and nothing more. */
+  position: relative;
+}
+.ft-brief-a::before {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 0.85em;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  opacity: 0.7;
+}
+.ft-brief-a:hover, .ft-brief-a:focus-visible { color: var(--ink); }
+.ft-brief-a:hover .ft-brief-c, .ft-brief-a:focus-visible .ft-brief-c { color: var(--gold-harvest); }
+.ft-brief-t { font-size: var(--fs-note); line-height: 1.5; min-width: 0; }
+.ft-brief-c { flex: none; color: var(--ink-faint); font-size: var(--fs-lead); line-height: 1; }
+.ft-brief-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}

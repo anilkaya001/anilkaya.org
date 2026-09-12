@@ -781,7 +781,25 @@ const CEILING_KIB = {
      and the reason is the same each time: 253 KiB of this route is comment
      that the merged stripping build removes and that is waiting on one
      dashboard field. */
-  tickerPage: 473,
+  /* 473 -> 477 FOR THE FINDINGS INDEX. On disk: flows-ticker.js 384,452 ->
+     386,860 and flows-drawers.js is not on this route, so the route moves
+     484,268 -> 486,832 B = 475.42 KiB.
+
+     WHAT IT BOUGHT: the design's top-right panel, which it calls an AI
+     summary. This product's AI summary is Neuron and it is generated per
+     SESSION, not per name, so calling this that would be a claim about how it
+     was made. What it is instead is the panels' OWN published leads, gathered
+     above the fold with a link into each — one source rendered twice, not two
+     spellings of one reading, so the index and the panel cannot disagree
+     about a figure. It states its own denominator ("the first 5 of 18"),
+     because a list of five under a card with eighteen readings is a selection
+     and a selection that hides its denominator reads as a census.
+
+     477 LEAVES 1,616 B. Fourth raise on this route in one wave. Every one is
+     measured and argued, and every one is also evidence for the same point:
+     253 KiB of what this route ships is comment that the merged stripping
+     build removes, and it is waiting on one dashboard field. */
+  tickerPage: 477,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
