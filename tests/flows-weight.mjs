@@ -790,7 +790,29 @@ const CEILING_KIB = {
      196 LEAVES 916 B, which is again deliberately not room for anything. This
      route and the ticker are now both within a kilobyte of their ceilings and
      both are owed the same structural fix. */
-  overviewPage: 196,
+  /* 198, FOR A COLLAPSE THIS CHANGE INTRODUCED AND THEN HAD TO UNDO:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 167,664
+       total         201,367 B = 196.65 KiB, 663 B over 196
+
+     The session moved out of the verdict strip and into the caption above it,
+     and the first draft of that caption printed ONE sentence for what the
+     tile had said four ways — "could not be read", "not published yet", "not
+     on this payload" are three different facts about the pipeline and only
+     one of them is about the market. That is the collapse this whole page is
+     built to refuse, reintroduced by a layout change, and it would have
+     shipped: the page renders, the line reads plausibly, and nothing about it
+     looks wrong.
+
+     The 663 B is `boardsRead`, lifted out of paintVerdict so the caption and
+     the Cleared tile decide it once. Two callers, one decision — which is
+     also why a second copy was never the cheaper option: it is how the
+     caption comes to say "not published yet" over a strip saying "could not
+     be read", about the same two payloads, four lines apart.
+
+     198 LEAVES 1,385 B. */
+  overviewPage: 198,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

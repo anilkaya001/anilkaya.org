@@ -154,8 +154,22 @@ const SURFACES = [
   { key: "board:long", file: "assets/js/flows-overview.js", at: "const poolCount = (payload)",
     to: "\n  };", label: "poolCount", vars: ["payload"] },
   { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["alerts"] },
-  { key: "board:long", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["long"] },
-  { key: "board:short", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["short"] },
+  /* THE TWO BOARD ENTRIES POINT AT boardsRead() AND NOT AT paintVerdict, and
+     this suite is what said so. The session used to be a tile in the verdict
+     strip, so paintVerdict read `long.sessionDate` and `long.status`
+     directly; the session is the strip's CAPTION now and both reads moved
+     into boardsRead, which the caption and the Cleared tile share.
+
+     Left pointing at paintVerdict the scan found zero `long.` reads there and
+     failed on its own vacuity guard — "zero reads means the regex or the
+     variable name is wrong, and a vacuous pass is worse than a failure" —
+     which is exactly the failure this file is built to produce rather than
+     quietly passing a site it can no longer see. Anchored on the function
+     that does the reading, the guard is live again: rename `sessionDate` and
+     the caption goes silent on a session both boards published, which is what
+     this entry exists to catch. */
+  { key: "board:long", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["long"] },
+  { key: "board:short", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["short"] },
   /* renderSpine() is the page's one chart, and it reads the band, the scored
      population and the neutral count off the board root. `deadBand` renamed
      draws an axis with no hatch and a caption stating the band's width is not

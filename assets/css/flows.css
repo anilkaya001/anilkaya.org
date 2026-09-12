@@ -206,7 +206,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=164") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=165") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -9388,24 +9388,6 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 /* A BASKET WITH NO READABLE LEAN GETS NO BAR AND A DIMMED LABEL — the chip is
    present because the basket is, and says nothing because nothing was read. */
 .cc-chip.is-null { opacity: 0.55; }
-
-/* The sector record's disclosure. Same vocabulary as every other fold on the
-   section — a marked summary a keyboard and a thumb can open — so the two are
-   not two mechanisms. */
-.cc-fold { margin: 0.7rem 0 0; }
-.cc-fold > summary {
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--gold-mystic);
-  cursor: pointer;
-  list-style: none;
-}
-.cc-fold > summary::-webkit-details-marker { display: none; }
-.cc-fold > summary::before { content: "+ "; color: var(--gold-harvest); }
-.cc-fold[open] > summary::before { content: "\2212 "; }
-.cc-fold > summary:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
 
 /* THE QUALIFIER LIST. Set as the note it is, with the marker outside the
    measure so the claims align down a left edge a reader can run an eye along

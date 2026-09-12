@@ -1018,19 +1018,7 @@
       return ["unavailable", "not on this payload"];
     };
 
-    /* THE TWO BOARDS ARE ONE PAYLOAD FOR THE SESSION AND CLEARED TILES: a
-       half that answered names it, and only when neither did is the tile a
-       silence — unreadable if either fetch failed, pending if both are
-       unpublished, unavailable if a half answered without the field. */
-    const answered = [long, short].filter((p) => p && p.status !== "pending");
-    const boardsSilence = (read) => read ? null
-      : answered.length ? ["unavailable", "not on this payload"]
-        : (!long || !short) ? ["unreadable", "could not be read — refresh to try again"]
-          : ["pending", "not published yet"];
-    const longDate = answered.includes(long) ? long.sessionDate : null;
-    const shortDate = answered.includes(short) ? short.sessionDate : null;
-    const sessionDate = (typeof longDate === "string" && longDate) ||
-      (typeof shortDate === "string" && shortDate) || null;
+    const { silence: boardsSilence, date: sessionDate } = boardsRead(long, short);
 
     /* THE POOL, NOT THE ROWS — poolCount, the number the rail badges, so the
        rail, this tile and each board's own status line agree. The counted-
@@ -1255,6 +1243,34 @@
     }
   }
 
+  /* ---------- what the two boards say about the session -------------
+
+     THE TWO BOARDS ARE TWO WRITES OF ONE SESSION, so "which session is this"
+     and "is that a silence" are one question asked of both halves: a half
+     that answered names it, and only when neither did is there a silence —
+     unreadable if either fetch failed, pending if both are unpublished,
+     unavailable if a half answered without the field.
+
+     LIFTED OUT OF paintVerdict BECAUSE THERE ARE TWO CALLERS NOW. The session
+     used to be a tile in the verdict strip and is the strip's caption; the
+     `Cleared` tile is still in the strip. A second copy of this decision is
+     how the caption comes to say "not published yet" over a strip that says
+     "could not be read", about the same two payloads, four lines apart —
+     and it is how the four silences quietly become one, which is the
+     distinction this page exists to keep. */
+  function boardsRead(long, short) {
+    const answered = [long, short].filter((p) => p && p.status !== "pending");
+    const longDate = answered.includes(long) ? long.sessionDate : null;
+    const shortDate = answered.includes(short) ? short.sessionDate : null;
+    const date = (typeof longDate === "string" && longDate) ||
+      (typeof shortDate === "string" && shortDate) || null;
+    const silence = (read) => read ? null
+      : answered.length ? ["unavailable", "not on this payload"]
+        : (!long || !short) ? ["unreadable", "could not be read — refresh to try again"]
+          : ["pending", "not published yet"];
+    return { silence, date };
+  }
+
   /* ---------- the session's caption --------------------------------
 
      WHICH SESSION, OVER HOW MANY NAMES, AND WHETHER IT IS STILL MOVING. The
@@ -1271,13 +1287,21 @@
   function paintMeta(box, dateEl, screenedEl, liveEl, boards, market, reads) {
     if (!box) return;
     let said = false;
-    const answered = boards.filter((b) => b && b.status !== "pending");
-    const date = answered.map((b) => b && b.sessionDate)
-      .find((d) => typeof d === "string" && d) || null;
+    /* THE FOUR SILENCES SURVIVED THE MOVE, and keeping them was the whole
+       care in it. This line replaced a TILE that carried them — "could not be
+       read", "not published yet", "not on this payload" are three different
+       facts about the pipeline and only one of them is about the market — and
+       the first draft of this caption printed one sentence for all three.
+       That is the collapse this page is built to refuse, reintroduced by a
+       layout change. Same function the strip's Cleared tile reads, so the two
+       cannot word one fact two ways. */
+    const { silence: boardsSilence, date } = boardsRead(boards[0], boards[1]);
+    const quiet = boardsSilence(date !== null);
     if (dateEl) {
-      dateEl.textContent = date || "session not published";
-      if (!date) dateEl.dataset.empty = "pending";
-      said = said || Boolean(date);
+      dateEl.textContent = date || (quiet ? "session " + quiet[1] : "");
+      if (quiet) dateEl.dataset.empty = quiet[0];
+      else delete dateEl.dataset.empty;
+      said = said || Boolean(date) || Boolean(quiet);
     }
     const n = isNum(market && market.n);
     if (screenedEl) {
@@ -2125,17 +2149,21 @@
     }
     into.append(strip);
 
-    /* THE TABLE IS THE RECORD AND IT FOLDS. Everything in it is also stated
-       above — the strip carries every basket, its lean and its rank — so what
-       the fold hides is the exact dollars, which is METHOD by this section's
-       own rule: how a reading was made, not what it means. The qualifiers
-       stay open, below, where they always were.
+    /* THE TABLE STAYS OPEN UNDER THE STRIP, and the first draft folded it.
 
-       A <details> and not a removal: folding is never deletion here, so the
-       rows stay in textContent for a find-in-page. */
-    const fold = el("details", "cc-fold");
-    const sum = el("summary", null, "All eleven baskets, with the dollars");
-    fold.append(sum);
+       The argument for folding was that the strip already carries every
+       basket, its lean and its rank, so what the fold hid was only the exact
+       dollars — method rather than meaning. That argument is wrong here, and
+       this region's own qualifier is what makes it wrong: "the dollars ride
+       beside it because a ratio carries no size: +90% on $30k of premium and
+       +90% on $300M are not the same fact." A page cannot make that claim and
+       then put the dollars behind a click. The claim is the reason the column
+       exists.
+
+       So the two layers stack: the strip is the glance — where did the money
+       go — and the table is the record, which is what a reader asking about
+       one basket needs. That is a real cost in height and it is the honest
+       one. */
     const wrap = tableWrap("Sector option-premium lean, most bullish first");
     const table = el("table", "cc-tbl");
     /* UNITS TRAVEL WITH NUMBERS, AND A RATIO AND A DOLLAR SUM NEVER SHARE A
@@ -2198,8 +2226,7 @@
     }
     table.append(body);
     wrap.append(table);
-    fold.append(wrap);
-    into.append(fold);
+    into.append(wrap);
 
     /* THE CAVEATS IN THE OPEN, THE DERIVATION BELOW THEM, AND EVERY WORD
        KEPT EITHER WAY: moved, not trimmed. `.ft-how` and `.ft-how-s` are

@@ -315,11 +315,26 @@ try {
   ok(await page.locator(".cc-lede").isVisible(), "scope opens with a native keyboard-accessible disclosure");
   await page.locator(".cc-change-detail summary").click();
   eq(await page.locator(".cc-score-scale").count(), 9, "each measured candidate score has a signed scale");
-  eq(await page.locator(".cc-jump a").count(), 6, "overview sections have direct navigation");
+  /* EVERY JUMP LINK RESOLVES, WHICH IS THE PROPERTY — not that there are six
+     of them. The count was restated here and went stale the moment the page
+     grew a region: it failed at 8 !== 6 on a change that ADDED two working
+     links, which is the shape of failure this repository keeps finding in its
+     own comments. What can actually break is a heading id renamed out from
+     under an anchor, leaving a jump that scrolls nowhere, and a count has
+     never been able to catch that. */
+  {
+    const jumps = await page.$$eval(".cc-jump a", (as) => as.map((a) => a.getAttribute("href")));
+    ok(jumps.length >= 6,
+       `the overview offers direct navigation to its sections (${jumps.length})`);
+    const dead = await page.evaluate((hrefs) => hrefs.filter(
+      (h) => !h || !h.startsWith("#") || !document.getElementById(h.slice(1))), jumps);
+    eq(dead.length, 0,
+       `and every jump resolves to a section on the page (dead: ${dead.join(", ")})`);
+  }
 
   /* ---------- the verdict bar ------------------------------------ */
   {
-    /* SIX READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
+    /* FIVE READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
        The page it replaced could not state the session's level at all: the
        board score is a cross-sectional residual, so whether the tape was
        bought or sold had been neutralised out of every number on it. */
@@ -330,11 +345,23 @@ try {
         s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
         cls: t.querySelector(".cc-tile-v")?.className || "",
       })));
-    eq(tiles.length, 7, "the verdict bar states seven readings");
+    /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.
+
+       This strip's only use is comparing one tile to the next, and `Session`
+       is a date while `Screened` is a population — neither could be compared
+       to anything on it. Both are drawn above the strip now, by paintMeta,
+       where a reader looks to answer "is this today" before reading a figure;
+       they are asserted there, below, rather than dropped. */
+    eq(tiles.length, 5, "the verdict bar states five readings");
     const by = Object.fromEntries(tiles.map((t) => [t.k, t]));
 
-    eq(by.Session?.v, SESSION, "the verdict names the session it is about");
-    eq(by.Screened?.v, "264", "and how many names were screened, from the market payload");
+    ok(!("Session" in by) && !("Screened" in by),
+       "the session and the screened population are the strip's CAPTION, not two of " +
+       "its readings — a date and a count that cannot be compared to a lean");
+    eq(await page.locator("#ccMetaDate").textContent(), SESSION,
+       "the caption names the session every figure below it is of");
+    ok((await page.locator("#ccMetaScreened").textContent()).includes("264"),
+       "and how many names were screened, from the market payload");
 
     /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE
        BETWEEN THEM. breadth.tilt counts names and premium.tilt weights
@@ -350,7 +377,7 @@ try {
        "and the dollar-weight tilt is a share of premium, on the same tile row");
     /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
 
-       Seven tiles each carrying a line of definition underneath is a
+       Five tiles each carrying a line of definition underneath is a
        paragraph wearing a strip's clothes, and the strip is the one element
        on this page meant to be taken in at a glance. The denominators those
        two lines stated are not lost: breadth.tilt's and premium.tilt's are
@@ -943,8 +970,8 @@ try {
     /* THE SIX REGIONS THAT ANSWERED ARE STILL DRAWN. Every one of these
        counts is zero against the loadBoard this phase exists to delete,
        because on that version none of them was painted at all. */
-    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
-       "the verdict bar still states its seven readings");
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 5,
+       "the verdict bar still states its five readings");
     eq(await page.locator(".cc-bear tbody tr").count(), 4,
        "the pole that DID answer still draws its whole side");
     eq(await page.locator("#ccChg tbody tr").count(), 7,
@@ -968,7 +995,12 @@ try {
     eq(tiles.Cleared, "\u2014 bull / 4 bear",
        "the unreadable side is an em dash, never a 0 — and each side keeps its own word, " +
        "so a half-silent tile cannot be read as a ratio");
-    eq(tiles.Session, SESSION, "and the session is taken off the half that answered");
+    /* THE SESSION IS THE CAPTION'S NOW, and this is the case it was written
+       for: one board answered 500 and the other did not, and neither half is
+       the page's session — they are two writes of one. The caption reads it
+       off whichever half came back. */
+    eq(await page.locator("#ccMetaDate").textContent(), SESSION,
+       "and the session is taken off the half that answered");
 
     /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
        em dash above is the right glyph for "not known" and it is the same
@@ -1026,8 +1058,8 @@ try {
        "the flagged windows still draw");
     eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
        "the dead band's residents still draw");
-    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
-       "and the verdict bar still states seven readings, every count of them an em dash");
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 5,
+       "and the verdict bar still states five readings, every count of them an em dash");
     const both = await page.evaluate(() => ({
       bull: document.querySelector("#ccBull [data-empty]")?.dataset.empty || null,
       bear: document.querySelector("#ccBear [data-empty]")?.dataset.empty || null,
@@ -1986,9 +2018,18 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.v, "—", "with both boards unreadable the session is an em dash");
-    eq(tiles.Session?.kind, "unreadable", "marked as this page's fault");
-    ok(/could not be read/.test(tiles.Session?.s), `and worded as one (${tiles.Session?.s})`);
+    /* THE SESSION MOVED TO THE CAPTION AND ITS FOUR SILENCES MOVED WITH IT.
+       This is the phase that proves it: the line above the strip reads the
+       SAME boardsRead() the Cleared tile below does, so a session that could
+       not be read and a session nobody has published yet stay two facts —
+       which is what a caption printing one sentence for both would have
+       destroyed, silently, in a layout change. */
+    const metaSession = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaSession.kind, "unreadable", "with both boards unreadable the session is marked as this page's fault");
+    ok(/could not be read/.test(metaSession.text), `and worded as one (${metaSession.text})`);
     eq(tiles.Cleared?.v, "— bull / — bear", "and so is the pool on both sides");
     eq(tiles.Cleared?.kind, "unreadable", "under the same mark");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
@@ -2002,8 +2043,13 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.kind, "pending", "with both boards unpublished the session is pending");
-    eq(tiles.Session?.s, "not published yet", "in the pipeline's own words");
+    const metaPending = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaPending.kind, "pending", "with both boards unpublished the session is pending");
+    ok(/not published yet/.test(metaPending.text),
+       `in the pipeline's own words (${metaPending.text})`);
     eq(tiles.Cleared?.kind, "pending", "and so is the pool");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
 
@@ -2019,9 +2065,13 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.kind, "unavailable",
+    const metaGap = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaGap.kind, "unavailable",
        "a board published without a session date is the payload's gap, not a fetch that failed");
-    eq(tiles.Session?.s, "not on this payload", "and is worded as one");
+    ok(/not on this payload/.test(metaGap.text), `and is worded as one (${metaGap.text})`);
     eq(tiles.Cleared?.v, "5 bull / — bear",
        "while the pool prints the half that answered beside a dash for the half that has not — " +
        "and each side keeps its own word, so the half-silent tile still says WHICH half is missing");
@@ -2871,11 +2921,17 @@ try {
        each sentence is required to be IN the qualifier paragraph, which no
        absence can satisfy; the fold check is kept beside it for the payload
        whose method DOES pass the wall. */
-    const openQual = await page.locator("#ccLean p.is-qualifier").count();
+    /* THE CLASS, NOT THE TAG, which is what this assertion's own message
+       already says: "the class is what draws the rule down the left". It was
+       written as `p.is-qualifier` and the caveats are a <ul> now — seven
+       claims joined into one paragraph rendered as a block a reader skips,
+       and a skipped qualifier does not qualify. The count and every sentence
+       check below are unchanged; only the element is. */
+    const openQual = await page.locator("#ccLean .is-qualifier").count();
     eq(openQual, 1,
-       "the caveats are exactly one paragraph marked as qualifiers — the class is what draws " +
+       "the caveats are exactly one block marked as qualifiers — the class is what draws " +
        "the rule down the left, and a caveat that reads as method is one nobody weighs");
-    const qualText = (await page.locator("#ccLean p.is-qualifier").textContent()).trim();
+    const qualText = (await page.locator("#ccLean .is-qualifier").textContent()).trim();
     const foldedText = (await page.locator("#ccLean details").allTextContents()).join(" ");
     for (const [what, pattern] of [
       ["the quiet baskets and why 0/0 is not a neutral lean", /0\/0 is undefined/],
