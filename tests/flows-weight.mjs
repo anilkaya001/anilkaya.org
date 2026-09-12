@@ -449,8 +449,41 @@ const CEILING_KIB = {
      312.57k this morning, 146.23k now. THE NUMBER COMES DOWN WITH THE WEIGHT,
      this file's rule for a shed: room the ceiling was written with must not
      silently become room plus the shed. 160 leaves the 13.8k the entry above
-     asked for and no more. */
-  overviewPage: 160,
+     asked for and no more.
+
+     160 -> 161, 2026-09-12, AND THE 13.8k IS GONE — spent, not overrun in one
+     step. Measured at this branch's base (f22060f), byte-exact with
+     `git cat-file -s` against `stat`:
+
+       flows-dock.js      6,007      nav.js           2,560
+       flows-ui.js       25,136      flows-overview.js  129,437
+       total            163,140 B = 159.32 KiB, 700 B of hand
+
+     So the route arrived here with 700 bytes, not 13.8k: the Neuron dock and
+     the candidate-B rollout had already taken the rest, each inside the
+     ceiling and none of them re-deriving what was left. This branch adds
+     1,223 B to flows-overview.js — 164,363 B = 160.51 KiB, 523 B over.
+
+     WHAT THE 1,223 BOUGHT, since that is the question this assertion asks.
+     Net of 86 insertions against 60 deletions, and the deletions are real:
+     the verdict strip's tile definitions, its duplicated disagreement note
+     and two dead helpers all went. The additions are the alerts subtitle's
+     cadence clause — a published caveat that was, for one commit, printed
+     NOWHERE, because it was removed from a tile on the false belief that
+     this subtitle carried it — and the comments explaining both.
+
+     NOT BOUGHT BACK BY SHORTENING COMMENTS. The tickerPage entry above
+     records what that costs: "bookkeeping rather than engineering: it
+     degrades the one thing this codebase is strictest about to satisfy a
+     number." The comment that would go first here is the one recording how a
+     caveat came to be deleted, which is exactly the comment worth keeping.
+
+     161 LEAVES 501 B, deliberately. The structural fix this route is still
+     owed is the one the paragraph above named and got done once already, and
+     the next one is the comment strip: measured, merged, and waiting on a
+     single Workers Builds field. Until that lands, this route should have to
+     come here and argue rather than find room waiting. */
+  overviewPage: 161,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
