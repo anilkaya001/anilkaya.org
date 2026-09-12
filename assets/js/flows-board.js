@@ -753,8 +753,22 @@
        has to come from the row. The ticker is the board's natural key: unique
        within a side by construction (one row per name) and stable across
        every sort, which is exactly what flipDeck needs to recognise the same
-       name in two different positions. */
-    card.dataset.t = String(row.t || "");
+       name in two different positions.
+
+       `data-flip` AND EMPHATICALLY NOT `data-t`, WHICH IS WHAT I REACHED FOR
+       FIRST AND CI CAUGHT. `data-t` is not a free attribute on this card: it
+       was the MODAL DELEGATION key, back when a card was a <button data-t>
+       that a delegated click turned into a dialog. tests/flows-board-render
+       asserts its ABSENCE — "carries no data-t for a delegation to find" —
+       beside three sibling assertions that together prove the modal is gone
+       rather than merely hidden.
+
+       A test cannot tell my identity key from a resurrected opener, and it
+       should not have to. The guarantee is worth more than the attribute
+       name: an unexplained `data-t` reappearing on this card is exactly what
+       the regression it guards against would look like. FLIP does not need
+       that particular spelling, so it takes its own. */
+    card.dataset.flip = String(row.t || "");
     card.style.setProperty("--i", String(Math.min(index, ARRIVE_STEPS)));
     card.style.setProperty("--tint", tintFor(row.sector));
     card.style.setProperty("--emph", (emph === undefined ? 0 : emph).toFixed(3));
@@ -1818,8 +1832,9 @@
      is composited: no layout, no paint, fifty cards or five hundred.
 
      IDENTITY COMES FROM THE ROW, NOT THE NODE. deckCard rebuilds every card
-     on every paint, so `data-t` (the ticker) is what lets this recognise the
-     same name in two positions. A name absent from the previous paint has no
+     on every paint, so `data-flip` (the ticker) is what lets this recognise
+     the same name in two positions — see deckCard for why it is not spelled
+     `data-t`. A name absent from the previous paint has no
      `before` box and is not moved — it fades in where it lands, which is
      correct: it did not come from anywhere.
 
@@ -1875,7 +1890,7 @@
     /* FIRST: where every card sits before the DOM changes. */
     const before = new Map();
     for (const card of deck.children) {
-      if (card.dataset.t) before.set(card.dataset.t, card.getBoundingClientRect());
+      if (card.dataset.flip) before.set(card.dataset.flip, card.getBoundingClientRect());
     }
 
     draw();                                       /* LAST */
@@ -1885,7 +1900,7 @@
        card, which is the one way to make this expensive. */
     const moves = [];
     for (const card of deck.children) {
-      const prev = before.get(card.dataset.t);
+      const prev = before.get(card.dataset.flip);
       if (!prev) continue;
       const now = card.getBoundingClientRect();
       const dx = prev.left - now.left;
