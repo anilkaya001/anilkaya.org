@@ -2,10 +2,10 @@
    flows-drawers.js — the ten panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 122k as
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 123k as
    measured on 2026-09-12 — it was 112k, the session path's window
    picker is 2k of the rise and renderPremiumTrack, the tenth drawer,
-   is the other 8k — and deferring it takes the ticker route
+   is the other 9k — and deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and

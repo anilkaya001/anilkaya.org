@@ -203,7 +203,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=160") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=162") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -3951,6 +3951,180 @@ body.is-stale .flows-tablewrap {
      scroll-margin rule further down this section is its only reader. */
   --ft-bar-h: 5.5rem;
 }
+/* ---------- the ticker page's arrival header ----------------------
+   FIVE BLOCKS ON ONE ROW, EACH ONE A READING WITH ITS OWN LABEL. The sticky
+   strip further down is the same facts run together on one line, which is the
+   right shape for something that has to survive the whole scroll and the
+   wrong shape for what a reader lands on.
+
+   auto-fit WITH A FLOOR rather than a fixed count: the blocks are genuinely
+   different widths — a ticker and a company name against a two-digit
+   conviction — so a fixed track would size every one of them to the widest.
+   The floor is what stops the score block wrapping its pill under its bar. */
+.ft-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, auto));
+  /* TWO NAMED ROWS AND EVERY BLOCK SHARES THEM, which is what puts the
+     labels on one line.
+
+     The first draft bottom-aligned five blocks of different internal heights,
+     and the result was three labels at three heights — "Options score" at
+     360, "Conviction" at 400, "Sector" at 427 — because a block with four
+     children pushed its own label further up than a block with two. Aligning
+     to the top instead only moves the problem: the ticker is set at 3rem and
+     would then sit on the label line.
+
+     `subgrid` is the tool for exactly this: the row track is decided once, by
+     the whole strip, and each block adopts it rather than sizing itself. The
+     label row is as tall as the tallest label and the value row as tall as
+     the tallest value, at every viewport, with no measurement in JavaScript
+     and nothing to keep in sync. */
+  grid-template-rows: auto auto;
+  align-items: end;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-3) 0 var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+.ft-hero > * {
+  grid-row: span 2;
+  display: grid;
+  grid-template-rows: subgrid;
+  align-content: end;
+  gap: 0.28rem;
+  min-width: 0;
+}
+/* THE NAME SPANS BOTH ROWS AND IS THE ONE BLOCK WITH NO LABEL. A symbol set
+   at 3rem does not need one, and "Ticker" over a ticker is the kind of label
+   that exists to satisfy a grid rather than a reader. It gets its own flex
+   column back so the company name sits tight under the symbol instead of
+   being pushed into the value row. */
+.ft-hero-id {
+  display: flex; flex-direction: column; justify-content: flex-end;
+  gap: 0.1rem; min-width: 0;
+}
+.ft-hero-t {
+  font-family: var(--font-figure);
+  font-size: clamp(2rem, 4.4vw, 3rem);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+/* THE COMPANY NAME IS A SECOND LINE AND NOT A PARENTHESIS. A forty-character
+   name set beside the symbol pushes the symbol off the left edge a reader
+   scans down — the same finding the ranked rows on the landing page record. */
+.ft-hero-nm {
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The change rides UNDER the price inside ONE row cell rather than taking a
+   row of its own: it is a qualifier on the figure above it, not a fifth
+   reading, and a row track sized to hold it would push every label up. */
+.ft-hero-stack {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  align-items: start; justify-content: end;
+  min-width: 0;
+}
+/* The figure and its bar read as one object, so they share a line: the bar is
+   the figure drawn, not a second reading under it. */
+.ft-hero-row { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.ft-hero-b { min-width: 0; }
+.ft-hero-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-hero-v {
+  font-family: var(--font-figure);
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  line-height: 1.05;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ft-hero-v.is-pos { color: var(--flow-up); }
+.ft-hero-v.is-neg { color: var(--flow-down); }
+.ft-hero-v[data-empty] { color: var(--ink-faint); }
+.ft-hero-chg {
+  font-family: var(--font-figure);
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.ft-hero-chg.is-pos { color: var(--flow-up); }
+.ft-hero-chg.is-neg { color: var(--flow-down); }
+
+/* THE SCORE BAR IS CENTRED ON ZERO, so a −49 and a +49 are mirror images and
+   the eye reads the side before the digits. Same construction as the ranked
+   rows' .cc-score-scale — one way a score is drawn across the section. */
+.ft-hero-bar {
+  position: relative; display: block;
+  width: 7rem; flex: none; height: 5px;
+  border-radius: 3px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.ft-hero-bar > i {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--ink-dim);
+  border-radius: 3px;
+}
+.ft-hero-bar > i.is-pos { background: var(--flow-up); }
+.ft-hero-bar > i.is-neg { background: var(--flow-down); }
+
+.ft-hero-pill {
+  align-self: start;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.1em;
+  padding: 0.16rem 0.5rem;
+  border-radius: var(--radius-1);
+  border: 1px solid currentColor;
+  color: var(--ink-dim);
+}
+.ft-hero-pill.is-pos { color: var(--flow-up); }
+.ft-hero-pill.is-neg { color: var(--flow-down); }
+
+/* CONVICTION AS FIVE SEGMENTS. Coarser than the digits beside it on purpose:
+   the number is the measurement and the segments are the glance. */
+.ft-hero-seg { display: flex; gap: 3px; }
+.ft-hero-seg > i {
+  display: block; width: 1.15rem; height: 5px;
+  border-radius: 2px;
+  background: var(--hairline);
+}
+.ft-hero-seg > i.is-on { background: var(--gold-harvest); }
+.ft-hero-m { font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* ---------- the flags row -----------------------------------------
+   MARKS, NOT BUTTONS. Nothing here is clickable and nothing here is new: each
+   one restates a panel's reading past a threshold its own title names. Set at
+   the label size so the row scans in one pass rather than reading as a
+   sentence. */
+.ft-flags {
+  display: flex; flex-wrap: wrap; gap: 0.35rem;
+  margin: 0 0 var(--space-3);
+}
+.ft-flag {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--ink-dim);
+  background: var(--panel-glass);
+  cursor: help;
+}
+.ft-flag.is-pos { color: var(--flow-up); border-color: color-mix(in srgb, var(--flow-up) 40%, transparent); }
+.ft-flag.is-neg { color: var(--flow-down); border-color: color-mix(in srgb, var(--flow-down) 40%, transparent); }
+
+@media (max-width: 40rem) {
+  .ft-hero { grid-template-columns: repeat(auto-fit, minmax(8rem, auto)); gap: var(--space-2); }
+}
+
 .ft-station {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
@@ -9090,4 +9264,26 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 @media (prefers-reduced-motion: reduce) {
   .cc-region, .ft-panel[data-panel] { animation: none; }
   .cc-region::before, .ft-panel[data-panel]::before { transition: none; }
+}
+
+/* ---------- the session ledger ------------------------------------
+   A LOOKUP TABLE UNDER TWO CHARTS OF THE SAME SESSIONS. Dates in the figure
+   face and left-aligned because they are keys, every measurement right-
+   aligned and tabular because they are compared down the column. */
+.ft-ledger { width: 100%; }
+.ft-ledger-d {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+/* THE BOARD-ONLY MARK IS QUIETER THAN THE DATE IT QUALIFIES: it says where a
+   row came from, which matters only when a reader is asking why a cell beside
+   it is empty. */
+.ft-ledger-src {
+  margin-left: 0.35rem;
+  font-size: var(--fs-label);
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  cursor: help;
 }

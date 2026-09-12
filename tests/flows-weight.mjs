@@ -552,7 +552,47 @@ const CEILING_KIB = {
      why a change in COLUMN COUNT is what retired it.
 
      417 LEAVES 1,852 B. */
-  tickerPage: 417,
+  /* 439, FOR THE HEADER A READER LANDS ON AND THE LEDGER UNDER THE CHARTS:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   61,048      flows-ticker.js  378,964
+       total            448,579 B = 438.07 KiB, 21,459 B over 417
+
+     WHAT IT BOUGHT, AND THIS ROUTE OWES AN ACCOUNT OF EVERY KILOBYTE:
+
+       - THE ARRIVAL HEADER. The page's answer to "what is this name" was one
+         run-on line — "SYN002 +16 $34.87 −1.7% bullish +1 score point over 1
+         session — 81 conviction short Γ session 2026-08-24 · built
+         2026-09-12" — seven readings a reader parses apart before using one.
+         It is five labelled blocks now, above the sticky bar rather than in
+         it, because a block that has to survive the whole scroll must stay
+         one line and a block a reader lands on has height for free.
+       - THE FLAGS ROW. Five marks, each a restatement of a panel's own
+         reading past a threshold its title names. No new opinion; a scan
+         layer over four stations' worth of findings.
+       - THE SESSION LEDGER. One row a session — close, score, the move and
+         net premium — joined ON THE DATE from two panels already on the card.
+         A sentinel like __stats, so the payload does not grow: the charts
+         above show the shape and this answers "what happened on the 14th",
+         which is a lookup and wants rows.
+
+     AND ONE THING IT DID NOT BUY: `sideOf`, which is a REMOVAL. The
+     side-against-the-dead-band decision now exists once for the three
+     surfaces that state it, where a second copy is how a header comes to call
+     a name bullish while a pill four lines up calls it unranked.
+
+     THE PATTERN THE PARAGRAPH ABOVE NAMES IS NOW A LEDGER OF ITS OWN: this is
+     the fourth raise on this route, and unlike the three before it this one
+     is BEHAVIOUR rather than reasoning — three surfaces that did not exist.
+     That does not retire the argument, it sharpens it. The route's real fix
+     is still the comment strip: built, merged, measured at ~253 KB of comment
+     on this route, and waiting on one Workers Builds field that is not mine
+     to set. This route is 438 KiB of source and roughly 185 KiB of it is
+     what a browser would actually parse with that field set.
+
+     439 LEAVES 917 B, which is deliberately not room for anything: the next
+     change to this route should have to come here and argue in the open. */
+  tickerPage: 439,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

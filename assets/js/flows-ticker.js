@@ -4670,6 +4670,211 @@
    * for the latest date costs 60 comparisons and cannot be wrong when a future
    * payload changes its order.
    */
+  /* HOW MANY SESSIONS THE LEDGER DRAWS.
+
+     The window is up to forty-two and a table of forty-two rows on a page of
+     twenty-four panels is a second page. Twenty is a month of sessions, which
+     is the span a reader asks a ledger about — "what has it done lately" —
+     and the two charts above still show the whole window, which is what a
+     chart is for. The cap is stated in the note under the table rather than
+     left for a reader to discover by counting. */
+  const LEDGER_MAX = 20;
+
+  /* ---------- the session ledger -----------------------------------
+
+     THE THREE SERIES THIS CARD ALREADY CARRIES, ON ONE ROW PER SESSION.
+
+     A reader wanting "what has this name done" had to read three drawings and
+     hold them in their head: the score-over-price chart has close and score,
+     the change block has the move, and the premium panel has the flow. Each
+     is a chart because a chart is what shows a SHAPE — but the question "what
+     happened on the 14th" is a lookup, and a lookup wants a table.
+
+     A SENTINEL, LIKE `__stats`, AND FOR THE SAME REASON. Nothing here is a
+     new measurement: every cell is read out of a panel this card already
+     publishes, so the payload does not grow by one byte and no figure here
+     can disagree with the panel it came from. The precedent is keyStats, one
+     station up, which gathers eight headline figures the same way.
+
+     JOINED ON THE DATE, NEVER ON THE INDEX. The overlay's rows are the
+     sessions its price window shares with the score archive; the premium
+     panel's rows are the sessions the archive holds at all. Those two windows
+     are not the same length and need not start on the same day — an index zip
+     would draw a plausible table out of two different calendars, which is the
+     defect shared/flows-overlay.js exists to name. */
+  function sessionLedger(host, _panel, card, question) {
+    const { panelHead, quietPanel, emptyPanel, statList, isNum, el, money, px2, signed } = P;
+    const panels = (card && card.panels) || {};
+    const ovl = panels.scoreOverlay, prem = panels.premiumTrack;
+
+    /* THE TWO SILENCES STAY APART. Neither panel is required — a card can
+       carry price history with no archived premium, or the other way round —
+       so the table draws on either, and only says nothing when it has
+       neither. Which one is missing is stated, because "no sessions" and "no
+       premium for these sessions" are different facts about the archive. */
+    const ovlRows = ovl && ovl.status === "ok" && Array.isArray(ovl.rows) ? ovl.rows : [];
+    const premRows = prem && prem.status === "ok" && Array.isArray(prem.rows) ? prem.rows : [];
+    if (!ovlRows.length && !premRows.length) {
+      return emptyPanel(host, question,
+        ovl && ovl.status !== "ok" ? ovl
+          : prem && prem.status !== "ok" ? prem
+            : { status: "quiet", reason: "this card carries no dated session history" });
+    }
+    panelHead(host, question);
+
+    const byDate = new Map();
+    const take = (rows, fill) => {
+      for (const r of rows) {
+        const d = r && r.d;
+        if (typeof d !== "string" || !d) continue;
+        if (!byDate.has(d)) byDate.set(d, { d, close: null, score: null, p: null, source: null });
+        fill(byDate.get(d), r);
+      }
+    };
+    take(ovlRows, (row, r) => {
+      row.close = isNum(r.close);
+      row.score = isNum(r.score);
+    });
+    take(premRows, (row, r) => {
+      row.p = isNum(r.p);
+      row.source = typeof r.source === "string" ? r.source : null;
+    });
+
+    /* NEWEST FIRST, WHICH IS THE ONLY ORDER A LEDGER IS READ IN. The two
+       charts run oldest-to-newest because a time axis does; a table is
+       scanned from the top and the top is today. */
+    const all = [...byDate.values()].sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0));
+    const rows = all.slice(0, LEDGER_MAX);
+
+    /* THE SCORE MOVE IS DIFFERENCED HERE AND IT CARRIES ITS OWN GAP, because
+       consecutive ROWS are not consecutive SCORED sessions: a name unscored
+       for three days has three rows between its two readings, and a naive
+       row-over-row subtraction would label a three-session move as an
+       overnight one. Against the previous SCORED row, with the gap in the
+       cell's title — the same rule the change layer states and the ranked
+       rows on the landing page follow. */
+    const scoredIdx = [];
+    all.forEach((r, i) => { if (r.score !== null) scoredIdx.push(i); });
+    const priorScored = new Map();
+    for (let k = 1; k < scoredIdx.length; k++) {
+      /* `all` is newest-first, so the PRIOR session is the NEXT index. */
+      priorScored.set(scoredIdx[k - 1], scoredIdx[k]);
+    }
+
+    /* `fc-tablewrap` AND `fc-levels`, WHICH ARE THE SECTION'S TABLE, not a
+       pair of classes invented here. Every other panel table on this page is
+       built from those two — the first scrolls horizontally on a narrow
+       viewport, the second carries the header rule, the cell padding and the
+       numeric alignment — and the first draft of this one reached for
+       `fc-scroll`/`fc-tbl`, neither of which exists in the stylesheet. It
+       rendered with the header row set at heading size and the Close and
+       Score columns run together with no gap: an unstyled table looks like a
+       styling choice, which is why it survived a screenshot. */
+    const wrap = el("div", "fc-tablewrap");
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "This name session by session, newest first");
+    wrap.tabIndex = 0;
+    const table = el("table", "fc-levels ft-ledger");
+    const thead = el("thead"), htr = el("tr");
+    /* EVERY HEADER CARRIES WHAT ITS COLUMN IS, as the other panel tables do:
+       a column called "Score" over a signed integer is two conventions a
+       reader has to know — which scale, and measured against what. */
+    for (const [label, cls, why] of [
+      ["Session", null, "The trading session the row describes, newest first."],
+      ["Close", "c-num", "The settled close for that session, from this card's own price window."],
+      ["Score", "c-num",
+        "The board's composite for that session, on a fixed −100 to +100 scale. " +
+        "Not a return forecast."],
+      ["Δ score", "c-num",
+        "The move since this name's PREVIOUS SCORED session, which need not be the row " +
+        "below: the span is in each cell's own title."],
+      ["Net premium", "c-num",
+        "Call premium minus put premium for that session, in dollars, as the board " +
+        "published it that morning. The sign is the reading."],
+    ]) {
+      const th = el("th", cls, label);
+      th.scope = "col";
+      th.title = why;
+      htr.append(th);
+    }
+    thead.append(htr);
+    table.append(thead);
+
+    const body = el("tbody");
+    let drawn = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const tr = el("tr");
+      const d = el("td", "ft-ledger-d", r.d);
+      /* A BOARD-ONLY SESSION IS MARKED, because its sparseness is a fact
+         about the archive: those days carry only the names that made a board,
+         so a gap beside one is more often a name that missed the board than a
+         name nobody priced. */
+      if (r.source === "boards") {
+        const mark = el("span", "ft-ledger-src", "· board");
+        mark.title = "Reconstructed from the archived boards for that session, which " +
+          "carry only the names that made a board that day.";
+        d.append(mark);
+      }
+      tr.append(d);
+      tr.append(el("td", "c-num", r.close === null ? DASH : px2(r.close)));
+      tr.append(el("td", "c-num" + P.polarity(r.score),
+        r.score === null ? DASH : signed(r.score, (a) => String(a))));
+
+      const iAll = all.indexOf(r);
+      const pj = priorScored.has(iAll) ? priorScored.get(iAll) : null;
+      const dCell = el("td", "c-num");
+      if (r.score !== null && pj !== null && all[pj].score !== null) {
+        const mv = r.score - all[pj].score;
+        const gap = pj - iAll;
+        dCell.className = "c-num" + P.polarity(mv);
+        dCell.textContent = signed(mv, (a) => String(a));
+        dCell.title = mv + " score points since " + all[pj].d + ", " +
+          gap + (gap === 1 ? " session" : " sessions") + " earlier.";
+      } else {
+        dCell.textContent = DASH;
+        dCell.title = r.score === null
+          ? "This name was not scored on this session."
+          : "No earlier scored session inside this window to measure against.";
+      }
+      tr.append(dCell);
+
+      const pCell = el("td", "c-num" + P.polarity(r.p));
+      pCell.textContent = r.p === null ? DASH : money(r.p);
+      if (r.p === null) {
+        pCell.title = "No archived net premium for this name on this session — which is " +
+          "not the same as a session it was priced flat in.";
+      }
+      tr.append(pCell);
+      body.append(tr);
+      drawn++;
+    }
+    table.append(body);
+    wrap.append(table);
+    host.append(wrap);
+
+    const priced = all.filter((r) => r.p !== null).length;
+    const scored = all.filter((r) => r.score !== null).length;
+    host.append(statList([
+      ["Sessions held", String(all.length)],
+      ["Scored", scored + " of " + all.length],
+      ["Priced", priced + " of " + all.length],
+    ]));
+
+    /* THE POPULATION AND THE JOIN, OPEN. Both change what a row MEANS: a
+       reader who does not know this is capped, or that the two columns come
+       from two windows joined on the date, reads a different table. */
+    const capped = all.length > drawn;
+    host.append(el("p", "fc-note is-qualifier",
+      "One row a session, newest first, over the window this card's price history and " +
+      "the score archive between them cover" +
+      (capped ? " — the newest " + drawn + " of " + all.length + " are drawn" : "") +
+      ". Close and score come from the score-over-price panel and net premium from the " +
+      "net-premium panel; the two are joined on the DATE, not by position, because the " +
+      "two windows need not be the same length or start on the same day. A dash is a " +
+      "session that column has no reading for, never a zero."));
+  }
+
   function keyStats(host, _panel, card, question) {
     const { panelHead, statList, isNum } = P;
     panelHead(host, question);
@@ -4825,6 +5030,7 @@
        the DOM, as they read the question. */
     __score: (host, panel, card, question) => P.score(host, card, question),
     __stats: keyStats,
+    __sessions: sessionLedger,
   };
 
   /* ---------- the walk --------------------------------------------- */
@@ -5437,6 +5643,7 @@
     scoreOverlay: { group: "signal", tier: "lead" },
     __score: { group: "signal", tier: "table" },
     __stats: { group: "signal", tier: "table" },
+    __sessions: { group: "tape", tier: "table" },
     gamma: { group: "convexity", tier: "lead" },
     levels: { group: "convexity", tier: "reading" },
     displacement: { group: "convexity", tier: "reading" },
@@ -6040,6 +6247,280 @@
   }
 
   /**
+   * THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against zero.
+   *
+   * A score of +1 with a band of ±1 is not a bullish name; it is a name the
+   * board declined to rank, and calling it bullish in a header is exactly the
+   * confident reading this product exists to refuse.
+   *
+   * ONE FUNCTION BECAUSE THERE ARE NOW THREE READERS. This lived inline in
+   * paintIdentity while the sticky strip was the only place a side was
+   * printed. The hero prints it as a pill and the flags row prints it as a
+   * mark, and a second copy of this decision is how one of the three comes to
+   * call a name bullish while the other two call it unranked — on the same
+   * screen, four lines apart.
+   *
+   * @returns {{text: string, word: string|null, cls: string, empty: string|null, title: string}}
+   *   `word` is null for every case that is NOT a directional claim — no score,
+   *   and inside the band — so a caller that wants only the direction cannot
+   *   accidentally treat "inside the dead band" as one.
+   */
+  function sideOf(card, chg) {
+    const score = isNum(card && card.score);
+    const band = chg && chg.status === "ok" ? chg.band : null;
+    if (score === null) {
+      return { text: DASH, word: null, cls: "is-null", empty: "unavailable",
+        title: "This card carries no score, so it has no side." };
+    }
+    const word = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
+    if (band === null) {
+      return { text: word, word, cls: P.polarity(score), empty: null,
+        title: "No dead band was published on this card, so the side is stated " +
+          "against zero rather than against the board's own membership rule." };
+    }
+    if (Math.abs(score) <= band) {
+      return { text: "inside the dead band", word: null, cls: "is-flat", empty: null,
+        title: "Within ±" + band + POINTS(band) + " of zero, which is the band " +
+          "the board declines to rank inside." };
+    }
+    return { text: word, word, cls: P.polarity(score), empty: null,
+      title: "Outside the published dead band of ±" + band + POINTS(band) + "." };
+  }
+
+  /* ---------- the arrival header ------------------------------------
+
+     THE SAME FACTS AS THE STICKY STRIP, LAID OUT RATHER THAN RUN TOGETHER.
+
+     The strip is one line by necessity — it is re-parented into the sticky bar
+     and every pixel of its height is spent for the whole scroll — so it reads
+     as "SYN002 +16 $34.87 −1.7% bullish +1 score point over 1 session — 81
+     conviction short Γ session 2026-08-24": seven readings a reader has to
+     parse apart before they can use any one of them. This block is what a
+     reader LANDS on, where height is free, and each reading is its own object
+     with its own label.
+
+     NOT ONE SECOND MEASUREMENT ANYWHERE IN IT. Score and conviction are read
+     off the card's top level, spot through the same spotOf() the strip uses,
+     the change off the context panel. A hero that re-derived any of them would
+     be a header that can disagree with the panel beneath it, which is the one
+     failure this page cannot afford at the top of itself. */
+  function paintHero(card, chg) {
+    const hero = $("ftHero");
+    if (!hero) return;
+
+    const t = $("ftHeroT");
+    if (t) t.textContent = card.ticker || "";
+    /* THE COMPANY NAME IS ON THE CARD NOW. It used to be a board field this
+       page could not reach without a second fetch, so the slot was empty on
+       arrival for every reader; shared/flows-card.js carries it across at a
+       cost of about thirty bytes. Absent stays hidden rather than falling
+       back to the symbol: a name equal to its own ticker is what an absent
+       name looks like after a fallback, and no reader could tell. */
+    const nm = typeof card.nm === "string" && card.nm.trim() ? card.nm.trim() : null;
+    const nmEl = $("ftHeroNm");
+    if (nmEl) {
+      nmEl.textContent = nm && nm !== card.ticker ? nm : "";
+      nmEl.hidden = !(nm && nm !== card.ticker);
+    }
+
+    const spot = spotOf(card);
+    const px = $("ftHeroPx");
+    if (px) {
+      px.textContent = spot === null ? DASH : "$" + spot.v.toFixed(2);
+      if (spot === null) px.setAttribute("data-empty", "unavailable");
+      else px.removeAttribute("data-empty");
+      px.title = spot === null
+        ? "No panel on this card published a spot price."
+        : "Spot as the " + spot.from + " panel resolved it.";
+    }
+
+    /* THE PERCENTAGE AND NOT A DOLLAR CHANGE. The mockup this follows prints
+       both — "+0.35 (+0.8%)" — and the dollar figure is derivable from spot
+       and this ratio. It is not printed, because the two come from DIFFERENT
+       PANELS: spot from levels/pricedMove/gamma, the ratio from context. A
+       dollar change computed across that seam is a third quantity neither
+       panel published, and the first time those two panels disagree about the
+       session it would be wrong in a way nothing on the page could catch. */
+    const ctx = card.panels && card.panels.context;
+    const chgPct = ctx && ctx.status === "ok" ? isNum(ctx.changePct) : null;
+    const chgEl = $("ftHeroChg");
+    if (chgEl) {
+      chgEl.textContent = chgPct === null ? "" : P.pct1(chgPct);
+      chgEl.className = "ft-hero-chg" + P.polarity(chgPct);
+      chgEl.hidden = chgPct === null;
+      chgEl.title = "Change against the previous close, from the price context panel.";
+    }
+
+    /* THE SCORE, ITS BAR AND ITS SIDE. The bar is the same ±100 scale the
+       board's rows use and the pill is the same word the strip prints — one
+       vocabulary for a direction across the section, so a reader who learned
+       it on the landing page does not learn it again here. */
+    const score = isNum(card.score);
+    const sEl = $("ftHeroScore");
+    if (sEl) {
+      sEl.textContent = score === null ? DASH : P.signed(score, (a) => String(a));
+      sEl.className = "ft-hero-v" + P.polarity(score);
+      if (score === null) sEl.setAttribute("data-empty", "unavailable");
+      else sEl.removeAttribute("data-empty");
+    }
+    const bar = $("ftHeroScoreBar");
+    if (bar) {
+      bar.replaceChildren();
+      bar.hidden = score === null;
+      if (score !== null) {
+        const fill = el("i", P.polarity(score).trim() || null);
+        /* HALF THE TRACK IS EACH SIDE, so the bar grows from the centre and a
+           −49 and a +49 are mirror images. Clamped, because the scale is the
+           claim: a score past ±100 would otherwise draw past its own track. */
+        const half = Math.min(50, Math.abs(score) / 2);
+        fill.style.width = half + "%";
+        fill.style.left = (score < 0 ? 50 - half : 50) + "%";
+        bar.append(fill);
+      }
+    }
+    /* THE PILL CARRIES THE SIDE ONLY WHERE THERE IS ONE. sideOf returns a
+       null `word` for the two cases that are not a direction — no score, and
+       inside the dead band — and the pill is absent for both rather than
+       printing "NEUTRAL", which would read as a measured middle instead of as
+       a name the board declined to rank. The strip below still states those
+       two in words; a pill is the wrong object for a refusal. */
+    const sd = sideOf(card, chg);
+    const pill = $("ftHeroSide");
+    if (pill) {
+      pill.textContent = sd.word ? sd.word.toUpperCase() : "";
+      pill.className = "ft-hero-pill" + (sd.word === "bullish" ? " is-pos"
+        : sd.word === "bearish" ? " is-neg" : "");
+      pill.title = sd.title;
+      pill.hidden = !sd.word;
+    }
+
+    /* CONVICTION AS FIVE SEGMENTS, WHICH IS WHAT IT IS. The number is a 0-100
+       reading and five lit segments out of five is a coarser statement than
+       the digits beside it — deliberately: the digits are the measurement and
+       the segments are the glance. A segment lights on its own fifth being
+       reached, so the last one needs 80 and not 100, and four lit means "past
+       four fifths" rather than "80 exactly". */
+    const conv = isNum(card.conviction);
+    const cEl = $("ftHeroConv");
+    if (cEl) {
+      cEl.textContent = conv === null ? DASH : String(Math.round(conv));
+      if (conv === null) cEl.setAttribute("data-empty", "unavailable");
+      else cEl.removeAttribute("data-empty");
+    }
+    const seg = $("ftHeroConvSeg");
+    if (seg) {
+      seg.replaceChildren();
+      seg.hidden = conv === null;
+      if (conv !== null) {
+        for (let i = 0; i < 5; i++) {
+          seg.append(el("i", conv >= (i + 1) * 20 ? "is-on" : null));
+        }
+      }
+    }
+
+    const sector = typeof card.sector === "string" && card.sector.trim()
+      ? card.sector.trim() : null;
+    const metaB = $("ftHeroMetaB"), secEl = $("ftHeroSector"), whenEl = $("ftHeroWhen");
+    const when = card.sessionDate ? "session " + fmtDate(card.sessionDate) : null;
+    if (whenEl) whenEl.textContent = when || "";
+    if (metaB && secEl) {
+      secEl.textContent = sector || "";
+      /* THE BLOCK SHOWS IF EITHER LINE HAS SOMETHING. A card with no sector
+         still has a session, and hiding the session because the sector is
+         absent would withhold the one fact that qualifies the whole page. */
+      metaB.hidden = !(sector || when);
+    }
+
+    hero.hidden = false;
+  }
+
+  /* ---------- the flags row -----------------------------------------
+
+     FIVE MARKS, EACH ONE A THRESHOLD ALREADY DRAWN SOMEWHERE BELOW.
+
+     THE ROW ADDS NO OPINION AND THAT IS THE POINT: every flag is a restatement
+     of a panel's own number past a line this function names in the flag's own
+     title, so a reader can always find the reading it came from. What it adds
+     is SCAN — five yes/no marks at the top, where the page's answer to "why
+     am I looking at this name" used to be spread over four stations.
+
+     ABSENT, NEVER GREYED OUT. A flag that draws itself dim to mean "no" turns
+     five silences into five negative claims, and most of these readings are
+     missing on some card on some day. A flag appears when its reading is
+     present AND past its line; otherwise there is nothing there. */
+  function paintFlags(card, chg) {
+    const host = $("ftFlags");
+    if (!host) return;
+    host.replaceChildren();
+
+    const marks = [];
+    const score = isNum(card.score);
+    const conv = isNum(card.conviction);
+
+    const sd = sideOf(card, chg);
+    if (sd.word && score !== null) {
+      marks.push([sd.word === "bullish" ? "Bullish flow" : "Bearish flow",
+        sd.word === "bullish" ? "is-pos" : "is-neg", sd.title]);
+    }
+
+    /* THE MOVE, WITH ITS SPAN AND ONLY WHERE IT IS ABOUT THIS SESSION.
+
+       Two guards, and each one is a claim this flag would otherwise make
+       falsely. `gap` is how many sessions the move spans: +23 over one
+       session and +23 over five, with the name off the board in between, are
+       different facts, so the span rides in the title. `stale` is how far the
+       newest SCORED session is from the newest session in the window: a flag
+       reading "Score down" off a reading taken a week ago claims an event
+       that did not happen today, which is the trap the ranked rows on the
+       landing page already name. Stale readings get no flag; the change
+       region below still lists them, dated, which is where a reading that is
+       not about today belongs. */
+    const d1 = chg && chg.status === "ok" ? chg.d1 : null;
+    const move = d1 ? isNum(d1.v) : null;
+    if (move !== null && isNum(d1.gap) !== null && chg.stale === 0 && Math.abs(move) >= 10) {
+      marks.push([move > 0 ? "Score up" : "Score down", move > 0 ? "is-pos" : "is-neg",
+        P.signed(move, (a) => String(a)) + " score points over " +
+        d1.gap + (d1.gap === 1 ? " session" : " sessions") +
+        ", against a threshold of 10."]);
+    }
+
+    if (conv !== null && conv >= 70) {
+      marks.push(["High conviction", "",
+        "Conviction " + Math.round(conv) + ", against a threshold of 70. Conviction is " +
+        "how strongly the components agree, not how large the move is."]);
+    }
+
+    /* UNUSUAL ACTIVITY IS THE TAPE'S OWN COUNT, not a judgement made here.
+       The top-contracts panel publishes how many lines it drew and the
+       aggressor panel whether any of them were lifted; either being present
+       and non-empty is what the vendor's rules already flagged. */
+    const top = card.panels && card.panels.topContracts;
+    const rows = top && top.status === "ok" && Array.isArray(top.rows) ? top.rows.length : 0;
+    if (rows >= 10) {
+      marks.push(["Unusual activity", "",
+        rows + " contract lines carried enough volume to make this name's tape panel, " +
+        "against a threshold of 10."]);
+    }
+
+    /* A CROSS-SECTION FLAG WAS DRAFTED HERE AND IS NOT SHIPPED, because the
+       field it wanted does not exist. marketRank publishes no single
+       percentile for a name: it carries a per-FEED block, each with its own
+       population, its own `asOf` and its own rank within that feed — so "top
+       decile" would have to pick one feed and present it as the name's place
+       in the session, which is a claim the payload deliberately refuses to
+       make. The panel states all of them, ranked, with their populations. A
+       flag that flattened that would be inventing the number the panel exists
+       to avoid inventing. */
+
+    for (const [label, cls, why] of marks) {
+      const chip = el("span", "ft-flag" + (cls ? " " + cls : ""), label);
+      chip.title = why;
+      host.append(chip);
+    }
+    host.hidden = !marks.length;
+  }
+
+  /**
    * Name, price, side, score — and rank when the page can honestly state it.
    *
    * RANK IS NOT ON THIS PAYLOAD. It is published per side on the board
@@ -6165,32 +6646,8 @@
       });
     }
 
-    /* THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against
-       zero. A score of +1 with a band of ±1 is not a bullish name; it is a
-       name the board declined to rank, and calling it bullish in the header
-       is exactly the confident reading this product exists to refuse. */
-    const band = chg && chg.status === "ok" ? chg.band : null;
-    let sideText, sideCls, sideEmpty = null, sideTitle;
-    if (score === null) {
-      sideText = DASH;
-      sideCls = "is-null";
-      sideEmpty = "unavailable";
-      sideTitle = "This card carries no score, so it has no side.";
-    } else if (band === null) {
-      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
-      sideCls = P.polarity(score);
-      sideTitle = "No dead band was published on this card, so the side is stated " +
-        "against zero rather than against the board's own membership rule.";
-    } else if (Math.abs(score) <= band) {
-      sideText = "inside the dead band";
-      sideCls = "is-flat";
-      sideTitle = "Within ±" + band + POINTS(band) + " of zero, which is the band " +
-        "the board declines to rank inside.";
-    } else {
-      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
-      sideCls = P.polarity(score);
-      sideTitle = "Outside the published dead band of ±" + band + POINTS(band) + ".";
-    }
+    const { text: sideText, cls: sideCls, empty: sideEmpty, title: sideTitle } =
+      sideOf(card, chg);
     const side = idChip("ftSide", "", sideText,
       { cls: sideCls, empty: sideEmpty, title: sideTitle });
 
@@ -6456,19 +6913,33 @@
       : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
     badge.className = "fc-score " +
       (score === null ? "" : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat");
-    const conv = isNum(card.conviction);
-    $("ftConv").textContent = conv === null ? DASH : conv + " conviction";
-    const regime = card.regime && card.regime.label;
-    $("ftRegime").textContent =
-      regime === "short" ? "short \u0393" : regime === "long" ? "long \u0393" : DASH;
-    $("ftDates").textContent =
-      "session " + fmtDate(card.sessionDate) + " \u00b7 built " + fmtDate(card.generatedAt);
+    /* THREE SLOTS LEFT THIS STRIP WHEN THE HERO ARRIVED, and each one for the
+       same reason: this strip is what SURVIVES THE SCROLL, and every reading
+       in it is paid for in pinned height on every screen of every panel. That
+       is the budget a reading has to earn.
+
+       Conviction, the gamma regime and the two dates do not earn it. All four
+       were also in the hero or one scroll away in a panel, so the first thing
+       a reader saw on arrival was the same seven facts twice, four lines
+       apart — and the strip was long enough to wrap at 1280. Conviction and
+       the session date are in the hero; the regime is the gamma panel's lead,
+       stated there with the ladder it was measured from.
+
+       WHAT STAYS IS WHAT A READER DEEP IN A PANEL ACTUALLY NEEDS: which name,
+       what it scores, what it costs, which way it moved. The slots are still
+       served — flows-pages.js emits them and they are empty, which the page's
+       own rule allows — so nothing here has to guess at markup. */
 
     /* CHANGE BEFORE DETAIL. paintChange returns its own derivation so the
        identity strip states the same numbers rather than deriving them a
        second time — two derivations of one move is two chances for the
        header and the block under it to disagree about the same name. */
     const chg = paintChange(card);
+    /* THE HERO AND THE FLAGS TAKE THE SAME CHANGE LAYER THE STRIP DOES, for
+       the reason directly above: one derivation of this name's move, read by
+       every surface that states it. */
+    paintHero(card, chg);
+    paintFlags(card, chg);
     paintIdentity(card, chg);
 
     /* THE STATION IS CHOSEN BEFORE THE DRAW NOW, AND THAT REORDERING IS THE

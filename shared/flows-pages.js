@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "160";
+export const ASSET_VERSION = "162";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1609,6 +1609,89 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        once. The other six Flows routes keep theirs; they are not opened
        daily to re-read one name. -->
 
+  <!-- THE ARRIVAL HEADER, AND IT IS NOT THE STICKY ONE.
+
+       .ft-head below is re-parented into the sticky bar by the controller and
+       has to stay one line for that to be worth having: a four-line block
+       pinned under the topbar would spend a fifth of a laptop viewport on
+       chrome for the whole scroll. So the two headers are two jobs. This one
+       is what a reader lands on — the name, what it costs, what this product
+       thinks of it and how strongly — laid out so each of those is a block
+       rather than a chip in a run-on line. That one is what survives the
+       scroll, and it stays terse.
+
+       ABOVE THE STICKY BAR, NOT BELOW IT, and that is a position rather than
+       a preference. The controller inserts the change section as the bar's
+       nextSibling, so anything served between the bar and .ft-head lands
+       UNDER a full panel of prose — the first draft of this block rendered
+       735px down the page, below the reading it was meant to introduce.
+       Above the bar it is what a reader lands on and it scrolls away, leaving
+       the tabs and the terse strip pinned, which is the division of labour
+       the two headers were split for.
+
+       NOTHING HERE IS A SECOND MEASUREMENT. Every slot is filled from the
+       same value the strip and the panels use; the difference is presentation
+       only. A hero that re-derived a score would be a header that can
+       disagree with the panel under it. -->
+  <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
+    <div class="ft-hero-id">
+      <span class="ft-hero-t" id="ftHeroT"></span>
+      <span class="ft-hero-nm" id="ftHeroNm" hidden></span>
+    </div>
+    <div class="ft-hero-px">
+      <span class="ft-hero-k">Last</span>
+      <!-- THE PRICE AND ITS CHANGE SHARE ONE ROW CELL, in a wrapper, so the
+           change is a qualifier under the figure rather than a fifth reading
+           taking a row track of its own. Separate elements, because the
+           controller writes the price with textContent and a nested child
+           would be wiped by it. -->
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroPx"></span>
+        <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
+      </span>
+    </div>
+    <!-- EVERY BLOCK IS LABEL + ONE CELL, whatever it holds. The strip's rows
+         are shared by all five (subgrid, see flows.css), so a block that put
+         four children straight into the grid would spread them across tracks
+         sized for two and land its bar on top of its own figure. The stack
+         wrapper is what keeps the row count at two while the contents vary. -->
+    <div class="ft-hero-b" id="ftHeroScoreB">
+      <span class="ft-hero-k">Options score</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-row">
+          <span class="ft-hero-v" id="ftHeroScore"></span>
+          <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
+        </span>
+        <span class="ft-hero-pill" id="ftHeroSide" hidden></span>
+      </span>
+    </div>
+    <div class="ft-hero-b" id="ftHeroConvB">
+      <span class="ft-hero-k">Conviction</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroConv"></span>
+        <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
+      </span>
+    </div>
+    <div class="ft-hero-b ft-hero-meta" id="ftHeroMetaB" hidden>
+      <span class="ft-hero-k">Sector</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-m" id="ftHeroSector"></span>
+        <!-- WHICH SESSION EVERY FIGURE ON THIS PAGE IS OF. It was the tail of
+             the sticky strip, where it cost pinned height on every screen to
+             say something a reader checks once. -->
+        <span class="ft-hero-m is-faint" id="ftHeroWhen"></span>
+      </span>
+    </div>
+  </section>
+  <!-- WHAT IS TRUE OF THIS NAME RIGHT NOW, AS A ROW OF MARKS.
+
+       Each one is a threshold already computed and already drawn somewhere on
+       this page; the row is a scan layer over them, not a new opinion. A flag
+       appears only when its own reading is present and past its threshold —
+       never as a greyed-out "no", which would turn five absences into five
+       claims. The threshold rides in the title of each. -->
+  <div class="ft-flags" id="ftFlags" hidden></div>
+
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
        IT. The controller used to build this <div> from nothing on first paint,
        which put the whole index — five tabs and their counts — behind a fetch
@@ -1658,6 +1741,12 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <header class="ft-head" id="ftHead" hidden>
     <h2 id="ftTicker" tabindex="-1">&nbsp;</h2>
     <span class="fc-score" id="ftScore"></span>
+    <!-- THREE SLOTS THE CONTROLLER NO LONGER FILLS, kept because emptying a
+         served slot is cheaper and safer than deleting one: the chrome check
+         reads this markup, and a slot that exists and is empty is the page's
+         own honest served state. Conviction and the session date moved to the
+         hero above; the gamma regime is the gamma panel's own lead, stated
+         beside the ladder it was measured from. See paintCard. -->
     <span class="fc-meta" id="ftConv"></span>
     <span class="fc-meta" id="ftRegime"></span>
     <span class="fc-meta" id="ftDates"></span>

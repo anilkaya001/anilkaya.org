@@ -2439,6 +2439,26 @@ export function buildCard({
   return {
     v: CARD_SCHEMA_VERSION,
     ticker,
+    /* WHO THIS IS AND WHAT IT DOES, ~30 BYTES, AND IT REMOVES A REQUEST.
+
+       Both fields are on the board row this card was built from and neither
+       was carried across, so the ticker page — which fetches the card and
+       nothing else — could print a symbol and no company name. Its header
+       had a served `ftSector` slot that no code ever filled, for exactly this
+       reason: the value was one join away and the join was a second fetch.
+
+       The alternative was for that page to read a board on load, which its
+       own comment rejects in the right terms: two requests on every ticker
+       view, paid by every reader, to serve the few who switch names. Thirty
+       bytes on a forty-kilobyte card is the cheaper side of that trade by
+       three orders of magnitude.
+
+       NULL WHERE THE VENDOR SENT NOTHING, never the ticker repeated back: a
+       name that equals its own symbol is what an absent name looks like after
+       a fallback, and the renderer cannot tell those apart afterwards. */
+    nm: (row && typeof row.nm === "string" && row.nm.trim()) ? row.nm.trim() : null,
+    sector: (row && typeof row.sector === "string" && row.sector.trim())
+      ? row.sector.trim() : null,
     generatedAt: generatedAt || null,
     // The trading session the DATA describes, which is not the day the job
     // ran: a pre-open run reads the previous completed session.

@@ -2892,9 +2892,7 @@ function boardRow(r, s, rank, memory = null, origin = null) {
        a reader sees. If it DOES arrive, the name appears and no further
        change is needed anywhere. */
     nm: typeof s.full_name === "string" && s.full_name.trim() ? s.full_name.trim() : null,
-    netPrem: onWire(s.net_call_premium) || onWire(s.net_put_premium)
-      ? num(s.net_call_premium) - num(s.net_put_premium)
-      : null,
+    netPrem: netPremiumOf(s),
     fam: r.fam,
     // 42 sessions of closes, base-64 packed: two characters a session, so
     // the whole sparkline costs 84 bytes on a card that already measures in
@@ -4199,10 +4197,30 @@ const onWire = (v) => v !== undefined && v !== null && v !== "";
  * keeps an unquoted name out of both premium lists rather than parking it in
  * the middle of them.
  */
+/**
+ * The screener row's SIGNED NET PREMIUM, in whole US dollars, or null.
+ *
+ * ONE DERIVATION, THREE CALLERS, AND THE THIRD IS WHY THIS EXISTS. boardRow
+ * and moverRow each carried their own copy of `num(net_call) - num(net_put)`
+ * behind their own presence check — the comment on moverRow records what it
+ * cost when those two copies disagreed, a name with no quoted premium
+ * publishing a flat $0 on one surface and a null on the other. The archive is
+ * the third caller now, and a third copy is a third chance at the same bug.
+ *
+ * NULL, NOT ZERO, WHEN NEITHER LEG IS ON THE WIRE. `num()` answers 0 for a
+ * column the vendor never sent, so the presence check is the whole point: a
+ * name nobody priced and a name priced flat are different sessions, and once
+ * one is written as the other no later reader can separate them.
+ */
+function netPremiumOf(row) {
+  if (!row) return null;
+  if (!(onWire(row.net_call_premium) || onWire(row.net_put_premium))) return null;
+  return Math.round(num(row.net_call_premium) - num(row.net_put_premium));
+}
+
 function moverRow(row, tilt) {
   const close = num(row.close);
   const prev = num(row.prev_close);
-  const hasPremium = onWire(row.net_call_premium) || onWire(row.net_put_premium);
   const t = tilt || {};
   return {
     t: row.ticker,
@@ -4214,9 +4232,7 @@ function moverRow(row, tilt) {
     chg: prev > 0 && close > 0 ? Number(((close - prev) / prev).toFixed(5)) : null,
     // Signed US dollars. Positive is call premium bought over put premium
     // bought, which is a statement about the TAPE and not a forecast.
-    netPrem: hasPremium
-      ? Math.round(num(row.net_call_premium) - num(row.net_put_premium))
-      : null,
+    netPrem: netPremiumOf(row),
     relVolume: fixed(t.relVolume, 2),
     surpriseTilt: fixed(t.surpriseTilt, 3),
     // The vendor's own sector string, passed through verbatim or null. It is
@@ -6157,7 +6173,24 @@ async function main() {
 
   // 6. Score.
   const scored = scoreBoard(
-    unique.map((e) => e.features),
+    /* THE DOLLAR PREMIUM RIDES ON THE FEATURE ROW, and this is the only
+       place both halves are in hand: `e.features` is what scoreBoard scores
+       and `e.row` is the screener row the dollars are on. scoreBoard spreads
+       the feature row into its result, partitionSides slices that, and
+       scoresRows archives it — so one property here is what carries a
+       session's net premium into the dated key.
+
+       WITHOUT IT THE ARCHIVE WRITE IS A NO-OP AND SAYS NOTHING ABOUT IT.
+       shared/flows-scores.js reads `netPrem` off the pool row; the pool rows
+       never had one, so the field it added was absent on all hundred rows of
+       every dated key. The ledger filled from the BOARD backfill and looked
+       correct, which is exactly how a write that does nothing survives a
+       screenshot.
+
+       Derived through netPremiumOf, not re-derived here: three surfaces state
+       this number and the one thing they may not do is disagree about which
+       names have one. */
+    unique.map((e) => ({ ...e.features, netPrem: netPremiumOf(e.row) })),
     unique.map((e) => e.tilt),
     unique.map((e) => e.row.sector || ""),
     unique.map((e) => num(e.row.marketcap)),

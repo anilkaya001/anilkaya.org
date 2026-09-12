@@ -157,6 +157,12 @@ const truncated = cards.filter((c) =>
     aggressor: 550, pricedMove: 584, surface: 668, ivSurface: 640, oiDeltas: 661,
     marketRank: 865, path: 712, darkpool: 688, gamma: 795, skewTerm: 829,
     volContext: 756, topContracts: 1044, __score: 1034,
+    /* MEASURED THE SAME WAY AS THE TWENTY-THREE ABOVE — rendered at 1440 with
+       the real Latin Modern, panel content height off getBoundingClientRect,
+       both span-2 and so both 763px wide, the width scoreOverlay's 506 was
+       taken at. `__sessions` is the tallest panel in the registry and that is
+       what it is: twenty rows, five columns, three stats and a qualifier. */
+    premiumTrack: 460, __sessions: 996,
   };
   eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
      `the measured-height table covers every registry panel (${Object.keys(PANEL_H).length} ` +
@@ -244,8 +250,15 @@ const truncated = cards.filter((c) =>
      dies at "all four chain panels (0 do)", about the chain leg on a run where
      it is fine. Hence the same exclusion above that filter, where it fails
      first; the rest of the contract is here. */
-  eq(SENTINEL_KEYS.size, 2,
-     "the registry declares both sentinels — the score derivation and the key statistics");
+  /* THREE NOW: the score derivation, the key statistics and the session
+     ledger. The count is asserted rather than the names, and it is asserted
+     at all because the SET is what stops a sentinel leaking — a count that
+     drifts without anyone noticing is a sentinel added to the registry and
+     not to the set, which is the failure the comment above measures. Raising
+     it is a decision and it looks like one here. */
+  eq(SENTINEL_KEYS.size, 3,
+     "the registry declares all three sentinels — the score derivation, the key " +
+     "statistics and the session ledger");
   for (const key of SENTINEL_KEYS) {
     ok(TICKER_PANELS.some((p) => p.key === key),
        `the sentinel "${key}" is a panel the registry actually mounts`);
