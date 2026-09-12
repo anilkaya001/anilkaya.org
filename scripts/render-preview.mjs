@@ -324,6 +324,24 @@ if (CARDS && existsSync(CARDS)) {
         return r.fulfill({ contentType: "text/javascript", body: "" });
       }
     });
+    /* THE WEBFONT, BECAUSE THE STICKY BAR'S HEIGHT DEPENDS ON IT.
+       flows-ticker.js measures the bar and writes --ft-bar-h, which every
+       panel's scroll-margin-top is built from; its own comment records that
+       the identity row wraps at a different count under the fallback face and
+       that the first-paint height came out 42px short. Serving no fonts meant
+       this harness only ever rendered the fallback, so barH and --ft-bar-h
+       agreed here (148 = 148) while CI, which loads the real face, failed
+       with "panel 201, bar ends 218". A preview that cannot reproduce a
+       font-dependent layout is not previewing the page a reader gets. */
+    await page.route(/\/assets\/fonts\/[A-Za-z0-9._-]+\.(woff2?|ttf|otf)/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({
+          contentType: file.endsWith(".woff2") ? "font/woff2" : "font/woff",
+          body: readFileSync(path.join(ROOT, "assets/fonts", file)),
+        });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    });
     await page.route(/\/assets\/css\/[a-z0-9-]+\.css/i, (r) => {
       const file = new URL(r.request().url()).pathname.split("/").pop();
       try {
@@ -392,6 +410,18 @@ if (CARDS && existsSync(CARDS)) {
         blurbsInDoc: document.querySelectorAll(".ft-group-b").length,
         blurbsDrawn: [...document.querySelectorAll(".ft-group-b")]
           .filter((b) => b.getBoundingClientRect().width > 2).length,
+        /* THE STICKY BAR AND THE NUMBER PANELS SCROLL AGAINST. CI failed with
+           "panel 201, bar ends 218": an anchored panel landed 17px UNDER the
+           bar. --ft-bar-h is written from a measurement of the bar, so the
+           two disagreeing means the measurement was taken against a different
+           layout than the one the reader gets. Clipping .ft-group-b out of
+           flow changes that height, so this reports BOTH and their gap
+           instead of leaving the cause to be reasoned about. */
+        barH: Math.round((document.querySelector(".ft-bar") || { getBoundingClientRect: () => ({ height: 0 }) })
+          .getBoundingClientRect().height),
+        barVar: (document.getElementById("ftGrid") || document.querySelector(".ft-grid"))
+          ? getComputedStyle(document.getElementById("ftGrid") || document.querySelector(".ft-grid"))
+            .getPropertyValue("--ft-bar-h").trim() : "",
         statusLine: (document.getElementById("ftStatus") || {}).textContent || "",
         /* AND THE BOX IT DRAWS. Emptying the text left a bordered, padded
            element above the identity row, which reads as a region that

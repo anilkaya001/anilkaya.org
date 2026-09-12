@@ -422,7 +422,39 @@ const CEILING_KIB = {
      the same argument the 496 paragraph made: this route is still owed a
      reduction, so the next change to it should have to come here and argue
      rather than find room waiting. */
-  tickerPage: 405,
+
+  /* 405 -> 406, 2026-09-12, AND THE ROUTE CAME HERE AND ARGUED, which is what
+     the paragraph above asked for. Byte-exact, `git cat-file -s origin/main:`
+     against `stat`:
+
+       flows-dock.js   6,007    nav.js           2,560
+       flows-panels.js 56,840   flows-ticker.js 349,833  (+1,255)
+       total          415,240 B = 405.51 KiB — 520 B over
+
+     WHAT THE 1,255 BOUGHT, and it is two things with different standing.
+
+     Roughly 540 B is comment over a net DELETION: the 23 panel questions and
+     5 station blurbs stopped being drawn, a navigation clause went, and the
+     status sentence went. That part earns no raise, and it did not get one —
+     it was twice shortened instead, once when this ceiling first failed and
+     again ten minutes later.
+
+     The rest is a ResizeObserver on the sticky bar, and that is the gain the
+     route needed. CI failed at flows-ticker-contract:3735 with a deep-linked
+     panel landing 17px UNDER the bar (201 against 218): every panel's
+     scroll-margin-top is built from --ft-bar-h, seven hand-driven calls wrote
+     it, and clipping the blurb out of flow changed the bar in a way none of
+     the seven caught. THIS SANDBOX CANNOT REPRODUCE IT — barH and --ft-bar-h
+     agree at 148 locally with or without the webfont served — so a better
+     guess at the missing call site would be a guess. Observing the bar is the
+     same argument syncBarHeight's own comment already makes for measuring
+     rather than assuming a constant, and it is the fix that holds without
+     knowing which reflow did it.
+
+     406 LEAVES 344 B, tighter than the 739 above, deliberately: the observer
+     closes the defect but the route is still owed the comment strip, and the
+     next change to it should have to come here too. */
+  tickerPage: 406,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

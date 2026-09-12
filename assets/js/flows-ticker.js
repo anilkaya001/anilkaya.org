@@ -5563,6 +5563,19 @@
     }
   }
 
+  /* AND WHENEVER THE BAR CHANGES SIZE, which holds without knowing WHY.
+
+     Seven hand-driven calls are a guess about every way a sticky bar can
+     rewrap, and the guess was wrong: clipping the station blurb out of flow
+     made the bar shorter and CI landed a deep-linked panel 17px under it
+     (201 against 218). This sandbox cannot reproduce that — barH and
+     --ft-bar-h agree at 148 here with or without the webfont — so the fix is
+     not a better guess at the missing call site. The observer measures
+     because it changed. The hand calls stay for the first paint. */
+  if (typeof ResizeObserver === "function" && barEl) {
+    new ResizeObserver(() => { syncBarHeight(); }).observe(barEl);
+  }
+
   /* ---------- deep links -------------------------------------------
 
      THERE WAS NO WAY TO SEND ANYONE A PANEL. Two anchor shapes now exist and
