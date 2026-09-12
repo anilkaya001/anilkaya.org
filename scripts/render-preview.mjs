@@ -739,6 +739,31 @@ if (CARDS && existsSync(CARDS)) {
        position a reader arriving at this address would find it in. Measured:
        resizing gave the bar a top of 70 while a fresh load at the same width
        gives it its real one. The contract mounts a fresh page; so does this. */
+    /* SEVERAL NARROW WIDTHS, NOT ONE, and that is the lesson of the defect
+       this check was added for. The public suite asserts this geometry at
+       NINE widths; this harness asserted it at 320 alone and therefore could
+       not see a tier boundary. 400px is the one that matters most here: the
+       Flows search is hidden below 25rem, so at exactly 400 it comes back
+       into a bar that is still narrow — the same overflow one tier up, which
+       a single 320px sample would never reach. */
+    for (const w of [360, 390, 400, 410, 420, 440, 460, 479, 480, 520, 640]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.waitForSelector(".ft-tab", { timeout: 15000 });
+      seen["topbar" + w] = await page.evaluate(() => {
+        const pill = document.querySelector(".pill");
+        if (!pill) return "no pill";
+        const parts = [pill, document.querySelector(".topbar__social"),
+          document.querySelector(".flows-find"), document.querySelector(".topbar__tools")]
+          .filter(Boolean).filter((n) => n.getBoundingClientRect().width > 0);
+        const right = Math.max(...parts.map((n) => n.getBoundingClientRect().right));
+        const off = [...pill.querySelectorAll("a")]
+          .filter((a) => a.getBoundingClientRect().right > window.innerWidth + 1)
+          .map((a) => a.textContent.trim().slice(0, 12));
+        return Math.round(window.innerWidth - right) + (off.length ? " OFF:" + off.join(",") : "");
+      });
+    }
+
     await page.setViewportSize({ width: 320, height: 900 });
     await page.reload({ waitUntil: "networkidle" });
     await page.waitForSelector(".ft-tab", { timeout: 15000 });

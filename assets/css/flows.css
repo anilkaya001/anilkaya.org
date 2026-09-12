@@ -3950,21 +3950,34 @@ body.is-stale .flows-tablewrap {
   .flows-find-i { width: 7ch; }
 }
 
-/* THE SEARCH LEAVES THE BAR ON THE NARROWEST PHONES, and it is the only thing
-   in it that has somewhere else to be. Measured at 320px: the Flows bar ran
-   86px past the viewport — far worse than the public bar's 5px, because this
-   one carries a search field, an avatar and a sign-out button on top of the
-   same four-tab pill. The tabs are what must not wrap (the tier above says
-   so), the identity and the way out belong together where a reader looks for
-   them, and the ticker search is reachable one tap away: /flows/ticker/ serves
-   its own find field in the fixed band, and the rail's "Ask the data" takes a
-   name in prose.
+/* THE SEARCH LEAVES THE BAR ON A PHONE, and it is the only thing in it that
+   has somewhere else to be. Measured at 320px: the Flows bar ran 86px past
+   the viewport — far worse than the public bar's 5px, because this one
+   carries a search field, an avatar and a sign-out on top of the same
+   four-tab pill. The tabs are what must not wrap (the tier above says so),
+   the identity and the way out belong together where a reader looks for them,
+   and the ticker search is one tap away: /flows/ticker/ serves its own find
+   field in the fixed band, and the rail's "Ask the data" takes a name in
+   prose.
+
+   29.99rem, NOT 25rem, AND THE FIRST DRAFT WAS 25. Written there it fixed
+   320px and opened a hole from 401 to 479: the search came back at 25rem
+   while the pill kept its wider size until 30rem, so the bar overflowed by
+   18px at 420 and read as FIXED at 320, 390 and 400 either side of it. The
+   sweep is what found it — 400 measured +18 and 420 measured −18, twenty
+   pixels of viewport making it thirty-six worse, which is a tier boundary and
+   nothing else. Hiding until 30rem lines the search up with the tier that
+   also restores the pill's size, so the two changes happen together instead
+   of 79px apart. Measured after, in slack: 11 at 320, 18 from 360 to 460, 19
+   at 479 and 480, 21 at 520, 26 at 640 — positive everywhere, no tab
+   off-screen.
 
    THIS ROUTE IS GATED, so tests/regression.mjs — which asserts exactly this
-   geometry on the eleven public pages — cannot reach it. scripts/render-preview
-   now measures the same thing on the ticker page, which is how the 86px was
-   found at all. */
-@media (max-width: 25rem) {
+   geometry on the eleven public pages, at nine widths — cannot reach it.
+   scripts/render-preview measures the same thing on the ticker page, and it
+   samples a sweep rather than one width for the reason above: a single 320px
+   sample called this fixed while 420 was broken. */
+@media (max-width: 29.99rem) {
   .flows-find { display: none; }
 }
 
