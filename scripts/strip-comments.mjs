@@ -245,6 +245,31 @@ export function stripTree({ check = false, dir = "assets/js" } = {}) {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
+  /* AN UNKNOWN FLAG IS A REFUSAL, NOT A DEFAULT, and this guard was written
+     the minute after the hole it closes was found the hard way.
+
+     This script's write mode REWRITES 47 SOURCE FILES IN PLACE, and its own
+     header says it must run in the deploy workspace and never as a commit.
+     Argument handling was one `includes("--check")`: every other argument —
+     including a misremembered `--out DIR` — fell through to write mode, which
+     is the destructive branch. So `strip-comments.mjs --out /tmp/somewhere`,
+     typed by someone expecting a copy elsewhere, stripped the repository
+     instead. Nothing was lost that time because the tree was committed and
+     pushed a minute earlier; that is luck, and luck is not a guard.
+
+     The rule is the one this repository applies to payloads: an input that
+     was not understood is refused rather than interpreted generously. */
+  const KNOWN = new Set(["--check"]);
+  const unknown = process.argv.slice(2).filter((a) => !KNOWN.has(a));
+  if (unknown.length) {
+    console.error("strip-comments: unknown argument" + (unknown.length > 1 ? "s" : "") +
+      ": " + unknown.join(" "));
+    console.error("  usage: node scripts/strip-comments.mjs [--check]");
+    console.error("  There is no --out: this script rewrites assets/js in place, which is");
+    console.error("  why it belongs in a deploy workspace and never in a commit. Run it with");
+    console.error("  --check to measure, or from a disposable checkout to produce stripped files.");
+    process.exit(2);
+  }
   const check = process.argv.includes("--check");
   const r = stripTree({ check });
   const saved = r.before - r.after;
