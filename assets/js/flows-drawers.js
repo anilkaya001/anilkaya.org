@@ -2279,14 +2279,27 @@
         "not a path, and the window picker above can widen it");
     }
 
-    /* A SYMMETRIC DOMAIN AROUND ZERO, off the window's own extreme. Scaling
-       each side to its own extreme would make a −$2M bar and a +$40M bar the
-       same length, which is the one thing a signed chart must not do. */
-    const peak = vals.reduce((m, v) => (Math.abs(v) > m ? Math.abs(v) : m), 0) || 1;
+    /* THE DOMAIN IS THE RANGE THE WINDOW OCCUPIES, ANCHORED AT ZERO.
+
+       ONE SCALE FOR BOTH SIDES is the property that matters: scaling each
+       side to its own extreme would make a −$2M bar and a +$40M bar the same
+       length, which is the one thing a signed chart must not do. A symmetric
+       ±peak axis has that property and pays for it with half an empty plot
+       whenever the window does not straddle zero — which, for a name whose
+       flow leans one way, is most windows. Anchoring at zero and taking the
+       real range keeps the single scale and spends the whole plot on it. */
+    const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+    const span = (hi - lo) || 1;
+    /* THE WINDOW'S EXTREME, SIGNED, for the stat list below. It was printed
+       as a magnitude — "$11.6M" under "Largest session" on a series where
+       every session was NEGATIVE — which reads as the largest inflow on a
+       chart that has none. The extreme is whichever end is further from zero,
+       and it keeps its sign. */
+    const peak = Math.abs(lo) > Math.abs(hi) ? lo : hi;
     const W = panelWidth(host), H = 128;
     const padT = 10, padB = 26, padL = 4, padR = 4;
     const plotW = W - padL - padR, plotH = H - padT - padB;
-    const yOf = (v) => padT + (1 - (Math.max(-peak, Math.min(peak, v)) + peak) / (2 * peak)) * plotH;
+    const yOf = (v) => padT + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * plotH;
     const step = rows.length > 1 ? plotW / rows.length : plotW;
     const barW = Math.max(1.2, Math.min(22, step * 0.7));
     const xOf = (i) => padL + step * (i + 0.5);
@@ -2350,7 +2363,7 @@
 
     host.append(statList([
       ["Net, window", signed(net, (a) => "$" + compact(a))],
-      ["Largest session", "$" + compact(peak)],
+      ["Largest session", signed(peak, (a) => "$" + compact(a))],
       ["Call-side / put-side", up + " / " + down],
       ["Priced sessions", vals.length + " of " + rows.length],
     ]));

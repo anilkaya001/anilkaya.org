@@ -967,9 +967,37 @@
      by not saying a number, which is the only honest thing a tile can do —
      and then says WHICH of the four silences the dash stands for, because
      the dash alone is one glyph for four facts. */
-  function paintVerdict(into, long, short, market, alerts) {
+  function paintVerdict(into, long, short, market, alerts, pulse) {
     const breadth = (market && market.breadth) || {};
     const premium = (market && market.premium) || {};
+
+    /* THE TWO LEAN TILES GET THEIR OWN RECENT HISTORY, out of the same daily
+       totals the flow chart draws — so the sparkline on a tile and the bars
+       in the region below it are the same numbers, and a reader who compares
+       them finds them agreeing.
+
+       DERIVED HERE AND NOT PUBLISHED ANYWHERE: a daily lean is
+       (call − put) / (call + put) per session, which is the same construction
+       `premium.tilt` uses for today. That is why the line can sit under
+       today's figure at all — it is the same quantity, one point a session,
+       rather than a second measurement with a similar name.
+
+       NEWEST LAST, because a line runs left to right and the payload orders
+       these newest first. Reversed on a copy: the array is the payload's. */
+    const daily = (() => {
+      const tot = pulse && pulse.totals;
+      if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
+      const rows = tot.rows.slice().reverse().slice(-21);
+      const lean = [], gross = [];
+      for (const r of rows) {
+        const c = isNum(r && r.callPrem), pu = isNum(r && r.putPrem);
+        if (c === null || pu === null) { lean.push(null); gross.push(null); continue; }
+        const g = Math.abs(c) + Math.abs(pu);
+        lean.push(g > 0 ? (c - pu) / g : null);
+        gross.push(g);
+      }
+      return { lean, gross };
+    })();
 
     /* FOUR SILENCES, FOUR SENTENCES, ON A TILE. Both tilt tiles printed "not
        measured this session" whenever the ratio was null — whether
@@ -1096,7 +1124,14 @@
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
         null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears]],
       ["Lean · names", pct(bt, 1), tone(bt), btSilence, ["signed", bt]],
-      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence, ["signed", pt]],
+      /* THE DOLLAR LEAN CARRIES ITS RECENT HISTORY where the name lean cannot:
+         `totals` is a premium series, so a daily dollar lean is derivable from
+         it and a daily NAME lean is not — that would need a breadth count a
+         session, which no key publishes. One tile gets a line and the other a
+         bar, and the difference is what the archive holds rather than a
+         design choice. */
+      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence,
+        daily && daily.lean ? ["spark", daily.lean] : ["signed", pt]],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
         tileSilence(alerts, seen !== null, null), flagSpread],
     ];
@@ -1146,6 +1181,44 @@
         const w = (a / (a + b)) * 100;
         svg.append(svgEl("rect", { class: "cc-viz-a", x: 0, y: 1, width: w, height: 6 }));
         svg.append(svgEl("rect", { class: "cc-viz-b", x: w, y: 1, width: 100 - w, height: 6 }));
+        return svg;
+      }
+      /* A SERIES, AS A LINE, WHICH IS WHAT A TILE CANNOT SAY IN ONE FIGURE.
+
+         "−2.5%" is today. Whether today is the third session leaning the same
+         way or a reversal of a fortnight is a different fact, and the tile
+         had no room for it in words. Scaled to the SERIES' own range and
+         anchored at zero where the series crosses it, so the line's shape is
+         the reading and its height is not comparable to any other tile's —
+         which is why no value is drawn beside it. The figure above is the
+         number; this is its recent history and nothing more.
+
+         A POLYLINE AND NOT AN AREA: an area fill under a signed series reads
+         as a quantity accumulated, and this is a level at each point. */
+      if (spec[0] === "spark") {
+        const vals = Array.isArray(spec[1]) ? spec[1].map((v) => isNum(v)) : [];
+        const seen = vals.filter((v) => v !== null);
+        if (seen.length < 3) return null;
+        const lo = Math.min(0, ...seen), hi = Math.max(0, ...seen);
+        const range = (hi - lo) || 1;
+        const step = vals.length > 1 ? 100 / (vals.length - 1) : 100;
+        const pts = [];
+        vals.forEach((v, i) => {
+          if (v === null) return;
+          pts.push((step * i).toFixed(2) + "," + (8 - ((v - lo) / range) * 8).toFixed(2));
+        });
+        if (pts.length < 3) return null;
+        /* THE ZERO RULE ONLY WHERE ZERO IS INSIDE THE RANGE. Drawn at the
+           edge of a one-sided series it is not a reference, it is a border. */
+        if (lo < 0 && hi > 0) {
+          const zy = (8 - ((0 - lo) / range) * 8).toFixed(2);
+          svg.append(svgEl("line", { class: "cc-viz-z", x1: 0, x2: 100, y1: zy, y2: zy }));
+        }
+        const last = seen[seen.length - 1];
+        svg.append(svgEl("polyline", {
+          class: "cc-viz-s" + (last < 0 ? " is-neg" : last > 0 ? " is-pos" : ""),
+          points: pts.join(" "), fill: "none",
+        }));
         return svg;
       }
       /* A DISTRIBUTION, WHICH THE COUNT BESIDE IT CANNOT CARRY. Scaled to the
@@ -1228,42 +1301,47 @@
     box.hidden = !said;
   }
 
-  /* ---------- the session as it happened ---------------------------
+  /* ---------- the market's flow, session by session -----------------
 
      THE ONE REGION ON THIS PAGE WITH TIME ON AN AXIS. Everything else states
-     a level at the close; this states how the session got there, out of a
+     a level at today's close; this states how the market got here, out of a
      `pulse` key that has been published and served and drawn nowhere.
 
-     TWO BARS PER INTERVAL, EACH ON ITS OWN SIGN. Call premium and put premium
-     are NET figures — the vendor publishes them signed, and a bucket in which
-     more calls were sold than bought is a negative call premium. Drawing them
-     as two stacked magnitudes, or as one net line, would lose the fact that
-     both sides can move the same way at once, which is what a squeeze looks
-     like. So: a marked zero, green above and below it for calls, red above
-     and below for puts, and the sign is the reading.
+     DAILY, NOT INTRADAY, AND THAT IS A DECISION RATHER THAN WHAT WAS EASIEST.
+     The same key carries BOTH: `tide` is the vendor's intraday series at its
+     own cadence, and `totals` is one row a session. The first draft of this
+     region led on the intraday one and offered the daily periods beside it,
+     which meant one control sliding between two quantities on two different
+     clocks — the unit conflation this codebase keeps finding in its own
+     columns, rebuilt on purpose and then explained in a paragraph. The owner
+     asked for the daily reading and that resolves it: every period here is
+     the same series at a different length, so the control is a WINDOW and not
+     a source, and the note under the chart is one sentence instead of two.
 
-     THE PERIOD CONTROL CHANGES THE SOURCE AND SAYS SO. 1D is `tide` — the
-     vendor's intraday series at its own cadence. 1W, 1M and All are `totals`
-     — one row a SESSION. They are different quantities on different clocks,
-     and the note under the chart names the one that is drawn. A control that
-     slid silently between them would be the unit conflation this codebase
-     keeps finding in its own columns. */
+     `tide` is still on the payload and still unread. It is a different
+     question — "how did TODAY accumulate" — and it belongs to a panel that
+     asks it, not to this one.
+
+     TWO BARS PER SESSION, EACH ON ITS OWN SIGN. Call premium and put premium
+     are NET figures: the vendor publishes them signed, and a session in which
+     more calls were sold than bought is a negative call premium. Drawing them
+     stacked, or as one net line, would lose the fact that both sides can move
+     the same way at once — which is what a squeeze looks like. So: a marked
+     zero, green above and below it for calls, red above and below for puts,
+     and the sign is the reading. */
   const TIDE_PERIODS = [
-    ["1D", "tide", null],
     ["1W", "totals", 5],
     ["1M", "totals", 21],
+    ["3M", "totals", 63],
     ["All", "totals", null],
   ];
 
-  function tideSeries(pulse, source, span) {
-    if (source === "tide") {
-      const t = pulse && pulse.tide;
-      if (!t || t.status !== "ok" || !Array.isArray(t.points)) return null;
-      const rows = t.points
-        .map((pt) => ({ at: pt && pt.t, call: isNum(pt && pt.callPrem), put: isNum(pt && pt.putPrem) }))
-        .filter((r) => r.call !== null || r.put !== null);
-      return rows.length >= 2 ? rows : null;
-    }
+  /* ONE SOURCE, AND THE PARAMETER IS GONE WITH IT. While this read two keys
+     the shape had to carry which one; every period is `totals` now, so a
+     branch on a source would be a branch that cannot be taken — and a dead
+     branch is how the next reader concludes the other source is still live
+     here. `span` is a count of SESSIONS, null for the whole window. */
+  function tideSeries(pulse, span) {
     const tot = pulse && pulse.totals;
     if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
     /* THE PAYLOAD ORDERS THESE NEWEST FIRST and a time axis runs the other
@@ -1283,8 +1361,8 @@
        A button that selects an empty chart is worse than an absent one: it
        tells a reader the data exists and that they mis-clicked. */
     const live = TIDE_PERIODS
-      .map(([label, source, span]) => [label, source, span, tideSeries(pulse, source, span)])
-      .filter(([, , , rows]) => rows);
+      .map(([label, , span]) => [label, span, tideSeries(pulse, span)])
+      .filter(([, , rows]) => rows);
     if (!live.length) {
       quiet(into, "empty",
         "The pulse key carried no timestamped premium series for this session.");
@@ -1295,10 +1373,9 @@
        one chart behind two labels, and a reader who clicks between them and
        sees nothing move learns the control is decorative. */
     const seen = new Set();
-    const periods = live.filter(([, source, , rows]) => {
-      const sig = source + ":" + rows.length;
-      if (seen.has(sig)) return false;
-      seen.add(sig);
+    const periods = live.filter(([, , rows]) => {
+      if (seen.has(rows.length)) return false;
+      seen.add(rows.length);
       return true;
     });
 
@@ -1314,23 +1391,50 @@
         seg.append(b);
       });
 
-      const [label, source, , rows] = periods[active];
-      const W = 1000, H = 220, padT = 12, padB = 26, padL = 0, padR = 0;
+      const [label, , rows] = periods[active];
+      /* ROOM ON THE RIGHT FOR THE VALUE MARKS, and a little more at the top so
+         the highest label is not clipped by the viewBox. A label drawn
+         outside the box is a label nobody sees. */
+      const W = 1000, H = 230, padT = 20, padB = 26, padL = 0, padR = 96;
       const plotH = H - padT - padB, plotW = W - padL - padR;
-      let peak = 0;
+      /* THE DOMAIN IS THE RANGE THE DATA ACTUALLY OCCUPIES, ANCHORED AT ZERO.
+
+         A symmetric ±peak axis is the reflex for a signed series and it is
+         wrong whenever the series does not straddle zero: on a week where
+         every session cleared positive premium, half the plot was empty and
+         every bar was drawn at half the height it had room for. Anchored
+         instead — lo = min(0, smallest), hi = max(0, largest) — the axis
+         covers exactly what was measured and still contains its own origin,
+         so a positive bar and a negative bar are drawn against ONE linear
+         scale and remain comparable by height. That is the property a
+         symmetric axis was protecting, and it survives.
+
+         The three value marks below are drawn from lo, 0 and hi for the same
+         reason: they are the ends of the scale and its origin, which is what
+         fixes a linear axis. */
+      let lo = 0, hi = 0;
       for (const r of rows) {
-        if (r.call !== null && Math.abs(r.call) > peak) peak = Math.abs(r.call);
-        if (r.put !== null && Math.abs(r.put) > peak) peak = Math.abs(r.put);
+        for (const v of [r.call, r.put]) {
+          if (v === null) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
       }
-      if (!(peak > 0)) peak = 1;
-      const yOf = (v) => padT + (1 - (Math.max(-peak, Math.min(peak, v)) + peak) / (2 * peak)) * plotH;
+      if (!(hi > lo)) { hi = 1; lo = 0; }
+      const span = hi - lo;
+      const yOf = (v) => padT + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * plotH;
       const zeroY = yOf(0);
       const step = plotW / rows.length;
-      /* TWO BARS IN THE SLOT, SIDE BY SIDE, WITH A HAIR BETWEEN THEM. At 78
-         intraday buckets each pair gets under 13 units of a 1000-unit box, so
-         the gap is a fraction of the slot rather than a constant — a constant
-         wins at 20 rows and erases the bars at 78. */
-      const barW = Math.max(0.6, (step * 0.78) / 2);
+      /* TWO BARS IN THE SLOT, SIDE BY SIDE, AND THE WIDTH IS CAPPED.
+
+         The gap is a FRACTION of the slot rather than a constant, because a
+         constant wins at twenty sessions and erases the bars at sixty. The
+         cap is what the first draft was missing: at five sessions the slot is
+         200 units of a 1000-unit box and a proportional bar is 78 of them —
+         drawn, that is a block, not a bar, and a week of flow read as five
+         coloured panels. Capped, a short window is sparse bars on a wide
+         axis, which is what five sessions actually are. */
+      const barW = Math.max(0.6, Math.min(22, (step * 0.78) / 2));
 
       const svg = svgEl("svg", { class: "cc-tide-c", viewBox: "0 0 " + W + " " + H,
         preserveAspectRatio: "none", role: "img" });
@@ -1349,7 +1453,6 @@
         }
       });
       svg.append(g);
-      svg.append(svgEl("line", { class: "cc-tide-z", x1: padL, x2: W - padR, y1: zeroY, y2: zeroY }));
 
       /* THE ENDS OF THE AXIS AND THE SCALE, AND NOTHING ELSE. A tick per
          bucket is 78 labels; a tick every nth is a ruler whose spacing means
@@ -1368,32 +1471,51 @@
         t.textContent = text;
         svg.append(t);
       }
+
+      /* THREE VALUE MARKS ON THE RIGHT: the two extremes of the scale and its
+         zero. A bar is only measurable against a number, and "full height
+         $25.30B" in the corner told a reader what the TALLEST bar is worth
+         without telling them what a half-height one is. Three marks is the
+         fewest that fix a linear scale — the ends and the origin — and on a
+         symmetric axis they are the only three whose positions are known
+         without a tick ladder a reader has to count along.
+
+         RIGHT-HAND SIDE, WHICH IS WHERE THE SERIES ENDS. A left axis is read
+         before the data on a chart that runs left to right; this one is read
+         after, when the question is "how big was that". */
+      for (const v of [hi, 0, lo]) {
+        const y = yOf(v);
+        svg.append(svgEl("line", { class: "cc-tide-g", x1: padL, x2: W - padR, y1: y, y2: y }));
+        const lab = svgEl("text", { class: "cc-tide-y", x: W - padR - 4, y: y - 4, "text-anchor": "end" });
+        lab.textContent = v === 0 ? "$0" : usd(v);
+        svg.append(lab);
+      }
       svg.setAttribute("aria-label",
-        rows.length + (source === "tide" ? " intraday intervals" : " sessions") +
+        rows.length + " sessions" +
         " from " + (stamp(rows[0].at) || "the start of the window") +
         " to " + (stamp(rows[rows.length - 1].at) || "its end") +
-        ", call and put premium drawn as two signed bars per slot against a common " +
-        "scale whose full height is " + usd(peak) + ".");
+        ", call and put premium drawn as two signed bars a session against one common " +
+        "scale running from " + usd(lo) + " to " + usd(hi) + ".");
 
       const key = el("div", "cc-tide-k");
       key.append(el("span", "cc-tide-key is-call", "Call premium"));
       key.append(el("span", "cc-tide-key is-put", "Put premium"));
-      key.append(el("span", "cc-tide-scale", "full height " + usd(peak)));
+      /* THE LEGEND NO LONGER CARRIES THE SCALE. It said "full height $25.30B",
+         which is the same fact the top axis mark now states — in the place a
+         reader measures a bar against rather than in a corner. */
       into.append(key);
       into.append(svg);
 
-      /* WHICH SERIES IS ON SCREEN, IN WORDS, AND IT CHANGES WITH THE BUTTON.
-         This is a population-and-unit statement, so it never folds. */
+      /* THE POPULATION AND THE UNIT, IN WORDS. Every period draws the same
+         series at a different length, so this says what a bar IS once and
+         then says how many of them are on screen. It never folds: a reader
+         who does not know these are whole-session totals carried without
+         cumulation reads a different chart. */
       into.append(el("p", "cc-note",
-        source === "tide"
-          ? "1D is the vendor's intraday net-premium series at its own cadence — " +
-            rows.length + " intervals of this session, carried without cumulation or " +
-            "smoothing. Each bar is the premium that crossed in that interval, not a " +
-            "running total."
-          : label + " is DAILY totals, one bar a session over " + rows.length +
-            " sessions — a different series from the intraday one behind 1D, on a " +
-            "different clock. The two are not continuations of each other and a bar " +
-            "here cannot be compared by height to a bar there."));
+        label + " is " + rows.length + " session" + (rows.length === 1 ? "" : "s") +
+        " of the vendor's own daily call and put premium, one bar a session, carried " +
+        "without cumulation or smoothing. Each pair is what crossed that session — " +
+        "not a running total, and not a forecast of anything."));
     };
     draw();
   }
@@ -1945,6 +2067,75 @@
         "No basket carried a readable lean this session, so none is named."));
     }
 
+    /* ---- THE STRIP: ELEVEN BASKETS AT A GLANCE --------------------
+
+       THE TABLE BELOW IS THE RECORD AND THIS IS THE READING. Eleven rows of
+       five columns is the right shape for "what exactly did Energy clear" and
+       the wrong one for "where did the money go this session", which is the
+       question a reader opens this region with — and answering it from a
+       table means reading eleven names, finding the numeric column, and
+       ranking eleven figures by eye.
+
+       A CHIP IS A BASKET: its name, its signed lean, and a bar of its own
+       share. Ordered exactly as the table is — the publisher's ranking,
+       untouched — so the strip and the record cannot disagree about which
+       basket leads.
+
+       THE BAR IS THE LEAN RATIO AND NOTHING ELSE. Not the dollars: the
+       dollars span three orders of magnitude across eleven baskets, so a bar
+       scaled to them would draw nine baskets as a hairline and say only that
+       Technology is large, which every reader already knows. The ratio is
+       bounded to ±1 by construction and is what the publisher ranks on. The
+       dollar size rides in the chip's title, because a ratio with no size is
+       the half-reading this region's own qualifier warns about — and it is in
+       the table, in full, one scroll down. */
+    const strip = el("div", "cc-chips");
+    strip.setAttribute("role", "list");
+    for (const r of ordered) {
+      const v = isNum(r && r.leanRatio);
+      const chip = el("div", "cc-chip" + (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
+      chip.setAttribute("role", "listitem");
+      chip.append(el("span", "cc-chip-n", r.sector || r.fullName || r.etf || DASH));
+      chip.append(el("span", "cc-chip-v", v === null ? DASH : pct(v, 1)));
+
+      /* THE SHARE BAR, CENTRED ON ZERO, on the same ±1 scale for every chip
+         — so two chips side by side are comparable, which is the whole point
+         of putting them side by side. A basket with no readable lean gets NO
+         bar: a zero-width one at the centre is what a measured 0/0 would draw,
+         and 0/0 is undefined rather than neutral. */
+      if (v !== null) {
+        const bar = el("span", "cc-chip-bar");
+        const fill = el("i");
+        const half = Math.min(50, Math.abs(v) * 50);
+        fill.style.width = Math.max(1.5, half) + "%";
+        fill.style.left = (v < 0 ? 50 - half : 50) + "%";
+        bar.append(fill);
+        chip.append(bar);
+      }
+
+      const net = isNum(r && r.netPremiumUsd), gross = isNum(r && r.grossPremiumUsd);
+      chip.title = v === null
+        ? (typeof r.reason === "string" && r.reason ? r.reason
+          : "This basket carried no readable pair of premium sums, so it has no lean.")
+        : (r.etf ? r.etf + ": " : "") + pct(v, 1) + " of its own two-sided premium leaned " +
+          (v > 0 ? "bullish" : v < 0 ? "bearish" : "neither way") +
+          (net === null ? "" : ", on " + usd(net) + " net") +
+          (gross === null ? "" : " of " + usd(gross) + " gross") + ".";
+      strip.append(chip);
+    }
+    into.append(strip);
+
+    /* THE TABLE IS THE RECORD AND IT FOLDS. Everything in it is also stated
+       above — the strip carries every basket, its lean and its rank — so what
+       the fold hides is the exact dollars, which is METHOD by this section's
+       own rule: how a reading was made, not what it means. The qualifiers
+       stay open, below, where they always were.
+
+       A <details> and not a removal: folding is never deletion here, so the
+       rows stay in textContent for a find-in-page. */
+    const fold = el("details", "cc-fold");
+    const sum = el("summary", null, "All eleven baskets, with the dollars");
+    fold.append(sum);
     const wrap = tableWrap("Sector option-premium lean, most bullish first");
     const table = el("table", "cc-tbl");
     /* UNITS TRAVEL WITH NUMBERS, AND A RATIO AND A DOLLAR SUM NEVER SHARE A
@@ -2007,7 +2198,8 @@
     }
     table.append(body);
     wrap.append(table);
-    into.append(wrap);
+    fold.append(wrap);
+    into.append(fold);
 
     /* THE CAVEATS IN THE OPEN, THE DERIVATION BELOW THEM, AND EVERY WORD
        KEPT EITHER WAY: moved, not trimmed. `.ft-how` and `.ft-how-s` are
@@ -2020,8 +2212,22 @@
        drifted — onto `.ft-link` and onto `.ft-tab::after` — so the comment
        pointed confidently at the wrong rules. tests/contracts.mjs argues the
        convention in full and fails a citation that outlives its file. */
+    /* ONE QUALIFIER A LINE, NOT SEVEN JOINED INTO A PARAGRAPH.
+
+       Every sentence here has to stay — each one is a population, a unit, an
+       ordering or a NOT-CLAIMED, and this section may not fold any of those.
+       What it may do is stop running them together: joined with a space they
+       rendered as an eleven-line block of prose under a chart, which is the
+       shape a reader skips, and skipping it is how a qualifier fails to
+       qualify. As a list each claim is found in one glance and read on its
+       own — the same words, the same count, none of them folded.
+
+       This is a DIFFERENT operation from the fold above, and the difference
+       is the rule: the fold hides method and this only re-sets qualifiers. */
     if (caveats.length) {
-      into.append(el("p", "fc-note is-qualifier cc-ln-note", caveats.join(" ")));
+      const box = el("ul", "fc-note is-qualifier cc-ln-note");
+      for (const c of caveats) box.append(el("li", null, c));
+      into.append(box);
     }
     appendMethod(into, method, "How this lean was derived");
   }
@@ -2702,7 +2908,7 @@
       [lng, sht], market,
       [alerts && alerts.readAt, pulse && pulse.readAt, lean && lean.readAt,
         news && news.readAt, market && market.generatedAt]);
-    paintVerdict(verdictHost, lng, sht, market, alerts);
+    paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
     /* THE SESSION AS IT HAPPENED, AND THE SPLIT IT ENDED ON. Both read keys
        already in this closure and both were unreachable before this change. */
     const tideHost = host("ccTide"), tideSeg = host("ccTideSeg");

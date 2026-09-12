@@ -3,34 +3,76 @@
    Loaded on every page (home + articles).
    ============================================================= */
 
+/* ---- Inter (Rasmus Andersson, SIL OFL 1.1) ----
+
+   THE FACE FLOWS IS SET IN. The section was in Latin Modern, which is a book
+   face: it is beautiful in prose and wrong for a dense instrument panel,
+   where the job is a hundred small figures read at a glance rather than a
+   paragraph read in sequence. The owner's design for both Flows pages is set
+   in a neutral grotesque and this is it.
+
+   ONE FILE PER SUBSET AND BOTH ARE VARIABLE, weight 400 to 700 in a single
+   container: 48 KB latin + 19 KB greek against the four static Latin Modern
+   faces it replaces on this section. Nothing outside /flows/ changes — the
+   Academy keeps Latin Modern for prose and JetBrains Mono for notation.
+
+   THE GREEK SUBSET IS NOT OPTIONAL. Flows prints Γ (the gamma regime) and Δ
+   (every score move, every open-interest change), both outside the latin
+   range — without this file they fall back to the system face mid-string,
+   beside the number that is the reading. tests/contracts.mjs checks both
+   ranges rather than trusting the family name. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  /* A RANGE, NOT A WEIGHT. The variable axis covers 400-700, so every weight
+     the section asks for is drawn by this file rather than synthesised. */
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-latin.woff2?v=163") format("woff2");
+  /* U+2212 IS IN HERE and it is the one that matters: it is the minus sign
+     every negative reading on the section is set with. */
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-greek.woff2?v=163") format("woff2");
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-038A,
+    U+038E-03A1, U+03A3-03FF;
+}
+
 /* ---- Latin Modern (GUST e-foundry, GUST Font License / OFL) ---- */
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=163") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=163") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=163") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=163") format("woff2");
 }
 
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
@@ -68,7 +110,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=163") format("woff2");
   /* The latin range carries U+2212 MINUS SIGN, which every negative number on
      this site is written with rather than a hyphen. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -80,7 +122,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=162") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=163") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }

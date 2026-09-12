@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "162";
+export const ASSET_VERSION = "163";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -464,7 +464,7 @@ ${neuronDock(summary)}
   <nav class="cc-jump" aria-label="Overview sections">
     <a href="#ccChgH">Changes</a><a href="#ccBullH">Candidates</a>
     <a href="#ccAlertsH">Activity</a><a href="#ccEventsH">Catalysts</a>
-    <a href="#ccTideH">Intraday</a><a href="#ccLeanH">Sectors</a>
+    <a href="#ccTideH">Daily flow</a><a href="#ccLeanH">Sectors</a>
     <a href="#ccSplitH">Split</a><a href="#ccSpineH">Distribution</a>
   </nav>
   <div class="cc">
@@ -487,23 +487,23 @@ ${neuronDock(summary)}
 
     <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
 
-    <!-- THE SESSION AS IT HAPPENED, WHICH THIS PAGE HAS NEVER DRAWN.
-         Every other region here reports a LEVEL at the close; the pulse key
-         has carried a timestamped net-premium series all along and no route
-         asked for it. Call and put premium are drawn as two bars from a marked
-         zero at each interval, each on its own sign, because both are net
-         figures that go negative and an unsigned bar would turn premium sold
-         into premium bought.
+    <!-- HOW THE MARKET GOT HERE, WHICH THIS PAGE HAS NEVER DRAWN.
+         Every other region here reports a LEVEL at today's close; the pulse
+         key has carried a dated call/put premium series all along and no
+         route asked for it. Both are drawn as two bars from a marked zero at
+         each session, each on its own sign, because both are net figures that
+         go negative and an unsigned bar would turn premium sold into premium
+         bought.
 
-         THE PERIOD CONTROL SWITCHES THE SOURCE, NOT THE ZOOM, and the note
-         under the chart says which one is drawn: 1D is the intraday tide at
-         the vendor's own cadence, and the wider periods are DAILY totals. Two
-         different quantities on two different clocks — offering them from one
-         control is only honest if the control says so. -->
+         DAILY, AND THE PERIOD CONTROL IS A WINDOW RATHER THAN A SOURCE: every
+         length offered is the same series, so a reader moving between them is
+         changing how far back they look and nothing else. The same key also
+         carries an intraday series; it answers a different question — how did
+         TODAY accumulate — and is left to a panel that asks it. -->
     <section class="cc-region cc-tide" aria-labelledby="ccTideH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccTideH">Intraday flow</h2>
-        <div class="cc-seg" id="ccTideSeg" role="group" aria-label="Period this flow is drawn over"></div>
+        <h2 class="cc-h-t" id="ccTideH">Daily flow</h2>
+        <div class="cc-seg" id="ccTideSeg" role="group" aria-label="How many sessions this flow is drawn over"></div>
       </div>
       <div class="cc-body" id="ccTide"></div>
     </section>

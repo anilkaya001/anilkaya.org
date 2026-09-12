@@ -62,41 +62,44 @@
   --flow-mag-dim: color-mix(in srgb, var(--ink-dim) 55%, transparent);
   --flow-surface: color-mix(in srgb, var(--bg-elev) 92%, transparent);
 
-  /* ONE FAMILY, AND THIS TOKEN IS WHAT USED TO BE --font-mono.
-     Flows is set entirely in Latin Modern. The 158 rules below that once
-     said `var(--font-figure)` now say `var(--font-figure)`, because the face
-     they resolve to is NOT monospaced and a token that keeps the old name
-     would be telling the next reader something measurement contradicts.
+  /* ONE FAMILY, AND IT IS INTER NOW, NOT LATIN MODERN.
 
-     THE JOB THE TOKEN STILL DOES, now that it no longer picks a second
-     family: it marks the DATA role — figures, tickers, labels, axis text —
-     which is what governs the weight discipline below and the letter-spacing
-     these rules carry. Prose uses --font-serif; both resolve to Latin Modern
-     today, and the distinction is what lets one of them move later.
+     Flows was set entirely in a book face. Latin Modern is a beautiful one
+     and it is the wrong tool for this section: a serif designed for
+     continuous prose, asked to carry a hundred small figures a reader takes
+     in at a glance. The two jobs pull in opposite directions — a book face
+     spends its detail on the texture of a paragraph, an interface face spends
+     it on legibility at 11px in a table cell. The owner's design for both
+     Flows pages is set in a neutral grotesque, and this is it.
 
-     WHY NUMERIC COLUMNS STILL LINE UP WITHOUT A MONOSPACED FACE. Measured in
-     Chromium against the four committed faces: Latin Modern's digits are
-     tabular WITHIN a weight — all ten are 0.500 em at weight 400 and 0.570 em
-     at 700, spread 0.0000px at both. So a column aligns as long as its cells
-     share a weight, which they do: `.c-num` sets no font-weight and nothing
-     overrides one, so every cell in a column inherits the same.
-     The 14.0% advance difference BETWEEN those weights is the trap — a column
-     that mixed 400 and 600 rows would misalign by that much per character —
-     so do not add a weight to a numeric cell rule without checking what its
-     column-mates resolve to.
+     THE ACADEMY IS UNTOUCHED. It keeps Latin Modern for prose and JetBrains
+     Mono for notation; this token and the section's prose face are the only
+     two that moved, so the change stops at the /flows/ boundary.
 
-     THE FALLBACK STACK DELIBERATELY SKIPS GEORGIA, which --font-serif lists.
-     Georgia's figures are OLDSTYLE: they vary in height and sit off the
-     baseline, which is correct for prose and wrong for a column of readings.
-     Times New Roman's are lining and tabular, so a reader who never receives
-     the webfont still gets a table rather than a ransom note.
+     THE JOB THE TOKEN DOES IS UNCHANGED: it marks the DATA role — figures,
+     tickers, labels, axis text — which is what governs the weight discipline
+     and the letter-spacing the rules below carry.
 
-     `font-variant-numeric: tabular-nums` is kept on the 38 rules that carry
-     it even though Latin Modern ships no `tnum` feature and the property is
-     therefore INERT against the webfont. It is not decoration: it is what
-     makes the fallback faces above tabular too, on the one path where this
-     token does not resolve to Latin Modern at all. */
-  --font-figure: "Latin Modern", "Latin Modern Roman", "Times New Roman", Times, serif;
+     WHY NUMERIC COLUMNS LINE UP. Inter ships a real `tnum` feature, so the
+     `font-variant-numeric: tabular-nums` on the 38 rules that carry it is
+     LIVE against the webfont rather than inert against it — which is what it
+     was under Latin Modern, whose digits happened to be tabular within a
+     weight and so aligned by luck rather than by instruction. The old note
+     recorded a 14% advance difference BETWEEN weights as the trap this
+     created; with a real tnum feature the trap is gone and a numeric cell may
+     take a weight without misaligning its column.
+
+     THE FALLBACK STACK IS THE SYSTEM UI FACE and not a serif: a reader who
+     never receives the webfont should get the same KIND of face, not a
+     different design. system-ui first, then the named faces it resolves to on
+     each platform, so the fallback is a grotesque everywhere. */
+  --font-figure: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  /* THE SECTION'S PROSE FACE, WHICH USED TO BE --font-serif. Notes, leads and
+     qualifiers are set here. It is the same family as the figures on purpose:
+     the design this follows uses one face at several weights, and a second
+     family on a page this dense is a second thing to parse. */
+  --font-ui: var(--font-figure);
 
   /* ---- GLASS, AND THE FLOOR THAT SET ITS ALPHA ----
 
@@ -203,7 +206,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=162") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=163") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -424,6 +427,17 @@
   min-height: 100vh;
   background: var(--flows-ground);
   background-attachment: fixed;
+  /* THE SECTION'S FACE, SET ONCE AT ITS ROOT. base.css gives the document
+     --font-serif; this is where /flows/ stops inheriting it. Everything under
+     here — prose, tables, notes, the 158 rules that name --font-figure
+     explicitly — now resolves to the same grotesque, which is what the design
+     this follows does: one family, several weights. The Academy is outside
+     this selector and keeps the serif. */
+  font-family: var(--font-ui);
+  /* THE FEATURE IS LIVE NOW. Inter ships `tnum`, so every column that asks
+     for tabular figures gets them from the webfont rather than from a
+     fallback face. Set here so a numeric rule cannot forget it. */
+  font-variant-numeric: tabular-nums;
 }
 
 .flows-kicker {
@@ -4168,7 +4182,7 @@ body.is-stale .flows-tablewrap {
 .ft-station-lead {
   grid-column: 1 / -1;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--font-ui);
   font-size: var(--fs-note);
   color: var(--ink-dim);
 }
@@ -6625,15 +6639,24 @@ body.is-stale .flows-tablewrap {
    reminder rather than a key a reader has to learn. */
 .cc-tide { grid-column: 1 / -1; }
 .cc-tide-c {
-  display: block; width: 100%; height: 220px;
+  display: block; width: 100%; height: 230px;
   margin: 0.2rem 0 0;
 }
 .cc-tide-b { shape-rendering: crispEdges; }
 .cc-tide-b.is-call { fill: var(--flow-up); }
 .cc-tide-b.is-put { fill: var(--flow-down); }
-.cc-tide-z {
+/* THE THREE VALUE RULES. The zero is the one a bar is signed against, so it
+   reads; the two extremes are fainter because they are a scale and not a
+   reading. */
+.cc-tide-g {
   stroke: var(--hairline); stroke-width: 1;
+  stroke-opacity: 0.5;
   vector-effect: non-scaling-stroke;
+}
+.cc-tide-y {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 13px;
 }
 .cc-tide-x {
   fill: var(--ink-faint);
@@ -8082,7 +8105,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    dollar figure sits, so it is set in italic serif at the reading size — the
    one value on the page that is a word, wearing a word's clothes. */
 .sg-facts dd.is-unbounded {
-  font-family: var(--font-serif);
+  /* ITALIC IS WHAT MARKS IT NOW, not a second family: the section is one
+     face, so "a word where a figure goes" is said with a slope rather than
+     with a serif. */
+  font-family: var(--font-ui);
   font-style: italic;
   font-size: var(--fs-note);
   color: var(--gold-celadon);
@@ -9287,3 +9313,119 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   color: var(--ink-faint);
   cursor: help;
 }
+
+/* ---------- the sector strip --------------------------------------
+   ELEVEN BASKETS AS ELEVEN CHIPS, in the publisher's own order. auto-fit with
+   a floor rather than a fixed eleven: at a pinned 78rem main, eleven tracks
+   are 62px each and a sector name does not fit in one, so the strip wraps to
+   two rows of six and five rather than clipping every label. */
+.cc-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  margin: 0.6rem 0 0;
+  /* THE CONTAINER CARRIES THE CHIP'S OWN GROUND. Eleven chips never fill a
+     grid of five, ten or twelve columns exactly, so there are always trailing
+     cells with nothing in them — and a container that let the region's
+     background show through them ended the strip with a pale slab that reads
+     as a twelfth basket. Same fill as a chip, so an empty cell is simply the
+     strip continuing and stopping. */
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+/* THE DIVIDERS ARE ON THE CHIPS, NOT IN THE GAP, and that is what eleven
+   chips in a five-column grid forced.
+
+   The verdict strip's construction — a 1px grid gap over a border-coloured
+   ground — draws every divider for free and is right there, because five
+   tiles fill five columns exactly. Eleven do not: the last row holds one chip
+   and four EMPTY cells, and an empty cell in that construction is a pane of
+   the divider colour, so the strip ended with a wide blank slab that reads as
+   a twelfth basket nobody named. Borders on the chip itself draw nothing
+   where there is no chip. The container clips the outermost edges. */
+.cc-chip {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.5rem 0.6rem 0.55rem;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+  cursor: help;
+}
+.cc-chip-n {
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cc-chip-v {
+  font-family: var(--font-figure);
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.cc-chip.is-pos .cc-chip-v { color: var(--flow-up); }
+.cc-chip.is-neg .cc-chip-v { color: var(--flow-down); }
+/* CENTRED ON ZERO AND ON ONE SCALE FOR EVERY CHIP: two chips side by side are
+   comparable, which is the only reason to put them side by side. */
+.cc-chip-bar {
+  position: relative; display: block;
+  width: 100%; height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ink-faint) 22%, transparent);
+  overflow: hidden;
+}
+.cc-chip-bar > i {
+  position: absolute; top: 0; bottom: 0;
+  border-radius: 2px;
+  background: var(--ink-dim);
+}
+.cc-chip.is-pos .cc-chip-bar > i { background: var(--flow-up); }
+.cc-chip.is-neg .cc-chip-bar > i { background: var(--flow-down); }
+/* A BASKET WITH NO READABLE LEAN GETS NO BAR AND A DIMMED LABEL — the chip is
+   present because the basket is, and says nothing because nothing was read. */
+.cc-chip.is-null { opacity: 0.55; }
+
+/* The sector record's disclosure. Same vocabulary as every other fold on the
+   section — a marked summary a keyboard and a thumb can open — so the two are
+   not two mechanisms. */
+.cc-fold { margin: 0.7rem 0 0; }
+.cc-fold > summary {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gold-mystic);
+  cursor: pointer;
+  list-style: none;
+}
+.cc-fold > summary::-webkit-details-marker { display: none; }
+.cc-fold > summary::before { content: "+ "; color: var(--gold-harvest); }
+.cc-fold[open] > summary::before { content: "\2212 "; }
+.cc-fold > summary:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+
+/* THE QUALIFIER LIST. Set as the note it is, with the marker outside the
+   measure so the claims align down a left edge a reader can run an eye along
+   rather than hunting sentence boundaries in a block. */
+ul.cc-ln-note { list-style: none; padding: 0; margin: 0.6rem 0 0; max-width: 78ch; }
+ul.cc-ln-note > li { position: relative; padding-left: 0.9rem; margin: 0 0 0.3rem; }
+ul.cc-ln-note > li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+/* THE TILE SPARKLINE. A stroke and no fill: an area under a signed series
+   reads as something accumulated, and every point here is a level. */
+.cc-viz-s {
+  stroke: var(--ink-dim);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.cc-viz-s.is-pos { stroke: var(--flow-up); }
+.cc-viz-s.is-neg { stroke: var(--flow-down); }

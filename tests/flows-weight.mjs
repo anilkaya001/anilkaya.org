@@ -737,7 +737,37 @@ const CEILING_KIB = {
      the structural fix this route is owed is the comment strip — measured,
      merged, and waiting on one Workers Builds field — and until it lands
      every raise here is paid for in a reader's parse time. */
-  overviewPage: 185,
+  /* 196, FOR THE SECTOR STRIP AND THE TILE THAT CARRIES ITS OWN HISTORY:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 166,062
+       total         199,765 B = 195.08 KiB, 10,325 B over 185
+
+     Two additions and one re-setting:
+
+       - THE SECTOR STRIP. Eleven baskets as eleven chips in the publisher's
+         own order, each with its signed lean and a bar on one shared ±1
+         scale. The region answered "what exactly did Energy clear" with an
+         eleven-row table and had no answer at all to "where did the money go
+         this session", which is what a reader opens it for — that question
+         was being answered by reading eleven names, finding the numeric
+         column and ranking eleven figures by eye. The table is the record and
+         folds behind a summary; every figure in it is also in the strip.
+       - THE DOLLAR LEAN'S RECENT HISTORY. A 21-session sparkline under the
+         tile's figure, derived from the same daily totals the flow chart
+         draws — so the line on the tile and the bars in the region below are
+         the same numbers. "−4.1%" is today; whether today is the third
+         session leaning that way or a reversal of a fortnight is a different
+         fact the tile could not state in words.
+       - THE QUALIFIERS ARE A LIST, NOT A PARAGRAPH. Seven claims joined with
+         spaces rendered as an eleven-line block under a chart, which is the
+         shape a reader skips — and a qualifier that is skipped does not
+         qualify. Same words, same count, none folded, one to a line.
+
+     196 LEAVES 916 B, which is again deliberately not room for anything. This
+     route and the ticker are now both within a kilobyte of their ceilings and
+     both are owed the same structural fix. */
+  overviewPage: 196,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
