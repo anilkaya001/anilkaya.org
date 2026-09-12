@@ -859,7 +859,52 @@ if (diffBase) {
     "base.css must declare U+2212 in the mono webfont's unicode-range, or every " +
     "minus sign on the site falls back to the system font");
   assert(/JBM-greek\.woff2/.test(base),
-    "and the greek subset ships too — Γ and σ are this section's own notation");
+    "and the greek subset ships too — the Academy's notation is σ, β and ε, and " +
+    "Latin Modern draws none of the three");
+
+  /* ---- AND THE SAME TRIPWIRE FOR THE FACE FLOWS IS NOW SET IN ----
+     Flows stopped using the mono family entirely: assets/css/flows.css defines
+     --font-figure as Latin Modern and its 158 rules resolve there, so on that
+     section the minus sign above is served by THESE files and not by the one
+     asserted above. The old assertion would have stayed green while every
+     negative number on the product's densest pages fell back.
+
+     Measured in Chromium against all four committed faces, rather than assumed
+     from the family name: U+2212, U+0393 Γ and U+0394 Δ are present, digits are
+     tabular within a weight (0.500 em at 400, 0.570 em at 700, spread 0.0000px),
+     and U+03C3 σ is ABSENT — which is why the ATR-normalised distances that used
+     to print "2.00σ" now print "2.00 ATR" and why no Flows surface may
+     reintroduce the glyph. */
+  for (const face of ["LM-regular.woff2", "LM-bold.woff2", "LM-italic.woff2", "LM-bold-italic.woff2"]) {
+    const lmPath = path.join(ROOT, "assets/fonts", face);
+    assert(existsSync(lmPath), `${face} is committed — Flows is set entirely in Latin Modern`);
+    const lm = readFileSync(lmPath);
+    assert.equal(lm.subarray(0, 4).toString("latin1"), "wOF2", `${face} is a woff2 container`);
+    assert(lm.subarray(0, 512).toString("latin1").includes("cmap") || lm.length > 8 * 1024,
+      `${face} carries a character map`);
+  }
+  const flowsCss = read("assets/css/flows.css");
+  assert(/--font-figure:\s*"Latin Modern"/.test(flowsCss),
+    "flows.css must define --font-figure as Latin Modern — it is what the section's " +
+    "figures, tickers, labels and axis text all resolve through");
+  assert(!/var\(--font-mono\)/.test(flowsCss),
+    "and nothing in Flows may reach for --font-mono: that token is the Academy's " +
+    "JetBrains stack, and a Flows rule using it puts a second family back on the page");
+  /* σ IS RETIRED FROM FLOWS, AND THIS IS WHAT KEEPS IT RETIRED. Latin Modern
+     does not draw it, so a renderer that reintroduces it does not fail — it
+     falls back to the system face for one glyph, mid-string, beside the number
+     that is the reading. That is silent, so it needs a test rather than a
+     convention. Comments are exempt: they explain the retirement. */
+  for (const file of filesUnder("assets/js", (f) => /flows-.*\.js$/.test(f))) {
+    const src = read(file);
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")   // block comments
+      .replace(/^\s*\/\/.*$/gm, "");       // line comments
+    assert(!code.includes("σ"),
+      `${file} must not emit σ: Latin Modern does not draw it, so it would fall back ` +
+      "to the system face for one glyph. Distances are printed in ATR (the card) or " +
+      "SD (the desk) — two different denominators the one glyph used to hide");
+  }
 }
 
 const assetIgnore = read(".assetsignore");

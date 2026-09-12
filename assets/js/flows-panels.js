@@ -130,7 +130,13 @@
   };
   const pct = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(2) + "%"));
   const pct1 = (v) => fmtOr(v, (n) => signed(n, (a) => (a * 100).toFixed(1) + "%"));
-  const sigma = (v) => fmtOr(v, (n) => signed(n, (a) => a.toFixed(2) + "σ"));
+  /* THE UNIT IS SPELLED, NOT LETTERED. This printed "2.00σ" until the type
+     stack became one family: Latin Modern draws Γ but not σ, so the one
+     glyph would have fallen to whatever the platform offered and changed
+     width mid-string — beside the number that IS the reading. "2.00 ATR"
+     needs no glyph outside the face and names the denominator outright,
+     which the notation only implied. */
+  const atrDist = (v) => fmtOr(v, (n) => signed(n, (a) => a.toFixed(2) + " ATR"));
   const px2 = (v) => fmtOr(v, (n) => neg(n.toFixed(2)));
   const vol1 = (v) => fmtOr(v, (n) => neg((n * 100).toFixed(1)) + "%");
   // "$-1.23B" prints the sign inside the currency symbol. The minus belongs in
@@ -169,24 +175,44 @@
 
   /* Mono character advance, in px per px of font-size divided by 10.
 
-     6.5, AND THE OLD 6 WAS TOO NARROW IN THE ONE DIRECTION THAT MATTERS.
-     MEASURED, in Chromium, on a real .fa-axis caption in the shipped webfont:
-     getComputedTextLength() / length = 6.421 at font-size 10px with
-     letter-spacing 0.4px. A 57-character axis caption is therefore 366 units
-     where the old constant predicted 342 — and a caption centred on a
-     24-unit-too-small half-width had its first glyph clipped off the canvas.
-     The same latent error sits under every renderGamma caption; it has simply
-     never had a string long enough to expose it.
+     5.5, AND THE FACE UNDERNEATH IT CHANGED, WHICH IS WHY THE NUMBER DID.
+     This was 6.5 against a MONOSPACED face (JetBrains Mono, 0.600 em +
+     0.4px letter-spacing = 6.421 measured), where one constant was an exact
+     width for every string. Flows is now set in Latin Modern, which is
+     proportional, so re-measuring was not optional: a constant fitted to the
+     old face is not a small error here, it is a different kind of quantity.
 
-     ERRS WIDE ON PURPOSE. A label estimated too narrow collides or leaves the
-     canvas silently; one estimated too wide falls back to a shorter form a
-     little sooner. Only one of those is a defect a reader can see.
+     RE-MEASURED the way the old figure was — getComputedTextLength() / length
+     at font-size 10px with letter-spacing 0.4px, in Chromium, on the real
+     caption strings — across ten of them:
+
+       "← short  net dealer Γ (log scale)  long →"      4.600
+       "strike distance from spot, in ATR(14) units"    4.842
+       "implied volatility by moneyness, 30-day"        4.862
+       "−0.76 ATR   −0.12 ATR   +1.40 ATR"             5.079   <- widest real
+       "WWWWWWWWWWWWWWWWWWWW"                          10.400   <- not a caption
+
+     5.5 is the widest real caption rounded up, +8.3%. The old constant kept
+     its own margin the same way (6.421 measured -> 6.5).
+
+     ERRS WIDE ON PURPOSE, AND THE GUARANTEE IS NOW WEAKER — say so rather
+     than let the next reader inherit the old sentence. A label estimated too
+     narrow collides or leaves the canvas silently; one estimated too wide
+     falls back to a shorter form a little sooner, and only the first is a
+     defect a reader can see. On a monospaced face that was a true bound for
+     ANY string. On a proportional one it is a bound for the strings that
+     exist: the 10.400 row above is what an all-caps-W caption would cost, and
+     nothing here would catch it. That is tolerable only because these
+     captions are a fixed set of English prose written in this repository —
+     never user input, never a ticker, never a vendor string. A caption built
+     from data that could contain runs of wide capitals must measure itself
+     with getComputedTextLength() instead of asking this constant.
 
      Hoisted to module scope from inside renderGamma when the renderers were
      extracted: it is the only text-metric constant on the page, and a second
      copy of it in a new drawer is a second number to keep in step. Scale it by
      the actual font size rather than using it raw at 9px. */
-  const AXIS_CH = 6.5;
+  const AXIS_CH = 5.5;
 
   /* ---------- panel scaffolding ----------------------------------- */
 
@@ -1082,7 +1108,7 @@
     el, svgEl, isNum, fmtOr, polarity, deadPanel, quietPanel, emptyPanel, statList,
     panelHead, panelWidth, appendMethod, leadReading, qualifier, mountId,
     niceStep, quantileAbs, symlog,
-    DASH, MINUS, neg, signed, pct, pct1, sigma, px2, vol1, money, compact,
+    DASH, MINUS, neg, signed, pct, pct1, atrDist, px2, vol1, money, compact,
     AXIS_CH,
   };
 

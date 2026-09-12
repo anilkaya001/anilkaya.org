@@ -154,6 +154,14 @@ const FLOWS_SCHEMA_SQL = [
      read time, so a change in the published rate corrects the history
      rather than leaving it stamped at yesterday's arithmetic. */
   "CREATE TABLE IF NOT EXISTS flows_ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0))",
+  /* THE STANDING SUMMARY, one row per scope — 'board' for the session,
+     'card:NVDA' for one name. Worker-owned rather than a flows_payload key,
+     because the cron's own rule is REFRESH, NEVER SEED: a cron that seeded
+     keys would be a second publisher with a second idea of the schema, and
+     the ingest allowlist admits no such key, so it would arrive with no
+     publisher-side validation. migrations/0007 carries the full argument,
+     including why the fingerprint is stored rather than recomputed. */
+  "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
 ];
 
 const MARKET_STALE_MS = 45 * 60 * 1000;
@@ -1352,6 +1360,15 @@ function neuronRates(env) {
  * subtraction from a real allowance, but it is only the truth about the
  * account under one assumption — that nothing else on it spent today.
  *
+ * THERE ARE TWO CALLERS ON THIS SITE NOW, AND THE ASSUMPTION STILL HOLDS.
+ * refreshFlowsSummary generates the standing summary on the cron and calls
+ * askRecordSpend exactly as the question box does, so both write the same
+ * flows_ai_usage row and this gauge still sees the whole of what this site
+ * spent. `assumesSoleSpender` stays true because it was never a claim about
+ * how many ROUTES spend — it is a claim about what else on the ACCOUNT might.
+ * A second lane keeping its own books is what would have broken it, which is
+ * why it does not.
+ *
  * I first built this to refuse the subtraction outright, on the grounds
  * that a figure it cannot fully see is a figure it should not print. That
  * was the wrong call. The assumption is not hidden and it is not
@@ -1468,6 +1485,162 @@ async function askRecordSpend(env, usage) {
     return spendShape(env, day,
       Number(row.calls) || 0, Number(row.tokens_in) || 0, Number(row.tokens_out) || 0);
   } catch { return null; /* the answer stands; only the gauge is poorer */ }
+}
+
+/**
+ * The standing summary, generated on the cron rather than on a page load.
+ *
+ * PER PAGE LOAD IS WRONG AT ANY TRAFFIC, and the arithmetic is the argument.
+ * One generation costs roughly 21 neurons against a 10,000/day allowance that
+ * belongs to the whole Cloudflare ACCOUNT and not to this route, so generating
+ * per load caps the entire site at a few hundred views a day, shared with the
+ * question box. Worse than the cost: two readers of the same board would get
+ * two different sentences about it, which is the property shared/flows-ask.js
+ * works hardest to guarantee — the same facts pick the same wording on every
+ * machine, forever.
+ *
+ * AND THE GATE IS CONTENT, NOT CLOCK. The cron fires 96 times a day. The
+ * briefing it summarises is published once a weekday, and refreshFlowsIntraday
+ * never rewrites that key — it merges `flowalerts` and refreshes `pulse`. So
+ * the facts move on exactly one firing, and fingerprinting them makes the
+ * spend proportional to what actually changed: ~21 neurons a day rather than
+ * ~2,016.
+ *
+ * WHAT IT DOES NOT DO IS FAIL THE OTHER CRON WORK. Like the two legs beside it
+ * in scheduled(), it is self-isolating: everything below either returns or is
+ * caught, and a model outage never reaches the market snapshot.
+ */
+async function refreshFlowsSummary(env) {
+  if (!env.DB) return;
+  await ensureFlowsTables(env);
+
+  const stored = await readFlowsPayload(env, "brief");
+  /* PENDING IS NOT AN ERROR AND NOT A QUIET MARKET. The briefing has not been
+     published for this session, so nothing was measured; writing a summary
+     saying the market was calm would be inventing the one thing this product
+     refuses to invent. The page has its own pending state and reads the
+     absence of a row as exactly that. */
+  if (stored === null) return;
+
+  let index;
+  try { index = JSON.parse(stored.payload); } catch { return; }
+  const facts = Array.isArray(index && index.facts) ? index.facts : [];
+  if (!facts.length) return;
+
+  const fingerprint = FLOWS_ASK.summaryFingerprint(facts);
+  const prior = await env.DB.prepare(
+    "SELECT fingerprint, llm, guard FROM flows_ai_summary WHERE scope = ?",
+  ).bind("board").first().catch(() => null);
+
+  /* WHEN TO SPEND NOTHING, and the second clause is the one worth reading.
+     Matching the fingerprint is not enough on its own: a firing that fell back
+     because the day's allowance was gone would otherwise store that fallback
+     and never try again, even after Cloudflare resets at 00:00 UTC and the
+     facts are still yesterday's. So an UNREACHABLE fallback is retried, and it
+     costs nothing to retry — a refused call spends no neurons.
+
+     A GUARD REFUSAL IS NOT RETRIED, and that asymmetry is deliberate. That
+     call DID spend, and the same facts through the same prompt will most
+     likely be refused the same way; retrying 95 more times would burn the
+     allowance to arrive at the sentence already on the page. */
+  if (prior && prior.fingerprint === fingerprint) {
+    const retryable = typeof prior.guard === "string" && prior.guard.startsWith("unreachable");
+    if (!retryable) return;
+  }
+
+  const plain = FLOWS_ASK.renderSummaryPlain(facts);
+  const write = (text, llm, model, guard) => env.DB.prepare(
+    "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
+    "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
+    "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
+  ).bind("board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+
+  const model = askModel(env);
+  /* NO MODEL CONFIGURED IS A STATE, NOT A FAILURE. CI passes FLOWS_ASK_MODEL
+     empty on purpose (tests/worker-server.mjs) because local inference bills
+     the same account-wide allowance as production, so this branch is the one
+     the suite exercises and it has to be correct. `guard` stays null: nothing
+     was generated, so nothing was refused. */
+  if (!env.AI || model === null) {
+    await write(plain, false, null, null).catch(() => {});
+    return;
+  }
+
+  let generated = null;
+  try {
+    const { system, user } = FLOWS_ASK.promptForSummary(facts);
+    const out = await env.AI.run(model, {
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      /* The same cap the question lane uses, for the same reason: the answer
+         is a few sentences over facts already written, so a long generation is
+         a model with room to start reasoning — which is where an unquoted
+         number comes from. */
+      max_tokens: 320,
+      temperature: 0.2,
+    });
+    generated = out && typeof out.response === "string" ? out.response.trim() : null;
+    /* ONE METER COUNTS BOTH CALLERS. askRecordSpend writes the same
+       flows_ai_usage row the question box does, so `remaining` on the ask page
+       stays a true subtraction of everything this site spent — which is what
+       `assumesSoleSpender` claims and would quietly stop being if this lane
+       kept its own books. */
+    await askRecordSpend(env, out && out.usage);
+  } catch (error) {
+    /* WHICH FAILURE, KEPT SEPARATE. askFailure distinguishes 3036 (the day's
+       allocation is spent) from 3040 (no capacity right now) and 5035 (the
+       model is not on this plan, a configuration fault) — all HTTP 429 for the
+       first two, so branching on status would merge states this codebase keeps
+       apart. The `why` is stored so the page can say which, and so the retry
+       rule above can tell a spent allowance from a refused wording. */
+    const failed = askFailure(error);
+    await write(plain, false, model, "unreachable:" + failed.why).catch(() => {});
+    return;
+  }
+
+  if (!generated) {
+    await write(plain, false, model, "unreachable:empty").catch(() => {});
+    return;
+  }
+
+  /* smallIntegers:false — the default whitelist passes 1..12 unquoted, and a
+     summary over dozens of facts is exactly where an unsupported small count
+     reads as authoritative. THE REJECTED WORDING IS NOT STORED: a page that
+     showed it beside the real reading would be publishing the invented figure
+     with a caption, and a caption is not what a reader remembers. */
+  const verdict = FLOWS_ASK.guardAnswer(generated, facts, { smallIntegers: false });
+  if (!verdict.ok) {
+    await write(plain, false, model, verdict.invented ? "invented" : "forecast").catch(() => {});
+    return;
+  }
+  await write(generated, true, model, null).catch(() => {});
+}
+
+/**
+ * The stored summary, or null when none has been generated for this session.
+ *
+ * A single indexed read of one short row — cheap enough to sit on a page load,
+ * which is the whole point of generating on the cron instead.
+ */
+async function readFlowsSummary(env, scope) {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
+    ).bind(scope || "board").first();
+    if (!row) return null;
+    return {
+      text: typeof row.text === "string" ? row.text : "",
+      /* THE PAGE MARKS THE TWO DIFFERENTLY AND A READER IS OWED THE
+         DISTINCTION, because it is not inferable from the prose: a summary
+         that reads well may be the deterministic fallback and one that reads
+         badly may be the model's. */
+      llm: row.llm === 1,
+      model: typeof row.model === "string" ? row.model : null,
+      guard: typeof row.guard === "string" ? row.guard : null,
+      generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
+    };
+  } catch { return null; }
 }
 
 /**
@@ -3296,7 +3469,7 @@ async function route(request, env, url, ctx) {
      never a redirect: bouncing them to /flows/ loses the page they wanted, and
      the section's existence is not the secret. */
   const FLOWS_ROUTES = {
-    "/flows/": (u) => FLOWS_PAGES.overviewPage({ username: u }),
+    "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
     "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
     "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
@@ -3327,8 +3500,34 @@ async function route(request, env, url, ctx) {
   if (Object.hasOwn(FLOWS_ROUTES, path)) {
     requireMethod(request, ["GET", "HEAD"]);
     const session = await currentFlowsUser(request, env);
+    /* THE SUMMARY IS READ FOR ONE ROUTE, AND IT IS THE FRONT DOOR.
+
+       refreshFlowsSummary has been generating this on the cron and
+       /api/flows/summary serving it, with nothing anywhere reading either. It
+       is rendered into the HTML rather than fetched because the twelve routes
+       carrying flows-dock.js share 486 bytes of headroom at the tightest, so
+       the smallest honest client fetcher would break three ceilings on
+       arrival; server-side it costs no client bytes at all.
+
+       ONE ROUTE AND NOT THIRTEEN, deliberately. readFlowsSummary is one
+       indexed read of one short row and its docstring calls that cheap enough
+       for a page load — which it is, once. Thirteen times is thirteen reads
+       per reader per visit against a free-tier quota shared with a live app,
+       for a sentence about the session as a whole. The overview is the page
+       whose stated job is the whole session on one screen, so it is the page
+       that pays. Per-card summaries will arrive on the routes that show
+       cards, keyed by their own scope, rather than by putting this one
+       everywhere.
+
+       A THROWN READ IS A PENDING SUMMARY, NOT A BROKEN PAGE. readFlowsSummary
+       already catches and answers null, and neuronDock renders null as the
+       pending state — which says the briefing has not been published, and
+       claims nothing about the market. */
+    const summary = session && path === "/flows/"
+      ? await readFlowsSummary(env, "board")
+      : null;
     const body = session
-      ? FLOWS_ROUTES[path](session.username)
+      ? FLOWS_ROUTES[path](session.username, summary)
       : FLOWS_PAGES.loginPage();
     return new Response(body, {
       status: 200,
@@ -3753,6 +3952,41 @@ async function route(request, env, url, ctx) {
       return json({ spend: await askSpend(env) });
     }
 
+    if (path === "/api/flows/summary") {
+      /* THE STANDING SUMMARY, GENERATED ON THE CRON AND READ HERE. Like
+         ai-usage above and for the same reason, this is NOT under the
+         passthrough convention: every other path here is /api/flows/<key>
+         streaming <key> verbatim, and there is no `summary` key — the
+         pipeline does not publish one and must not, because the cron's rule
+         is refresh, never seed. It is computed in the Worker, stored in the
+         Worker's own table, and named for what it reports.
+
+         FOUR STATES, NEVER THREE. No row is PENDING: the briefing has not
+         been published for this session, so nothing was measured — which is
+         not the same as a quiet market and must never be served as one. A row
+         with `llm` false and a `guard` of "invented" or "forecast" is a
+         generation that was REFUSED, and the reader gets the deterministic
+         reading with the reason. A `guard` beginning "unreachable" is the
+         model not answering, with askFailure's own `why` after the colon so
+         3036 (the day's allocation is spent, resets 00:00 UTC) stays distinct
+         from 3040 (no capacity, nothing spent) and 5035 (a configuration
+         fault). A row with `llm` true is the model's wording, and it passed
+         the same guard the question box applies.
+
+         Cheap enough to sit on a page load: one indexed read of one short
+         row, which is the entire point of generating on the cron. */
+      const summary = await readFlowsSummary(env, "board");
+      if (summary === null) {
+        return json({ status: "pending", summary: null, llm: false, model: null,
+          guard: null, generatedAt: null,
+          note: "No summary has been generated for this session yet. Nothing is claimed " +
+            "about the market by that — it says the briefing has not been published, " +
+            "not that the session was quiet." });
+      }
+      return json({ status: "ok", summary: summary.text, llm: summary.llm,
+        model: summary.model, guard: summary.guard, generatedAt: summary.generatedAt });
+    }
+
     if (path === "/api/flows/brief") {
       /* THE BRIEFING, STREAMED LIKE EVERY OTHER KEY. It is one blob the
          pipeline already computed, so it goes down the same path they all
@@ -3999,6 +4233,16 @@ export default {
     ctx.waitUntil(refreshFlowsIntraday(env).catch((error) => {
       console.error(JSON.stringify({
         message: "flows intraday refresh failed",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }));
+    /* The standing summary, in the same self-isolating shape as the two above:
+       its failure never reaches them and theirs never reaches it. It is gated
+       on the CONTENT of the briefing rather than on this firing, so 95 of the
+       96 daily wakes return having spent nothing — see refreshFlowsSummary. */
+    ctx.waitUntil(refreshFlowsSummary(env).catch((error) => {
+      console.error(JSON.stringify({
+        message: "flows summary refresh failed",
         error: error instanceof Error ? error.message : String(error),
       }));
     }));

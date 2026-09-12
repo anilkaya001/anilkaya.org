@@ -384,8 +384,45 @@ const CEILING_KIB = {
      not for a feature" and the 496 paragraph made that real by leaving 1,379;
      this leaves a comparable margin on a route that has just given back 97.88
      KiB, rather than banking the lot where the next change would find it
-     waiting. */
-  tickerPage: 404,
+     waiting.
+
+     404 -> 405, AND THE PARAGRAPH ABOVE HAD ALREADY STOPPED BEING TRUE. Before
+     anything in this change touched the route, `stat` on the four scripts at
+     origin/main gave 6,003 + 2,560 + 55,172 + 348,560 = 412,295 B against a
+     413,696 B ceiling — 1,401 B of room, not the 2,042 the line above claims.
+     Nothing was done wrong: the figure was measured when it was written and a
+     later PR spent 641 B of it without re-deriving the number. That is the
+     third time this file has caught its own prose drifting, and it is worth
+     saying plainly that the drift is the normal case rather than the
+     exception — a recorded number is a measurement with a date on it, and
+     this file is the only thing that puts the date on it.
+
+     WHAT THE 1,686 B BOUGHT, measured: flows-panels.js +1,668 and
+     flows-ticker.js +18, for 413,981 B = 404.27 KiB, which is 285 B over.
+     Almost all of it is comment, and it is the comment that was the point.
+     Flows stopped using the mono family in this change: --font-mono was a
+     JetBrains stack chosen for a FIXED 0.600 em advance, and the section now
+     resolves --font-figure to Latin Modern, which is proportional. Two
+     measurements had to be written down beside the code that rests on them or
+     the next reader inherits a number whose face no longer exists — AXIS_CH,
+     re-derived from 6.421 to the widest real caption at 5.079 and rounded to
+     5.5, carrying the admission that "errs wide" is now a bound on the
+     captions that EXIST rather than on any string; and atrDist, which records
+     why the ATR-normalised distances stopped printing σ (Latin Modern does
+     not draw it) and why the desk's identical-looking glyph became SD instead
+     (it was never the same denominator).
+
+     THE BYTES ARE NOT BOUGHT BACK BY SHORTENING EITHER ONE. The unusualPage
+     note below settled that trade and this change is the case it was written
+     for: a font swap whose whole risk is unmeasured numbers is the worst
+     possible place to delete the measurements to save 285 B.
+
+     405 LEAVES 739 B, which is less than the 1,401 this route actually had and
+     far less than the 2,042 it believed it had. That is deliberate and it is
+     the same argument the 496 paragraph made: this route is still owed a
+     reduction, so the next change to it should have to come here and argue
+     rather than find room waiting. */
+  tickerPage: 405,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

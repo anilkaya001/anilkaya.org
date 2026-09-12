@@ -16,6 +16,92 @@
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
   const viewButtons = Array.from(document.querySelectorAll(".flows-view"));
+  /* THE VENDOR'S SECTOR STRING -> ONE OF ELEVEN TINT TOKENS, AND BOTH
+     VOCABULARIES ARE IN HERE BECAUSE THE VENDOR SENDS BOTH.
+
+     `boardRow` publishes `sector` exactly as the screener sent it and says in
+     its own comment why it refuses to map it: the spellings are undocumented,
+     and fixtures in tests/ carry "Information Technology" AND "Technology",
+     "Health Care" AND "Healthcare", "Consumer Discretionary" AND "Consumer
+     Cyclical". A crosswalk in the PIPELINE would publish a sector attribution
+     nobody verified. A crosswalk HERE picks a colour, which is a different
+     kind of claim: the card prints the vendor's own string either way, so the
+     worst case of a miss is a grey edge beside a correctly spelled sector.
+
+     THAT IS WHY THE FALLBACK IS A REAL TOKEN AND NOT A GUESS. An unrecognised
+     spelling takes --sect-none and keeps its label. Adding a nearest-match or
+     a substring heuristic here would trade a visibly neutral card for a
+     confidently wrong one, which is the wrong direction on every surface in
+     this product. */
+  const SECTOR_TINT = new Map([
+    ["information technology", "tech"], ["technology", "tech"],
+    ["communication services", "comm"], ["communications", "comm"],
+    ["consumer discretionary", "disc"], ["consumer cyclical", "disc"],
+    ["consumer staples", "staples"], ["consumer defensive", "staples"],
+    ["energy", "energy"],
+    ["financials", "fin"], ["financial services", "fin"], ["financial", "fin"],
+    ["health care", "health"], ["healthcare", "health"],
+    ["industrials", "ind"],
+    ["materials", "mat"], ["basic materials", "mat"],
+    ["real estate", "re"],
+    ["utilities", "util"],
+  ]);
+
+  const tintFor = (sector) => {
+    const key = typeof sector === "string" ? sector.trim().toLowerCase() : "";
+    const slug = key ? SECTOR_TINT.get(key) : undefined;
+    return "var(--sect-" + (slug || "none") + ")";
+  };
+
+  /* HOW LOUD EACH CARD IS, AND THE ANSWER IS "AS LOUD AS WHAT THE BOARD IS
+     ORDERED BY SAYS IT IS".
+
+     Candidate B ranked by net premium and let the tint follow that ranking.
+     Pinning the emphasis to net premium specifically would have been the
+     narrow reading of it: the board is orderable eight ways, and a wall whose
+     loudness always described ONE column while the order described another is
+     a wall with two rankings on it, which is worse than none.
+
+     So the magnitude is read through the ACTIVE SORT'S OWN GETTER — the same
+     `get` the comparator uses, so the brightest card is always the top card
+     and the two cannot disagree by construction.
+
+     UNSORTED FALLS BACK TO CONVICTION, not to the rank. The published order IS
+     a conviction ranking, and rank is an ordinal: scaling by it would make the
+     50th card of a 50-name board as quiet as the 50th of a 5-name board, which
+     says something about the board's length rather than about the name.
+
+     THE CURVE IS DELIBERATE. `^0.45` lifts the low end, because a linear
+     normalisation against one huge outlier — and premium is exactly that
+     shape, where NVDA clears hundreds of millions against a tail in the tens
+     of thousands — flattens forty cards to visually zero and turns the wall
+     back into a wall. A null magnitude is 0, which is the floor, not a hole:
+     .fd-card::before keeps a visible edge there so the sector still reads. */
+  function emphasisFor(view) {
+    const col = sortKey ? colByKey(sortKey) : null;
+    const get = col && sortable(col) && col.kind === "num"
+      ? (row, index) => col.get(row, index)
+      : (row) => isNum(row.cnv);
+    let max = 0;
+    const mags = view.map(({ row, index }) => {
+      const raw = get(row, index);
+      const mag = raw === null || raw === undefined || !isFinite(raw) ? null : Math.abs(raw);
+      if (mag !== null && mag > max) max = mag;
+      return mag;
+    });
+    return (i) => {
+      const mag = mags[i];
+      if (mag === null || max <= 0) return 0;
+      return Math.pow(mag / max, 0.45);
+    };
+  }
+
+  /* How many cards get their own step in the entrance stagger before the rest
+     share the last one. Ten steps at the stylesheet's --stagger is 260ms of
+     lead-in, which is one --dur-open — long enough to read as sequence, short
+     enough that nobody waits for the board. */
+  const ARRIVE_STEPS = 10;
+
   const deck = document.getElementById("flowsDeck");
   const tableWrap = document.getElementById("flowsTableWrap");
   if (!body || !statusEl) return;
@@ -362,7 +448,7 @@
   /**
    * WHERE THIS NAME WAS YESTERDAY, in a glyph and a number.
    *
-   * SIGN IN POSITION AND GLYPH, NEVER IN HUE: ▲/▼ carry the direction and the
+   * SIGN IN POSITION AND GLYPH, NEVER IN HUE: ↑/↓ carry the direction and the
    * digits carry the size, so the mark survives greyscale, a monochrome
    * printout and every form of colour blindness. The class is confirmation
    * for everyone else, never the carrier.
@@ -394,11 +480,11 @@
     const now = isNum(row.r);
     const ends = from !== null && now !== null ? ", from rank " + from + " to rank " + now : "";
     if (dr > 0) {
-      return { cls: "fb-mem is-up", glyph: "▲" + dr,
+      return { cls: "fb-mem is-up", glyph: "↑" + dr,
                say: "climbed " + places(dr) + " since " + comparand() + ends };
     }
     if (dr < 0) {
-      return { cls: "fb-mem is-down", glyph: "▼" + Math.abs(dr),
+      return { cls: "fb-mem is-down", glyph: "↓" + Math.abs(dr),
                say: "fell " + places(Math.abs(dr)) + " since " + comparand() + ends };
     }
     return { cls: "fb-mem is-same", glyph: "=",
@@ -445,8 +531,8 @@
 
   /* A mark as a DOM node. role="img" plus aria-label, the same pattern the
      family glyph already uses: the glyph is a picture to a screen reader and
-     the words are the accessible name, so "▲7" is never announced as "black
-     up-pointing triangle seven" and never announced as nothing. */
+     the words are the accessible name, so "↑7" is never announced as
+     "upwards arrow seven" and never announced as nothing. */
   function markNode(mark) {
     const span = document.createElement("span");
     span.className = mark.cls;
@@ -620,7 +706,7 @@
     "/flows/ticker/?t=" + encodeURIComponent(String(t || "")) +
     "&s=signal&from=" + encodeURIComponent(side);
 
-  function deckCard(row, index) {
+  function deckCard(row, index, emph) {
     /* NOT EVERY ROW HAS A CARD, and the deck has to say so BEFORE the click.
 
        The board is built from data already fetched, so it costs nothing to
@@ -645,6 +731,18 @@
     card.setAttribute("role", "listitem");
     if (deep) card.href = readerHref(row.t);
 
+    /* WHERE THIS CARD SITS IN THE ARRIVAL, and the clamp is the whole point.
+       flows.css staggers the entrance by --i, and an unclamped index on a
+       fifty-name board would start the last card 1.3s after the first — a
+       reader watching the interface rather than reading it. Past ARRIVE_STEPS
+       every remaining card shares the final delay and lands together, so the
+       board is always complete within one bounded window regardless of how
+       many names the run published. The cap lives here rather than in the
+       stylesheet because CSS cannot clamp a value it does not compute. */
+    card.style.setProperty("--i", String(Math.min(index, ARRIVE_STEPS)));
+    card.style.setProperty("--tint", tintFor(row.sector));
+    card.style.setProperty("--emph", (emph === undefined ? 0 : emph).toFixed(3));
+
     const score = isNum(row.s);
 
     const head = document.createElement("div");
@@ -660,6 +758,19 @@
     sc.textContent = score === null ? DASH : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
     head.append(rank, tk, sc);
     card.append(head);
+
+    /* THE SECTOR AS A WORD, and only when the payload carries one. A board
+       published before `sector` was on the wire draws no element at all rather
+       than an em dash: an absent FIELD is not the same as an absent VALUE, and
+       fifty cards each printing a dash for a column that does not exist yet is
+       fifty statements about nothing. The tint above is already neutral in
+       that case, so the two silences agree. */
+    if (typeof row.sector === "string" && row.sector.trim()) {
+      const sect = document.createElement("div");
+      sect.className = "fd-sect";
+      sect.textContent = row.sector.trim();
+      card.append(sect);
+    }
 
     /* WHERE THIS NAME WAS YESTERDAY, on the card that is the default and the
        phone view. Its own line rather than three more items inside .fd-head:
@@ -1690,8 +1801,14 @@
     for (const { row, index } of view) tableFrag.append(rowFor(row, index));
     body.replaceChildren(tableFrag);              // one insertion, 50 rows
     if (deck) {
+      /* ONCE PER PAINT, NOT ONCE PER CARD. The scale is a property of the
+         whole drawn set — it needs the maximum — so computing it inside
+         deckCard would be fifty passes over fifty rows to answer one
+         question. It is also recomputed on every sort rather than cached,
+         which is the point: the loudness describes the CURRENT order. */
+      const emphasis = emphasisFor(view);
       const deckFrag = document.createDocumentFragment();
-      for (const { row, index } of view) deckFrag.append(deckCard(row, index));
+      view.forEach(({ row, index }, i) => deckFrag.append(deckCard(row, index, emphasis(i))));
       deck.replaceChildren(deckFrag);
     }
   }

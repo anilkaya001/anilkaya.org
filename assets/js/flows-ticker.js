@@ -556,7 +556,7 @@
       const lvl = svgEl("text", {
         class: "fts-level" + (atmIv === null ? " is-missing" : ""),
         x, y: padT - 27, "text-anchor": "middle",
-        "font-family": "var(--font-mono)", "font-size": 9,
+        "font-family": "var(--font-figure)", "font-size": 9,
         fill: "currentColor", "fill-opacity": atmIv === null ? 0.55 : 1,
         "font-weight": atmIv === null ? 400 : 700,
       });
@@ -565,7 +565,7 @@
 
       const head = svgEl("text", {
         class: "fts-exp", x, y: padT - 17, "text-anchor": "middle",
-        "font-family": "var(--font-mono)", "font-size": 9,
+        "font-family": "var(--font-figure)", "font-size": 9,
         fill: "currentColor", "fill-opacity": 0.8,
       });
       /* The ISO date keeps its hyphen — the U+2212 rule is about signs, and
@@ -576,7 +576,7 @@
 
       const tenor = svgEl("text", {
         class: "fts-days", x, y: padT - 6, "text-anchor": "middle",
-        "font-family": "var(--font-mono)", "font-size": 8.5,
+        "font-family": "var(--font-figure)", "font-size": 8.5,
         fill: "currentColor", "fill-opacity": 0.6,
       });
       tenor.textContent = days === null ? DASH : days + "d";
@@ -781,7 +781,7 @@
                from "no volume field at all". */
             class: "fts-iv" + (traded === 1 ? "" : " is-stale"),
             x: x + cellW / 2, y: y + cellH / 2 + 3.2, "text-anchor": "middle",
-            "font-family": "var(--font-mono)", "font-size": 9,
+            "font-family": "var(--font-figure)", "font-size": 9,
             fill: "currentColor",
           });
           t.textContent = ftsVol(iv);
@@ -811,7 +811,7 @@
       const t = svgEl("text", {
         class: "fts-m" + (i === atmRow ? " is-atm" : ""),
         x: labelW - 6, y: padT + i * rowH + rowH / 2 + 3.2, "text-anchor": "end",
-        "font-family": "var(--font-mono)", "font-size": 9.5,
+        "font-family": "var(--font-figure)", "font-size": 9.5,
         fill: "currentColor", "fill-opacity": i === atmRow ? 1 : 0.7,
         "font-weight": i === atmRow ? 700 : 400,
       });
@@ -890,7 +890,7 @@
       }
       const t = svgEl("text", {
         class: "fts-key", x: kx + it.n * SW + PAD_LB, y: y + SWH - 1.2,
-        "font-family": "var(--font-mono)", "font-size": KEY_FS,
+        "font-family": "var(--font-figure)", "font-size": KEY_FS,
         fill: "currentColor",
       });
       t.textContent = it.label;
@@ -1331,7 +1331,7 @@
        records for its strokes. */
     const text = (cls, attrs, size, content) => {
       const t = svgEl("text", Object.assign({
-        class: cls, "font-family": "var(--font-mono)", "font-size": size,
+        class: cls, "font-family": "var(--font-figure)", "font-size": size,
         fill: "currentColor",
       }, attrs));
       t.textContent = content;
@@ -4694,7 +4694,7 @@
        spot measures distAtr === 0, and the two-armed form prints it +0.00 —
        a confident positive sign on a measured zero. Unsigned is the truth
        there: the wall is at spot, neither above it nor below. */
-    const atrOf = (n) => (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(2) + "σ";
+    const atrOf = (n) => (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(2) + " ATR";
 
     const pairs = [];
     const lv = panels.levels;
@@ -6047,7 +6047,7 @@
          ATR is unavailable, so the second reading is simply absent. */
       const atrSaid = flipAtr === null
         ? ""
-        : " (" + P.signed(flipAtr, (a) => a.toFixed(2)) + "σ)";
+        : " (" + P.signed(flipAtr, (a) => a.toFixed(2)) + " ATR)";
       /* THE CLASS IS TWO-ARMED AND THE SENTENCE IS THREE-ARMED, deliberately.
          `is-above`/`is-below` is emphasis and mirrors .fc-levels exactly, so a
          zero taking the brighter of two greys costs a reader nothing. The WORD

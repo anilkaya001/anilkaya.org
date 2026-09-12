@@ -47,10 +47,10 @@
      the sentences a reader is looking at is the most load-bearing fact on
      this page, so it cannot be a tint: the mark sits at the front of the
      provenance line, the same place on every answer, and the sentence beside
-     it says the same thing in words. Both glyphs are in the mono subsets
-     this site self-hosts, so neither falls back mid-line. */
-  var MARK_MODEL = "◆";   // the wording came back from the model and passed the guard
-  var MARK_PLAIN = "▪";   // the wording was assembled here from the published facts
+     it says the same thing in words. Both are in Latin Modern; the pair
+     they replace was in no subset this site ships (_fontcheck). */
+  var MARK_MODEL = "∗";   // the wording came back from the model and passed the guard
+  var MARK_PLAIN = "•";   // the wording was assembled here from the published facts
 
   /* A NUMBER, OR THE VENDOR'S QUOTED NUMBER, AND NOTHING ELSE. Byte-for-byte
      the body in flows-market.js and flows-ui.js. IT RETURNS THE READING, so

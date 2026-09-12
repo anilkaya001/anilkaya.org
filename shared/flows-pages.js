@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "135";
+export const ASSET_VERSION = "138";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -202,6 +202,152 @@ const dock = (active) => (active === "ask" ? "" : `
 </aside>
 <script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
 
+/* ---------- Neuron, the standing summary ------------------------ */
+
+/**
+ * The session's summary, as it reaches a reader.
+ *
+ * IT IS RENDERED HERE AND NOT FETCHED, WHICH IS THE WHOLE REASON IT EXISTS AT
+ * ALL RATHER THAN STAYING A ROUTE NOBODY CALLED. `refreshFlowsSummary` has
+ * been generating this on the cron and `/api/flows/summary` has been serving
+ * it, and nothing anywhere read either — a finished feature with no reader.
+ *
+ * A CLIENT FETCH COULD NOT HAVE PAID FOR ITSELF. The obvious home for the
+ * fetch is flows-dock.js, the one script already on twelve routes. Measured
+ * against tests/flows-weight.mjs, those twelve share 486 BYTES of headroom at
+ * the tightest (unusual), with overview at 704 and ticker at 739 — so the
+ * smallest honest fetcher would break three ceilings on arrival. Emitting the
+ * sentence server-side costs ZERO client bytes, and readFlowsSummary says in
+ * its own docstring that it is "one indexed read of one short row — cheap
+ * enough to sit on a page load, which is the whole point of generating on the
+ * cron instead".
+ *
+ * SO THE WRITING EFFECT IS CSS AND NOT SCRIPT. Each word is its own span with
+ * its own delay; flows.css animates them in. Nothing runs, so the sentence
+ * cannot arrive half-written and cannot fail to arrive — a reader with
+ * JavaScript off gets the whole thing, immediately, which is the correct
+ * degradation for a paragraph.
+ *
+ * THE STAGGER IS CLAMPED AT 32 WORDS. Ungated, a long summary would still be
+ * arriving two seconds after the page painted; past the clamp the remaining
+ * words share the last delay and land together.
+ *
+ * FOUR STATES, AND THE READER IS TOLD WHICH. `llm` records whether a model
+ * wrote the wording, because that is NOT inferable from the prose — one that
+ * reads well may be the deterministic fallback and one that reads badly may be
+ * the model's. `guard` carries WHY a generation was refused, and an invented
+ * figure and a claim about the future are not the same fault. A null summary
+ * is PENDING and says so: the briefing has not been published for this
+ * session, which is not a statement about the market.
+ */
+function neuronMark(id, live) {
+  /* Three layers, 3-4-2, every edge drawn — the smallest graph that still
+     reads as a network rather than a molecule, and it survives at 13px, which
+     is the size that actually decides the design. Cyan at the input and gold
+     at the output: the gradient is the page's own, so the mark is MADE OF the
+     palette rather than placed on top of it. */
+  const L = [[5, [7, 14, 21]], [14, [4.5, 11, 17.5, 24]], [23, [10, 18]]];
+  let edges = "";
+  for (let l = 0; l < 2; l++) {
+    for (const a of L[l][1]) for (const b of L[l + 1][1]) {
+      edges += `<line x1="${L[l][0]}" y1="${a}" x2="${L[l + 1][0]}" y2="${b}"/>`;
+    }
+  }
+  let nodes = "";
+  L.forEach(([x, ys], i) => ys.forEach((y, j) => {
+    nodes += `<circle cx="${x}" cy="${y}" r="${i === 1 ? 1.7 : 2}" class="ak-nn-n" style="--d:${((i * 4 + j) * 0.09).toFixed(2)}s"/>`;
+  }));
+  return `<svg class="ak-nn${live ? " is-live" : ""}" viewBox="0 0 28 28" aria-hidden="true" focusable="false">` +
+    `<defs><linearGradient id="akNN${id}" x1="0" y1="0" x2="1" y2="0">` +
+    `<stop offset="0" stop-color="#9bc4d2"/><stop offset="1" stop-color="#da9100"/>` +
+    `</linearGradient></defs>` +
+    `<g class="ak-nn-e" stroke="url(#akNN${id})">${edges}</g>` +
+    `<g fill="url(#akNN${id})">${nodes}</g></svg>`;
+}
+
+const NEURON_CLAMP = 32;
+
+function neuronWords(text) {
+  /* Split on whitespace and keep ordinary spaces BETWEEN the spans, so the
+     paragraph is still one run of text to a screen reader, to find-in-page and
+     to a copy. A per-letter split would not survive any of the three — and a
+     per-letter typewriter running through "$412.8M" reads as a figure counting
+     up, which is a figure a reader has every reason to distrust. */
+  return String(text).split(/\s+/).filter(Boolean).map((word, i) =>
+    `<span class="ak-w" style="--d:${Math.min(i, NEURON_CLAMP)}">${escapeHTML(word)}</span>`).join(" ");
+}
+
+/** Which silence, in the reader's words rather than in the column's. */
+function neuronProvenance(summary) {
+  if (summary.llm) {
+    return "Wording by " + escapeHTML(summary.model || "a language model") +
+      ", over readings this page already carries. Every figure in it was measured by the " +
+      "pipeline and is published whether or not a model ever replies.";
+  }
+  const guard = typeof summary.guard === "string" ? summary.guard : "";
+  if (guard === "invented") {
+    return "This is the deterministic reading. A model was asked for the wording and its answer " +
+      "named a figure no reading supports, so it was refused and is not shown.";
+  }
+  if (guard === "forecast") {
+    return "This is the deterministic reading. A model was asked for the wording and its answer " +
+      "made a claim about what happens next, which nothing here measures, so it was refused.";
+  }
+  if (guard.startsWith("unreachable:")) {
+    const why = guard.slice("unreachable:".length);
+    const said = why === "3036"
+      ? "the day\u2019s free model allowance is spent; it resets at 00:00 UTC"
+      : why === "3040" ? "the model had no capacity at that moment, and nothing was spent"
+        : why === "5035" ? "the configured model is not available on this plan, which is a fault here rather than an outage"
+          : why === "empty" ? "the model answered with nothing"
+            : "the model did not answer";
+    return "This is the deterministic reading: " + said + ". The figures are unaffected \u2014 " +
+      "they were measured by the pipeline, and only the phrasing was ever at stake.";
+  }
+  return "This is the deterministic reading, assembled from the published facts themselves. " +
+    "No model was asked.";
+}
+
+function neuronDock(summary, { scope = "this session" } = {}) {
+  if (!summary || typeof summary.text !== "string" || !summary.text.trim()) {
+    /* PENDING IS NOT A QUIET MARKET AND NOT AN ERROR. Nothing has been
+       measured for this session yet, so the honest thing is to say which of
+       those it is. The mark does not pulse: there is no sentence arriving. */
+    return `
+  <section class="ak-neuron is-pending" aria-labelledby="akNeuronH">
+    ${neuronMark("p", false)}
+    <div class="ak-neuron-body">
+      <p class="ak-neuron-h" id="akNeuronH">Neuron</p>
+      <p class="ak-neuron-say ak-neuron-none">No summary has been written for ${escapeHTML(scope)} yet.</p>
+      <p class="ak-neuron-src">That says the briefing has not been published, not that the
+        session was quiet. Nothing is claimed about the market by this line.</p>
+    </div>
+  </section>`;
+  }
+  const when = typeof summary.generatedAt === "string" && summary.generatedAt
+    ? `<span class="ak-neuron-when">&middot; written <time datetime="${escapeHTML(summary.generatedAt)}">${escapeHTML(summary.generatedAt.slice(11, 16))} UTC</time></span>`
+    : "";
+  const words = neuronWords(summary.text);
+  const caretAt = Math.min(String(summary.text).split(/\s+/).filter(Boolean).length, NEURON_CLAMP) + 1;
+  /* THE MARK PULSES ONLY WHEN A MODEL ACTUALLY WROTE THIS, and the first draft
+     of this function got it wrong in a way worth recording: it passed `true`
+     unconditionally, so a panel whose own provenance line read "No model was
+     asked" sat under an animated neural graph. The animation is a claim. A
+     deterministic reading is assembled from published facts by code in this
+     repository, and dressing it in the same movement as a generation would be
+     the section's own `llm` column contradicted by its decoration — on the one
+     element whose whole job is to say which of the two a reader is holding. */
+  return `
+  <section class="ak-neuron${summary.llm ? " is-llm" : ""}" aria-labelledby="akNeuronH">
+    ${neuronMark(summary.llm ? "d" : "s", summary.llm)}
+    <div class="ak-neuron-body">
+      <p class="ak-neuron-h" id="akNeuronH">Neuron ${when}</p>
+      <p class="ak-neuron-say">${words}<span class="ak-caret" style="--d:${caretAt}" aria-hidden="true"></span></p>
+      <p class="ak-neuron-src">${neuronProvenance(summary)}</p>
+    </div>
+  </section>`;
+}
+
 const shell = (title, kicker, active, username, body) => `
 <body class="flows-body has-rail" data-flows-page="${active}">
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
@@ -308,11 +454,12 @@ ${topbar(true)}
  * band is why this page is usually short, and a reader who cannot see it
  * reads a ten-name page as a broken one.
  */
-export function overviewPage({ username = "" } = {}) {
+export function overviewPage({ username = "", summary = null } = {}) {
   return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
 ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
+${neuronDock(summary)}
 
   <!-- THE COMMAND CENTER. Twelve columns at desk widths, stacking to one on a
        phone. Every region below is a HOST: the shell, its heading and its

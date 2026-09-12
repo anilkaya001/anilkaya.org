@@ -442,7 +442,13 @@ try {
     /* NEW SINCE YESTERDAY, IN A GLYPH AND A POSITION. */
     eq(rows[0].freshMark, true, "the filing on the window's newest date carries the mark");
     eq(rows[1].freshMark, false, "an older filing does not");
-    ok(/^◆/.test(rows[0].filed),
+    /* THE GLYPH MOVED, THE POSITION IS THE POINT. This pinned ◆, which no face
+       this site ships has ever drawn — it fell back to the platform from the
+       day it shipped. It is • now, and this assertion stays literal rather
+       than becoming a loose "starts with something": the mark's identity is
+       part of the design's vocabulary, and a test that accepts any leading
+       character would not have caught the swap at all. */
+    ok(/^•/.test(rows[0].filed),
       "and the mark leads the date cell — a fixed position, so it survives greyscale " +
       "and a monochrome printout where a tint would not");
 

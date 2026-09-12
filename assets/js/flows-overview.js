@@ -1503,8 +1503,17 @@
          `sector` (the name cell below reads the same two); this read `.t`,
          the board row's key, so the region's lead reading printed "undefined
          leans most bullish at +27.8% …; undefined most bearish at −22.1%."
-         on every session. The ticker leads: it is what can be looked up. */
-      const basket = (r) => r.etf || r.sector || r.fullName || DASH;
+         on every session.
+
+         THE NAME LEADS NOW, AND THE TICKER USED TO. The old order was argued
+         — "the ticker is what can be looked up" — and it is the wrong trade
+         in a SENTENCE: "XLE leans most bearish" asks a reader to expand an
+         abbreviation mid-clause, while "Energy leans most bearish" is already
+         the reading. The ticker is still the better handle in a TABLE, where
+         it is a key rather than prose, and the name cell below keeps it —
+         one step quieter. flows-market.js:710 has always ordered it this way,
+         so this also ends two routes disagreeing about the same row. */
+      const basket = (r) => r.sector || r.fullName || r.etf || DASH;
       const finding = leaners.length === 1
         ? basket(hi) + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
           " of its own premium."
@@ -1543,13 +1552,25 @@
       const read = typeof row.read === "string" ? row.read : "unreadable";
       tr.dataset.read = read;
 
-      /* THE FUND AND THE LABEL IN ONE CELL. The vendor names XLC
-         "Communication Services" and SECTOR_ETFS does too, but the two are our
-         label beside theirs and the publisher carries both; the TICKER is the
-         thing a reader can look up, so it leads. */
+      /* THE FUND AND THE LABEL IN ONE CELL, AND THE LABEL LEADS. The vendor
+         names XLC "Communication Services" and SECTOR_ETFS does too, so the
+         publisher carries both — our label beside theirs — plus the vendor's
+         own `fullName` for the fund.
+
+         THE TICKER LED HERE UNTIL NOW, on the grounds that it is the thing a
+         reader can look up. That is true and it is not the first thing a
+         reader needs: eleven four-letter codes make a column nobody can scan
+         without translating every row, and the translation is already in the
+         payload. The name leads; the ticker stays in the same cell one step
+         quieter, so nothing that could be looked up before is lost. */
       const name = el("td", "cc-ln-name");
-      name.append(el("span", "cc-t cc-etf", row.etf || DASH));
-      name.append(document.createTextNode(row.sector || row.fullName || DASH));
+      name.append(el("span", "cc-t", row.sector || row.fullName || DASH));
+      /* UNCONDITIONAL, and that is not laziness. flows-overview-contract reads
+         `.cc-etf`'s textContent on every row to assert the ranking order, so a
+         row that omitted the span — however sensible the condition — would
+         throw rather than fail, and a TypeError is a worse failure than a
+         wrong order because it says nothing about what is wrong. */
+      name.append(el("small", "cc-etf", row.etf || DASH));
       if (read !== "ok") {
         const tag = el("span", "cc-dim cc-ln-tag", read);
         tag.title = typeof row.reason === "string" && row.reason ? row.reason

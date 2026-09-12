@@ -2861,9 +2861,17 @@ try {
        so the word is checked where the defect printed it: as a subject. */
     ok(!/undefined (leans|most|is)/.test(region),
        `no sentence in the region has "undefined" for a subject (${finding})`);
+    /* BY NAME, NOT BY TICKER, and the string is still pinned whole. This read
+       "XLB leans most bullish … XLE most bearish", because the renderer led
+       with the fund code; a sentence is the one place the abbreviation costs
+       more than it saves, since expanding it mid-clause is work the reader
+       should not be doing. The assertion stays an exact-string equality
+       rather than relaxing to a regex: the wording of the lead reading IS the
+       product here, and a looser check would have let the ticker come back. */
     eq(finding,
-       "XLB leans most bullish at +62.0% of its own premium; XLE most bearish at −55.0%.",
-       "the finding names the top and bottom basket by ticker, at the percentages their cells print");
+       "Materials leans most bullish at +62.0% of its own premium; Energy most bearish at −55.0%.",
+       "the finding names the top and bottom basket by its sector name, at the percentages " +
+       "their cells print — the ticker stays in the table cell, where it is a key rather than prose");
 
     eq((await page.locator("#ccLeanSub").textContent()).trim(), "8 of 11 leaned",
        "the subtitle counts the baskets that produced a lean against the eleven asked about");
