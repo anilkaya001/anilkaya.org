@@ -2,7 +2,7 @@
    flows-drawers.js — the ten panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 126k as
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 145k as
    measured on 2026-09-12 — it was 112k, the session path's window
    picker is 2k of the rise, renderPremiumTrack, the tenth drawer, is
    9k of it, and the gamma rail's self-sizing is the last 2k — and
@@ -776,6 +776,47 @@
       (spot !== null ? `, with spot at ${px2(spot)}` : "") +
       (gapAtr === null ? "." : `, a gap of ${gapAtr.toFixed(2)} ATR.`));
     host.append(svg);
+    /* THE CURSOR READS THE MARKS THIS CHART ACTUALLY DREW, AND NOTHING ELSE.
+
+       Every entry's x is xOf() — the same function that placed the dot or the
+       spot rule above it — so the rule lands ON a mark at every panel width
+       rather than near it. The band is the spot rule's own 30..62, which is
+       the drawing's vertical extent and keeps the cursor clear of the "spot"
+       caption at y=24, the two dot labels at y=74, and the gap caption on the
+       last line.
+
+       THE GAP IS PRINTED THE WAY THE CAPTION PRINTS IT, branch for branch:
+       atrDist when there is an ATR to normalise by, px2 of the raw pixel gap
+       when there is not — and px2 itself yields the em dash if even that is
+       absent, so "no ATR to state it in" and "no gap measured at all" stay
+       two different facts in the readout, exactly as they are on the canvas.
+
+       NO POLARITY CLASS ON THE DIRECTION ROW. The bar between the centroids
+       carries is-up / is-down, not is-pos / is-neg, because this panel's own
+       docstring says the direction is read off POSITION rather than off a
+       sign; tinting the readout green or red would assert a polarity the
+       drawing deliberately refuses. The side is stated in the words the
+       reading sentence uses instead. */
+    const gapRow = { k: "Gap", v: gapAtr === null ? px2(panel.gapPx) : atrDist(gapAtr), cls: "" };
+    const sideRow = { k: "New gamma", v: vol >= oi ? "above the book" : "below the book", cls: "" };
+    const marks = [
+      { at: oi, label: "standing book", rows: [{ k: "Centroid", v: px2(oi), cls: "" }, gapRow, sideRow] },
+      { at: vol, label: "today's flow", rows: [{ k: "Centroid", v: px2(vol), cls: "" }, gapRow, sideRow] },
+    ];
+    if (spot !== null) marks.push({ at: spot, label: "spot", rows: [{ k: "Last", v: px2(spot), cls: "" }] });
+    /* SORTED BY PRICE, because on this chart x IS price. The marks are drawn
+       in a fixed order — spot first, then book, then flow — and on any book
+       whose new gamma sits below its standing gamma that order is not the
+       order they stand on the axis. Arrow-right has to walk rightward. */
+    marks.sort((a, b) => a.at - b.at);
+
+    if (window.FlowsCursor && marks.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Gamma centroid displacement: the standing book against today's flow",
+        band: { y0: 30, y1: 62 },
+        points: marks.map((m) => ({ x: xOf(m.at), label: m.label, rows: m.rows })),
+      });
+    }
 
     host.append(el("p", "fc-reading", reading));
 
@@ -1179,6 +1220,106 @@
       `Darker cells carry more gamma; hatched cells are short gamma.`);
 
     host.append(svg);
+    /* THE CURSOR READS A COLUMN, BECAUSE THE COLUMN IS THIS GRID'S SHARED
+       INDEX. x here is the expiry and y is the strike ladder, so a vertical
+       rule is one expiry — the same slot the column rule already divides —
+       and the readout says what that expiry carries on the rows the price
+       rail guarantees: spot's row and the two walls. The aria-label above
+       states why it cannot be a cell instead: 126 of them, and a cursor reads
+       one coordinate.
+
+       x IS THE CELL CENTRE THE MARKS USE, `plotL + j * colW + cellW / 2` —
+       the expression the zero tick and the clip slash are placed with — so
+       the rule runs down the middle of the cells it is reading, and `grid[i][j]`
+       is the same array those cells were drawn from.
+
+       THE THREE STATES SURVIVE THE READOUT, because they are the three the
+       cells are drawn as: a pair the vendor never returned prints the em
+       dash, a pair it measured at exactly zero prints 0, and everything else
+       prints its magnitude with the side spelled out. NO MINUS: this picture
+       carries sign as a hatch and its key calls that "short", so a readout
+       printing −1.2M would assert a channel the drawing does not use — and
+       the stat list below already writes the densest cell the same way.
+
+       "Spot row" IS THE NEAREST STRIKE, NOT SPOT. The spot rule is drawn
+       unsnapped at the true price for exactly that reason, so the key names
+       the strike whose cell is being read and leaves that gap visible.
+
+       ONE ROW PER ROW, NAMED BY EVERYTHING TRUE OF IT. A call wall sitting on
+       spot's own strike is the ordinary case for an ATM-heavy book, and three
+       keys printing one cell's number three times is the readout version of
+       the defect the price rail already refuses — there, the first claim on a
+       y wins it. Here the claims merge instead, so nothing is dropped and no
+       number is repeated. */
+    if (window.FlowsCursor && expiries.length) {
+      const cellRead = (v) => (v === null ? DASH
+        : v === 0 ? compact(v)
+        : compact(Math.abs(v)) + (v < 0 ? " short" : " long"));
+      /* ONE ARM PER STATE, WHICH IS WHAT flows-sign REFUSES TO LET SLIDE.
+         Written as `v === null || v === 0 ? "" : v < 0 ? "is-neg" : "is-pos"`
+         this reads correctly — zero is excluded before the comparison — and
+         the scanner still refuses it, on purpose: it matches the SHAPE of a
+         sign decided in two arms, and it has no allow-list, because the
+         moment a line can be excused by name the next defect is one entry
+         from invisible. A measured zero keeps its own arm here; it takes no
+         tint, since a strike carrying exactly no exposure is neither side. */
+      const cellCls = (v) => (v === null ? "" : v < 0 ? "is-neg" : v > 0 ? "is-pos" : "");
+      const levels = [];
+      const claim = (i, name) => {
+        if (i < 0 || i >= strikes.length) return;
+        const had = levels.find((lv) => lv.i === i);
+        if (had) had.names.push(name); else levels.push({ i, names: [name] });
+      };
+      claim(spotRow, "Spot row");
+      claim(callRow, "Call wall");
+      claim(putRow, "Put wall");
+      window.FlowsCursor.attach(svg, {
+        name: "Dealer gamma by strike and expiry" +
+          (card && card.ticker ? " for " + card.ticker : ""),
+        band: { y0: padT, y1: padT + strikes.length * rowH },
+        points: expiries.map((e, j) => {
+          /* THE DENSEST CELL IN THIS COLUMN, found the way the stat list finds
+             the densest cell in the whole grid: reading `grid`, skipping the
+             unmeasured and the measured zero, comparing magnitudes. It is the
+             one reading a shade cannot state exactly, and per column it is
+             also the answer to "which strike is this expiry's gamma on".
+
+             `measured` IS WHAT KEEPS THE TWO SILENCES APART. A column of
+             nothing but measured zeros has no cell to rank and is still not
+             an unmeasured column, so it reads 0; only a column the vendor
+             returned nothing for at all reads the em dash. */
+          let top = null, measured = 0;
+          for (let i = 0; i < strikes.length; i++) {
+            const v = grid[i][j];
+            if (v === null) continue;
+            measured++;
+            if (v === 0) continue;
+            if (top === null || Math.abs(v) > Math.abs(top.v)) top = { v, i };
+          }
+          const rows = levels.map((lv) => {
+            const v = grid[lv.i][j];
+            const names = top !== null && top.i === lv.i
+              ? lv.names.concat(["Densest"]) : lv.names;
+            return { k: names.join(" · ") + " " + px2(strikes[lv.i]), v: cellRead(v), cls: cellCls(v) };
+          });
+          if (top === null || !levels.some((lv) => lv.i === top.i)) {
+            rows.push({
+              k: top === null ? "Densest" : "Densest " + px2(strikes[top.i]),
+              v: top === null ? (measured ? compact(0) : DASH) : cellRead(top.v),
+              cls: top === null ? "" : cellCls(top.v),
+            });
+          }
+          return {
+            x: plotL + j * colW + cellW / 2,
+            /* The full date, where the column heading prints month-day: the
+               heading drops the year to buy width it shares with seven other
+               labels, and the readout shares its line with nothing. */
+            label: String(e),
+            rows,
+          };
+        }),
+      });
+    }
 
     /* THE LEGEND SAYS WHAT THE PICTURE CANNOT. Which row is spot, which are
        the walls, that the scale is capped, and how much of the book is on
@@ -1305,6 +1446,54 @@
       `Gamma roll-off by expiry. ` + rows.map((r) =>
         `${r.expiry}: ${(r.share * 100).toFixed(0)} percent`).join(", ") + ".");
     host.append(svg);
+    /* THE CURSOR RUNS DOWN THIS CHART, NOT ACROSS IT. The shared index here is
+       the EXPIRY, and the expiries are stacked down the side, one row each — so
+       a vertical rule searched on x would report whichever expiry's cumulative
+       edge happened to fall near the pointer's column, which is not the row the
+       pointer is over. `axis: "y"` searches the coordinate this chart actually
+       indexes on, and draws the rule across the row it is reading.
+
+       y IS THE MIDDLE OF THAT ROW'S BARS, written from the same terms the rects
+       were: they start at padT + i * ROW + 4 and stand ROW - 10 tall, so the
+       rule lands on the staircase rather than in the gap between two steps. The
+       band is the plot's own horizontal extent, so it stops short of the expiry
+       rail on the left and the share values on the right instead of striking
+       through them.
+
+       THE SHARE IS A GROSS MAGNITUDE AND CARRIES NO POLARITY CLASS. The method
+       note under this chart is explicit that the two legs are summed in
+       magnitude — a front week of one billion call against minus 999 million
+       put is two billion about to expire — so there is no positive or negative
+       side here to colour, and an is-pos row would invent a sign the drawing
+       never had.
+
+       DAYS PRINT THE EM DASH WHEN THERE ARE NONE. The rail already drops the
+       "11d" suffix when days is null — the calendar builder returns null for
+       every expiry when it has no session date to count from — and "0d" would
+       claim the book expires today, the confident zero this panel exists to
+       refuse. */
+    if (window.FlowsCursor && rows.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Gamma roll-off by expiry",
+        axis: "y",
+        band: { x0: padL, x1: padL + plotW },
+        points: rows.map((r, i) => ({
+          y: padT + i * ROW + 4 + (ROW - 10) / 2,
+          /* The half-life rule is drawn as a vertical line at 50% of the axis
+             and named only at the foot of the chart; on the one row it actually
+             falls on it is named here as well, off panel.halfLifeExpiry — the
+             same field the stat list below prints. */
+          label: r.expiry + (r.expiry === panel.halfLifeExpiry ? " — half the book" : ""),
+          rows: [
+            { k: "Expiring here",
+              v: isNum(r.share) === null ? DASH : (r.share * 100).toFixed(0) + "%" },
+            { k: "Cumulative by then",
+              v: isNum(r.cumShare) === null ? DASH : (r.cumShare * 100).toFixed(0) + "%" },
+            { k: "Days out", v: isNum(r.days) === null ? DASH : r.days + "d" },
+          ],
+        })),
+      });
+    }
 
     host.append(statList([
       ["Front expiry", rows[0].expiry],
@@ -1613,6 +1802,63 @@
       svg.setAttribute("aria-label",
         `${closes.length} daily closes, from ${px2(closes[0])} to ${px2(closes[closes.length - 1])}.`);
       host.append(svg);
+      /* THE CURSOR READS `closes` — THE ARRAY THE LINE WAS DRAWN FROM — AND
+         PLACES ITSELF WITH `xOf(i)`, the same function that put each vertex
+         on the page. The rule therefore lands ON the mark rather than near
+         it, and the number under it cannot become a second opinion about the
+         same close.
+
+         THE SECOND ROW IS THE OTHER QUANTITY THIS CHART ENCODES. There are
+         no axis labels here by design — the baseline drawn at `closes[0]` is
+         the reference, and the comment above it says what that buys: "the
+         line's position against it IS the window return". A readout that
+         printed only the close would hand back the one number a reader can
+         almost read off the page and withhold the one they cannot.
+
+         DATES COME FROM `panel.closeDates`, UNFILTERED, because that array is
+         index-aligned with `closes` by construction: buildContext zips the
+         two BEFORE it drops unreadable candles, and its comment warns that a
+         dates array filtered separately is misaligned by exactly the number
+         of dropped sessions. `dates` below is the filtered copy built for the
+         span sentence, and it is the wrong array to index with `i`.
+
+         A CLOSE WITH NO DATE NAMES ITS PLACE IN THE WINDOW instead of wearing
+         an em dash, because index IS what `xOf` places on and the qualifier
+         below already tells the reader the axis is order. An undated close
+         and a dated one are different facts; neither is silence, and neither
+         is a date this panel does not have.
+
+         px2 AND pct1 ARE THE PANEL'S OWN FORMATTERS, so both rows route
+         through fmtOr: an unreadable close or a window with no usable first
+         close prints the em dash, never a confident 0.00.
+
+         THE RULE IS BOUNDED TO THE DRAWN PLOT — pad to H - pad — which is
+         exactly the span `yOf` maps the window's low and high onto. */
+      if (window.FlowsCursor && closes.length) {
+        const dayOf = Array.isArray(panel.closeDates) ? panel.closeDates : [];
+        const base = isNum(closes[0]);
+        window.FlowsCursor.attach(svg, {
+          name: (card && card.ticker ? card.ticker + " " : "") + "daily closes",
+          band: { y0: pad, y1: H - pad },
+          points: closes.map((c, i) => {
+            const v = isNum(c);
+            // No readable close, or no readable baseline to measure from, is
+            // no distance — not a flat one. pct1 prints that as the em dash.
+            const rel = v === null || base === null || !(base > 0) ? null : v / base - 1;
+            return {
+              x: xOf(i),
+              label: dayOf[i] || `Session ${i + 1} of ${closes.length}`,
+              rows: [
+                { k: "Close", v: px2(c) },
+                {
+                  k: "From first close", v: pct1(rel),
+                  cls: rel === null ? "" : rel > 0 ? "is-pos" : rel < 0 ? "is-neg" : "",
+                },
+              ],
+            };
+          }),
+        });
+      }
     }
 
     host.append(statList([
@@ -1927,6 +2173,61 @@
       (centroid !== null ? `. Movement-weighted mean minute at ${Math.round(centroid * 100)}% of the session` : "") +
       ".");
     host.append(svg);
+    /* THE CURSOR OVER THE SAME TWO ARRAYS THE TWO LEGS WERE DRAWN FROM.
+       `x(i)` is the function that placed every vertex of both paths, and the
+       readings are `delta[i]` and `prem[i]` — the arrays `dOf` walked. `dU`
+       and `pU` are the DRAWING of those numbers, each divided by its own
+       scale, so a readout rebuilt from them would be a second opinion about
+       one series, rounded through two normalisations.
+
+       A BREAK IN THE LINE IS AN EM DASH, NOT A ZERO. `dOf` lifts the pen at a
+       null and draws no segment through it; the index stays on the axis here —
+       a reader arrowing across the gap is told there is nothing there rather
+       than stepping over a stretch of session — and the value prints DASH.
+
+       THE PREMIUM ROW EXISTS ONLY WHEN THE PREMIUM LEG IS DRAWN. A row for a
+       line that is not on the chart is a reading nobody can check against a
+       mark, and both cases where the leg is withheld — never published, or
+       published and never moved off zero — are already stated under the chart.
+
+       THE MINUTE, NOT THE INDEX, because the question this panel asks is WHEN.
+       `perMin` is the payload's own cadence, the same figure the window buttons
+       are cut from; the window is a slice off the END of the session, so the
+       offset of this slice inside `whole` is what turns a position in the
+       window back into a minute of the session, and the last point of a full
+       session reads the same minute count the stat block prints. A card that
+       publishes no minute count is given the position rather than a time this
+       renderer would have to invent.
+
+       UNITS TRAVEL WITH THE NUMBERS: money() carries its own dollar sign,
+       compact() carries nothing, so the legend's own word for the delta unit
+       is appended to it — to a number, never to the em dash. */
+    if (window.FlowsCursor && rows.length) {
+      const off = whole.length - rows.length;
+      const sessionMin = perMin > 0 ? Math.round(whole.length * perMin) : null;
+      const when = (i) => (sessionMin === null
+        ? `Point ${i + 1} of ${rows.length}`
+        : `Minute ${Math.round((off + i + 1) * perMin)} of ${sessionMin}`);
+      /* is-pos/is-neg AND NOTHING ELSE: those are the two rules the readout
+         stylesheet carries, and a measured zero on a side-signed series holds
+         no side at all — it is not a small positive and it is not an absence. */
+      const side = (v) => (v === null ? "" : v > 0 ? "is-pos" : v < 0 ? "is-neg" : "");
+      window.FlowsCursor.attach(svg, {
+        name: "Session path, cumulative net delta" +
+          (drawPrem ? " and cumulative net premium" : ""),
+        band: { y0: pad, y1: H - pad },
+        points: delta.map((d, i) => {
+          const p = prem[i];
+          const out = [{ k: "Net delta", cls: side(d),
+            v: d === null ? DASH : compact(d) + " contracts" }];
+          if (drawPrem) {
+            out.push({ k: "Net premium", cls: side(p),
+              v: p === null ? DASH : money(p) });
+          }
+          return { x: x(i), label: when(i), rows: out };
+        }),
+      });
+    }
 
     /* THE LEGEND CARRIES THE STROKES THEMSELVES, not a colour word. A reader
        who cannot separate the two hues — or who printed the card — matches the
@@ -2394,6 +2695,45 @@
       (gaps ? " " + gaps + " session" + (gaps === 1 ? "" : "s") +
         " in that window carry no archived premium and are drawn as no bar at all." : ""));
     host.append(svg);
+    /* THE CURSOR READS THE SAME `rows` THE BARS WERE DRAWN FROM, placed by the
+       same `xOf(i)` that placed them, and prints each session with the
+       formatter the stat list already uses for ONE session's premium — so
+       "Largest session" above and the reading under the rule cannot disagree
+       about the same bar.
+
+       AN UNPRICED SESSION KEEPS ITS SLOT AND SAYS SO. Dropping those points
+       would hand the rule to the nearest drawn bar and print a neighbouring
+       session's date over an empty column; printing $0 would give the session
+       nobody priced the one appearance this panel reserves for a session that
+       WAS priced flat — the distinction the whole drawing is built around. The
+       em dash is the reading, and the second row names which fact it is, in
+       this panel's own words.
+
+       THE SIGN IS THE READING HERE, not a drawing direction: a bar is calls
+       minus puts, so a minus is a real negative and the side row spells out
+       which side that is rather than leaving a reader to infer it.
+
+       THE RULE IS BOUNDED TO THE PLOT so it stops above the two date labels,
+       which sit in padB below it. */
+    if (window.FlowsCursor && rows.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Net premium by session" + (card && card.ticker ? " for " + card.ticker : ""),
+        band: { y0: padT, y1: padT + plotH },
+        points: rows.map((r, i) => {
+          const v = isNum(r && r.p);
+          return {
+            x: xOf(i),
+            label: (r && r.d) || DASH,
+            rows: [
+              { k: "Net premium", v: v === null ? DASH : signed(v, (a) => "$" + compact(a)),
+                cls: v === null ? "" : v > 0 ? "is-pos" : v < 0 ? "is-neg" : "" },
+              { k: "Side", v: v === null ? "no archived premium"
+                : v > 0 ? "call-side" : v < 0 ? "put-side" : "priced flat" },
+            ],
+          };
+        }),
+      });
+    }
 
     /* THE LEAD IS THE COMPARISON, and it is two numbers a reader can check
        against the bars: where the window ends up, and how lopsided it got

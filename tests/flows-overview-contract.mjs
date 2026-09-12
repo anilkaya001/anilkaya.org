@@ -1012,8 +1012,23 @@ try {
       if (!m) return null;
       return Number(m[1]) * ({ B: 1e9, M: 1e6, K: 1e3 }[m[2]] || 1);
     };
-    const premCells = (await page.locator("#ccAlerts tbody tr td:nth-child(3)")
-      .allTextContents()).map(asUsd);
+    /* THE COLUMN IS FOUND BY ITS HEADER, NOT BY ITS POSITION, and that is a
+       fix rather than a flourish. This read `td:nth-child(3)` — correct when
+       the table was Name, Contract, Premium, Rule, and silently wrong the
+       moment the table grew a Time column in front: the third cell became the
+       CONTRACT, every parse returned null, and the check failed. It could
+       just as easily have found another dollar column and passed while
+       measuring the wrong thing.
+
+       So the index is derived from the rendered header row. A table that
+       renames or drops its premium column now fails with "no Premium column",
+       which is a sentence about the page rather than a puzzle. */
+    const alertHeads = (await page.locator("#ccAlerts thead th").allTextContents())
+      .map((h) => h.trim());
+    const premAt = alertHeads.findIndex((h) => /^premium$/i.test(h));
+    ok(premAt >= 0, `the flagged-window table has a Premium column (${alertHeads.join(" | ")})`);
+    const premCells = (await page.locator(
+      "#ccAlerts tbody tr td:nth-child(" + (premAt + 1) + ")").allTextContents()).map(asUsd);
     ok(premCells.length >= 2 && premCells.every((one) => one !== null),
        `every drawn premium parses (${premCells.join(", ")}) — a column this check could not ` +
        "read would let it pass by comparing nothing");
