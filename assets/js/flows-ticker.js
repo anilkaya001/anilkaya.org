@@ -6731,6 +6731,74 @@
     host.hidden = !found.length;
   }
 
+  /* ---------- the other names in this sector -------------------------
+
+     THE ONE THING ON THIS PAGE THAT IS NOT ABOUT THIS NAME, and the design
+     puts it at the bottom of its right column. Every other reading here was
+     measured on this ticker; this says which OTHER names the same session's
+     boards ranked in the same sector, so a reader who has just formed a view
+     can see whether it is one name or a group.
+
+     IT IS TODAY'S BOARDS AND NOT A CORRELATION. Nothing here models how these
+     names move together — the claim is only that the same run ranked them and
+     put them in the same sector, which is what the board publishes. The
+     subtitle says exactly that, because "Related" on its own invites the
+     stronger reading.
+
+     ONLY NAMES WITH A CARD GET A LINK, by the rule this file already keeps
+     for the switch list: a link that opens nothing is worse than no link. A
+     ranked name with no card is still shown — it is part of the answer — but
+     as text rather than as a door. */
+  function paintRelated(card) {
+    const host = $("ftRel"), list = $("ftRelL"), sub = $("ftRelS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const mine = typeof card.sector === "string" && card.sector.trim()
+      ? card.sector.trim() : null;
+    const rows = mine && switchRows
+      ? switchRows.filter((r) => r.sector === mine && r.t !== card.ticker)
+      : [];
+    /* RANKED BY THE SCORE'S MAGNITUDE, which is how this product orders a
+       board, with the unscored at the tail rather than seated at zero. */
+    const ranked = rows.slice().sort((a, b) => {
+      const x = isNum(a.s), y = isNum(b.s);
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return Math.abs(y) - Math.abs(x);
+    });
+    const CAP = 8;
+    for (const r of ranked.slice(0, CAP)) {
+      const sc = isNum(r.s);
+      const chip = el(r.card === false ? "span" : "a",
+        "ft-rel-c" + (sc === null ? "" : " " + P.polarity(sc)));
+      if (r.card !== false) chip.href = "/flows/ticker/?t=" + encodeURIComponent(r.t);
+      chip.append(el("span", "ft-rel-t", r.t));
+      chip.append(el("span", "ft-rel-v", sc === null ? DASH : P.signed(sc, (a) => String(a))));
+      chip.title = (r.card === false ? r.t + " was ranked but has no card, so there is nothing to open. " : "")
+        + (sc === null ? "No score published for this name." : "Options score " + P.signed(sc, (a) => String(a)) + ".")
+        + (r.chg === null ? "" : " Session move " + P.pct1(r.chg) + ".");
+      list.append(chip);
+    }
+    if (sub) {
+      sub.textContent = !mine
+        ? "This card publishes no sector, so no peer set can be drawn."
+        : switchRows === null
+          /* THE BOARDS HAVE NOT BEEN READ, WHICH IS NOT AN EMPTY SECTOR. This
+             said "No other Energy name was ranked on today's boards" before a
+             single board had been fetched — a measurement claimed over a key
+             nobody had opened, which is the exact collapse this product
+             refuses everywhere else. */
+          ? "Reading today's boards for the other names in " + mine + "\u2026"
+        : ranked.length
+          ? (ranked.length > CAP ? CAP + " of " + ranked.length : String(ranked.length)) +
+            " other " + mine + " name" + (ranked.length === 1 ? "" : "s") +
+            " on today's boards, by score. Ranked together, not modelled together."
+          : "No other " + mine + " name was ranked on today's boards.";
+    }
+    host.hidden = !mine;
+  }
+
   function paintFlags(card, chg) {
     const host = $("ftFlags");
     if (!host) return;
@@ -7298,6 +7366,10 @@
     paintCards(card);
     paintBrief(card);
     paintFlags(card, chg);
+    /* AFTER THE BOARDS ARRIVE, NOT WITH THE CARD. switchRows is filled by a
+       separate fetch; when the card paints first this draws nothing and the
+       board's own handler calls it again. */
+    paintRelated(card);
     paintIdentity(card, chg);
 
     /* THE STATION IS CHOSEN BEFORE THE DRAW NOW, AND THAT REORDERING IS THE
@@ -7360,6 +7432,45 @@
      switch, and the card is what this page is. Fetched once and kept, because
      opening the switcher twice is not two different questions. */
   let switchRows = null;
+  let boardsAsked = null;
+
+  /* THE BOARDS, FETCHED ONCE, AND NOW FOR TWO READERS RATHER THAN ONE.
+
+     They were fetched only when someone opened the switcher. Two things on
+     this page need them and neither is the switcher: the rank chip ("3 of
+     40", a board field the card carries no copy of) and the sector peer set.
+     Both were therefore blank on every visit where nobody clicked.
+
+     THE PROMISE IS KEPT, NOT THE RESULT, so a click during the idle load
+     waits on the same fetch instead of starting a second pair.
+
+     AND WHAT IT COSTS IS TWO CACHED GETS PER VISIT, said plainly: this page
+     used to make them only on demand, and now makes them on every view.
+     They are the same two payloads four other routes already serve, and the
+     alternative was a peer strip that announces an empty sector on a page
+     that simply had not looked. */
+  function ensureBoards() {
+    if (boardsAsked) return boardsAsked;
+    boardsAsked = Promise.all([
+      getJSON("/api/flows/board?side=long").catch(() => null),
+      getJSON("/api/flows/board?side=short").catch(() => null),
+    ]).then(([long, short]) => {
+      switchRows = boardRows(long, short);
+      paintRank();
+      if (painted) paintRelated(painted);
+      return switchRows;
+    });
+    return boardsAsked;
+  }
+
+  /* AFTER FIRST PAINT, NEVER DURING IT. The card is what this page is; the
+     boards qualify it. requestIdleCallback where it exists, a timeout where
+     it does not, so the two fetches never compete with the card's own. */
+  function boardsWhenIdle() {
+    const go = () => { ensureBoards(); };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 3000 });
+    else setTimeout(go, 1200);
+  }
 
   function wireSwitch(card) {
     const btn = document.getElementById("ftSwitch");
@@ -7370,17 +7481,7 @@
       const prev = btn.textContent;
       btn.textContent = "Loading names…";
       try {
-        if (!switchRows) {
-          const [long, short] = await Promise.all([
-            getJSON("/api/flows/board?side=long").catch(() => null),
-            getJSON("/api/flows/board?side=short").catch(() => null),
-          ]);
-          switchRows = boardRows(long, short);
-          /* THE ONLY MOMENT THIS PAGE CAN HONESTLY STATE A RANK. It is a
-             board field and the card carries no copy of it; now that a board
-             has actually been read, the chip can be filled. */
-          paintRank();
-        }
+        await ensureBoards();
         const shown = carded(switchRows);
         if (!shown.length) {
           /* NOT AN ERROR AND NOT A BLANK LIST, and now three reasons rather
@@ -7500,6 +7601,12 @@
       for (const row of rows) {
         out.push({
           t: row.t, r: row.r, s: row.s, side,
+          /* TWO FIELDS THE BOARD HAS ALWAYS PUBLISHED AND THIS WALK DROPPED.
+             `sector` is what makes a peer a peer, and `chg` is the session
+             move — both on every board row since the board shipped. Carried
+             here rather than fetched again: this list is already in hand. */
+          sector: typeof row.sector === "string" && row.sector ? row.sector : null,
+          chg: isNum(row.chg),
           card: knowsDeep ? row.dp === 1 : null,
           of: rows.length,
         });
@@ -7741,6 +7848,7 @@
       }
       paint(card);
       wireSwitch(card);
+      boardsWhenIdle();
       return null;
     }).catch(() => {
       statusEl.textContent = "This page could not be loaded. Reload to try again.";

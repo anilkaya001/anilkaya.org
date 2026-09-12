@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "182";
+export const ASSET_VERSION = "183";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1907,6 +1907,18 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <p class="ft-brief-s" id="ftBriefS"></p>
   </aside>
   <div class="ft-flags" id="ftFlags" hidden></div>
+  <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
+       right column and calls Related. Drawn from the same session's BOARDS —
+       the only place this page learns about any name but its own — so the
+       claim is that one run ranked them and put them in one sector, and the
+       subtitle says so rather than letting the word "related" imply a model
+       nobody built. Written by flows-ticker.js once the boards arrive, which
+       is a different fetch from the card's. -->
+  <aside class="ft-rel" id="ftRel" hidden aria-labelledby="ftRelH">
+    <h2 class="ft-rel-h" id="ftRelH">Others in this sector</h2>
+    <div class="ft-rel-l" id="ftRelL"></div>
+    <p class="ft-rel-s" id="ftRelS"></p>
+  </aside>
 
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
        IT. The controller used to build this <div> from nothing on first paint,

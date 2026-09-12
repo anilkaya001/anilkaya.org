@@ -9759,8 +9759,8 @@ ul.cc-ln-note > li::before {
 }
 .fx-read-rk { color: var(--ink-dim); }
 .fx-read-rv { font-variant-numeric: tabular-nums; }
-.fx-read-rv.is-pos { color: var(--flow-pos, var(--ink)); }
-.fx-read-rv.is-neg { color: var(--flow-neg, var(--ink)); }
+.fx-read-rv.is-pos { color: var(--flow-up); }
+.fx-read-rv.is-neg { color: var(--flow-down); }
 
 /* A CHART THAT TAKES FOCUS MUST SHOW IT. The ring is on the SVG itself
    rather than a wrapper, because the SVG is what the tab stop is. */
@@ -9814,8 +9814,8 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   color: var(--ink);
   white-space: nowrap;
 }
-.ft-card-v.is-pos { color: var(--flow-pos, var(--ink)); }
-.ft-card-v.is-neg { color: var(--flow-neg, var(--ink)); }
+.ft-card-v.is-pos { color: var(--flow-up); }
+.ft-card-v.is-neg { color: var(--flow-down); }
 .ft-card-s {
   font-family: var(--font-figure);
   font-size: var(--fs-micro);
@@ -9824,8 +9824,8 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
 }
 .ft-card-spark { flex: none; opacity: 0.85; }
 .ft-card-line { stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.ft-card-line.is-pos { stroke: var(--flow-pos, var(--ink-dim)); }
-.ft-card-line.is-neg { stroke: var(--flow-neg, var(--ink-dim)); }
+.ft-card-line.is-pos { stroke: var(--flow-up); }
+.ft-card-line.is-neg { stroke: var(--flow-down); }
 /* A SERIES THAT ENDED EXACTLY EVEN IS NEITHER, and it is a measurement rather
    than an absence — so it draws, in the neutral ink, instead of borrowing the
    positive colour the way a two-arm sign would have given it. */
@@ -9847,8 +9847,8 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   border-radius: 999px;
   background: var(--ink-dim);
 }
-.ft-card-bar > i.is-pos { background: var(--flow-pos, var(--ink-dim)); }
-.ft-card-bar > i.is-neg { background: var(--flow-neg, var(--ink-dim)); }
+.ft-card-bar > i.is-pos { background: var(--flow-up); }
+.ft-card-bar > i.is-neg { background: var(--flow-down); }
 
 
 /* ---------- what this card found ----------
@@ -9905,5 +9905,55 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   margin: 0.5rem 0 0;
   font-family: var(--font-figure);
   font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+
+/* ---------- the other names in this sector ----------
+   CHIPS, BECAUSE THE ANSWER IS A SET AND NOT A RANKING. They are ordered by
+   score magnitude, but a reader takes them in as a group — "this is a sector
+   move" or "this is one name" — which is what a row of chips says and a
+   numbered table does not. */
+.ft-rel {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-rel-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-rel-l { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ft-rel-c {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  text-decoration: none;
+}
+/* A chip with no card is not a door, and must not look like one. */
+span.ft-rel-c { opacity: 0.62; border-style: dashed; }
+a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
+.ft-rel-t { font-weight: 700; letter-spacing: 0.04em; }
+.ft-rel-v { font-variant-numeric: tabular-nums; }
+.ft-rel-c.is-pos .ft-rel-v { color: var(--flow-up); }
+.ft-rel-c.is-neg .ft-rel-v { color: var(--flow-down); }
+.ft-rel-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
   color: var(--ink-faint);
 }

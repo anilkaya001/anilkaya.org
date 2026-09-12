@@ -799,7 +799,28 @@ const CEILING_KIB = {
      measured and argued, and every one is also evidence for the same point:
      253 KiB of what this route ships is comment that the merged stripping
      build removes, and it is waiting on one dashboard field. */
-  tickerPage: 477,
+  /* 477 -> 482 FOR THE SECTOR PEERS. flows-ticker.js 386,860 -> 392,336, so
+     the route moves 486,832 -> 492,308 B = 480.77 KiB.
+
+     WHAT IT BOUGHT, AND IT IS THE ONE THING ON THIS PAGE THAT IS NOT ABOUT
+     THIS NAME. Every other reading here was measured on this ticker; the peer
+     strip says which OTHER names the same session's boards ranked in the same
+     sector, so a reader who has just formed a view can see whether it is one
+     name or a group. It is today's boards and not a correlation, and the
+     subtitle says that in those words.
+
+     AND IT CHANGED WHEN THE BOARDS ARE FETCHED, which is the part to weigh.
+     They were fetched only when someone opened the name switcher, so the rank
+     chip ("3 of 40", a board field the card has no copy of) and the peer set
+     were blank on every visit where nobody clicked. They are now fetched once
+     on idle, after first paint: two cached GETs per visit that this page did
+     not previously make, for two readings that could not otherwise exist. The
+     alternative was a peer strip announcing an empty sector on a page that
+     had simply never looked — which it did, in the first render, until the
+     pending silence was given its own sentence.
+
+     482 LEAVES 1,260 B. */
+  tickerPage: 482,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
