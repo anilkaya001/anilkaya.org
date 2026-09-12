@@ -352,6 +352,88 @@ await post("scoretrack", scoretrack(TRACK_DAYS));
    needs a live example of — an endpoint that has not spoken is not an
    endpoint that measured nothing. */
 
+/* ---------- one shape for a verdict tile, because four had drifted ----
+
+   THIS FILE READ THE VERDICT STRIP IN FOUR PLACES, and each place listed
+   the fields it happened to need on the day it was written. Three were
+   object-shaped and nearly identical, so every slot the strip grew had to
+   be added to each of them by hand — and was not. That cost three separate
+   CI failures in one wave, each with the same signature: a projection that
+   could not see a slot, failing against a page that was drawing that slot
+   correctly. A contract which reports a working page as broken is the most
+   expensive kind of wrong one can be, because the next move it provokes is
+   an edit to the page.
+
+   SO THE SHAPE IS DEFINED ONCE, HERE, AND SHIPPED INTO THE PAGE AS SOURCE.
+   `page.evaluate` cannot take a function as an argument, so this crosses as
+   its own `toString()`, pasted into the expression each reader evaluates. It
+   closes over nothing from this module, which is what makes that legal — and
+   if it ever does, the page throws a ReferenceError on the first call rather
+   than quietly handing back an object one field short.
+
+   IT COLLECTS EVERY SLOT THE TILE HAS, not the union of what today's
+   readers ask for. A projection sized to its callers is precisely the thing
+   that drifted; one sized to the ELEMENT cannot, because the next slot is
+   added here and every reader has it the same hour. Two consequences worth
+   stating: `.cc-tile-q` is a reading MOVED into another tile's sub-line —
+   the equal-weight tilt lives there since the strip went to five — and it
+   carries its own silence and its own sign, because the demotion cost that
+   tilt its tile and was not allowed to cost it either of those. And it is
+   its own element, never the tile's silence span: reading both off one
+   selector is how the two get conflated, and on a failed key both are
+   present.
+
+   THE COMPUTED STYLE IS READ FOR EVERY TILE, not only in the block that
+   asserts the silence marks. Five tiles, once per load, against a field
+   that cannot then be missing from a reader that needs it.
+
+   WHAT THIS DOES NOT REPLACE: the four single-tile reads further down that
+   `.find` one label and take `v` and `s` off it. Those name the two fields
+   they want, so a slot that vanishes throws there instead of arriving as
+   `undefined` — a loud failure, and a different defect from the one above. */
+function tileShape(t) {
+  const val = t.querySelector(".cc-tile-v");
+  const sub = t.querySelector(".cc-tile-s");
+  const q = t.querySelector(".cc-tile-q");
+  const cs = getComputedStyle(t);
+  return {
+    k: t.querySelector(".cc-tile-k")?.textContent.trim(),
+    v: val ? val.textContent.trim() : undefined,
+    cls: val ? val.className : "",
+    s: sub ? sub.textContent.trim() : "",
+    kind: t.dataset.empty || null,
+    q: q ? q.textContent.trim() : "",
+    subKind: q ? q.dataset.empty || null : null,
+    subCls: q ? q.className : "",
+    /* SHAPE AND GLYPH, NEVER HUE. The four silences are told apart by the
+       border and the ::before glyph, so a reader who cannot see colour tells
+       them apart too — and that is what the mark assertions compare. */
+    mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " +
+      (sub ? getComputedStyle(sub, "::before").content : "none"),
+  };
+}
+const TILE_SHAPE = tileShape.toString();
+
+/* THE TWO READINGS OF THE STRIP every block below takes: a list in drawing
+   order, and the same objects keyed by their label. Both are built from the
+   one shape above, so neither can know a field the other does not.
+
+   THE SHAPE IS PASTED INTO AN EXPRESSION, NOT REBUILT BY `new Function`.
+   Both get the source across; only one of them runs eval INSIDE the page,
+   where the served Content-Security-Policy decides whether that is allowed.
+   It is today — worker.js lists `unsafe-eval` in script-src — but a contract
+   that fails the moment someone tightens that header is a contract holding
+   the header hostage, and it would fail as a page defect rather than as what
+   it is. A string handed to `page.evaluate` is evaluated by the driver
+   instead, so this file asserts nothing about the CSP by accident. */
+const tileList = (pg) => pg.evaluate(
+  `Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), ${TILE_SHAPE})`);
+
+const tilesByKey = (pg) => pg.evaluate(
+  `Object.fromEntries(Array.from(
+     document.querySelectorAll("#ccVerdict .cc-tile"),
+     (t) => { const o = (${TILE_SHAPE})(t); return [o.k, o]; }))`);
+
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
@@ -407,32 +489,7 @@ try {
        The page it replaced could not state the session's level at all: the
        board score is a cross-sectional residual, so whether the tape was
        bought or sold had been neutralised out of every number on it. */
-    const tiles = await page.evaluate(() => Array.from(
-      document.querySelectorAll("#ccVerdict .cc-tile"), (t) => ({
-        k: t.querySelector(".cc-tile-k")?.textContent.trim(),
-        v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-        s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
-        /* THE DEMOTED READING, WHICH THIS PROJECTION DID NOT COLLECT.
-           `.cc-tile-q` is a reading moved into another tile's sub-line — the
-           equal-weight tilt lives there — and the assertion below reads it by
-           name. Without this field it read `undefined` and failed on a strip
-           that was drawing the sentence correctly: the second reader further
-           down this file had been taught about the slot and this one had not,
-           so the file asserted the fold against a projection that could not
-           see it. */
-        q: t.querySelector(".cc-tile-q")?.textContent.trim() || "",
-        /* THE SUB'S OWN CLASS, because the assertion below reads the TONE off
-           it: the demotion cost the equal-weight tilt its tile and was not
-           allowed to cost it its sign. Added in the same pass as `q` and
-           missed — `subCls` came back undefined and failed against a strip
-           that was tinting the sub correctly, which is the same defect as the
-           one that prompted `q`, two assertions further down. The fix for a
-           projection that cannot see a slot is to read every field the block
-           below reads, so both were derived from the block rather than from
-           memory this time: k, v, cls, q, subCls. */
-        subCls: t.querySelector(".cc-tile-q")?.className || "",
-        cls: t.querySelector(".cc-tile-v")?.className || "",
-      })));
+    const tiles = await tileList(page);
     /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.
 
        This strip's only use is comparing one tile to the next, and `Session`
@@ -1126,11 +1183,8 @@ try {
        answered, because neither half is the page's session: they are two
        writes of one, and the mismatch warning already fires when they
        disagree. */
-    const tiles = await page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
-        t.querySelector(".cc-tile-k")?.textContent.trim(),
-        t.querySelector(".cc-tile-v")?.textContent.trim()])));
-    eq(tiles.Cleared, "\u2014 bull / 4 bear",
+    const tiles = await tilesByKey(page);
+    eq(tiles.Cleared?.v, "\u2014 bull / 4 bear",
        "the unreadable side is an em dash, never a 0 — and each side keeps its own word, " +
        "so a half-silent tile cannot be read as a ratio");
     /* THE SESSION IS THE CAPTION'S NOW, and this is the case it was written
@@ -2005,12 +2059,7 @@ try {
       premium: { ...market.premium, tilt: -0.0300 } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
-    const tiles = await page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
-        t.querySelector(".cc-tile-k")?.textContent.trim(),
-        { v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-          s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
-          cls: t.querySelector(".cc-tile-v")?.className || "" }])));
+    const tiles = await tilesByKey(page);
     eq(tiles["Flow bias"]?.v, "−3.0%", "the dollar weighting is the tile's value");
     ok(/\+5\.0%/.test(tiles["Flow bias"]?.q || ""),
        "and the equal weighting is printed beneath it, so the page cannot show one sign and hide the other");
@@ -2060,29 +2109,7 @@ try {
        carries the kind on data-empty, and the stylesheet draws the mark the
        region silences wear, so the four are told apart without prose and
        without colour: the mark is read here as shape and glyph only. */
-    const readTiles = () => page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => {
-        const sub = t.querySelector(".cc-tile-s");
-        const cs = getComputedStyle(t);
-        const glyph = sub ? getComputedStyle(sub, "::before").content : "none";
-        return [t.querySelector(".cc-tile-k")?.textContent.trim(), {
-          v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-          s: sub ? sub.textContent.trim() : "",
-          kind: t.dataset.empty || null,
-          /* THE SUB'S OWN KIND AND CLASSES. A demoted reading lives here and
-             carries its own silence and its own sign — asserting only the
-             TILE's data-empty would have let the name lean lose all four
-             silences without a single assertion noticing, which is exactly
-             what the first draft of that fold did. */
-          /* THE DEMOTED READING IS ITS OWN ELEMENT (.cc-tile-q), never the
-             tile's silence span — reading both off one selector is how the
-             two get conflated, and on a failed key they are both present. */
-          q: t.querySelector(".cc-tile-q")?.textContent.trim() || "",
-          subKind: t.querySelector(".cc-tile-q")?.dataset.empty || null,
-          subCls: t.querySelector(".cc-tile-q")?.className || "",
-          mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " + glyph,
-        }];
-      })));
+    const readTiles = () => tilesByKey(page);
     const marks = new Map();
     /* ONE TILE AND ONE SUB-LINE, AND BOTH ARE CHECKED HERE.
 
