@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+/* =============================================================
+   render-preview.mjs — draw the gated pages the way a reader will
+   get them, and say what came out.
+
+   WHY THIS EXISTS, AND IT IS NOT A TEST. tests/ asserts properties;
+   this renders pictures. The distinction earned its keep three
+   times in one afternoon: a sparkline whose visibility depended on
+   a JS listener firing, a 3px sector band that decayed from its
+   first pixel and never showed its colour, and an equal-height
+   rule copied onto a grid where it opened 200px of void under
+   every sparse region. Every DOM probe passed all three. One of
+   them asserted the third AS AN INVARIANT and scored it green.
+
+   A COMPUTED STYLE IS EVIDENCE A RULE APPLIED, NOT THAT THE PAGE
+   READS. That is the whole argument for this file.
+
+   WHAT IT DOES NOT DO is reach the live site: this container's
+   egress proxy refuses anilkaya.org, so nothing here can confirm
+   what production is serving. It renders the REPOSITORY's own
+   emitters and assets — the same HTML shared/flows-pages.js
+   writes, the same stylesheets, the same controllers — with only
+   the network answered from fixtures. That is the closest a
+   sandbox gets to the live UI, and the gap is named rather than
+   papered over: CI and the Cloudflare deploy check are what say a
+   push actually shipped.
+
+   USAGE
+     node scripts/render-preview.mjs [--out DIR] [--cards DIR]
+
+   `--cards` points at a directory of emitted cards, which is what
+   makes the ticker page real rather than hand-written:
+     node scripts/flows-pipeline.mjs --dry-run --emit /tmp/e/
+     node scripts/render-preview.mjs --cards /tmp/e/
+
+   Without it the ticker is skipped and the script says so. It
+   exits non-zero if any page threw, so it can gate a push.
+   ============================================================= */
+import { readFileSync, readdirSync, mkdirSync, existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/* PLAYWRIGHT LIVES UNDER tests/, AND THIS FILE DOES NOT. Node resolves
+   node_modules by walking up from the IMPORTING file, so a bare
+   `import "playwright"` from scripts/ finds nothing — the browser toolchain is
+   a devDependency of the suite. Reaching for it explicitly is honest about
+   that: this is a development tool that borrows the test rig, and it says so
+   rather than asking the repository root to carry a dependency only it uses. */
+const { chromium } = createRequire(path.join(ROOT, "tests/package.json"))("playwright");
+const argv = process.argv.slice(2);
+const argOf = (flag, fallback) => {
+  const i = argv.indexOf(flag);
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+/* THE DEFAULT IS OUTSIDE THE REPOSITORY, deliberately. A default that wrote
+   PNGs into the working tree would put them in front of the next `git add -A`,
+   and a screenshot is not a source file. */
+const OUT = argOf("--out", path.join(os.tmpdir(), "flows-render-preview"));
+const CARDS = argOf("--cards", null);
+mkdirSync(OUT, { recursive: true });
+
+const pages = await import(path.join(ROOT, "shared/flows-pages.js"));
+const CSS = ["assets/css/base.css", "assets/css/flows.css"]
+  .map((f) => `<style>${readFileSync(path.join(ROOT, f), "utf8")}</style>`).join("\n");
+const js = (f) => readFileSync(path.join(ROOT, "assets/js", f), "utf8");
+
+/* A page is assembled the way the Worker serves it, then its <link> and
+   <script src> are swapped for the files themselves — so what renders is this
+   working tree and not whatever a cache holds. */
+function inline(html, scripts) {
+  let out = html.replace(/<link rel="stylesheet"[^>]*>/g, "").replace("</head>", CSS + "</head>");
+  for (const f of scripts) {
+    out = out.replace(new RegExp(`<script src="[^"]*${f.replace(".", "\\.")}[^"]*"[^>]*></script>`),
+      `<script>${js(f)}</script>`);
+  }
+  /* The dock's renderer is fetched on demand and is not part of any page's
+     first paint; leaving the tag in would only 404 against a stub. */
+  return out.replace(/<script src="[^"]*flows-dock\.js[^"]*"[^>]*><\/script>/, "");
+}
+
+const stubFetch = (map) => `<script>
+const S = ${JSON.stringify(map)};
+window.fetch = (u) => {
+  const k = Object.keys(S).find((k) => String(u).includes(k));
+  const body = k ? S[k] : { status: "pending", rows: [] };
+  return Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" },
+    json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
+};
+</script>`;
+
+const FIX = JSON.parse(readFileSync(path.join(ROOT, "scripts/render-preview.fixtures.json"), "utf8"));
+
+const browser = await chromium.launch();
+let failed = 0;
+const report = [];
+
+async function shot(name, html, { width = 1440, height = 1400, settle = 2500, probe = null } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2 });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
+  await page.setContent(html, { waitUntil: "load" });
+  await page.waitForTimeout(settle);
+  const seen = probe ? await page.evaluate(probe) : {};
+  const file = path.join(OUT, name + ".png");
+  await page.screenshot({ path: file });
+  await ctx.close();
+  if (errs.length) failed++;
+  report.push({ name, file, errors: errs.slice(0, 3), ...seen });
+}
+
+/* ---- the board ---- */
+await shot("board-long",
+  inline(stubFetch({ "board?side=long": FIX.boardLong }) +
+    pages.FLOWS_PAGES.sidePage({ username: "preview", side: "long" }),
+    ["nav.js", "flows-ui.js", "flows-board.js"]),
+  { probe: () => {
+      const c = [...document.querySelectorAll(".fd-card")];
+      return { cards: c.length,
+        heights: [...new Set(c.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
+        lines: [...document.querySelectorAll(".fd-sparkline")].length,
+        sectors: [...document.querySelectorAll(".fd-sect")].length };
+    } });
+
+/* ---- the overview ---- */
+await shot("overview",
+  inline(stubFetch(FIX.overview) +
+    pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
+    ["nav.js", "flows-ui.js", "flows-overview.js"]),
+  { height: 1600, probe: () => {
+      const r = [...document.querySelectorAll(".cc-region")];
+      return { regions: r.length,
+        regionHeights: [...new Set(r.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
+        tiles: document.querySelectorAll(".cc-tile").length,
+        tileSubs: document.querySelectorAll(".cc-tile-s").length,
+        verdictNotes: document.querySelectorAll(".cc-verdict-note").length,
+        /* EVENNESS IS MEASURED, NOT ASSERTED. The strip drew four tiles then
+           three at a different width for months, and every DOM probe over it
+           passed — because "the rule applied" and "the row reads even" are
+           different questions. These two are rounded rect counts: 1 and 1
+           means every tile is the same size, anything else names how many
+           distinct sizes a reader is being shown. */
+        /* One line per value, or the strip is taller than it needs to be. */
+        tileValueLines: new Set([...document.querySelectorAll(".cc-tile-v")]
+          .map((v) => Math.round(v.getBoundingClientRect().height
+            / parseFloat(getComputedStyle(v).lineHeight)))).size,
+        tileLabelTops: new Set([...document.querySelectorAll(".cc-tile-k")]
+          .map((k) => Math.round(k.getBoundingClientRect().top))).size,
+        tileWidths: new Set([...document.querySelectorAll(".cc-tile")]
+          .map((t) => Math.round(t.getBoundingClientRect().width))).size,
+        tileHeights: new Set([...document.querySelectorAll(".cc-tile")]
+          .map((t) => Math.round(t.getBoundingClientRect().height))).size,
+        neuronWords: document.querySelectorAll(".ak-w").length };
+    } });
+
+/* THE STRIP AT ITS TWO NARROWER COUNTS. The seven-column track hands the
+   strip 4 columns under 1100px and 2 under 620px — counts chosen because
+   they divide a row evenly and leave no short final row, which is the exact
+   failure the auto-fit track produced at full width. Neither step had ever
+   been rendered, and "the media query matched" is not "the row reads even":
+   both are asserted the same way the wide one is, on measured rects. */
+for (const [name, width] of [["overview-1000", 1000], ["overview-600", 600]]) {
+  await shot(name,
+    inline(stubFetch(FIX.overview) +
+      pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
+      ["nav.js", "flows-ui.js", "flows-overview.js"]),
+    { width, height: 1600, probe: () => ({
+        tiles: document.querySelectorAll(".cc-tile").length,
+        tileValueLines: new Set([...document.querySelectorAll(".cc-tile-v")]
+          .map((v) => Math.round(v.getBoundingClientRect().height
+            / parseFloat(getComputedStyle(v).lineHeight)))).size,
+        tileWidths: new Set([...document.querySelectorAll(".cc-tile")]
+          .map((t) => Math.round(t.getBoundingClientRect().width))).size,
+        /* A row's worth of tiles must be a whole row. Seven into four is
+           4+3, and the short row is what made the strip ragged before — so
+           the count that matters is how many DISTINCT widths the reader is
+           shown, which stays 1 only if the last row's tiles are sized by the
+           track rather than by what is left over. */
+        docScroll: document.documentElement.scrollWidth <= window.innerWidth,
+      }) });
+}
+
+/* ---- the reader, only when real cards were emitted ---- */
+if (CARDS && existsSync(CARDS)) {
+  const { TICKER_PANEL_KEYS } = await import(path.join(ROOT, "shared/flows-panels.js"));
+  const all = readdirSync(CARDS).filter((f) => f.startsWith("-card-"))
+    .map((f) => JSON.parse(readFileSync(path.join(CARDS, f), "utf8")));
+  const best = all.map((c) => ({ c, n: TICKER_PANEL_KEYS.filter((k) => c.panels && c.panels[k]).length }))
+    .sort((a, b) => b.n - a.n)[0];
+  if (best) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1600 }, deviceScaleFactor: 2 });
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on("pageerror", (e) => errs.push(String(e)));
+    const pageHTML = pages.FLOWS_PAGES.tickerPage({ username: "preview" });
+    await page.route("**/*", (r) => r.fulfill({ contentType: "text/html", body: pageHTML }));
+    await page.route("**/assets/js/flows-drawers.js*",
+      (r) => r.fulfill({ contentType: "text/javascript", body: js("flows-drawers.js") }));
+    await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
+    await page.evaluate((card) => {
+      window.fetch = () => Promise.resolve({ ok: true, status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+    }, best.c);
+    for (const f of ["assets/css/base.css", "assets/css/flows.css"]) {
+      await page.addStyleTag({ path: path.join(ROOT, f) });
+    }
+    await page.addScriptTag({ content: js("flows-panels.js") });
+    await page.addScriptTag({ content: js("flows-ticker.js") });
+    await page.waitForTimeout(4000);
+    const seen = await page.evaluate(() => {
+      const p = [...document.querySelectorAll(".ft-panel[data-panel]")];
+      return { ticker: (document.querySelector(".ft-tk") || {}).textContent || "?",
+        panels: p.length,
+        panelHeights: [...new Set(p.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
+        stations: document.querySelectorAll(".ft-station").length };
+    });
+    await page.screenshot({ path: path.join(OUT, "ticker.png") });
+    await ctx.close();
+    if (errs.length) failed++;
+    report.push({ name: "ticker", file: path.join(OUT, "ticker.png"), errors: errs.slice(0, 3), ...seen });
+  }
+} else {
+  report.push({ name: "ticker", skipped: "no --cards directory; run flows-pipeline.mjs --dry-run --emit first" });
+}
+
+await browser.close();
+for (const r of report) {
+  const { name, file, errors, skipped, ...rest } = r;
+  if (skipped) { console.log(`- ${name}: SKIPPED (${skipped})`); continue; }
+  console.log(`- ${name}: ${JSON.stringify(rest)}`);
+  console.log(`  -> ${file}${errors && errors.length ? "\n  ERRORS: " + errors.join(" | ") : ""}`);
+}
+console.log(failed ? `\n${failed} page(s) threw` : "\nevery page rendered clean");
+process.exit(failed ? 1 : 0);

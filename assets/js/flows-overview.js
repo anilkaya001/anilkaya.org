@@ -765,15 +765,28 @@
         summary.append(metric);
       }
       into.append(summary);
-      into.append(el("p", "cc-quiet", "Compared: " + (isNum(change.comparable) ?? DASH) +
+    }
+    /* THE METHODOLOGY GOES BEHIND THE DISCLOSURE BUILT FOR IT. This paragraph
+       — the comparable population, the count of single-session comparisons,
+       the span, the band, the shed — used to sit in the open directly above a
+       <details> headed "Comparison scope and methodology", which is the exact
+       thing it is. So the region printed four counters, then a dense sentence
+       of scope, then an invitation to read about scope.
+
+       NOTHING IS DROPPED AND NOTHING IS HIDDEN THAT A READING DEPENDS ON. The
+       four counters above are the measurement; this is how they were arrived
+       at, and a reader who wants it is one click from all of it in the place
+       the page already told them to look. */
+    const detail = el("details", "ft-how cc-change-detail");
+    detail.append(el("summary", "ft-how-s", "Comparison scope and methodology"));
+    if (change) {
+      detail.append(el("p", "cc-quiet", "Compared: " + (isNum(change.comparable) ?? DASH) +
         " names · " + (isNum(change.consecutive) ?? DASH) + " single-session comparisons. " +
         "Each row states its comparison span. " +
         (change.prior && change.session ? change.prior + " → " + change.session + ". " : "") +
         (band === null ? "Band unavailable." : "Band: ±" + band + " score points.") +
         (shed ? " " + shed + " counted names omitted from this payload." : "")));
     }
-    const detail = el("details", "ft-how cc-change-detail");
-    detail.append(el("summary", "ft-how-s", "Comparison scope and methodology"));
     detail.append(el("p", "cc-quiet cc-lede", lede));
     into.append(detail);
 
@@ -964,40 +977,21 @@
     const sessionDate = (typeof longDate === "string" && longDate) ||
       (typeof shortDate === "string" && shortDate) || null;
 
-    /* THE POOL, NOT THE ROWS — poolCount, the number the rail badges. The
-       difference is printed beside it as what was counted and not carried. */
+    /* THE POOL, NOT THE ROWS — poolCount, the number the rail badges, so the
+       rail, this tile and each board's own status line agree. The counted-
+       versus-carried gap is stated by the region that lists the rows, which
+       is where a reader is when the difference can affect a reading. */
     const bulls = poolCount(long);
     const bears = poolCount(short);
-    const notCarried = (payload, side) => {
-      const rows = rowCount(payload), pool = poolCount(payload);
-      return rows !== null && pool !== null && pool > rows ? (pool - rows) + " " + side : null;
-    };
-    const held = [notCarried(long, "bull"), notCarried(short, "bear")].filter(Boolean);
-    const clearedSub = "bull / bear cleared the band" +
-      (held.length ? " · " + held.join(" and ") + " counted, not carried" : "");
-
-    /* WHY THE ALERT SUB-LABEL IS NOT A CONSTANT. "nightly read" is a claim
-       about when the feed was taken; the two fetch silences are tileSilence's
-       above, so no provenance is attached to a number that does not exist.
-       AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE: the
-       else-branch used to print "nightly read" for everything not explicitly
-       intraday, so a payload predating the field asserted a provenance
-       nobody published — the confident default wearing a ternary. */
-    let alertNote = "read, cadence not published";
-    if (alerts && alerts.status !== "pending") {
-      alertNote = alerts.refreshed === "intraday" ? "refreshed intraday"
-        : alerts.refreshed === "nightly" ? "nightly read" : alertNote;
-    }
     /* THE VENDOR'S CEILING IS NOT A CENSUS. shared/flows-alerts.js publishes
        `vendorTruncated` beside `seen` when the read came back at the vendor's
        documented maximum — 2026-08-24: seen 200, vendorLimit 200, truncated.
        This tile printed "200" and the region subtitle "8 of 200", a ceiling
-       as a population. The true count is unknown and at least 200: ≥ on the
-       number, and the words beside it, because a withholding never folds.
-       The news region words its own ceiling the same way. */
+       as a population. The true count is unknown and at least 200, and the
+       ≥ carries that: a withholding never folds, but it does not need a
+       sentence to say so when the glyph is the statement. */
     const seen = isNum(alerts && alerts.seen);
     const atLimit = Boolean(alerts) && alerts.vendorTruncated === true;
-    const flaggedSaid = atLimit ? alertNote + " · vendor ceiling hit, population unknown" : alertNote;
 
     /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE.
        breadth.tilt counts names, premium.tilt weights dollars; they are the
@@ -1011,8 +1005,6 @@
        weighted. */
     const bt = isNum(breadth.tilt);
     const pt = isNum(premium.tilt);
-    const disagree = bt !== null && pt !== null && bt !== 0 && pt !== 0 && (bt > 0) !== (pt > 0);
-    const DISAGREE_SAID = "the two weightings disagree in sign";
     /* THE QUIET CASE IS THE SHAPER'S OWN 0/0, read off its published
        denominator: breadth.tilt is null when bull + bear is 0, premium.tilt
        when netPositive + netNegative is 0 (shared/flows-market.js:157, :168).
@@ -1025,52 +1017,55 @@
     const ptSilence = tileSilence(market, pt !== null,
       gross === 0 ? "no net premium was priced" : null);
 
+    /* NO TILE CARRIES A SUBTITLE WHILE ITS NUMBER IS REAL.
+
+       Seven tiles each explaining themselves underneath is a paragraph
+       wearing a strip's clothes — and the strip is the one element on this
+       page a reader is meant to take in at a glance, not read. Every
+       definition that stood here has a home: the tilts' denominators are
+       stated where /flows/market/ draws them, the cleared board's
+       counted-vs-carried caveat is stated by the region that lists it, and
+       the flagged ceiling is carried by the ≥ on the number itself.
+
+       The values were rewritten to need no gloss rather than merely losing
+       one: "41 bull / 48 bear" reads in one direction and cannot be divided
+       the wrong way round, where "41 / 48" needed a line underneath.
+
+       THE SUBTITLE SLOT REMAINS, AND ONLY A SILENCE MAY USE IT. A dash is
+       the one value on this strip that cannot explain itself, and the four
+       silences are what separate "not published yet" from "the fetch broke"
+       from "measured, and empty". Dropping those sentences would not make
+       the page denser; it would make four different facts look like one. */
     const tiles = [
       /* EITHER HALF CAN NAME THE SESSION. This read the long board alone,
          so a long board that did not answer — or has not published yet —
          put an em dash here while the short board in the same closure
          carried the date. Neither half is the page's session; they are two
-         writes of one, and the mismatch warning below already fires when
-         they disagree. */
-      ["Session", sessionDate || DASH, "", null, boardsSilence(sessionDate !== null)],
-      ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), "names", null,
+         writes of one. */
+      ["Session", sessionDate || DASH, null, boardsSilence(sessionDate !== null)],
+      ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), null,
         tileSilence(market, isNum(market && market.n) !== null, null)],
-      /* EACH SHARE NAMES THE POPULATION IT IS A SHARE OF, and neither
-         population is "names" or "premium" in the loose sense the first
-         version used. breadth.tilt is (bull − bear) / (bull + bear), so its
-         denominator is the names that LEANED — not the 264 in the Screened
-         tile beside it, which is what "of names" invited a reader to divide
-         by. premium.tilt is net / gross over per-name NET premium, and
-         shared/flows-market.js says in so many words that those sums are
-         "not call premium and not put premium": the subtitle that read
-         "calls − puts" named two vendor columns this number is not made of. */
-      ["Tilt · names", pct(bt, 1),
-        disagree ? DISAGREE_SAID : "of the names that leaned, bull − bear", tone(bt), btSilence],
-      ["Tilt · dollars", pct(pt, 1),
-        disagree ? DISAGREE_SAID : "of gross net premium, bought − sold", tone(pt), ptSilence],
+      ["Tilt · names", pct(bt, 1), tone(bt), btSilence],
+      ["Tilt · dollars", pct(pt, 1), tone(pt), ptSilence],
       ["Breadth",
-        (bull === null ? DASH : String(bull)) + " / " + (bear === null ? DASH : String(bear)),
-        "bull / bear", null, tileSilence(market, bull !== null && bear !== null, null)],
-      /* The pool, so rail, tile, status line and pole subtitle agree. A
-         silent half is a dash explained in its region; the tile is marked
-         only when neither half answered. */
+        (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
+        null, tileSilence(market, bull !== null && bear !== null, null)],
       ["Cleared",
-        (bulls === null ? DASH : bulls) + " / " + (bears === null ? DASH : bears), clearedSub, null,
-        boardsSilence(bulls !== null || bears !== null)],
-      ["Flagged windows", seen === null ? DASH : (atLimit ? "≥" : "") + seen, flaggedSaid, null,
+        (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
+        null, boardsSilence(bulls !== null || bears !== null)],
+      ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
         tileSilence(alerts, seen !== null, null)],
     ];
 
     /* A silent tile keeps its dash, prints the silence's sentence as its sub
        and carries the kind on data-empty — the mark flows.css draws for a
        region's silence — so the four are told apart without prose. */
-    for (const [key, value, sub, cls, silence] of tiles) {
+    for (const [key, value, cls, silence] of tiles) {
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
-      const said = silence ? silence[1] : sub;
-      if (said) tile.append(el("span", "cc-tile-s", said));
+      if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
       into.append(tile);
     }
   }

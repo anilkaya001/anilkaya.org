@@ -6174,17 +6174,53 @@ body.is-stale .flows-tablewrap {
   grid-column: 1 / -1;
   display: grid;
   gap: 1px;
-  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
-  background: var(--panel-border);
+  /* SEVEN TILES, AND AN EXPLICIT COUNT RATHER THAN auto-fit.
+
+     `auto-fit` with an 11rem floor packed four tiles into the first row and
+     three into a second, so the second row's three each grew to a third of
+     the width: the same strip drew tiles of two different sizes, side by
+     side, which is exactly the unevenness this section was asked to remove.
+     A fixed seven-column track makes every tile the same width by
+     construction at any viewport that can hold seven, and the two media
+     steps below hand it 4 and 2 — counts that divide the row evenly and
+     leave no short final row. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* AND THE SAME FOR HEIGHT. The tiles are peers — one label, one figure,
+     the same two lines of content — so a tile that happens to wrap its
+     value must not leave its row-mates short. This is the .flows-deck rule
+     and it belongs here for the deck's reason: equal-sized cards ranked by
+     what they say, not by how much they had to say it in. It does NOT
+     belong on .cc, whose regions carry genuinely different content volumes
+     — the comment further down records what happened when it was copied
+     there. */
+  grid-auto-rows: 1fr;
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
   overflow: hidden;
 }
+@media (max-width: 1100px) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-tile {
-  background: var(--panel-bg);
+  /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
+     tile on a translucent strip doubles the blur and the wash, and seven of
+     them draw seven slightly different greys where the 1px gap is supposed
+     to be the only line. The strip carries the surface; the tile carries a
+     hairline of it so the dividers read. */
+  background: rgba(255, 255, 255, 0.012);
   padding: 0.6rem 0.85rem;
   display: flex;
   flex-direction: column;
+  /* LABELS ON ONE BASELINE, NOT CENTRED IN THEIR OWN BOX. With
+     `justify-content: center` a tile whose value takes two lines pushes its
+     own label up, so seven labels sat at two different heights — the boxes
+     were identical and the row still read ragged. Rendered and measured:
+     four labels at y=604, three at y=589. Top-aligned, the label row is one
+     line across the strip whatever the values below it do. */
+  justify-content: flex-start;
   gap: 0.15rem;
 }
 .cc-tile-k {
@@ -6196,7 +6232,18 @@ body.is-stale .flows-tablewrap {
 }
 .cc-tile-v {
   font-family: var(--font-figure);
-  font-size: var(--fs-head);
+  /* THE VALUE IS SIZED TO THE COLUMN IT HAS, not to the largest it could
+     want. At seven equal columns each tile is ~164px wide and ~137px of it
+     is inside the padding; "41 bull / 48 bear" at --fs-head overflowed that
+     and wrapped mid-phrase, which is the one place a two-word value must
+     not break. The clamp keeps the headline weight at wide viewports and
+     steps down exactly as far as the column does. */
+  font-size: clamp(1rem, 1.05vw + 0.55rem, var(--fs-head));
+  /* AND IT MAY NOT WRAP. A wrapped value is not a denser strip; it is the
+     same words on two lines in a box that then has to be taller than its
+     neighbours. If a viewport ever cannot hold one, the media steps above
+     have already given the strip fewer columns. */
+  white-space: nowrap;
   font-weight: 600;
   color: var(--ink);
   line-height: 1.15;
@@ -8048,15 +8095,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .flows-body .cc-quiet,.flows-body .fc-note,.flows-body .cc-tile-s {
   color:var(--ink-dim);
 }
-.flows-body .cc-verdict {
-  display:flex;
-  flex-wrap:wrap;
-  gap:0;
-  background:var(--panel-bg);
-}
+/* THIS OVERRIDE IS WHAT DREW THE RAGGED STRIP, and it is removed rather
+   than adjusted. `display:flex; flex-wrap:wrap` with `flex:1 1 22%` sizes
+   every tile to its own content and lets the last row stretch to fill —
+   four tiles then three, at two different widths, plus an orphan whenever
+   an eighth element appeared. The grid above is the shape that was wanted
+   the whole time; it was simply being overridden two thousand lines later.
+   Only the padding survives, since the grid inherits everything else. */
 .flows-body .cc-tile {
-  flex:1 1 22%;
-  border:1px solid var(--panel-border);
   padding:.85rem 1rem;
 }
 .flows-body .cc-tile-v {

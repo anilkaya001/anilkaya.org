@@ -348,19 +348,28 @@ try {
        "the equal-weight tilt is a share of names, with its unit");
     eq(by["Tilt · dollars"]?.v, "−2.1%",
        "and the dollar-weight tilt is a share of premium, on the same tile row");
-    /* AND IT NAMES THE POPULATION IT IS A SHARE OF. breadth.tilt divides by
-       bull + bear, not by the 264 in the Screened tile beside it, and
-       premium.tilt is a share of gross NET premium — which shared/
-       flows-market.js says explicitly is not call premium and not put
-       premium. Both subtitles used to name the wrong denominator. */
-    eq(by["Tilt · names"]?.s, "of the names that leaned, bull − bear",
-       "each tile says what it is a share OF, in the denominator the shaper used");
-    eq(by["Tilt · dollars"]?.s, "of gross net premium, bought − sold",
-       "and the two subtitles are not the same sentence, nor two vendor columns this is not made of");
+    /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
+
+       Seven tiles each carrying a line of definition underneath is a
+       paragraph wearing a strip's clothes, and the strip is the one element
+       on this page meant to be taken in at a glance. The denominators those
+       two lines stated are not lost: breadth.tilt's and premium.tilt's are
+       stated where /flows/market/ draws them, which is where a reader is
+       standing when the difference between the two weightings can change a
+       reading. Asserted over EVERY tile, not just the two that prompted it,
+       so a definition cannot creep back one tile at a time. */
+    eq(tiles.filter((t) => t.s).length, 0,
+       `no tile explains itself while its value is a measurement (${
+         tiles.filter((t) => t.s).map((t) => t.k + ": " + t.s).join(" | ")})`);
     ok(/is-neg/.test(by["Tilt · names"]?.cls || "") &&
        /is-neg/.test(by["Tilt · dollars"]?.cls || ""),
        `and a sold tape is toned as one on both (${by["Tilt · names"]?.cls})`);
-    eq(by.Breadth?.v, "9 / 12", "breadth is bull over bear, from the market payload");
+    /* AND THE VALUE READS IN ONE DIRECTION. "9 / 12" needed a line
+       underneath saying "bull / bear" and could be divided the wrong way
+       round by anyone who did not read it; the words are inside the value
+       now, which is both shorter on the page and impossible to misorder. */
+    eq(by.Breadth?.v, "9 bull / 12 bear",
+       "breadth names its two sides inside the value, so it needs nothing underneath");
     /* THE POOL, NOT THE ROWS. Neither fixture board publishes `cleared`, so
        here the pool IS the row count and the two readings agree; the pooled
        phase below is where they part and the tile has to follow the rail. */
@@ -1172,7 +1181,7 @@ try {
       const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
         (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
       return { v: tile.querySelector(".cc-tile-v").textContent.trim(),
-               s: tile.querySelector(".cc-tile-s").textContent.trim() };
+               s: tile.querySelector(".cc-tile-s")?.textContent.trim() || "" };
     });
     eq(flagged.v, "44",
        "which is the same number the verdict tile has always printed twelve pixels away");
@@ -1194,17 +1203,26 @@ try {
       const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
         (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
       return { v: tile.querySelector(".cc-tile-v").textContent.trim(),
-               s: tile.querySelector(".cc-tile-s").textContent.trim(),
+               s: tile.querySelector(".cc-tile-s")?.textContent.trim() || "",
                sub: document.getElementById("ccAlertsSub").textContent.trim() };
     });
     eq(ceiling.v, "≥44",
        "a read that hit the vendor's ceiling prints the count as a floor, never as a census");
-    ok(/vendor ceiling/.test(ceiling.s) && /population unknown/.test(ceiling.s),
-       `and says so in words beside the cadence, in the open (${ceiling.s})`);
-    ok(/nightly read/.test(ceiling.s),
-       `without dropping when the read was taken to make room (${ceiling.s})`);
+    /* THE ≥ IS THE STATEMENT, AND THE REGION SAYS IT IN WORDS.
+
+       The tile used to carry "vendor ceiling hit, population unknown ·
+       nightly read" underneath, which is the withholding said twice on one
+       screen — the glyph in front of the number already refuses to fold the
+       unknown into a census, and #ccAlertsSub twelve pixels down carries the
+       same floor AND the cadence, beside the rows it describes. A
+       withholding never folds; it does not have to be printed twice to stay
+       unfolded. So the tile's gloss is gone and the region's is asserted
+       harder: the floor and the read's provenance are both read off it. */
+    eq(ceiling.s, "", "and the tile prints the floor without a sentence under it");
     ok(/^8 of ≥44 · read /.test(ceiling.sub),
-       `and the region subtitle carries the same floor, so the two cannot disagree (${ceiling.sub})`);
+       `the region subtitle carries the same floor, so the two cannot disagree (${ceiling.sub})`);
+    ok(/nightly/.test(ceiling.sub),
+       `and carries when the read was taken, which is where that belongs (${ceiling.sub})`);
     await post("flowalerts", { ...alerts, seen: 44, rows: alertMany,
       vendorLimit: 44, vendorTruncated: false });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -1227,11 +1245,11 @@ try {
     await post("flowalerts", noCadence);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
-    const said = await page.evaluate(() => {
-      const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
-        (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Flagged windows");
-      return tile.querySelector(".cc-tile-s").textContent.trim();
-    });
+    /* READ OFF THE REGION SUBTITLE, which is where the cadence now lives —
+       the defect this guards is the confident default, and it is the same
+       defect wherever the sentence is printed. */
+    const said = await page.evaluate(
+      () => document.getElementById("ccAlertsSub").textContent.trim());
     ok(!/nightly/.test(said),
        `a payload that published no cadence is not reported as a nightly read (${said})`);
     ok(!/intraday/.test(said), `nor as an intraday one (${said})`);
@@ -1532,12 +1550,16 @@ try {
         bearSub: document.getElementById("ccBearSub").textContent.trim(),
       };
     });
-    eq(onePop.v, "12 / 9", "the Cleared tile prints the pool the rail badges");
-    eq(onePop.v.split(" / ")[1], pooled.short,
+    eq(onePop.v, "12 bull / 9 bear", "the Cleared tile prints the pool the rail badges");
+    eq(onePop.v.replace(/[^0-9 ]/g, "").trim().split(/\s+/)[1], pooled.short,
        "read back against the badge rather than a literal: one bearish population, one number");
-    eq(onePop.v.split(" / ")[0], pooled.long, "and the same on the bullish side");
-    ok(/7 bull and 5 bear counted, not carried/.test(onePop.s),
-       `and the tile says what the cap took, beside the pool, in the open (${onePop.s})`);
+    eq(onePop.v.replace(/[^0-9 ]/g, "").trim().split(/\s+/)[0], pooled.long,
+       "and the same on the bullish side");
+    /* WHAT THE CAP TOOK IS STATED BY THE STATUS LINE AND BY EACH POLE'S OWN
+       SUBTITLE, asserted immediately below, so dropping it from the tile
+       drops a third print of one fact rather than the fact. The tile is the
+       glance; the reconciliation belongs beside the rows it is about. */
+    eq(onePop.s, "", "and the tile itself carries no gloss under a measured value");
     ok(/5 of 12 bullish carried · 4 of 9 bearish carried/.test(onePop.status),
        `the status line reconciles the rows it drew against the same pool (${onePop.status})`);
     eq(onePop.bullSub, "top 5 of 12",
@@ -1808,10 +1830,25 @@ try {
     ok(/is-pos/.test(tiles["Tilt · names"]?.cls || "") &&
        /is-neg/.test(tiles["Tilt · dollars"]?.cls || ""),
        "and each carries its own sign in the glyph before any hue is applied");
-    eq(tiles["Tilt · names"]?.s, "the two weightings disagree in sign",
-       "and the disagreement is stated rather than left for the reader to spot");
-    eq(tiles["Tilt · dollars"]?.s, "the two weightings disagree in sign",
-       "on both tiles, because either one alone would be the misleading half");
+    /* THE DISAGREEMENT IS SHOWN, NOT ANNOUNCED — and the shape it used to be
+       announced in was wrong twice over.
+
+       It printed "the two weightings disagree in sign" under EACH tile,
+       which states one observation as if it were two independent ones: a
+       disagreement is a property of the pair, and there is exactly one of
+       it. And it printed that warning INSTEAD of each tile's definition, so
+       on precisely the session where the two numbers part company a reader
+       lost both denominators — the one thing that explains how the same
+       ratio can carry two signs.
+
+       What actually communicates it is the thing asserted two lines up: two
+       tiles, side by side, one +5.0% and one −3.0%, each carrying its own
+       sign in the glyph before any hue. A reader who can see both cannot
+       miss that they differ; a sentence saying so is the page narrating its
+       own screenshot. So the assertion is that NEITHER tile grows a
+       sentence, on the one session that used to produce two. */
+    eq((tiles["Tilt · names"]?.s || "") + (tiles["Tilt · dollars"]?.s || ""), "",
+       "neither tilt narrates the disagreement its own two glyphs already show");
     await post("market", market);
   }
 

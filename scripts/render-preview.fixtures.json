@@ -1,0 +1,1093 @@
+{
+ "boardLong": {
+  "v": 2,
+  "side": "long",
+  "sessionDate": "2026-09-10",
+  "status": "ok",
+  "universe": 260,
+  "enriched": 89,
+  "scored": 89,
+  "deadBand": 1,
+  "neutral": 29,
+  "horizonSessions": 10,
+  "rows": [
+   {
+    "t": "NVDA",
+    "r": 1,
+    "s": 62,
+    "cnv": 92,
+    "agr": 6,
+    "bth": 8,
+    "px": 178.44,
+    "chg": 0.0421,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 412800000,
+    "sector": "Information Technology",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "P0MGItAABIKPIoNuKOENIQHjF+D3ErJlLxOLUiXqTfXig+eYanSmRaJVDyKzWdjO1n4J4Y//8C1l7S5W1c8x"
+   },
+   {
+    "t": "SPY",
+    "r": 2,
+    "s": 55,
+    "cnv": 88,
+    "agr": 6,
+    "bth": 8,
+    "px": 681.35,
+    "chg": 0.0182,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 296000000,
+    "sector": "Broad market",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "AAE+McQJNWOFKbP5POU6YQeBkutHsjwOvDsSpemIi3cHZ7YFdvgfeEX6TSSYZHg8pRtrw0377v//+C561ru7"
+   },
+   {
+    "t": "AVGO",
+    "r": 3,
+    "s": 58,
+    "cnv": 85,
+    "agr": 6,
+    "bth": 8,
+    "px": 352.19,
+    "chg": 0.0308,
+    "purity": 0.4,
+    "gRegime": "short",
+    "gFlipDist": -0.05,
+    "netPrem": 204600000,
+    "sector": "Information Technology",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "AbAALaVxSBWbYJPHQwKQL7WzlolWb0UcZsevu8+z//2Euv2234yBsdkHfuo/2h6U9n71507K4Ouw2tz/qNja"
+   },
+   {
+    "t": "MSFT",
+    "r": 4,
+    "s": 51,
+    "cnv": 81,
+    "agr": 6,
+    "bth": 8,
+    "px": 498.12,
+    "chg": 0.0137,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 158200000,
+    "sector": "Technology",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "lNnLkDccSgK6EqCpAACXFvCbFJB1AQD9FFL6PlR2OJLEF8JuKoNnLPR5VSe6fEj4gSjzpfxfz53b2F9i//6v"
+   },
+   {
+    "t": "GOOGL",
+    "r": 5,
+    "s": 49,
+    "cnv": 78,
+    "agr": 6,
+    "bth": 8,
+    "px": 252.88,
+    "chg": 0.0206,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 121300000,
+    "sector": "Communication Services",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "//3ir5qLvnuypHg/dngTrJoemQjCaURDU1QPJEJ/EoAnJRF6AACZKzMGLyVBbibObJdMWKUtK1MWQ+RhJoBQ"
+   },
+   {
+    "t": "AAPL",
+    "r": 6,
+    "s": 43,
+    "cnv": 92,
+    "agr": 6,
+    "bth": 8,
+    "px": 241.06,
+    "chg": 0.0084,
+    "purity": 0.4,
+    "gRegime": "short",
+    "gFlipDist": -0.05,
+    "netPrem": 96400000,
+    "sector": "Information Technology",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "UzP+QZSYafo8rfz9xy8/8+94z/3ez7r4hPhFbZM6EBAAHjXtnsvx84+j1BsYyw6A///o2Z8P7cwhvr8e465f"
+   },
+   {
+    "t": "LLY",
+    "r": 7,
+    "s": 38,
+    "cnv": 71,
+    "agr": 6,
+    "bth": 8,
+    "px": 874.22,
+    "chg": 0.0062,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 41700000,
+    "sector": "Healthcare",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "//9B5+3ByuudqQoNpXoKpgodnTlJiIh/ifkolGmhn2mnlojhh+fGbgW8R2MgI6EvEXCrCIAAAFChCADaDJCh"
+   },
+   {
+    "t": "META",
+    "r": 8,
+    "s": 35,
+    "cnv": 68,
+    "agr": 6,
+    "bth": 8,
+    "px": 618.4,
+    "chg": -0.0047,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 33100000,
+    "sector": "Communication Services",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "//9k+P7T1V0TxMrFoum5jLiXeAdLbCcMhNijiXeTfNdha8VjWIZ3YwTyTGSxUmU9Y9W0WyWaR0NJH0D/ASAA"
+   },
+   {
+    "t": "COST",
+    "r": 9,
+    "s": 31,
+    "cnv": 64,
+    "agr": 6,
+    "bth": 8,
+    "px": 932.1,
+    "chg": 0.0091,
+    "purity": 0.4,
+    "gRegime": "short",
+    "gFlipDist": -0.05,
+    "netPrem": 28400000,
+    "sector": "Consumer Staples",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "GYBTAAAzFtK3UOdTdgYERvOnPiShckkovByk1w+O8Y4oyky+yitTrmk7jRa9UgPgPGVgSdSHYqjnt75X7Z//"
+   },
+   {
+    "t": "UBER",
+    "r": 10,
+    "s": 29,
+    "cnv": 61,
+    "agr": 6,
+    "bth": 8,
+    "px": 88.15,
+    "chg": 0.0243,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 22900000,
+    "sector": "Industrials",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "AACLGOKcKvLkLKN1OPPNSCWPYcYZaFaXdmfZi7nlrEvAx/ycyIzczXyPvSwpvDvGuQvKuiw1zj1G4g9Z91//"
+   },
+   {
+    "t": "NEE",
+    "r": 11,
+    "s": 24,
+    "cnv": 57,
+    "agr": 6,
+    "bth": 8,
+    "px": 74.3,
+    "chg": 0.0054,
+    "purity": 0.4,
+    "gRegime": "long",
+    "gFlipDist": -0.05,
+    "netPrem": 14200000,
+    "sector": "Utilities",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "YkeOpXpruqoUnIf3YpOAG+JrFBHnAAGTLMQVbzoxwuz6xi6P//7Z1H7J3RtxxztJz/9f9M1ss4sGz02u2X6A"
+   },
+   {
+    "t": "CAT",
+    "r": 12,
+    "s": 21,
+    "cnv": 52,
+    "agr": 6,
+    "bth": 8,
+    "px": 402.77,
+    "chg": 0.0119,
+    "purity": 0.4,
+    "gRegime": "short",
+    "gFlipDist": -0.05,
+    "netPrem": 9800000,
+    "sector": "Industrials",
+    "dp": 1,
+    "fam": {
+     "F": 40,
+     "P": 30,
+     "D": 20,
+     "V": 55,
+     "O": 61
+    },
+    "pr": [
+     120,
+     240,
+     90
+    ],
+    "w52": 0.7,
+    "vrp": 0.02,
+    "ivr": 0.4,
+    "im": 0.05,
+    "hm": 0.06,
+    "hr": 0.05,
+    "spark": "EzHaHuHAEgDoDIFoGdGBFKDOAmACAACUFnIVKCLlOuQ+TIScTrXOZdavdFd7cebvdehJmOr6x90j3K6D96//"
+   }
+  ]
+ },
+ "summary": {
+  "text": "Information Technology cleared $412.8M and leaned 68% to calls — the heaviest basket of the session. Energy leaned hardest the other way at 61% puts, and Real Estate was read and held nothing at all.",
+  "llm": true,
+  "model": "@cf/zai-org/glm-4.7-flash",
+  "guard": null,
+  "generatedAt": "2026-09-10T16:41:07.000Z"
+ },
+ "overview": {
+  "board?side=long": {
+   "v": 2,
+   "side": "long",
+   "sessionDate": "2026-09-10",
+   "status": "ok",
+   "universe": 260,
+   "enriched": 89,
+   "scored": 89,
+   "deadBand": 1,
+   "neutral": 29,
+   "horizonSessions": 10,
+   "rows": [
+    {
+     "t": "NVDA",
+     "r": 1,
+     "s": 62,
+     "cnv": 92,
+     "agr": 6,
+     "bth": 8,
+     "px": 178.44,
+     "chg": 0.0421,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 412800000,
+     "sector": "Information Technology",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "P0MGItAABIKPIoNuKOENIQHjF+D3ErJlLxOLUiXqTfXig+eYanSmRaJVDyKzWdjO1n4J4Y//8C1l7S5W1c8x"
+    },
+    {
+     "t": "SPY",
+     "r": 2,
+     "s": 55,
+     "cnv": 88,
+     "agr": 6,
+     "bth": 8,
+     "px": 681.35,
+     "chg": 0.0182,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 296000000,
+     "sector": "Broad market",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "AAE+McQJNWOFKbP5POU6YQeBkutHsjwOvDsSpemIi3cHZ7YFdvgfeEX6TSSYZHg8pRtrw0377v//+C561ru7"
+    },
+    {
+     "t": "AVGO",
+     "r": 3,
+     "s": 58,
+     "cnv": 85,
+     "agr": 6,
+     "bth": 8,
+     "px": 352.19,
+     "chg": 0.0308,
+     "purity": 0.4,
+     "gRegime": "short",
+     "gFlipDist": -0.05,
+     "netPrem": 204600000,
+     "sector": "Information Technology",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "AbAALaVxSBWbYJPHQwKQL7WzlolWb0UcZsevu8+z//2Euv2234yBsdkHfuo/2h6U9n71507K4Ouw2tz/qNja"
+    },
+    {
+     "t": "MSFT",
+     "r": 4,
+     "s": 51,
+     "cnv": 81,
+     "agr": 6,
+     "bth": 8,
+     "px": 498.12,
+     "chg": 0.0137,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 158200000,
+     "sector": "Technology",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "lNnLkDccSgK6EqCpAACXFvCbFJB1AQD9FFL6PlR2OJLEF8JuKoNnLPR5VSe6fEj4gSjzpfxfz53b2F9i//6v"
+    },
+    {
+     "t": "GOOGL",
+     "r": 5,
+     "s": 49,
+     "cnv": 78,
+     "agr": 6,
+     "bth": 8,
+     "px": 252.88,
+     "chg": 0.0206,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 121300000,
+     "sector": "Communication Services",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "//3ir5qLvnuypHg/dngTrJoemQjCaURDU1QPJEJ/EoAnJRF6AACZKzMGLyVBbibObJdMWKUtK1MWQ+RhJoBQ"
+    },
+    {
+     "t": "AAPL",
+     "r": 6,
+     "s": 43,
+     "cnv": 92,
+     "agr": 6,
+     "bth": 8,
+     "px": 241.06,
+     "chg": 0.0084,
+     "purity": 0.4,
+     "gRegime": "short",
+     "gFlipDist": -0.05,
+     "netPrem": 96400000,
+     "sector": "Information Technology",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "UzP+QZSYafo8rfz9xy8/8+94z/3ez7r4hPhFbZM6EBAAHjXtnsvx84+j1BsYyw6A///o2Z8P7cwhvr8e465f"
+    },
+    {
+     "t": "LLY",
+     "r": 7,
+     "s": 38,
+     "cnv": 71,
+     "agr": 6,
+     "bth": 8,
+     "px": 874.22,
+     "chg": 0.0062,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 41700000,
+     "sector": "Healthcare",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "//9B5+3ByuudqQoNpXoKpgodnTlJiIh/ifkolGmhn2mnlojhh+fGbgW8R2MgI6EvEXCrCIAAAFChCADaDJCh"
+    },
+    {
+     "t": "META",
+     "r": 8,
+     "s": 35,
+     "cnv": 68,
+     "agr": 6,
+     "bth": 8,
+     "px": 618.4,
+     "chg": -0.0047,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 33100000,
+     "sector": "Communication Services",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "//9k+P7T1V0TxMrFoum5jLiXeAdLbCcMhNijiXeTfNdha8VjWIZ3YwTyTGSxUmU9Y9W0WyWaR0NJH0D/ASAA"
+    },
+    {
+     "t": "COST",
+     "r": 9,
+     "s": 31,
+     "cnv": 64,
+     "agr": 6,
+     "bth": 8,
+     "px": 932.1,
+     "chg": 0.0091,
+     "purity": 0.4,
+     "gRegime": "short",
+     "gFlipDist": -0.05,
+     "netPrem": 28400000,
+     "sector": "Consumer Staples",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "GYBTAAAzFtK3UOdTdgYERvOnPiShckkovByk1w+O8Y4oyky+yitTrmk7jRa9UgPgPGVgSdSHYqjnt75X7Z//"
+    },
+    {
+     "t": "UBER",
+     "r": 10,
+     "s": 29,
+     "cnv": 61,
+     "agr": 6,
+     "bth": 8,
+     "px": 88.15,
+     "chg": 0.0243,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 22900000,
+     "sector": "Industrials",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "AACLGOKcKvLkLKN1OPPNSCWPYcYZaFaXdmfZi7nlrEvAx/ycyIzczXyPvSwpvDvGuQvKuiw1zj1G4g9Z91//"
+    },
+    {
+     "t": "NEE",
+     "r": 11,
+     "s": 24,
+     "cnv": 57,
+     "agr": 6,
+     "bth": 8,
+     "px": 74.3,
+     "chg": 0.0054,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": 14200000,
+     "sector": "Utilities",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "YkeOpXpruqoUnIf3YpOAG+JrFBHnAAGTLMQVbzoxwuz6xi6P//7Z1H7J3RtxxztJz/9f9M1ss4sGz02u2X6A"
+    },
+    {
+     "t": "CAT",
+     "r": 12,
+     "s": 21,
+     "cnv": 52,
+     "agr": 6,
+     "bth": 8,
+     "px": 402.77,
+     "chg": 0.0119,
+     "purity": 0.4,
+     "gRegime": "short",
+     "gFlipDist": -0.05,
+     "netPrem": 9800000,
+     "sector": "Industrials",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "EzHaHuHAEgDoDIFoGdGBFKDOAmACAACUFnIVKCLlOuQ+TIScTrXOZdavdFd7cebvdehJmOr6x90j3K6D96//"
+    }
+   ]
+  },
+  "board?side=short": {
+   "v": 2,
+   "side": "short",
+   "sessionDate": "2026-09-10",
+   "status": "ok",
+   "universe": 260,
+   "enriched": 89,
+   "scored": 89,
+   "deadBand": 1,
+   "neutral": 29,
+   "horizonSessions": 10,
+   "rows": [
+    {
+     "t": "TSLA",
+     "r": 1,
+     "s": -57,
+     "cnv": 84,
+     "agr": 6,
+     "bth": 8,
+     "px": 409.63,
+     "chg": -0.0214,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": -188500000,
+     "sector": "Consumer Discretionary",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "t2l0lxuQ2HycztsmtmxLrYrDq+r7n1u2uWwe6M//4K1rp0lDgne9ZbdKe1WBTEXEQSIgAcAAFkETLTQTQaKu"
+    },
+    {
+     "t": "XOM",
+     "r": 2,
+     "s": -44,
+     "cnv": 73,
+     "agr": 6,
+     "bth": 8,
+     "px": 118.77,
+     "chg": -0.0168,
+     "purity": 0.4,
+     "gRegime": "long",
+     "gFlipDist": -0.05,
+     "netPrem": -58200000,
+     "sector": "Energy",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "//5P0RzBsdkDc4YQZ0dlcUZpTJQRSFQfN3QkV0V9ZAeFfsbNbSZyWPQqPRM+J3L6K/JgF9ASBWD+I5LRHaAA"
+    },
+    {
+     "t": "AMZN",
+     "r": 3,
+     "s": -39,
+     "cnv": 69,
+     "agr": 6,
+     "bth": 8,
+     "px": 232.75,
+     "chg": -0.0112,
+     "purity": 0.4,
+     "gRegime": "short",
+     "gFlipDist": -0.05,
+     "netPrem": -74900000,
+     "sector": "Consumer Discretionary",
+     "dp": 1,
+     "fam": {
+      "F": 40,
+      "P": 30,
+      "D": 20,
+      "V": 55,
+      "O": 61
+     },
+     "pr": [
+      120,
+      240,
+      90
+     ],
+     "w52": 0.7,
+     "vrp": 0.02,
+     "ivr": 0.4,
+     "im": 0.05,
+     "hm": 0.06,
+     "hr": 0.05,
+     "spark": "WnbkkxjUloiEWdJ9AABrAFEHImRuTqWQf2sb1Bvtyw159/7z///R/K2FzTv+sMnLqemsf4aobOhrqRvotUsa"
+    }
+   ]
+  },
+  "market": {
+   "sessionDate": "2026-09-10",
+   "n": 89,
+   "breadth": {
+    "bull": 41,
+    "bear": 48,
+    "tilt": -0.079
+   },
+   "premium": {
+    "netPositive": 520000000,
+    "netNegative": 480000000,
+    "tilt": 0.041
+   }
+  },
+  "flowalerts": {
+   "sessionDate": "2026-09-10",
+   "atVendorLimit": true,
+   "seen": 232,
+   "rows": [
+    {
+     "ticker": "NVDA",
+     "premium": 12000000,
+     "startedAt": "2026-09-10T14:30:00Z",
+     "minutes": 5
+    },
+    {
+     "ticker": "TSLA",
+     "premium": 8400000,
+     "startedAt": "2026-09-10T15:10:00Z",
+     "minutes": 3
+    }
+   ]
+  },
+  "sector-premium": {
+   "sessionDate": "2026-09-10",
+   "units": {
+    "netPremiumUsd": "usd"
+   },
+   "lean": {
+    "rank": "leanRatio"
+   },
+   "notSameAs": "sector:trix",
+   "rows": [
+    {
+     "sector": "Information Technology",
+     "etf": "XLK",
+     "grossPremiumUsd": 610000000,
+     "netPremiumUsd": 412800000,
+     "leanRatio": 0.68,
+     "read": true
+    },
+    {
+     "sector": "Energy",
+     "etf": "XLE",
+     "grossPremiumUsd": 94000000,
+     "netPremiumUsd": -57000000,
+     "leanRatio": -0.61,
+     "read": true
+    },
+    {
+     "sector": "Financials",
+     "etf": "XLF",
+     "grossPremiumUsd": 130000000,
+     "netPremiumUsd": 21000000,
+     "leanRatio": 0.16,
+     "read": true
+    }
+   ]
+  },
+  "events": {
+   "sessionDate": "2026-09-10",
+   "rows": [
+    {
+     "ticker": "ORCL",
+     "when": "2026-09-11",
+     "session": "after"
+    }
+   ]
+  },
+  "news": {
+   "fetchedAt": "2026-09-10T09:15:00Z",
+   "rows": [
+    {
+     "headline": "Chipmakers extend gains as AI demand holds",
+     "createdAt": "2026-09-10T13:02:00Z",
+     "tickers": [
+      "NVDA"
+     ]
+    }
+   ]
+  },
+  "scoretrack": {
+   "sessionDate": "2026-09-10",
+   "rows": []
+  }
+ }
+}
