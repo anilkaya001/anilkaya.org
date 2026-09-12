@@ -66,44 +66,54 @@ export const PULSE_CAPS = Object.freeze({
   seasonality: 12,  // months — the natural population, capped only in form
 });
 
+/* WHAT SURVIVED A CUT, AND THE RULE THAT DECIDED IT.
+
+   These notes ran 38 to 62 words each and the pulse drew seven of them on
+   one screen, under tables that already carry their own column headers.
+   Rendered, the page read as an essay with figures in it. The ask was a
+   clean, dense page; the constraint is flows-overview.js:325, which says a
+   population, a horizon, a unit, a truncation or a NOT-CLAIMED may never be
+   folded away — "folding a withholding is how a caveat unread becomes a
+   caveat deleted".
+
+   Both hold at once, because the length was never the withholding. Each
+   note was two things welded together: a DEFINITION of what the card shows,
+   which its own headers and title already say, and a REFUSAL of what it
+   does not support, which nothing else says anywhere. The definition is
+   gone. Every refusal is here, in fewer words and earlier in the sentence,
+   where a reader who skims still meets it.
+
+   Nothing was moved behind a disclosure and nothing was softened. Checked
+   clause by clause against the originals: the tide's "never a forecast",
+   totals' "who initiated", oiChange's unpublished vendor rule AND its
+   day-late horizon, netImpact's irreproducible definition, insiders'
+   filing-day-not-trading-day, darkpool's reporting-facility-not-a-venue,
+   seasonality's no-claim-about-the-month-ahead, and the whole of refusals. */
 export const PULSE_NOTES = Object.freeze({
   tide:
-    "The tide is the vendor's own running net premium series for the whole " +
-    "market: net call premium, net put premium and net volume per bucket, " +
-    "carried exactly as published. This page adds no cumulation, no " +
-    "differencing and no smoothing, and a rising line is a statement about " +
-    "premium flow, never a forecast of price.",
+    "The vendor's own net premium series, carried without cumulation, " +
+    "differencing or smoothing. A rising line is premium flow, never a " +
+    "forecast of price.",
   totals:
-    "Total options volume and premium per session, split call/put, as the " +
-    "vendor reports them. The split is the vendor's attribution; no ratio " +
-    "here says who initiated anything.",
+    "The call/put split is the vendor's attribution. No ratio here says " +
+    "who initiated anything.",
   oiChange:
-    "The vendor's ranking of contracts by open-interest change. The " +
-    "selection and the ordering are the vendor's own — its rule is not " +
-    "published — so this list ranks inside what the vendor chose to " +
-    "surface, not the whole chain universe. An open-interest change is a " +
-    "settled fact a day late by construction: it compares two clearing " +
-    "snapshots, never today's tape.",
+    "The vendor's selection and ordering, under a rule it does not " +
+    "publish — so this ranks inside what the vendor chose to surface, not " +
+    "the chain universe. Open-interest change compares two clearing " +
+    "snapshots, so it is a day late by construction, never today's tape.",
   netImpact:
-    "The vendor's ranking of names by net options premium impact. Sign " +
-    "is the vendor's attribution against the quote; the definition of " +
-    "impact is the vendor's and is not reproducible from this payload.",
+    "Sign is the vendor's attribution against the quote. Its definition " +
+    "of impact is not reproducible from this payload.",
   insiders:
-    "Aggregate insider filings per filing day: purchase and sale counts " +
-    "with their notionals, as disclosed in regulatory filings. Filings " +
-    "arrive with statutory delay, so the latest row is the most recent " +
-    "FILING day, not the most recent trading day.",
+    "Filings arrive with statutory delay: the latest row is the most " +
+    "recent FILING day, not the most recent trading day.",
   darkpool:
-    "Off-exchange equity trades reported to the tape, largest-premium " +
-    "recent prints as the vendor surfaces them. These ARE executions — " +
-    "unlike the option feeds' windows — but the tape reports them with " +
-    "delay, attributes no side and no participant, and 'dark pool' here " +
-    "means the off-exchange reporting facility, not a named venue.",
+    "These ARE executions, unlike the option feeds' windows — but the tape " +
+    "reports them with delay and attributes no side and no participant. " +
+    "'Dark pool' here is the off-exchange reporting facility, not a venue.",
   seasonality:
-    "Monthly market seasonality over the vendor's stated span of years: " +
-    "average, median and extreme monthly changes with the share of " +
-    "positive closes. A seasonal average is arithmetic over history and " +
-    "carries no claim about the month ahead.",
+    "Arithmetic over history. It carries no claim about the month ahead.",
   refusals:
     "No feed here supports intent or identity: nothing says who was " +
     "active or which side initiated. The tide and impact rankings use the " +

@@ -1,0 +1,3418 @@
+{
+  "boardLong": {
+    "v": 2,
+    "side": "long",
+    "sessionDate": "2026-09-10",
+    "status": "ok",
+    "universe": 260,
+    "enriched": 89,
+    "scored": 89,
+    "deadBand": 1,
+    "neutral": 29,
+    "horizonSessions": 10,
+    "rows": [
+      {
+        "t": "NVDA",
+        "r": 1,
+        "s": 62,
+        "cnv": 92,
+        "agr": 6,
+        "bth": 8,
+        "px": 178.44,
+        "chg": 0.0421,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 412800000,
+        "sector": "Information Technology",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "P0MGItAABIKPIoNuKOENIQHjF+D3ErJlLxOLUiXqTfXig+eYanSmRaJVDyKzWdjO1n4J4Y//8C1l7S5W1c8x"
+      },
+      {
+        "t": "SPY",
+        "r": 2,
+        "s": 55,
+        "cnv": 88,
+        "agr": 6,
+        "bth": 8,
+        "px": 681.35,
+        "chg": 0.0182,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 296000000,
+        "sector": "Broad market",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "AAE+McQJNWOFKbP5POU6YQeBkutHsjwOvDsSpemIi3cHZ7YFdvgfeEX6TSSYZHg8pRtrw0377v//+C561ru7"
+      },
+      {
+        "t": "AVGO",
+        "r": 3,
+        "s": 58,
+        "cnv": 85,
+        "agr": 6,
+        "bth": 8,
+        "px": 352.19,
+        "chg": 0.0308,
+        "purity": 0.4,
+        "gRegime": "short",
+        "gFlipDist": -0.05,
+        "netPrem": 204600000,
+        "sector": "Information Technology",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "AbAALaVxSBWbYJPHQwKQL7WzlolWb0UcZsevu8+z//2Euv2234yBsdkHfuo/2h6U9n71507K4Ouw2tz/qNja"
+      },
+      {
+        "t": "MSFT",
+        "r": 4,
+        "s": 51,
+        "cnv": 81,
+        "agr": 6,
+        "bth": 8,
+        "px": 498.12,
+        "chg": 0.0137,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 158200000,
+        "sector": "Technology",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "lNnLkDccSgK6EqCpAACXFvCbFJB1AQD9FFL6PlR2OJLEF8JuKoNnLPR5VSe6fEj4gSjzpfxfz53b2F9i//6v"
+      },
+      {
+        "t": "GOOGL",
+        "r": 5,
+        "s": 49,
+        "cnv": 78,
+        "agr": 6,
+        "bth": 8,
+        "px": 252.88,
+        "chg": 0.0206,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 121300000,
+        "sector": "Communication Services",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "//3ir5qLvnuypHg/dngTrJoemQjCaURDU1QPJEJ/EoAnJRF6AACZKzMGLyVBbibObJdMWKUtK1MWQ+RhJoBQ"
+      },
+      {
+        "t": "AAPL",
+        "r": 6,
+        "s": 43,
+        "cnv": 92,
+        "agr": 6,
+        "bth": 8,
+        "px": 241.06,
+        "chg": 0.0084,
+        "purity": 0.4,
+        "gRegime": "short",
+        "gFlipDist": -0.05,
+        "netPrem": 96400000,
+        "sector": "Information Technology",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "UzP+QZSYafo8rfz9xy8/8+94z/3ez7r4hPhFbZM6EBAAHjXtnsvx84+j1BsYyw6A///o2Z8P7cwhvr8e465f"
+      },
+      {
+        "t": "LLY",
+        "r": 7,
+        "s": 38,
+        "cnv": 71,
+        "agr": 6,
+        "bth": 8,
+        "px": 874.22,
+        "chg": 0.0062,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 41700000,
+        "sector": "Healthcare",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "//9B5+3ByuudqQoNpXoKpgodnTlJiIh/ifkolGmhn2mnlojhh+fGbgW8R2MgI6EvEXCrCIAAAFChCADaDJCh"
+      },
+      {
+        "t": "META",
+        "r": 8,
+        "s": 35,
+        "cnv": 68,
+        "agr": 6,
+        "bth": 8,
+        "px": 618.4,
+        "chg": -0.0047,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 33100000,
+        "sector": "Communication Services",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "//9k+P7T1V0TxMrFoum5jLiXeAdLbCcMhNijiXeTfNdha8VjWIZ3YwTyTGSxUmU9Y9W0WyWaR0NJH0D/ASAA"
+      },
+      {
+        "t": "COST",
+        "r": 9,
+        "s": 31,
+        "cnv": 64,
+        "agr": 6,
+        "bth": 8,
+        "px": 932.1,
+        "chg": 0.0091,
+        "purity": 0.4,
+        "gRegime": "short",
+        "gFlipDist": -0.05,
+        "netPrem": 28400000,
+        "sector": "Consumer Staples",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "GYBTAAAzFtK3UOdTdgYERvOnPiShckkovByk1w+O8Y4oyky+yitTrmk7jRa9UgPgPGVgSdSHYqjnt75X7Z//"
+      },
+      {
+        "t": "UBER",
+        "r": 10,
+        "s": 29,
+        "cnv": 61,
+        "agr": 6,
+        "bth": 8,
+        "px": 88.15,
+        "chg": 0.0243,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 22900000,
+        "sector": "Industrials",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "AACLGOKcKvLkLKN1OPPNSCWPYcYZaFaXdmfZi7nlrEvAx/ycyIzczXyPvSwpvDvGuQvKuiw1zj1G4g9Z91//"
+      },
+      {
+        "t": "NEE",
+        "r": 11,
+        "s": 24,
+        "cnv": 57,
+        "agr": 6,
+        "bth": 8,
+        "px": 74.3,
+        "chg": 0.0054,
+        "purity": 0.4,
+        "gRegime": "long",
+        "gFlipDist": -0.05,
+        "netPrem": 14200000,
+        "sector": "Utilities",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "YkeOpXpruqoUnIf3YpOAG+JrFBHnAAGTLMQVbzoxwuz6xi6P//7Z1H7J3RtxxztJz/9f9M1ss4sGz02u2X6A"
+      },
+      {
+        "t": "CAT",
+        "r": 12,
+        "s": 21,
+        "cnv": 52,
+        "agr": 6,
+        "bth": 8,
+        "px": 402.77,
+        "chg": 0.0119,
+        "purity": 0.4,
+        "gRegime": "short",
+        "gFlipDist": -0.05,
+        "netPrem": 9800000,
+        "sector": "Industrials",
+        "dp": 1,
+        "fam": {
+          "F": 40,
+          "P": 30,
+          "D": 20,
+          "V": 55,
+          "O": 61
+        },
+        "pr": [
+          120,
+          240,
+          90
+        ],
+        "w52": 0.7,
+        "vrp": 0.02,
+        "ivr": 0.4,
+        "im": 0.05,
+        "hm": 0.06,
+        "hr": 0.05,
+        "spark": "EzHaHuHAEgDoDIFoGdGBFKDOAmACAACUFnIVKCLlOuQ+TIScTrXOZdavdFd7cebvdehJmOr6x90j3K6D96//"
+      }
+    ]
+  },
+  "summary": {
+    "text": "Information Technology cleared $412.8M and leaned 68% to calls — the heaviest basket of the session. Energy leaned hardest the other way at 61% puts, and Real Estate was read and held nothing at all.",
+    "llm": true,
+    "model": "@cf/zai-org/glm-4.7-flash",
+    "guard": null,
+    "generatedAt": "2026-09-10T16:41:07.000Z"
+  },
+  "overview": {
+    "board?side=long": {
+      "v": 2,
+      "side": "long",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "universe": 260,
+      "enriched": 89,
+      "scored": 89,
+      "deadBand": 1,
+      "neutral": 29,
+      "horizonSessions": 10,
+      "rows": [
+        {
+          "t": "NVDA",
+          "r": 1,
+          "s": 62,
+          "cnv": 92,
+          "agr": 6,
+          "bth": 8,
+          "px": 178.44,
+          "chg": 0.0421,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 412800000,
+          "sector": "Information Technology",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "P0MGItAABIKPIoNuKOENIQHjF+D3ErJlLxOLUiXqTfXig+eYanSmRaJVDyKzWdjO1n4J4Y//8C1l7S5W1c8x"
+        },
+        {
+          "t": "SPY",
+          "r": 2,
+          "s": 55,
+          "cnv": 88,
+          "agr": 6,
+          "bth": 8,
+          "px": 681.35,
+          "chg": 0.0182,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 296000000,
+          "sector": "Broad market",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "AAE+McQJNWOFKbP5POU6YQeBkutHsjwOvDsSpemIi3cHZ7YFdvgfeEX6TSSYZHg8pRtrw0377v//+C561ru7"
+        },
+        {
+          "t": "AVGO",
+          "r": 3,
+          "s": 58,
+          "cnv": 85,
+          "agr": 6,
+          "bth": 8,
+          "px": 352.19,
+          "chg": 0.0308,
+          "purity": 0.4,
+          "gRegime": "short",
+          "gFlipDist": -0.05,
+          "netPrem": 204600000,
+          "sector": "Information Technology",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "AbAALaVxSBWbYJPHQwKQL7WzlolWb0UcZsevu8+z//2Euv2234yBsdkHfuo/2h6U9n71507K4Ouw2tz/qNja"
+        },
+        {
+          "t": "MSFT",
+          "r": 4,
+          "s": 51,
+          "cnv": 81,
+          "agr": 6,
+          "bth": 8,
+          "px": 498.12,
+          "chg": 0.0137,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 158200000,
+          "sector": "Technology",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "lNnLkDccSgK6EqCpAACXFvCbFJB1AQD9FFL6PlR2OJLEF8JuKoNnLPR5VSe6fEj4gSjzpfxfz53b2F9i//6v"
+        },
+        {
+          "t": "GOOGL",
+          "r": 5,
+          "s": 49,
+          "cnv": 78,
+          "agr": 6,
+          "bth": 8,
+          "px": 252.88,
+          "chg": 0.0206,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 121300000,
+          "sector": "Communication Services",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "//3ir5qLvnuypHg/dngTrJoemQjCaURDU1QPJEJ/EoAnJRF6AACZKzMGLyVBbibObJdMWKUtK1MWQ+RhJoBQ"
+        },
+        {
+          "t": "AAPL",
+          "r": 6,
+          "s": 43,
+          "cnv": 92,
+          "agr": 6,
+          "bth": 8,
+          "px": 241.06,
+          "chg": 0.0084,
+          "purity": 0.4,
+          "gRegime": "short",
+          "gFlipDist": -0.05,
+          "netPrem": 96400000,
+          "sector": "Information Technology",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "UzP+QZSYafo8rfz9xy8/8+94z/3ez7r4hPhFbZM6EBAAHjXtnsvx84+j1BsYyw6A///o2Z8P7cwhvr8e465f"
+        },
+        {
+          "t": "LLY",
+          "r": 7,
+          "s": 38,
+          "cnv": 71,
+          "agr": 6,
+          "bth": 8,
+          "px": 874.22,
+          "chg": 0.0062,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 41700000,
+          "sector": "Healthcare",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "//9B5+3ByuudqQoNpXoKpgodnTlJiIh/ifkolGmhn2mnlojhh+fGbgW8R2MgI6EvEXCrCIAAAFChCADaDJCh"
+        },
+        {
+          "t": "META",
+          "r": 8,
+          "s": 35,
+          "cnv": 68,
+          "agr": 6,
+          "bth": 8,
+          "px": 618.4,
+          "chg": -0.0047,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 33100000,
+          "sector": "Communication Services",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "//9k+P7T1V0TxMrFoum5jLiXeAdLbCcMhNijiXeTfNdha8VjWIZ3YwTyTGSxUmU9Y9W0WyWaR0NJH0D/ASAA"
+        },
+        {
+          "t": "COST",
+          "r": 9,
+          "s": 31,
+          "cnv": 64,
+          "agr": 6,
+          "bth": 8,
+          "px": 932.1,
+          "chg": 0.0091,
+          "purity": 0.4,
+          "gRegime": "short",
+          "gFlipDist": -0.05,
+          "netPrem": 28400000,
+          "sector": "Consumer Staples",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "GYBTAAAzFtK3UOdTdgYERvOnPiShckkovByk1w+O8Y4oyky+yitTrmk7jRa9UgPgPGVgSdSHYqjnt75X7Z//"
+        },
+        {
+          "t": "UBER",
+          "r": 10,
+          "s": 29,
+          "cnv": 61,
+          "agr": 6,
+          "bth": 8,
+          "px": 88.15,
+          "chg": 0.0243,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 22900000,
+          "sector": "Industrials",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "AACLGOKcKvLkLKN1OPPNSCWPYcYZaFaXdmfZi7nlrEvAx/ycyIzczXyPvSwpvDvGuQvKuiw1zj1G4g9Z91//"
+        },
+        {
+          "t": "NEE",
+          "r": 11,
+          "s": 24,
+          "cnv": 57,
+          "agr": 6,
+          "bth": 8,
+          "px": 74.3,
+          "chg": 0.0054,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": 14200000,
+          "sector": "Utilities",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "YkeOpXpruqoUnIf3YpOAG+JrFBHnAAGTLMQVbzoxwuz6xi6P//7Z1H7J3RtxxztJz/9f9M1ss4sGz02u2X6A"
+        },
+        {
+          "t": "CAT",
+          "r": 12,
+          "s": 21,
+          "cnv": 52,
+          "agr": 6,
+          "bth": 8,
+          "px": 402.77,
+          "chg": 0.0119,
+          "purity": 0.4,
+          "gRegime": "short",
+          "gFlipDist": -0.05,
+          "netPrem": 9800000,
+          "sector": "Industrials",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "EzHaHuHAEgDoDIFoGdGBFKDOAmACAACUFnIVKCLlOuQ+TIScTrXOZdavdFd7cebvdehJmOr6x90j3K6D96//"
+        }
+      ]
+    },
+    "board?side=short": {
+      "v": 2,
+      "side": "short",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "universe": 260,
+      "enriched": 89,
+      "scored": 89,
+      "deadBand": 1,
+      "neutral": 29,
+      "horizonSessions": 10,
+      "rows": [
+        {
+          "t": "TSLA",
+          "r": 1,
+          "s": -57,
+          "cnv": 84,
+          "agr": 6,
+          "bth": 8,
+          "px": 409.63,
+          "chg": -0.0214,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": -188500000,
+          "sector": "Consumer Discretionary",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "t2l0lxuQ2HycztsmtmxLrYrDq+r7n1u2uWwe6M//4K1rp0lDgne9ZbdKe1WBTEXEQSIgAcAAFkETLTQTQaKu"
+        },
+        {
+          "t": "XOM",
+          "r": 2,
+          "s": -44,
+          "cnv": 73,
+          "agr": 6,
+          "bth": 8,
+          "px": 118.77,
+          "chg": -0.0168,
+          "purity": 0.4,
+          "gRegime": "long",
+          "gFlipDist": -0.05,
+          "netPrem": -58200000,
+          "sector": "Energy",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "//5P0RzBsdkDc4YQZ0dlcUZpTJQRSFQfN3QkV0V9ZAeFfsbNbSZyWPQqPRM+J3L6K/JgF9ASBWD+I5LRHaAA"
+        },
+        {
+          "t": "AMZN",
+          "r": 3,
+          "s": -39,
+          "cnv": 69,
+          "agr": 6,
+          "bth": 8,
+          "px": 232.75,
+          "chg": -0.0112,
+          "purity": 0.4,
+          "gRegime": "short",
+          "gFlipDist": -0.05,
+          "netPrem": -74900000,
+          "sector": "Consumer Discretionary",
+          "dp": 1,
+          "fam": {
+            "F": 40,
+            "P": 30,
+            "D": 20,
+            "V": 55,
+            "O": 61
+          },
+          "pr": [
+            120,
+            240,
+            90
+          ],
+          "w52": 0.7,
+          "vrp": 0.02,
+          "ivr": 0.4,
+          "im": 0.05,
+          "hm": 0.06,
+          "hr": 0.05,
+          "spark": "WnbkkxjUloiEWdJ9AABrAFEHImRuTqWQf2sb1Bvtyw159/7z///R/K2FzTv+sMnLqemsf4aobOhrqRvotUsa"
+        }
+      ]
+    },
+    "market": {
+      "sessionDate": "2026-09-10",
+      "n": 89,
+      "breadth": {
+        "bull": 41,
+        "bear": 48,
+        "tilt": -0.079
+      },
+      "premium": {
+        "netPositive": 520000000,
+        "netNegative": 480000000,
+        "tilt": 0.041
+      }
+    },
+    "flowalerts": {
+      "sessionDate": "2026-09-10",
+      "seen": 232,
+      "rows": [
+        {
+          "ticker": "NVDA",
+          "premium": 12000000,
+          "startedAt": "2026-09-10T14:30:00Z",
+          "minutes": 5
+        },
+        {
+          "ticker": "TSLA",
+          "premium": 8400000,
+          "startedAt": "2026-09-10T15:10:00Z",
+          "minutes": 3
+        }
+      ],
+      "vendorTruncated": true,
+      "vendorLimit": 232,
+      "refreshed": "intraday",
+      "readAt": "2026-09-10T16:28:00Z",
+      "status": "ok"
+    },
+    "sector-premium": {
+      "sessionDate": "2026-09-10",
+      "units": {
+        "netPremiumUsd": "usd"
+      },
+      "lean": {
+        "rank": "leanRatio"
+      },
+      "notSameAs": "sector:trix",
+      "rows": [
+        {
+          "sector": "Information Technology",
+          "etf": "XLK",
+          "grossPremiumUsd": 610000000,
+          "netPremiumUsd": 412800000,
+          "leanRatio": 0.68,
+          "read": true
+        },
+        {
+          "sector": "Energy",
+          "etf": "XLE",
+          "grossPremiumUsd": 94000000,
+          "netPremiumUsd": -57000000,
+          "leanRatio": -0.61,
+          "read": true
+        },
+        {
+          "sector": "Financials",
+          "etf": "XLF",
+          "grossPremiumUsd": 130000000,
+          "netPremiumUsd": 21000000,
+          "leanRatio": 0.16,
+          "read": true
+        }
+      ]
+    },
+    "events": {
+      "sessionDate": "2026-09-10",
+      "rows": [
+        {
+          "ticker": "ORCL",
+          "when": "2026-09-11",
+          "session": "after"
+        }
+      ]
+    },
+    "news": {
+      "fetchedAt": "2026-09-10T09:15:00Z",
+      "rows": [
+        {
+          "headline": "Chipmakers extend gains as AI demand holds",
+          "createdAt": "2026-09-10T13:02:00Z",
+          "tickers": [
+            "NVDA"
+          ]
+        }
+      ]
+    },
+    "scoretrack": {
+      "sessionDate": "2026-09-10",
+      "rows": []
+    }
+  },
+  "market": {
+    "flows/market": {
+      "v": 2,
+      "generatedAt": "2026-09-11T05:15:22.410Z",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "n": 412,
+      "screened": 446,
+      "premium": {
+        "netPositive": 3182440000,
+        "netNegative": 2744910000,
+        "net": 437530000,
+        "priced": 401,
+        "oneLegged": 8,
+        "tilt": 0.0737,
+        "topShare": 0.2914
+      },
+      "breadth": {
+        "bull": 221,
+        "bear": 176,
+        "flat": 4,
+        "unpriced": 11,
+        "tilt": 0.1133
+      },
+      "pcr": {
+        "volume": 0.7412,
+        "premium": 0.9038,
+        "quotedVolume": 409,
+        "quotedPremium": 406
+      },
+      "aggressor": {
+        "callAsk": 101344820,
+        "callBid": 92117660,
+        "putAsk": 71220340,
+        "putBid": 78904115,
+        "callLift": 0.5238,
+        "putLift": 0.4744,
+        "quoted": 398
+      },
+      "vol": {
+        "iv30dMedian": 0.3874,
+        "iv30dQuoted": 405,
+        "ivRankMedian": 0.4411,
+        "ivRankQuoted": 412
+      },
+      "notes": {
+        "population": "Every reading here is over the SCREENED UNIVERSE and not over the market: the names this run's band ladder returned and the universe gate admitted. The vendor caps each band at about fifty rows, so the population is bounded by how the ladder was walked.",
+        "presence": "Net premium is measured only where BOTH legs were quoted. A name quoting one leg is counted separately, never folded into a total — an unquoted leg treated as a zero would publish a name as balanced when one side was never reported.",
+        "weighting": "Breadth counts names; premium tilt weights them by dollars. When they disagree in sign, that is the reading.",
+        "concentration": "A market-wide total is a number one large print can own, so the five largest names' share of gross net premium is published beside it.",
+        "aggressor": "Lift is the share of volume that traded at the offer, over names that quoted both sides. It says which side of the quote was hit — not who was buying, and not why.",
+        "refused": "No probability, no forecast and no direction is claimed for the market. These are sums and ratios of quoted numbers over a stated population."
+      }
+    },
+    "flows/sectors": {
+      "v": 2,
+      "generatedAt": "2026-09-11T05:15:22.410Z",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "basis": "SPDR Select Sector ETFs, not GICS index levels",
+      "seriesSessions": 30,
+      "warmupSessions": 34,
+      "measured": 11,
+      "scaling": {
+        "rule": "fixed-clamp",
+        "choice": true,
+        "neutral": 50,
+        "fullScaleBp": 50,
+        "relation": "trix = 50 + 50 * clamp(trixBp / fullScaleBp, -1, +1)"
+      },
+      "sectors": [
+        {
+          "sector": "Information Technology",
+          "etf": "XLK",
+          "trixBp": 41.2,
+          "trix": 91.2,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            1.24,
+            1.34,
+            1.43,
+            1.53,
+            1.63,
+            1.73,
+            1.83,
+            1.93,
+            2.03,
+            2.13,
+            2.23,
+            2.33,
+            2.43,
+            2.53,
+            2.63,
+            2.73,
+            2.83,
+            2.93,
+            3.03,
+            3.13,
+            3.22,
+            3.32,
+            3.42,
+            3.52,
+            3.62,
+            3.72,
+            3.82,
+            3.92,
+            4.02,
+            4.12
+          ]
+        },
+        {
+          "sector": "Communication Services",
+          "etf": "XLC",
+          "trixBp": 28.6,
+          "trix": 78.6,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            0.86,
+            0.93,
+            1,
+            1.07,
+            1.13,
+            1.2,
+            1.27,
+            1.34,
+            1.41,
+            1.48,
+            1.55,
+            1.62,
+            1.69,
+            1.76,
+            1.82,
+            1.89,
+            1.96,
+            2.03,
+            2.1,
+            2.17,
+            2.24,
+            2.31,
+            2.38,
+            2.45,
+            2.51,
+            2.58,
+            2.65,
+            2.72,
+            2.79,
+            2.86
+          ]
+        },
+        {
+          "sector": "Consumer Discretionary",
+          "etf": "XLY",
+          "trixBp": 17.4,
+          "trix": 67.4,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            0.52,
+            0.56,
+            0.61,
+            0.65,
+            0.69,
+            0.73,
+            0.77,
+            0.82,
+            0.86,
+            0.9,
+            0.94,
+            0.98,
+            1.03,
+            1.07,
+            1.11,
+            1.15,
+            1.19,
+            1.24,
+            1.28,
+            1.32,
+            1.36,
+            1.4,
+            1.45,
+            1.49,
+            1.53,
+            1.57,
+            1.61,
+            1.66,
+            1.7,
+            1.74
+          ]
+        },
+        {
+          "sector": "Financials",
+          "etf": "XLF",
+          "trixBp": 9.8,
+          "trix": 59.8,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            0.29,
+            0.32,
+            0.34,
+            0.36,
+            0.39,
+            0.41,
+            0.44,
+            0.46,
+            0.48,
+            0.51,
+            0.53,
+            0.55,
+            0.58,
+            0.6,
+            0.63,
+            0.65,
+            0.67,
+            0.7,
+            0.72,
+            0.74,
+            0.77,
+            0.79,
+            0.81,
+            0.84,
+            0.86,
+            0.89,
+            0.91,
+            0.93,
+            0.96,
+            0.98
+          ]
+        },
+        {
+          "sector": "Industrials",
+          "etf": "XLI",
+          "trixBp": 4.1,
+          "trix": 54.1,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            0.12,
+            0.13,
+            0.14,
+            0.15,
+            0.16,
+            0.17,
+            0.18,
+            0.19,
+            0.2,
+            0.21,
+            0.22,
+            0.23,
+            0.24,
+            0.25,
+            0.26,
+            0.27,
+            0.28,
+            0.29,
+            0.3,
+            0.31,
+            0.32,
+            0.33,
+            0.34,
+            0.35,
+            0.36,
+            0.37,
+            0.38,
+            0.39,
+            0.4,
+            0.41
+          ]
+        },
+        {
+          "sector": "Health Care",
+          "etf": "XLV",
+          "trixBp": -2.7,
+          "trix": 47.3,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -0.08,
+            -0.09,
+            -0.09,
+            -0.1,
+            -0.11,
+            -0.11,
+            -0.12,
+            -0.13,
+            -0.13,
+            -0.14,
+            -0.15,
+            -0.15,
+            -0.16,
+            -0.17,
+            -0.17,
+            -0.18,
+            -0.19,
+            -0.19,
+            -0.2,
+            -0.2,
+            -0.21,
+            -0.22,
+            -0.22,
+            -0.23,
+            -0.24,
+            -0.24,
+            -0.25,
+            -0.26,
+            -0.26,
+            -0.27
+          ]
+        },
+        {
+          "sector": "Materials",
+          "etf": "XLB",
+          "trixBp": -9.3,
+          "trix": 40.7,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -0.28,
+            -0.3,
+            -0.32,
+            -0.35,
+            -0.37,
+            -0.39,
+            -0.41,
+            -0.44,
+            -0.46,
+            -0.48,
+            -0.5,
+            -0.53,
+            -0.55,
+            -0.57,
+            -0.59,
+            -0.62,
+            -0.64,
+            -0.66,
+            -0.68,
+            -0.71,
+            -0.73,
+            -0.75,
+            -0.77,
+            -0.8,
+            -0.82,
+            -0.84,
+            -0.86,
+            -0.89,
+            -0.91,
+            -0.93
+          ]
+        },
+        {
+          "sector": "Consumer Staples",
+          "etf": "XLP",
+          "trixBp": -14.8,
+          "trix": 35.2,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -0.44,
+            -0.48,
+            -0.52,
+            -0.55,
+            -0.59,
+            -0.62,
+            -0.66,
+            -0.69,
+            -0.73,
+            -0.77,
+            -0.8,
+            -0.84,
+            -0.87,
+            -0.91,
+            -0.94,
+            -0.98,
+            -1.02,
+            -1.05,
+            -1.09,
+            -1.12,
+            -1.16,
+            -1.19,
+            -1.23,
+            -1.27,
+            -1.3,
+            -1.34,
+            -1.37,
+            -1.41,
+            -1.44,
+            -1.48
+          ]
+        },
+        {
+          "sector": "Energy",
+          "etf": "XLE",
+          "trixBp": -21.5,
+          "trix": 28.5,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -0.65,
+            -0.7,
+            -0.75,
+            -0.8,
+            -0.85,
+            -0.9,
+            -0.96,
+            -1.01,
+            -1.06,
+            -1.11,
+            -1.16,
+            -1.22,
+            -1.27,
+            -1.32,
+            -1.37,
+            -1.42,
+            -1.48,
+            -1.53,
+            -1.58,
+            -1.63,
+            -1.68,
+            -1.73,
+            -1.79,
+            -1.84,
+            -1.89,
+            -1.94,
+            -1.99,
+            -2.05,
+            -2.1,
+            -2.15
+          ]
+        },
+        {
+          "sector": "Real Estate",
+          "etf": "XLRE",
+          "trixBp": -33.9,
+          "trix": 16.1,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -1.02,
+            -1.1,
+            -1.18,
+            -1.26,
+            -1.34,
+            -1.43,
+            -1.51,
+            -1.59,
+            -1.67,
+            -1.75,
+            -1.84,
+            -1.92,
+            -2,
+            -2.08,
+            -2.16,
+            -2.24,
+            -2.33,
+            -2.41,
+            -2.49,
+            -2.57,
+            -2.65,
+            -2.74,
+            -2.82,
+            -2.9,
+            -2.98,
+            -3.06,
+            -3.14,
+            -3.23,
+            -3.31,
+            -3.39
+          ]
+        },
+        {
+          "sector": "Utilities",
+          "etf": "XLU",
+          "trixBp": -48.2,
+          "trix": 1.8,
+          "clamped": false,
+          "clampedPoints": 0,
+          "reason": null,
+          "series": [
+            -1.45,
+            -1.56,
+            -1.68,
+            -1.8,
+            -1.91,
+            -2.03,
+            -2.14,
+            -2.26,
+            -2.38,
+            -2.49,
+            -2.61,
+            -2.73,
+            -2.84,
+            -2.96,
+            -3.07,
+            -3.19,
+            -3.31,
+            -3.42,
+            -3.54,
+            -3.66,
+            -3.77,
+            -3.89,
+            -4.01,
+            -4.12,
+            -4.24,
+            -4.35,
+            -4.47,
+            -4.59,
+            -4.7,
+            -4.82
+          ]
+        }
+      ]
+    },
+    "flows/movers": {
+      "v": 2,
+      "generatedAt": "2026-09-11T05:15:22.410Z",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "universe": 412,
+      "cap": 15,
+      "ranked": 398,
+      "priced": 401,
+      "unrankedChange": 14,
+      "unrankedPremium": 11,
+      "risers": [
+        {
+          "t": "APP",
+          "px": 421.08,
+          "chg": 0.0914,
+          "netPrem": 3882242,
+          "relVolume": 1.08,
+          "sector": null
+        },
+        {
+          "t": "PLTR",
+          "px": 168.22,
+          "chg": 0.0688,
+          "netPrem": 1691680,
+          "relVolume": 2.18,
+          "sector": null
+        },
+        {
+          "t": "SMCI",
+          "px": 44.91,
+          "chg": 0.0612,
+          "netPrem": 6887417,
+          "relVolume": 1.45,
+          "sector": null
+        },
+        {
+          "t": "MU",
+          "px": 142.37,
+          "chg": 0.0537,
+          "netPrem": 14795742,
+          "relVolume": 2.06,
+          "sector": null
+        },
+        {
+          "t": "COIN",
+          "px": 318.44,
+          "chg": 0.0489,
+          "netPrem": -17017612,
+          "relVolume": 2.2,
+          "sector": null
+        },
+        {
+          "t": "ARM",
+          "px": 151.06,
+          "chg": 0.0421,
+          "netPrem": -11614647,
+          "relVolume": 0.91,
+          "sector": null
+        },
+        {
+          "t": "AVGO",
+          "px": 356.71,
+          "chg": 0.0388,
+          "netPrem": 19710405,
+          "relVolume": 0.69,
+          "sector": null
+        },
+        {
+          "t": "ORCL",
+          "px": 288.95,
+          "chg": 0.0342,
+          "netPrem": -4637421,
+          "relVolume": 0.65,
+          "sector": null
+        },
+        {
+          "t": "NFLX",
+          "px": 1204.6,
+          "chg": 0.0301,
+          "netPrem": -17120260,
+          "relVolume": 1.68,
+          "sector": null
+        },
+        {
+          "t": "UBER",
+          "px": 92.18,
+          "chg": 0.0277,
+          "netPrem": 16960540,
+          "relVolume": 1.9,
+          "sector": null
+        },
+        {
+          "t": "SNOW",
+          "px": 221.44,
+          "chg": 0.0249,
+          "netPrem": 9648948,
+          "relVolume": 0.7,
+          "sector": null
+        },
+        {
+          "t": "DASH",
+          "px": 188.02,
+          "chg": 0.0231,
+          "netPrem": 4724747,
+          "relVolume": 1.39,
+          "sector": null
+        }
+      ],
+      "fallers": [
+        {
+          "t": "LULU",
+          "px": 187.33,
+          "chg": -0.0821,
+          "netPrem": -11844053,
+          "relVolume": 2.03,
+          "sector": null
+        },
+        {
+          "t": "CVS",
+          "px": 61.47,
+          "chg": -0.0644,
+          "netPrem": -17243476,
+          "relVolume": 1.88,
+          "sector": null
+        },
+        {
+          "t": "MRNA",
+          "px": 24.18,
+          "chg": -0.0587,
+          "netPrem": -14146233,
+          "relVolume": 0.64,
+          "sector": null
+        },
+        {
+          "t": "ENPH",
+          "px": 38.92,
+          "chg": -0.0512,
+          "netPrem": 8659532,
+          "relVolume": 1.78,
+          "sector": null
+        },
+        {
+          "t": "XOM",
+          "px": 108.74,
+          "chg": -0.0448,
+          "netPrem": 14528513,
+          "relVolume": 1.91,
+          "sector": null
+        },
+        {
+          "t": "PFE",
+          "px": 25.31,
+          "chg": -0.0397,
+          "netPrem": 13434076,
+          "relVolume": 1.79,
+          "sector": null
+        },
+        {
+          "t": "CVX",
+          "px": 146.08,
+          "chg": -0.0341,
+          "netPrem": -18552084,
+          "relVolume": 1.14,
+          "sector": null
+        },
+        {
+          "t": "KO",
+          "px": 68.55,
+          "chg": -0.0298,
+          "netPrem": -13989043,
+          "relVolume": 1.65,
+          "sector": null
+        },
+        {
+          "t": "NEE",
+          "px": 71.26,
+          "chg": -0.0264,
+          "netPrem": -4676895,
+          "relVolume": 1.08,
+          "sector": null
+        },
+        {
+          "t": "DUK",
+          "px": 116.4,
+          "chg": -0.0238,
+          "netPrem": 11607437,
+          "relVolume": 1.1,
+          "sector": null
+        },
+        {
+          "t": "T",
+          "px": 27.84,
+          "chg": -0.0211,
+          "netPrem": 14977951,
+          "relVolume": 1.49,
+          "sector": null
+        },
+        {
+          "t": "CL",
+          "px": 88.17,
+          "chg": -0.0193,
+          "netPrem": -11977463,
+          "relVolume": 1.34,
+          "sector": null
+        }
+      ],
+      "premium": {
+        "basis": "screener net call premium minus net put premium",
+        "bullish": [
+          {
+            "t": "NVDA",
+            "px": 181.22,
+            "chg": 0.0338,
+            "netPrem": 512400000,
+            "relVolume": 1.52,
+            "sector": null
+          },
+          {
+            "t": "TSLA",
+            "px": 349.76,
+            "chg": 0.0271,
+            "netPrem": 388100000,
+            "relVolume": 1.26,
+            "sector": null
+          },
+          {
+            "t": "AAPL",
+            "px": 232.55,
+            "chg": 0.0122,
+            "netPrem": 254700000,
+            "relVolume": 1.08,
+            "sector": null
+          },
+          {
+            "t": "AMD",
+            "px": 168.93,
+            "chg": 0.0466,
+            "netPrem": 191300000,
+            "relVolume": 1.94,
+            "sector": null
+          },
+          {
+            "t": "META",
+            "px": 742.18,
+            "chg": 0.0187,
+            "netPrem": 166800000,
+            "relVolume": 1.56,
+            "sector": null
+          },
+          {
+            "t": "MSFT",
+            "px": 512.44,
+            "chg": 0.0093,
+            "netPrem": 142500000,
+            "relVolume": 1.17,
+            "sector": null
+          },
+          {
+            "t": "AMZN",
+            "px": 231.07,
+            "chg": 0.0154,
+            "netPrem": 118900000,
+            "relVolume": 1.75,
+            "sector": null
+          },
+          {
+            "t": "GOOGL",
+            "px": 208.36,
+            "chg": 0.0209,
+            "netPrem": 97400000,
+            "relVolume": 1.54,
+            "sector": null
+          },
+          {
+            "t": "PLTR",
+            "px": 168.22,
+            "chg": 0.0688,
+            "netPrem": 88200000,
+            "relVolume": 1.24,
+            "sector": null
+          },
+          {
+            "t": "APP",
+            "px": 421.08,
+            "chg": 0.0914,
+            "netPrem": 71600000,
+            "relVolume": 1.52,
+            "sector": null
+          }
+        ],
+        "bearish": [
+          {
+            "t": "SPY",
+            "px": 664.31,
+            "chg": -0.0061,
+            "netPrem": -428700000,
+            "relVolume": 0.98,
+            "sector": null
+          },
+          {
+            "t": "QQQ",
+            "px": 588.14,
+            "chg": -0.0044,
+            "netPrem": -311200000,
+            "relVolume": 0.74,
+            "sector": null
+          },
+          {
+            "t": "IWM",
+            "px": 241.88,
+            "chg": -0.0118,
+            "netPrem": -176400000,
+            "relVolume": 1.55,
+            "sector": null
+          },
+          {
+            "t": "XOM",
+            "px": 108.74,
+            "chg": -0.0448,
+            "netPrem": -134900000,
+            "relVolume": 1.44,
+            "sector": null
+          },
+          {
+            "t": "JPM",
+            "px": 312.55,
+            "chg": -0.0072,
+            "netPrem": -112300000,
+            "relVolume": 1.33,
+            "sector": null
+          },
+          {
+            "t": "CVX",
+            "px": 146.08,
+            "chg": -0.0341,
+            "netPrem": -94100000,
+            "relVolume": 1.07,
+            "sector": null
+          },
+          {
+            "t": "LULU",
+            "px": 187.33,
+            "chg": -0.0821,
+            "netPrem": -77800000,
+            "relVolume": 1.32,
+            "sector": null
+          },
+          {
+            "t": "BA",
+            "px": 214.66,
+            "chg": -0.0164,
+            "netPrem": -66200000,
+            "relVolume": 0.73,
+            "sector": null
+          },
+          {
+            "t": "INTC",
+            "px": 24.77,
+            "chg": -0.0231,
+            "netPrem": -51900000,
+            "relVolume": 1.83,
+            "sector": null
+          },
+          {
+            "t": "CVS",
+            "px": 61.47,
+            "chg": -0.0644,
+            "netPrem": -44300000,
+            "relVolume": 0.92,
+            "sector": null
+          }
+        ],
+        "byContract": {
+          "basis": "vendor-flagged windows",
+          "seen": 240,
+          "shed": 232,
+          "rows": [
+            {
+              "t": "NVDA",
+              "oc": "NVDA260918C00190000",
+              "cp": "C",
+              "k": 190,
+              "exp": "2026-09-18",
+              "prem": 41280400,
+              "sweep": true,
+              "rule": "RepeatedHits"
+            },
+            {
+              "t": "TSLA",
+              "oc": "TSLA260918C00360000",
+              "cp": "C",
+              "k": 360,
+              "exp": "2026-09-18",
+              "prem": 28114900,
+              "sweep": true,
+              "rule": "SteadyAccumulation"
+            },
+            {
+              "t": "SPY",
+              "oc": "SPY260919P00650000",
+              "cp": "P",
+              "k": 650,
+              "exp": "2026-09-19",
+              "prem": -22406700,
+              "sweep": false,
+              "rule": "RepeatedHitsDescendingFill"
+            },
+            {
+              "t": "AMD",
+              "oc": "AMD261016C00180000",
+              "cp": "C",
+              "k": 180,
+              "exp": "2026-10-16",
+              "prem": 17392250,
+              "sweep": true,
+              "rule": "SweepsFollowedByFloor"
+            },
+            {
+              "t": "QQQ",
+              "oc": "QQQ260918P00575000",
+              "cp": "P",
+              "k": 575,
+              "exp": "2026-09-18",
+              "prem": -15880100,
+              "sweep": false,
+              "rule": "SteadyAccumulation"
+            },
+            {
+              "t": "META",
+              "oc": null,
+              "cp": null,
+              "k": null,
+              "exp": null,
+              "prem": 12044800,
+              "sweep": null,
+              "rule": "RepeatedHits"
+            },
+            {
+              "t": "AAPL",
+              "oc": "AAPL261120C00240000",
+              "cp": "C",
+              "k": 240,
+              "exp": "2026-11-20",
+              "prem": 9911300,
+              "sweep": false,
+              "rule": "SteadyAccumulation"
+            },
+            {
+              "t": "COIN",
+              "oc": "COIN260918C00340000",
+              "cp": "C",
+              "k": 340,
+              "exp": "2026-09-18",
+              "prem": 8420600,
+              "sweep": true,
+              "rule": "RepeatedHits"
+            }
+          ]
+        }
+      }
+    },
+    "flows/pulse": {
+      "v": 2,
+      "generatedAt": "2026-09-11T05:15:22.410Z",
+      "sessionDate": "2026-09-10",
+      "readAt": "2026-09-10T20:05:00.000Z",
+      "refreshed": "cron",
+      "cadenceMinutes": 15,
+      "notes": {
+        "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
+        "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
+        "oiChange": "The vendor's selection and ordering, under a rule it does not publish — so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's tape.",
+        "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
+        "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
+        "darkpool": "These ARE executions, unlike the option feeds' windows — but the tape reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
+        "seasonality": "Arithmetic over history. It carries no claim about the month ahead.",
+        "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the vendor's unpublished definitions, so absence from a list is not evidence of quiet."
+      },
+      "tide": {
+        "status": "ok",
+        "points": [
+          {
+            "t": "2026-09-10T09:30:00-04:00",
+            "callPrem": 35447820,
+            "putPrem": -22101057,
+            "vol": 208309
+          },
+          {
+            "t": "2026-09-10T09:35:00-04:00",
+            "callPrem": 44234293,
+            "putPrem": -24647199,
+            "vol": 193913
+          },
+          {
+            "t": "2026-09-10T09:40:00-04:00",
+            "callPrem": 45187716,
+            "putPrem": -22881299,
+            "vol": 243337
+          },
+          {
+            "t": "2026-09-10T09:45:00-04:00",
+            "callPrem": 50786784,
+            "putPrem": -23405177,
+            "vol": 216358
+          },
+          {
+            "t": "2026-09-10T09:50:00-04:00",
+            "callPrem": 52701098,
+            "putPrem": -23184773,
+            "vol": 239583
+          },
+          {
+            "t": "2026-09-10T09:55:00-04:00",
+            "callPrem": 58092625,
+            "putPrem": -31415235,
+            "vol": 270373
+          },
+          {
+            "t": "2026-09-10T10:00:00-04:00",
+            "callPrem": 54117386,
+            "putPrem": -30995128,
+            "vol": 264616
+          },
+          {
+            "t": "2026-09-10T10:05:00-04:00",
+            "callPrem": 55410383,
+            "putPrem": -36099691,
+            "vol": 282230
+          },
+          {
+            "t": "2026-09-10T10:10:00-04:00",
+            "callPrem": 63574827,
+            "putPrem": -29973601,
+            "vol": 373463
+          },
+          {
+            "t": "2026-09-10T10:15:00-04:00",
+            "callPrem": 68168687,
+            "putPrem": -35801733,
+            "vol": 295912
+          },
+          {
+            "t": "2026-09-10T10:20:00-04:00",
+            "callPrem": 73881782,
+            "putPrem": -35755335,
+            "vol": 316192
+          },
+          {
+            "t": "2026-09-10T10:25:00-04:00",
+            "callPrem": 69057723,
+            "putPrem": -43297265,
+            "vol": 351229
+          },
+          {
+            "t": "2026-09-10T10:30:00-04:00",
+            "callPrem": 61841036,
+            "putPrem": -40828699,
+            "vol": 326382
+          },
+          {
+            "t": "2026-09-10T10:35:00-04:00",
+            "callPrem": 86558199,
+            "putPrem": -40725973,
+            "vol": 414843
+          },
+          {
+            "t": "2026-09-10T10:40:00-04:00",
+            "callPrem": 80360886,
+            "putPrem": -50891803,
+            "vol": 455164
+          },
+          {
+            "t": "2026-09-10T10:45:00-04:00",
+            "callPrem": 92425104,
+            "putPrem": -43822528,
+            "vol": 386357
+          },
+          {
+            "t": "2026-09-10T10:50:00-04:00",
+            "callPrem": 83521866,
+            "putPrem": -47534445,
+            "vol": 500796
+          },
+          {
+            "t": "2026-09-10T10:55:00-04:00",
+            "callPrem": 86534211,
+            "putPrem": -57690096,
+            "vol": 516777
+          },
+          {
+            "t": "2026-09-10T11:00:00-04:00",
+            "callPrem": 89198190,
+            "putPrem": -59293724,
+            "vol": 459291
+          },
+          {
+            "t": "2026-09-10T11:05:00-04:00",
+            "callPrem": 94140616,
+            "putPrem": -60905148,
+            "vol": 488622
+          },
+          {
+            "t": "2026-09-10T11:10:00-04:00",
+            "callPrem": 89940677,
+            "putPrem": -60490903,
+            "vol": 593276
+          },
+          {
+            "t": "2026-09-10T11:15:00-04:00",
+            "callPrem": 108192348,
+            "putPrem": -52602826,
+            "vol": 473674
+          },
+          {
+            "t": "2026-09-10T11:20:00-04:00",
+            "callPrem": 95220211,
+            "putPrem": -51887957,
+            "vol": 463868
+          },
+          {
+            "t": "2026-09-10T11:25:00-04:00",
+            "callPrem": 107706515,
+            "putPrem": -67668411,
+            "vol": 499362
+          },
+          {
+            "t": "2026-09-10T11:30:00-04:00",
+            "callPrem": 107113849,
+            "putPrem": -59540234,
+            "vol": 501842
+          },
+          {
+            "t": "2026-09-10T11:35:00-04:00",
+            "callPrem": 111467751,
+            "putPrem": -68258817,
+            "vol": 688019
+          },
+          {
+            "t": "2026-09-10T11:40:00-04:00",
+            "callPrem": 124611741,
+            "putPrem": -62128849,
+            "vol": 649059
+          },
+          {
+            "t": "2026-09-10T11:45:00-04:00",
+            "callPrem": 100649538,
+            "putPrem": -75793156,
+            "vol": 579671
+          },
+          {
+            "t": "2026-09-10T11:50:00-04:00",
+            "callPrem": 109797245,
+            "putPrem": -75022425,
+            "vol": 537298
+          },
+          {
+            "t": "2026-09-10T11:55:00-04:00",
+            "callPrem": 131406220,
+            "putPrem": -69567715,
+            "vol": 593451
+          },
+          {
+            "t": "2026-09-10T12:00:00-04:00",
+            "callPrem": 125907926,
+            "putPrem": -73945476,
+            "vol": 682471
+          },
+          {
+            "t": "2026-09-10T12:05:00-04:00",
+            "callPrem": 140684681,
+            "putPrem": -75206937,
+            "vol": 814982
+          },
+          {
+            "t": "2026-09-10T12:10:00-04:00",
+            "callPrem": 111020013,
+            "putPrem": -80164977,
+            "vol": 740695
+          },
+          {
+            "t": "2026-09-10T12:15:00-04:00",
+            "callPrem": 116847125,
+            "putPrem": -82588995,
+            "vol": 790522
+          },
+          {
+            "t": "2026-09-10T12:20:00-04:00",
+            "callPrem": 136134329,
+            "putPrem": -70806060,
+            "vol": 845339
+          },
+          {
+            "t": "2026-09-10T12:25:00-04:00",
+            "callPrem": 134468110,
+            "putPrem": -81970114,
+            "vol": 842550
+          },
+          {
+            "t": "2026-09-10T12:30:00-04:00",
+            "callPrem": 148786875,
+            "putPrem": -76672463,
+            "vol": 882590
+          },
+          {
+            "t": "2026-09-10T12:35:00-04:00",
+            "callPrem": 133504804,
+            "putPrem": -76729360,
+            "vol": 689317
+          },
+          {
+            "t": "2026-09-10T12:40:00-04:00",
+            "callPrem": 124843593,
+            "putPrem": -96109775,
+            "vol": 876479
+          },
+          {
+            "t": "2026-09-10T12:45:00-04:00",
+            "callPrem": 149797274,
+            "putPrem": -77620416,
+            "vol": 777663
+          },
+          {
+            "t": "2026-09-10T12:50:00-04:00",
+            "callPrem": 163181639,
+            "putPrem": -91170639,
+            "vol": 719031
+          },
+          {
+            "t": "2026-09-10T12:55:00-04:00",
+            "callPrem": null,
+            "putPrem": null,
+            "vol": null
+          },
+          {
+            "t": "2026-09-10T13:00:00-04:00",
+            "callPrem": 158332329,
+            "putPrem": -90912586,
+            "vol": 908540
+          },
+          {
+            "t": "2026-09-10T13:05:00-04:00",
+            "callPrem": 139509363,
+            "putPrem": -108618991,
+            "vol": 734154
+          },
+          {
+            "t": "2026-09-10T13:10:00-04:00",
+            "callPrem": 183526817,
+            "putPrem": -89196606,
+            "vol": 800124
+          },
+          {
+            "t": "2026-09-10T13:15:00-04:00",
+            "callPrem": 142699040,
+            "putPrem": -107636222,
+            "vol": 878714
+          },
+          {
+            "t": "2026-09-10T13:20:00-04:00",
+            "callPrem": 174321450,
+            "putPrem": -89074887,
+            "vol": 755927
+          },
+          {
+            "t": "2026-09-10T13:25:00-04:00",
+            "callPrem": 142977603,
+            "putPrem": -93441668,
+            "vol": 929820
+          },
+          {
+            "t": "2026-09-10T13:30:00-04:00",
+            "callPrem": 148429035,
+            "putPrem": -122931432,
+            "vol": 877264
+          },
+          {
+            "t": "2026-09-10T13:35:00-04:00",
+            "callPrem": 155548641,
+            "putPrem": -99683773,
+            "vol": 895573
+          },
+          {
+            "t": "2026-09-10T13:40:00-04:00",
+            "callPrem": 174626653,
+            "putPrem": -111351170,
+            "vol": 1167329
+          },
+          {
+            "t": "2026-09-10T13:45:00-04:00",
+            "callPrem": 190373190,
+            "putPrem": -116007165,
+            "vol": 858632
+          },
+          {
+            "t": "2026-09-10T13:50:00-04:00",
+            "callPrem": 169977463,
+            "putPrem": -124626547,
+            "vol": 1111797
+          },
+          {
+            "t": "2026-09-10T13:55:00-04:00",
+            "callPrem": 184427852,
+            "putPrem": -101946582,
+            "vol": 1118678
+          },
+          {
+            "t": "2026-09-10T14:00:00-04:00",
+            "callPrem": 200963836,
+            "putPrem": -102558959,
+            "vol": 880342
+          },
+          {
+            "t": "2026-09-10T14:05:00-04:00",
+            "callPrem": 179667899,
+            "putPrem": -109935466,
+            "vol": 955819
+          },
+          {
+            "t": "2026-09-10T14:10:00-04:00",
+            "callPrem": 200664090,
+            "putPrem": -123895097,
+            "vol": 1225232
+          },
+          {
+            "t": "2026-09-10T14:15:00-04:00",
+            "callPrem": 197841022,
+            "putPrem": -136999235,
+            "vol": 1091597
+          },
+          {
+            "t": "2026-09-10T14:20:00-04:00",
+            "callPrem": 176238309,
+            "putPrem": -130881781,
+            "vol": 1109520
+          },
+          {
+            "t": "2026-09-10T14:25:00-04:00",
+            "callPrem": 202668197,
+            "putPrem": -137782235,
+            "vol": 1337451
+          },
+          {
+            "t": "2026-09-10T14:30:00-04:00",
+            "callPrem": 210984424,
+            "putPrem": -136409427,
+            "vol": 1307533
+          },
+          {
+            "t": "2026-09-10T14:35:00-04:00",
+            "callPrem": 195667011,
+            "putPrem": -147296729,
+            "vol": 1150261
+          },
+          {
+            "t": "2026-09-10T14:40:00-04:00",
+            "callPrem": 232742581,
+            "putPrem": -150991481,
+            "vol": 1369148
+          },
+          {
+            "t": "2026-09-10T14:45:00-04:00",
+            "callPrem": 235074405,
+            "putPrem": -136485983,
+            "vol": 963147
+          },
+          {
+            "t": "2026-09-10T14:50:00-04:00",
+            "callPrem": 227716273,
+            "putPrem": -119304821,
+            "vol": 1247426
+          },
+          {
+            "t": "2026-09-10T14:55:00-04:00",
+            "callPrem": 186962504,
+            "putPrem": -157037951,
+            "vol": 976295
+          },
+          {
+            "t": "2026-09-10T15:00:00-04:00",
+            "callPrem": 243055849,
+            "putPrem": -154372317,
+            "vol": 1004437
+          },
+          {
+            "t": "2026-09-10T15:05:00-04:00",
+            "callPrem": 218605789,
+            "putPrem": -125015893,
+            "vol": 1252292
+          },
+          {
+            "t": "2026-09-10T15:10:00-04:00",
+            "callPrem": 195078110,
+            "putPrem": -136830359,
+            "vol": 1113941
+          },
+          {
+            "t": "2026-09-10T15:15:00-04:00",
+            "callPrem": 222927376,
+            "putPrem": -157793591,
+            "vol": 1417467
+          },
+          {
+            "t": "2026-09-10T15:20:00-04:00",
+            "callPrem": 260378132,
+            "putPrem": -141202924,
+            "vol": 1456494
+          },
+          {
+            "t": "2026-09-10T15:25:00-04:00",
+            "callPrem": 236586661,
+            "putPrem": -149620885,
+            "vol": 1111916
+          },
+          {
+            "t": "2026-09-10T15:30:00-04:00",
+            "callPrem": 241606786,
+            "putPrem": -152120356,
+            "vol": 1107770
+          },
+          {
+            "t": "2026-09-10T15:35:00-04:00",
+            "callPrem": 222600409,
+            "putPrem": -130275670,
+            "vol": 1160546
+          },
+          {
+            "t": "2026-09-10T15:40:00-04:00",
+            "callPrem": 228530414,
+            "putPrem": -145510678,
+            "vol": 1370142
+          },
+          {
+            "t": "2026-09-10T15:45:00-04:00",
+            "callPrem": 280145710,
+            "putPrem": -157798409,
+            "vol": 1412634
+          },
+          {
+            "t": "2026-09-10T15:50:00-04:00",
+            "callPrem": 277574069,
+            "putPrem": -178676080,
+            "vol": 1623858
+          },
+          {
+            "t": "2026-09-10T15:55:00-04:00",
+            "callPrem": 254501390,
+            "putPrem": -171626648,
+            "vol": 1169130
+          }
+        ],
+        "seen": 78,
+        "cap": 480,
+        "shed": 0
+      },
+      "totals": {
+        "status": "ok",
+        "rows": [
+          {
+            "date": "2026-09-10",
+            "callVol": 10295264,
+            "putVol": 7210123,
+            "callPrem": 20968910524,
+            "putPrem": 11362663231
+          },
+          {
+            "date": "2026-09-09",
+            "callVol": 9770749,
+            "putVol": 6511571,
+            "callPrem": 19573783913,
+            "putPrem": 11993049469
+          },
+          {
+            "date": "2026-09-08",
+            "callVol": 12583787,
+            "putVol": 7999707,
+            "callPrem": 16923847237,
+            "putPrem": 8511078339
+          },
+          {
+            "date": "2026-09-04",
+            "callVol": 10559472,
+            "putVol": 7700143,
+            "callPrem": 19099650083,
+            "putPrem": 10413077040
+          },
+          {
+            "date": "2026-09-03",
+            "callVol": 12153060,
+            "putVol": 6610440,
+            "callPrem": 16016364104,
+            "putPrem": 8381820283
+          },
+          {
+            "date": "2026-09-02",
+            "callVol": 13194228,
+            "putVol": 8367780,
+            "callPrem": 14522418706,
+            "putPrem": 10160845805
+          },
+          {
+            "date": "2026-09-01",
+            "callVol": 11020410,
+            "putVol": 7948013,
+            "callPrem": 20586805248,
+            "putPrem": 8853008232
+          },
+          {
+            "date": "2026-08-28",
+            "callVol": 10518098,
+            "putVol": 6309902,
+            "callPrem": 18998310073,
+            "putPrem": 9802938647
+          },
+          {
+            "date": "2026-08-27",
+            "callVol": 11721126,
+            "putVol": 8474248,
+            "callPrem": 15674782238,
+            "putPrem": 11509859428
+          },
+          {
+            "date": "2026-08-26",
+            "callVol": 13622683,
+            "putVol": 8432928,
+            "callPrem": 18775872478,
+            "putPrem": 11527248039
+          },
+          {
+            "date": "2026-08-25",
+            "callVol": 12012308,
+            "putVol": 8111364,
+            "callPrem": 18720305004,
+            "putPrem": 10881370049
+          },
+          {
+            "date": "2026-08-24",
+            "callVol": 12854284,
+            "putVol": 7308998,
+            "callPrem": 14585931377,
+            "putPrem": 9636209971
+          },
+          {
+            "date": "2026-08-21",
+            "callVol": 13665040,
+            "putVol": 8177379,
+            "callPrem": 21480254650,
+            "putPrem": 11394744682
+          },
+          {
+            "date": "2026-08-20",
+            "callVol": 10281691,
+            "putVol": 7683818,
+            "callPrem": 15855800040,
+            "putPrem": 12973322921
+          },
+          {
+            "date": "2026-08-19",
+            "callVol": 12222058,
+            "putVol": 6529801,
+            "callPrem": 21112293827,
+            "putPrem": 10741725020
+          },
+          {
+            "date": "2026-08-18",
+            "callVol": 10388153,
+            "putVol": 7908244,
+            "callPrem": 14074344125,
+            "putPrem": 8517366005
+          },
+          {
+            "date": "2026-08-17",
+            "callVol": 11125212,
+            "putVol": 7745119,
+            "callPrem": 20030257649,
+            "putPrem": 8909381742
+          },
+          {
+            "date": "2026-08-14",
+            "callVol": 11999187,
+            "putVol": 7540318,
+            "callPrem": 18005173643,
+            "putPrem": 9057873940
+          },
+          {
+            "date": "2026-08-13",
+            "callVol": 11663264,
+            "putVol": 6960203,
+            "callPrem": 14954704390,
+            "putPrem": 11428707510
+          },
+          {
+            "date": "2026-08-12",
+            "callVol": 10873404,
+            "putVol": 6389421,
+            "callPrem": 14594980330,
+            "putPrem": 12267173655
+          }
+        ],
+        "seen": 20,
+        "cap": 20,
+        "shed": 0
+      },
+      "oiChange": {
+        "status": "ok",
+        "rows": [
+          {
+            "t": "NVDA",
+            "oc": "NVDA260918C00200000",
+            "cp": "C",
+            "k": 200,
+            "exp": "2026-09-18",
+            "ratio": 0.9142,
+            "diff": 38420,
+            "currOi": 80448,
+            "prevOi": 42028,
+            "vol": 21440,
+            "trades": 1806,
+            "avgPx": 4.12,
+            "pctOfTotal": 0.0335
+          },
+          {
+            "t": "SPY",
+            "oc": "SPY260919P00640000",
+            "cp": "P",
+            "k": 640,
+            "exp": "2026-09-19",
+            "ratio": 0.4418,
+            "diff": 29104,
+            "currOi": 95412,
+            "prevOi": 66308,
+            "vol": 44190,
+            "trades": 3902,
+            "avgPx": 6.88,
+            "pctOfTotal": 0.069
+          },
+          {
+            "t": "TSLA",
+            "oc": "TSLA261016C00380000",
+            "cp": "C",
+            "k": 380,
+            "exp": "2026-10-16",
+            "ratio": 1.6231,
+            "diff": 24880,
+            "currOi": 40208,
+            "prevOi": 15328,
+            "vol": 12760,
+            "trades": 1544,
+            "avgPx": 9.31,
+            "pctOfTotal": 0.0199
+          },
+          {
+            "t": "AMD",
+            "oc": "AMD260918C00180000",
+            "cp": "C",
+            "k": 180,
+            "exp": "2026-09-18",
+            "ratio": 0.3387,
+            "diff": 18442,
+            "currOi": 72806,
+            "prevOi": 54364,
+            "vol": 19880,
+            "trades": 1201,
+            "avgPx": 3.44,
+            "pctOfTotal": 0.0311
+          },
+          {
+            "t": "QQQ",
+            "oc": "QQQ260918P00580000",
+            "cp": "P",
+            "k": 580,
+            "exp": "2026-09-18",
+            "ratio": 0.2153,
+            "diff": 16220,
+            "currOi": 91488,
+            "prevOi": 75268,
+            "vol": 30140,
+            "trades": 2288,
+            "avgPx": 5.02,
+            "pctOfTotal": 0.0471
+          },
+          {
+            "t": "AAPL",
+            "oc": "AAPL261120C00240000",
+            "cp": "C",
+            "k": 240,
+            "exp": "2026-11-20",
+            "ratio": 15.6149,
+            "diff": 14108,
+            "currOi": 15012,
+            "prevOi": 904,
+            "vol": 8820,
+            "trades": 742,
+            "avgPx": 2.18,
+            "pctOfTotal": 0.0138
+          },
+          {
+            "t": "META",
+            "oc": "META260918P00700000",
+            "cp": "P",
+            "k": 700,
+            "exp": "2026-09-18",
+            "ratio": -0.1844,
+            "diff": -9412,
+            "currOi": 41620,
+            "prevOi": 51032,
+            "vol": 10402,
+            "trades": 908,
+            "avgPx": 11.44,
+            "pctOfTotal": 0.0163
+          },
+          {
+            "t": "PLTR",
+            "oc": "PLTR260918C00175000",
+            "cp": "C",
+            "k": 175,
+            "exp": "2026-09-18",
+            "ratio": 0.7712,
+            "diff": 12880,
+            "currOi": 29572,
+            "prevOi": 16692,
+            "vol": 22410,
+            "trades": 1988,
+            "avgPx": 1.62,
+            "pctOfTotal": 0.035
+          },
+          {
+            "t": "COIN",
+            "oc": "COIN260918C00340000",
+            "cp": "C",
+            "k": 340,
+            "exp": "2026-09-18",
+            "ratio": 0.4491,
+            "diff": 8802,
+            "currOi": 28402,
+            "prevOi": 19600,
+            "vol": 9944,
+            "trades": 806,
+            "avgPx": 7.76,
+            "pctOfTotal": 0.0155
+          },
+          {
+            "t": "INTC",
+            "oc": "INTC261016P00024000",
+            "cp": "P",
+            "k": 24,
+            "exp": "2026-10-16",
+            "ratio": -0.0621,
+            "diff": -1442,
+            "currOi": 21788,
+            "prevOi": 23230,
+            "vol": 4108,
+            "trades": 318,
+            "avgPx": 0.94,
+            "pctOfTotal": 0.0064
+          },
+          {
+            "t": "MU",
+            "oc": "MU260918C00150000",
+            "cp": "C",
+            "k": 150,
+            "exp": "2026-09-18",
+            "ratio": 0.2088,
+            "diff": 6104,
+            "currOi": 35348,
+            "prevOi": 29244,
+            "vol": 11620,
+            "trades": 1044,
+            "avgPx": 2.71,
+            "pctOfTotal": 0.0182
+          },
+          {
+            "t": "XOM",
+            "oc": "XOM260918P00105000",
+            "cp": "P",
+            "k": 105,
+            "exp": "2026-09-18",
+            "ratio": 0.1337,
+            "diff": 4218,
+            "currOi": 35766,
+            "prevOi": 31548,
+            "vol": 6602,
+            "trades": 512,
+            "avgPx": 1.83,
+            "pctOfTotal": 0.0103
+          }
+        ],
+        "seen": 20,
+        "cap": 20,
+        "shed": 8
+      },
+      "netImpact": {
+        "status": "ok",
+        "rows": [
+          {
+            "t": "NVDA",
+            "netPrem": 498220000
+          },
+          {
+            "t": "TSLA",
+            "netPrem": 341880000
+          },
+          {
+            "t": "AMD",
+            "netPrem": 212440000
+          },
+          {
+            "t": "META",
+            "netPrem": 158700000
+          },
+          {
+            "t": "AAPL",
+            "netPrem": 121330000
+          },
+          {
+            "t": "GOOGL",
+            "netPrem": 88410000
+          },
+          {
+            "t": "AVGO",
+            "netPrem": 64220000
+          },
+          {
+            "t": "APP",
+            "netPrem": 41880000
+          },
+          {
+            "t": "MSFT",
+            "netPrem": 22140000
+          },
+          {
+            "t": "SPY",
+            "netPrem": -402110000
+          },
+          {
+            "t": "QQQ",
+            "netPrem": -288640000
+          },
+          {
+            "t": "IWM",
+            "netPrem": -161220000
+          },
+          {
+            "t": "XOM",
+            "netPrem": -118440000
+          },
+          {
+            "t": "JPM",
+            "netPrem": -92310000
+          },
+          {
+            "t": "LULU",
+            "netPrem": -64180000
+          },
+          {
+            "t": "CVS",
+            "netPrem": -38820000
+          }
+        ],
+        "seen": 20,
+        "cap": 20,
+        "shed": 4
+      },
+      "insiders": {
+        "status": "ok",
+        "rows": [
+          {
+            "date": "2026-09-10",
+            "buys": 112,
+            "sells": 323,
+            "buysNotional": 41873433,
+            "sellsNotional": 158398212
+          },
+          {
+            "date": "2026-09-09",
+            "buys": 67,
+            "sells": 350,
+            "buysNotional": 14783913,
+            "sellsNotional": 90153082
+          },
+          {
+            "date": "2026-09-08",
+            "buys": 82,
+            "sells": 262,
+            "buysNotional": 11085627,
+            "sellsNotional": 37817262
+          },
+          {
+            "date": "2026-09-04",
+            "buys": 102,
+            "sells": 161,
+            "buysNotional": 45061473,
+            "sellsNotional": 118217915
+          },
+          {
+            "date": "2026-09-03",
+            "buys": 136,
+            "sells": 134,
+            "buysNotional": 30992509,
+            "sellsNotional": 90246518
+          },
+          {
+            "date": "2026-09-02",
+            "buys": 67,
+            "sells": 151,
+            "buysNotional": 32566737,
+            "sellsNotional": 34776379
+          },
+          {
+            "date": "2026-08-28",
+            "buys": 125,
+            "sells": 326,
+            "buysNotional": 33276660,
+            "sellsNotional": 104851210
+          },
+          {
+            "date": "2026-08-27",
+            "buys": 58,
+            "sells": 174,
+            "buysNotional": 11295681,
+            "sellsNotional": 40604969
+          },
+          {
+            "date": "2026-08-26",
+            "buys": 41,
+            "sells": 128,
+            "buysNotional": 29633580,
+            "sellsNotional": 41095572
+          },
+          {
+            "date": "2026-08-25",
+            "buys": 104,
+            "sells": 129,
+            "buysNotional": 43084050,
+            "sellsNotional": 47198444
+          }
+        ],
+        "seen": 10,
+        "cap": 12,
+        "shed": 0
+      },
+      "darkpool": {
+        "status": "ok",
+        "rows": [
+          {
+            "t": "NVDA",
+            "at": "2026-09-10T15:59:00Z",
+            "px": 181.14,
+            "size": 230655,
+            "prem": 41780847,
+            "vol": 1229042,
+            "bid": 181.09,
+            "ask": 181.19,
+            "canceled": false
+          },
+          {
+            "t": "SPY",
+            "at": "2026-09-10T15:52:00Z",
+            "px": 664.02,
+            "size": 508261,
+            "prem": 337495469,
+            "vol": 6638240,
+            "bid": 663.97,
+            "ask": 664.07,
+            "canceled": false
+          },
+          {
+            "t": "AAPL",
+            "at": "2026-09-10T15:45:00Z",
+            "px": 232.48,
+            "size": 94055,
+            "prem": 21865906,
+            "vol": 875035,
+            "bid": 232.43,
+            "ask": 232.53,
+            "canceled": false
+          },
+          {
+            "t": "MSFT",
+            "at": "2026-09-10T15:38:00Z",
+            "px": 512.11,
+            "size": 440453,
+            "prem": 225560386,
+            "vol": 2747610,
+            "bid": 512.06,
+            "ask": 512.16,
+            "canceled": false
+          },
+          {
+            "t": "TSLA",
+            "at": "2026-09-10T15:31:00Z",
+            "px": 349.44,
+            "size": 173930,
+            "prem": 60778099,
+            "vol": 2627316,
+            "bid": 349.39,
+            "ask": 349.49,
+            "canceled": false
+          },
+          {
+            "t": "AMZN",
+            "at": "2026-09-10T15:24:00Z",
+            "px": 230.88,
+            "size": 496773,
+            "prem": 114694950,
+            "vol": 4851117,
+            "bid": 230.83,
+            "ask": 230.93,
+            "canceled": false
+          },
+          {
+            "t": "QQQ",
+            "at": "2026-09-10T15:17:00Z",
+            "px": 587.92,
+            "size": 408527,
+            "prem": 240181194,
+            "vol": 4613626,
+            "bid": 587.87,
+            "ask": 587.97,
+            "canceled": false
+          },
+          {
+            "t": "META",
+            "at": "2026-09-10T15:10:00Z",
+            "px": 741.66,
+            "size": 439291,
+            "prem": 325804563,
+            "vol": 5277270,
+            "bid": 741.61,
+            "ask": 741.71,
+            "canceled": false
+          },
+          {
+            "t": "GOOGL",
+            "at": "2026-09-10T15:03:00Z",
+            "px": 208.14,
+            "size": 372603,
+            "prem": 77553588,
+            "vol": 3095062,
+            "bid": 208.09,
+            "ask": 208.19,
+            "canceled": false
+          },
+          {
+            "t": "AVGO",
+            "at": "2026-09-10T14:56:00Z",
+            "px": 356.22,
+            "size": 422670,
+            "prem": 150563507,
+            "vol": 2437292,
+            "bid": 356.17,
+            "ask": 356.27,
+            "canceled": false
+          },
+          {
+            "t": "JPM",
+            "at": "2026-09-10T14:49:00Z",
+            "px": 312.18,
+            "size": 243420,
+            "prem": 75990856,
+            "vol": 3841567,
+            "bid": 312.13,
+            "ask": 312.23,
+            "canceled": false
+          },
+          {
+            "t": "AMD",
+            "at": "2026-09-10T14:42:00Z",
+            "px": 168.71,
+            "size": 480787,
+            "prem": 81113575,
+            "vol": 3588193,
+            "bid": 168.66,
+            "ask": 168.76,
+            "canceled": false
+          }
+        ],
+        "seen": 30,
+        "cap": 30,
+        "shed": 18
+      },
+      "seasonality": {
+        "status": "ok",
+        "rows": [
+          {
+            "month": 1,
+            "avg": -0.41,
+            "median": 0.62,
+            "min": -8.57,
+            "max": 7.91,
+            "positivePct": 54.29,
+            "years": 35
+          },
+          {
+            "month": 2,
+            "avg": 0.18,
+            "median": 0.44,
+            "min": -10.99,
+            "max": 7.15,
+            "positivePct": 57.14,
+            "years": 35
+          },
+          {
+            "month": 3,
+            "avg": 1.12,
+            "median": 1.38,
+            "min": -12.51,
+            "max": 9.67,
+            "positivePct": 65.71,
+            "years": 35
+          },
+          {
+            "month": 4,
+            "avg": 1.47,
+            "median": 1.81,
+            "min": -14.52,
+            "max": 12.68,
+            "positivePct": 71.43,
+            "years": 35
+          },
+          {
+            "month": 5,
+            "avg": 0.62,
+            "median": 0.91,
+            "min": -8.2,
+            "max": 9.23,
+            "positivePct": 60,
+            "years": 35
+          },
+          {
+            "month": 6,
+            "avg": 0.08,
+            "median": 0.34,
+            "min": -8.6,
+            "max": 6.89,
+            "positivePct": 54.29,
+            "years": 35
+          },
+          {
+            "month": 7,
+            "avg": 1.31,
+            "median": 1.62,
+            "min": -7.9,
+            "max": 8.44,
+            "positivePct": 68.57,
+            "years": 35
+          },
+          {
+            "month": 8,
+            "avg": -0.14,
+            "median": 0.41,
+            "min": -14.58,
+            "max": 11.6,
+            "positivePct": 57.14,
+            "years": 35
+          },
+          {
+            "month": 9,
+            "avg": -0.97,
+            "median": -0.52,
+            "min": -11,
+            "max": 8.76,
+            "positivePct": 45.71,
+            "years": 35
+          },
+          {
+            "month": 10,
+            "avg": 0.84,
+            "median": 1.33,
+            "min": -16.94,
+            "max": 10.77,
+            "positivePct": 62.86,
+            "years": 35
+          },
+          {
+            "month": 11,
+            "avg": 1.62,
+            "median": 1.94,
+            "min": -11.39,
+            "max": 10.23,
+            "positivePct": 74.29,
+            "years": 35
+          },
+          {
+            "month": 12,
+            "avg": 1.38,
+            "median": 1.61,
+            "min": -9.18,
+            "max": 7.06,
+            "positivePct": 71.43,
+            "years": 35
+          }
+        ],
+        "seen": 12,
+        "cap": 12,
+        "shed": 0
+      }
+    },
+    "board?side=long": {
+      "v": 2,
+      "side": "long",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "universe": 412,
+      "scored": 96,
+      "rows": [
+        {
+          "t": "NVDA",
+          "r": 1,
+          "s": 68,
+          "netPrem": 512400000
+        },
+        {
+          "t": "AMD",
+          "r": 2,
+          "s": 66,
+          "netPrem": 191300000
+        },
+        {
+          "t": "PLTR",
+          "r": 3,
+          "s": 64,
+          "netPrem": 88200000
+        },
+        {
+          "t": "XOM",
+          "r": 4,
+          "s": 62,
+          "netPrem": -134900000
+        },
+        {
+          "t": "APP",
+          "r": 5,
+          "s": 60,
+          "netPrem": 71600000
+        },
+        {
+          "t": "CVS",
+          "r": 6,
+          "s": 58,
+          "netPrem": -44300000
+        },
+        {
+          "t": "META",
+          "r": 7,
+          "s": 56,
+          "netPrem": 166800000
+        }
+      ]
+    },
+    "board?side=short": {
+      "v": 2,
+      "side": "short",
+      "sessionDate": "2026-09-10",
+      "status": "ok",
+      "universe": 412,
+      "scored": 84,
+      "rows": [
+        {
+          "t": "LULU",
+          "r": 1,
+          "s": 68,
+          "netPrem": -77800000
+        },
+        {
+          "t": "LVS",
+          "r": 2,
+          "s": 66,
+          "netPrem": null
+        },
+        {
+          "t": "INTC",
+          "r": 3,
+          "s": 64,
+          "netPrem": -51900000
+        },
+        {
+          "t": "TSLA",
+          "r": 4,
+          "s": 62,
+          "netPrem": 388100000
+        },
+        {
+          "t": "BA",
+          "r": 5,
+          "s": 60,
+          "netPrem": -66200000
+        },
+        {
+          "t": "AAPL",
+          "r": 6,
+          "s": 58,
+          "netPrem": 254700000
+        }
+      ]
+    }
+  }
+}

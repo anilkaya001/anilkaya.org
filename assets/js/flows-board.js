@@ -674,6 +674,15 @@
     const yOf = (v) => pad + (1 - v / 4095) * (H - pad * 2);
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("class", "fd-sparkline");
+    /* pathLength="1" IS WHAT MAKES THE DRAW-IN POSSIBLE AT ALL, and it is one
+       attribute rather than a measurement. The line draws itself with
+       stroke-dasharray, which needs to know how long the path IS — a value
+       CSS cannot compute and JavaScript could only get from getTotalLength(),
+       which is a forced layout per card, fifty times, for decoration.
+       Declaring the length as 1 makes every path in the deck report the same
+       normalised length whatever its real geometry, so one CSS rule with no
+       custom property draws all fifty correctly. */
+    path.setAttribute("pathLength", "1");
     path.setAttribute("d", values.map((v, i) =>
       (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yOf(v).toFixed(1)).join(" "));
     svg.append(path);
@@ -739,6 +748,27 @@
        board is always complete within one bounded window regardless of how
        many names the run published. The cap lives here rather than in the
        stylesheet because CSS cannot clamp a value it does not compute. */
+    /* THE KEY A RE-SORT FOLLOWS THIS CARD BY. Cards are rebuilt on every
+       paint rather than reused, so identity cannot come from the node — it
+       has to come from the row. The ticker is the board's natural key: unique
+       within a side by construction (one row per name) and stable across
+       every sort, which is exactly what flipDeck needs to recognise the same
+       name in two different positions.
+
+       `data-flip` AND EMPHATICALLY NOT `data-t`, WHICH IS WHAT I REACHED FOR
+       FIRST AND CI CAUGHT. `data-t` is not a free attribute on this card: it
+       was the MODAL DELEGATION key, back when a card was a <button data-t>
+       that a delegated click turned into a dialog. tests/flows-board-render
+       asserts its ABSENCE — "carries no data-t for a delegation to find" —
+       beside three sibling assertions that together prove the modal is gone
+       rather than merely hidden.
+
+       A test cannot tell my identity key from a resurrected opener, and it
+       should not have to. The guarantee is worth more than the attribute
+       name: an unexplained `data-t` reappearing on this card is exactly what
+       the regression it guards against would look like. FLIP does not need
+       that particular spelling, so it takes its own. */
+    card.dataset.flip = String(row.t || "");
     card.style.setProperty("--i", String(Math.min(index, ARRIVE_STEPS)));
     card.style.setProperty("--tint", tintFor(row.sector));
     card.style.setProperty("--emph", (emph === undefined ? 0 : emph).toFixed(3));
@@ -1781,6 +1811,174 @@
    * conviction ranking. The published rank is a fact about the pipeline, not
    * about where a row happens to be sitting.
    */
+  /* ---------- the re-sort, as a movement rather than a cut -----------
+
+     A BOARD THAT RE-RANKS BY CUTTING TELLS A READER NOTHING ABOUT WHAT
+     CHANGED. Sorting fifty cards used to replace the whole deck in one call:
+     every name appeared in its new place with no relationship to where it had
+     been, so the only way to learn that NVDA went from ninth to second was to
+     have memorised ninth. Moving it there says it.
+
+     THAT IS THE WHOLE ARGUMENT FOR THIS, AND IT IS NOT DECORATION. The
+     emphasis is recomputed in the same instant (emphasisFor reads the new
+     sort), so a re-sort changes each card's POSITION and its LOUDNESS
+     together. Cutting between two such states asks a reader to diff two
+     boards from memory; moving between them is the same information delivered
+     as one event.
+
+     FIRST, LAST, INVERT, PLAY — and the inversion is why it is cheap. Every
+     card is measured once before the DOM changes and once after, then offset
+     by the difference and released. The browser animates a transform, which
+     is composited: no layout, no paint, fifty cards or five hundred.
+
+     IDENTITY COMES FROM THE ROW, NOT THE NODE. deckCard rebuilds every card
+     on every paint, so `data-flip` (the ticker) is what lets this recognise
+     the same name in two positions — see deckCard for why it is not spelled
+     `data-t`. A name absent from the previous paint has no
+     `before` box and is not moved — it fades in where it lands, which is
+     correct: it did not come from anywhere.
+
+     EXITS ARE NOT ANIMATED, DELIBERATELY. A card leaving the view is a name
+     the reader just filtered out, and holding it on screen for a quarter of a
+     second is delaying the answer they asked for. Entrances are movement
+     toward the reader; exits are the reader's own instruction, already
+     obeyed.
+
+     AND IT DOES NOT RUN ON THE FIRST PAINT. There is nothing to move from,
+     and .fd-card's arrival animation owns that moment instead — running both
+     would have the stagger fighting an inverted transform on the same
+     property. `calm` is the same MediaQueryList the spotlight uses and is
+     re-checked on change, so a reader who turns motion down mid-session gets
+     a plain cut without reloading. */
+  let deckPainted = false;
+  let flipFrame = 0;
+
+  function flipDeck(draw) {
+    const animate = deckPainted && deck && !calm.matches;
+    if (!animate) {
+      draw();
+      /* THE ARRIVAL IS OPT-IN, and this is the line that opts in. Without the
+         class the CSS animation does not run at all, which is what keeps a
+         re-sort from re-flashing all fifty cards — and, more sharply, what
+         stops an `animation` on `transform` from overriding the inline
+         transform this function sets. An animation beats an inline style; the
+         two cannot share the property.
+
+         `!calm.matches` IS NOT BELT-AND-BRACES HERE, IT IS THE FIX. The class
+         used to go on regardless, and the CSS alone stood the animation down —
+         which holds only while the preference does. A reader who loaded the
+         board with reduced motion ON and turned it OFF later had fifty cards
+         still carrying `is-arriving`, so the rule began matching and every one
+         of them re-ran its entrance: measured at `opacity: 0` the instant the
+         preference flipped back. A class that says "this card is arriving" must
+         not outlive the arrival, and must not be applied to a paint that is
+         never going to animate. */
+      if (deck && !deckPainted && !calm.matches) {
+        for (const card of deck.children) card.classList.add("is-arriving");
+      }
+      deckPainted = true;
+      return;
+    }
+
+    /* A PENDING RELEASE MUST NOT OUTLIVE THE SORT THAT SCHEDULED IT. Two sorts
+       inside one frame — a double click on the order control — would leave the
+       first sort's callback holding cards this paint is about to detach, and
+       it would stamp `is-flipping` on them after they had left the document.
+       Cancelling is cheaper than reasoning about whether that is harmless. */
+    clearFlip();
+
+    /* FIRST: where every card sits before the DOM changes. */
+    const before = new Map();
+    for (const card of deck.children) {
+      if (card.dataset.flip) before.set(card.dataset.flip, card.getBoundingClientRect());
+    }
+
+    draw();                                       /* LAST */
+
+    /* INVERT, in one batch. Every read happens before every write: reading a
+       rect after writing a transform would force a synchronous layout per
+       card, which is the one way to make this expensive. */
+    const moves = [];
+    for (const card of deck.children) {
+      const prev = before.get(card.dataset.flip);
+      if (!prev) continue;
+      const now = card.getBoundingClientRect();
+      const dx = prev.left - now.left;
+      const dy = prev.top - now.top;
+      /* Sub-pixel drift is not a move. Animating it spends a compositor layer
+         to travel a distance no one can see. */
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      moves.push({ card, dx, dy });
+    }
+    if (!moves.length) return;
+    for (const { card, dx, dy } of moves) {
+      card.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+    }
+
+    /* PLAY, on the next frame. Setting the offset and clearing it in the same
+       frame is one style computation and no animation at all — the browser
+       never paints the inverted state, so there is nothing to transition
+       from. */
+    flipFrame = requestAnimationFrame(() => {
+      flipFrame = 0;
+      for (const { card } of moves) {
+        card.classList.add("is-flipping");
+        card.style.transform = "";
+      }
+    });
+  }
+
+  /* Put the deck back to rest: no pending release, no card still wearing the
+     moving state. Called before a new sort, and whenever the motion
+     preference changes. */
+  function clearFlip() {
+    if (flipFrame) { cancelAnimationFrame(flipFrame); flipFrame = 0; }
+    if (!deck) return;
+    for (const card of deck.querySelectorAll(".fd-card.is-flipping")) {
+      card.classList.remove("is-flipping");
+      card.style.removeProperty("transform");
+    }
+  }
+
+  /* THE CLASS COMES OFF WHEN THE MOVE ENDS, and it has to. `is-flipping`
+     carries a --dur-open transition on transform; left on, the card's hover
+     lift would take a region's duration instead of an element's, which is the
+     motion system's own distinction inverted on the surface it was written
+     for. One delegated listener rather than fifty, and a `transform` guard so
+     a transition on any other property does not clear it early. */
+  if (deck) {
+    /* BOTH ENDINGS, AND THE SECOND ONE IS THE BUG. A transition that is
+       REMOVED rather than finished fires `transitioncancel`, not
+       `transitionend` — and the reduced-motion block removes exactly this
+       transition. So a reader who turned motion down while a re-sort was in
+       flight left every moving card wearing `is-flipping` permanently:
+       measured with `z-index: 1` still set, so those cards stacked over their
+       neighbours for the rest of the session. Listening for one ending and
+       not the other is listening for the easy half. */
+    const settleFlip = (event) => {
+      if (event.propertyName !== "transform") return;
+      const card = event.target;
+      if (card && card.classList && card.classList.contains("is-flipping")) {
+        card.classList.remove("is-flipping");
+      }
+    };
+    deck.addEventListener("transitionend", settleFlip);
+    deck.addEventListener("transitioncancel", settleFlip);
+
+    /* AND THE ARRIVAL TAKES ITS OWN CLASS OFF. `fd-draw` is the longer of the
+       two entrance animations, so it is the one that says the card has
+       finished arriving; a card with no price line to draw (the `is-empty`
+       placeholder) never fires it, and settles on `fd-arrive` instead. */
+    deck.addEventListener("animationend", (event) => {
+      const card = event.target && event.target.closest && event.target.closest(".fd-card");
+      if (!card || !card.classList.contains("is-arriving")) return;
+      if (event.animationName === "fd-draw"
+          || (event.animationName === "fd-arrive" && !card.querySelector(".fd-sparkline"))) {
+        card.classList.remove("is-arriving");
+      }
+    });
+  }
+
   function paintRows() {
     /* NOTHING TO PAINT MEANS NOTHING TO ERASE. On an empty or errored board
        the tbody holds the explanation row render() wrote — a header click
@@ -1807,9 +2005,11 @@
          question. It is also recomputed on every sort rather than cached,
          which is the point: the loudness describes the CURRENT order. */
       const emphasis = emphasisFor(view);
-      const deckFrag = document.createDocumentFragment();
-      view.forEach(({ row, index }, i) => deckFrag.append(deckCard(row, index, emphasis(i))));
-      deck.replaceChildren(deckFrag);
+      flipDeck(() => {
+        const deckFrag = document.createDocumentFragment();
+        view.forEach(({ row, index }, i) => deckFrag.append(deckCard(row, index, emphasis(i))));
+        deck.replaceChildren(deckFrag);
+      });
     }
   }
 
@@ -2240,6 +2440,20 @@
   }
 
   function syncSpotlight() {
+    /* A PREFERENCE CHANGE LEAVES NOTHING MID-FLIGHT. Turning motion down
+       cancels the transform transition without an end event and stops the
+       entrance animations from matching; both would otherwise strand a class
+       on the card. Done first, and unconditionally, because the early return
+       below fires whenever the effective spotlight state has not changed —
+       which is exactly the case when only `calm` moved. */
+    if (calm.matches) {
+      clearFlip();
+      if (deck) {
+        for (const card of deck.querySelectorAll(".fd-card.is-arriving")) {
+          card.classList.remove("is-arriving");
+        }
+      }
+    }
     const want = fine.matches && !calm.matches;
     if (want === spotlightOn || !deck) return;
     spotlightOn = want;

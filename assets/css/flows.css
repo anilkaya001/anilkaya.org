@@ -229,6 +229,13 @@
   --dur-move:  170ms;
   --dur-open:  260ms;
   --dur-enter: 420ms;
+  /* THE LINE DRAW IS ITS OWN BAND, and it exists as a token because the first
+     version of it spelled the duration `calc(var(--dur-enter) + 120ms)` —
+     which survives the preference block below. Zeroing --dur-enter left
+     `calc(0s + 120ms)`, so a reader who declined motion still watched fifty
+     sparklines draw themselves. A literal added to a token is a value the
+     token can no longer govern. */
+  --dur-draw:  540ms;
   --stagger:    26ms;
   /* The cadence of the standing summary, which is the only type on this site
      that arrives a word at a time. Slower than --stagger because a word is a
@@ -353,6 +360,7 @@
     --dur-move:  0s;
     --dur-open:  0s;
     --dur-enter: 0s;
+    --dur-draw:  0s;
     --stagger:   0s;
     --word:      0s;
     --lift: 0px;
@@ -1979,7 +1987,15 @@ body.is-stale .flows-tablewrap {
   opacity: calc(0.34 + 0.66 * var(--emph));
   transition: opacity var(--dur-move) var(--ease);
   background:
-    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
     radial-gradient(58% 70% at 2% 0%,
       color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
 }
@@ -2059,9 +2075,42 @@ body.is-stale .flows-tablewrap {
   from { opacity: 0; transform: translateY(var(--rise)); }
   to   { opacity: 1; transform: none; }
 }
-.fd-card {
+/* OPT-IN, AND THE CLASS IS LOAD-BEARING RATHER THAN TIDY. assets/js/flows-board.js
+   adds `is-arriving` on the FIRST paint only. Two things depend on that:
+   a re-sort does not re-flash all fifty cards, and — the sharper one — an
+   `animation` on `transform` overrides an inline `transform`, so a card still
+   arriving could not be moved by the FLIP below. The two effects own the same
+   property and must never own it at once. */
+.fd-card.is-arriving {
   animation: fd-arrive var(--dur-enter) var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+/* THE RE-SORT. A board that re-ranks by cutting tells a reader nothing about
+   what changed: the only way to learn a name went from ninth to second is to
+   have memorised ninth. This moves it there instead.
+
+   --dur-open AND NOT --dur-move, because what is changing is the whole
+   region — fifty cards travelling at once is a board rearranging itself, not
+   an element nudging. The band the motion system reserves for a region is the
+   one this earns.
+
+   ALL THREE PROPERTIES ARE RESTATED, and the first draft of this rule got it
+   wrong in a way worth recording: it listed `transform` alone. `transition` is
+   a SHORTHAND, and this selector outranks `.fd-card` — so naming one property
+   here silently dropped the border and shadow transitions for as long as a
+   card was moving, and a hover during a re-sort would have snapped instead of
+   answering. Only the transform's band changes; the other two keep the tap and
+   move bands they have at rest.
+
+   The class is removed on transitionend (see the delegated listener in
+   flows-board.js) so the slow band never outlives the move it was for. */
+.fd-card.is-flipping {
+  transition: border-color var(--dur-tap) var(--ease),
+              transform var(--dur-open) var(--ease-out),
+              box-shadow var(--dur-move) var(--ease-out);
+  /* A moving card passes over its neighbours rather than under them. */
+  z-index: 1;
 }
 
 /* A ROW WITH NO DETAIL CARD.
@@ -2135,7 +2184,9 @@ body.is-stale .flows-tablewrap {
      identity matrix rather than to `none`, and an identity transform still
      promotes the card to its own compositing layer — so the distance being
      zero is not the same as there being no transform. */
-  .fd-card { transition: none; animation: none; }
+  .fd-card, .fd-card.is-arriving, .fd-card.is-flipping { transition: none; animation: none; }
+  /* The sparkline's own override is NOT here — see the block beneath
+     `fd-draw`, and the note on it. It cannot live in this block. */
   .fd-card:hover { transform: none; box-shadow: var(--shadow-card); }
   .fd-card::after { display: none; }
   /* The edge STAYS — it is information, not motion. Only its transition goes,
@@ -2190,6 +2241,71 @@ body.is-stale .flows-tablewrap {
 /* non-scaling-stroke, because preserveAspectRatio="none" stretches the
    120-unit viewBox across the card and would thicken the line with it. */
 .fd-sparkline { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+
+/* THE PRICE LINE DRAWS ITSELF, left to right, as the card arrives.
+
+   ONE RULE FOR EVERY CARD, because the path declares `pathLength="1"` (see
+   sparkSvg). Without that, a dash animation needs each path's real length —
+   which CSS cannot compute and JavaScript could only get from
+   getTotalLength(), a forced layout per card, fifty times, for decoration.
+   Normalising the length in the SVG makes 1 the right number for all of them.
+
+   IT IS TIED TO THE ARRIVAL, not to the card. A re-sort moves cards that are
+   already drawn; redrawing every line on every sort would be fifty strokes
+   racing under a board that is already busy moving, and the line's shape is
+   not what changed. So this runs only under .is-arriving, and it shares that
+   card's stagger — the line starts as its own card settles.
+
+   --dur-enter + a beat, because a line that finishes drawing exactly as the
+   card lands reads as one event rather than two. */
+/* THE HIDDEN STATE LIVES IN THE KEYFRAMES, NOT IN THIS RULE, and that is a
+   robustness point rather than a stylistic one. The first version declared
+   `stroke-dashoffset: 1` here as the resting value and animated it to 0 under
+   `backwards` fill. `backwards` fills only BEFORE the delay — so the instant
+   the animation finished, the property reverted to this rule's value and the
+   price line vanished again. It was visible at all only because the JS removes
+   `is-arriving` on animationend, which made a chart's visibility depend on a
+   listener firing. Anything that stopped that listener — an interrupted
+   animation, a card whose `fd-draw` never runs — left a card that looked drawn
+   and had no line in it.
+
+   Now the rule sets no dash at all: a sparkline with this class and no
+   animation is simply visible, which is the correct resting state. `both`
+   keeps the final frame, so the line stays drawn after it finishes whether or
+   not anything ever removes the class. */
+.fd-card.is-arriving .fd-sparkline {
+  animation: fd-draw var(--dur-draw) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+@keyframes fd-draw {
+  from { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  to   { stroke-dasharray: 1; stroke-dashoffset: 0; }
+}
+
+/* AND THE OVERRIDE LIVES HERE, NOT IN THE BLOCK AT THE TOP OF THE FILE.
+
+   THIS IS THE THIRD TIME THIS EXACT MISTAKE HAS BEEN MADE IN THIS STYLESHEET,
+   which is why it is written down at length rather than quietly fixed. The
+   note on `.fd-card` records the first (a hover lift the early reduced-motion
+   block could not reach for two years); the glass hatch near the top records
+   the second (rules restated in a block 700 lines above the ones they meant to
+   beat). This was the third: `.fd-card.is-arriving .fd-sparkline` in the
+   preference block scored the same specificity as the rule above, sat earlier
+   in the file, and lost — so the measurement said `animation-name: fd-draw`
+   under a preference that had asked for none.
+
+   THE RULE THE FILE KEEPS RELEARNING: a preference block may set TOKENS
+   anywhere, because a custom property resolves on the element that uses it and
+   source order cannot touch it. A preference block that names a SELECTOR must
+   sit after what it overrides. --dur-draw above is the belt; this is the
+   braces, and it is placed where braces actually hold. */
+@media (prefers-reduced-motion: reduce) {
+  .fd-card.is-arriving .fd-sparkline {
+    animation: none;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+}
 .fd-spark.is-pos .fd-sparkline { stroke: var(--flow-up); }
 .fd-spark.is-neg .fd-sparkline { stroke: var(--flow-down); }
 
@@ -6058,17 +6174,53 @@ body.is-stale .flows-tablewrap {
   grid-column: 1 / -1;
   display: grid;
   gap: 1px;
-  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
-  background: var(--panel-border);
+  /* SEVEN TILES, AND AN EXPLICIT COUNT RATHER THAN auto-fit.
+
+     `auto-fit` with an 11rem floor packed four tiles into the first row and
+     three into a second, so the second row's three each grew to a third of
+     the width: the same strip drew tiles of two different sizes, side by
+     side, which is exactly the unevenness this section was asked to remove.
+     A fixed seven-column track makes every tile the same width by
+     construction at any viewport that can hold seven, and the two media
+     steps below hand it 4 and 2 — counts that divide the row evenly and
+     leave no short final row. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* AND THE SAME FOR HEIGHT. The tiles are peers — one label, one figure,
+     the same two lines of content — so a tile that happens to wrap its
+     value must not leave its row-mates short. This is the .flows-deck rule
+     and it belongs here for the deck's reason: equal-sized cards ranked by
+     what they say, not by how much they had to say it in. It does NOT
+     belong on .cc, whose regions carry genuinely different content volumes
+     — the comment further down records what happened when it was copied
+     there. */
+  grid-auto-rows: 1fr;
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
   overflow: hidden;
 }
+@media (max-width: 1100px) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-tile {
-  background: var(--panel-bg);
+  /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
+     tile on a translucent strip doubles the blur and the wash, and seven of
+     them draw seven slightly different greys where the 1px gap is supposed
+     to be the only line. The strip carries the surface; the tile carries a
+     hairline of it so the dividers read. */
+  background: rgba(255, 255, 255, 0.012);
   padding: 0.6rem 0.85rem;
   display: flex;
   flex-direction: column;
+  /* LABELS ON ONE BASELINE, NOT CENTRED IN THEIR OWN BOX. With
+     `justify-content: center` a tile whose value takes two lines pushes its
+     own label up, so seven labels sat at two different heights — the boxes
+     were identical and the row still read ragged. Rendered and measured:
+     four labels at y=604, three at y=589. Top-aligned, the label row is one
+     line across the strip whatever the values below it do. */
+  justify-content: flex-start;
   gap: 0.15rem;
 }
 .cc-tile-k {
@@ -6080,7 +6232,18 @@ body.is-stale .flows-tablewrap {
 }
 .cc-tile-v {
   font-family: var(--font-figure);
-  font-size: var(--fs-head);
+  /* THE VALUE IS SIZED TO THE COLUMN IT HAS, not to the largest it could
+     want. At seven equal columns each tile is ~164px wide and ~137px of it
+     is inside the padding; "41 bull / 48 bear" at --fs-head overflowed that
+     and wrapped mid-phrase, which is the one place a two-word value must
+     not break. The clamp keeps the headline weight at wide viewports and
+     steps down exactly as far as the column does. */
+  font-size: clamp(1rem, 1.05vw + 0.55rem, var(--fs-head));
+  /* AND IT MAY NOT WRAP. A wrapped value is not a denser strip; it is the
+     same words on two lines in a box that then has to be taller than its
+     neighbours. If a viewport ever cannot hold one, the media steps above
+     have already given the strip fewer columns. */
+  white-space: nowrap;
   font-weight: 600;
   color: var(--ink);
   line-height: 1.15;
@@ -7239,7 +7402,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    something down their length. */
 .sg-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  /* THE min() GUARD, WHICH THIS TRACK WAS MISSING. The note above .fc-stats
+     states the rule and says it was "applied to every auto-fit and auto-fill
+     track rather than only the one that was caught" — and that sentence was
+     false here and in one other place. A bare `minmax(15rem, 1fr)` is a 240px
+     FLOOR WITH NO CEILING ON THE CONTAINER: when the column is narrower than
+     240px the track refuses to shrink and the overflow lands on the document,
+     which is the one thing .cc's min-width:0 note is about. `min(15rem, 100%)`
+     asks for 15rem and settles for the width it actually has. */
+  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
   gap: var(--space-2) var(--space-3);
   margin: 0;
 }
@@ -7893,7 +8064,16 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ak-brief .ak-warns { grid-column: 1 / -1; }
   .ak-region .ak-facts { grid-template-columns: 1fr; }
-  .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
+  /* THE WARNINGS LIST'S TRACK IS NOT DECLARED HERE, AND HAS NOT BEEN FOR SOME
+     TIME. This line read `repeat(auto-fit, minmax(24rem, 1fr))` — an
+     unguarded floor, so it was one of the two tracks that made the .fc-stats
+     note's "every track" false. But removing it is not the fix for that,
+     because the declaration was already inert: `.flows-body .ak-warns-list`
+     further down sets `repeat(2, minmax(0, 1fr))` with a one-column step at
+     47.99rem, the same specificity and later in the file, and every page that
+     draws this list is a .flows-body. Two rules for one list, one of them
+     dead, is how a stylesheet comes to be read wrongly — so the dead one goes
+     rather than being quietly corrected into a second source of truth. */
 }
 
 /* THE DENOMINATOR UNDER THE PAIR — small, but never absent while the pair
@@ -7932,15 +8112,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .flows-body .cc-quiet,.flows-body .fc-note,.flows-body .cc-tile-s {
   color:var(--ink-dim);
 }
-.flows-body .cc-verdict {
-  display:flex;
-  flex-wrap:wrap;
-  gap:0;
-  background:var(--panel-bg);
-}
+/* THIS OVERRIDE IS WHAT DREW THE RAGGED STRIP, and it is removed rather
+   than adjusted. `display:flex; flex-wrap:wrap` with `flex:1 1 22%` sizes
+   every tile to its own content and lets the last row stretch to fill —
+   four tiles then three, at two different widths, plus an orphan whenever
+   an eighth element appeared. The grid above is the shape that was wanted
+   the whole time; it was simply being overridden two thousand lines later.
+   Only the padding survives, since the grid inherits everything else. */
 .flows-body .cc-tile {
-  flex:1 1 22%;
-  border:1px solid var(--panel-border);
   padding:.85rem 1rem;
 }
 .flows-body .cc-tile-v {
@@ -8246,4 +8425,201 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-w { animation: none; }
   .ak-caret { display: none; }
   .ak-nn.is-live .ak-nn-e line, .ak-nn.is-live .ak-nn-n { animation: none; }
+}
+
+/* ================================================================
+   CANDIDATE B, TAKEN OFF THE BOARD AND ON TO THE OTHER ROUTES.
+
+   B SHIPPED ON TWO ROUTES OUT OF THIRTEEN AND THAT WAS NOT THE BRIEF. The
+   sector edge, the equal sizing and the arrival landed on `.fd-card`, which
+   only `sidePage()` emits — so /flows/long/ and /flows/short/ got the redesign
+   and the other eleven kept the old chrome. A reader opening the Overview or a
+   ticker page saw the new typeface and the glass and none of the thing that
+   makes the board legible at a glance.
+
+   IT IS ALL CSS, AND THAT IS FORCED RATHER THAN ELEGANT. tests/flows-weight
+   measures overviewPage at 704 bytes of headroom and tickerPage at 739; a
+   single new renderer on either breaks its ceiling on arrival. Every rule
+   below hooks onto markup those pages ALREADY emit — `.cc-region` and its
+   modifier, `.ft-station[data-group]` and `.ft-panel[data-panel]` — so the
+   treatment costs a reader zero bytes of JavaScript and no parse at all.
+
+   WHAT CARRIES OVER UNCHANGED: one size set by the grid, a 2px tinted edge
+   with a glow behind it, a floor of 0.34 so nothing ever vanishes, the
+   arrival, and hue as the LAST channel — never on type, never on the sign.
+
+   WHAT CHANGES MEANING, AND IT IS THE ONE REAL DESIGN DECISION HERE. On the
+   board, loudness is a MAGNITUDE: how big this name is in whatever the board
+   is sorted by. Inside there is no magnitude that honestly ranks twenty-three
+   panels against each other, and inventing one would be the first dishonest
+   pixel in the section. So inside, loudness is the SILENCE — a panel with a
+   reading sits at full weight and one without recedes by how much it is
+   missing. That answers what a reader actually arrives asking ("what is
+   missing here before I scroll"), which twenty-three panels at equal weight
+   cannot answer at all.
+   ================================================================ */
+
+/* ---- the Overview: one tint per region, one height per row ---- */
+
+/* NO grid-auto-rows HERE, AND THE RULE THAT WAS HERE IS THE LESSON.
+
+   It read `grid-auto-rows: 1fr`, copied from .flows-deck under a comment
+   claiming a row holding one tall region "left its neighbour short". That
+   problem does not exist: a grid item's default `align-items: stretch`
+   already sizes it to its OWN row. Measured in Chromium — two rows, the first
+   tall and the second short — items came out [92, 92, 20, 20] with no rule
+   at all, and [92, 92, 92, 92] with it.
+
+   SO THE RULE WAS NOT EQUALISING WITHIN A ROW, IT WAS EQUALISING ACROSS ROWS,
+   and on this page that is actively wrong. The Overview's regions carry
+   deliberately different amounts — a one-line note beside a twelve-row table —
+   and forcing every row to the tallest opened ~200px of void under the sparse
+   ones. A screenshot showed it immediately; the DOM probe did not, because it
+   asserted "nine regions, one height" and scored that a PASS. It was the
+   symptom.
+
+   EQUAL SIZE BELONGS WHERE ITEMS ARE PEERS OF ONE KIND. Fifty cards on a board
+   are peers, and .flows-deck keeps the rule for exactly that reason. Nine
+   regions answering nine different questions are not, and making them look
+   like peers is a layout asserting a symmetry the content does not have. */
+
+.cc-region {
+  --tint: var(--sect-none);
+  --emph: 0.62;
+  position: relative;
+  overflow: hidden;
+}
+.cc-region::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: calc(0.34 + 0.66 * var(--emph));
+  transition: opacity var(--dur-move) var(--ease);
+  background:
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
+    radial-gradient(58% 70% at 2% 0%,
+      color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
+}
+/* The edge is behind the content, never over it. */
+.cc-region > * { position: relative; z-index: 1; }
+
+/* THE TINT NAMES WHAT THE REGION IS ABOUT, and the two directional ones are
+   the board's own signed pair rather than a sector hue — on a region headed
+   "Bullish" any other colour would be a second vocabulary for a fact the page
+   already states in green and red. The rest take sector tints, which carry no
+   fact and are only there so the eye can tell one region from the next. */
+.cc-bull   { --tint: var(--flow-up);   --emph: 1; }
+.cc-bear   { --tint: var(--flow-down); --emph: 1; }
+.cc-chg    { --tint: var(--sect-tech); --emph: 0.86; }
+.cc-alerts { --tint: var(--sect-energy); --emph: 0.8; }
+.cc-ev     { --tint: var(--sect-health); --emph: 0.7; }
+.cc-watch  { --tint: var(--sect-staples); --emph: 0.62; }
+.cc-lean   { --tint: var(--sect-fin);  --emph: 0.8; }
+.cc-news   { --tint: var(--sect-comm); --emph: 0.62; }
+.cc-spine  { --tint: var(--sect-util); --emph: 0.7; }
+
+/* ---- the reader: one tint per station, loudness from the silence ---- */
+
+/* AND NOT HERE EITHER, WHERE IT WOULD HAVE BEEN WORSE. A station is a SINGLE
+   column (`grid-template-columns: minmax(0, 1fr)`), so every panel is its own
+   row — `1fr` would have stretched a one-line reading to the height of the
+   tallest chart in the station, on all five of them. The panels are already
+   the full width of their column, which is the only dimension they share. */
+
+.ft-panel[data-panel] {
+  --tint: var(--sect-none);
+  --emph: 1;
+  position: relative;
+  overflow: hidden;
+}
+.ft-panel[data-panel]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: calc(0.34 + 0.66 * var(--emph));
+  transition: opacity var(--dur-move) var(--ease);
+  background:
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
+    radial-gradient(58% 70% at 2% 0%,
+      color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
+}
+.ft-panel[data-panel] > * { position: relative; z-index: 1; }
+
+/* One tint per station, so a reader who has scrolled knows which of the five
+   they are in without looking up at the heading. */
+.ft-station[data-group="signal"]     .ft-panel { --tint: var(--sect-tech); }
+.ft-station[data-group="convexity"]  .ft-panel { --tint: var(--sect-fin); }
+.ft-station[data-group="volatility"] .ft-panel { --tint: var(--sect-health); }
+.ft-station[data-group="tape"]       .ft-panel { --tint: var(--sect-disc); }
+.ft-station[data-group="context"]    .ft-panel { --tint: var(--sect-comm); }
+
+/* THE FOUR SILENCES, AS LOUDNESS. The ladder is the one this codebase already
+   keeps, and the ORDER is the argument: `quiet` sits above the other three
+   deliberately, because it is the only one of the four that is a MEASUREMENT —
+   the tape was read and named nothing. Sinking it to the level of a feed that
+   failed would tell a reader the market was silent when in fact the pipeline
+   was.
+
+   OPACITY IS THE SECOND CHANNEL AND NEVER THE ONLY ONE. Each state keeps its
+   glyph, exactly as the sign keeps its position: a reader on a monochrome
+   printout, or one who cannot separate these weights, loses the dimming and
+   still reads the ladder. */
+.ft-panel[data-empty="quiet"]       { --emph: 0.46; }
+.ft-panel[data-empty="pending"]     { --emph: 0.30; }
+.ft-panel[data-empty="unavailable"] { --emph: 0.22; }
+.ft-panel[data-empty="unreadable"]  { --emph: 0.22; }
+
+/* ---- the arrival, on both ----
+
+   THE STAGGER INDEX COMES FROM `nth-child` RATHER THAN FROM A RENDERER. On the
+   board the renderer writes `--i` because it knows each card's rank; here
+   nothing may be added to either controller, so position in the grid is the
+   index. Ten steps, matching ARRIVE_STEPS on the board, and everything past
+   the tenth shares the last delay — so a twenty-three panel station is fully
+   arrived inside the same window a twelve-card board is. */
+.cc-region, .ft-panel[data-panel] {
+  animation: fd-arrive var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 10) * var(--stagger));
+}
+.cc-region:nth-child(1),        .ft-panel[data-panel]:nth-child(1)  { --i: 0; }
+.cc-region:nth-child(2),        .ft-panel[data-panel]:nth-child(2)  { --i: 1; }
+.cc-region:nth-child(3),        .ft-panel[data-panel]:nth-child(3)  { --i: 2; }
+.cc-region:nth-child(4),        .ft-panel[data-panel]:nth-child(4)  { --i: 3; }
+.cc-region:nth-child(5),        .ft-panel[data-panel]:nth-child(5)  { --i: 4; }
+.cc-region:nth-child(6),        .ft-panel[data-panel]:nth-child(6)  { --i: 5; }
+.cc-region:nth-child(7),        .ft-panel[data-panel]:nth-child(7)  { --i: 6; }
+.cc-region:nth-child(8),        .ft-panel[data-panel]:nth-child(8)  { --i: 7; }
+.cc-region:nth-child(9),        .ft-panel[data-panel]:nth-child(9)  { --i: 8; }
+.cc-region:nth-child(10),       .ft-panel[data-panel]:nth-child(10) { --i: 9; }
+
+/* Both stand down with everything else. The tokens above are already zeroed by
+   the block at the top of the file, which takes the stagger and the travel to
+   nothing; these two take the animation off entirely so no element can be left
+   mid-blur, and they sit AFTER what they override — the rule this stylesheet
+   has now relearned three times. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-region, .ft-panel[data-panel] { animation: none; }
+  .cc-region::before, .ft-panel[data-panel]::before { transition: none; }
 }
