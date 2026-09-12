@@ -1700,6 +1700,41 @@
       into.append(key);
       into.append(svg);
 
+      /* THE CURSOR OVER THE SAME ROWS THE BARS WERE DRAWN FROM. A session's
+         two bars are a pair, so the readout is the pair — call above put,
+         each a magnitude, which is what the axis marks above already say and
+         what stops a reader reading the downward bar as a negative number.
+
+         AN ABSENT SIDE PRINTS THE EM DASH RATHER THAN $0, for the same reason
+         the bar for it is not drawn at all: a session the feed did not carry
+         and a session that cleared nothing are two different facts, and this
+         chart has always refused to merge them.
+
+         x IS THE MIDDLE OF THE PAIR, not of the call bar: the rule should
+         land between the two bars a reader is being told about, and the pair
+         occupies step*0.11 to step*0.11 + 2*barW inside its slot. */
+      if (window.FlowsCursor && rows.length) {
+        window.FlowsCursor.attach(svg, {
+          name: "Daily call and put premium, " + label,
+          band: { y0: padT, y1: padT + plotH },
+          points: rows.map((r, i) => ({
+            x: padL + step * i + step * 0.11 + barW,
+            /* `at`, NOT `d`. tideSeries names the session `at` — the row it
+               maps from carries `date` and it renames it — and the first
+               registration here read `.d`, the board row's key, which is the
+               same confusion that once printed "undefined leans most bullish"
+               in the sector region. Driven rather than read: every readout
+               came back with an em dash for its heading, which is what sent
+               me to the shaper. */
+            label: r.at || DASH,
+            rows: [
+              { k: "Call", v: r.call === null ? DASH : usd(Math.max(0, r.call)), cls: "is-pos" },
+              { k: "Put", v: r.put === null ? DASH : usd(Math.max(0, r.put)), cls: "is-neg" },
+            ],
+          })),
+        });
+      }
+
       /* THE POPULATION AND THE UNIT, IN WORDS. Every period draws the same
          series at a different length, so this says what a bar IS once and
          then says how many of them are on screen. It never folds: a reader

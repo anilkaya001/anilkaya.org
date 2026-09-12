@@ -198,7 +198,7 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
 await shot("board-long",
   inline(stubFetch({ "board?side=long": FIX.boardLong }) +
     pages.FLOWS_PAGES.sidePage({ username: "preview", side: "long" }),
-    ["nav.js", "flows-ui.js", "flows-board.js"]),
+    ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-board.js"]),
   { probe: () => {
       const c = [...document.querySelectorAll(".fd-card")];
       return { cards: c.length,
@@ -211,7 +211,7 @@ await shot("board-long",
 await shot("overview",
   inline(stubFetch(FIX.overview) +
     pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
-    ["nav.js", "flows-ui.js", "flows-overview.js"]),
+    ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-overview.js"]),
   { height: 1600, probe: () => {
       const r = [...document.querySelectorAll(".cc-region")];
       return { regions: r.length,
@@ -258,7 +258,7 @@ for (const [name, width] of [["overview-1000", 1000], ["overview-600", 600]]) {
   await shot(name,
     inline(stubFetch(FIX.overview) +
       pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
-      ["nav.js", "flows-ui.js", "flows-overview.js"]),
+      ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-overview.js"]),
     { width, height: 1600, probe: () => ({
         tiles: document.querySelectorAll(".cc-tile").length,
         tileValueLines: new Set([...document.querySelectorAll(".cc-tile-v")]

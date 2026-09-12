@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "178";
+export const ASSET_VERSION = "179";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -866,6 +866,9 @@ ${neuronDock(summary)}
      module scope, and two deferred scripts execute in document order, so the
      library has to be the earlier tag. It is a hard dependency and the page
      says so on the status line rather than throwing when it is missing. -->
+<!-- Before the renderer that registers with it; both deferred, so both run in
+     document order after parsing. -->
+<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>

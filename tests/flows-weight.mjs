@@ -1121,7 +1121,39 @@ const CEILING_KIB = {
      argument rather than an exception to it: two raises inside one PR is
      worth saying out loud, and what a reader gets for them is five readings
      the payload was already carrying and the page was dropping. */
-  overviewPage: 217,
+  /* 217 -> 227 FOR THE SAME CURSOR, ON THE PAGE WITH THE OTHER BIG CHART.
+     Derived on disk:
+
+       file                  before      after
+       flows-cursor.js            0     10,016   (the ticker route's file,
+       flows-overview.js    187,001    187,927    served here too)
+       flows-ui.js           25,136     25,136
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                220,704    232,620 B = 227.17 KiB
+
+     ONE FILE, TWO ROUTES, AND THAT IS THE ARGUMENT. The daily flow chart is
+     this page's largest drawing and it withheld every session's two figures
+     between its axis marks. It could have grown its own hover — a few hundred
+     bytes here — and then the ticker's cursor and the overview's would be two
+     implementations of one idea, drifting on what a rule looks like and
+     whether a keyboard can reach it. The shared file is the more expensive
+     and the more honest of the two.
+
+     228 AND NOT 227, AND THE 502 BYTES BETWEEN THEM ARE THE POINT. 227 was
+     written against 232,118 B — the figure before the label fix that went in
+     with it. The cursor's first registration here read `r.d` for the session,
+     which is the BOARD row's key; tideSeries renames `date` to `at`, so every
+     readout printed an em dash for its heading. That was caught by driving
+     the chart rather than by reading the diff, and the comment recording it
+     is what took the route 172 B past a ceiling set minutes earlier. Raising
+     to the measurement rather than trimming the note is this file's own rule
+     — "bookkeeping rather than engineering" is what it calls the alternative.
+
+     228 LEAVES 892 B. As on the ticker route, the real answer to this route's
+     weight is the comment-stripping build that is already merged and waiting
+     on a switch, not a further raise here. */
+  overviewPage: 228,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
