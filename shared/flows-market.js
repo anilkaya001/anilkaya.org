@@ -199,30 +199,48 @@ export function marketAggregate(eligibleRows, tiltsByTicker = new Map(), { scree
  * make the numbers legible, and they live with the arithmetic so the two
  * cannot drift.
  */
+/* SAME CUT AS PULSE_NOTES, SAME RULE. These four print together in the page
+   foot, and together they ran a ten-line paragraph under a page whose own
+   tiles already state the session, the population count and both tilts. The
+   definitions are gone; the population bound, the unquoted-leg rule, the
+   two-weightings reading and the refusal are all still here.
+
+   `weighting` keeps "when they disagree in sign, that is the reading" —
+   and this is now the ONLY place that sentence is printed. The verdict
+   strip used to print it under both tilt tiles, which stated one
+   observation twice and, worse, printed it INSTEAD of each tile's
+   denominator on exactly the session where the two numbers part company.
+   The strip shows the disagreement with two signed figures side by side;
+   this says what it means, once, where the weightings are explained. */
 export const MARKET_NOTES = Object.freeze({
   population:
-    "Every reading on this page is over the SCREENED UNIVERSE — the names this " +
-    "run's market-cap band ladder returned and the universe gate admitted — not " +
-    "over the market. The vendor's screener caps each band at about fifty rows, " +
-    "so the population is bounded by how the ladder was walked.",
+    /* "not OVER the market", not "not the market" — flows-market-contract
+       asserts the refusal in that exact shape, and it is right to: the
+       population is a scope, so the sentence has to refuse the SCOPE and not
+       merely name a different noun. The first trim wrote the shorter phrase
+       and the contract caught it. */
+    "Every reading here is over the SCREENED UNIVERSE and not over the " +
+    "market: the " +
+    "names this run's band ladder returned and the universe gate admitted. " +
+    "The vendor caps each band at about fifty rows, so the population is " +
+    "bounded by how the ladder was walked.",
   presence:
-    "Net premium is measured only where BOTH the call and the put leg were " +
-    "quoted. A name quoting one leg is counted separately and never folded into " +
-    "a total: treating an unquoted leg as a zero would publish a name as balanced " +
+    "Net premium is measured only where BOTH legs were quoted. A name " +
+    "quoting one leg is counted separately, never folded into a total — " +
+    "an unquoted leg treated as a zero would publish a name as balanced " +
     "when one side was never reported.",
   weighting:
-    "Breadth counts names; premium tilt weights them by dollars. They are the " +
-    "same ratio under two weightings, published together so the choice is visible " +
-    "rather than made silently. When they disagree in sign, that is the reading.",
+    "Breadth counts names; premium tilt weights them by dollars. When they " +
+    "disagree in sign, that is the reading.",
   concentration:
-    "A market-wide total is a number one large print can own, so the share of " +
-    "gross net premium accounted for by the five largest names is published " +
-    "beside it.",
+    "A market-wide total is a number one large print can own, so the five " +
+    "largest names' share of gross net premium is published beside it.",
   aggressor:
-    "Lift is the share of volume that traded at the offer, over the names that " +
-    "quoted both sides. It describes which side of the quote was hit — not who " +
+    "Lift is the share of volume that traded at the offer, over names that " +
+    "quoted both sides. It says which side of the quote was hit — not who " +
     "was buying, and not why.",
   refused:
-    "No probability, no forecast, and no direction is claimed for the market. " +
-    "These are sums and ratios of quoted numbers over a stated population.",
+    "No probability, no forecast and no direction is claimed for the " +
+    "market. These are sums and ratios of quoted numbers over a stated " +
+    "population.",
 });
