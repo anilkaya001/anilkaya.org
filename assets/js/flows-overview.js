@@ -1381,13 +1381,25 @@
      question — "how did TODAY accumulate" — and it belongs to a panel that
      asks it, not to this one.
 
-     TWO BARS PER SESSION, EACH ON ITS OWN SIGN. Call premium and put premium
-     are NET figures: the vendor publishes them signed, and a session in which
-     more calls were sold than bought is a negative call premium. Drawing them
-     stacked, or as one net line, would lose the fact that both sides can move
-     the same way at once — which is what a squeeze looks like. So: a marked
-     zero, green above and below it for calls, red above and below for puts,
-     and the sign is the reading. */
+     TWO BARS PER SESSION, BY SIDE — AND THE SIDE IS NOT A SIGN.
+
+     THIS PARAGRAPH USED TO SAY THE OPPOSITE AND IT WAS WRONG. It read: "call
+     premium and put premium are NET figures: the vendor publishes them
+     signed... and the sign is the reading." That is true of `pulse.points`,
+     which shapeTide builds from `net_call_premium` / `net_put_premium`
+     (shared/flows-pulse.js:132-133) — and this chart does not draw that
+     series. Every period below reads `totals`, which shapeTotals builds from
+     the vendor's `call_premium` / `put_premium` columns
+     (shared/flows-pulse.js:154-155): GROSS sums, non-negative by
+     construction. The two arrays carry the same FIELD NAMES for two different
+     quantities, which is how the claim survived the switch to a daily source.
+
+     So there is no sign to read here, and pretending otherwise would be the
+     confident reading this whole section exists to refuse. What the two sides
+     mean is drawn instead: call premium upward, put premium downward, both as
+     MAGNITUDES from a common zero. The picture is the one a reader expects —
+     green above, red below — and the axis names the side rather than printing
+     a minus sign in front of a number that was never negative. */
   const TIDE_PERIODS = [
     ["1W", "totals", 5],
     ["1M", "totals", 21],
@@ -1471,13 +1483,18 @@
          The three value marks below are drawn from lo, 0 and hi for the same
          reason: they are the ends of the scale and its origin, which is what
          fixes a linear axis. */
+      /* THE PUT SIDE IS PLOTTED AT ITS NEGATIVE and is not a negative number.
+         `lo` is the downward reach of the put bars and `hi` the upward reach
+         of the call bars; both are magnitudes, and the marks below say which
+         side each end belongs to rather than signing it. A gross figure that
+         arrives negative is a payload this drawing cannot represent, so it is
+         clamped to zero rather than drawn on the wrong side of the rule. */
       let lo = 0, hi = 0;
       for (const r of rows) {
-        for (const v of [r.call, r.put]) {
-          if (v === null) continue;
-          if (v < lo) lo = v;
-          if (v > hi) hi = v;
-        }
+        const c = r.call === null ? null : Math.max(0, r.call);
+        const p = r.put === null ? null : Math.max(0, r.put);
+        if (c !== null && c > hi) hi = c;
+        if (p !== null && -p < lo) lo = -p;
       }
       if (!(hi > lo)) { hi = 1; lo = 0; }
       const span = hi - lo;
@@ -1495,12 +1512,19 @@
          axis, which is what five sessions actually are. */
       const barW = Math.max(0.6, Math.min(22, (step * 0.78) / 2));
 
+      /* NOT "none": that scales x and y apart, so bar HEIGHTS — the whole
+         reading — get multiplied by whatever the host/viewBox ratio happens
+         to be. The same defect was found and fixed on the premium-track panel
+         this session; this is its twin on the landing page. */
       const svg = svgEl("svg", { class: "cc-tide-c", viewBox: "0 0 " + W + " " + H,
-        preserveAspectRatio: "none", role: "img" });
+        width: "100%", height: H, preserveAspectRatio: "xMidYMid meet", role: "img" });
       const g = svgEl("g", { class: "cc-tide-bars" });
       rows.forEach((r, i) => {
         const x0 = padL + step * i + step * 0.11;
-        for (const [v, cls, off] of [[r.call, "is-call", 0], [r.put, "is-put", barW]]) {
+        for (const [v, cls, off] of [
+          [r.call === null ? null : Math.max(0, r.call), "is-call", 0],
+          [r.put === null ? null : -Math.max(0, r.put), "is-put", barW],
+        ]) {
           if (v === null) continue;
           const y = yOf(v);
           g.append(svgEl("rect", {
@@ -1546,15 +1570,19 @@
         const y = yOf(v);
         svg.append(svgEl("line", { class: "cc-tide-g", x1: padL, x2: W - padR, y1: y, y2: y }));
         const lab = svgEl("text", { class: "cc-tide-y", x: W - padR - 4, y: y - 4, "text-anchor": "end" });
-        lab.textContent = v === 0 ? "$0" : usd(v);
+        /* THE MARK CARRIES THE SIDE, NOT A SIGN. usd(lo) would print
+           "-$60M" for a put total that is not negative and never was. */
+        lab.textContent = v === 0 ? "$0"
+          : v > 0 ? usd(v) + " call" : usd(-v) + " put";
         svg.append(lab);
       }
       svg.setAttribute("aria-label",
         rows.length + " sessions" +
         " from " + (stamp(rows[0].at) || "the start of the window") +
         " to " + (stamp(rows[rows.length - 1].at) || "its end") +
-        ", call and put premium drawn as two signed bars a session against one common " +
-        "scale running from " + usd(lo) + " to " + usd(hi) + ".");
+        ", the vendor's gross call and put premium drawn as two bars a session " +
+        "against one common scale — calls upward to " + usd(hi) + ", puts downward " +
+        "to " + usd(-lo) + ". Both are magnitudes; neither side is a negative number.");
 
       const key = el("div", "cc-tide-k");
       key.append(el("span", "cc-tide-key is-call", "Call premium"));
@@ -1595,19 +1623,49 @@
      DRAWN AS AN ARC RATHER THAN A BAR because the two parts are shares of one
      whole and always sum to it — the one case where a ring says something a
      split bar does not: that there IS a whole, and that it closes. */
-  function paintSplit(into, sub, market) {
-    if (silent(into, market, "market summary")) return;
-    const prem = (market && market.premium) || {};
-    const call = isNum(prem.netPositive), put = isNum(prem.netNegative);
-    if (call === null || put === null) {
+  /* THIS RING READ THE WRONG FIELD AND SAID SO IN THE LEGEND.
+
+     It was built on `market.premium.netPositive` / `netNegative`, assigned
+     them to variables named `call` and `put`, and labelled them "Calls" and
+     "Puts". Those two fields are the sums of POSITIVE and NEGATIVE net
+     premium across names — and shared/flows-market.js:147-150 says, verbatim,
+     that they are "not call premium and not put premium, both of which are
+     separate screener columns a reader could hold beside these and have no
+     way to know are unrelated". A name whose flow was heavily put-buying but
+     whose net came out positive counted toward "Calls". The comment warning
+     against exactly this was written before the ring existed and the ring did
+     it anyway.
+
+     THE CALL/PUT SPLIT IS A REAL READING AND IT HAS A REAL FIELD: the pulse
+     key's daily totals carry the vendor's own `callPrem` / `putPrem` for each
+     session (shared/flows-pulse.js:154-155). Those ARE call premium and put
+     premium. The newest row is this session's, and the sub-line below names
+     its date rather than assuming it is the session the rest of the page is
+     describing — the two feeds have disagreed before. */
+  function paintSplit(into, sub, pulse) {
+    if (silent(into, pulse, "market pulse feed")) return;
+    const tot = (pulse && pulse.totals) || null;
+    if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) {
       quiet(into, "unavailable",
-        "The market key is published without the two premium totals this figure is " +
-        "built from.");
+        "The pulse key is published without the daily totals this split is built from.");
       return;
     }
-    /* MAGNITUDES, AND THE SENTENCE SAYS SO IF EITHER AROSE NEGATIVE. Both are
-       published as unsigned pools by construction; a ring of a negative share
-       is not a smaller ring, it is a meaningless one. */
+    if (!tot.rows.length) {
+      quiet(into, "empty", "The daily totals were read and carried no session.");
+      return;
+    }
+    /* NEWEST FIRST, as the payload orders them — see tideSeries, which reverses
+       a COPY for its own axis and leaves this order alone. */
+    const row = tot.rows[0] || {};
+    const call = isNum(row.callPrem), put = isNum(row.putPrem);
+    if (call === null || put === null) {
+      quiet(into, "unavailable",
+        "The newest session carries no call/put premium pair, so there is no split to take.");
+      return;
+    }
+    /* GROSS AND NON-NEGATIVE BY CONSTRUCTION. A ring of a negative share is
+       not a smaller ring, it is a meaningless one, so a figure that arrives
+       negative is taken as its magnitude and the note says the session. */
     const a = Math.abs(call), b = Math.abs(put), whole = a + b;
     if (!(whole > 0)) {
       quiet(into, "empty",
@@ -1657,14 +1715,17 @@
     wrap.append(legend);
     into.append(wrap);
 
-    /* THE POPULATION, WHICH THE RING CANNOT DRAW. `priced` is how many names
-       carried both legs; `oneLegged` is how many carried one and were left
-       out of both pools. A share taken over 408 of 415 names is a different
-       claim from one taken over all of them. */
-    const priced = isNum(prem.priced), one = isNum(prem.oneLegged);
-    if (sub && priced !== null) {
-      sub.textContent = "over " + priced + " priced name" + (priced === 1 ? "" : "s") +
-        (one ? ", " + one + " one-legged and left out" : "");
+    /* WHICH SESSION, BECAUSE IT IS NOT NECESSARILY THIS PAGE'S. The old
+       sub-line printed the market key's `priced` / `oneLegged` population,
+       which described a different field entirely and has no meaning for this
+       one. The pulse feed dates itself and has disagreed with the run's
+       session before, so the honest qualifier here is the date of the row
+       actually drawn. */
+    if (sub) {
+      const when = typeof row.date === "string" && row.date ? row.date : null;
+      sub.textContent = when
+        ? "the vendor's gross call and put premium for " + when
+        : "the vendor's gross call and put premium, for a session the feed did not date";
       sub.hidden = false;
     }
   }
@@ -2976,7 +3037,7 @@
     const tideHost = host("ccTide"), tideSeg = host("ccTideSeg");
     if (tideHost && tideSeg) paintTide(tideHost, tideSeg, pulse);
     const splitHost = host("ccSplit");
-    if (splitHost) paintSplit(splitHost, host("ccSplitSub"), market);
+    if (splitHost) paintSplit(splitHost, host("ccSplitSub"), pulse);
 
     const trk = readTrack(track && track.status !== "pending" ? track : null);
 

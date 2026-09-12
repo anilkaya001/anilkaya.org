@@ -897,7 +897,46 @@ const CEILING_KIB = {
      across by hand, and the only way to know they were is a test that asks.
 
      200 LEAVES 1,355 B. */
-  overviewPage: 200,
+  /* 200 -> 203, AND THE 1,355 B WENT ON TWO WRONG READINGS.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-ui.js       25,136   flows-overview.js 173,641
+       total            207,344 B = 202.48 KiB, 2,544 B over 200
+
+     +3,899 B in flows-overview.js, and almost all of it is the reasoning for
+     two defects this route had SHIPPED. Neither was a layout slip; both were
+     the confident reading this section exists to refuse.
+
+     THE DAILY CHART CLAIMED A SIGN IT DOES NOT HAVE. paintTide's own comment
+     said "call premium and put premium are NET figures: the vendor publishes
+     them signed... and the sign is the reading". True of `pulse.points`,
+     which shapeTide builds from net_call_premium/net_put_premium — and this
+     chart draws `pulse.totals`, which shapeTotals builds from the GROSS
+     call_premium/put_premium columns. The two arrays carry the SAME FIELD
+     NAMES for two different quantities (shared/flows-pulse.js:132-133 against
+     :154-155), which is exactly how the claim survived being re-pointed at a
+     daily source. Calls are drawn upward and puts downward as magnitudes now,
+     and the axis marks name the side instead of printing "-$60M" for a total
+     that was never negative.
+
+     THE RING CALLED TWO POOLS "CALLS" AND "PUTS". paintSplit read
+     market.premium.netPositive/netNegative — the sums of positive and
+     negative NET premium — assigned them to variables named `call` and `put`,
+     and labelled them so. shared/flows-market.js:147-150 says verbatim that
+     these are "not call premium and not put premium, both of which are
+     separate screener columns a reader could hold beside these and have no
+     way to know are unrelated". The warning predates the ring; the ring did
+     it anyway. It reads the pulse totals' own callPrem/putPrem now, which ARE
+     those columns, and its sub-line names the session the row is dated to
+     rather than assuming it is this page's.
+
+     A third fix rides along at no argument: the chart carried
+     preserveAspectRatio="none", the same defect found on the premium-track
+     panel this session, which scales bar HEIGHTS by the host ratio.
+
+     203 LEAVES 1,424 B, the same order the last two raises left. The route is
+     owed the comment strip like every other one here. */
+  overviewPage: 203,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is
