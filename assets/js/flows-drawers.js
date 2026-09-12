@@ -2,10 +2,11 @@
    flows-drawers.js — the ten panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 123k as
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 126k as
    measured on 2026-09-12 — it was 112k, the session path's window
-   picker is 2k of the rise and renderPremiumTrack, the tenth drawer,
-   is the other 9k — and deferring it takes the ticker route
+   picker is 2k of the rise, renderPremiumTrack, the tenth drawer, is
+   9k of it, and the gamma rail's self-sizing is the last 2k — and
+   deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and
@@ -134,7 +135,34 @@
        nothing and looked like a tooltip stuck over the chart. Without the
        plate the text needs no padding, border or background, and the twenty
        pixels go back to the bars. */
-    const padT = 16, padB = 30, labelW = 46, railW = 112;
+    /* THE RAIL IS SIZED TO ITS TEXT NOW, not to a constant that was right for
+       one typeface. It was a flat 112, and the comment beside the plates said
+       the sub-line "has room for about twenty monospace characters" — true of
+       the mono face this page used to set. Flows is Inter now, and the very
+       clipping that sentence warned about happened: SYN010's flip plate reads
+       "+18.90% · +7.61 ATR", which wants 104px of the 100 the rail left it,
+       and SVG clips the overflow SILENTLY. Nothing on the page looked wrong.
+
+       Both sub-lines are built here, before the geometry, so the widest one
+       can set the width. AXIS_CH is the repo's one text-metric constant and
+       it predicts this label at 104.5px against a measured 104 — close enough
+       to size a rail, and the same constant the axis labels already trust.
+
+       FLOORED AND CAPPED. The floor keeps short labels from shrinking the
+       rail into the leader lines; the cap keeps a pathological string from
+       eating the plot it is annotating, which would trade a silent clip for a
+       silent squeeze. A label past the cap still clips — but it is now a
+       21-character label rather than a 19-character one. */
+    const atSpotW = isNum((card.regime || {}).spotGammaShare);
+    const lvW = (card.panels && card.panels.levels && card.panels.levels.status === "ok"
+      ? card.panels.levels.levels.find((l) => l.kind === "gamma_flip") : null);
+    const subLines = [
+      atSpotW === null ? "" : "\u0393 " + Math.abs(atSpotW).toFixed(2) + " of peak",
+      lvW ? pct(lvW.distPct) + " \u00b7 " + atrDist(lvW.distAtr) : "",
+    ];
+    const needRail = Math.max(...subLines.map((t) => t.length)) * AXIS_CH + 16;
+    const padT = 16, padB = 30, labelW = 46;
+    const railW = Math.max(112, Math.min(148, Math.ceil(needRail)));
     const plotL = labelW, plotR = W - railW;
     const plotW = Math.max(60, plotR - plotL);
     const H = padT + bars.length * ROW + padB;
@@ -2304,9 +2332,24 @@
     const barW = Math.max(1.2, Math.min(22, step * 0.7));
     const xOf = (i) => padL + step * (i + 0.5);
 
+    /* THE ONLY CHART IN THIS FILE THAT STRETCHED. The other seven all carry
+       "xMidYMid meet"; this one shipped "none", which scales x and y apart —
+       so the bars keep their correct WIDTH while their heights are multiplied
+       by whatever the host/viewBox ratio happens to be, and a panel whose
+       whole claim is that bar length means dollars silently stops meaning it.
+
+       It survived because it is invisible to the measurement that was
+       watching: every width-based assertion passes under "none" by
+       construction. flows-card-render asks the question directly, and that
+       suite sits behind flows-overview in the run order, so it had never
+       executed against this branch until the overview went green.
+
+       width/height as well as the ratio, matching the house pattern above:
+       W is already panelWidth(host), so one viewBox unit renders as one CSS
+       pixel and the drawing's size does not change — only its honesty. */
     const svg = svgEl("svg", {
-      class: "pt-chart", viewBox: "0 0 " + W + " " + H,
-      preserveAspectRatio: "none", role: "img",
+      class: "pt-chart", viewBox: "0 0 " + W + " " + H, width: "100%", height: H,
+      preserveAspectRatio: "xMidYMid meet", role: "img",
     });
     const zeroY = yOf(0);
     const g = svgEl("g", { class: "pt-bars" });
