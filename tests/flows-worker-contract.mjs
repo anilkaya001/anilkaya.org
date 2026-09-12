@@ -826,12 +826,42 @@ try {
     }
 
     /* Every gated page carries the rail, and the rail carries every
-       destination — a nav that omits a route is a route nobody finds. */
+       destination it offers — a nav that omits a route it means to offer is a
+       route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
                         "/flows/market/", "/flows/unusual/", "/flows/events/",
-                        "/flows/ticker/", "/flows/desk/", "/flows/history/",
-                        "/flows/track/"]) {
+                        "/flows/ticker/", "/flows/desk/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
+    }
+
+    /* AND TWO ROUTES ARE DELIBERATELY NOT IN IT. The track record and the
+       score track came off the rail by the owner's decision — twelve
+       destinations was more than the nav could ask a reader to choose
+       between. This is the half of that change a test has to hold, because
+       the other half is invisible: the ROUTES STILL ANSWER. Nothing was
+       deleted from the worker or the pipeline, so a link already sent still
+       opens and every payload still publishes.
+
+       Asserted in BOTH directions on purpose. A route quietly deleted and a
+       route deliberately unlisted look identical from the rail alone, and
+       only one of them is what was asked for. */
+    /* SCOPED TO THE RAIL, and the first run of this assertion is why. Tested
+       against the whole page it failed on /flows/history/, and the link it
+       found was the right one to find: the board's own footer says "whether
+       this board has been right is measured rather than asserted, session by
+       session, on the TRACK RECORD" and links it there. That is a refusal
+       pointing at its own evidence, and it is more useful now that the route
+       is not in the nav, not less. What was asked for was a shorter rail, not
+       a buried route. */
+    const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
+    ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
+    for (const gone of ["/flows/history/", "/flows/track/"]) {
+      ok(!rail.includes(`href="${gone}"`),
+         `the RAIL does NOT link to ${gone} — it was taken off deliberately`);
+      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
+      eq(still.status, 200,
+         `but ${gone} still answers: unlisted is not deleted, and a link already ` +
+         "sent has to keep working");
     }
 
     // The API answers, and answers honestly before the pipeline has run.

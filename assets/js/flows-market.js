@@ -421,8 +421,15 @@
       said = "The two weightings DISAGREE in sign: more names leaned " +
         (b > 0 ? "positive" : "negative") + " while the dollars leaned " +
         (p > 0 ? "positive" : "negative") + " — breadth without size, or size without breadth.";
-      how = "That disagreement is the session's most informative reading, and it is why " +
-        "both are drawn rather than one being chosen.";
+      /* THE SENTENCE THAT EXPLAINED WHY TWO BARS EXIST IS GONE. It read
+         "That disagreement is the session's most informative reading, and it
+         is why both are drawn rather than one being chosen" — a
+         justification for this section's own construction, under a heading
+         that already says "Bought or sold, TWO WAYS", above two labelled
+         rows a reader can see disagree. Method, by the rule; and the lead
+         directly above still states the disagreement itself, which is the
+         reading rather than the argument for it. */
+      how = "";
     } else {
       said = "Both weightings agree in sign: names and dollars both leaned " +
         (b > 0 ? "positive" : "negative") + " this session.";

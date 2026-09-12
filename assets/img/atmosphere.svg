@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" role="img" aria-label="">
+  <title>Atmosphere seen edge-on at altitude</title>
+  <!--
+    THE GROUND, AS A FILE RATHER THAN AS A GUESS IN A STYLESHEET.
+
+    Vector, not a photograph: it is ~1 KB against a JPEG's hundreds, it is
+    resolution-independent on every display this site meets, and it costs the
+    ticker route nothing measurable next to a raster of the same coverage. The
+    subject is a gradient of light through air, which is what SVG gradients
+    ARE — there is no detail here a photograph would carry and this cannot.
+
+    The stops are read off the reference: a sun just off the left edge, deep
+    navy at altitude, the blue band thinning as it falls, the thin bright
+    horizon, and the dust-lit haze below it going to shadow at the foot.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.00"  stop-color="#050a18"/>
+      <stop offset="0.08"  stop-color="#071433"/>
+      <stop offset="0.20"  stop-color="#0b2a66"/>
+      <stop offset="0.30"  stop-color="#0f4ba6"/>
+      <stop offset="0.385" stop-color="#2a8ade"/>
+      <stop offset="0.435" stop-color="#7cc6f2"/>
+      <stop offset="0.468" stop-color="#cfe6f7"/>
+      <stop offset="0.487" stop-color="#f6e6bd"/>
+      <stop offset="0.500" stop-color="#fdf3d8"/>
+      <stop offset="0.520" stop-color="#f5cf8d"/>
+      <stop offset="0.560" stop-color="#e8ab60"/>
+      <stop offset="0.640" stop-color="#c98b50"/>
+      <stop offset="0.760" stop-color="#8f6a4e"/>
+      <stop offset="0.880" stop-color="#665551"/>
+      <stop offset="1.00"  stop-color="#4e4a4a"/>
+    </linearGradient>
+    <!-- The sun, off the left edge. Its glow is what keeps the horizon from
+         reading as a drawn rule: the band is brightest where the light enters
+         and cools across the frame. -->
+    <radialGradient id="sun" cx="0.02" cy="0.47" r="0.55">
+      <stop offset="0.00" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.25" stop-color="#fff3d2" stop-opacity="0.55"/>
+      <stop offset="0.60" stop-color="#ffd79a" stop-opacity="0.18"/>
+      <stop offset="1.00" stop-color="#ffc98a" stop-opacity="0"/>
+    </radialGradient>
+    <!-- The upper sky darkens toward the right, away from the light. -->
+    <linearGradient id="fall" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.00" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="0.55" stop-color="#00040e" stop-opacity="0.18"/>
+      <stop offset="1.00" stop-color="#00040e" stop-opacity="0.38"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <rect width="1600" height="900" fill="url(#fall)"/>
+  <rect width="1600" height="900" fill="url(#sun)"/>
+</svg>

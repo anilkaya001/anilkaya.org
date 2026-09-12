@@ -220,7 +220,17 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(/not zipped by position|not.*index/i.test(OVERLAY_NOTES.join),
      "the join note states the thing that would otherwise be invisible");
   ok(/breaks/.test(OVERLAY_NOTES.gap) && /zero/i.test(OVERLAY_NOTES.gap),
-     "the gap note says the line breaks and says why zero is not a substitute");
+     "the gap note says the series breaks and says why zero is not a substitute");
+  /* THE UNITS SURVIVED THE REDRAW. The axes note lost its closing clause when
+     the score became bars — "the two lines crossing means nothing at all" was
+     guarding a misreading that two different kinds of object cannot produce.
+     What it must NOT lose is the two units and the refusal to compare them,
+     which is a scope statement and not a definition. */
+  ok(/dollars/.test(OVERLAY_NOTES.axes) && /hundred/.test(OVERLAY_NOTES.axes),
+     "the axes note still names both units");
+  ok(/separate scales/i.test(OVERLAY_NOTES.axes) &&
+     /cannot be compared/i.test(OVERLAY_NOTES.axes),
+     "and still refuses the comparison, which is the claim the crossing clause was making");
 }
 
 /* ---------- 10. against the corpus the pipeline actually emits ----- */

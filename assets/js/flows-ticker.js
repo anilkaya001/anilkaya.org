@@ -5563,6 +5563,44 @@
     }
   }
 
+  /* AND WHENEVER THE BAR CHANGES SIZE, which holds without knowing WHY.
+
+     Seven hand-driven calls are a guess about every way a sticky bar can
+     rewrap, and the guess was wrong: clipping the station blurb out of flow
+     made the bar shorter and CI landed a deep-linked panel 17px under it
+     (201 against 218). This sandbox cannot reproduce that — barH and
+     --ft-bar-h agree at 148 here with or without the webfont — so the fix is
+     not a better guess at the missing call site. The observer measures
+     because it changed. The hand calls stay for the first paint. */
+  if (typeof ResizeObserver === "function") {
+    const settle = new ResizeObserver(() => {
+      syncBarHeight();
+      reHonourJump();
+    });
+    if (barEl) settle.observe(barEl);
+    /* AND THE GRID, WHICH IS WHERE THE DEFECT ACTUALLY WAS.
+
+       Observing the bar alone was a fix for a cause I had inferred from one
+       number and never measured. Measured, with the failing case reproduced:
+
+         panel top 172.2, bar bottom 217.7, --ft-bar-h 147px,
+         scroll-margin-top 227px, scrollY 9481
+
+       The variable was RIGHT and the scroll margin was RIGHT. The panel was
+       simply 55px higher than the margin it had been scrolled to — so nothing
+       about the bar was ever wrong, and every byte spent on measuring the bar
+       harder could not have moved that panel. What happened is that content
+       ABOVE the target reflowed after the jump and pulled it up underneath a
+       scrollY that stayed put. A bar that does not change size reports
+       nothing while that happens.
+
+       The grid's own height changes whenever any panel inside it reflows,
+       which is the one signal that covers every cause without enumerating
+       them — the same argument the bar observer makes, finally pointed at the
+       right element. */
+    if (grid) settle.observe(grid);
+  }
+
   /* ---------- deep links -------------------------------------------
 
      THERE WAS NO WAY TO SEND ANYONE A PANEL. Two anchor shapes now exist and
@@ -5596,6 +5634,34 @@
       : (direct.closest(".ft-panel") || direct);
   }
 
+  /* THE JUMP IS REDONE WHEN THE BAR IT CLEARED CHANGES HEIGHT.
+
+     Updating --ft-bar-h is not enough on its own, and CI proved it twice:
+     `scroll-margin-top` is read by the browser AT SCROLL TIME and never
+     again, so a bar that rewraps AFTER the scroll leaves the reader at an
+     offset computed against a height that no longer exists. The measurement
+     from the failing run says exactly that and nothing else: the panel sat at
+     172 against a bar ending at 218, and 172 is 4.4rem + 5.5rem + 0.6rem to
+     the pixel — the STYLESHEET's placeholder height, one unwrapped row of
+     tabs in the fallback face. The webfont then swapped, the tab row wrapped,
+     the bar went from 92 to 148, and nothing moved the page.
+
+     ONLY FOR A READER WHO HAS NOT MOVED. `jumped.y` is where the jump left
+     the page; a scrollY that has since changed by more than a pixel of
+     rounding means the reader is somewhere they chose, and yanking them back
+     to an anchor they have already scrolled past would be the worse bug. The
+     re-jump clears the record either way, so this fires once per jump. */
+  let jumped = null;
+  function reHonourJump() {
+    if (!jumped) return;
+    const { target, y } = jumped;
+    jumped = null;
+    if (!target.isConnected) return;
+    if (Math.abs(Math.round(window.scrollY) - y) > 1) return;
+    target.scrollIntoView({ block: "start" });
+    jumped = { target, y: Math.round(window.scrollY) };
+  }
+
   function honourHash() {
     const target = hashTarget();
     if (!target) return;
@@ -5608,6 +5674,9 @@
     }
     syncBarHeight();
     target.scrollIntoView({ block: "start" });
+    /* WHERE THE JUMP PUT US, so a later re-measure can tell a bar that grew
+       under a settled reader from a reader who has scrolled away. */
+    jumped = { target, y: Math.round(window.scrollY) };
     /* FOCUS FOLLOWS THE JUMP, or a keyboard reader lands visually on panel 14
        and carries on tabbing from panel 1. */
     if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
@@ -5682,7 +5751,28 @@
     const target = hashTarget();
     const group = target && target.dataset ? target.dataset.group : null;
     if (group && keys.indexOf(group) !== -1) return group;
-    return keys[0];
+    /* THE DEFAULT IS ALL TWENTY-THREE, NOT THE FIRST THREE.
+
+       Opening on one station was the right answer to a real measurement: 23
+       panels stacked in a one- and two-column grid measured 11,468px at 1440
+       and 19,978px at 390, and clicking a tab moved the reader four thousand
+       pixels with the other four stations still underneath. But the fix for a
+       column count was made in the station selector, and it has been paying
+       for that ever since — the landing view is three panels, two of which
+       used to span the whole row, which is a page of bands rather than a
+       board of cards.
+
+       The grid is what changed: three columns at 76rem, four at 110, five at
+       132, and NO panel spans a full row at any width. Twenty-three cards
+       across three-to-five columns is eight rows, not twenty-three, and it is
+       the thing the reader of this page has asked for in every message — many
+       small cards, seen at once, without scrolling to find them.
+
+       THE TABS DO NOT GO AWAY. They still narrow to one station, they still
+       write ?s= , and every link already sent still opens the station it
+       names. What changed is only which view a reader who asked for nothing
+       gets, and the reason the old default existed no longer holds. */
+    return ALL_STATIONS;
   }
 
   /* A CLICK IS AN ACT AND A SCROLL IS NOT. pushState so Back returns the reader
@@ -5691,8 +5781,12 @@
   function writeStation(key, push) {
     let url;
     try { url = new URL(location.href); } catch { return; }
-    const first = stationKeys()[0];
-    if (key === first) url.searchParams.delete("s");
+    /* THE DEFAULT DROPS OUT OF THE URL, and the default is now ALL_STATIONS
+       — the same rule as before, pointed at the new default. Writing
+       `?s=all` onto a page that already shows all of them would put a
+       parameter in every reader's address bar that says what the page does
+       without it. */
+    if (key === ALL_STATIONS) url.searchParams.delete("s");
     else url.searchParams.set("s", key);
     const next = url.pathname + url.search + url.hash;
     try {
@@ -6321,12 +6415,15 @@
        the shorter of the two the counts differ, and a reader told "4
        sessions" without being told which calendar has been given a number
        with no unit. */
+    /* The third sentence was navigation to a panel two screens down that
+       carries that title; it is gone. The rest is the UNIT — these counts
+       are on the intersection of the price window and the score archive,
+       which have different lengths — and a unit is never folded away. */
     changeEl.append(el("p", "fc-note",
       "Derived from the " + SESSIONS(chg.window.sessions) + " between " + chg.window.from +
       " and " + chg.window.to + " that this card's price window shares with the score " +
       "archive, " + chg.window.scored + " of which carry a score for this name. Every " +
-      "session count above counts THOSE sessions. The series itself is in the " +
-      "score-over-price panel below."));
+      "session count above counts THOSE sessions."));
 
     return chg;
   }
@@ -6404,8 +6501,13 @@
        running it first is what lets that ranking apply. */
     honourHash();
 
-    statusEl.textContent = (card.ticker || "This name") +
-      " \u00b7 every panel the card carries, drawn at page width.";
+    /* Blank, not a sentence. It read "<TICKER> · every panel the card
+       carries, drawn at page width": the ticker is in the badge above, "every
+       panel" is the ABSENCE of a withholding rather than a reading, and the
+       rest describes the layout. The five station leads below count what drew
+       and what was withheld, per station, which is the fact a reader can act
+       on. */
+    statusEl.textContent = "";
     if (footEl) {
       footEl.textContent =
         "Every number here is read off the card payload the pipeline published " +

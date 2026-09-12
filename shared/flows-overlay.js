@@ -57,15 +57,29 @@ export const OVERLAY_NOTES = Object.freeze({
     "position: both are about forty points long and both run oldest first, so " +
     "an index join would draw a plausible chart out of two windows that need " +
     "not describe the same days.",
-  gap: "A break in the score line is a session the archive holds no score for " +
-    "this name — the name was off the board, or that day's board was never " +
-    "written. The line breaks rather than bridging, because a bridged gap is a " +
-    "score nobody computed and a zero would be a NEUTRAL score, which is a " +
-    "reading this system publishes and means.",
+  /* THE SCORE IS DRAWN AS BARS, so a missing session is a missing bar and this
+     refusal is structural rather than programmed: there is no stroke that
+     could have bridged the hole. The word "breaks" stays because what it names
+     is unchanged — the series stops rather than continuing across a day nobody
+     scored — and because a zero is still the wrong substitute, for a reason no
+     drawing can state on its own. */
+  gap: "A missing bar is a session the archive holds no score for this name — " +
+    "the name was off the board, or that day's board was never written. The " +
+    "series breaks rather than bridging: a bridged gap is a score nobody " +
+    "computed, and a zero would be a NEUTRAL score, which is a reading this " +
+    "system publishes and means.",
+  /* WHAT THE DRAWING NOW CARRIES, THIS NO LONGER SAYS. This note used to end
+     "the two lines crossing means nothing at all", because two strokes on one
+     date axis look like two comparable series. Bars against a marked zero
+     beside a price LINE are two visibly different kinds of object and cannot
+     be read as crossing, so the sentence went with the defect it guarded.
+     THE UNITS STAY. They are not a definition: they are what the two scales
+     mean, nothing else on this panel states them, and "cannot be compared by
+     height" is the same refusal the crossing clause was making. */
   axes: "Two units on one date axis. Price is in dollars and has no meaningful " +
     "zero; the score is bounded to plus or minus one hundred and its zero is the " +
-    "centre of the dead band. They are drawn against separate scales and the " +
-    "score's zero is marked, so the two lines crossing means nothing at all.",
+    "centre of the dead band. They are drawn against separate scales, so the " +
+    "bars and the line cannot be compared by height.",
   window: "The overlap is the intersection of the price window and the score " +
     "window, and either can be the shorter. Sessions outside it are counted and " +
     "named rather than silently dropped.",

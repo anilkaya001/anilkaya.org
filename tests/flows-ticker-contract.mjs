@@ -192,32 +192,40 @@ const truncated = cards.filter((c) =>
      is a stronger check than a limit with a well-argued one, and leaving the
      machinery in place "in case" would be leaving a hole shaped like the
      defect it was built for. */
-  const PAIR_LIMIT = 250;
-  for (const g of TICKER_GROUPS) {
-    const limit = PAIR_LIMIT;
-    /* Span-2 panels own their row, so they never share a height with anyone;
-       at two columns the rest pair off in registry order. */
-    const solo = TICKER_PANELS.filter((p) => p.group === g.key && p.span !== 2);
-    for (let i = 0; i + 1 < solo.length; i += 2) {
-      const [a, b] = [solo[i], solo[i + 1]];
-      const gap = Math.abs(PANEL_H[a.key] - PANEL_H[b.key]);
-      ok(gap <= limit,
-         `${g.key}: "${a.key}" (${PANEL_H[a.key]}px) and "${b.key}" (${PANEL_H[b.key]}px) are ` +
-         `row-mates at two columns, so the shorter is stretched ${gap}px — past the ${limit}px ` +
-         `a panel can fill honestly. Reorder the station, or widen the panel whose layout ` +
-         `can absorb width (see the span note in shared/flows-panels.js — widening the TALL ` +
-         `one is the obvious move and it is usually the wrong one)`);
-    }
-    /* NO "THE ODD ONE OUT MUST BE THE SHORTEST" RULE, and dropping it was a
-       finding rather than a concession. It follows from the UNCONSTRAINED
-       matching optimum, and this registry is not unconstrained: three argued
-       adjacency contracts and the lead-is-first rule pin most of the order
-       already. In `context` the shortest panel is the lead and must come
-       first, so the rule and the contracts cannot both hold — and the
-       contracts are the ones with reasons written next to them. The pair
-       limit above is what survives, because it constrains the thing that
-       actually hurts a reader. */
-  }
+  /* AND THEN THE THING IT WAS MEASURING WAS REMOVED, so the pair limit is
+     gone and the defect is measured directly, live, further down this file.
+
+     EVERY SENTENCE ABOVE IS TRUE OF THE GRID IT WAS WRITTEN FOR. A grid item
+     stretches to its row by default, so a 506px panel beside a 1034px one was
+     DRAWN 1034px tall with 528px of nothing inside its own border. That void
+     is what the limit existed to bound, and comparing two recorded CONTENT
+     heights was the available proxy: contents differing by more than 250px
+     means the shorter card carries more than 250px of void.
+
+     `.ft-station` now sets `align-items: start`. Nothing is stretched, so a
+     height difference between row-mates is no longer a void — it is a ragged
+     bottom edge, the ordinary shape of a card wall. Keeping the limit would
+     fail this grid for a defect it cannot have; RAISING it would be the move
+     this file says it is most suspicious of. Deleting it and measuring the
+     void itself is the third option, and it is strictly stronger: it admits
+     no void at any size, in any pairing, at any column count, and it cannot
+     be satisfied by reordering a station — which is what the old message had
+     to suggest, and which never removed a void, only moved it.
+
+     THE TABLE ABOVE STAYS. It is the record of what each panel's content
+     measured, it still proves the registry and the height table have not
+     drifted apart, and the live check below needs no fixture to compare
+     against.
+
+     AND THE RULE THIS BLOCK USED TO END ON GOES WITH IT. "The odd one out
+     must be the shortest" was dropped earlier as a finding rather than a
+     concession — it follows from the UNCONSTRAINED matching optimum, and this
+     registry is pinned by three argued adjacency contracts and the
+     lead-is-first rule. Both it and the pair limit were about WHICH PANEL
+     SITS NEXT TO WHICH, and with no stretch that question no longer has a
+     defect attached to it: a card wall does not care what its neighbour
+     measures. The adjacency contracts in shared/flows-panels.js still hold,
+     for their own reasons, and are still asserted there. */
 
   /* Every registry key other than the score sentinel names a real payload
      panel. This is the assertion that would have caught four published,
@@ -908,13 +916,32 @@ try {
       return out;
     });
 
+    /* THE DEFAULT IS ALL FIVE, AND THAT IS A DECISION, NOT A RELAXATION.
+
+       This asserted exactly ONE station on arrival, and the reason was
+       measured: 23 panels in a one- and two-column grid ran 11,468px at 1440
+       and 19,978px at 390, and a tab click moved the reader four thousand
+       pixels with the other four stations still stacked underneath.
+
+       The COLUMN COUNT is what has changed. `.ft-station` is three columns at
+       76rem, four at 110 and five at 132, no panel spans a full row at any
+       width, and nothing is stretched. Twenty-three cards across three-to-five
+       columns is eight rows, not twenty-three — so the height that justified
+       hiding four fifths of the name is not the height the page now has.
+
+       WHAT IS STILL ASSERTED, below and unchanged: a tab click narrows to one
+       station and writes ?s=, Back undoes it, an address no station answers to
+       is ignored rather than obeyed, and ?s=all shows all five. The last of
+       those is now also what a reader who asks for nothing gets, which is why
+       this block reads the default and the explicit address the same way. */
     const first = await shown();
-    eq(first.open.length, 1,
-       `on arrival exactly one station is in the document (${first.open.join(", ") || "none"})`);
-    eq(first.hidden.length, 4,
-       `and the other four are out of it (${first.hidden.length} hidden)`);
-    eq(first.selected.join(","), first.open[0],
-       `the tab marked selected is the station that is open (${first.selected.join(",")} vs ${first.open[0]})`);
+    eq(first.open.length, 5,
+       `on arrival every station is in the document (${first.open.join(", ") || "none"})`);
+    eq(first.hidden.length, 0,
+       `and none is hidden from a reader who asked for nothing (${first.hidden.length} hidden)`);
+    ok(!/[?&]s=/.test(first.url),
+       `and the default writes no s= into the address, because it is what the page ` +
+       `does without one (${first.url || "empty"})`);
 
     /* A CLICK SWITCHES, AND DOES NOT SCROLL TO SOMETHING FOUR THOUSAND PIXELS
        DOWN — the station it names is the only one left in the flow. */
@@ -929,12 +956,18 @@ try {
        its entry instead, or Back would walk a reader through every station
        they merely scrolled past. */
     await page.goBack();
-    await page.waitForFunction(() => !document.querySelector(
-      '.ft-station[data-group="convexity"]') || document.querySelector(
-      '.ft-station[data-group="convexity"]').hidden, null, { timeout: 4000 });
+    /* WAITS FOR THE VIEW TO COME BACK, NOT FOR convexity TO HIDE. The old
+       condition was "convexity is hidden again", which held when Back
+       restored a single OTHER station. Back now restores the all-five
+       default, in which convexity is one of the five still on the page — so
+       that condition can never become true and the wait could only time out.
+       The state being waited for is "no station is hidden", which is what the
+       default is. */
+    await page.waitForFunction(() => [...document.querySelectorAll(
+      '.ft-station[data-group]')].every((s) => !s.hidden), null, { timeout: 4000 });
     const back = await shown();
-    eq(back.open.join(","), first.open[0],
-       `Back returns to the station the reader came from (${back.open.join(", ")})`);
+    eq(back.open.length, 5,
+       `Back returns to the view the reader came from, which is all five (${back.open.join(", ")})`);
 
     /* ?s=all IS THE WAY BACK TO ONE PAGE, and it is what keeps find-in-page and
        printing from silently losing four fifths of the name. */
@@ -952,7 +985,13 @@ try {
     const bad = await badPage.evaluate(() =>
       [...document.querySelectorAll(".ft-station[data-group]")].filter((s) => !s.hidden)
         .map((s) => s.dataset.group));
-    eq(bad.length, 1, `an unknown ?s= opens one station rather than none (${bad.join(", ")})`);
+    /* THE PROPERTY IS "NOT OBEYED", AND IT IS UNCHANGED. A mistyped ?s= falls
+       back to the DEFAULT, and the outcome this guards against — all five
+       hidden because a reader fat-fingered the query — is still refused. What
+       the default is has changed; that a bad address gets it has not. */
+    eq(bad.length, 5,
+       `an unknown ?s= falls back to the default view rather than hiding everything ` +
+       `(${bad.join(", ") || "none"})`);
     await badPage.close();
 
     /* A DEEP LINK OPENS THE STATION THAT HOLDS THE PANEL. Scrolling to an
@@ -982,9 +1021,15 @@ try {
       ["&s=all#ftg-convexity", "signal,convexity,volatility,tape,context"],
       ["&s=all", "signal,convexity,volatility,tape,context"],
       ["#ftg-convexity", "convexity"],
-      ["", "signal"],
+      /* THE TWO ROWS THAT NAME NOTHING NOW GET THE ALL-FIVE DEFAULT. The
+         RANKING this table exists to pin is untouched: an explicit ?s= still
+         wins, a hash still decides when ?s= is silent, and a hash naming a
+         PANEL still wins over ?s= — the four rows that exercise those three
+         rules are unchanged. These two exercise the FALLBACK, and what the
+         fallback is has changed by decision. */
+      ["", "signal,convexity,volatility,tape,context"],
       ["&s=volatility#panel-gamma", "convexity"],
-      ["&s=bogus", "signal"],
+      ["&s=bogus", "signal,convexity,volatility,tape,context"],
     ]) {
       const p = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
       const hash = query.includes("#") ? query.slice(query.indexOf("#") + 1) : "";
@@ -2546,8 +2591,10 @@ try {
           viewBox: svg ? svg.getAttribute("viewBox") : null,
           par: svg ? svg.getAttribute("preserveAspectRatio") : null,
           box: svg ? (({ width, height }) => ({ width, height }))(svg.getBoundingClientRect()) : null,
-          scoreD: score ? score.getAttribute("d") : null,
-          dots: host.querySelectorAll(".ovl-dot").length,
+          bars: host.querySelectorAll(".ovl-bar").length,
+          negBars: host.querySelectorAll(".ovl-bar.is-neg").length,
+          zeroBars: host.querySelectorAll(".ovl-bar.is-zero").length,
+          hasScore: !!score,
           band: !!host.querySelector(".ovl-band"),
           said: host.textContent,
           aria: svg ? svg.getAttribute("aria-label") : null,
@@ -2567,42 +2614,56 @@ try {
     ok(Math.abs(ratio - 1) < 0.02,
        `one viewBox unit is one CSS pixel (drawn ${vbW}, laid out ${good.box.width.toFixed(1)}, ` +
        `ratio ${ratio.toFixed(3)})`);
-    ok(/\bM/.test(good.scoreD), "the score line is drawn");
+    ok(good.hasScore && good.bars > 0, "the score is drawn, as bars");
     ok(good.aria && /sessions from/.test(good.aria),
        "and the chart names its own window to a screen reader");
 
-    /* ---- THE GAP. A hole must break the path, not bridge it. ---- */
+    /* ---- THE GAP. A session nobody scored draws NOTHING.
+
+       This used to count subpaths in a path `d`, because the score was one
+       stroke and a hole had to be programmed to break it. Bars make the
+       refusal structural: one rect per scored session, so an unscored one has
+       no rect and there is no stroke that could have bridged it. Counting
+       bars is therefore a STRONGER test than counting moves — a path could
+       always have been made to bridge by a later edit, and a missing rect
+       cannot be. ---- */
     const holed = JSON.parse(JSON.stringify(base));
     const mid = Math.floor(holed.panels.scoreOverlay.rows.length / 2);
     holed.panels.scoreOverlay.rows[mid].score = null;
     holed.panels.scoreOverlay.scored -= 1;
     holed.panels.scoreOverlay.gaps += 1;
     const gapped = await readOvl(holed);
-    const moveCount = (d) => (d.match(/M/g) || []).length;
-    eq(moveCount(gapped.scoreD), moveCount(good.scoreD) + 1,
-       "a hole in the middle splits the score path into one more subpath — the line " +
-       "BREAKS rather than bridging a session nobody scored");
+    eq(gapped.bars, good.bars - 1,
+       "a hole in the middle draws one FEWER bar — the session nobody scored is " +
+       "absent from the drawing rather than bridged across");
     ok(/no score/i.test(gapped.said),
        "and the panel says in words how many sessions carry no score");
 
-    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. A one-point subpath has
-       no length and renders as nothing at all, so a real measurement would
-       simply vanish. It gets a dot instead. ---- */
+    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. This was the line's worst
+       case and is the bar chart's ordinary one: a one-point subpath has no
+       length and rendered as nothing at all, so a real measurement vanished
+       and needed a hand-placed dot. A lone bar is a bar. ---- */
     const island = JSON.parse(JSON.stringify(base));
     const rows = island.panels.scoreOverlay.rows;
     for (let i = 0; i < rows.length; i++) if (i !== 2) rows[i].score = null;
     island.panels.scoreOverlay.scored = 1;
     island.panels.scoreOverlay.gaps = rows.length - 1;
     const lone = await readOvl(island);
-    eq(lone.dots, 1, "a scored session with holes on both sides is drawn as a dot, not lost");
+    eq(lone.bars, 1,
+       "a scored session with holes on both sides draws exactly one bar, and is not lost");
 
-    /* ---- A ZERO IS A READING, NOT A HOLE. ---- */
+    /* ---- A ZERO IS A READING, NOT A HOLE, and on a bar chart that needs
+       saying twice: it must draw a bar AND that bar must not be tinted like a
+       direction it does not carry. ---- */
     const zeroed = JSON.parse(JSON.stringify(base));
     zeroed.panels.scoreOverlay.rows[mid].score = 0;
     const atZero = await readOvl(zeroed);
-    eq(moveCount(atZero.scoreD), moveCount(good.scoreD),
-       "a measured zero does NOT break the line: it is a name sitting at neutral, " +
-       "which is a reading this system publishes and means");
+    eq(atZero.bars, good.bars,
+       "a measured zero still draws its bar: it is a name sitting at neutral, which " +
+       "is a reading this system publishes and means, not an unscored session");
+    ok(atZero.zeroBars >= 1,
+       "and it is drawn in the neutral ink rather than as a positive or a negative — " +
+       "the centre of the dead band carries no direction");
 
     /* ---- THE TWO EMPTY STATES, which are not the same sentence. ---- */
     const disjoint = JSON.parse(JSON.stringify(base));
@@ -3721,6 +3782,26 @@ try {
     {
       const { page, errors } = await open("panel-" + target);
       await settled(page);
+      /* NO CARD IS DRAWN TALLER THAN WHAT IS IN IT.
+
+         The direct measurement of the void the deleted pair limit bounded by
+         proxy. A stretched grid item reports the row's height from its border
+         box and its own content height from scrollHeight, so the difference
+         IS the empty space inside the card — no fixture, no recorded table,
+         and true at whatever column count the viewport produces. */
+      const stretched = await page.evaluate(() => Array.from(
+        document.querySelectorAll(".ft-station:not([hidden]) .ft-panel"), (el) => ({
+          key: el.dataset.panel,
+          drawn: Math.round(el.getBoundingClientRect().height),
+          content: el.scrollHeight,
+        })).filter((p) => p.drawn - p.content > 2));
+      eq(stretched.length, 0,
+         "no panel is drawn taller than its own content — a grid item stretches to its " +
+         "row unless the container says otherwise, so check that .ft-station still sets " +
+         "align-items: start rather than reordering a station to pair a short panel with " +
+         "a taller one (" +
+         stretched.map((p) => `${p.key} ${p.drawn}px around ${p.content}px`).join("; ") + ")");
+
       const landed = await page.evaluate((k) => {
         const s = document.getElementById("panel-" + k);
         const r = s.getBoundingClientRect();
@@ -4087,7 +4168,27 @@ try {
     });
     eq(q.servedText, TICKER_PANELS.find((p) => p.key === "gamma").question,
        "the served question is the registry's, verbatim");
-    ok(q.servedShown, "and a reader can see it");
+    /* AND A READER DOES NOT SEE IT IN THE GRID — deliberately, since v149.
+       Twenty-three panels each carrying a sentence that restates its own
+       title is 243 words of DEFINITION on every ticker (flows-overview.js:325,
+       and the same cut the Market route took in 851741e). `.ft-panel-q` is
+       clipped to a 1px box rather than display:none, so it stays in the
+       accessibility tree and a screen reader still hears the question before
+       the drawing.
+
+       MEASURED ON THE BOX, NOT ON getClientRects(). A clipped 1px element
+       still HAS client rects, so the old check would now pass while the
+       sentence is invisible — an assertion that survives the change it was
+       meant to police is worse than one that fails. */
+    const qBox = await page.evaluate(() => {
+      const el = document.querySelector("#panel-gamma .ft-panel-q");
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), inTree: !el.hidden };
+    });
+    ok(qBox && qBox.w <= 2 && qBox.h <= 2,
+       `the served question is clipped out of the grid rather than drawn (${JSON.stringify(qBox)})`);
+    ok(qBox.inTree, "and stays in the document for assistive technology");
     eq(q.drawnText, q.servedText,
        "the renderer still draws the same sentence — deleting the drawn copy would pass " +
        "every assertion here and lose the comparison that catches a drawer handed the card " +
@@ -5173,22 +5274,45 @@ try {
       ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
     const LIT = 15, FLAT = 3;
 
+    /* THE BASELINE IS THE STRIP'S OWN MIDDLE, NOT --bg.
+
+       `ground` above is --bg put through the same coefficients, and it was a
+       fair stand-in for as long as the page behind this strip was one flat
+       colour. It is not any more: the ground is an atmosphere image, so the
+       luminance under the rail depends on where the rail sits in it. CI
+       measured the left edge at 13.11 against a --bg of 9.86 and failed a
+       FLAT limit of 3 — reporting a shadow that is not there, because the
+       comparison had drifted off the thing it was comparing to.
+
+       The interior columns of the SAME screenshot are the honest baseline,
+       and were always the better one: this strip has its own translucent
+       background over the page, so what an edge must stand off is the strip's
+       middle, not the document's colour token. Taking it per-screenshot also
+       means the two scroll positions are each judged against themselves.
+
+       --bg's own check above stays. It asserts the ground is dark, which is
+       the premise of the polarity argument and is still worth measuring. */
+    const middle = (cols) => {
+      const inner = cols.slice(14, W - 14).slice().sort((a, b) => a - b);
+      return inner.length ? inner[inner.length >> 1] : ground;
+    };
+    const startBase = middle(atStart), endBase = middle(atEnd);
     const startRight = band(atStart, "right"), startLeft = band(atStart, "left");
     const endRight = band(atEnd, "right"), endLeft = band(atEnd, "left");
 
-    ok(startRight - ground >= LIT,
+    ok(startRight - startBase >= LIT,
        `scrolled to the start, the RIGHT edge stands off the ground ` +
-       `(${startRight.toFixed(2)} against ${ground.toFixed(2)}) — this is the assertion ` +
+       `(${startRight.toFixed(2)} against ${startBase.toFixed(2)}) — this is the assertion ` +
        "a black shadow on a black page fails, and did: it measured four counts");
-    ok(startLeft - ground <= FLAT,
-       `and the LEFT edge is the ground itself (${startLeft.toFixed(2)} against ` +
-       `${ground.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
-    ok(endLeft - ground >= LIT,
+    ok(startLeft - startBase <= FLAT,
+       `and the LEFT edge is the strip itself (${startLeft.toFixed(2)} against ` +
+       `${startBase.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
+    ok(endLeft - endBase >= LIT,
        `scrolled to the end, the LEFT edge stands off the ground ` +
-       `(${endLeft.toFixed(2)} against ${ground.toFixed(2)})`);
-    ok(endRight - ground <= FLAT,
+       `(${endLeft.toFixed(2)} against ${endBase.toFixed(2)})`);
+    ok(endRight - endBase <= FLAT,
        `and the RIGHT edge has PUT ITSELF AWAY (${endRight.toFixed(2)} against ` +
-       `${ground.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
+       `${endBase.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
        "telling a reader to swipe past the last item in the strip");
 
     /* COVERAGE, so the next scrolling strip cannot ship without an edge. This

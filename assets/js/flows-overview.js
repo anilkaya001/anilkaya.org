@@ -376,6 +376,14 @@
     const t = String((row && row.t) || "");
     const deep = !knowsDeep || (row && row.dp === 1);
     td.append(nameNode(t, Boolean(t) && deep));
+    /* THE COMPANY BESIDE THE SYMBOL, WHEN THE BOARD CARRIES ONE. `nm` is a
+       vendor carry (scripts/flows-pipeline.mjs) and null wherever the vendor
+       sent no name, so a nameless row draws exactly the cell it always drew.
+       A SECOND LINE, not a parenthesis: the ticker is what the rank, the link
+       and every column are keyed on, and a forty-character name beside it
+       would push the symbol off the edge a reader scans down. */
+    const nm = row && typeof row.nm === "string" && row.nm.trim() ? row.nm.trim() : null;
+    if (nm && nm !== t) td.append(el("span", "cc-nm", nm));
     /* THE CROSSING, ON THE RANKED ROW ITSELF. A name that cleared the band
        this session is a new arrival on this board and a name that faded is
        on its way off it; both were visible only in the change region, which
@@ -1045,14 +1053,14 @@
       ["Session", sessionDate || DASH, null, boardsSilence(sessionDate !== null)],
       ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), null,
         tileSilence(market, isNum(market && market.n) !== null, null)],
-      ["Tilt · names", pct(bt, 1), tone(bt), btSilence],
-      ["Tilt · dollars", pct(pt, 1), tone(pt), ptSilence],
+      ["Lean · names", pct(bt, 1), tone(bt), btSilence, ["signed", bt]],
+      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence, ["signed", pt]],
       ["Breadth",
         (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
-        null, tileSilence(market, bull !== null && bear !== null, null)],
+        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear]],
       ["Cleared",
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
-        null, boardsSilence(bulls !== null || bears !== null)],
+        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears]],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
         tileSilence(alerts, seen !== null, null)],
     ];
@@ -1060,11 +1068,60 @@
     /* A silent tile keeps its dash, prints the silence's sentence as its sub
        and carries the kind on data-empty — the mark flows.css draws for a
        region's silence — so the four are told apart without prose. */
-    for (const [key, value, cls, silence] of tiles) {
+    /* AND FOUR OF THE SEVEN CARRY THE SHAPE OF THEIR OWN NUMBER.
+
+       "−7.9%" and "41 bull / 48 bear" are the same two facts a reader has to
+       decode from digits every time: which side, and by how much. A bar off a
+       centre line answers the first before the number is read at all, and the
+       second at a glance; the digits stay for the reader who wants a value
+       rather than an impression.
+
+       BUILT FROM THE SAME VALUE THE TILE PRINTS, never from a second read of
+       the payload — a diagram that can disagree with the number beside it is
+       worse than no diagram. A SILENT tile gets no bar at all: there is
+       nothing to draw, and a zero-width one would read as a measured zero,
+       which is the distinction this page exists to keep.
+
+       SVG and no library: two rects and a rule. `aria-hidden`, because every
+       figure in them is already in the text beside them. */
+    const viz = (spec) => {
+      if (!Array.isArray(spec)) return null;
+      const svg = svgEl("svg", { class: "cc-viz", viewBox: "0 0 100 8",
+        preserveAspectRatio: "none", "aria-hidden": "true", focusable: "false" });
+      if (spec[0] === "signed") {
+        const v = isNum(spec[1]);
+        if (v === null) return null;
+        /* THE SCALE IS ±0.25 OF THE RATIO, NOT ±1. Both leans are bounded to
+           ±1 by construction and in practice sit inside a tenth of that, so a
+           full-scale bar would be invisible on every ordinary session — the
+           same defect the score bars had before they were floored. Past the
+           floor the bar pins at the edge and the number carries the excess. */
+        const frac = Math.max(-1, Math.min(1, v / 0.25));
+        const half = Math.abs(frac) * 50;
+        svg.append(svgEl("rect", { class: "cc-viz-t", x: frac < 0 ? 50 - half : 50,
+          y: 1, width: Math.max(0.8, half), height: 6 }));
+        svg.append(svgEl("line", { class: "cc-viz-z", x1: 50, x2: 50, y1: 0, y2: 8 }));
+        svg.setAttribute("class", "cc-viz " + (v < 0 ? "is-neg" : v > 0 ? "is-pos" : "is-zero"));
+        return svg;
+      }
+      if (spec[0] === "split") {
+        const a = isNum(spec[1]), b = isNum(spec[2]);
+        if (a === null || b === null || !(a + b > 0)) return null;
+        const w = (a / (a + b)) * 100;
+        svg.append(svgEl("rect", { class: "cc-viz-a", x: 0, y: 1, width: w, height: 6 }));
+        svg.append(svgEl("rect", { class: "cc-viz-b", x: w, y: 1, width: 100 - w, height: 6 }));
+        return svg;
+      }
+      return null;
+    };
+
+    for (const [key, value, cls, silence, spec] of tiles) {
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
+      const bar = silence ? null : viz(spec);
+      if (bar) tile.append(bar);
       if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
       into.append(tile);
     }
@@ -2474,10 +2531,36 @@
     const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
       : pool !== null && pool > rows ? rows + " of " + pool + " " + word + " carried"
         : rows + " " + word;
+    /* THE STRIP SAYS IT, SO THIS LINE DOES NOT. The Session tile carries
+       meta.sessionDate and the Cleared tile both POOLS, so reprinting them
+       restated the readings sitting an inch above.
+
+       WHAT THE STRIP CANNOT SAY STAYS. "50 of 53 bearish carried" is a
+       TRUNCATION — the cap took names — and the tile prints the pool alone,
+       so this is the only place rows and pool are reconciled; it prints when
+       they part company and not otherwise. The band count is measured here
+       and nowhere else, and the unread-board sentence is a refusal: the em
+       dash five other absences print cannot say a fetch failed. */
+    const lngRows = rowCount(lng), shtRows = rowCount(sht);
+    const lngPool = poolCount(lng), shtPool = poolCount(sht);
+    const cut = (rows, pool) => rows !== null && pool !== null && pool > rows;
+    /* AND AN UNKNOWN SIDE PUTS THE COUNTS BACK, which the first draft of this
+       got wrong and CI caught. The Cleared tile prints the pools, so on an
+       ordinary session the counts here were a restatement — but a side that
+       has not published has NO pool either, and the line this replaced was
+       the only place "— bullish · 4 bearish" appeared. An em dash where a
+       count belongs is the difference between "not known" and "zero", which
+       is the distinction this whole page is built to keep, and dropping it to
+       save a line would be exactly the fold the DEFINITION-vs-REFUSAL rule
+       forbids. So: print when a side is TRUNCATED, print when a side is
+       UNKNOWN, and stay quiet only when both sides are whole and counted. */
+    const unknown = (rows) => rows === null;
     const parts = [];
-    parts.push(sideSaid(rowCount(lng), poolCount(lng), "bullish") + " · " +
-      sideSaid(rowCount(sht), poolCount(sht), "bearish"));
-    if (meta.sessionDate) parts.push("session " + meta.sessionDate);
+    if (cut(lngRows, lngPool) || cut(shtRows, shtPool) ||
+        unknown(lngRows) || unknown(shtRows)) {
+      parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " +
+        sideSaid(shtRows, shtPool, "bearish"));
+    }
     if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
     /* AND A BOARD THAT DID NOT ANSWER IS NAMED HERE. The em dash the count
        falls back to is the right glyph for "not known" and it is the same
@@ -2485,8 +2568,9 @@
        that a fetch failed. The line that reports on this page is where that
        belongs. */
     const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
-    statusEl.textContent = parts.join(" · ") + "." + (unread.length
-      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
+    const said = parts.length ? parts.join(" · ") + "." : "";
+    statusEl.textContent = said + (unread.length
+      ? (said ? " " : "") + "The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
         " could not be read, so " + (unread.length > 1 ? "neither side is" : "that side is not") +
         " on this page. Refresh to try again."
       : "");

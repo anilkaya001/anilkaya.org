@@ -2879,6 +2879,19 @@ function boardRow(r, s, rank, memory = null, origin = null) {
        spelling loses the tint and keeps the label, which is the right way
        round — the decoration degrades and the fact does not. */
     sector: s.sector || null,
+    /* THE COMPANY'S OWN NAME, CARRIED IF THE VENDOR SENDS IT AND NULL IF NOT.
+       A board of bare tickers asks the reader to know sixty of them by
+       heart, and the vendor already publishes a `full_name` on the
+       sector-etfs response this file reads at :3874 — the same key, on a
+       different endpoint. Whether the SCREENER row carries it is not
+       verified here: no vendor key is reachable from a test, and the
+       synthetic rows this file generates do not invent one. So this is a
+       carry, not a claim. Every renderer of it falls back to the ticker
+       alone, which is exactly what the board printed before, so a vendor
+       that never sends the field costs a null per row and changes nothing
+       a reader sees. If it DOES arrive, the name appears and no further
+       change is needed anywhere. */
+    nm: typeof s.full_name === "string" && s.full_name.trim() ? s.full_name.trim() : null,
     netPrem: onWire(s.net_call_premium) || onWire(s.net_put_premium)
       ? num(s.net_call_premium) - num(s.net_put_premium)
       : null,

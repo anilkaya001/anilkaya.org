@@ -162,10 +162,49 @@
   /* The page's own ground, as a token for the same reason — the preference
      block returns it to the flat --bg. The glows are bounded to opposite
      corners so they never meet; see .flows-body. */
+  /* THE GROUND IS THE IMAGE, NOT A STYLESHEET'S IMPRESSION OF IT.
+
+     The four stops this replaces — #121214, #141312, #131110, #12100d —
+     spanned four units of lightness across a whole page, which is a flat
+     black field with extra steps and is where the fatigue came from. The
+     first attempt at fixing it was a hand-written gradient here, and that was
+     the wrong artefact: an imitation of a picture, maintained by hand, that
+     could never be the picture.
+
+     assets/img/atmosphere.svg IS the picture, as a file. Vector, ~2.8 KB,
+     resolution-independent, and a real asset the version ritual stamps like
+     any other — the subject is light through air, which is what an SVG
+     gradient already is, so nothing is lost to not being a photograph.
+
+     THE SCRIM IS WHAT MAKES IT A GROUND AND NOT A WALLPAPER. The image is
+     bright: a white sun at the left edge and a lit horizon across the middle.
+     Laid behind the page at full strength it would pull the eye off every
+     reading on it, which is the one thing a background must not do. The two
+     flat layers over it hold it to roughly a fifth of its own luminance —
+     enough that the navy, the band and the horizon are all still THERE and
+     the page is no longer black, and not enough to compete with a number.
+
+     THE COLOUR UNDERNEATH IS THE FALLBACK, for a printer, a forced-colours
+     mode, and any request where the asset does not arrive. `fixed` pins the
+     image to the viewport rather than the document: the longest route here
+     measures ten thousand pixels, and an unpinned cover image would show one
+     flat slice per screen, which is the thing this replaces. */
   --flows-ground:
-    radial-gradient(62% 48% at 8% 0%, rgba(155, 196, 210, 0.06), transparent 70%),
-    radial-gradient(62% 48% at 92% 100%, rgba(201, 168, 120, 0.06), transparent 70%),
-    linear-gradient(180deg, #121214 0%, #141312 38%, #131110 62%, #12100d 100%);
+    /* THE SCRIM IS A GRADIENT, NOT A FLAT WASH, because the image is not
+       evenly bright. A single opacity that let the navy through turned the
+       lit haze below the horizon into glare behind every card in the lower
+       two thirds of the page — the render showed the bullish table sitting on
+       brown. Light at the top where the sky is already dark, heavy below the
+       horizon where it is not. */
+    linear-gradient(180deg,
+      rgba(8, 8, 10, 0.42) 0%,
+      rgba(8, 8, 10, 0.50) 34%,
+      rgba(8, 8, 10, 0.72) 52%,
+      rgba(9, 8, 7, 0.88) 68%,
+      rgba(9, 8, 7, 0.94) 100%),
+    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
+    url("/assets/img/atmosphere.svg?v=158") center / cover no-repeat,
+    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
 
@@ -1520,25 +1559,58 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   vector-effect: non-scaling-stroke;
 }
 
-/* Score: solid and full weight — this is the series the panel is about. */
-.ovl-score {
-  fill: none;
-  stroke: var(--gold-harvest);
-  stroke-width: 1.8;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
+/* Score: BARS from the marked zero, and the group is the series. This was a
+   solid gold stroke, which made the panel two lines on one date axis and cost
+   the units note a whole sentence saying they must not be read as crossing.
+   Bars are filled shapes beside a dashed line: two different kinds of object,
+   so the eye does not try to compare them. */
+.ovl-score { fill: none; stroke: none; }
+.ovl-bar {
+  fill: var(--gold-harvest);
+  stroke: none;
+  /* The sides do not scale with the viewBox, so a 40-session name and a
+     6-session one get bars that read as the same object. */
+  shape-rendering: crispEdges;
 }
-
-/* A scored session with an unscored one on either side. A one-point subpath
-   has no length and renders as nothing, so a real measurement would vanish
-   between two gaps; the dot is that session, drawn. */
-.ovl-dot { fill: var(--gold-harvest); }
+/* SIGNED, AND THE ZERO CASE IS NEITHER. A score of zero is a measurement —
+   the centre of the dead band — and it draws as a 0.8-unit sliver on the axis
+   rather than as nothing, which is what an UNSCORED session draws. Tinting it
+   like a positive would be a direction the number does not carry. */
+.ovl-bar.is-neg { fill: var(--flow-down); }
+.ovl-bar.is-zero { fill: var(--ink-faint); }
 
 /* ---------- session path ------------------------------------------ */
 
 .fp { display: block; width: 100%; height: auto; }
 .fp-zero { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 3 3; }
+/* THE WINDOW PICKER ON THE SESSION PATH. Four chips, not a select: there are
+   four of them, they are the whole control, and a select would hide three
+   behind a click to save a row this panel is not short of. */
+.fp-win { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0 0 0.5rem; }
+.fp-win-b {
+  font: inherit;
+  font-size: var(--fs-fine);
+  /* --font-figure, NOT --font-mono. The mono token is the Academy's JetBrains
+     stack and contracts.mjs refuses it here by name: a Flows rule reaching for
+     it puts a second family back on a section whose whole typographic argument
+     is two faces. --font-figure is the one this section counts in. */
+  font-family: var(--font-figure);
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  transition: color var(--dur-tap) var(--ease), background var(--dur-tap) var(--ease);
+}
+.fp-win-b:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.fp-win-b[aria-current="true"] {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+}
+
 .fp-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
 .fp-line.is-pos { stroke: var(--flow-up); }
 .fp-line.is-neg { stroke: var(--flow-down); }
@@ -3852,6 +3924,21 @@ body.is-stale .flows-tablewrap {
 .ft-station {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
+  /* CARDS TAKE THE HEIGHT OF WHAT IS IN THEM. A grid item stretches to its
+     row by default, so a 500px card beside a 1000px one was DRAWN as a 1000px
+     card with 500px of nothing inside its own border — which is what made the
+     short panels look enormous, and it is the void the reader of this page
+     kept pointing at. `start` is what makes a grid of small cards look like
+     one: nothing is padded out to meet a neighbour it has nothing to do with.
+
+     THIS DOES NOT REPLACE THE EVENNESS RULE, it removes the thing that rule
+     was measuring. flows-ticker-contract asserts that row-mates do not differ
+     by more than 250px, and the argument for it was that the shorter panel is
+     STRETCHED that far past what its drawing can fill. With no stretch there
+     is no filled void; what remains is a ragged bottom edge, which is the
+     ordinary shape of a card wall and not a panel pretending to hold more
+     than it does. */
+  align-items: start;
 }
 /* THE SPACE BETWEEN TWO STATIONS IS THE SPACE TWO GROUPS USED TO HAVE, to the
    pixel: one row gap plus the top margin the group heading carried and no
@@ -3960,9 +4047,38 @@ body.is-stale .flows-tablewrap {
    plot: the same squeeze as a 320px phone, on a desktop. At 76rem the host
    is 424 and the plot is 266, which is where a 30-bar ladder's strike labels
    and volume rail stop colliding. */
+/* MANY SMALL CARDS, AND NO PANEL TAKES A ROW TO ITSELF.
+
+   Two columns with `.is-wide` spanning `1 / -1` meant seven of the
+   twenty-three panels — scoreOverlay, __stats, gamma, surface, ivSurface,
+   skewTerm, topContracts — each owned a whole row. A station of three panels
+   where two of them are full-width is three stacked bands, not a grid, and
+   shrinking the band only makes a shorter band. The reader of this page has
+   asked for many small cards four times; this is the rule that was refusing
+   them.
+
+   THE COLUMN COUNT CLIMBS WITH THE VIEWPORT and `is-wide` no longer opts out
+   of it at any width. The panel that "needs" width is the ladder, whose plot
+   is host − 46 − 112, and the note above this block measured its floor at a
+   424px host. Three columns at 1280 gives 300 and four at 1760 gives 380, so
+   the ladder keeps `is-wide` as a SPAN OF TWO — which is a wide card in a
+   dense grid, not a band across the page. */
 @media (min-width: 76rem) {
-  .ft-station { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ft-panel.is-wide { grid-column: 1 / -1; }
+  .ft-station { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ft-panel.is-wide { grid-column: span 2; }
+}
+@media (min-width: 110rem) {
+  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* SEVEN FIGURES ARE PRIME, SO SOME ROW IS ALWAYS SHORT — the question is only
+   how short. `.fc-stats` is auto-fit over a 8.5rem minimum, which in this
+   block's full-width host measured FIVE then TWO: a full row and a stub, read
+   as two unrelated groups. Four then three is the least ragged split seven
+   admits, and every cell keeps the same width, which is the property the
+   raggedness was breaking. */
+@media (min-width: 76rem) {
+  #ftChange .fc-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* --- the identity block --------------------------------------------- */
@@ -4095,11 +4211,36 @@ body.is-stale .flows-tablewrap {
    its host, readable before the fetch that fills the box under it and set
    exactly as the drawn one was — the same sentence in the same place, and a
    reader must not be able to tell which arrived with the page. */
+/* AND IT IS NO LONGER DRAWN, ONLY SERVED.
+
+   Twenty-three panels, each with a sentence over it restating its own title:
+   "Score over price" above "How has this name's daily score moved against
+   its own price?", "Score derivation" above "Which components produced this
+   score, and how heavily?". Measured across the registry, the questions are
+   243 words and the station blurbs another 106 — 349 words of fixed prose on
+   every ticker, for every name, saying what the headings beside them already
+   say. That is the flows-overview.js:325 DEFINITION case, and the Market
+   route was cut on the same rule in 851741e.
+
+   HIDDEN, NOT DELETED, AND THE DISTINCTION IS THE WHOLE POINT HERE. The
+   sentence stays in the served markup and stays in the accessibility tree:
+   a screen reader still hears the question before the drawing, which is
+   where it does the most good and costs a sighted reader nothing. It is also
+   still visible where a reader has ASKED for depth — the enlarge dialog
+   draws `.fc-q`, which is scoped out of the rule below, so opening a panel
+   still shows what it answers.
+
+   This is deliberately CSS and not a renderer change: the question is still
+   emitted, still compared against the registry by the ticker suite, and
+   still the thing that catches a drawer handed the CARD where it expected
+   the question — a defect that shipped once and that deleting the string
+   would hide rather than fix. */
 .ft-panel-q {
-  margin: 0 0 0.7rem;
-  color: var(--ink-dim);
-  font-size: var(--fs-note);
-  font-style: italic;
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
 }
 /* AND THE DRAWN COPY IS HIDDEN IN THE GRID, NOT DELETED. Every renderer still
    heads its drawing with the question it was handed, which is what the ticker
@@ -4488,10 +4629,20 @@ body.is-stale .flows-tablewrap {
   font-family: var(--font-figure); font-size: var(--fs-data); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-harvest);
 }
+/* THE STATION BLURB, SERVED AND NOT DRAWN, for the reason .ft-panel-q above
+   records. All five are lists of the panels underneath them — "The published
+   score, what it has done since the last session that scored this name, what
+   it is made of, and the figures the rest of this page derives" sits above
+   three panels titled "Score over price", "Score derivation" and "Key
+   statistics". The station's own name and the count beside it (`OVERVIEW 3`)
+   carry what a reader needs at a glance; the sentence is for a reader who
+   cannot see that layout, and it still reaches them. */
 .ft-group-b {
-  display: block; margin-top: 0.3rem;
-  font-family: var(--font-serif); font-size: var(--fs-note); font-weight: 400;
-  color: var(--ink-dim);
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
 }
 .ft-group:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 4px; }
 
@@ -6003,10 +6154,10 @@ body.is-stale .flows-tablewrap {
    grid of independently labelled regions is not worth a focus-order defect,
    so the 8% stays on the table deliberately. */
 @media (min-width: 132rem) {
-  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ft-station { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: span 2; }
   .ft-panel[data-panel="ivSurface"],
-  .ft-panel[data-panel="skewTerm"] { grid-column: 1 / span 2; }
+  .ft-panel[data-panel="skewTerm"] { grid-column: span 2; }
 }
 
 /* --- the quiet arm ---------------------------------------------------- */
@@ -6202,7 +6353,20 @@ body.is-stale .flows-tablewrap {
   box-shadow: var(--glass-edge), var(--shadow-card);
   overflow: hidden;
 }
-@media (max-width: 1100px) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* SEVEN TILES ONLY WHERE SEVEN FIT, AND 1100px WAS MEASURED AGAINST THE
+   WRONG FACE. The rule above is unchanged and correct — a value may not wrap,
+   and a viewport that cannot hold one gets fewer columns — but the threshold
+   it relies on was set with a preview harness that served no webfont and
+   rendered everything in the narrower fallback. With the real Latin Modern
+   the strip overflowed at 1440: "41 bull / 48 bear" ran straight through the
+   tile beside it and pushed the flagged count out of line.
+
+   91.99rem is not a new number: it is the canvas tier `.flows-main` already
+   uses. Below it main is pinned at 78rem, so seven tiles get ~150px of inner
+   width each and the longest value needs more; above it main grows with the
+   viewport and seven fit. Tying the strip to the tier that decides its width
+   is what stops these two drifting apart again. */
+@media (max-width: 91.99rem) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-tile {
   /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
@@ -6251,6 +6415,22 @@ body.is-stale .flows-tablewrap {
 .cc-tile-v.is-pos { color: var(--flow-up); }
 .cc-tile-v.is-neg { color: var(--flow-down); }
 .cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
+
+/* THE SHAPE OF THE TILE'S OWN NUMBER. A 100x8 viewBox stretched to the tile
+   with preserveAspectRatio:none — the bar carries a proportion, not a length,
+   so there is nothing for an aspect ratio to distort. */
+.cc-viz { display: block; width: 100%; height: 8px; margin-top: 0.4rem; }
+.cc-viz-z { stroke: var(--ink-faint); stroke-width: 1; stroke-opacity: 0.55; }
+.cc-viz.is-pos .cc-viz-t { fill: var(--flow-up); }
+.cc-viz.is-neg .cc-viz-t { fill: var(--flow-down); }
+/* A MEASURED ZERO IS NEITHER SIDE. It draws its 0.8-unit sliver on the centre
+   line in the neutral ink rather than inheriting a direction the number does
+   not carry — the same rule the score bars follow. */
+.cc-viz.is-zero .cc-viz-t { fill: var(--ink-faint); }
+/* The split reads bull-first because the value beside it does. */
+.cc-viz-a { fill: var(--flow-up); }
+.cc-viz-b { fill: var(--flow-down); }
+
 
 /* THE FOUR SILENCES, ON A TILE. flows-overview.js sets data-empty on a
    verdict tile whose number is an em dash, with the same four kinds the
@@ -6435,6 +6615,22 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 .cc-rank { color: var(--ink-faint); width: 1.6rem; }
 .cc-t { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .cc-dim { color: var(--ink-faint); font-size: var(--fs-fine); }
+/* The company name under its symbol. It is allowed to wrap where the cell
+   itself is not: `.cc-t` sets nowrap so a ticker never breaks mid-symbol,
+   and a name of arbitrary length inheriting that would widen the column
+   past the table. Truncated to two lines, because a cell is not a place to
+   read a legal entity's full registered style. */
+.cc-nm {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-weight: 400;
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+  white-space: normal;
+  max-width: 12rem;
+}
 /* The crossing tag and the earnings mark follow the ticker inside one cell
    with no text node between them, so without a margin they rendered as one
    token — "SYN132cleared", "SYN182⚠38d" — at a gap of 0px, and a number
@@ -6958,6 +7154,19 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   border-left: 1px solid var(--hairline);
   padding-left: 0.6rem;
 }
+/* AN EMPTY STATUS LINE DRAWS NOTHING, INCLUDING ITS OWN FRAME.
+
+   The ticker's status sentence was removed as a definition, and setting its
+   textContent to "" left the element behind: a hairline, 0.6rem of left
+   padding and 1.8rem of vertical padding, drawing an empty bordered box
+   above the identity row. Rendered, that reads as a region that failed to
+   load rather than one that had nothing to say — which is the opposite of
+   what removing the sentence was for, and it is the kind of thing only a
+   picture shows. `:empty` matches an element with no children and no text,
+   so a controller that later writes into it brings the frame back with the
+   words, and every OTHER route's status line — which does say something —
+   is untouched. */
+.flows-status:empty { display: none; }
 
 /* Staleness keeps its band and gains a SHAPE. The 1px border plus a tinted
    ground was a colour reading twice; in greyscale a 10% wash on a near-black
@@ -8166,17 +8375,17 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   padding-block:.55rem;
 }
 .cc-change-summary {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:.75rem;
-  padding:1rem 1rem .2rem;
+  display:flex;
+  flex-wrap:wrap;
+  gap:.5rem 1.6rem;
+  padding:.75rem 1rem .2rem;
 }
 .cc-change-metric {
   display:flex;
   flex-direction:column;
-  gap:.2rem;
+  gap:.1rem;
   border-left:2px solid var(--gold-celadon);
-  padding-left:.75rem;
+  padding-left:.6rem;
 }
 .cc-change-metric strong {
   font-family:var(--font-figure);

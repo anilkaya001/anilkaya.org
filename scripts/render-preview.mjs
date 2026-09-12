@@ -104,7 +104,46 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
-  await page.setContent(html, { waitUntil: "load" });
+  /* SERVED FROM AN ORIGIN, NOT setContent, SO THAT ASSET PATHS RESOLVE.
+
+     setContent renders on about:blank, where `url("/assets/img/...")` has no
+     base to resolve against: the browser never issues the request, and the
+     ground fell back to its colour with nothing reporting a thing. That is
+     the same blindness the font note in the ticker block records — a preview
+     that cannot load what the page loads is not previewing the page.
+
+     IMAGES AND FONTS BOTH. The first pass routed only images, on the argument
+     that serving fonts would move every measurement this file has recorded
+     for these pages. It moves them TOWARD the truth: the ticker block's own
+     note says CI loads the real face and this harness only ever rendered the
+     fallback, which is how a font-dependent layout failed on CI and passed
+     here. A number measured against a face no reader has is not a
+     measurement. Once an origin exists the fonts are requested for real, so
+     the choice is between serving them and logging a 404 per page. */
+  await page.route(/^https:\/\/preview\.local\//, (r) => {
+    const u = new URL(r.request().url());
+    if (u.pathname === "/") return r.fulfill({ contentType: "text/html", body: html });
+    const f = /^\/assets\/fonts\/([A-Za-z0-9._-]+\.(?:woff2?|ttf|otf))$/.exec(u.pathname);
+    if (f) {
+      try {
+        return r.fulfill({
+          contentType: f[1].endsWith(".woff2") ? "font/woff2" : "font/woff",
+          body: readFileSync(path.join(ROOT, "assets/fonts", f[1])),
+        });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    }
+    const m = /^\/assets\/img\/([A-Za-z0-9._-]+)$/.exec(u.pathname);
+    if (m) {
+      const ext = m[1].slice(m[1].lastIndexOf(".") + 1).toLowerCase();
+      const type = ext === "svg" ? "image/svg+xml"
+        : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/" + ext;
+      try {
+        return r.fulfill({ contentType: type, body: readFileSync(path.join(ROOT, "assets/img", m[1])) });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    }
+    return r.fulfill({ status: 404, body: "" });
+  });
+  await page.goto("https://preview.local/", { waitUntil: "load" });
   await page.waitForTimeout(settle);
   const seen = probe ? await page.evaluate(probe) : {};
   const file = path.join(OUT, name + ".png");
@@ -283,26 +322,169 @@ if (CARDS && existsSync(CARDS)) {
     const errs = [];
     page.on("pageerror", (e) => errs.push(String(e)));
     const pageHTML = pages.FLOWS_PAGES.tickerPage({ username: "preview" });
-    await page.route("**/*", (r) => r.fulfill({ contentType: "text/html", body: pageHTML }));
-    await page.route("**/assets/js/flows-drawers.js*",
-      (r) => r.fulfill({ contentType: "text/javascript", body: js("flows-drawers.js") }));
-    await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
-    await page.evaluate((card) => {
-      window.fetch = () => Promise.resolve({ ok: true, status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+
+    /* THE CATCH-ALL SERVED THE PAGE'S HTML TO THE PAGE'S OWN SCRIPT TAGS.
+       a catch-all route answering with `contentType: "text/html"` replies to
+       EVERY request, and
+       the ticker document carries `<script src>` for nav, the panel library
+       and the controller — each of which was handed the document and tried
+       to parse "<!doctype html" as JavaScript. That is the three
+       `SyntaxError: Unexpected token '<'` this block reported the first time
+       it ever ran, and it had been sitting unvalidated because the ticker is
+       skipped unless --cards is passed. A tool whose whole claim is "a
+       computed style is evidence a rule applied, not that the page reads"
+       does not get to ship a page that threw and call the run clean.
+
+       Assets are now served as assets, from this working tree, so the page
+       boots the way the Worker boots it. */
+    /* ORDER MATTERS AND IT IS BACKWARDS FROM READING ORDER. Playwright tries
+       route handlers in REVERSE registration order — the last one added is
+       consulted first. With the catch-all registered last it answered every
+       request before the asset handlers were reached, so each <script src>
+       got a 204 with an empty body: no controller, no fetch, no card. The
+       probe reported `fetches: 0`, which is the number that named this.
+
+       (The original harness accidentally relied on the same rule: its
+       flows-drawers route was registered AFTER the catch-all, which is the
+       only reason that one file ever loaded.)
+
+       So the catch-all goes FIRST and the specific handlers after it. */
+    await page.route("**/*", (r) => r.request().resourceType() === "document"
+      ? r.fulfill({ contentType: "text/html", body: pageHTML })
+      : r.fulfill({ status: 204, body: "" }));
+    await page.route(/\/assets\/js\/[a-z0-9-]+\.js/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({ contentType: "text/javascript", body: js(file) });
+      } catch {
+        /* A script the tree does not have is an empty body, not the document:
+           an honest 200 with nothing in it fails visibly at the feature that
+           needed it rather than as a parse error three frames away. */
+        return r.fulfill({ contentType: "text/javascript", body: "" });
+      }
+    });
+    /* THE WEBFONT, BECAUSE THE STICKY BAR'S HEIGHT DEPENDS ON IT.
+       flows-ticker.js measures the bar and writes --ft-bar-h, which every
+       panel's scroll-margin-top is built from; its own comment records that
+       the identity row wraps at a different count under the fallback face and
+       that the first-paint height came out 42px short. Serving no fonts meant
+       this harness only ever rendered the fallback, so barH and --ft-bar-h
+       agreed here (148 = 148) while CI, which loads the real face, failed
+       with "panel 201, bar ends 218". A preview that cannot reproduce a
+       font-dependent layout is not previewing the page a reader gets. */
+    await page.route(/\/assets\/fonts\/[A-Za-z0-9._-]+\.(woff2?|ttf|otf)/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({
+          contentType: file.endsWith(".woff2") ? "font/woff2" : "font/woff",
+          body: readFileSync(path.join(ROOT, "assets/fonts", file)),
+        });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    });
+    await page.route(/\/assets\/css\/[a-z0-9-]+\.css/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({ contentType: "text/css", body: readFileSync(path.join(ROOT, "assets/css", file), "utf8") });
+      } catch { return r.fulfill({ contentType: "text/css", body: "" }); }
+    });
+
+    /* AND THE IMAGES, FOR THE SAME REASON THE FONTS ARE SERVED. The ground is
+       now an SVG file rather than a gradient written in the stylesheet, so a
+       harness that 404s it renders the FALLBACK colour and reports a page
+       nobody gets — the same class of blindness the font note above records,
+       and the reason the first atmosphere edit went into a token that was
+       never painted without anything catching it. */
+    await page.route(/\/assets\/img\/[A-Za-z0-9._-]+\.(svg|png|jpe?g|webp|avif)/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
+      const type = ext === "svg" ? "image/svg+xml"
+        : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/" + ext;
+      try {
+        return r.fulfill({ contentType: type, body: readFileSync(path.join(ROOT, "assets/img", file)) });
+      } catch { return r.fulfill({ status: 404, body: "" }); }
+    });
+
+    /* THE CARD STUB IS INSTALLED BEFORE THE CONTROLLER RUNS, not after.
+       addInitScript lands in the page before any of its own script executes;
+       the old page.evaluate() ran AFTER goto(), so the controller had already
+       fetched, missed, and drawn its empty state — which is why the ticker
+       badge read "?" on a card that is right here. */
+    await page.addInitScript((card) => {
+      window.__fetches = 0;
+      /* HEADERS ANSWER PER NAME, NOT ONE STRING FOR ALL OF THEM. getJSON reads
+         X-Payload-Updated and Numbers it; a stub that returns
+         "application/json" for every header makes that NaN. It survived as
+         `|| null`, but a stub that lies about one header will lie about the
+         next one someone reads. */
+      window.fetch = () => {
+        window.__fetches += 1;
+        return Promise.resolve({ ok: true, status: 200,
+          headers: { get: (h) => (String(h).toLowerCase() === "content-type"
+            ? "application/json" : null) },
+          json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+      };
     }, best.c);
-    for (const f of ["assets/css/base.css", "assets/css/flows.css"]) {
-      await page.addStyleTag({ path: path.join(ROOT, f) });
-    }
-    await page.addScriptTag({ content: js("flows-panels.js") });
-    await page.addScriptTag({ content: js("flows-ticker.js") });
-    await page.waitForTimeout(4000);
+    await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
+    /* WAIT FOR THE CARD, NOT FOR A CLOCK. A fixed timeout reported "Loading
+       the name…" as though it were the finished page — the screenshot then
+       shows a spinner and the probe numbers describe an empty grid. */
+    await page.waitForFunction(
+      () => { const t = document.getElementById("ftTicker");
+        return !!(t && t.textContent && t.textContent.trim() && t.textContent.trim() !== "\u2014"); },
+      null, { timeout: 20000 },
+    ).catch(() => {});
+    await page.waitForTimeout(3500);
     const seen = await page.evaluate(() => {
       const p = [...document.querySelectorAll(".ft-panel[data-panel]")];
-      return { ticker: (document.querySelector(".ft-tk") || {}).textContent || "?",
+      const rows = new Map();
+      for (const x of p) {
+        const r = x.getBoundingClientRect(), top = Math.round(r.top);
+        if (!rows.has(top)) rows.set(top, []);
+        rows.get(top).push(r);
+      }
+      const spread = [...rows.values()].map((rs) =>
+        Math.round(Math.max(...rs.map((r) => r.height)) - Math.min(...rs.map((r) => r.height))));
+      /* #ftTicker, NOT .ft-tk. The badge the controller fills is an id; the
+         class this probe asked for does not exist on this page, so it reported
+         "?" whether the card had loaded or not — a probe that cannot tell its
+         two outcomes apart. */
+      return { ticker: (document.getElementById("ftTicker") || {}).textContent || "?",
+        fetches: window.__fetches || 0,
         panels: p.length,
         panelHeights: [...new Set(p.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
+        /* The evenness question a reader actually asks, same as the Market
+           and verdict-strip probes: do two panels SIDE BY SIDE differ. */
+        panelRows: rows.size,
+        worstRowGapPx: spread.length ? Math.max(...spread) : 0,
+        /* The two definition layers this commit stops drawing, read back off
+           the page rather than asserted: both must still be in the document
+           and both must be clipped out of the grid. */
+        questionsInDoc: document.querySelectorAll(".ft-panel-q").length,
+        questionsDrawn: [...document.querySelectorAll(".ft-panel-q")]
+          .filter((q) => q.getBoundingClientRect().width > 2).length,
+        blurbsInDoc: document.querySelectorAll(".ft-group-b").length,
+        blurbsDrawn: [...document.querySelectorAll(".ft-group-b")]
+          .filter((b) => b.getBoundingClientRect().width > 2).length,
+        /* THE STICKY BAR AND THE NUMBER PANELS SCROLL AGAINST. CI failed with
+           "panel 201, bar ends 218": an anchored panel landed 17px UNDER the
+           bar. --ft-bar-h is written from a measurement of the bar, so the
+           two disagreeing means the measurement was taken against a different
+           layout than the one the reader gets. Clipping .ft-group-b out of
+           flow changes that height, so this reports BOTH and their gap
+           instead of leaving the cause to be reasoned about. */
+        barH: Math.round((document.querySelector(".ft-bar") || { getBoundingClientRect: () => ({ height: 0 }) })
+          .getBoundingClientRect().height),
+        barVar: (document.getElementById("ftGrid") || document.querySelector(".ft-grid"))
+          ? getComputedStyle(document.getElementById("ftGrid") || document.querySelector(".ft-grid"))
+            .getPropertyValue("--ft-bar-h").trim() : "",
+        statusLine: (document.getElementById("ftStatus") || {}).textContent || "",
+        /* AND THE BOX IT DRAWS. Emptying the text left a bordered, padded
+           element above the identity row, which reads as a region that
+           failed rather than one with nothing to say. Height, not text, is
+           what says whether it is gone. */
+        statusBoxH: Math.round(((document.getElementById("ftStatus") || {})
+          .getBoundingClientRect ? document.getElementById("ftStatus")
+          .getBoundingClientRect().height : 0)),
         stations: document.querySelectorAll(".ft-station").length };
     });
     await page.screenshot({ path: path.join(OUT, "ticker.png") });

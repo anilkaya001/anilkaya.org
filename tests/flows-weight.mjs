@@ -422,7 +422,137 @@ const CEILING_KIB = {
      the same argument the 496 paragraph made: this route is still owed a
      reduction, so the next change to it should have to come here and argue
      rather than find room waiting. */
-  tickerPage: 405,
+
+  /* 405 -> 406, 2026-09-12, AND THE ROUTE CAME HERE AND ARGUED, which is what
+     the paragraph above asked for. Byte-exact, `git cat-file -s origin/main:`
+     against `stat`:
+
+       flows-dock.js   6,007    nav.js           2,560
+       flows-panels.js 56,840   flows-ticker.js 349,833  (+1,255)
+       total          415,240 B = 405.51 KiB — 520 B over
+
+     WHAT THE 1,255 BOUGHT, and it is two things with different standing.
+
+     Roughly 540 B is comment over a net DELETION: the 23 panel questions and
+     5 station blurbs stopped being drawn, a navigation clause went, and the
+     status sentence went. That part earns no raise, and it did not get one —
+     it was twice shortened instead, once when this ceiling first failed and
+     again ten minutes later.
+
+     The rest is a ResizeObserver on the sticky bar, and that is the gain the
+     route needed. CI failed at flows-ticker-contract:3735 with a deep-linked
+     panel landing 17px UNDER the bar (201 against 218): every panel's
+     scroll-margin-top is built from --ft-bar-h, seven hand-driven calls wrote
+     it, and clipping the blurb out of flow changed the bar in a way none of
+     the seven caught. THIS SANDBOX CANNOT REPRODUCE IT — barH and --ft-bar-h
+     agree at 148 locally with or without the webfont served — so a better
+     guess at the missing call site would be a guess. Observing the bar is the
+     same argument syncBarHeight's own comment already makes for measuring
+     rather than assuming a constant, and it is the fix that holds without
+     knowing which reflow did it.
+
+     406 LEAVES 344 B, tighter than the 739 above, deliberately: the observer
+     closes the defect but the route is still owed the comment strip, and the
+     next change to it should have to come here too. */
+  /* AND IT CAME, BECAUSE THE OBSERVER ALONE DID NOT CLOSE IT. 408 now:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   56,840      flows-ticker.js  351,521
+       total            416,928 B = 407.16 KiB, 165 B over 406
+
+     WHAT THE 1,193 B BOUGHT, and the measurement that says the previous fix
+     was incomplete rather than wrong. CI failed again at the same assertion
+     with the panel at 172 and the bar ending at 218 — and 172 is
+     4.4rem + 5.5rem + 0.6rem to the pixel, which is the STYLESHEET's
+     placeholder --ft-bar-h, not any height the bar ever had after paint. So
+     the jump happened while the tab row was one unwrapped line in the
+     fallback face, the webfont then swapped, the row wrapped, the bar grew
+     92 -> 148, and --ft-bar-h was dutifully updated by the observer for a
+     `scroll-margin-top` the browser had already read and would never read
+     again. Setting the variable was never going to move the page: only a
+     second scrollIntoView can, and only for a reader still sitting where the
+     first one left them, which is what `jumped` records and checks.
+
+     408 LEAVES 1,024 B. Wider than the 344 above on purpose: that margin was
+     set on the belief the defect was closed, and it was not, so the next
+     attempt should not also have to spend its first hour here. The route is
+     still owed the comment strip. */
+  /* 412, AND WHAT IT BOUGHT IS A DRAWING THAT DELETED THREE PATCHES:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   59,479      flows-ticker.js  352,124
+       total            420,170 B = 410.32 KiB, 2,378 B over 408
+
+     The score over price panel drew the score as a second LINE, and three
+     defects in the file were each patched around that choice: a gap had to be
+     PROGRAMMED to break the path (a bridged hole is a score nobody computed,
+     and a zero would be worse — zero is NEUTRAL and this system means it); a
+     lone scored session between two holes drew a zero-length subpath, which
+     renders as nothing, so a real measurement needed a hand-placed dot; and
+     two strokes on one date axis look comparable, so the units note had to
+     end by saying the two crossing means nothing at all.
+
+     Drawn as BARS all three go away, and the code for two of them with it. A
+     session with no score has no rect — the refusal is structural, and there
+     is no stroke that could bridge anything. A lone bar is a bar. And a set
+     of filled rects beside a dashed line is visibly not two comparable
+     series, so shared/flows-overlay.js gave that clause back.
+
+     THE BYTES ARE THE ARGUMENT, NOT THE DRAWING. The bar loop is shorter than
+     the path loop plus the dot loop it replaced; what grew is the reasoning
+     above each — including the one recording that the FIRST render of this
+     came out unreadable, bars four pixels tall on a ±100 domain for a name
+     scoring +16, which is why the domain is now the name's own extent with a
+     floor and why that floor is PRINTED in the panel's own stat list.
+
+     412 LEAVES 1,718 B. The route is still owed the comment strip. */
+  /* 415, AND THE PATTERN IS NOW THE POINT. Measured:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   62,280      flows-ticker.js  352,124
+       total            422,971 B = 413.06 KiB, 1,086 B over 412
+
+     WHAT IT BOUGHT. The overlay's closing note was ONE paragraph of three
+     unrelated sentences and the largest block of text on the ticker page.
+     This file's own rule at NOTE_WALL_CHARS says which may fold, and the
+     panel had never applied it: the population and what it left out stay
+     OPEN (qualifier), the units stay OPEN (they change what the drawing
+     means), and the join — how the two series were matched — FOLDS into the
+     disclosure appendMethod already builds. Nothing is deleted; the node is
+     moved, so the sentence is still in textContent for a find-in-page, which
+     the ticker suite asserts. The card measured ~1000px and now measures
+     ~490px, which is the whole reason for the change.
+
+     appendMethod gained an `always` flag: the 420-character wall is the right
+     question for a caller that hands over everything and lets length decide,
+     and the wrong one for a caller that has already sorted method from
+     qualifier itself.
+
+     AND THE PATTERN: this is the third raise on this route in one session,
+     each of a kilobyte or two, each of it reasoning rather than behaviour —
+     my own comments were trimmed twice before this number was touched and
+     still cost more than the code. The route's real fix is the comment strip:
+     built, merged, measured at ~253 KB of comment on this route, and waiting
+     on one Workers Builds field that is not mine to set. Until it is set,
+     this ceiling will keep climbing a kilobyte at a time and every raise will
+     be honest and pointless in the same breath.
+
+     415 LEAVES 1,973 B. */
+  /* 417, for the change that made the page a card wall:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   64,465      flows-ticker.js  352,124
+       total            425,156 B = 415.19 KiB, 194 B over 415
+
+     The default view is now all 23 panels rather than the first station's
+     three, the station grid is three columns at 76rem and four at 110 with no
+     panel spanning a full row, nothing is stretched to a row it does not
+     fill, and the conviction arithmetic folds. The 194 B is the reasoning for
+     the default — the measurement that justified opening on one station, and
+     why a change in COLUMN COUNT is what retired it.
+
+     417 LEAVES 1,852 B. */
+  tickerPage: 417,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -483,7 +613,56 @@ const CEILING_KIB = {
      the next one is the comment strip: measured, merged, and waiting on a
      single Workers Builds field. Until that lands, this route should have to
      come here and argue rather than find room waiting. */
-  overviewPage: 161,
+  /* AND IT CAME BACK, ONE BRANCH LATER, TO ARGUE. 163 now. Measured the same
+     way, `git cat-file -s HEAD:` against `stat`:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-ui.js       25,136      flows-overview.js 132,152
+       total            165,855 B = 161.97 KiB, 991 B over 161
+
+     WHAT THE 2,715 B BOUGHT. Three changes, and two of them DELETE what a
+     reader sees: the verdict strip's two tilt tiles are now "Lean · names"
+     and "Lean · dollars" (the word "tilt" is jargon this page never defined
+     and the value is already a signed per cent), and the status line above
+     the strip stopped reprinting the session date and both board counts,
+     which the Session and Cleared tiles carry twelve pixels below it. That
+     line now prints only what the strip cannot: the rows-against-pool
+     TRUNCATION when the two part company, the band count, and the
+     unread-board refusal. The third change ADDS: the company name under the
+     symbol on every ranked row, drawn only where the vendor sent one.
+
+     NOT BOUGHT BACK BY SHORTENING COMMENTS — except my own, twice, which is
+     a different act: both blocks written on this branch were over-written on
+     their first draft and were cut to what they had to say (−316 B) before
+     this number was touched. Nothing that predates this branch was trimmed.
+
+     163 LEAVES 1,057 B, which is room for a fix and not for a feature. The
+     paragraph above still stands: the structural fix owed here is the
+     comment strip, measured and merged and waiting on one Workers Builds
+     field, and until it lands this route argues for every raise. */
+  /* 166, FOR FOUR DIAGRAMS AND WHAT THEY REPLACE A READER DOING:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 135,724
+       total         169,427 B = 165.46 KiB, 2,517 B over 163
+
+     Four of the seven verdict tiles now carry the shape of their own number:
+     a bar off a centre line for each lean, a proportional split for breadth
+     and for cleared. "−7.9%" and "41 bull / 48 bear" are the same two facts —
+     which side, and by how much — and a reader had to decode both from digits
+     every time. The bar answers the first before the number is read at all.
+
+     BUILT FROM THE VALUE THE TILE PRINTS, never a second read of the payload,
+     because a diagram that can disagree with the number beside it is worse
+     than no diagram; and a SILENT tile gets no bar, because a zero-width one
+     would read as a measured zero.
+
+     Two rects and a rule each, no library. The bytes are the viz() closure
+     and the reasoning above it.
+
+     166 LEAVES 586 B, which is tight on purpose: this route is still owed the
+     comment strip, and the next change should have to come here too. */
+  overviewPage: 166,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

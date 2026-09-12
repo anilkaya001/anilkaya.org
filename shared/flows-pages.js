@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "148";
+export const ASSET_VERSION = "158";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -113,8 +113,9 @@ const rail = (active) => {
 <nav class="flows-rail" aria-label="Flows">
   <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
        question a reader already knew to ask; this one answers the question
-       they arrive with. A rail that buried it under twelve destinations
-       would be a table of contents for a book nobody opened. -->
+       they arrive with. A rail that buried it under a dozen destinations
+       would be a table of contents for a book nobody opened — which is also
+       why the track record and the score track came off it. -->
   <p class="rail-group" id="railBrief">Briefing</p>
   <div class="rail-items" role="group" aria-labelledby="railBrief">
     ${item("/flows/ask/", "Ask the data", "ask")}
@@ -141,11 +142,6 @@ const rail = (active) => {
   <p class="rail-group" id="railDisclosures">Disclosures</p>
   <div class="rail-items" role="group" aria-labelledby="railDisclosures">
     ${item("/flows/political/", "Political", "political")}
-  </div>
-  <p class="rail-group" id="railEvidence">Evidence</p>
-  <div class="rail-items" role="group" aria-labelledby="railEvidence">
-    ${item("/flows/history/", "Track record", "history")}
-    ${item("/flows/track/", "Score track", "track")}
   </div>
 </nav>`;
 };
@@ -280,32 +276,30 @@ function neuronWords(text) {
 /** Which silence, in the reader's words rather than in the column's. */
 function neuronProvenance(summary) {
   if (summary.llm) {
-    return "Wording by " + escapeHTML(summary.model || "a language model") +
-      ", over readings this page already carries. Every figure in it was measured by the " +
-      "pipeline and is published whether or not a model ever replies.";
+    return "Wording by " + escapeHTML(summary.model || "a language model") + "; figures measured by the pipeline.";
   }
   const guard = typeof summary.guard === "string" ? summary.guard : "";
-  if (guard === "invented") {
-    return "This is the deterministic reading. A model was asked for the wording and its answer " +
-      "named a figure no reading supports, so it was refused and is not shown.";
-  }
-  if (guard === "forecast") {
-    return "This is the deterministic reading. A model was asked for the wording and its answer " +
-      "made a claim about what happens next, which nothing here measures, so it was refused.";
-  }
+  /* EVERY BRANCH STILL NAMES WHICH OF THE TWO A READER IS HOLDING, because
+     that is the whole job of this line and it is a NOT-CLAIMED: a sentence
+     assembled by code in this repository must never be mistaken for one a
+     model wrote. What went is the paragraph around it — three lines of
+     reassurance under a two-line summary, restating on every page load that
+     the figures were measured, which the deterministic reading demonstrates
+     by existing. The refusals keep their reason: "refused" with no cause
+     would leave a reader unable to tell a guard from an outage. */
+  if (guard === "invented") return "Deterministic reading. A model\u2019s wording named an unsupported figure and was refused.";
+  if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
     const said = why === "3036"
-      ? "the day\u2019s free model allowance is spent; it resets at 00:00 UTC"
-      : why === "3040" ? "the model had no capacity at that moment, and nothing was spent"
-        : why === "5035" ? "the configured model is not available on this plan, which is a fault here rather than an outage"
+      ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
+      : why === "3040" ? "the model had no capacity, and nothing was spent"
+        : why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"
             : "the model did not answer";
-    return "This is the deterministic reading: " + said + ". The figures are unaffected \u2014 " +
-      "they were measured by the pipeline, and only the phrasing was ever at stake.";
+    return "Deterministic reading: " + said + ".";
   }
-  return "This is the deterministic reading, assembled from the published facts themselves. " +
-    "No model was asked.";
+  return "Deterministic reading. No model was asked.";
 }
 
 function neuronDock(summary, { scope = "this session" } = {}) {
@@ -319,8 +313,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
     <div class="ak-neuron-body">
       <p class="ak-neuron-h" id="akNeuronH">Neuron</p>
       <p class="ak-neuron-say ak-neuron-none">No summary has been written for ${escapeHTML(scope)} yet.</p>
-      <p class="ak-neuron-src">That says the briefing has not been published, not that the
-        session was quiet. Nothing is claimed about the market by this line.</p>
+      <p class="ak-neuron-src">Not published yet \u2014 not a quiet session. Nothing here is claimed about the market.</p>
     </div>
   </section>`;
   }
@@ -1059,7 +1052,18 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
   <p class="flows-stale" id="mktStale" role="status" hidden></p>
 
   <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+    <!-- THE LEDE IS THIS PAGE'S <meta> DESCRIPTION AND IS NO LONGER DRAWN.
+         "Whether the screened universe was bought or sold, how broad that was,
+         and how much of it is five names" is a table of contents for the three
+         headings underneath it — "Bought or sold, two ways", "Breadth, and what
+         it is made of", "The tape" — the DEFINITION case. It still reaches
+         head() above, where a one-line description of a page is exactly what a
+         search result and a link preview are for.
+
+         ONLY THIS PAGE. Nine pages share this markup and an earlier pass at
+         this edit replaced the FIRST of them — the bullish/bearish board —
+         leaving a comment there that described Market's headings. The side
+         page's lede is a different sentence and is still drawn. -->
   </div>
 
   <section class="fc-panel" id="mktTiltPanel" hidden>
@@ -1082,11 +1086,17 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
     <div class="flows-tablewrap" tabindex="0" role="region"
          aria-label="Aggregate tape readings over the screened universe">
       <table class="flows-table" id="mktTape">
+        <!-- WHAT SURVIVED AND WHY. "Sums and ratios over the screened universe"
+             repeats the heading "The tape" and the Names column beside it, and
+             the "because a ratio whose numerator and denominator come from
+             different sets of names is not a ratio of anything" clause is the
+             REASON for a rule rather than the rule — method, in the
+             flows-overview.js:325 sense. What is left is the rule itself, which
+             is a population statement and therefore never folded away; the
+             Names column and its abbr title carry it per row, and this says
+             once that they do. -->
         <caption class="flows-caption">
-          Sums and ratios over the screened universe. Each row states the
-          population it was measured over, because a ratio whose numerator and
-          denominator come from different sets of names is not a ratio of
-          anything.
+          Each row states the population it was measured over.
         </caption>
         <thead>
           <tr>
