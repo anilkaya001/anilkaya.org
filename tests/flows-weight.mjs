@@ -640,7 +640,29 @@ const CEILING_KIB = {
      paragraph above still stands: the structural fix owed here is the
      comment strip, measured and merged and waiting on one Workers Builds
      field, and until it lands this route argues for every raise. */
-  overviewPage: 163,
+  /* 166, FOR FOUR DIAGRAMS AND WHAT THEY REPLACE A READER DOING:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 135,724
+       total         169,427 B = 165.46 KiB, 2,517 B over 163
+
+     Four of the seven verdict tiles now carry the shape of their own number:
+     a bar off a centre line for each lean, a proportional split for breadth
+     and for cleared. "−7.9%" and "41 bull / 48 bear" are the same two facts —
+     which side, and by how much — and a reader had to decode both from digits
+     every time. The bar answers the first before the number is read at all.
+
+     BUILT FROM THE VALUE THE TILE PRINTS, never a second read of the payload,
+     because a diagram that can disagree with the number beside it is worse
+     than no diagram; and a SILENT tile gets no bar, because a zero-width one
+     would read as a measured zero.
+
+     Two rects and a rule each, no library. The bytes are the viz() closure
+     and the reasoning above it.
+
+     166 LEAVES 586 B, which is tight on purpose: this route is still owed the
+     comment strip, and the next change should have to come here too. */
+  overviewPage: 166,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

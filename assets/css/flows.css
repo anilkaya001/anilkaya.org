@@ -203,7 +203,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=157") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=158") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -6415,6 +6415,22 @@ body.is-stale .flows-tablewrap {
 .cc-tile-v.is-pos { color: var(--flow-up); }
 .cc-tile-v.is-neg { color: var(--flow-down); }
 .cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
+
+/* THE SHAPE OF THE TILE'S OWN NUMBER. A 100x8 viewBox stretched to the tile
+   with preserveAspectRatio:none — the bar carries a proportion, not a length,
+   so there is nothing for an aspect ratio to distort. */
+.cc-viz { display: block; width: 100%; height: 8px; margin-top: 0.4rem; }
+.cc-viz-z { stroke: var(--ink-faint); stroke-width: 1; stroke-opacity: 0.55; }
+.cc-viz.is-pos .cc-viz-t { fill: var(--flow-up); }
+.cc-viz.is-neg .cc-viz-t { fill: var(--flow-down); }
+/* A MEASURED ZERO IS NEITHER SIDE. It draws its 0.8-unit sliver on the centre
+   line in the neutral ink rather than inheriting a direction the number does
+   not carry — the same rule the score bars follow. */
+.cc-viz.is-zero .cc-viz-t { fill: var(--ink-faint); }
+/* The split reads bull-first because the value beside it does. */
+.cc-viz-a { fill: var(--flow-up); }
+.cc-viz-b { fill: var(--flow-down); }
+
 
 /* THE FOUR SILENCES, ON A TILE. flows-overview.js sets data-empty on a
    verdict tile whose number is an em dash, with the same four kinds the

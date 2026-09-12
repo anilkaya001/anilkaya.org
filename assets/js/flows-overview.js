@@ -1053,14 +1053,14 @@
       ["Session", sessionDate || DASH, null, boardsSilence(sessionDate !== null)],
       ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), null,
         tileSilence(market, isNum(market && market.n) !== null, null)],
-      ["Lean · names", pct(bt, 1), tone(bt), btSilence],
-      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence],
+      ["Lean · names", pct(bt, 1), tone(bt), btSilence, ["signed", bt]],
+      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence, ["signed", pt]],
       ["Breadth",
         (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
-        null, tileSilence(market, bull !== null && bear !== null, null)],
+        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear]],
       ["Cleared",
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
-        null, boardsSilence(bulls !== null || bears !== null)],
+        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears]],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
         tileSilence(alerts, seen !== null, null)],
     ];
@@ -1068,11 +1068,60 @@
     /* A silent tile keeps its dash, prints the silence's sentence as its sub
        and carries the kind on data-empty — the mark flows.css draws for a
        region's silence — so the four are told apart without prose. */
-    for (const [key, value, cls, silence] of tiles) {
+    /* AND FOUR OF THE SEVEN CARRY THE SHAPE OF THEIR OWN NUMBER.
+
+       "−7.9%" and "41 bull / 48 bear" are the same two facts a reader has to
+       decode from digits every time: which side, and by how much. A bar off a
+       centre line answers the first before the number is read at all, and the
+       second at a glance; the digits stay for the reader who wants a value
+       rather than an impression.
+
+       BUILT FROM THE SAME VALUE THE TILE PRINTS, never from a second read of
+       the payload — a diagram that can disagree with the number beside it is
+       worse than no diagram. A SILENT tile gets no bar at all: there is
+       nothing to draw, and a zero-width one would read as a measured zero,
+       which is the distinction this page exists to keep.
+
+       SVG and no library: two rects and a rule. `aria-hidden`, because every
+       figure in them is already in the text beside them. */
+    const viz = (spec) => {
+      if (!Array.isArray(spec)) return null;
+      const svg = svgEl("svg", { class: "cc-viz", viewBox: "0 0 100 8",
+        preserveAspectRatio: "none", "aria-hidden": "true", focusable: "false" });
+      if (spec[0] === "signed") {
+        const v = isNum(spec[1]);
+        if (v === null) return null;
+        /* THE SCALE IS ±0.25 OF THE RATIO, NOT ±1. Both leans are bounded to
+           ±1 by construction and in practice sit inside a tenth of that, so a
+           full-scale bar would be invisible on every ordinary session — the
+           same defect the score bars had before they were floored. Past the
+           floor the bar pins at the edge and the number carries the excess. */
+        const frac = Math.max(-1, Math.min(1, v / 0.25));
+        const half = Math.abs(frac) * 50;
+        svg.append(svgEl("rect", { class: "cc-viz-t", x: frac < 0 ? 50 - half : 50,
+          y: 1, width: Math.max(0.8, half), height: 6 }));
+        svg.append(svgEl("line", { class: "cc-viz-z", x1: 50, x2: 50, y1: 0, y2: 8 }));
+        svg.setAttribute("class", "cc-viz " + (v < 0 ? "is-neg" : v > 0 ? "is-pos" : "is-zero"));
+        return svg;
+      }
+      if (spec[0] === "split") {
+        const a = isNum(spec[1]), b = isNum(spec[2]);
+        if (a === null || b === null || !(a + b > 0)) return null;
+        const w = (a / (a + b)) * 100;
+        svg.append(svgEl("rect", { class: "cc-viz-a", x: 0, y: 1, width: w, height: 6 }));
+        svg.append(svgEl("rect", { class: "cc-viz-b", x: w, y: 1, width: 100 - w, height: 6 }));
+        return svg;
+      }
+      return null;
+    };
+
+    for (const [key, value, cls, silence, spec] of tiles) {
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
+      const bar = silence ? null : viz(spec);
+      if (bar) tile.append(bar);
       if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
       into.append(tile);
     }
