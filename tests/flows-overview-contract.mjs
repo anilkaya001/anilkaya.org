@@ -1134,8 +1134,9 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
     const stamp = (await page.locator("#ccAlertsSub").textContent()).trim();
-    ok(/^3 of 7 · read /.test(stamp),
-       `the flagged-window subtitle counts its rows against the read's own seen (${stamp})`);
+    ok(/^3 of 7 · nightly read /.test(stamp),
+       `the flagged-window subtitle counts its rows against the read's own seen, ` +
+       `and names the cadence before the instant (${stamp})`);
     ok(!/\d{2}:\d{2}:\d{2}/.test(stamp),
        `with no seconds field, which this feed cannot support (${stamp})`);
     ok(/read \d{2}:\d{2} \S/.test(stamp),
