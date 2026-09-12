@@ -8398,11 +8398,27 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* ---- the Overview: one tint per region, one height per row ---- */
 
-/* EVERY REGION THE SAME HEIGHT WITHIN ITS ROW. `.cc` is a twelve-column grid
-   whose items already stretch; what it lacked was the implicit rows resolving
-   together, so a row holding one tall region left its neighbour short. Same
-   fix as .flows-deck, same reason. */
-.cc { grid-auto-rows: 1fr; }
+/* NO grid-auto-rows HERE, AND THE RULE THAT WAS HERE IS THE LESSON.
+
+   It read `grid-auto-rows: 1fr`, copied from .flows-deck under a comment
+   claiming a row holding one tall region "left its neighbour short". That
+   problem does not exist: a grid item's default `align-items: stretch`
+   already sizes it to its OWN row. Measured in Chromium — two rows, the first
+   tall and the second short — items came out [92, 92, 20, 20] with no rule
+   at all, and [92, 92, 92, 92] with it.
+
+   SO THE RULE WAS NOT EQUALISING WITHIN A ROW, IT WAS EQUALISING ACROSS ROWS,
+   and on this page that is actively wrong. The Overview's regions carry
+   deliberately different amounts — a one-line note beside a twelve-row table —
+   and forcing every row to the tallest opened ~200px of void under the sparse
+   ones. A screenshot showed it immediately; the DOM probe did not, because it
+   asserted "nine regions, one height" and scored that a PASS. It was the
+   symptom.
+
+   EQUAL SIZE BELONGS WHERE ITEMS ARE PEERS OF ONE KIND. Fifty cards on a board
+   are peers, and .flows-deck keeps the rule for exactly that reason. Nine
+   regions answering nine different questions are not, and making them look
+   like peers is a layout asserting a symmetry the content does not have. */
 
 .cc-region {
   --tint: var(--sect-none);
@@ -8452,7 +8468,11 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* ---- the reader: one tint per station, loudness from the silence ---- */
 
-.ft-station { grid-auto-rows: 1fr; }
+/* AND NOT HERE EITHER, WHERE IT WOULD HAVE BEEN WORSE. A station is a SINGLE
+   column (`grid-template-columns: minmax(0, 1fr)`), so every panel is its own
+   row — `1fr` would have stretched a one-line reading to the height of the
+   tallest chart in the station, on all five of them. The panels are already
+   the full width of their column, which is the only dimension they share. */
 
 .ft-panel[data-panel] {
   --tint: var(--sect-none);
