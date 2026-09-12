@@ -7402,7 +7402,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    something down their length. */
 .sg-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  /* THE min() GUARD, WHICH THIS TRACK WAS MISSING. The note above .fc-stats
+     states the rule and says it was "applied to every auto-fit and auto-fill
+     track rather than only the one that was caught" — and that sentence was
+     false here and in one other place. A bare `minmax(15rem, 1fr)` is a 240px
+     FLOOR WITH NO CEILING ON THE CONTAINER: when the column is narrower than
+     240px the track refuses to shrink and the overflow lands on the document,
+     which is the one thing .cc's min-width:0 note is about. `min(15rem, 100%)`
+     asks for 15rem and settles for the width it actually has. */
+  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
   gap: var(--space-2) var(--space-3);
   margin: 0;
 }
@@ -8056,7 +8064,16 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ak-brief .ak-warns { grid-column: 1 / -1; }
   .ak-region .ak-facts { grid-template-columns: 1fr; }
-  .ak-warns .ak-warns-list { grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); }
+  /* THE WARNINGS LIST'S TRACK IS NOT DECLARED HERE, AND HAS NOT BEEN FOR SOME
+     TIME. This line read `repeat(auto-fit, minmax(24rem, 1fr))` — an
+     unguarded floor, so it was one of the two tracks that made the .fc-stats
+     note's "every track" false. But removing it is not the fix for that,
+     because the declaration was already inert: `.flows-body .ak-warns-list`
+     further down sets `repeat(2, minmax(0, 1fr))` with a one-column step at
+     47.99rem, the same specificity and later in the file, and every page that
+     draws this list is a .flows-body. Two rules for one list, one of them
+     dead, is how a stylesheet comes to be read wrongly — so the dead one goes
+     rather than being quietly corrected into a second source of truth. */
 }
 
 /* THE DENOMINATOR UNDER THE PAIR — small, but never absent while the pair
