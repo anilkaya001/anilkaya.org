@@ -941,7 +941,33 @@ const CEILING_KIB = {
 
      203 LEAVES 1,424 B, the same order the last two raises left. The route is
      owed the comment strip like every other one here. */
-  overviewPage: 203,
+  /* 203 -> 207, FOR THE STRIP THE TARGET DESIGN ASKS FOR.
+
+     The verdict strip now reads BREADTH / CLEARED / FLOW BIAS / PREMIUM /
+     FLAGGED, which is the target's five. Three things bought the bytes:
+
+       - A SIXTH SLOT ON THE TILE TUPLE, so a tile can carry a qualifier when
+         it is NOT silent. The silence sentence still wins when there is one:
+         a silent tile has no reading for a qualifier to be about.
+       - THE TWO LEANS BECAME ONE TILE WITHOUT LOSING ONE. The payload
+         publishes a names-weighted and a dollars-weighted tilt on purpose —
+         shared/flows-market.js says publishing both is what removes the
+         choice — so matching the target by deleting one would have made that
+         choice silently. The dollar lean takes the tile, the name lean takes
+         its sub-line, and they end up beside each other where they are
+         actually comparable.
+       - THE PREMIUM TILE, which cost almost nothing to feed: `daily.gross`
+         was already built from the same pulse rows the ring and the daily
+         chart read, and used for nothing. The tile, the ring and the chart
+         now cannot disagree about a session's premium.
+
+     NO DELTA BESIDE THAT FIGURE, though the target prints "+4.1%". Nothing
+     publishes a session-over-session premium delta for this population, and
+     differencing the two newest rows of a 20-row window at the render is an
+     invented reading. The sparkline carries the direction instead.
+
+     207 LEAVES 1,368 B. */
+  overviewPage: 207,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

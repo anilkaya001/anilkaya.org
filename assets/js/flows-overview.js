@@ -1028,6 +1028,36 @@
       return { lean, gross };
     })();
 
+    /* THE SPLIT AS TWO SHARES, which is what the target prints under each of
+       these bars ("85% call / 15% put"). The counts are already the tile's
+       value; this says what fraction of the WHOLE each side is, which a
+       reader otherwise does in their head off two three-digit numbers.
+
+       BOTH SIDES OR NEITHER. A share needs a denominator, so one half missing
+       leaves no sentence rather than a percentage of a number nobody has —
+       the em dash in the value above is already saying which half is absent.
+       A denominator of zero is a measured session in which nothing cleared;
+       that gets no percentage either, because 0/0 is undefined and "0%" would
+       be a claim. */
+    const shareOf = (a, b) => {
+      if (a === null || b === null) return null;
+      const whole = a + b;
+      if (!(whole > 0)) return null;
+      return Math.round((a / whole) * 100) + "% bull / " +
+        Math.round((b / whole) * 100) + "% bear";
+    };
+
+    /* THE NEWEST SESSION'S TOTAL, for the Premium tile. Taken off the end of
+       the series the sparkline draws, so the figure is the last point of its
+       own line rather than a second read that could differ from it. */
+    const grossNow = (() => {
+      if (!daily || !Array.isArray(daily.gross)) return null;
+      for (let i = daily.gross.length - 1; i >= 0; i--) {
+        if (daily.gross[i] !== null) return daily.gross[i];
+      }
+      return null;
+    })();
+
     /* FOUR SILENCES, FOUR SENTENCES, ON A TILE. Both tilt tiles printed "not
        measured this session" whenever the ratio was null — whether
        /api/flows/market failed to read, is unpublished, is published without
@@ -1130,19 +1160,43 @@
     const tiles = [
       ["Breadth",
         (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
-        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear]],
+        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear],
+        shareOf(bull, bear)],
       ["Cleared",
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
-        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears]],
-      ["Lean · names", pct(bt, 1), tone(bt), btSilence, ["signed", bt]],
-      /* THE DOLLAR LEAN CARRIES ITS RECENT HISTORY where the name lean cannot:
-         `totals` is a premium series, so a daily dollar lean is derivable from
-         it and a daily NAME lean is not — that would need a breadth count a
-         session, which no key publishes. One tile gets a line and the other a
-         bar, and the difference is what the archive holds rather than a
-         design choice. */
-      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence,
-        daily && daily.lean ? ["spark", daily.lean] : ["signed", pt]],
+        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears],
+        shareOf(bulls, bears)],
+      /* FIVE TILES, AND THE TWO LEANS ARE ONE TILE NOW — WITHOUT LOSING ONE.
+
+         The target strip reads BREADTH / CLEARED / FLOW BIAS / PREMIUM /
+         FLAGGED: one bias tile and one dollar total. This page had TWO bias
+         tiles, names-weighted and dollars-weighted, and the payload publishes
+         both on purpose — shared/flows-market.js says publishing both is what
+         removes the choice between them. Matching the target by deleting one
+         would have made that choice silently, on the reader's behalf.
+
+         So the dollar lean takes the tile (it is the one with a history to
+         draw) and the NAME lean moves to its sub-line. Both readings survive,
+         the strip is the target's five, and the two are beside each other
+         where they are actually comparable rather than two cards apart. */
+      ["Flow bias", pct(pt, 1), tone(pt), ptSilence,
+        daily && daily.lean ? ["spark", daily.lean] : ["signed", pt],
+        bt === null ? null : pct(bt, 1) + " weighting names equally"],
+      /* THE DOLLAR TOTAL, FROM THE SERIES THE RING AND THE CHART ALREADY
+         READ. `daily.gross` is |callPrem| + |putPrem| a session, built two
+         hundred lines up from the same pulse rows paintSplit takes its ring
+         from — so the tile, the ring and the daily chart cannot disagree
+         about what a session's premium was. It was computed and then used for
+         nothing until now.
+
+         NO SESSION-OVER-SESSION DELTA, which the target prints beside this
+         figure as "+4.1%". Nothing publishes one for this population, and the
+         two newest rows of a 20-row window are not it: that would be a
+         reading invented at the render, which is the one thing this strip
+         does not do. The sparkline carries the direction instead. */
+      ["Premium", grossNow === null ? DASH : usd(grossNow), null,
+        tileSilence(pulse, grossNow !== null, null),
+        daily && daily.gross ? ["spark", daily.gross] : null],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
         tileSilence(alerts, seen !== null, null), flagSpread],
     ];
@@ -1254,7 +1308,11 @@
       return null;
     };
 
-    for (const [key, value, cls, silence, spec] of tiles) {
+    /* THE SUB-LINE IS EITHER THE SILENCE OR THE QUALIFIER, NEVER BOTH.
+       A silent tile has no reading for a qualifier to be about, so the two
+       cannot collide — and the silence always wins, because "not measured" is
+       the more important of the two things a reader could be told. */
+    for (const [key, value, cls, silence, spec, sub] of tiles) {
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
@@ -1262,6 +1320,7 @@
       const bar = silence ? null : viz(spec);
       if (bar) tile.append(bar);
       if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
+      else if (sub) tile.append(el("span", "cc-tile-s", sub));
       into.append(tile);
     }
   }
