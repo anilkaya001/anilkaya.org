@@ -613,6 +613,13 @@ if (CARDS && existsSync(CARDS)) {
            fixed number. A ZERO here means the strip is served and empty,
            which is the state worth seeing. */
         cards: document.querySelectorAll(".ft-card").length,
+        /* ONE HEIGHT FOR EVERY FIGURE IN THE ROW, or the row reads uneven.
+           A count of distinct tops: 1 means the six cards share a baseline,
+           anything else names how many the reader is being shown. */
+        cardFigureTops: new Set([...document.querySelectorAll(".ft-card-v")]
+          .map((v) => Math.round(v.getBoundingClientRect().top))).size,
+        cardHeights: new Set([...document.querySelectorAll(".ft-card")]
+          .map((c) => Math.round(c.getBoundingClientRect().height))).size,
         /* A card whose figure is the em dash is a card that should not have
            been drawn: its panel read, and then it had nothing to say. */
         cardsDash: [...document.querySelectorAll(".ft-card-v")]

@@ -1947,7 +1947,29 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        THE CARDS ARE WRITTEN BY flows-ticker.js. The host is served empty and
        hidden, the same way the hero above is, so a page whose card never
        arrives shows no empty furniture. -->
+  <!-- THE TWO COLUMNS THE DESIGN PUTS UNDER THE HEADER, and the reason they
+       are a WRAPPER rather than a rule on .flows-main. A grid placed on the
+       page shell would have to give each of its fourteen children an explicit
+       column, and auto-placement would drop the right-hand cards into rows of
+       their own below the left instead of beside it. Two boxes and one grid
+       between them is what actually produces the shape.
+
+       WHAT IS IN EACH. Left: this session's figures and what changed since
+       the last one — the reading a visitor came for. Right: what this card
+       FOUND, the flags, and the other names in the sector — the design's
+       summary column, in its order. Nothing moved between them; the same
+       blocks are in the same order they were stacked in.
+
+       IT IS ONE COLUMN UNTIL THERE IS WIDTH FOR TWO, and the breakpoint is in
+       flows.css beside the rule, not here. #ftChange is inserted by the
+       controller after #ftCards, so it lands inside the left column without
+       this markup naming it — the one place these two files have to agree,
+       and the insertion says so at its own end. -->
+  <div class="ft-split">
+    <div class="ft-split-main">
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+    </div>
+    <aside class="ft-split-side" aria-label="What this card found">
   <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
 
        The design puts a findings panel at the top right and calls it an AI
@@ -1988,6 +2010,8 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-rel-l" id="ftRelL"></div>
     <p class="ft-rel-s" id="ftRelS"></p>
   </aside>
+    </aside>
+  </div>
 
 
   <header class="ft-head" id="ftHead" hidden>

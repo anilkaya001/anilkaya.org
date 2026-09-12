@@ -9780,6 +9780,56 @@ svg[data-fx-cursor="on"]:focus-visible {
 svg[data-fx-cursor="on"] { touch-action: pan-y; }
 
 
+/* ---------- the two columns under the header ----------
+
+   THE DESIGN PUTS THE SESSION'S FIGURES ON THE LEFT AND WHAT THE CARD FOUND
+   ON THE RIGHT, and until now this page stacked all of it full-width: the
+   findings index ran the whole measure, so a reader scrolled past 514px of
+   summary to reach the stations it indexes. Beside the figures it is what it
+   is meant to be — a thing you glance at while reading the left.
+
+   ONE COLUMN UNTIL 72rem, AND THE NUMBER IS A MEASUREMENT. With the 13rem
+   rail and the shell's padding, a 1152px viewport leaves main about 830px;
+   20rem of side column takes 320 of it and leaves ~490px for six cards and
+   the change region, which is the point at which the cards stop fitting three
+   across. Below it the two boxes are one column in source order — figures,
+   then findings — which is the order they were stacked in before, so a phone
+   loses nothing.
+
+   NO PAIRED MAX AT THIS STEP. A min and a max at one width both match on the
+   width itself; the rail's 60/60 pair did exactly that until this wave, so
+   this tier is a min alone and the single-column case is the unqualified
+   default above. */
+.ft-split { display: grid; gap: var(--space-3); }
+@media (min-width: 72rem) {
+  .ft-split {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    /* START, NOT STRETCH. The right column is three boxes whose height is
+       their content; stretched to the left column's height they would grow a
+       tail of empty panel under the sector strip. */
+    align-items: start;
+  }
+  /* STICKY, BECAUSE THE LEFT COLUMN IS THE LONGER ONE. What the card found is
+     an index INTO the page, so it earns its place beside the reading rather
+     than scrolling away from it. Capped at the viewport with its own overflow
+     for the reason the rail's note gives: a sticky box taller than the screen
+     hides its own tail with no affordance saying so. */
+  .ft-split-side {
+    position: sticky;
+    top: calc(var(--ft-bar-h, 9rem) + 1rem);
+    max-height: calc(100vh - var(--ft-bar-h, 9rem) - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+.ft-split-main { min-width: 0; }
+.ft-split-side { min-width: 0; display: flex; flex-direction: column; }
+/* The three boxes already carry their own bottom margin from the stacked
+   layout; in a flex column that margin is the gap, so the last one's is
+   removed rather than a second spacing system introduced. */
+.ft-split-side > :last-child { margin-bottom: 0; }
+
+
 /* ---------- the six cards ----------
    THE SESSION'S FLOW ABOVE THE STATIONS, in the shape the design specifies: a
    row of equal cards, each a label, a figure, a small drawing and the coverage
@@ -9818,6 +9868,20 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-faint);
+  /* TWO LINES OF ROOM WHETHER OR NOT THE LABEL USES THEM, so every figure in
+     the row starts at the same height. The row is six cards on one baseline
+     and "SESSION PREMIUM" is the only label that wraps — at full width none
+     of them did, and the wrap appeared the moment these cards moved into the
+     left column of the split above. One wrapped label pushed one figure a
+     line lower than its five neighbours, which is the row reading uneven
+     for a reason that is about typesetting rather than about the session.
+
+     RESERVED RATHER THAN PREVENTED: shortening the label to fit would be
+     this stylesheet editing a reading to suit its own grid, and truncating it
+     would hide which measurement the card is of. lh is the line box of this
+     element's own font-size and line-height, so it stays correct if either
+     changes. */
+  min-height: 2lh;
 }
 .ft-card-row {
   display: flex;
@@ -9825,6 +9889,24 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   justify-content: space-between;
   gap: 0.5rem;
   min-width: 0;
+  /* IT STACKS RATHER THAN RUNNING INTO THE NEXT CARD. The figure and its
+     sparkline sat side by side on a row that could not wrap, beside a
+     sparkline that could not shrink — so on a narrow card the pair simply
+     overflowed, and nothing clipped it: the premium run's line ran out of its
+     own box and struck through the neighbouring card's figure. It was always
+     wrong and the two-column split made it plain, because the six cards went
+     from the full measure to the left column's share of it.
+
+     WRAPPING IS THE HONEST FIX AND CLIPPING IS NOT. `overflow: hidden` would
+     have cut the line at the card edge with nothing saying so, the silent
+     truncation this codebase refuses everywhere else. Shrinking is no better:
+     the figure alone is most of the card's inner width, so there is no room
+     to give beside it. Below it there is.
+
+     AND THE ROW STAYS EVEN. .ft-cards is a grid, so its items stretch to the
+     tallest in the row — a card that wraps makes every card taller by the
+     same amount rather than making one of them odd. */
+  flex-wrap: wrap;
 }
 .ft-card-v {
   font-family: var(--font-figure);
@@ -9841,7 +9923,11 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
   line-height: 1.4;
   color: var(--ink-faint);
 }
-.ft-card-spark { flex: none; opacity: 0.85; }
+/* Never wider than the card, whatever the width attribute says:
+   preserveAspectRatio is "none" on this drawing, so a capped width compresses
+   the line horizontally rather than overflowing — the sequence of sessions is
+   the reading and it survives the squeeze. */
+.ft-card-spark { flex: none; max-width: 100%; opacity: 0.85; }
 .ft-card-line { stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .ft-card-line.is-pos { stroke: var(--flow-up); }
 .ft-card-line.is-neg { stroke: var(--flow-down); }
