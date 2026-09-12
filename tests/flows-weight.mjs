@@ -656,14 +656,29 @@ const CEILING_KIB = {
      the next typo fix on this route fails CI and gets "fixed" by deleting a
      comment, which is the bookkeeping the unusualPage paragraph below refuses
      by name. 1,175 B is the same order as the 917 and 750 the last two raises
-     left: room for a fix, not for a feature. The next change here still has
-     to come to this comment and argue.
+     left: room for a fix, not for a feature.
+
+     AND THE RESERVE WAS SPENT ON A FIX, WHICH IS WHAT IT WAS FOR — 449 -> 450
+     in the same session. flows-sign found two places in flows-ticker.js where
+     this branch decided a sign in two arms: the flags row calling a move of
+     exactly zero "Score down", and the change verdict calling a zero-move
+     flip "Flipped bearish". Both now carry a third arm, at 960 B of reasoning.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   69,370   flows-ticker.js  381,624
+       total            459,561 B = 448.79 KiB, 215 B under 449
+
+     215 B is by the argument above not a reserve, so the ceiling follows the
+     fix rather than leaving the next one nothing: 450 leaves 1,239 B, the
+     same order as before. A reserve that is never allowed to be spent is just
+     a smaller ceiling with extra steps; one that is spent and not restored is
+     a trap for whoever edits next.
 
      THE STANDING ACCOUNT IS UNCHANGED AND IT IS STILL THE REAL ANSWER: this
      route is 448 KiB of source and roughly 191 KiB of it is what a browser
      would parse with the comment strip's one Workers Builds field set. Every
      kilobyte argued here is a kilobyte that field would return. */
-  tickerPage: 449,
+  tickerPage: 450,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

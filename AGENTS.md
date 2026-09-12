@@ -337,6 +337,56 @@ The suites prove:
 GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
 manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
 
+### Which suites need the dev server, and which do not
+
+Some suites boot workerd (`wrangler dev`) and some only need Node and
+Playwright. In a sandbox that cannot reach Cloudflare's endpoints, workerd
+never starts and those suites hang until they are killed — so it is worth
+knowing which is which BEFORE deciding what can be run before a push.
+
+**This list is measured, not inferred.** Grepping for `workerd` misclassifies
+in both directions: `contracts.mjs` and `flows-weight.mjs` merely mention the
+string and run fine, and a suite can need a server without naming it. Each
+entry below was run and timed.
+
+Confirmed to run with no server:
+
+```
+contracts              flows-weight            flows-payload-shape
+flows-scores-contract  flows-overlay-contract  flows-ticker-contract
+flows-card-render      flows-card-contract     flows-strip
+flows-features         flows-alerts-contract   flows-brief
+flows-warnings         flows-sign              flows-ask
+flows-stock-contract   flows-premium-contract  flows-pulse-contract
+flows-events-contract  flows-mint-contract     flows-permits-contract
+flows-political-contract  flows-record-contract  flows-universe-contract
+flows-chain-panels     flows-auth-contract     mastery-contract
+academy-contract
+```
+
+Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
+`flows-watch-render`, `flows-political-render`, `flows-ask-render`,
+`flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
+`flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
+`placement-contract`.
+Anything not named in either list has not been measured — run it and find
+out rather than assuming.
+
+**Why this section exists.** `flows-card-render` was filed as needing a
+server. It does not — it renders through `page.setContent` and finishes in
+nine seconds. Because it was skipped locally it went unrun for a whole
+branch, and it then found three real defects at once: a drawer count left
+behind by a new panel, a chart shipping `preserveAspectRatio="none"` so its
+bar heights meant nothing, and an SVG label clipped off its own canvas by
+the switch to Inter. All three were invisible to every check that WAS being
+run, and all three cost a CI round trip each.
+
+**Ordering matters too.** The suites run in sequence and the run stops at the
+first failure, so a suite near the front hides every suite behind it. A count
+or a threshold in a late suite can be stale for a long time and say nothing.
+When a long-failing suite finally goes green, expect the ones behind it to
+have something to say.
+
 ## Local development
 
 For production-equivalent routing and API behavior:

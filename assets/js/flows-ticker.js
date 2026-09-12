@@ -6478,7 +6478,14 @@
     const d1 = chg && chg.status === "ok" ? chg.d1 : null;
     const move = d1 ? isNum(d1.v) : null;
     if (move !== null && isNum(d1.gap) !== null && chg.stale === 0 && Math.abs(move) >= 10) {
-      marks.push([move > 0 ? "Score up" : "Score down", move > 0 ? "is-pos" : "is-neg",
+      /* THREE ARMS, though the |move| >= 10 guard above means the third can
+         never fire today. It is written because the guard is a THRESHOLD and
+         thresholds get tuned: the day someone lowers it to 0 this line would
+         start calling a measured-flat session "Score down" in red, and the
+         defect would be one edit away with nothing pointing at it. The class
+         comes from the shared polarity() rather than a fourth local copy. */
+      marks.push([move > 0 ? "Score up" : move < 0 ? "Score down" : "Score flat",
+        P.polarity(move),
         P.signed(move, (a) => String(a)) + " score points over " +
         d1.gap + (d1.gap === 1 ? " session" : " sessions") +
         ", against a threshold of 10."]);
@@ -6830,9 +6837,15 @@
       if (chg.cross === "cleared") return ["Cleared the band", "\u2191", "is-pos"];
       if (chg.cross === "faded") return ["Faded out of the band", "\u2193", "is-neg"];
       if (chg.cross === "flipped") {
-        return mv > 0
-          ? ["Flipped bullish", "\u2191", "is-pos"]
-          : ["Flipped bearish", "\u2193", "is-neg"];
+        if (mv > 0) return ["Flipped bullish", "\u2191", "is-pos"];
+        if (mv < 0) return ["Flipped bearish", "\u2193", "is-neg"];
+        /* A FLIP IS A CROSSING, so a move of exactly zero beside one is the
+           payload disagreeing with itself. The two-armed version resolved
+           that contradiction by calling it BEARISH — picking a side on no
+           evidence, which is the one thing this section never does. State the
+           crossing, claim no direction, and let the figures below say what is
+           actually known. */
+        return ["Flipped", "\u2192", "is-flat"];
       }
       if (mv > 0) return ["Bullish drift", "\u2191", "is-pos"];
       if (mv < 0) return ["Bearish drift", "\u2193", "is-neg"];
