@@ -5274,22 +5274,45 @@ try {
       ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
     const LIT = 15, FLAT = 3;
 
+    /* THE BASELINE IS THE STRIP'S OWN MIDDLE, NOT --bg.
+
+       `ground` above is --bg put through the same coefficients, and it was a
+       fair stand-in for as long as the page behind this strip was one flat
+       colour. It is not any more: the ground is an atmosphere image, so the
+       luminance under the rail depends on where the rail sits in it. CI
+       measured the left edge at 13.11 against a --bg of 9.86 and failed a
+       FLAT limit of 3 — reporting a shadow that is not there, because the
+       comparison had drifted off the thing it was comparing to.
+
+       The interior columns of the SAME screenshot are the honest baseline,
+       and were always the better one: this strip has its own translucent
+       background over the page, so what an edge must stand off is the strip's
+       middle, not the document's colour token. Taking it per-screenshot also
+       means the two scroll positions are each judged against themselves.
+
+       --bg's own check above stays. It asserts the ground is dark, which is
+       the premise of the polarity argument and is still worth measuring. */
+    const middle = (cols) => {
+      const inner = cols.slice(14, W - 14).slice().sort((a, b) => a - b);
+      return inner.length ? inner[inner.length >> 1] : ground;
+    };
+    const startBase = middle(atStart), endBase = middle(atEnd);
     const startRight = band(atStart, "right"), startLeft = band(atStart, "left");
     const endRight = band(atEnd, "right"), endLeft = band(atEnd, "left");
 
-    ok(startRight - ground >= LIT,
+    ok(startRight - startBase >= LIT,
        `scrolled to the start, the RIGHT edge stands off the ground ` +
-       `(${startRight.toFixed(2)} against ${ground.toFixed(2)}) — this is the assertion ` +
+       `(${startRight.toFixed(2)} against ${startBase.toFixed(2)}) — this is the assertion ` +
        "a black shadow on a black page fails, and did: it measured four counts");
-    ok(startLeft - ground <= FLAT,
-       `and the LEFT edge is the ground itself (${startLeft.toFixed(2)} against ` +
-       `${ground.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
-    ok(endLeft - ground >= LIT,
+    ok(startLeft - startBase <= FLAT,
+       `and the LEFT edge is the strip itself (${startLeft.toFixed(2)} against ` +
+       `${startBase.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
+    ok(endLeft - endBase >= LIT,
        `scrolled to the end, the LEFT edge stands off the ground ` +
-       `(${endLeft.toFixed(2)} against ${ground.toFixed(2)})`);
-    ok(endRight - ground <= FLAT,
+       `(${endLeft.toFixed(2)} against ${endBase.toFixed(2)})`);
+    ok(endRight - endBase <= FLAT,
        `and the RIGHT edge has PUT ITSELF AWAY (${endRight.toFixed(2)} against ` +
-       `${ground.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
+       `${endBase.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
        "telling a reader to swipe past the last item in the strip");
 
     /* COVERAGE, so the next scrolling strip cannot ship without an edge. This
