@@ -272,6 +272,54 @@ const eventsPayload = {
   ],
 };
 
+/* THE MARKET PULSE, AND WHY IT IS PUBLISHED HERE AS OF THIS CHANGE.
+
+   The verdict strip used to read four keys and now reads five: the Premium
+   tile and the Flow bias sparkline are drawn from `pulse.totals`, and the
+   daily flow chart under them draws the same rows. This file called its
+   store "a fully published session" and asserted that no tile wears a
+   silence mark — while never publishing the key two of those readings come
+   from. So the strip was correctly marking an ABSENT key, and the assertion
+   was correctly failing; what was wrong was the fixture's claim to be
+   complete. The renderer is not the thing that changed here.
+
+   SHAPED LIKE THE PUBLISHER'S OUTPUT, FIELD FOR FIELD, because a fixture
+   that invents a shape tests the renderer against a payload nobody serves.
+   `totals` rows are NEWEST FIRST and carry GROSS, non-negative premium;
+   `tide` points are oldest-first and carry NET, signed premium
+   (shared/flows-pulse.js, shapeTotals and shapeTide) — two different
+   quantities under field names that read alike, which is the exact
+   confusion the renderer's own comments were written against, so the
+   fixture keeps both shapes honest rather than reusing one.
+
+   THE NUMBERS ARE DELIBERATE: three sessions, each clearing more call than
+   put premium, so the Flow bias sub-line and the Premium tile both have
+   something to say, and the newest session is the one the tile prints. */
+const pulsePayload = {
+  v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+  readAt: new Date().toISOString(), cadenceMinutes: 15,
+  totals: {
+    status: "ok", seen: 3, cap: 20, shed: 0,
+    rows: [
+      { date: SESSION, callPrem: 17036252974, callVol: 12202894,
+        putPrem: 13054676706, putVol: 6493149 },
+      { date: "2026-08-21", callPrem: 15548052618, callVol: 9169998,
+        putPrem: 14209345121, putVol: 7101223 },
+      { date: "2026-08-20", callPrem: 12980114003, callVol: 8110447,
+        putPrem: 12118880554, putVol: 6902551 },
+    ],
+  },
+  tide: {
+    status: "ok", seen: 3, cap: 78, shed: 0,
+    points: [
+      { t: SESSION + "T09:30:00-04:00", callPrem: -146307772, putPrem: -83670685, vol: -916838 },
+      { t: SESSION + "T09:35:00-04:00", callPrem: 39938956, putPrem: 61514946, vol: 681275 },
+      { t: SESSION + "T09:40:00-04:00", callPrem: 88110432, putPrem: -12004881, vol: 402117 },
+    ],
+  },
+};
+
+await post("pulse", pulsePayload);
 await post("board:long", board("long", bullRows, SESSION, { deep: 4 }));
 await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
 await post("board:watch", watch);
