@@ -373,13 +373,14 @@ try {
     /* THE POOL, NOT THE ROWS. Neither fixture board publishes `cleared`, so
        here the pool IS the row count and the two readings agree; the pooled
        phase below is where they part and the tile has to follow the rail. */
-    eq(by.Cleared?.v, "5 / 4", "and both boards are counted whole, not to the region cap");
-    eq(by.Cleared?.s, "bull / bear cleared the band",
-       "under the population's own name, with no not-carried clause when nothing was shed");
+    eq(by.Cleared?.v, "5 bull / 4 bear",
+       "and both boards are counted whole, not to the region cap");
     ok(!("Both sides" in by), "and the old row-count tile is gone rather than kept beside it");
     eq(by["Flagged windows"]?.v, "7", "the vendor's flagged-window count");
-    eq(by["Flagged windows"]?.s, "nightly read",
-       "carrying WHEN it was read, because the number means nothing without it");
+    /* WHEN IT WAS READ IS NOW ON THE REGION SUBTITLE, not under the tile —
+       asserted on #ccAlertsSub in the ceiling block below, beside the rows it
+       is about. The number still means nothing without it; it is simply said
+       once, where a reader is standing when it matters. */
     /* A TILE WITH A READING CARRIES NO SILENCE MARK. The four kinds are
        asserted one by one further down; here every tile holds a number. */
     eq(await page.locator("#ccVerdict .cc-tile[data-empty]").count(), 0,
@@ -964,7 +965,9 @@ try {
       Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
         t.querySelector(".cc-tile-k")?.textContent.trim(),
         t.querySelector(".cc-tile-v")?.textContent.trim()])));
-    eq(tiles.Cleared, "\u2014 / 4", "the unreadable side is an em dash, never a 0");
+    eq(tiles.Cleared, "\u2014 bull / 4 bear",
+       "the unreadable side is an em dash, never a 0 — and each side keeps its own word, " +
+       "so a half-silent tile cannot be read as a ratio");
     eq(tiles.Session, SESSION, "and the session is taken off the half that answered");
 
     /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
@@ -1886,7 +1889,7 @@ try {
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     let tiles = await readTiles();
     for (const k of [...TILTS, "Breadth", "Screened"]) {
-      eq(tiles[k]?.v, k === "Breadth" ? "— / —" : "—",
+      eq(tiles[k]?.v, k === "Breadth" ? "— bull / — bear" : "—",
          `${k} is an em dash when the market payload could not be read`);
       eq(tiles[k]?.kind, "unreadable", `and is marked as this page's fault (${k})`);
       ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
@@ -1925,7 +1928,8 @@ try {
       eq(tiles[k]?.kind, "unavailable", `and is marked as the payload's gap (${k})`);
       eq(tiles[k]?.s, "not on this payload", `worded as one, not as a session that measured nothing (${k})`);
     }
-    eq(tiles.Breadth?.v, "9 / 12", "while the breadth the same payload does carry still prints");
+    eq(tiles.Breadth?.v, "9 bull / 12 bear",
+       "while the breadth the same payload does carry still prints");
     eq(tiles.Breadth?.kind, null, "with no mark on a tile that has its reading");
     marks.set("unavailable", tiles[TILTS[0]].mark);
 
@@ -1944,7 +1948,7 @@ try {
     eq(tiles["Tilt · names"]?.s, "no name leaned", "and says so as a reading about the session");
     eq(tiles["Tilt · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
     eq(tiles["Tilt · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
-    eq(tiles.Breadth?.v, "0 / 0", "and the measured zeros behind it print as zeros");
+    eq(tiles.Breadth?.v, "0 bull / 0 bear", "and the measured zeros behind it print as zeros");
     eq(tiles.Breadth?.kind, null, "which are a reading, not a silence");
     marks.set("empty", tiles[TILTS[0]].mark);
     await post("market", market);
@@ -1972,7 +1976,7 @@ try {
     eq(tiles.Session?.v, "—", "with both boards unreadable the session is an em dash");
     eq(tiles.Session?.kind, "unreadable", "marked as this page's fault");
     ok(/could not be read/.test(tiles.Session?.s), `and worded as one (${tiles.Session?.s})`);
-    eq(tiles.Cleared?.v, "— / —", "and so is the pool on both sides");
+    eq(tiles.Cleared?.v, "— bull / — bear", "and so is the pool on both sides");
     eq(tiles.Cleared?.kind, "unreadable", "under the same mark");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
     allowFetchFailure = false;
@@ -2005,8 +2009,9 @@ try {
     eq(tiles.Session?.kind, "unavailable",
        "a board published without a session date is the payload's gap, not a fetch that failed");
     eq(tiles.Session?.s, "not on this payload", "and is worded as one");
-    eq(tiles.Cleared?.v, "5 / —",
-       "while the pool prints the half that answered beside a dash for the half that has not");
+    eq(tiles.Cleared?.v, "5 bull / — bear",
+       "while the pool prints the half that answered beside a dash for the half that has not — " +
+       "and each side keeps its own word, so the half-silent tile still says WHICH half is missing");
     eq(tiles.Cleared?.kind, null,
        "with no mark, because the dash is explained in that half's own region and on the status line");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
