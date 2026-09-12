@@ -812,7 +812,29 @@ const CEILING_KIB = {
      be read", about the same two payloads, four lines apart.
 
      198 LEAVES 1,385 B. */
-  overviewPage: 198,
+  /* 200, FOR THE SECOND HALF OF THE SAME COLLAPSE:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 169,742
+       total         203,445 B = 198.68 KiB, 693 B over 198
+
+     The session kept its four silences when it moved to the caption; the
+     SCREENED POPULATION, which moved with it, did not. That slot simply hid
+     itself whenever the figure was absent — so a market key that failed to
+     read and one nobody has published looked identical, which is the same
+     collapse one line over and was caught by the same suite, one phase
+     further in.
+
+     `keySilence` is the 693 B: the four-kind decision lifted out of
+     paintVerdict so the strip's tiles and the caption's two slots ask it of
+     one function. That is now the second helper this change had to lift for
+     the same reason — boardsRead was the first — and the pattern is worth
+     naming: moving a reading from one element to another moves nothing else
+     with it. Every silence, unit and population it carried has to be carried
+     across by hand, and the only way to know they were is a test that asks.
+
+     200 LEAVES 1,355 B. */
+  overviewPage: 200,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

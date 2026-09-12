@@ -1933,13 +1933,29 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     let tiles = await readTiles();
-    for (const k of [...TILTS, "Breadth", "Screened"]) {
+    for (const k of [...TILTS, "Breadth"]) {
       eq(tiles[k]?.v, k === "Breadth" ? "— bull / — bear" : "—",
          `${k} is an em dash when the market payload could not be read`);
       eq(tiles[k]?.kind, "unreadable", `and is marked as this page's fault (${k})`);
       ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
          `worded as the fetch silence, never as a reading about the session (${tiles[k]?.s})`);
     }
+    /* THE SCREENED POPULATION LEFT THE STRIP FOR THE CAPTION AND KEPT ALL
+       FOUR SILENCES, which is the only reason it is allowed to leave. It
+       reads the same keySilence() the three tiles above do, so a market key
+       that failed to read and one nobody has published stay two facts on the
+       caption exactly as they were on the tile. A caption that simply hid the
+       slot would have made them one — the collapse this whole phase exists to
+       catch, one element further up the page. */
+    const metaScreened = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaScreened");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null, hidden: el.hidden };
+    });
+    eq(metaScreened.kind, "unreadable",
+       "the screened population is marked as this page's fault on the caption too");
+    ok(!metaScreened.hidden, "and is stated rather than hidden, which would be a fourth silence");
+    ok(/could not be read/.test(metaScreened.text) && !/not measured/.test(metaScreened.text),
+       `worded as the fetch silence, never as a reading (${metaScreened.text})`);
     marks.set("unreadable", tiles[TILTS[0]].mark);
     await page.unroute("**/api/flows/market");
     allowFetchFailure = false;

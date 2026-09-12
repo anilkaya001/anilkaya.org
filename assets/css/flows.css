@@ -206,7 +206,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=165") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=166") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----

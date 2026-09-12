@@ -960,6 +960,35 @@
     into.append(wrap);
   }
 
+  /* ---------- one key's silence, for every surface that reads it ----
+
+     FOUR KINDS, ONE FUNCTION. `unreadable` is the request not coming back and
+     is this page's fault; `pending` is a key never published for this session;
+     `unavailable` is the key published WITHOUT the field, which is the payload
+     predating the layer; `empty` is the pipeline measuring and finding nothing
+     — and that last one is the only one of the four that says anything about
+     the market. Returns [kind, sentence] for a silence and null for a reading.
+
+     LIFTED OUT OF paintVerdict FOR THE SAME REASON boardsRead WAS. The
+     screened population was a tile in the verdict strip and is the strip's
+     caption now, so two surfaces ask this of the same payload. The first
+     draft of the caption asked nothing and simply hid the slot when the
+     figure was missing — which turns four facts into one absence, on a page
+     whose whole argument is that they are four.
+
+     `quietSaid` is passed only where the caller's own denominator is a
+     published zero: a null ratio with no such denominator is the payload's
+     gap, not the market's. Same kinds, precedence and data-empty names as
+     quiet()/silent() give a region, so a tile, a caption and the region
+     beneath them never word one fact three ways. */
+  const keySilence = (payload, read, quietSaid) => {
+    if (!payload) return ["unreadable", "could not be read — refresh to try again"];
+    if (payload.status === "pending") return ["pending", "not published yet"];
+    if (read) return null;
+    if (quietSaid) return ["empty", quietSaid];
+    return ["unavailable", "not on this payload"];
+  };
+
   /* ---------- the verdict bar --------------------------------------
 
      Seven readings the rest of the page then explains. Every one of them is
@@ -1010,13 +1039,7 @@
        only when the caller's own denominator is a published zero — a null
        ratio with no such denominator is the payload's gap, not the market's.
        Returns [kind, sentence] for a silence and null for a reading. */
-    const tileSilence = (payload, read, quietSaid) => {
-      if (!payload) return ["unreadable", "could not be read — refresh to try again"];
-      if (payload.status === "pending") return ["pending", "not published yet"];
-      if (read) return null;
-      if (quietSaid) return ["empty", quietSaid];
-      return ["unavailable", "not on this payload"];
-    };
+    const tileSilence = keySilence;
 
     const { silence: boardsSilence, date: sessionDate } = boardsRead(long, short);
 
@@ -1303,11 +1326,23 @@
       else delete dateEl.dataset.empty;
       said = said || Boolean(date) || Boolean(quiet);
     }
+    /* AND THE SCREENED POPULATION KEEPS ITS FOUR SILENCES TOO. It was a tile
+       that carried them and the first draft of this caption hid the slot
+       whenever the figure was absent — so a market key that failed to read
+       and one that has never been published looked identical, which is
+       exactly the collapse the session line above was fixed for. Hiding is
+       reserved for the one case that is not a silence at all: a page with no
+       market payload in play. */
     const n = isNum(market && market.n);
+    const nQuiet = keySilence(market, n !== null, null);
     if (screenedEl) {
-      screenedEl.textContent = n === null ? "" : n + " names screened";
-      screenedEl.hidden = n === null;
-      said = said || n !== null;
+      screenedEl.textContent = n === null
+        ? (nQuiet ? "screened " + nQuiet[1] : "")
+        : n + " names screened";
+      if (nQuiet) screenedEl.dataset.empty = nQuiet[0];
+      else delete screenedEl.dataset.empty;
+      screenedEl.hidden = n === null && !nQuiet;
+      said = said || n !== null || Boolean(nQuiet);
     }
     /* THE NEWEST STAMP WINS AND A MISSING ONE IS NOT A ZERO. Payloads that
        carry no readAt simply do not vote; if none does, the line is absent
