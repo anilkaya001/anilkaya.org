@@ -8339,3 +8339,164 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .ak-caret { display: none; }
   .ak-nn.is-live .ak-nn-e line, .ak-nn.is-live .ak-nn-n { animation: none; }
 }
+
+/* ================================================================
+   CANDIDATE B, TAKEN OFF THE BOARD AND ON TO THE OTHER ROUTES.
+
+   B SHIPPED ON TWO ROUTES OUT OF THIRTEEN AND THAT WAS NOT THE BRIEF. The
+   sector edge, the equal sizing and the arrival landed on `.fd-card`, which
+   only `sidePage()` emits — so /flows/long/ and /flows/short/ got the redesign
+   and the other eleven kept the old chrome. A reader opening the Overview or a
+   ticker page saw the new typeface and the glass and none of the thing that
+   makes the board legible at a glance.
+
+   IT IS ALL CSS, AND THAT IS FORCED RATHER THAN ELEGANT. tests/flows-weight
+   measures overviewPage at 704 bytes of headroom and tickerPage at 739; a
+   single new renderer on either breaks its ceiling on arrival. Every rule
+   below hooks onto markup those pages ALREADY emit — `.cc-region` and its
+   modifier, `.ft-station[data-group]` and `.ft-panel[data-panel]` — so the
+   treatment costs a reader zero bytes of JavaScript and no parse at all.
+
+   WHAT CARRIES OVER UNCHANGED: one size set by the grid, a 2px tinted edge
+   with a glow behind it, a floor of 0.34 so nothing ever vanishes, the
+   arrival, and hue as the LAST channel — never on type, never on the sign.
+
+   WHAT CHANGES MEANING, AND IT IS THE ONE REAL DESIGN DECISION HERE. On the
+   board, loudness is a MAGNITUDE: how big this name is in whatever the board
+   is sorted by. Inside there is no magnitude that honestly ranks twenty-three
+   panels against each other, and inventing one would be the first dishonest
+   pixel in the section. So inside, loudness is the SILENCE — a panel with a
+   reading sits at full weight and one without recedes by how much it is
+   missing. That answers what a reader actually arrives asking ("what is
+   missing here before I scroll"), which twenty-three panels at equal weight
+   cannot answer at all.
+   ================================================================ */
+
+/* ---- the Overview: one tint per region, one height per row ---- */
+
+/* EVERY REGION THE SAME HEIGHT WITHIN ITS ROW. `.cc` is a twelve-column grid
+   whose items already stretch; what it lacked was the implicit rows resolving
+   together, so a row holding one tall region left its neighbour short. Same
+   fix as .flows-deck, same reason. */
+.cc { grid-auto-rows: 1fr; }
+
+.cc-region {
+  --tint: var(--sect-none);
+  --emph: 0.62;
+  position: relative;
+  overflow: hidden;
+}
+.cc-region::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: calc(0.34 + 0.66 * var(--emph));
+  transition: opacity var(--dur-move) var(--ease);
+  background:
+    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    radial-gradient(58% 70% at 2% 0%,
+      color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
+}
+/* The edge is behind the content, never over it. */
+.cc-region > * { position: relative; z-index: 1; }
+
+/* THE TINT NAMES WHAT THE REGION IS ABOUT, and the two directional ones are
+   the board's own signed pair rather than a sector hue — on a region headed
+   "Bullish" any other colour would be a second vocabulary for a fact the page
+   already states in green and red. The rest take sector tints, which carry no
+   fact and are only there so the eye can tell one region from the next. */
+.cc-bull   { --tint: var(--flow-up);   --emph: 1; }
+.cc-bear   { --tint: var(--flow-down); --emph: 1; }
+.cc-chg    { --tint: var(--sect-tech); --emph: 0.86; }
+.cc-alerts { --tint: var(--sect-energy); --emph: 0.8; }
+.cc-ev     { --tint: var(--sect-health); --emph: 0.7; }
+.cc-watch  { --tint: var(--sect-staples); --emph: 0.62; }
+.cc-lean   { --tint: var(--sect-fin);  --emph: 0.8; }
+.cc-news   { --tint: var(--sect-comm); --emph: 0.62; }
+.cc-spine  { --tint: var(--sect-util); --emph: 0.7; }
+
+/* ---- the reader: one tint per station, loudness from the silence ---- */
+
+.ft-station { grid-auto-rows: 1fr; }
+
+.ft-panel[data-panel] {
+  --tint: var(--sect-none);
+  --emph: 1;
+  position: relative;
+  overflow: hidden;
+}
+.ft-panel[data-panel]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: calc(0.34 + 0.66 * var(--emph));
+  transition: opacity var(--dur-move) var(--ease);
+  background:
+    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    radial-gradient(58% 70% at 2% 0%,
+      color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
+}
+.ft-panel[data-panel] > * { position: relative; z-index: 1; }
+
+/* One tint per station, so a reader who has scrolled knows which of the five
+   they are in without looking up at the heading. */
+.ft-station[data-group="signal"]     .ft-panel { --tint: var(--sect-tech); }
+.ft-station[data-group="convexity"]  .ft-panel { --tint: var(--sect-fin); }
+.ft-station[data-group="volatility"] .ft-panel { --tint: var(--sect-health); }
+.ft-station[data-group="tape"]       .ft-panel { --tint: var(--sect-disc); }
+.ft-station[data-group="context"]    .ft-panel { --tint: var(--sect-comm); }
+
+/* THE FOUR SILENCES, AS LOUDNESS. The ladder is the one this codebase already
+   keeps, and the ORDER is the argument: `quiet` sits above the other three
+   deliberately, because it is the only one of the four that is a MEASUREMENT —
+   the tape was read and named nothing. Sinking it to the level of a feed that
+   failed would tell a reader the market was silent when in fact the pipeline
+   was.
+
+   OPACITY IS THE SECOND CHANNEL AND NEVER THE ONLY ONE. Each state keeps its
+   glyph, exactly as the sign keeps its position: a reader on a monochrome
+   printout, or one who cannot separate these weights, loses the dimming and
+   still reads the ladder. */
+.ft-panel[data-empty="quiet"]       { --emph: 0.46; }
+.ft-panel[data-empty="pending"]     { --emph: 0.30; }
+.ft-panel[data-empty="unavailable"] { --emph: 0.22; }
+.ft-panel[data-empty="unreadable"]  { --emph: 0.22; }
+
+/* ---- the arrival, on both ----
+
+   THE STAGGER INDEX COMES FROM `nth-child` RATHER THAN FROM A RENDERER. On the
+   board the renderer writes `--i` because it knows each card's rank; here
+   nothing may be added to either controller, so position in the grid is the
+   index. Ten steps, matching ARRIVE_STEPS on the board, and everything past
+   the tenth shares the last delay — so a twenty-three panel station is fully
+   arrived inside the same window a twelve-card board is. */
+.cc-region, .ft-panel[data-panel] {
+  animation: fd-arrive var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 10) * var(--stagger));
+}
+.cc-region:nth-child(1),        .ft-panel[data-panel]:nth-child(1)  { --i: 0; }
+.cc-region:nth-child(2),        .ft-panel[data-panel]:nth-child(2)  { --i: 1; }
+.cc-region:nth-child(3),        .ft-panel[data-panel]:nth-child(3)  { --i: 2; }
+.cc-region:nth-child(4),        .ft-panel[data-panel]:nth-child(4)  { --i: 3; }
+.cc-region:nth-child(5),        .ft-panel[data-panel]:nth-child(5)  { --i: 4; }
+.cc-region:nth-child(6),        .ft-panel[data-panel]:nth-child(6)  { --i: 5; }
+.cc-region:nth-child(7),        .ft-panel[data-panel]:nth-child(7)  { --i: 6; }
+.cc-region:nth-child(8),        .ft-panel[data-panel]:nth-child(8)  { --i: 7; }
+.cc-region:nth-child(9),        .ft-panel[data-panel]:nth-child(9)  { --i: 8; }
+.cc-region:nth-child(10),       .ft-panel[data-panel]:nth-child(10) { --i: 9; }
+
+/* Both stand down with everything else. The tokens above are already zeroed by
+   the block at the top of the file, which takes the stagger and the travel to
+   nothing; these two take the animation off entirely so no element can be left
+   mid-blur, and they sit AFTER what they override — the rule this stylesheet
+   has now relearned three times. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-region, .ft-panel[data-panel] { animation: none; }
+  .cc-region::before, .ft-panel[data-panel]::before { transition: none; }
+}
