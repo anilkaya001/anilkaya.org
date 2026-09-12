@@ -352,7 +352,16 @@ try {
            so the file asserted the fold against a projection that could not
            see it. */
         q: t.querySelector(".cc-tile-q")?.textContent.trim() || "",
-        subKind: t.querySelector(".cc-tile-q")?.dataset.empty || null,
+        /* THE SUB'S OWN CLASS, because the assertion below reads the TONE off
+           it: the demotion cost the equal-weight tilt its tile and was not
+           allowed to cost it its sign. Added in the same pass as `q` and
+           missed — `subCls` came back undefined and failed against a strip
+           that was tinting the sub correctly, which is the same defect as the
+           one that prompted `q`, two assertions further down. The fix for a
+           projection that cannot see a slot is to read every field the block
+           below reads, so both were derived from the block rather than from
+           memory this time: k, v, cls, q, subCls. */
+        subCls: t.querySelector(".cc-tile-q")?.className || "",
         cls: t.querySelector(".cc-tile-v")?.className || "",
       })));
     /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.
