@@ -2,8 +2,9 @@
    flows-drawers.js — the nine panel renderers that are NOT on the
    station a reader lands on, fetched when they are first needed.
 
-   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 112k as
-   measured on 2026-09-11, and deferring it takes the ticker route
+   WHAT THIS FILE DEFERS, AND WHAT THAT WEIGHS: this file is 114k as
+   measured on 2026-09-12 — it was 112k, and the session path's window
+   picker is the 2k — and deferring it takes the ticker route
    from 499.88 KiB to 402.01 KiB — 97.88 KiB off first paint. The two
    figures differ because the walk that defers it GREW: making the
    grid draw one station rather than twenty-three panels, and
@@ -1730,6 +1731,53 @@
       return emptyPanel(host, question, panel);
     }
     panelHead(host, question);
+
+    /* THE WINDOW THIS PATH IS DRAWN OVER, PICKED BY THE READER.
+
+       The series is cumulative and side-signed across the whole session, and
+       a whole session is the wrong window for most questions asked of it: a
+       bid that persisted all day and a bid that arrived in the last half hour
+       draw the same shape at full width, because the late one is a wiggle at
+       the right-hand end of a 390-minute axis. Slicing from the END is what
+       separates them.
+
+       THE WINDOWS ARE DERIVED FROM THE PAYLOAD'S OWN MINUTES, not assumed to
+       be five minutes a point: `minutes / points` is the real cadence, and a
+       card published at a different one still gets windows that mean what
+       they say. A window wider than the series, or narrower than two points,
+       is not offered — an axis with one point on it is not a path.
+
+       REDRAWN, NOT RESCALED. Each window re-enters this function with its own
+       slice, so both legs renormalise to the extremes INSIDE the window and
+       the zero rule stays honest. A window is a different measurement, not a
+       zoom on the same one, and it is drawn as one. */
+    const whole = Array.isArray(panel.__whole) ? panel.__whole : panel.series;
+    const perMin = isNum(panel.minutes) && whole.length > 1
+      ? panel.minutes / whole.length : null;
+    if (perMin > 0) {
+      const wins = [["Session", whole.length]]
+        .concat([["2h", 120], ["1h", 60], ["30m", 30]]
+          .map(([lab, mins]) => [lab, Math.round(mins / perMin)]))
+        .filter(([, n], i) => i === 0 || (n >= 2 && n < whole.length));
+      if (wins.length > 1) {
+        const bar = el("div", "fp-win");
+        bar.setAttribute("role", "group");
+        bar.setAttribute("aria-label", "Window this path is drawn over");
+        const active = isNum(panel.__win) || whole.length;
+        for (const [lab, n] of wins) {
+          const b = el("button", "fp-win-b", lab);
+          b.type = "button";
+          if (n === active) b.setAttribute("aria-current", "true");
+          b.addEventListener("click", () => {
+            host.replaceChildren();
+            renderPath(host, { ...panel, series: whole.slice(-n), __win: n, __whole: whole },
+              card, questionIn);
+          });
+          bar.append(b);
+        }
+        host.append(bar);
+      }
+    }
 
     /* A row is a PAIR. A card old enough to carry bare numbers instead is read
        as delta-only rather than crashing on `undefined[1]` — published cards

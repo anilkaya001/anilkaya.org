@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "156";
+export const ASSET_VERSION = "157";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -141,11 +141,6 @@ const rail = (active) => {
   <p class="rail-group" id="railDisclosures">Disclosures</p>
   <div class="rail-items" role="group" aria-labelledby="railDisclosures">
     ${item("/flows/political/", "Political", "political")}
-  </div>
-  <p class="rail-group" id="railEvidence">Evidence</p>
-  <div class="rail-items" role="group" aria-labelledby="railEvidence">
-    ${item("/flows/history/", "Track record", "history")}
-    ${item("/flows/track/", "Score track", "track")}
   </div>
 </nav>`;
 };

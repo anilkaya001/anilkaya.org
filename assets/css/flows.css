@@ -203,7 +203,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=156") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=157") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
@@ -1583,6 +1583,34 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 
 .fp { display: block; width: 100%; height: auto; }
 .fp-zero { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 3 3; }
+/* THE WINDOW PICKER ON THE SESSION PATH. Four chips, not a select: there are
+   four of them, they are the whole control, and a select would hide three
+   behind a click to save a row this panel is not short of. */
+.fp-win { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0 0 0.5rem; }
+.fp-win-b {
+  font: inherit;
+  font-size: var(--fs-fine);
+  /* --font-figure, NOT --font-mono. The mono token is the Academy's JetBrains
+     stack and contracts.mjs refuses it here by name: a Flows rule reaching for
+     it puts a second family back on a section whose whole typographic argument
+     is two faces. --font-figure is the one this section counts in. */
+  font-family: var(--font-figure);
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  transition: color var(--dur-tap) var(--ease), background var(--dur-tap) var(--ease);
+}
+.fp-win-b:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.fp-win-b[aria-current="true"] {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+}
+
 .fp-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
 .fp-line.is-pos { stroke: var(--flow-up); }
 .fp-line.is-neg { stroke: var(--flow-down); }
