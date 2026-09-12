@@ -1987,7 +1987,15 @@ body.is-stale .flows-tablewrap {
   opacity: calc(0.34 + 0.66 * var(--emph));
   transition: opacity var(--dur-move) var(--ease);
   background:
-    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
     radial-gradient(58% 70% at 2% 0%,
       color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
 }
@@ -2250,13 +2258,29 @@ body.is-stale .flows-tablewrap {
 
    --dur-enter + a beat, because a line that finishes drawing exactly as the
    card lands reads as one event rather than two. */
+/* THE HIDDEN STATE LIVES IN THE KEYFRAMES, NOT IN THIS RULE, and that is a
+   robustness point rather than a stylistic one. The first version declared
+   `stroke-dashoffset: 1` here as the resting value and animated it to 0 under
+   `backwards` fill. `backwards` fills only BEFORE the delay — so the instant
+   the animation finished, the property reverted to this rule's value and the
+   price line vanished again. It was visible at all only because the JS removes
+   `is-arriving` on animationend, which made a chart's visibility depend on a
+   listener firing. Anything that stopped that listener — an interrupted
+   animation, a card whose `fd-draw` never runs — left a card that looked drawn
+   and had no line in it.
+
+   Now the rule sets no dash at all: a sparkline with this class and no
+   animation is simply visible, which is the correct resting state. `both`
+   keeps the final frame, so the line stays drawn after it finishes whether or
+   not anything ever removes the class. */
 .fd-card.is-arriving .fd-sparkline {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: fd-draw var(--dur-draw) var(--ease-out) backwards;
+  animation: fd-draw var(--dur-draw) var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * var(--stagger));
 }
-@keyframes fd-draw { to { stroke-dashoffset: 0; } }
+@keyframes fd-draw {
+  from { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  to   { stroke-dasharray: 1; stroke-dashoffset: 0; }
+}
 
 /* AND THE OVERRIDE LIVES HERE, NOT IN THE BLOCK AT THE TOP OF THE FILE.
 
@@ -8396,7 +8420,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   opacity: calc(0.34 + 0.66 * var(--emph));
   transition: opacity var(--dur-move) var(--ease);
   background:
-    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
     radial-gradient(58% 70% at 2% 0%,
       color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
 }
@@ -8438,7 +8470,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   opacity: calc(0.34 + 0.66 * var(--emph));
   transition: opacity var(--dur-move) var(--ease);
   background:
-    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    /* 3px AND THE TINT HELD TO 42% BEFORE IT FADES. At 2px with the colour
+       decaying from the first pixel, the band was present and did not read —
+       and a grouping cue nobody notices is not a cue. THE EMPHASIS COMES FROM
+       THE BAND AND NEVER FROM THE GLOW, because the glow is what the card's
+       faint ink sits on: measured over the painted pixels, `.fd-sect` reads
+       4.770 and `.fd-rank` 4.639 against a 4.5 floor, so 9% is very nearly the
+       ceiling and raising it to make the tint louder would buy colour with
+       legibility. The band has no text on it at any size. */
+    linear-gradient(90deg, var(--tint) 42%, transparent 88%) top left / 100% 3px no-repeat,
     radial-gradient(58% 70% at 2% 0%,
       color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
 }
