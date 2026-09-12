@@ -6965,12 +6965,25 @@
        in it is paid for in pinned height on every screen of every panel. That
        is the budget a reading has to earn.
 
-       Conviction, the gamma regime and the two dates do not earn it. All four
-       were also in the hero or one scroll away in a panel, so the first thing
-       a reader saw on arrival was the same seven facts twice, four lines
-       apart — and the strip was long enough to wrap at 1280. Conviction and
-       the session date are in the hero; the regime is the gamma panel's lead,
-       stated there with the ladder it was measured from.
+       Conviction, the gamma regime and the two dates do not earn it, and each
+       one has a home that was CHECKED rather than assumed:
+
+         - conviction and the session date are in the hero, four lines up;
+         - the regime is stated by the gamma panel, off `spotGammaShare`,
+           beside the ladder it was measured from;
+         - the BUILD time is in the stale banner — and only when it is a
+           reading. `markStale` prints "this card was last written N days
+           ago" once the age passes STALE_WRITE_MS, which is the one state in
+           which a build timestamp tells a reader anything. On a fresh card it
+           said "built 2026-09-12" on every screen of every panel to report
+           that nothing was wrong.
+
+       That last one is the honest exception and it is written down because
+       the first draft of this comment claimed all four were "in the hero or
+       one scroll away in a panel". Three were. The build time is not in a
+       panel at all; it is conditional, and a comment that rounded it up to
+       the other three is how a reader later concludes the page states
+       something it does not.
 
        WHAT STAYS IS WHAT A READER DEEP IN A PANEL ACTUALLY NEEDS: which name,
        what it scores, what it costs, which way it moved. The slots are still
