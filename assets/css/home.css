@@ -19,7 +19,18 @@
     radial-gradient(140% 120% at 50% 120%,
       color-mix(in srgb, var(--gold-harvest) 10%, transparent) 0%,
       transparent 60%),
-    var(--bg-deep);
+    /* THE SITE'S GROUND, COMPOSED UNDER THIS HERO'S OWN TWO WASHES.
+
+       index.html is <body class="home">, so this rule and base.css's `body`
+       rule select the SAME element — and a class beats a type selector, so
+       this shorthand replaces the shared ground outright rather than layering
+       over it. The first attempt at fixing that ended this list with
+       `transparent`, which removed the ground from Home altogether: the probe
+       came back with body background-color rgba(0,0,0,0) and nothing but the
+       gold behind it. Naming --site-ground as the final layers is what
+       actually composes the two, and it is the same token base.css paints, so
+       Home cannot drift from the other three. */
+    var(--site-ground);
 }
 
 /* Simulation canvas — bottom layer, receives pointer input */

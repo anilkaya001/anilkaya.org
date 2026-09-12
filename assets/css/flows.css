@@ -192,22 +192,14 @@
      image to the viewport rather than the document: the longest route here
      measures ten thousand pixels, and an unpinned cover image would show one
      flat slice per screen, which is the thing this replaces. */
-  --flows-ground:
-    /* THE SCRIM IS A GRADIENT, NOT A FLAT WASH, because the image is not
-       evenly bright. A single opacity that let the navy through turned the
-       lit haze below the horizon into glare behind every card in the lower
-       two thirds of the page — the render showed the bullish table sitting on
-       brown. Light at the top where the sky is already dark, heavy below the
-       horizon where it is not. */
-    linear-gradient(180deg,
-      rgba(8, 8, 10, 0.42) 0%,
-      rgba(8, 8, 10, 0.50) 34%,
-      rgba(8, 8, 10, 0.72) 52%,
-      rgba(9, 8, 7, 0.88) 68%,
-      rgba(9, 8, 7, 0.94) 100%),
-    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=170") center / cover no-repeat,
-    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
+  /* ALIASED, NOT RESTATED. The image, the scrim and the fallback moved to
+     base.css as --site-ground when the ground stopped being this section's
+     alone — Home, Articles and the Econometrics Lab paint it too now. The
+     name survives because it is what the reduced-transparency block below
+     overrides and what .flows-body paints: a section that ever needs its own
+     ground changes one line here rather than re-stating a four-layer stack it
+     would then have to keep in step with base.css by hand. */
+  --flows-ground: var(--site-ground);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
 
