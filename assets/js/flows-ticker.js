@@ -6321,12 +6321,15 @@
        the shorter of the two the counts differ, and a reader told "4
        sessions" without being told which calendar has been given a number
        with no unit. */
+    /* The third sentence was navigation to a panel two screens down that
+       carries that title; it is gone. The rest is the UNIT — these counts
+       are on the intersection of the price window and the score archive,
+       which have different lengths — and a unit is never folded away. */
     changeEl.append(el("p", "fc-note",
       "Derived from the " + SESSIONS(chg.window.sessions) + " between " + chg.window.from +
       " and " + chg.window.to + " that this card's price window shares with the score " +
       "archive, " + chg.window.scored + " of which carry a score for this name. Every " +
-      "session count above counts THOSE sessions. The series itself is in the " +
-      "score-over-price panel below."));
+      "session count above counts THOSE sessions."));
 
     return chg;
   }
@@ -6404,8 +6407,13 @@
        running it first is what lets that ranking apply. */
     honourHash();
 
-    statusEl.textContent = (card.ticker || "This name") +
-      " \u00b7 every panel the card carries, drawn at page width.";
+    /* Blank, not a sentence. It read "<TICKER> · every panel the card
+       carries, drawn at page width": the ticker is in the badge above, "every
+       panel" is the ABSENCE of a withholding rather than a reading, and the
+       rest describes the layout. The five station leads below count what drew
+       and what was withheld, per station, which is the fact a reader can act
+       on. */
+    statusEl.textContent = "";
     if (footEl) {
       footEl.textContent =
         "Every number here is read off the card payload the pipeline published " +

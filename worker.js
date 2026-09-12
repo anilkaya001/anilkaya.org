@@ -1543,8 +1543,26 @@ async function refreshFlowsSummary(env) {
      call DID spend, and the same facts through the same prompt will most
      likely be refused the same way; retrying 95 more times would burn the
      allowance to arrive at the sentence already on the page. */
+  /* AN EMPTY ANSWER IS NOT AN OUTAGE, AND RETRYING IT IS THE EXPENSIVE
+     MISTAKE. Measured in production on 2026-09-12 before this changed: 21
+     calls in one day, 275,247 tokens in, 6,720 out — 6,720 / 21 = 320.00,
+     which is `max_tokens` exactly, on every single call, with
+     `out.response` empty every time. The generation is being cut off at the
+     cap before any answer text is emitted, and the same facts through the
+     same prompt at temperature 0.2 will be cut off the same way on the next
+     firing. So it spent a ~13,000-token prompt twenty-one times to arrive
+     at the sentence that was already on the page.
+
+     That is the argument this file already makes for a guard refusal, and
+     it applies here for the same reason. 3036 stays retryable because the
+     day's allowance genuinely resets at 00:00 UTC, and 3040 because
+     capacity genuinely returns; an empty answer changes only when the
+     facts, the prompt or the cap change — and a fact change moves the
+     fingerprint, which starts a fresh attempt on its own. */
   if (prior && prior.fingerprint === fingerprint) {
-    const retryable = typeof prior.guard === "string" && prior.guard.startsWith("unreachable");
+    const retryable = typeof prior.guard === "string"
+      && prior.guard.startsWith("unreachable")
+      && prior.guard !== "unreachable:empty";
     if (!retryable) return;
   }
 
@@ -1572,14 +1590,36 @@ async function refreshFlowsSummary(env) {
     const { system, user } = FLOWS_ASK.promptForSummary(facts);
     const out = await env.AI.run(model, {
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      /* The same cap the question lane uses, for the same reason: the answer
-         is a few sentences over facts already written, so a long generation is
-         a model with room to start reasoning — which is where an unquoted
-         number comes from. */
-      max_tokens: 320,
+      /* 320 -> 1024, AND THE ARGUMENT THE OLD NUMBER MADE IS ANSWERED RATHER
+         THAN DROPPED.
+
+         It read: "the answer is a few sentences over facts already written,
+         so a long generation is a model with room to start reasoning — which
+         is where an unquoted number comes from." That reasoning is sound for
+         an instruction-tuned model, and it is what the cap was chosen
+         against. It does not survive a REASONING model, which thinks in
+         output tokens before it writes a word: measured on 2026-09-12, every
+         one of 21 calls returned exactly 320 output tokens with `response`
+         empty. The cap was not keeping the answer short. It was ending the
+         call inside the thinking, so there was never an answer at all, and
+         the page showed the deterministic wording 21 times having paid for
+         the prompt 21 times.
+
+         WHAT ACTUALLY ENFORCES THE HONESTY IS guardAnswer(), not this
+         number, and it is unchanged and still runs on everything aiText()
+         returns: a figure no reading supports is refused and NOT stored, so
+         a longer generation cannot put an invented number on the page. The
+         cap was a second belt over that, and a second belt that strangles
+         the first is worse than none.
+
+         1024 is room to think and then answer, not room to ramble: the
+         system prompt still asks for a few sentences, and a model that
+         spends all 1024 thinking lands in the same empty branch as before —
+         which is now recorded and NOT retried twenty times. */
+      max_tokens: 1024,
       temperature: 0.2,
     });
-    generated = out && typeof out.response === "string" ? out.response.trim() : null;
+    generated = aiText(out);
     /* ONE METER COUNTS BOTH CALLERS. askRecordSpend writes the same
        flows_ai_usage row the question box does, so `remaining` on the ask page
        stays a true subtraction of everything this site spent — which is what
@@ -1614,6 +1654,39 @@ async function refreshFlowsSummary(env) {
     return;
   }
   await write(generated, true, model, null).catch(() => {});
+}
+
+/**
+ * The text a Workers AI text-generation call produced, or null.
+ *
+ * WHY THIS IS NOT `out.response`, WHICH IS WHAT BOTH LANES READ UNTIL NOW.
+ * `response` is the documented field and is correct for an
+ * instruction-tuned model. A REASONING model spends output tokens thinking
+ * before it writes, and Workers AI carries that thinking in a separate
+ * field — the platform's own Grok example publishes
+ * `usage.output_tokens_details.reasoning_tokens` beside the text. When the
+ * cap lands inside the thinking, `response` is an empty string and the call
+ * still billed for every token: the exact signature measured here on
+ * 2026-09-12, 320 of 320 output tokens on all 21 calls with nothing in
+ * `response`.
+ *
+ * THE THINKING IS NEVER RETURNED AS THE ANSWER. A model's scratch work is
+ * not a reading and must not reach a reader — this only looks past
+ * `response` to the fields that carry a FINISHED answer under a different
+ * name. Anything found here still goes through guardAnswer() exactly as
+ * `response` does; nothing below weakens that.
+ */
+function aiText(out) {
+  if (!out || typeof out !== "object") return null;
+  const take = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const direct = take(out.response);
+  if (direct) return direct;
+  /* The OpenAI-compatible shape, which some models on this platform answer
+     in even through env.AI.run(). */
+  const choice = Array.isArray(out.choices) && out.choices.length ? out.choices[0] : null;
+  const message = choice && choice.message ? take(choice.message.content) : null;
+  if (message) return message;
+  return take(choice && choice.text);
 }
 
 /**
@@ -1761,15 +1834,24 @@ async function askAnswer(question, env, index, updatedAt, subject) {
   try {
     const out = await env.AI.run(model, {
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      /* SHORT ON PURPOSE, and not only to spend fewer neurons: the
-         answer is two or three sentences of prose over facts that are
-         already written, so a long generation is a model with room to
-         start reasoning — which is where an unquoted number comes
-         from. The cap and the guard are the same argument. */
-      max_tokens: 320,
+      /* RAISED WITH THE SUMMARY LANE, AND THE EVIDENCE HERE IS WEAKER, which
+         is worth saying. The summary lane's 320 was MEASURED binding — 21
+         calls, 320 of 320 output tokens, empty `response` every time. This
+         lane shares that model and shared that cap, so it fails the same way
+         BY CONSTRUCTION rather than by observation: a reader's question has
+         been answered with the pipeline's own wording on every ask since the
+         model changed, and nobody could tell, because that fallback is a
+         legitimate state here.
+
+         The old comment said "the cap and the guard are the same argument".
+         They are not, and that is the mistake: the guard reads the answer
+         and refuses an unsupported figure; the cap only decides when the
+         model stops talking. Only one of the two can tell a wrong sentence
+         from a right one, and it is not this number. */
+      max_tokens: 1024,
       temperature: 0.2,
     });
-    generated = out && typeof out.response === "string" ? out.response.trim() : null;
+    generated = aiText(out);
     /* MEASURED, NOT ESTIMATED. The response carries its own token counts,
        so the gauge counts what the model actually billed rather than what
        a length heuristic guessed it would.

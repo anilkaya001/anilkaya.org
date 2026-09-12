@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "148";
+export const ASSET_VERSION = "149";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1059,7 +1059,18 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
   <p class="flows-stale" id="mktStale" role="status" hidden></p>
 
   <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+    <!-- THE LEDE IS THIS PAGE'S <meta> DESCRIPTION AND IS NO LONGER DRAWN.
+         "Whether the screened universe was bought or sold, how broad that was,
+         and how much of it is five names" is a table of contents for the three
+         headings underneath it — "Bought or sold, two ways", "Breadth, and what
+         it is made of", "The tape" — the DEFINITION case. It still reaches
+         head() above, where a one-line description of a page is exactly what a
+         search result and a link preview are for.
+
+         ONLY THIS PAGE. Nine pages share this markup and an earlier pass at
+         this edit replaced the FIRST of them — the bullish/bearish board —
+         leaving a comment there that described Market's headings. The side
+         page's lede is a different sentence and is still drawn. -->
   </div>
 
   <section class="fc-panel" id="mktTiltPanel" hidden>
@@ -1082,11 +1093,17 @@ ${shell("Market Level", "Options-flow intelligence", "market", username, `
     <div class="flows-tablewrap" tabindex="0" role="region"
          aria-label="Aggregate tape readings over the screened universe">
       <table class="flows-table" id="mktTape">
+        <!-- WHAT SURVIVED AND WHY. "Sums and ratios over the screened universe"
+             repeats the heading "The tape" and the Names column beside it, and
+             the "because a ratio whose numerator and denominator come from
+             different sets of names is not a ratio of anything" clause is the
+             REASON for a rule rather than the rule — method, in the
+             flows-overview.js:325 sense. What is left is the rule itself, which
+             is a population statement and therefore never folded away; the
+             Names column and its abbr title carry it per row, and this says
+             once that they do. -->
         <caption class="flows-caption">
-          Sums and ratios over the screened universe. Each row states the
-          population it was measured over, because a ratio whose numerator and
-          denominator come from different sets of names is not a ratio of
-          anything.
+          Each row states the population it was measured over.
         </caption>
         <thead>
           <tr>

@@ -4087,7 +4087,27 @@ try {
     });
     eq(q.servedText, TICKER_PANELS.find((p) => p.key === "gamma").question,
        "the served question is the registry's, verbatim");
-    ok(q.servedShown, "and a reader can see it");
+    /* AND A READER DOES NOT SEE IT IN THE GRID — deliberately, since v149.
+       Twenty-three panels each carrying a sentence that restates its own
+       title is 243 words of DEFINITION on every ticker (flows-overview.js:325,
+       and the same cut the Market route took in 851741e). `.ft-panel-q` is
+       clipped to a 1px box rather than display:none, so it stays in the
+       accessibility tree and a screen reader still hears the question before
+       the drawing.
+
+       MEASURED ON THE BOX, NOT ON getClientRects(). A clipped 1px element
+       still HAS client rects, so the old check would now pass while the
+       sentence is invisible — an assertion that survives the change it was
+       meant to police is worse than one that fails. */
+    const qBox = await page.evaluate(() => {
+      const el = document.querySelector("#panel-gamma .ft-panel-q");
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), inTree: !el.hidden };
+    });
+    ok(qBox && qBox.w <= 2 && qBox.h <= 2,
+       `the served question is clipped out of the grid rather than drawn (${JSON.stringify(qBox)})`);
+    ok(qBox.inTree, "and stays in the document for assistive technology");
     eq(q.drawnText, q.servedText,
        "the renderer still draws the same sentence — deleting the drawn copy would pass " +
        "every assertion here and lose the comparison that catches a drawer handed the card " +

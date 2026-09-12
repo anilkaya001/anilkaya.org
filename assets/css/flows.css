@@ -4095,11 +4095,36 @@ body.is-stale .flows-tablewrap {
    its host, readable before the fetch that fills the box under it and set
    exactly as the drawn one was — the same sentence in the same place, and a
    reader must not be able to tell which arrived with the page. */
+/* AND IT IS NO LONGER DRAWN, ONLY SERVED.
+
+   Twenty-three panels, each with a sentence over it restating its own title:
+   "Score over price" above "How has this name's daily score moved against
+   its own price?", "Score derivation" above "Which components produced this
+   score, and how heavily?". Measured across the registry, the questions are
+   243 words and the station blurbs another 106 — 349 words of fixed prose on
+   every ticker, for every name, saying what the headings beside them already
+   say. That is the flows-overview.js:325 DEFINITION case, and the Market
+   route was cut on the same rule in 851741e.
+
+   HIDDEN, NOT DELETED, AND THE DISTINCTION IS THE WHOLE POINT HERE. The
+   sentence stays in the served markup and stays in the accessibility tree:
+   a screen reader still hears the question before the drawing, which is
+   where it does the most good and costs a sighted reader nothing. It is also
+   still visible where a reader has ASKED for depth — the enlarge dialog
+   draws `.fc-q`, which is scoped out of the rule below, so opening a panel
+   still shows what it answers.
+
+   This is deliberately CSS and not a renderer change: the question is still
+   emitted, still compared against the registry by the ticker suite, and
+   still the thing that catches a drawer handed the CARD where it expected
+   the question — a defect that shipped once and that deleting the string
+   would hide rather than fix. */
 .ft-panel-q {
-  margin: 0 0 0.7rem;
-  color: var(--ink-dim);
-  font-size: var(--fs-note);
-  font-style: italic;
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
 }
 /* AND THE DRAWN COPY IS HIDDEN IN THE GRID, NOT DELETED. Every renderer still
    heads its drawing with the question it was handed, which is what the ticker
@@ -4488,10 +4513,20 @@ body.is-stale .flows-tablewrap {
   font-family: var(--font-figure); font-size: var(--fs-data); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-harvest);
 }
+/* THE STATION BLURB, SERVED AND NOT DRAWN, for the reason .ft-panel-q above
+   records. All five are lists of the panels underneath them — "The published
+   score, what it has done since the last session that scored this name, what
+   it is made of, and the figures the rest of this page derives" sits above
+   three panels titled "Score over price", "Score derivation" and "Key
+   statistics". The station's own name and the count beside it (`OVERVIEW 3`)
+   carry what a reader needs at a glance; the sentence is for a reader who
+   cannot see that layout, and it still reaches them. */
 .ft-group-b {
-  display: block; margin-top: 0.3rem;
-  font-family: var(--font-serif); font-size: var(--fs-note); font-weight: 400;
-  color: var(--ink-dim);
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
 }
 .ft-group:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 4px; }
 

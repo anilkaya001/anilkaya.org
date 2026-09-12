@@ -283,26 +283,81 @@ if (CARDS && existsSync(CARDS)) {
     const errs = [];
     page.on("pageerror", (e) => errs.push(String(e)));
     const pageHTML = pages.FLOWS_PAGES.tickerPage({ username: "preview" });
-    await page.route("**/*", (r) => r.fulfill({ contentType: "text/html", body: pageHTML }));
-    await page.route("**/assets/js/flows-drawers.js*",
-      (r) => r.fulfill({ contentType: "text/javascript", body: js("flows-drawers.js") }));
-    await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
-    await page.evaluate((card) => {
+
+    /* THE CATCH-ALL SERVED THE PAGE'S HTML TO THE PAGE'S OWN SCRIPT TAGS.
+       a catch-all route answering with `contentType: "text/html"` replies to
+       EVERY request, and
+       the ticker document carries `<script src>` for nav, the panel library
+       and the controller — each of which was handed the document and tried
+       to parse "<!doctype html" as JavaScript. That is the three
+       `SyntaxError: Unexpected token '<'` this block reported the first time
+       it ever ran, and it had been sitting unvalidated because the ticker is
+       skipped unless --cards is passed. A tool whose whole claim is "a
+       computed style is evidence a rule applied, not that the page reads"
+       does not get to ship a page that threw and call the run clean.
+
+       Assets are now served as assets, from this working tree, so the page
+       boots the way the Worker boots it. */
+    await page.route(/\/assets\/js\/[a-z0-9-]+\.js/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({ contentType: "text/javascript", body: js(file) });
+      } catch {
+        /* A script the tree does not have is an empty body, not the document:
+           an honest 200 with nothing in it fails visibly at the feature that
+           needed it rather than as a parse error three frames away. */
+        return r.fulfill({ contentType: "text/javascript", body: "" });
+      }
+    });
+    await page.route(/\/assets\/css\/[a-z0-9-]+\.css/i, (r) => {
+      const file = new URL(r.request().url()).pathname.split("/").pop();
+      try {
+        return r.fulfill({ contentType: "text/css", body: readFileSync(path.join(ROOT, "assets/css", file), "utf8") });
+      } catch { return r.fulfill({ contentType: "text/css", body: "" }); }
+    });
+    await page.route("**/*", (r) => r.request().resourceType() === "document"
+      ? r.fulfill({ contentType: "text/html", body: pageHTML })
+      : r.fulfill({ status: 204, body: "" }));
+
+    /* THE CARD STUB IS INSTALLED BEFORE THE CONTROLLER RUNS, not after.
+       addInitScript lands in the page before any of its own script executes;
+       the old page.evaluate() ran AFTER goto(), so the controller had already
+       fetched, missed, and drawn its empty state — which is why the ticker
+       badge read "?" on a card that is right here. */
+    await page.addInitScript((card) => {
       window.fetch = () => Promise.resolve({ ok: true, status: 200,
         headers: { get: () => "application/json" },
         json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
     }, best.c);
-    for (const f of ["assets/css/base.css", "assets/css/flows.css"]) {
-      await page.addStyleTag({ path: path.join(ROOT, f) });
-    }
-    await page.addScriptTag({ content: js("flows-panels.js") });
-    await page.addScriptTag({ content: js("flows-ticker.js") });
-    await page.waitForTimeout(4000);
+    await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
+    await page.waitForTimeout(5000);
     const seen = await page.evaluate(() => {
       const p = [...document.querySelectorAll(".ft-panel[data-panel]")];
+      const rows = new Map();
+      for (const x of p) {
+        const r = x.getBoundingClientRect(), top = Math.round(r.top);
+        if (!rows.has(top)) rows.set(top, []);
+        rows.get(top).push(r);
+      }
+      const spread = [...rows.values()].map((rs) =>
+        Math.round(Math.max(...rs.map((r) => r.height)) - Math.min(...rs.map((r) => r.height))));
       return { ticker: (document.querySelector(".ft-tk") || {}).textContent || "?",
         panels: p.length,
         panelHeights: [...new Set(p.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
+        /* The evenness question a reader actually asks, same as the Market
+           and verdict-strip probes: do two panels SIDE BY SIDE differ. */
+        panelRows: rows.size,
+        worstRowGapPx: spread.length ? Math.max(...spread) : 0,
+        /* The two definition layers this commit stops drawing, read back off
+           the page rather than asserted: both must still be in the document
+           and both must be clipped out of the grid. */
+        questionsInDoc: document.querySelectorAll(".ft-panel-q").length,
+        questionsDrawn: [...document.querySelectorAll(".ft-panel-q")]
+          .filter((q) => q.getBoundingClientRect().width > 2).length,
+        blurbsInDoc: document.querySelectorAll(".ft-group-b").length,
+        blurbsDrawn: [...document.querySelectorAll(".ft-group-b")]
+          .filter((b) => b.getBoundingClientRect().width > 2).length,
+        statusLine: (document.getElementById("ftStatus") || {}).textContent || "",
         stations: document.querySelectorAll(".ft-station").length };
     });
     await page.screenshot({ path: path.join(OUT, "ticker.png") });
