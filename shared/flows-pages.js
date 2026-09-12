@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "173";
+export const ASSET_VERSION = "174";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -553,6 +553,16 @@ ${neuronDock(summary)}
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccAlertsH">Largest flagged windows</h2>
         <span class="cc-h-s" id="ccAlertsSub"></span>
+        <!-- THE WAY TO THE REST OF THEM, AND IT IS A DIFFERENT SENTENCE FROM
+             THE ONE BESIDE IT. #ccAlertsSub states how many of how many this
+             region drew and when the feed was read — a measurement, written
+             by flows-overview.js. This is the address of the route that draws
+             the whole population, and it is static because it is true whether
+             or not the key read: a reader whose alerts key failed here is
+             exactly the reader who wants the other route. Two elements rather
+             than one anchor, so the count can keep being asserted as its own
+             text. -->
+        <a class="cc-h-s cc-h-all" href="/flows/unusual/">All flagged windows \u2192</a>
       </div>
       <div class="cc-body" id="ccAlerts"></div>
     </section>

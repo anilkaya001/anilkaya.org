@@ -1029,8 +1029,32 @@ const CEILING_KIB = {
      213 LEAVES 1,544 B, which is less than the last raise left on purpose:
      this route has now taken three raises in a row, and the next edit to it
      should have to make its argument in the open rather than find room
-     already cleared for it. */
-  overviewPage: 213,
+     already cleared for it.
+
+     213 -> 217, ONE COMMIT LATER, WHICH IS THE ARGUMENT THAT PARAGRAPH ASKED
+     FOR. Re-derived the same way:
+
+       flows-overview.js  182,865 -> 187,001; the other three unchanged
+       total              216,568 -> 220,704 B = 215.53 KiB
+
+     WHAT IT BOUGHT: the flagged-windows table drew four columns over rows
+     carrying `spanStart`, `spanEnd`, `askPrem` and `bidPrem` — so a reader
+     could see that $3.0M was flagged and not WHEN inside the session, nor
+     which side of the quote the vendor attributed it to. Both are now
+     columns: the window start on the EASTERN clock, named in the header
+     because a table of session windows with an unnamed clock is a number
+     nobody can place, with both ends of the span in the cell's title; and
+     the ask/bid share, which carries no hue precisely because green means
+     bullish everywhere else on this page and a print at the ask is not
+     proof of a buyer. Plus the route to the whole population beside the
+     count, which is markup rather than script.
+
+     217 LEAVES 1,504 B. The paragraph above said the next edit to this route
+     should argue in the open rather than find room waiting, and this is that
+     argument rather than an exception to it: two raises inside one PR is
+     worth saying out loud, and what a reader gets for them is five readings
+     the payload was already carrying and the page was dropping. */
+  overviewPage: 217,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

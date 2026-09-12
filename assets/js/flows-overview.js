@@ -106,6 +106,32 @@
      over 6 sessions" is. A delta printed without its span is the exact
      defect the shared change layer replaced, and it is not allowed back in
      through a terse cell. */
+  /* AN INSTANT ON THE EASTERN CLOCK, "HH:MM", or null.
+
+     THE SHAPE IS CHECKED BEFORE THE PARSE, for the reason shared/flows-
+     freshness.js states about the same conversion: Date.parse is lenient
+     enough to be dangerous, and a bare "2026-01-05" is not merely lenient
+     but wrong — midnight UTC is the previous evening in New York. A
+     timestamp with no time is refused rather than guessed at.
+
+     NOT THE VIEWER'S ZONE, deliberately. Everything measured here is a
+     window inside one Eastern session, and the region's subtitle already
+     carries the READ instant on the viewer's own wall clock; a table of
+     session windows in Istanbul time would be two clocks on one region
+     with nothing saying which is which. */
+  const etTime = (at) => {
+    if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(at.trim())) {
+      return null;
+    }
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return null;
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(d);
+    } catch { return null; }
+  };
+
   const sessionsSaid = (n) => n + (n === 1 ? " session" : " sessions");
   const daysSaid = (n) => n + (n === 1 ? " calendar day" : " calendar days");
 
@@ -1861,15 +1887,69 @@
 
     const wrap = tableWrap("Flagged option windows, largest premium first");
     const table = el("table", "cc-tbl");
-    table.append(headRow([["Name", null], ["Contract", null], ["Premium", "c-num"], ["Rule", null]]));
+    /* TWO COLUMNS THE PAYLOAD HAS ALWAYS CARRIED AND THIS TABLE NEVER DREW.
+
+       WHEN. `spanStart` is the vendor's own start of the window — a window is
+       a span rather than a print, so the cell states the start and the title
+       carries both ends. In EASTERN time, named in the header: these are
+       session windows, and a clock with no zone on a table of session windows
+       is a number a reader cannot place. The viewer's own zone is deliberately
+       not used here — the alerts subtitle above already carries the READ
+       instant in the viewer's wall clock, and those two are different facts.
+
+       WHICH SIDE. `askPrem` and `bidPrem` are the vendor's attribution of the
+       window's premium to the ask and the bid, and the share of the two is
+       the only reading either supports on its own. It is ATTRIBUTION and the
+       header's title says so: a trade printing at the ask is not proof it was
+       bought, and this column would be a claim about intent if it were named
+       "bought" or "sold". */
+    table.append(headRow([
+      ["Time \u00b7 ET", null, "The start of the vendor's flagged window, in Eastern time. " +
+        "A window is a span rather than a print; hover a cell for both ends."],
+      ["Name", null], ["Contract", null], ["Premium", "c-num"],
+      ["Side", "c-num", "The vendor's ATTRIBUTION of this window's premium to the ask or the " +
+        "bid, as a share of the two. A print at the ask is not proof of a buyer, so this " +
+        "column names the side of the quote and never an intent."],
+      ["Rule", null],
+    ]));
     const body = el("tbody");
     for (const row of drawn) {
       const tr = el("tr");
+
+      const at = etTime(row.spanStart);
+      const when = el("td", "c-num cc-dim", at === null ? DASH : at);
+      if (at !== null) {
+        const to = etTime(row.spanEnd);
+        when.title = to === null
+          ? "Window opened " + at + " ET; the vendor stated no end for it."
+          : "Window ran " + at + " to " + to + " ET.";
+      }
+      tr.append(when);
+
       tr.append(el("td", "cc-t", row.t || DASH));
       tr.append(el("td", null,
         (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
         (row.exp ? " " + String(row.exp).slice(5) : "")));
       tr.append(el("td", "c-num", usd(row.prem)));
+
+      /* BOTH TERMS REQUIRED, and a measured zero on one side is a reading
+         rather than an absence: a window whose whole premium printed at the
+         bid is bid 100%, and a window the vendor split for neither side is
+         the em dash. */
+      const ask = isNum(row.askPrem), bid = isNum(row.bidPrem);
+      const two = ask === null || bid === null ? null : Math.abs(ask) + Math.abs(bid);
+      const askShare = two === null || two === 0 ? null : Math.abs(ask) / two;
+      /* NO HUE ON THIS COLUMN, AND THAT IS THE POINT OF IT. Green and red
+         mean bullish and bearish everywhere else on this page, and tinting
+         an ask-side share green would assert by colour the exact claim the
+         header's title refuses in words: a print at the ask is not proof of
+         a buyer. The words "ask" and "bid" carry the whole reading. */
+      tr.append(el("td", "c-num",
+        askShare === null ? DASH
+          : askShare === 0.5 ? "even"
+          : (askShare > 0.5 ? "ask " : "bid ") +
+            ((askShare > 0.5 ? askShare : 1 - askShare) * 100).toFixed(0) + "%"));
+
       tr.append(el("td", "cc-dim", row.rule || DASH));
       body.append(tr);
     }

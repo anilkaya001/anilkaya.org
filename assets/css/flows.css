@@ -6995,6 +6995,18 @@ body.is-stale .flows-tablewrap {
   min-width: 0;
   text-align: right;
 }
+/* THE ROUTE TO THE WHOLE POPULATION, beside the count rather than under it.
+   It is an anchor in a row of captions, so it reads as one of them until a
+   pointer or a focus ring says otherwise — the underline is what marks it as
+   a way out, and it is drawn at the same size as the count it sits next to so
+   the header stays one line of type rather than two weights. */
+.cc-h-all {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--ink-faint);
+  white-space: nowrap;
+}
+.cc-h-all:hover, .cc-h-all:focus-visible { color: var(--ink); }
 /* Where the subtitle is the way to the rest of the rows, it is a real
    anchor — linkable, middle-clickable, sendable — and it says how many the
    region is NOT showing rather than "more". */
