@@ -3950,6 +3950,24 @@ body.is-stale .flows-tablewrap {
   .flows-find-i { width: 7ch; }
 }
 
+/* THE SEARCH LEAVES THE BAR ON THE NARROWEST PHONES, and it is the only thing
+   in it that has somewhere else to be. Measured at 320px: the Flows bar ran
+   86px past the viewport — far worse than the public bar's 5px, because this
+   one carries a search field, an avatar and a sign-out button on top of the
+   same four-tab pill. The tabs are what must not wrap (the tier above says
+   so), the identity and the way out belong together where a reader looks for
+   them, and the ticker search is reachable one tap away: /flows/ticker/ serves
+   its own find field in the fixed band, and the rail's "Ask the data" takes a
+   name in prose.
+
+   THIS ROUTE IS GATED, so tests/regression.mjs — which asserts exactly this
+   geometry on the eleven public pages — cannot reach it. scripts/render-preview
+   now measures the same thing on the ticker page, which is how the 86px was
+   found at all. */
+@media (max-width: 25rem) {
+  .flows-find { display: none; }
+}
+
 @media (min-width: 60rem) {
   .flows-body.has-rail { grid-template-columns: 13rem minmax(0, 1fr); }
   .flows-body.has-rail > .flows-main { padding-top: 6rem; }

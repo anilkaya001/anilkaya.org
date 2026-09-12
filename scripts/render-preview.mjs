@@ -786,6 +786,29 @@ if (CARDS && existsSync(CARDS)) {
        DOCUMENT running off its edge is a different thing and it is a bug.
        Reported with the widest offender named, since "true" alone sends the
        next reader hunting through a 26,000px page. */
+    /* THE SAME TOPBAR GEOMETRY tests/regression.mjs asserts on the public
+       pages, measured here because that suite cannot reach a gated route. The
+       Flows bar carries MORE than the public one — the pill plus a search
+       field, a sign-out and an avatar — so if the public bar is tight at
+       320px this one is tighter, and nothing else would have told us. Direct
+       geometry rather than scrollWidth, for the reason that suite records:
+       body{overflow-x:hidden} swallows a clipped bar silently. */
+    seen.topbar = await page.evaluate(() => {
+      const pill = document.querySelector(".pill");
+      if (!pill) return "no pill";
+      const parts = [pill, document.querySelector(".topbar__social"),
+        document.querySelector(".flows-find"), document.querySelector(".topbar__tools")]
+        .filter(Boolean);
+      const right = Math.max(...parts.map((n) => n.getBoundingClientRect().right));
+      const left = Math.min(...parts.map((n) => n.getBoundingClientRect().left));
+      const off = [...pill.querySelectorAll("a")]
+        .filter((a) => a.getBoundingClientRect().right > window.innerWidth + 1 ||
+                       a.getBoundingClientRect().left < -1)
+        .map((a) => a.textContent.trim().slice(0, 12));
+      return Math.round(window.innerWidth - right) + "px slack, left " + Math.round(left) +
+        (off.length ? ", OFF-SCREEN: " + off.join(",") : "");
+    });
+
     seen.wide = await page.evaluate(() => {
       const de = document.documentElement;
       if (de.scrollWidth <= de.clientWidth) return false;
