@@ -325,12 +325,30 @@ if (CARDS && existsSync(CARDS)) {
        fetched, missed, and drawn its empty state — which is why the ticker
        badge read "?" on a card that is right here. */
     await page.addInitScript((card) => {
-      window.fetch = () => Promise.resolve({ ok: true, status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+      window.__fetches = 0;
+      /* HEADERS ANSWER PER NAME, NOT ONE STRING FOR ALL OF THEM. getJSON reads
+         X-Payload-Updated and Numbers it; a stub that returns
+         "application/json" for every header makes that NaN. It survived as
+         `|| null`, but a stub that lies about one header will lie about the
+         next one someone reads. */
+      window.fetch = () => {
+        window.__fetches += 1;
+        return Promise.resolve({ ok: true, status: 200,
+          headers: { get: (h) => (String(h).toLowerCase() === "content-type"
+            ? "application/json" : null) },
+          json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+      };
     }, best.c);
     await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
-    await page.waitForTimeout(5000);
+    /* WAIT FOR THE CARD, NOT FOR A CLOCK. A fixed timeout reported "Loading
+       the name…" as though it were the finished page — the screenshot then
+       shows a spinner and the probe numbers describe an empty grid. */
+    await page.waitForFunction(
+      () => { const t = document.getElementById("ftTicker");
+        return !!(t && t.textContent && t.textContent.trim() && t.textContent.trim() !== "\u2014"); },
+      null, { timeout: 20000 },
+    ).catch(() => {});
+    await page.waitForTimeout(3500);
     const seen = await page.evaluate(() => {
       const p = [...document.querySelectorAll(".ft-panel[data-panel]")];
       const rows = new Map();
@@ -341,7 +359,12 @@ if (CARDS && existsSync(CARDS)) {
       }
       const spread = [...rows.values()].map((rs) =>
         Math.round(Math.max(...rs.map((r) => r.height)) - Math.min(...rs.map((r) => r.height))));
-      return { ticker: (document.querySelector(".ft-tk") || {}).textContent || "?",
+      /* #ftTicker, NOT .ft-tk. The badge the controller fills is an id; the
+         class this probe asked for does not exist on this page, so it reported
+         "?" whether the card had loaded or not — a probe that cannot tell its
+         two outcomes apart. */
+      return { ticker: (document.getElementById("ftTicker") || {}).textContent || "?",
+        fetches: window.__fetches || 0,
         panels: p.length,
         panelHeights: [...new Set(p.map((x) => Math.round(x.getBoundingClientRect().height)))].length,
         /* The evenness question a reader actually asks, same as the Market
