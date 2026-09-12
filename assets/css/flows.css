@@ -229,6 +229,13 @@
   --dur-move:  170ms;
   --dur-open:  260ms;
   --dur-enter: 420ms;
+  /* THE LINE DRAW IS ITS OWN BAND, and it exists as a token because the first
+     version of it spelled the duration `calc(var(--dur-enter) + 120ms)` —
+     which survives the preference block below. Zeroing --dur-enter left
+     `calc(0s + 120ms)`, so a reader who declined motion still watched fifty
+     sparklines draw themselves. A literal added to a token is a value the
+     token can no longer govern. */
+  --dur-draw:  540ms;
   --stagger:    26ms;
   /* The cadence of the standing summary, which is the only type on this site
      that arrives a word at a time. Slower than --stagger because a word is a
@@ -353,6 +360,7 @@
     --dur-move:  0s;
     --dur-open:  0s;
     --dur-enter: 0s;
+    --dur-draw:  0s;
     --stagger:   0s;
     --word:      0s;
     --lift: 0px;
@@ -2059,9 +2067,42 @@ body.is-stale .flows-tablewrap {
   from { opacity: 0; transform: translateY(var(--rise)); }
   to   { opacity: 1; transform: none; }
 }
-.fd-card {
+/* OPT-IN, AND THE CLASS IS LOAD-BEARING RATHER THAN TIDY. assets/js/flows-board.js
+   adds `is-arriving` on the FIRST paint only. Two things depend on that:
+   a re-sort does not re-flash all fifty cards, and — the sharper one — an
+   `animation` on `transform` overrides an inline `transform`, so a card still
+   arriving could not be moved by the FLIP below. The two effects own the same
+   property and must never own it at once. */
+.fd-card.is-arriving {
   animation: fd-arrive var(--dur-enter) var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+/* THE RE-SORT. A board that re-ranks by cutting tells a reader nothing about
+   what changed: the only way to learn a name went from ninth to second is to
+   have memorised ninth. This moves it there instead.
+
+   --dur-open AND NOT --dur-move, because what is changing is the whole
+   region — fifty cards travelling at once is a board rearranging itself, not
+   an element nudging. The band the motion system reserves for a region is the
+   one this earns.
+
+   ALL THREE PROPERTIES ARE RESTATED, and the first draft of this rule got it
+   wrong in a way worth recording: it listed `transform` alone. `transition` is
+   a SHORTHAND, and this selector outranks `.fd-card` — so naming one property
+   here silently dropped the border and shadow transitions for as long as a
+   card was moving, and a hover during a re-sort would have snapped instead of
+   answering. Only the transform's band changes; the other two keep the tap and
+   move bands they have at rest.
+
+   The class is removed on transitionend (see the delegated listener in
+   flows-board.js) so the slow band never outlives the move it was for. */
+.fd-card.is-flipping {
+  transition: border-color var(--dur-tap) var(--ease),
+              transform var(--dur-open) var(--ease-out),
+              box-shadow var(--dur-move) var(--ease-out);
+  /* A moving card passes over its neighbours rather than under them. */
+  z-index: 1;
 }
 
 /* A ROW WITH NO DETAIL CARD.
@@ -2135,7 +2176,9 @@ body.is-stale .flows-tablewrap {
      identity matrix rather than to `none`, and an identity transform still
      promotes the card to its own compositing layer — so the distance being
      zero is not the same as there being no transform. */
-  .fd-card { transition: none; animation: none; }
+  .fd-card, .fd-card.is-arriving, .fd-card.is-flipping { transition: none; animation: none; }
+  /* The sparkline's own override is NOT here — see the block beneath
+     `fd-draw`, and the note on it. It cannot live in this block. */
   .fd-card:hover { transform: none; box-shadow: var(--shadow-card); }
   .fd-card::after { display: none; }
   /* The edge STAYS — it is information, not motion. Only its transition goes,
@@ -2190,6 +2233,55 @@ body.is-stale .flows-tablewrap {
 /* non-scaling-stroke, because preserveAspectRatio="none" stretches the
    120-unit viewBox across the card and would thicken the line with it. */
 .fd-sparkline { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+
+/* THE PRICE LINE DRAWS ITSELF, left to right, as the card arrives.
+
+   ONE RULE FOR EVERY CARD, because the path declares `pathLength="1"` (see
+   sparkSvg). Without that, a dash animation needs each path's real length —
+   which CSS cannot compute and JavaScript could only get from
+   getTotalLength(), a forced layout per card, fifty times, for decoration.
+   Normalising the length in the SVG makes 1 the right number for all of them.
+
+   IT IS TIED TO THE ARRIVAL, not to the card. A re-sort moves cards that are
+   already drawn; redrawing every line on every sort would be fifty strokes
+   racing under a board that is already busy moving, and the line's shape is
+   not what changed. So this runs only under .is-arriving, and it shares that
+   card's stagger — the line starts as its own card settles.
+
+   --dur-enter + a beat, because a line that finishes drawing exactly as the
+   card lands reads as one event rather than two. */
+.fd-card.is-arriving .fd-sparkline {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: fd-draw var(--dur-draw) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+@keyframes fd-draw { to { stroke-dashoffset: 0; } }
+
+/* AND THE OVERRIDE LIVES HERE, NOT IN THE BLOCK AT THE TOP OF THE FILE.
+
+   THIS IS THE THIRD TIME THIS EXACT MISTAKE HAS BEEN MADE IN THIS STYLESHEET,
+   which is why it is written down at length rather than quietly fixed. The
+   note on `.fd-card` records the first (a hover lift the early reduced-motion
+   block could not reach for two years); the glass hatch near the top records
+   the second (rules restated in a block 700 lines above the ones they meant to
+   beat). This was the third: `.fd-card.is-arriving .fd-sparkline` in the
+   preference block scored the same specificity as the rule above, sat earlier
+   in the file, and lost — so the measurement said `animation-name: fd-draw`
+   under a preference that had asked for none.
+
+   THE RULE THE FILE KEEPS RELEARNING: a preference block may set TOKENS
+   anywhere, because a custom property resolves on the element that uses it and
+   source order cannot touch it. A preference block that names a SELECTOR must
+   sit after what it overrides. --dur-draw above is the belt; this is the
+   braces, and it is placed where braces actually hold. */
+@media (prefers-reduced-motion: reduce) {
+  .fd-card.is-arriving .fd-sparkline {
+    animation: none;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+}
 .fd-spark.is-pos .fd-sparkline { stroke: var(--flow-up); }
 .fd-spark.is-neg .fd-sparkline { stroke: var(--flow-down); }
 

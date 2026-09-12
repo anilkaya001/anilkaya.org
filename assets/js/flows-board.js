@@ -674,6 +674,15 @@
     const yOf = (v) => pad + (1 - v / 4095) * (H - pad * 2);
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("class", "fd-sparkline");
+    /* pathLength="1" IS WHAT MAKES THE DRAW-IN POSSIBLE AT ALL, and it is one
+       attribute rather than a measurement. The line draws itself with
+       stroke-dasharray, which needs to know how long the path IS — a value
+       CSS cannot compute and JavaScript could only get from getTotalLength(),
+       which is a forced layout per card, fifty times, for decoration.
+       Declaring the length as 1 makes every path in the deck report the same
+       normalised length whatever its real geometry, so one CSS rule with no
+       custom property draws all fifty correctly. */
+    path.setAttribute("pathLength", "1");
     path.setAttribute("d", values.map((v, i) =>
       (i ? "L" : "M") + xOf(i).toFixed(1) + " " + yOf(v).toFixed(1)).join(" "));
     svg.append(path);
@@ -739,6 +748,13 @@
        board is always complete within one bounded window regardless of how
        many names the run published. The cap lives here rather than in the
        stylesheet because CSS cannot clamp a value it does not compute. */
+    /* THE KEY A RE-SORT FOLLOWS THIS CARD BY. Cards are rebuilt on every
+       paint rather than reused, so identity cannot come from the node — it
+       has to come from the row. The ticker is the board's natural key: unique
+       within a side by construction (one row per name) and stable across
+       every sort, which is exactly what flipDeck needs to recognise the same
+       name in two different positions. */
+    card.dataset.t = String(row.t || "");
     card.style.setProperty("--i", String(Math.min(index, ARRIVE_STEPS)));
     card.style.setProperty("--tint", tintFor(row.sector));
     card.style.setProperty("--emph", (emph === undefined ? 0 : emph).toFixed(3));
@@ -1781,6 +1797,119 @@
    * conviction ranking. The published rank is a fact about the pipeline, not
    * about where a row happens to be sitting.
    */
+  /* ---------- the re-sort, as a movement rather than a cut -----------
+
+     A BOARD THAT RE-RANKS BY CUTTING TELLS A READER NOTHING ABOUT WHAT
+     CHANGED. Sorting fifty cards used to replace the whole deck in one call:
+     every name appeared in its new place with no relationship to where it had
+     been, so the only way to learn that NVDA went from ninth to second was to
+     have memorised ninth. Moving it there says it.
+
+     THAT IS THE WHOLE ARGUMENT FOR THIS, AND IT IS NOT DECORATION. The
+     emphasis is recomputed in the same instant (emphasisFor reads the new
+     sort), so a re-sort changes each card's POSITION and its LOUDNESS
+     together. Cutting between two such states asks a reader to diff two
+     boards from memory; moving between them is the same information delivered
+     as one event.
+
+     FIRST, LAST, INVERT, PLAY — and the inversion is why it is cheap. Every
+     card is measured once before the DOM changes and once after, then offset
+     by the difference and released. The browser animates a transform, which
+     is composited: no layout, no paint, fifty cards or five hundred.
+
+     IDENTITY COMES FROM THE ROW, NOT THE NODE. deckCard rebuilds every card
+     on every paint, so `data-t` (the ticker) is what lets this recognise the
+     same name in two positions. A name absent from the previous paint has no
+     `before` box and is not moved — it fades in where it lands, which is
+     correct: it did not come from anywhere.
+
+     EXITS ARE NOT ANIMATED, DELIBERATELY. A card leaving the view is a name
+     the reader just filtered out, and holding it on screen for a quarter of a
+     second is delaying the answer they asked for. Entrances are movement
+     toward the reader; exits are the reader's own instruction, already
+     obeyed.
+
+     AND IT DOES NOT RUN ON THE FIRST PAINT. There is nothing to move from,
+     and .fd-card's arrival animation owns that moment instead — running both
+     would have the stagger fighting an inverted transform on the same
+     property. `calm` is the same MediaQueryList the spotlight uses and is
+     re-checked on change, so a reader who turns motion down mid-session gets
+     a plain cut without reloading. */
+  let deckPainted = false;
+
+  function flipDeck(draw) {
+    const animate = deckPainted && deck && !calm.matches;
+    if (!animate) {
+      draw();
+      /* THE ARRIVAL IS OPT-IN, and this is the line that opts in. Without the
+         class the CSS animation does not run at all, which is what keeps a
+         re-sort from re-flashing all fifty cards — and, more sharply, what
+         stops an `animation` on `transform` from overriding the inline
+         transform this function sets. An animation beats an inline style; the
+         two cannot share the property. */
+      if (deck && !deckPainted) {
+        for (const card of deck.children) card.classList.add("is-arriving");
+      }
+      deckPainted = true;
+      return;
+    }
+
+    /* FIRST: where every card sits before the DOM changes. */
+    const before = new Map();
+    for (const card of deck.children) {
+      if (card.dataset.t) before.set(card.dataset.t, card.getBoundingClientRect());
+    }
+
+    draw();                                       /* LAST */
+
+    /* INVERT, in one batch. Every read happens before every write: reading a
+       rect after writing a transform would force a synchronous layout per
+       card, which is the one way to make this expensive. */
+    const moves = [];
+    for (const card of deck.children) {
+      const prev = before.get(card.dataset.t);
+      if (!prev) continue;
+      const now = card.getBoundingClientRect();
+      const dx = prev.left - now.left;
+      const dy = prev.top - now.top;
+      /* Sub-pixel drift is not a move. Animating it spends a compositor layer
+         to travel a distance no one can see. */
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      moves.push({ card, dx, dy });
+    }
+    if (!moves.length) return;
+    for (const { card, dx, dy } of moves) {
+      card.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+    }
+
+    /* PLAY, on the next frame. Setting the offset and clearing it in the same
+       frame is one style computation and no animation at all — the browser
+       never paints the inverted state, so there is nothing to transition
+       from. */
+    requestAnimationFrame(() => {
+      for (const { card } of moves) {
+        card.classList.add("is-flipping");
+        card.style.transform = "";
+      }
+    });
+  }
+
+  /* THE CLASS COMES OFF WHEN THE MOVE ENDS, and it has to. `is-flipping`
+     carries a --dur-open transition on transform; left on, the card's hover
+     lift would take a region's duration instead of an element's, which is the
+     motion system's own distinction inverted on the surface it was written
+     for. One delegated listener rather than fifty, and a `transform` guard so
+     a transition on any other property does not clear it early. */
+  if (deck) {
+    deck.addEventListener("transitionend", (event) => {
+      if (event.propertyName !== "transform") return;
+      const card = event.target;
+      if (card && card.classList && card.classList.contains("is-flipping")) {
+        card.classList.remove("is-flipping");
+      }
+    });
+  }
+
   function paintRows() {
     /* NOTHING TO PAINT MEANS NOTHING TO ERASE. On an empty or errored board
        the tbody holds the explanation row render() wrote — a header click
@@ -1807,9 +1936,11 @@
          question. It is also recomputed on every sort rather than cached,
          which is the point: the loudness describes the CURRENT order. */
       const emphasis = emphasisFor(view);
-      const deckFrag = document.createDocumentFragment();
-      view.forEach(({ row, index }, i) => deckFrag.append(deckCard(row, index, emphasis(i))));
-      deck.replaceChildren(deckFrag);
+      flipDeck(() => {
+        const deckFrag = document.createDocumentFragment();
+        view.forEach(({ row, index }, i) => deckFrag.append(deckCard(row, index, emphasis(i))));
+        deck.replaceChildren(deckFrag);
+      });
     }
   }
 
