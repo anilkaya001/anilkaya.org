@@ -78,9 +78,12 @@
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
 
    THIS IS THE ACADEMY'S FACE NOW, NOT THE SITE'S. It was both until Flows
-   moved to one family: assets/css/flows.css defines --font-figure as Latin
-   Modern and its 158 rules resolve there, so nothing under /flows/ reaches
-   --font-mono any more (tests/contracts.mjs asserts that it cannot). What
+   moved to one family: assets/css/flows.css defines --font-figure as INTER
+   (flows.css:96) and its rules resolve there, so nothing under /flows/
+   reaches --font-mono any more (tests/contracts.mjs asserts that it cannot).
+   This sentence said "Latin Modern" until the section was re-set in Inter and
+   nothing updated it — a stale face in a comment is the same defect as a
+   stale number, and this file argues that case two paragraphs down. What
    still does: lab.css, article.css, placement.css and review.css. Scoping
    the claim is the point — a comment that says "this site" about two
    sections when it is true of one is the kind of sentence this repository
@@ -93,9 +96,13 @@
    axis labels the charts size their margins against are measured from a font
    the measuring code has never seen. Self-hosting fixes the width to one
    known number: 0.6 em per character, everywhere. (Flows keeps the same
-   guarantee by a different route: Latin Modern's digits are tabular WITHIN a
-   weight — measured 0.500 em at 400, 0.570 em at 700, spread 0.0000px — so a
-   column there aligns as long as its cells share a weight.)
+   guarantee by a different route, and it is no longer the face that provides
+   it: Inter is proportional, so the alignment comes from
+   `font-variant-numeric: tabular-nums`, declared on .flows-body at
+   flows.css:440 and inherited by the tables under it. The figures this
+   paragraph used to quote — 0.500 em at 400, 0.570 em at 700 — were Latin
+   Modern's and are deleted rather than restated, because nobody re-measured
+   them for Inter and a measurement nobody took is worse than none.)
 
    Two files, not four. The Google build is variable on the weight axis, so
    one file per subset covers the 400 and the 700 this site uses, and

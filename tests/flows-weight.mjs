@@ -402,7 +402,12 @@ const CEILING_KIB = {
      Almost all of it is comment, and it is the comment that was the point.
      Flows stopped using the mono family in this change: --font-mono was a
      JetBrains stack chosen for a FIXED 0.600 em advance, and the section now
-     resolves --font-figure to Latin Modern, which is proportional. Two
+     resolves --font-figure to Inter, which is proportional. (This line read
+     "Latin Modern" until the section was re-set; the argument below is
+     unchanged by the swap, because it turns on PROPORTIONAL vs fixed and both
+     faces are proportional — but the name had to be corrected, and AXIS_CH
+     is owed a re-measurement against Inter that this note does not pretend to
+     have done.) Two
      measurements had to be written down beside the code that rests on them or
      the next reader inherits a number whose face no longer exists — AXIS_CH,
      re-derived from 6.421 to the widest real caption at 5.079 and rounded to
