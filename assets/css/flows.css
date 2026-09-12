@@ -162,10 +162,40 @@
   /* The page's own ground, as a token for the same reason — the preference
      block returns it to the flat --bg. The glows are bounded to opposite
      corners so they never meet; see .flows-body. */
+  /* THE GROUND IS AN ATMOSPHERE NOW, NOT FOUR SHADES OF NEAR-BLACK.
+
+     The four stops it replaces — #121214, #141312, #131110, #12100d — span
+     four units of lightness and two of hue across a whole page, which is a
+     flat black field with extra steps. A reader looking at this section all
+     day said so, and sent the reference: an atmosphere seen edge-on, deep
+     navy at altitude, a blue band beneath it, a thin gold horizon, dusty
+     brown below. These stops are read off it.
+
+     AND THEY STAY DARK ON PURPOSE. The ground is what shows in the gutters,
+     behind the rail and through the glass; the moment it competes with a
+     reading it has failed at the only job it has. The panels that carry text
+     are opaque (--panel-bg) and untouched, so no contrast ratio on this site
+     moves — what changed is the page behind the cards, which is exactly the
+     surface the fatigue was coming from.
+
+     THE TWO RADIAL ACCENTS SURVIVE, warmed slightly to sit with the horizon
+     rather than against it. They are what stops the linear ramp reading as a
+     gradient banner: the eye finds a corner-lit field rather than a stripe.
+
+     THE FORCED-COLOURS AND REDUCED-TRANSPARENCY BRANCH at :331 still flattens
+     all of this to var(--bg), and it must keep doing so — an atmosphere is a
+     decoration and the first thing a reader who has asked for plainness
+     should stop being sent. */
   --flows-ground:
-    radial-gradient(62% 48% at 8% 0%, rgba(155, 196, 210, 0.06), transparent 70%),
-    radial-gradient(62% 48% at 92% 100%, rgba(201, 168, 120, 0.06), transparent 70%),
-    linear-gradient(180deg, #121214 0%, #141312 38%, #131110 62%, #12100d 100%);
+    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.10), transparent 70%),
+    radial-gradient(62% 48% at 92% 100%, rgba(214, 170, 104, 0.08), transparent 70%),
+    linear-gradient(180deg,
+      #0a1020 0%,     /* deep navy, the top of the frame   */
+      #101c33 24%,    /* the blue band under it            */
+      #1d1d22 44%,    /* where the two meet, neutral       */
+      #2a2416 56%,    /* the gold horizon, heavily muted   */
+      #17120c 76%,    /* dusty brown below it              */
+      #100e0b 100%);  /* warm enough to meet --bg          */
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
 
