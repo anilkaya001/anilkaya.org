@@ -2864,6 +2864,21 @@ function boardRow(r, s, rank, memory = null, origin = null) {
        on the same two fields. Two builders disagreeing about the degenerate
        case of one quantity is how a renderer ends up needing to know which
        surface produced its row. */
+    /* THE VENDOR'S OWN SECTOR STRING, VERBATIM OR NULL, and moverRow already
+       publishes it under this exact name off this exact row — so a renderer
+       holding one of the two never has to know which. It is deliberately NOT
+       mapped onto the eleven GICS names this file uses for the sector ETFs:
+       the vendor's spellings are undocumented and demonstrably not one
+       vocabulary (fixtures in tests/ carry both "Information Technology" and
+       "Technology", both "Health Care" and "Healthcare"), so a crosswalk here
+       would publish a sector attribution nobody verified.
+
+       WHAT THE BOARD DOES WITH IT is therefore split in two, and the split is
+       the point: the card PRINTS this string as it came, and separately
+       matches it against the spellings it knows to pick a tint. An unknown
+       spelling loses the tint and keeps the label, which is the right way
+       round — the decoration degrades and the fact does not. */
+    sector: s.sector || null,
     netPrem: onWire(s.net_call_premium) || onWire(s.net_put_premium)
       ? num(s.net_call_premium) - num(s.net_put_premium)
       : null,

@@ -235,6 +235,46 @@
   --lift: -2px;
   --rise:  6px;
   --decor:   1;
+
+  /* ---- THE SECTOR TINTS, AND WHAT THEY ARE ALLOWED TO BE ----
+
+     THEY NEVER CARRY A FACT, AND THE CARD IS BUILT SO THEY CANNOT. The sector
+     is on the card as a WORD, in the ordinary dim ink every other label uses;
+     these eleven colours appear only on a 2px edge and a glow behind it. That
+     division is not fastidiousness — it is the only way the constraint set
+     closes. Eleven hues that are mutually distinguishable AND each clear 4.5:1
+     on the glass panel AND stay quieter than the signed pair do not exist
+     inside one family; drop the contrast requirement by refusing to set type
+     in them and the other two are easy. It is also this file's own standing
+     rule, stated at --flow-up: hue is the LAST channel, never the only one.
+
+     WHAT THEY BUY, THEN, IS GROUPING RATHER THAN IDENTIFICATION. Nobody
+     decodes an eleven-way legend. But a board where six of the top eight cards
+     carry the same edge tells a reader "this is a technology session" before
+     they have read a single word, and the word is right there to confirm it.
+
+     NONE OF THEM IS THE BRAND GOLD, deliberately. --gold-mystic is chrome now
+     (see --flow-mag: "data drawn in the accent colour reads as emphasis rather
+     than as measurement"), so Energy gets a burnt orange and not the accent.
+     None of them is the signed green or red either, which must stay the
+     loudest thing on a board about direction.
+
+     --sect-none IS A REAL STATE, NOT A DEFAULT. The vendor's sector spellings
+     are undocumented and demonstrably not one vocabulary, so a string the card
+     does not recognise takes this neutral and keeps its printed label. The
+     decoration degrades; the fact does not. */
+  --sect-tech:    #9bc4d2;
+  --sect-comm:    #7fb3a8;
+  --sect-disc:    #c9a878;
+  --sect-staples: #9fae86;
+  --sect-energy:  #c07a4a;
+  --sect-fin:     #af983f;
+  --sect-health:  #8fb0c4;
+  --sect-ind:     #a09aa8;
+  --sect-mat:     #b5906f;
+  --sect-re:      #8aa9a0;
+  --sect-util:    #9d9ec7;
+  --sect-none:    #6f6a5a;
 }
 
 /* ---- THE WAY OUT OF THE GLASS ----
@@ -1868,6 +1908,15 @@ body.is-stale .flows-tablewrap {
   all: unset;
   box-sizing: border-box;
   cursor: pointer;
+  /* WHICH SECTOR, AND HOW LOUD. Both are written by assets/js/flows-board.js:
+     --tint from the vendor's sector string, --emph from where this row sits in
+     the magnitude of whatever the board is CURRENTLY ORDERED BY. The defaults
+     below are the honest resting state — neutral tint, quietest emphasis — so
+     a board rendered before the script runs, or from a payload published
+     before sectors were on the wire, is uniformly quiet rather than uniformly
+     shouting. */
+  --tint: var(--sect-none);
+  --emph: 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -1882,6 +1931,57 @@ body.is-stale .flows-tablewrap {
   transition: border-color var(--dur-tap) var(--ease),
               transform var(--dur-move) var(--ease-out),
               box-shadow var(--dur-move) var(--ease-out);
+}
+
+/* THE SECTOR EDGE AND ITS GLOW — CANDIDATE B'S WHOLE MECHANISM, IN ONE LAYER.
+
+   B's proposition is that a wall of identically sized cards can still tell you
+   where to look, WITHOUT anything being bigger. Size is settled by the grid
+   (see .flows-deck); this is the other half. The edge names the sector and the
+   loudness names the magnitude, and because the two travel on one pseudo-
+   element they can never drift apart or double-count.
+
+   ONE OPACITY FOR BOTH LAYERS, WHICH IS WHY THE GLOW CARRIES ITS OWN ALPHA.
+   The bar is the full tint and the radial is the tint at 9%, so the shared
+   `opacity` scales them together: the bar moves over 0.34..1.00 and the glow
+   over 0.03..0.09, which is the ratio they need and one number to animate.
+
+   THE FLOOR IS 0.34 AND NOT 0, so the quietest card on the board still shows
+   its sector. A card that vanished for being small would be a board that hides
+   its own tail — and the tail is where a reader looks for what nobody else has
+   noticed yet.
+
+   IT IS NOT ON THE SPARKLINE, and that is a departure from the drawing this
+   came from. In the mockup the price line was sector-tinted; here it already
+   carries the SIGN (.fd-spark.is-pos / .is-neg, the board's signed pair), and
+   direction is worth more to a reader than sector identity. Two encodings on
+   one stroke means the louder one wins and the other becomes noise. */
+.fd-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: calc(0.34 + 0.66 * var(--emph));
+  transition: opacity var(--dur-move) var(--ease);
+  background:
+    linear-gradient(90deg, var(--tint), transparent 76%) top left / 100% 2px no-repeat,
+    radial-gradient(58% 70% at 2% 0%,
+      color-mix(in srgb, var(--tint) 9%, transparent), transparent 70%);
+}
+
+/* The sector, as a WORD, in the ink every other label on this card uses. The
+   tint above is the grouping cue; this is the fact. */
+.fd-sect {
+  font-family: var(--font-figure);
+  font-size: 0.53rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 11rem;
 }
 
 /* THE CURSOR SPOTLIGHT.
@@ -2024,6 +2124,9 @@ body.is-stale .flows-tablewrap {
   .fd-card { transition: none; animation: none; }
   .fd-card:hover { transform: none; box-shadow: var(--shadow-card); }
   .fd-card::after { display: none; }
+  /* The edge STAYS — it is information, not motion. Only its transition goes,
+     so a re-sort re-tints instantly instead of crossfading. */
+  .fd-card::before { transition: none; }
 }
 
 .fd-head { display: flex; align-items: baseline; gap: 0.5rem; }
