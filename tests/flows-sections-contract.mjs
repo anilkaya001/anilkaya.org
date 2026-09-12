@@ -267,11 +267,14 @@ try {
       eq(bare.status, 308, `${route} without its trailing slash redirects`);
     }
 
-    /* The rail reaches every destination. A nav that omits a route is a
-       route nobody finds. */
+    /* The rail reaches every destination it offers. A nav that omits a route
+       it means to offer is a route nobody finds — but /flows/history/ is no
+       longer one it offers: the track record and the score track came off the
+       rail by decision, and the route still answers (asserted in both
+       directions in flows-worker-contract). */
     const html = await (await fetch(url("/flows/"), { headers: auth })).text();
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
-                        "/flows/desk/", "/flows/history/"]) {
+                        "/flows/desk/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
   }

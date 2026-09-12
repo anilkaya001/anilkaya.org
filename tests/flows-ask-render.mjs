@@ -563,8 +563,8 @@ await page.unroute("**/api/flows/ask");
 
    THE ROUTE IS /flows/history/ BECAUSE IT IS THE LIGHTEST PAGE THE RAIL
    IS MOUNTED ON — 49k against the ticker's 470k — and what is under
-   test is the rail, which is byte-for-byte the same on all twelve. The
-   `?t=` the last block reads is the query the ticker route uses for the
+   test is the rail, which is byte-for-byte the same on every page it is
+   mounted on. The `?t=` the last block reads is the query the ticker route uses for the
    name it is showing; the rail reads it off whatever page it is docked
    to, so the mechanism is the same wherever it is exercised. */
 {

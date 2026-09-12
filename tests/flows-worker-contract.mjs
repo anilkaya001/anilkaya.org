@@ -826,12 +826,32 @@ try {
     }
 
     /* Every gated page carries the rail, and the rail carries every
-       destination — a nav that omits a route is a route nobody finds. */
+       destination it offers — a nav that omits a route it means to offer is a
+       route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
                         "/flows/market/", "/flows/unusual/", "/flows/events/",
-                        "/flows/ticker/", "/flows/desk/", "/flows/history/",
-                        "/flows/track/"]) {
+                        "/flows/ticker/", "/flows/desk/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
+    }
+
+    /* AND TWO ROUTES ARE DELIBERATELY NOT IN IT. The track record and the
+       score track came off the rail by the owner's decision — twelve
+       destinations was more than the nav could ask a reader to choose
+       between. This is the half of that change a test has to hold, because
+       the other half is invisible: the ROUTES STILL ANSWER. Nothing was
+       deleted from the worker or the pipeline, so a link already sent still
+       opens and every payload still publishes.
+
+       Asserted in BOTH directions on purpose. A route quietly deleted and a
+       route deliberately unlisted look identical from the rail alone, and
+       only one of them is what was asked for. */
+    for (const gone of ["/flows/history/", "/flows/track/"]) {
+      ok(!html.includes(`href="${gone}"`),
+         `the rail does NOT link to ${gone} — it was taken off deliberately`);
+      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
+      eq(still.status, 200,
+         `but ${gone} still answers: unlisted is not deleted, and a link already ` +
+         "sent has to keep working");
     }
 
     // The API answers, and answers honestly before the pipeline has run.

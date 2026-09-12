@@ -113,8 +113,9 @@ const rail = (active) => {
 <nav class="flows-rail" aria-label="Flows">
   <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
        question a reader already knew to ask; this one answers the question
-       they arrive with. A rail that buried it under twelve destinations
-       would be a table of contents for a book nobody opened. -->
+       they arrive with. A rail that buried it under a dozen destinations
+       would be a table of contents for a book nobody opened — which is also
+       why the track record and the score track came off it. -->
   <p class="rail-group" id="railBrief">Briefing</p>
   <div class="rail-items" role="group" aria-labelledby="railBrief">
     ${item("/flows/ask/", "Ask the data", "ask")}
