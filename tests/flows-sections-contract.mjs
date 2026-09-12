@@ -29,6 +29,13 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
+
+/* THE RAIL'S DESTINATIONS, IN ONE PLACE. The track record and the score track
+   were taken off the rail by decision; the routes still answer. Two
+   assertions in this file turn on which side of that a route is on, and a
+   list they share is what stops them drifting apart. */
+const RAIL_OFF = new Set(["/flows/history/", "/flows/track/"]);
+const RAIL_LISTS = (route) => !RAIL_OFF.has(route);
 const TOKEN = "sections-token-aaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
 const url = (p) => server.baseURL + p;
@@ -248,9 +255,26 @@ try {
       /* ANCHORED TO THE ROUTE. A bare /aria-current/ test passes when the
          rail marks the WRONG page current; the item template emits the
          attribute inside the same tag as its href, so the adjacency is what
-         proves the self-link is the one marked. */
-      ok(new RegExp('href="' + route + '"[^>]*aria-current="page"').test(html),
-         `${route} marks ITSELF current in the rail, not merely something`);
+         proves the self-link is the one marked.
+
+         AND A ROUTE THE RAIL NO LONGER LISTS CANNOT MARK ITSELF, which is
+         not a lapse but the other half of taking it off: the track record is
+         still served, still carries the rail, and is simply not one of the
+         rail's destinations any more. What it must NOT do is light up a
+         NEIGHBOUR — a page that marks some other route current is worse than
+         one that marks nothing, because it tells a reader they are somewhere
+         they are not. That is the assertion for the unlisted case, and it is
+         strictly the stronger of the two. */
+      if (RAIL_LISTS(route)) {
+        ok(new RegExp('href="' + route + '"[^>]*aria-current="page"').test(html),
+           `${route} marks ITSELF current in the rail, not merely something`);
+      } else {
+        const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
+        ok(rail.includes("flows-rail"), `${route}: the rail markup is found before it is read`);
+        ok(!/aria-current="page"/.test(rail),
+           `${route} is not in the rail, so the rail marks NOTHING current — a page ` +
+           "that lit up a neighbour would tell a reader they are somewhere they are not");
+      }
 
       const anon = await fetch(url(route), { redirect: "manual" });
       eq(anon.status, 200, `${route} answers an anonymous visitor`);
