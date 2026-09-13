@@ -4802,6 +4802,70 @@ try {
          "two copies of one number are two numbers that can drift");
       eq(errors.length, 0, "the panel draws without throwing");
       await page.close();
+
+      /* THE OTHER SIDE OF covThin, WHICH THE CORPUS CAN NO LONGER REACH.
+
+         The renderer sends the coverage line to the OPEN side when
+         `in * 5 < of` and to the folded side otherwise. Every emitted card
+         now takes the open branch — measured: 19 of 19 eligible cards, where
+         before the coverage population widened from the board's fifty to
+         every carded name it was 0 of 19. So the folded branch, and with it
+         the disclosure `appendMethod` builds once the method set clears its
+         420-character wall, runs in production with nothing exercising it.
+
+         A FIXTURE IS SYNTHESISED RATHER THAN HUNTED FOR, because there is
+         nothing to hunt: `in` is raised to `of` on a deep clone, which is the
+         one field the branch reads. Nothing else about the card moves, so a
+         failure here is about the fold and not about the card.
+
+         THE BRANCH IS ASSERTED BEFORE ITS CONSEQUENCE. Whether the line is a
+         qualifier is the decision the renderer makes and is independent of
+         any length; whether a <details> exists follows from that decision
+         plus the wall. Asserting only the second is the mistake this block
+         already made once — see the note on the cut above. */
+      {
+        const fat = JSON.parse(JSON.stringify(base));
+        const cov = fat.panels.marketRank.coverage.oiChange;
+        cov.in = cov.of;
+        const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+        const errs2 = [];
+        page2.on("pageerror", (e) => errs2.push(String(e)));
+        await mount(page2, fat, { ticker: fat.ticker });
+        const fatGot = await page2.evaluate(() => {
+          const b = document.querySelector('.ft-panel[data-panel="marketRank"] .fmr-block');
+          if (!b) return null;
+          const q = (s) => b.querySelector(s);
+          const state = (n) => (n
+            ? { there: true, qualifier: n.classList.contains("is-qualifier"),
+                inDetails: !!n.closest("details"),
+                open: n.closest("details") ? n.closest("details").open : true }
+            : { there: false });
+          const method = [...b.querySelectorAll(".fmr-cut, .fmr-cover, .fmr-said")]
+            .filter((n) => !n.classList.contains("is-qualifier"));
+          return {
+            cover: state(q(".fmr-cover")),
+            cut: state(q(".fmr-cut")),
+            methodChars: method.reduce((n, x) => n + (x.textContent || "").length, 0),
+          };
+        });
+        ok(fatGot && fatGot.cover.there,
+           "the fattened join still draws its coverage line");
+        ok(fatGot && !fatGot.cover.qualifier,
+           "and a join this wide is NOT a qualifier — the renderer only raises the coverage " +
+           "line into the open when most cards would say they are not in the feed, which is " +
+           "the sentence a reader has to meet unopened");
+        /* The wall is 420 in flows-panels.js; the message carries the measured
+           count so a future failure says whether the fold was wrong or the
+           method set merely got shorter. */
+        ok(fatGot && fatGot.methodChars > 420,
+           `and the method set clears the 420-character wall (${fatGot && fatGot.methodChars}), ` +
+           "so the disclosure below is the branch under test rather than a short set left inline");
+        ok(fatGot && fatGot.cut.inDetails && !fatGot.cut.open,
+           "so the method IS folded behind a disclosure, and it is shut — the path every " +
+           "emitted card stopped taking when the coverage population widened");
+        eq(errs2.length, 0, "and the fattened panel draws without throwing");
+        await page2.close();
+      }
     }
 
     /* --- 7e. the cut is the reading when the name is NOT in the list ----
