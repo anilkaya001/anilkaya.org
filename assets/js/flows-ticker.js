@@ -7121,7 +7121,7 @@
         points: candles.map((r, i) => {
           const o = isNum(r[1]), v = isNum(r[4]), vol = isNum(r[5]);
           return {
-            v: vol, tone: o === null || v === null ? "flat" : v >= o ? "pos" : "neg",
+            v: vol, tone: o === null || v === null ? "flat" : v > o ? "pos" : v < o ? "neg" : "flat",
             label: r[0] ? String(r[0]) : "Session " + (i + 1),
             rows: [
               { k: "Volume", v: vol === null ? "not published" : compact(vol) + " shares" },
@@ -7351,7 +7351,8 @@
         const pt = spec.points[i];
         if (pt.v === null) continue;
         const cx = x(i);
-        const tone = pt.o === null ? "flat" : pt.v >= pt.o ? "pos" : "neg";
+        /* A CLOSE ON ITS OPEN IS FLAT — a doji is not an up day. */
+        const tone = pt.o === null ? "flat" : pt.v > pt.o ? "pos" : pt.v < pt.o ? "neg" : "flat";
         if (pt.h !== null && pt.l !== null) {
           svg.append(svgEl("line", { class: "ft-chart-wick is-" + tone,
             x1: cx, x2: cx, y1: y(pt.h), y2: y(pt.l) }));
@@ -7388,7 +7389,8 @@
         for (let i = 0; i < n; i++) {
           const pt = spec.points[i];
           if (pt.vol === null || !(vmax > 0)) continue;
-          const tone = pt.o === null || pt.v === null ? "flat" : pt.v >= pt.o ? "pos" : "neg";
+          const tone = pt.o === null || pt.v === null ? "flat"
+            : pt.v > pt.o ? "pos" : pt.v < pt.o ? "neg" : "flat";
           const hh = (pt.vol / vmax) * volH;
           svg.append(svgEl("rect", { class: "ft-chart-vol is-" + tone,
             x: x(i) - bw / 2, width: bw, y: vBase - hh, height: Math.max(0.5, hh) }));
@@ -7627,7 +7629,8 @@
       const r = pts[i].r;
       if (r === null) continue;
       const hh = (Math.abs(r) / rmax) * (retH / 2);
-      svg.append(svgEl("rect", { class: "ft-garch-ret is-" + (r >= 0 ? "pos" : "neg"),
+      /* THREE ARMS: a zero return is a measured flat day, not a small up. */
+      svg.append(svgEl("rect", { class: "ft-garch-ret is-" + (r < 0 ? "neg" : r > 0 ? "pos" : "flat"),
         x: x(i) - bw / 2, width: bw, y: r >= 0 ? rMid - hh : rMid, height: Math.max(0.5, hh) }));
     }
     svg.append(svgEl("line", { class: "ft-chart-zero", x1: plotL, x2: plotL + plotW, y1: rMid, y2: rMid }));

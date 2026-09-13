@@ -10481,6 +10481,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-garch-ret { opacity: 0.55; }
 .ft-garch-ret.is-pos { fill: var(--flow-up); }
 .ft-garch-ret.is-neg { fill: var(--flow-down); }
+.ft-garch-ret.is-flat { fill: var(--ink-faint); }
 .ft-garch-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin: 0.3rem 0 0;
   font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
 .ft-garch-lg::before { content: ""; display: inline-block; width: 0.9rem; height: 2px;
