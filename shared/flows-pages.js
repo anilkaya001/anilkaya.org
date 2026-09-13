@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "189";
+export const ASSET_VERSION = "190";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -483,7 +483,25 @@ ${rail(active)}
     <span class="flows-crumbs-sep" aria-hidden="true">/</span>
     <span aria-current="page">${title}</span>
   </nav>
-  <header class="flows-head">
+  <!-- THE PAGE HEADER IS COLLAPSED ON THE TICKER ROUTE, AND ONLY THERE.
+
+       The design opens that page on the NAME: breadcrumb, then IREN at
+       display size with its figures. This shell's own header — the kicker
+       and an <h1> reading "Ticker" — sits between those two and measured
+       150px of a 900px viewport, spent every visit to say which route a
+       reader is on directly under a breadcrumb that just said it.
+
+       COLLAPSED, NOT DELETED, and the distinction is the document outline.
+       The <h1> is still served and still first in the outline; it is
+       visually hidden, so a screen reader and a search result still get the
+       page's name while the viewport is spent on the name a reader came
+       for. Deleting it would leave the route's only <h1> inside a block that
+       is hidden until a fetch resolves — no heading at all on the picker
+       path, which is a real regression for one saved fold.
+
+       EVERY OTHER ROUTE KEEPS IT. They are not opened to read one name, and
+       their <h1> is the whole of what they are. -->
+  <header class="flows-head${active === "ticker" ? " flows-head--quiet" : ""}">
     <div>
       <p class="flows-kicker">${kicker}</p>
       <h1>${title}</h1>
@@ -2043,6 +2061,34 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
     <ol class="ft-lv-l" id="ftLvL"></ol>
     <p class="ft-lv-s" id="ftLvS"></p>
+  </aside>
+  <!-- RECENT FLOW, AND THE WORD "RECENT" IS DOING LESS WORK THAN IT LOOKS.
+
+       The rows are the vendor's own FLOW ALERTS for this name: each one is a
+       window of activity in ONE contract that one of the vendor's rules
+       flagged, carrying the window's span, its execution count, a total size
+       and a total premium. shared/flows-alerts.js states the two caveats this
+       card has to carry and does: a row AGGREGATES a window, so it is never
+       "a trade" and this card does not call it one; and the population is
+       what the vendor's rules chose to flag, ranked by premium and capped, so
+       a name with no rows here is a name the rules did not flag — NOT a name
+       with no options flow.
+
+       WHICH IS WHY THE EMPTY CASE IS A SENTENCE RATHER THAN A HIDDEN CARD.
+       Everywhere else on this page an absent reading hides its block; here
+       the absence is itself the thing most likely to be misread, so it is
+       stated. A reader who sees nothing and concludes "quiet name" has been
+       misled by the silence; a reader told "the vendor's rules flagged
+       nothing for this name among the sixty rows this run kept" has not.
+
+       A SECOND FETCH, DEFERRED. The alerts key is market-wide and is not on
+       the card, so this is the one block here that waits on a request of its
+       own — taken in the same idle pass as the boards, because both fill the
+       right-hand column and neither is above the fold. -->
+  <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
+    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
+    <ol class="ft-flow-l" id="ftFlowL"></ol>
+    <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>
   <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
        right column and calls Related. Drawn from the same session's BOARDS —

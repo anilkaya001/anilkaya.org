@@ -909,13 +909,22 @@ const CEILING_KIB = {
        nav.js             2,560 ->   2,560
        flows-cursor.js   13,123 ->  13,123
        flows-panels.js   71,727 ->  71,727
-       flows-ticker.js  411,696 -> 425,132   (+13,436)
+       flows-ticker.js  411,696 -> 425,971   (+14,275)
        ----------------------------------------------
-       total            505,113 -> 518,549 B = 506.40 KiB
+       total            505,113 -> 519,388 B = 507.21 KiB
 
      Four of the five files are byte-identical: everything here is in the
      controller. 505,113 sat 743 B inside the 494 KiB (505,856 B) ceiling, so
-     the route is 12,693 B over it now.
+     the route is 13,532 B over it now.
+
+     AND THE FIRST VERSION OF THIS PARAGRAPH HAD THE WRONG NUMBER IN IT,
+     which is worth leaving written down because it is the exact failure this
+     file exists to prevent. It read 425,132 and 518,549 — measured honestly,
+     but measured BEFORE two late fixes to the same commit (the subtitle's
+     capitalisation and the ATR unit, each with its comment). The figures
+     shipped 839 B stale. A derivation is only evidence if it describes the
+     bytes that actually shipped, so it is re-measured against the commit
+     rather than against the working tree it was written in.
 
      WHAT THE 13,436 B BOUGHT: the option chain and the key-levels card, the
      two blocks the target design puts beside the price chart and in the
@@ -942,8 +951,45 @@ const CEILING_KIB = {
      the same reasoning: room for a fix, not for a feature. This route is
      still owed the reduction the paragraph above describes, so the next
      change to it should have to argue in the open rather than find
-     pre-authorised room waiting. */
-  tickerPage: 508,
+     pre-authorised room waiting.
+
+     508 -> 517 THE SAME DAY, and the same measurement discipline. `stat` on
+     disk against `git cat-file -s 98df3bd:`:
+
+       flows-ticker.js  425,971 -> 433,944   (+7,973)
+       the other four   byte-identical again
+       ----------------------------------------------
+       total            519,388 -> 527,361 B = 515.00 KiB
+
+     WHAT THE 7,973 B BOUGHT: the recent-flow card — the vendor's own flow
+     alerts filtered to this name — and the collapse of the shell's page
+     header on this route.
+
+     THE ALERTS CARD IS THE ONE BLOCK ON THIS PAGE THAT STATES ITS EMPTY
+     CASE INSTEAD OF HIDING, and most of its bytes are that sentence. A row
+     here is one ALERT: a window of activity in one contract that one of the
+     vendor's own unpublished rules flagged, aggregating its executions — so
+     it is never "a trade", and a name with NO rows is a name the rules did
+     not flag rather than a name with no flow. Hiding on empty, which is what
+     every other block here does, would let a reader draw the second
+     conclusion from the first fact. The four silences are applied rather
+     than waived: the card says which silence it is, and tells a failed read
+     from a published feed that flagged nothing.
+
+     517 AND NOT 516. 516 KiB leaves 1,023 B; 517 leaves 2,047 B, which is
+     the order the 508 raise fixed as this route's standard two paragraphs
+     up — room for a fix, not for a feature. 1,023 B is under the size of a
+     single comment paragraph in this codebase, which is the tightness that
+     gets "fixed" by deleting prose.
+
+     AND THE CUMULATIVE STORY, STATED RATHER THAN LEFT TO BE NOTICED:
+     494 -> 508 -> 517 is 23 KiB in one day, on a route this file already
+     says is owed a REDUCTION. Each raise argues for itself above and each
+     is measured, but three in a day is a ratchet unless someone says so.
+     Nothing here retires that debt: the drawer split and the comment strip
+     are still the route's real fixes, and the next addition to it should
+     have to argue against this paragraph as well as its own. */
+  tickerPage: 517,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

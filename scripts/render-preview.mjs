@@ -499,21 +499,59 @@ if (CARDS && existsSync(CARDS)) {
        the old page.evaluate() ran AFTER goto(), so the controller had already
        fetched, missed, and drawn its empty state — which is why the ticker
        badge read "?" on a card that is right here. */
-    await page.addInitScript((card) => {
+    /* THE STUB ANSWERS PER ROUTE NOW, AND IT USED TO ANSWER THE CARD TO
+       EVERYTHING.
+
+       Every request — the boards, the funnel, the flow alerts — got the CARD
+       object back. Any block reading one of those keys was therefore handed a
+       payload of the wrong shape, found no rows in it, and drew its empty
+       state; the render then showed that empty state as though it were what a
+       reader gets. That is precisely the failure this file's own header
+       claims it exists to catch, sitting inside the file.
+
+       It is not hypothetical: the recent-flow card reads
+       /api/flows/flowalerts, and under the old stub it would have rendered
+       "the vendor's rules flagged nothing on this name" on every card in the
+       corpus — a sentence about the vendor, produced by the harness.
+
+       The fixtures are the emitted keys beside the cards, read from the same
+       --cards directory, so the page is answered with the run's own payloads
+       rather than with hand-written ones. A route with no fixture answers
+       null, which is what the Worker serves for a key nobody wrote. */
+    const fixture = (name) => {
+      try { return JSON.parse(readFileSync(path.join(CARDS, "-" + name + ".json"), "utf8")); }
+      catch { return null; }
+    };
+    await page.addInitScript((seed) => {
       window.__fetches = 0;
       /* HEADERS ANSWER PER NAME, NOT ONE STRING FOR ALL OF THEM. getJSON reads
          X-Payload-Updated and Numbers it; a stub that returns
          "application/json" for every header makes that NaN. It survived as
          `|| null`, but a stub that lies about one header will lie about the
          next one someone reads. */
-      window.fetch = () => {
+      const pick = (url) => {
+        const u = String(url || "");
+        if (u.indexOf("/api/flows/flowalerts") >= 0) return seed.alerts;
+        if (u.indexOf("/api/flows/events") >= 0) return seed.events;
+        if (u.indexOf("side=short") >= 0) return seed.short;
+        if (u.indexOf("/api/flows/board") >= 0) return seed.long;
+        return seed.card;
+      };
+      window.fetch = (url) => {
         window.__fetches += 1;
+        const body = pick(url);
         return Promise.resolve({ ok: true, status: 200,
           headers: { get: (h) => (String(h).toLowerCase() === "content-type"
             ? "application/json" : null) },
-          json: () => Promise.resolve(card), text: () => Promise.resolve(JSON.stringify(card)) });
+          json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
       };
-    }, best.c);
+    }, {
+      card: best.c,
+      alerts: fixture("flowalerts"),
+      events: fixture("events"),
+      long: fixture("board-long"),
+      short: fixture("board-short"),
+    });
     await page.goto("https://preview.test/flows/ticker/?t=" + encodeURIComponent(best.c.ticker));
     /* WAIT FOR THE CARD, NOT FOR A CLOCK. A fixed timeout reported "Loading
        the name…" as though it were the finished page — the screenshot then

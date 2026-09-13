@@ -7244,6 +7244,158 @@
     host.hidden = false;
   }
 
+  /* ---------- recent flow: the vendor's alerts for this name ---------
+
+     WHAT A ROW IS, restated from shared/flows-alerts.js because this is the
+     surface a reader meets it on: ONE ALERT — a window of activity in one
+     contract that one of the vendor's rules flagged — carrying the window's
+     span, its execution count, a total size and a total premium. It
+     AGGREGATES `trades` executions, so it is never a single trade and
+     nothing here calls it one. The column is headed by the window's start.
+
+     THE SELECTION IS THE VENDOR'S, AND THAT IS THE HEADLINE CAVEAT. These
+     rows exist because a rule fired; the rules are the vendor's own and are
+     not published. So the population is "what the vendor chose to flag",
+     ranked by its own premium and capped at the key's `cap` — and a name
+     with no rows is a name the RULES did not flag, not a name with no flow.
+
+     WHICH IS WHY THIS BLOCK STATES ITS EMPTY CASE INSTEAD OF HIDING.
+     Every other block on this page hides when it has nothing, because a
+     hidden block claims nothing. Here the absence is the thing most likely
+     to be misread — a reader who sees no rows and concludes "quiet name"
+     has drawn a conclusion the data does not support — so the silence is
+     written out. That is the one deliberate exception on the page and it is
+     the four-silences rule applied, not waived: the sentence says which
+     silence it is. */
+  function paintFlow(ticker, feed) {
+    const host = $("ftFlow"), list = $("ftFlowL"), sub = $("ftFlowS");
+    if (!host || !list) return;
+    list.replaceChildren();
+
+    /* UNREADABLE IS NOT EMPTY. A failed fetch and a feed that flagged
+       nothing are different facts, and the second is the one this card
+       exists to state carefully. */
+    if (!feed || typeof feed !== "object") {
+      if (sub) {
+        sub.textContent = "The vendor's flow alerts could not be read just now, so this " +
+          "card cannot say whether any were raised on " + ticker + ". That is a failed " +
+          "read, not a quiet name.";
+      }
+      host.hidden = false;
+      return;
+    }
+    if (feed.status === "pending") {
+      if (sub) {
+        sub.textContent = "No flow-alert feed has been published yet this session, so " +
+          "there is nothing to filter for " + ticker + " — nothing here is a reading " +
+          "about the name.";
+      }
+      host.hidden = false;
+      return;
+    }
+
+    const all = Array.isArray(feed.rows) ? feed.rows : [];
+    const mine = all.filter((r) => r && String(r.t || "").toUpperCase() === ticker);
+
+    /* NEWEST FIRST, ON THE WINDOW'S START. The feed's own order is by
+       PREMIUM — that is what its header says it ranks by — so a card headed
+       "recent" has to re-order or stop using the word. A row whose span the
+       vendor did not stamp sorts last rather than being read as oldest. */
+    const timed = mine.slice().sort((a, b) => {
+      const at = a.spanStart ? Date.parse(a.spanStart) : NaN;
+      const bt = b.spanStart ? Date.parse(b.spanStart) : NaN;
+      const aok = Number.isFinite(at), bok = Number.isFinite(bt);
+      if (!aok && !bok) return 0;
+      if (!aok) return 1;
+      if (!bok) return -1;
+      return bt - at;
+    });
+
+    const CAP = 6;
+    const shown = timed.slice(0, CAP);
+
+    /* THE WINDOW'S START, IN THE READER'S OWN ZONE. `spanStart` is an
+       INSTANT, and the card's session date is an Eastern calendar day, so
+       slicing characters out of the ISO string prints a UTC clock beside an
+       Eastern session — the same class of defect indexCrossFeed carries a
+       paragraph about. toLocaleTimeString renders it where the reader is. */
+    const clock = (iso) => {
+      if (!iso) return DASH;
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return DASH;
+      try {
+        return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch (_) { return DASH; }
+    };
+
+    for (const r of shown) {
+      const li = el("li", "ft-flow-i");
+      li.append(el("span", "ft-flow-t", clock(r.spanStart)));
+
+      /* THE CONTRACT, AS THE TARGET WRITES IT: strike then side, "44P".
+         A row whose symbol carried no parsable strike or type prints the
+         dash rather than half a contract name. */
+      const k = isNum(r.k);
+      const side = r.cp === "C" ? "C" : r.cp === "P" ? "P" : "";
+      const oc = el("span", "ft-flow-c" + (
+        side === "C" ? " is-call" : side === "P" ? " is-put" : ""));
+      oc.textContent = k === null || !side ? DASH : px2(k) + side;
+      if (r.exp) oc.title = "Expires " + r.exp;
+      li.append(oc);
+
+      li.append(el("span", "ft-flow-z", compact(r.size)));
+
+      const prem = el("span", "ft-flow-p");
+      prem.textContent = isNum(r.prem) === null ? DASH : "$" + compact(r.prem);
+      li.append(prem);
+
+      /* THE SWEEP MARK IS THE VENDOR'S FLAG AND ONLY WHEN IT SENT ONE.
+         flows-alerts.js keeps `false` and null apart on purpose: the vendor
+         looking and finding no sweep is not the vendor saying nothing. Only
+         a true prints a mark; neither of the other two prints anything,
+         because a mark for "no" would make two different silences look like
+         one claim. */
+      if (r.sweep === true) {
+        const s = el("span", "ft-flow-w", "SWEEP");
+        s.title = "The vendor flagged this window as a sweep.";
+        li.append(s);
+      }
+
+      const trades = isNum(r.trades);
+      li.title = (k === null || !side ? "This alert" : px2(k) + side) +
+        (r.exp ? " expiring " + r.exp : "") +
+        (trades === null
+          ? ", a window the vendor did not count executions for"
+          : ", " + trades + " execution" + (trades === 1 ? "" : "s") + " aggregated") +
+        (r.rule ? ", flagged by the vendor's " + r.rule + " rule." : ".");
+      list.append(li);
+    }
+
+    if (sub) {
+      const cap = isNum(feed.cap);
+      const seen = isNum(feed.seen);
+      const pool = "the " + all.length + " row" + (all.length === 1 ? "" : "s") +
+        " this run kept" +
+        (cap === null ? "" : " of a " + cap + "-row cap") +
+        (seen === null || seen <= all.length ? "" : ", cut from " + seen + " read");
+      if (!mine.length) {
+        /* THE SENTENCE THIS CARD EXISTS FOR. Said in full rather than as
+           "no recent flow", which is the reading the data does not carry. */
+        sub.textContent = "The vendor's rules flagged nothing on " + ticker + " in " +
+          pool + ". The rules are the vendor's own and are not published, so this is " +
+          "what its screens chose to raise — not a measurement of how much traded in " +
+          "this name.";
+      } else {
+        sub.textContent = "Newest first" +
+          (mine.length > CAP ? ", the " + CAP + " newest of " + mine.length : "") +
+          ". Each row is one ALERT — a window of activity in one contract that a vendor " +
+          "rule flagged, aggregating its executions — never a single trade. Selected " +
+          "from " + pool + " by the vendor's own rules, which are not published.";
+      }
+    }
+    host.hidden = false;
+  }
+
   /* ---------- the other names in this sector -------------------------
 
      THE ONE THING ON THIS PAGE THAT IS NOT ABOUT THIS NAME, and the design
@@ -8015,8 +8167,25 @@
   /* AFTER FIRST PAINT, NEVER DURING IT. The card is what this page is; the
      boards qualify it. requestIdleCallback where it exists, a timeout where
      it does not, so the two fetches never compete with the card's own. */
-  function boardsWhenIdle() {
-    const go = () => { ensureBoards(); };
+  /* THE TWO RIGHT-COLUMN FETCHES, TAKEN TOGETHER AND LATE.
+
+     Neither the sector peers nor the flow alerts is on the card, and neither
+     is above the fold, so both wait for an idle frame rather than competing
+     with the payload the whole page is drawn from. They are ONE idle pass
+     because they have one trigger and one deadline; splitting them would put
+     two timers against the same 3s budget for no gain.
+
+     A FAILED ALERTS READ REACHES paintFlow AS null, NOT AS A SKIPPED CALL.
+     That is the difference between the card saying "this could not be read"
+     and the card saying nothing at all, and only the first is true. */
+  function boardsWhenIdle(ticker) {
+    const go = () => {
+      ensureBoards();
+      if (!ticker) return;
+      getJSON("/api/flows/flowalerts")
+        .then((feed) => paintFlow(ticker, feed))
+        .catch(() => paintFlow(ticker, null));
+    };
     if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 3000 });
     else setTimeout(go, 1200);
   }
@@ -8397,7 +8566,7 @@
       }
       paint(card);
       wireSwitch(card);
-      boardsWhenIdle();
+      boardsWhenIdle(ticker);
       return null;
     }).catch(() => {
       statusEl.textContent = "This page could not be loaded. Reload to try again.";

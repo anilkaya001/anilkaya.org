@@ -10307,3 +10307,84 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   line-height: 1.45;
   color: var(--ink-faint);
 }
+
+/* ---------- recent flow: the vendor's alerts for this name ----------
+
+   FIVE TRACKS DOWN THE CARD, same reasoning as .ft-lv-i above: time,
+   contract, size, premium and an optional mark line up column-wise so
+   the rows read as a set. The sweep chip is the only optional track,
+   so it is last — a column that appears on some rows and not others
+   cannot sit between two that always do. */
+.ft-flow {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-flow-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-flow-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ft-flow-i {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+.ft-flow-i + .ft-flow-i { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ft-flow-t { font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-flow-c { font-weight: 700; }
+.ft-flow-c.is-call { color: var(--flow-up); }
+.ft-flow-c.is-put { color: var(--flow-down); }
+.ft-flow-z { color: var(--ink-faint); text-align: right; }
+.ft-flow-p { font-weight: 700; text-align: right; }
+/* THE SWEEP MARK WRAPS TO ITS OWN LINE rather than adding a fifth track,
+   because it is on a minority of rows: a column reserved for it would
+   put a gap in every row that has none. */
+.ft-flow-w {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  color: var(--gold-harvest);
+  background: color-mix(in srgb, var(--gold-harvest) 14%, transparent);
+}
+.ft-flow-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* THE TICKER ROUTE'S PAGE HEADER, COLLAPSED OUT OF THE VIEWPORT.
+
+   Same geometry as .visually-hidden in base.css and deliberately the same
+   geometry rather than `display:none`: the <h1> stays in the accessibility
+   tree and in the document outline, so the route still has a heading on the
+   picker path, where the name-sized header is `hidden` behind a fetch.
+
+   WHY IT IS WORTH A RULE AT ALL: measured 150px of a 900px viewport, spent
+   to print "Ticker" directly beneath a breadcrumb that has just said Flows /
+   Ticker. The design opens this page on the name, and this is what makes
+   room for it. */
+.flows-head--quiet {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
