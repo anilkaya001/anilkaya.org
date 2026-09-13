@@ -5711,8 +5711,16 @@
       const age = days >= 1
         ? days + (days === 1 ? " day" : " days")
         : hours + (hours === 1 ? " hour" : " hours");
+      /* THE SENTENCE MUST NOT CLAIM A READ THAT DID NOT HAPPEN, and the
+         first version of it did. It said "no board is readable to say which
+         session is current" — which is a report about a failed request, on a
+         path where no request had been made yet. That is precisely the
+         collapse this codebase names everywhere else: an absence and a
+         failure told as the same thing. The wording now says only what is
+         true, that the comparison has not been made, and is silent about
+         why. */
       parts.push("this card was last written " + age + " ago" +
-        (mine ? ", and no board is readable to say which session is current"
+        (mine ? ", and the session it names has not yet been compared against the current run"
               : ", and it names no session it describes"));
     }
     return parts;
@@ -9496,6 +9504,28 @@
       getJSON("/api/flows/flowalerts")
         .then((feed) => paintFlow(ticker, feed))
         .catch(() => paintFlow(ticker, null));
+      /* WHAT FILLS `boardSession` ON THE ORDINARY VIEW — see assessAge for
+         why the band compares two published sessions rather than a clock.
+
+         It was filled only by ensureBoards(), which two button handlers
+         reach and nothing else, so on a plain ?t= view the comparison never
+         ran and every card fell to the write stamp. The boards are not the
+         answer: flows-ticker-contract asserts a named ticker page fetches
+         NO board, for the sound reason that two board payloads on every view
+         are paid by every reader to serve the few who switch. `meta` is a
+         different resource — the run's own counters, about 300 bytes — and
+         one small idle-pass read, beside the alerts read, is its whole cost.
+
+         A failed or absent read leaves boardSession null and the band says
+         exactly what it said before, so this can only ever narrow a
+         silence. */
+      getJSON("/api/flows/meta")
+        .then((m) => {
+          if (!m || !ISO_DAY.test(String(m.sessionDate || ""))) return;
+          boardSession = String(m.sessionDate);
+          if (painted) setStale(assessAge(painted));
+        })
+        .catch(() => { /* the band keeps the verdict it already drew */ });
     };
     if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 3000 });
     else setTimeout(go, 1200);

@@ -1168,8 +1168,40 @@ const CEILING_KIB = {
      of those names `host.hidden = !found.length` removed the whole summary
      card and said nothing — the one place on this route where the four
      silences were not applied. It now carries `unavailable` on its sub-line,
-     in the `.fb-empty` vocabulary the rest of the page already speaks. */
-  tickerPage: 580,
+     in the `.fb-empty` vocabulary the rest of the page already speaks.
+
+     (5) 580 -> 581, AND THIS IS THE THIRD RAISE IN ONE SESSION, WHICH IS
+     WORTH SAYING PLAINLY RATHER THAN LETTING THE NUMBER DRIFT. Measured:
+     flows-ticker.js 500,622, the other four unchanged, 594,037 B = 580.11
+     KiB. 581 KiB is 594,944 B and leaves 907 B — deliberately tighter than
+     the 1,690 the raise above left, for the reason that paragraph gave.
+
+     WHAT IT BOUGHT IS A DEAD ARM MADE LIVE, found by an adversarial pass
+     over the previous commit rather than by a test. The staleness band's
+     session comparison reads `boardSession`, which only ensureBoards()
+     fills — and ensureBoards() is reached from two button handlers and
+     nothing else. So on the ordinary ?t= view the comparison never ran:
+     every card fell through to the write stamp, and the arm that was
+     supposed to be the whole finding was unreachable. It now reads the
+     `meta` key, which the pipeline has published every morning since the
+     archive shipped and which NOTHING has ever served — a diagnostic
+     written daily into a store no reader could reach. About 300 bytes,
+     fetched on the idle pass beside the alerts read, which is why this is
+     not a way around the no-board assertion at :2716 but a different
+     resource at a different cost.
+
+     AND A SENTENCE THAT CLAIMED A READ THAT DID NOT HAPPEN. The fallback
+     arm said "no board is readable to say which session is current" on a
+     path where no board had been requested — an absence and a failure told
+     as the same thing, which is the collapse this codebase names everywhere
+     else. It now says only that the comparison has not been made.
+
+     The 381 B recovered before this raise came from a comment written
+     twice: the new read's paragraph restated assessAge's reasoning instead
+     of pointing at it. Removing a duplication introduced in the same wave
+     is not the comment-shaving this file forbids — that rule is about
+     degrading prose already earning its place. */
+  tickerPage: 581,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

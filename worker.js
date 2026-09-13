@@ -4036,6 +4036,31 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
+    if (path === "/api/flows/meta") {
+      /* THE RUN'S OWN ACCOUNT OF ITSELF: which session it built, when, how
+         many names it enriched and carded. The pipeline has published this
+         key since the archive shipped and NOTHING has ever served it — a
+         diagnostic written every morning into a store no reader could reach.
+
+         WHAT NEEDED IT. The ticker page's staleness band compares the card's
+         session against the session the current run describes, which is the
+         only comparison that needs no clock, no timezone and no holiday
+         table — both facts are the product's own. It had no way to learn the
+         second one: flows-ticker-contract asserts, with its reasons, that a
+         named ticker page fetches NO board, because two board payloads on
+         every view would be paid by every reader to serve the few who
+         switch. That assertion is right and this is not a way around it.
+         This key is ~300 bytes of counters against a board's rows, and it
+         carries the one field the band needs.
+
+         SERVED LIKE EVERY OTHER STORED BLOB — one read, handed back as
+         bytes, never parsed here. `pending` when the key is absent, which is
+         an ordinary state before the first run of a fresh store. */
+      const stored = await readFlowsPayload(env, "meta");
+      if (stored === null) return json({ status: "pending" });
+      return passthrough(stored);
+    }
+
     if (path === "/api/flows/flowalerts") {
       /* THE VENDOR'S FLOW ALERTS — one market-wide call a run, published as
          its own key so a failed feed can never cost the counter beside it.
