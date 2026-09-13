@@ -10496,3 +10496,76 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   text-align: center; border-radius: 999px;
   color: var(--bg); background: var(--gold-harvest); font-weight: 700;
 }
+
+/* ---------- ONE CARD SYSTEM FOR THE WHOLE PAGE ----------------------
+
+   The blocks this wave added — the series chart, the chain, key levels,
+   recent flow, the findings index and the sector peers — each arrived with
+   their own chrome: a flat tint, a 0.6rem radius and a faint uppercase
+   caption. The twenty-five panels below them use the section's established
+   card: --panel-glass over --panel-border at --radius-2, a glass edge and a
+   card shadow, under a celadon header strip.
+
+   Two card systems on one page is the incoherence, and the established one
+   wins because it is the one the rest of the section already speaks. This
+   block is the reconciliation: same ground, same border, same radius, same
+   elevation, same header. Nothing below changes a layout — only surface —
+   so no geometry assertion moves.
+
+   THE HEADERS ARE h2 HERE AND h3 THERE, which is why the rules are written
+   out rather than folded into .fc-panel h3: the outline is a property of the
+   document (these six are siblings of the grid, not panels inside a station)
+   and it should not be bent to save a selector. */
+.ft-chart,
+.ft-chain,
+.ft-lv,
+.ft-flow,
+.ft-brief,
+.ft-rel {
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: var(--space-2) var(--panel-pad-x) var(--space-3);
+}
+.ft-chart-h,
+.ft-chain-h,
+.ft-lv-h,
+.ft-flow-h,
+.ft-brief-h,
+.ft-rel-h {
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+/* The two cards that carry a control beside their name keep the name and the
+   control on one line, so the header strip reads the same as every other. */
+.ft-chart-top,
+.ft-chain-top {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 0.5rem;
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+}
+.ft-chart-top .ft-chart-h,
+.ft-chain-top .ft-chain-h {
+  margin: 0; padding: 0; border: 0; background: none; border-radius: 0;
+}
+@media (max-width: 30rem) {
+  .ft-chart, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
+  .ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
+  .ft-chart-top, .ft-chain-top { padding-inline: var(--space-2); }
+}
