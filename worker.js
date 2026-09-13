@@ -540,6 +540,35 @@ async function refreshMarketSnapshot(env) {
   return payload;
 }
 
+/* THE CRON'S HALF OF THE SNAPSHOT, GATED THE WAY THE FLOWS FEEDS ARE.
+
+   The scheduled handler fired refreshMarketSnapshot on all 96 wakes a day,
+   ~68 of them outside any session, re-fetching six index quotes that had
+   not moved since the close. Inside the Eastern window (the same gate
+   refreshFlowsIntraday uses, from shared/flows-freshness.js) every firing
+   refreshes, so the landing-page ticker is never more than a cadence old
+   while the market is open. Outside it, the row is refreshed only once it
+   is older than MARKET_STALE_MS — the same threshold the read path repairs
+   at — so the overnight ticker still moves hourly (pre-market and futures
+   sessions do change these quotes) without a fetch every quarter hour.
+
+   A COLD ROW IS ALWAYS REFRESHED: age is Infinity with no row, so the
+   bootstrap case takes the refresh branch on the first firing rather than
+   waiting for the first reader to repair it inline. */
+async function refreshMarketSnapshotIfDue(env) {
+  const now = new Date();
+  if (!isRefreshWindow(now)) {
+    let row = null;
+    try {
+      row = await marketOp(env, () => env.DB.prepare(
+        "SELECT updated_at FROM market_snapshot WHERE id=1").first());
+    } catch { row = null; }
+    const age = row ? now.getTime() - Number(row.updated_at) : Infinity;
+    if (age <= MARKET_STALE_MS) return null;
+  }
+  return refreshMarketSnapshot(env);
+}
+
 // Serve the cached snapshot, repairing it inline only when it is missing or well
 // past the cron cadence (bootstrap and cron-outage recovery). Always resolves to
 // a valid body; an empty-quotes payload is the graceful floor.
@@ -4369,9 +4398,10 @@ function finalize(response, request, url) {
 
 export default {
   // Cron trigger (wrangler.toml) keeps the market snapshot warm so /api/markets
-  // reads never block on the upstream fetch during normal traffic.
+  // reads never block on the upstream fetch during normal traffic — every
+  // firing inside the session, hourly outside it (refreshMarketSnapshotIfDue).
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(refreshMarketSnapshot(env).catch((error) => {
+    ctx.waitUntil(refreshMarketSnapshotIfDue(env).catch((error) => {
       console.error(JSON.stringify({
         message: "market refresh failed",
         error: error instanceof Error ? error.message : String(error),

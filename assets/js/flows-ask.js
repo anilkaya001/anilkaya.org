@@ -1386,10 +1386,14 @@
       var session = typeof brief.sessionDate === "string" && brief.sessionDate
         ? brief.sessionDate : null;
       var built = stampSaid(brief.generatedAt);
+      /* WHEN THE INTRADAY READINGS WERE LAST RE-READ, if the cron has done so
+         since the build: the flow-alert and pulse facts move inside the
+         session and the stamp says how far behind the tape they can be. */
+      var reread = stampSaid(brief.refreshedAt);
       status.textContent = [
         session === null ? "Briefing published without a session date" : "Session " + session,
         built === null ? "no build stamp on this key" : "built " + built,
-      ].join(" · ");
+      ].concat(reread === null ? [] : ["alerts and pulse re-read " + reread]).join(" \u00b7 ");
     }
 
     /* THE PROSE TRAVELS WITH THE NUMBERS — published in the payload beside the
