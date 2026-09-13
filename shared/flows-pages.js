@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "202";
+export const ASSET_VERSION = "209";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -2055,6 +2055,36 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </h2>
     <ol class="ft-brief-l" id="ftBriefL"></ol>
     <p class="ft-brief-s" id="ftBriefS"></p>
+    <!-- THE QUESTION BOX, IN THE CARD THE ANSWERS CAME FROM.
+
+         The assistant has been one click away on every page since the dock
+         shipped, behind a tab on the right edge. That is a good place for
+         "ask me anything" and the wrong place for "ask about THIS name":
+         a reader who has just read five findings about one symbol and wants
+         a sixth has to find a tab, open it, and type the symbol the page is
+         already about.
+
+         IT IS NOT A SECOND ASSISTANT. assets/js/flows-dock.js mounts the
+         renderer on #askApp and its own header records that two mounts
+         collide on that id — the renderer takes whichever host it is given,
+         so a second instance here would leave one of them inert. This form
+         OPENS THE EXISTING DOCK and hands it the text, which is also why it
+         costs no extra bytes of renderer: the 96k of assets/js/flows-ask.js
+         is still fetched once, still on first open, and still by the dock.
+
+         A FORM RATHER THAN A BUTTON, so Enter submits it the way Enter
+         submits every other question field in this product, and so a reader
+         with no JavaScript gets a labelled control that does nothing rather
+         than a button that lies about being interactive. -->
+    <form class="ft-brief-ask" id="ftBriefAsk" hidden>
+      <label class="ft-brief-ask-l" for="ftBriefQ" id="ftBriefQL">Ask about this name</label>
+      <span class="ft-brief-ask-row">
+        <input class="ft-brief-ask-i" id="ftBriefQ" type="text" autocomplete="off"
+               aria-describedby="ftBriefQL">
+        <button class="ft-brief-ask-b" type="submit">${icon("ask")}<span
+          class="ft-brief-ask-bt">Ask</span></button>
+      </span>
+    </form>
   </aside>
     </div>
   </div>

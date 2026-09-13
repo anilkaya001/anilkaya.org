@@ -1644,15 +1644,69 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       for (const r of b.rows) if (r.dp) claimed.add(r.t);
     }
     ok(emitted.size > 0, `the dry run emitted ${emitted.size} cards`);
-    ok(emitted.size <= DEEP_NAMES,
-       `and no more than the ${DEEP_NAMES}-name deep budget (${emitted.size}), however wide the board got`);
-    assert.deepEqual([...emitted].sort(), [...claimed].sort(),
-      "the cards that exist are EXACTLY the rows that advertise one — a row promising a card " +
-      "the pipeline never wrote opens a 404, and a card nobody links to is three calls burned"); checks++;
 
+    /* THE EQUALITY BECAME TWO ASSERTIONS, BECAUSE ITS COST PREMISE STOPPED
+       BEING TRUE OF EVERY CARD.
+
+       It read: "a card nobody links to is three calls burned". That priced
+       every emitted card at the deep legs, which is why one set could be
+       checked against the other. There is now a second kind that costs
+       nothing: a CROSS-SECTION card, built for a name the run enriched but
+       did not take deep, out of features already in memory and with the
+       seven per-name legs never dispatched. Zero vendor calls, so the
+       sentence that justified the bound does not describe it.
+
+       WHAT THE OLD ASSERTION WAS REALLY PROTECTING SURVIVES INTACT, and it
+       is the first of the two below: every row that advertises a card must
+       have one, or the board opens a 404. That direction is unchanged and
+       still exact.
+
+       WHAT REPLACES THE OTHER DIRECTION IS STRICTER THAN A BOUND ON THE
+       COUNT. Every emitted card is classified by its own published `depth`,
+       and the DEEP budget is asserted against the board-depth set alone —
+       so the leg that spends calls is still capped at DEEP_NAMES however
+       wide anything else gets. A cross-section card that quietly acquired a
+       fetched panel would fail this, because it would be stamped `board`
+       and push that set past the cap. The cheap lane cannot become the
+       expensive one without this noticing. */
+    const depthOf = (t) => {
+      const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+      return c.depth;
+    };
+    const byDepth = { board: new Set(), "cross-section": new Set(), other: new Set() };
+    for (const t of emitted) {
+      const d = depthOf(t);
+      (byDepth[d] || byDepth.other).add(t);
+    }
+    eq(byDepth.other.size, 0,
+       "every emitted card declares a depth this contract knows — an unrecognised one is a third " +
+       "kind of card nobody has priced");
+    ok(byDepth.board.size <= DEEP_NAMES,
+       `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
+       "cards), however wide the board or the cross-section got");
+    assert.deepEqual([...byDepth.board].sort(), [...claimed].sort(),
+      "the BOARD-depth cards are EXACTLY the rows that advertise one — a row promising a card " +
+      "the pipeline never wrote opens a 404, and a deep card nobody links to is three calls burned"); checks++;
+    ok(byDepth["cross-section"].size > 0,
+       `and the cross-section lane ran (${byDepth["cross-section"].size} cards), so the split above is ` +
+       "a measurement rather than a tautology over a run where every card is a board card");
+    for (const t of byDepth["cross-section"]) {
+      ok(!claimed.has(t),
+         `${t} is a cross-section card and no board row advertises it — the two sets are disjoint by ` +
+         "construction, and an overlap would mean a name got both lanes and paid the deep calls twice");
+    }
+
+    /* AGAINST THE DEEP SET, NOT AGAINST EVERY CARD. This guards the equality
+       above from being vacuous on a run where the board happens to be all
+       deep — and the set it must be compared to is the one that equality is
+       about. Left on `emitted` it started failing the moment the
+       cross-section lane shipped, and for a reason that says nothing about
+       the property: 100 cards against a 95-row board is not "the board is
+       not wider than its deep set", it is two different populations being
+       subtracted. */
     const total = long.rows.length + short.rows.length;
-    ok(total > emitted.size,
-       `the board (${total} rows) is genuinely wider than the deep set (${emitted.size}), so this ` +
+    ok(total > byDepth.board.size,
+       `the board (${total} rows) is genuinely wider than the deep set (${byDepth.board.size}), so this ` +
        "equality is a measurement rather than a tautology over a board where every row is deep");
     eq(long.deep, long.rows.filter((r) => r.dp).length,
        "the published `deep` count agrees with the rows it counts");

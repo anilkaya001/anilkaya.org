@@ -4765,18 +4765,107 @@ try {
       ok(!oi.cut.qualifier,
          `the cut is NOT a qualifier on a name that placed ("${(oi.cut.text || "").slice(0, 55)}") ` +
          "— the name is in the list, so how the list was cut is method");
-      ok(oi.cut.inDetails && !oi.cut.open,
-         "and it is folded behind the shut disclosure with the rest of the method");
+      /* THE FOLD IS AN OUTCOME, NOT THE BRANCH — which is what the comment
+         beside `folded()` above already says, and this assertion was the one
+         line in the block that ignored it. It read
+         `oi.cut.inDetails && !oi.cut.open`, and that is exactly the
+         "passes by accident whenever the folded set happens to be under the
+         420-character wall" it warns about. It passed for a year because the
+         folded set on this fixture happened to clear the wall.
+
+         WHAT MOVED IT: the marketRank coverage population. It was the
+         board's fifty; it is now every name that gets a card, because the
+         panel is drawn on all of them and a denominator that excluded the
+         name being read would describe a different population than the card
+         it is written on. At 19 of 50 the coverage line was folded; at 19 of
+         100 `in * 5 < of` is true, so the renderer moves it into the open —
+         which is the branch fmrCoverageLine's own note is written for, since
+         "most cards will say they are not in it" is a sentence a reader must
+         meet unopened. The folded set then falls under the wall and
+         appendMethod appends in place rather than building a disclosure.
+
+         So the property is asserted as the branch plus the one thing that
+         must never happen: the cut may be inlined, but it must never be
+         raised as a qualifier, and any disclosure holding it must be shut. */
+      ok(!oi.cut.qualifier && (!oi.cut.inDetails || !oi.cut.open),
+         "and it is method either way — inlined when the method set is short, never " +
+         "raised as a qualifier, and never behind a disclosure left open");
       ok(/last place in the feed held|reaches back to|no order this run could measure/
         .test(oi.all),
          "and still readable in the block's text with the disclosure shut");
-      ok(oi.said.inDetails,
-         "so is the sentence about what a cross-section is, which is method by any reading");
+      ok(!oi.said.qualifier && (!oi.said.inDetails || !oi.said.open),
+         "so is the sentence about what a cross-section is, which is method by any reading — " +
+         "same rule as the cut above, and for the same reason: the renderer never puts it on " +
+         "the open side, so the class is the assertion and the disclosure is its usual effect");
       ok(!/This name places \d+ of \d+/.test(oi.all),
          "and the rank is stated ONCE — the prose copy under the figures is gone, because " +
          "two copies of one number are two numbers that can drift");
       eq(errors.length, 0, "the panel draws without throwing");
       await page.close();
+
+      /* THE OTHER SIDE OF covThin, WHICH THE CORPUS CAN NO LONGER REACH.
+
+         The renderer sends the coverage line to the OPEN side when
+         `in * 5 < of` and to the folded side otherwise. Every emitted card
+         now takes the open branch — measured: 19 of 19 eligible cards, where
+         before the coverage population widened from the board's fifty to
+         every carded name it was 0 of 19. So the folded branch, and with it
+         the disclosure `appendMethod` builds once the method set clears its
+         420-character wall, runs in production with nothing exercising it.
+
+         A FIXTURE IS SYNTHESISED RATHER THAN HUNTED FOR, because there is
+         nothing to hunt: `in` is raised to `of` on a deep clone, which is the
+         one field the branch reads. Nothing else about the card moves, so a
+         failure here is about the fold and not about the card.
+
+         THE BRANCH IS ASSERTED BEFORE ITS CONSEQUENCE. Whether the line is a
+         qualifier is the decision the renderer makes and is independent of
+         any length; whether a <details> exists follows from that decision
+         plus the wall. Asserting only the second is the mistake this block
+         already made once — see the note on the cut above. */
+      {
+        const fat = JSON.parse(JSON.stringify(base));
+        const cov = fat.panels.marketRank.coverage.oiChange;
+        cov.in = cov.of;
+        const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+        const errs2 = [];
+        page2.on("pageerror", (e) => errs2.push(String(e)));
+        await mount(page2, fat, { ticker: fat.ticker });
+        const fatGot = await page2.evaluate(() => {
+          const b = document.querySelector('.ft-panel[data-panel="marketRank"] .fmr-block');
+          if (!b) return null;
+          const q = (s) => b.querySelector(s);
+          const state = (n) => (n
+            ? { there: true, qualifier: n.classList.contains("is-qualifier"),
+                inDetails: !!n.closest("details"),
+                open: n.closest("details") ? n.closest("details").open : true }
+            : { there: false });
+          const method = [...b.querySelectorAll(".fmr-cut, .fmr-cover, .fmr-said")]
+            .filter((n) => !n.classList.contains("is-qualifier"));
+          return {
+            cover: state(q(".fmr-cover")),
+            cut: state(q(".fmr-cut")),
+            methodChars: method.reduce((n, x) => n + (x.textContent || "").length, 0),
+          };
+        });
+        ok(fatGot && fatGot.cover.there,
+           "the fattened join still draws its coverage line");
+        ok(fatGot && !fatGot.cover.qualifier,
+           "and a join this wide is NOT a qualifier — the renderer only raises the coverage " +
+           "line into the open when most cards would say they are not in the feed, which is " +
+           "the sentence a reader has to meet unopened");
+        /* The wall is 420 in flows-panels.js; the message carries the measured
+           count so a future failure says whether the fold was wrong or the
+           method set merely got shorter. */
+        ok(fatGot && fatGot.methodChars > 420,
+           `and the method set clears the 420-character wall (${fatGot && fatGot.methodChars}), ` +
+           "so the disclosure below is the branch under test rather than a short set left inline");
+        ok(fatGot && fatGot.cut.inDetails && !fatGot.cut.open,
+           "so the method IS folded behind a disclosure, and it is shut — the path every " +
+           "emitted card stopped taking when the coverage population widened");
+        eq(errs2.length, 0, "and the fattened panel draws without throwing");
+        await page2.close();
+      }
     }
 
     /* --- 7e. the cut is the reading when the name is NOT in the list ----

@@ -2454,6 +2454,21 @@ export function buildCard({
      means the pulse leg did not reach the card build, which the panel
      reports as an unavailability rather than as an absence of activity. */
   marketCross = null,
+  /* WHY A PANEL'S RAW IS NULL, WHEN THE RUN KNOWS AND THE DEFAULT SENTENCE
+     WOULD GUESS WRONG.
+
+     Every `null` raw above reaches its panel as "unavailable", and each of
+     those panels has a default reason phrased as a read that was attempted
+     and failed. That is right for the case it was written for. It is wrong
+     for a card built out of the cross-section the run ALREADY paid for,
+     where the per-name legs were never dispatched — there the reader needs
+     to know that no request was made and that reloading changes nothing.
+
+     `null` keeps every existing sentence exactly as it was. A string
+     replaces the reason on precisely the panels whose raw is missing, and
+     on no others: a panel that was fetched and answered is untouched by
+     this, so a partial card cannot be relabelled wholesale. */
+  unfetched = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -2479,6 +2494,22 @@ export function buildCard({
   return {
     v: CARD_SCHEMA_VERSION,
     ticker,
+    /* WHICH OF THE TWO KINDS OF CARD THIS IS, said once at the top rather
+       than inferred by counting how many panels came back unavailable.
+
+       A BOARD card is built for one of the names the run went deep on: the
+       per-name legs were fetched, so every panel is a measurement or a
+       stated silence about a measurement that was attempted. A CROSS-SECTION
+       card is built for a name the run enriched but did not take deep — the
+       price, the candles, the volatility fit and the score are all real and
+       all of this session, and the seven panels that need their own vendor
+       calls were never requested.
+
+       IT IS DERIVED FROM `unfetched` RATHER THAN PASSED SEPARATELY, so there
+       is one source of truth for "were the per-name legs spent". Two flags
+       that could disagree is how a card comes to claim one depth and read as
+       the other. */
+    depth: unfetched ? "cross-section" : "board",
     /* WHO THIS IS AND WHAT IT DOES, ~30 BYTES, AND IT REMOVES A REQUEST.
 
        Both fields are on the board row this card was built from and neither
@@ -2599,7 +2630,17 @@ export function buildCard({
          built from its own endpoint rather than derived: an outer product of
          two marginals is a model of a surface, not a measurement of one, and
          this project does not publish the difference silently. */
-      surface: buildSurface(surface, { spot, asOf: sessionDate }),
+      /* THE SAME null-MEANS-TWO-THINGS PROBLEM AS THE WAVE-2 PANELS, and it
+         bites harder here: buildSurface's own empty-input sentence is "no
+         expiry-strike gamma", which is a claim about the BOOK. Said over a
+         name whose surface was never requested, it tells a reader this
+         symbol has no gamma surface — the opposite of the truth for a
+         liquid name. The guard is before the builder, not inside it: the
+         builder is right about the inputs it is given, and what is wrong is
+         handing it an absence and letting it describe a market. */
+      surface: unfetched && (surface === null || surface === undefined)
+        ? { status: "unavailable", reason: unfetched }
+        : buildSurface(surface, { spot, asOf: sessionDate }),
       levels: buildLevels({
         spot,
         atr: features && features.atr,
@@ -2677,17 +2718,25 @@ export function buildCard({
         sessions: HORIZON_SESSIONS,
       }),
       context: contextPanel,
-      congress: buildCongress(congress, { asOf: sessionDate }),
+      /* buildCongress maps `(tradeRows || [])`, so a null reaches it as an
+         empty tape and the panel reports "no disclosed transactions" — a
+         MEASURED EMPTINESS over a read that never happened. The pipeline's
+         own comment records this exact collapse being fixed once already for
+         the failed-read case; an unfetched card is the third way in. */
+      congress: unfetched && (congress === null || congress === undefined)
+        ? { status: "unavailable", reason: unfetched }
+        : buildCongress(congress, { asOf: sessionDate }),
       /* WHERE THIS NAME SITS IN THE MARKET'S OWN TWO LISTS, joined off feeds
          the run already pays for. Zero marginal vendor calls: the pulse leg
          fetches both once and this reads the same two responses. */
       marketRank: buildMarketCross(marketCross, ticker, { asOf: sessionDate }),
       darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool,
-        darkpoolLead),
+        darkpoolLead, unfetched),
       oiDeltas: stockPanel(oiDeltas, shapeStockOiChange, STOCK_NOTES.oiDeltas,
-        oiDeltasLead),
+        oiDeltasLead, unfetched),
       volContext: darkNull(termStructure) && darkNull(ivRank)
-        ? { status: "unavailable", reason: "neither volatility feed could be read this run",
+        ? { status: "unavailable",
+            reason: unfetched || "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
         /* THE HALVES GO THROUGH AS READ. `|| []` here turned a half whose
            read never landed into an empty list, and the shaper called it
@@ -2777,9 +2826,19 @@ function withVolLead(panel) {
    sentences for them. */
 const darkNull = (raw) => raw === null || raw === undefined;
 
-function stockPanel(raw, shaper, note, lead) {
+function stockPanel(raw, shaper, note, lead, unfetched) {
   if (darkNull(raw)) {
-    return { status: "unavailable", reason: "the feed could not be read this run", note };
+    /* TWO DIFFERENT FACTS THAT BOTH ARRIVE AS `null`, AND THE DEFAULT WAS
+       TELLING THE WRONG ONE.
+
+       "The feed could not be read this run" is a claim that a request was
+       made and failed. On a card the run deliberately did not spend the
+       per-name legs on, no request was made at all — and a reader who is
+       told a feed failed reasonably concludes the vendor is down, reloads,
+       and gets the same sentence tomorrow. `unfetched` is the caller's
+       chance to say which of the two happened; the default is unchanged, so
+       every existing call site keeps the sentence it already had. */
+    return { status: "unavailable", reason: unfetched || "the feed could not be read this run", note };
   }
   const panel = { ...shaper(raw), note };
   /* THE LEAD IS BUILT HERE RATHER THAN IN THE SHAPER, and the reason is an
