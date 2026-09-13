@@ -1054,7 +1054,38 @@ const CEILING_KIB = {
      electing to spend those two requests — the same bargain the switcher
      already strikes. The flow-alerts read stays on the idle pass, because it
      is one request about THIS name rather than an index of others. */
-  tickerPage: 542,
+  /* 542 -> 568, for the price the design draws and the model beside it.
+     flows-ticker.js 459,285 -> 485,227 (+25,942) against
+     git cat-file -s 4c61005:, the other FOUR identical — flows-panels.js
+     71,727, flows-cursor.js 13,123, flows-dock.js 6,007, nav.js 2,560 —
+     total 552,702 -> 578,644 B = 565.08 KiB. 568 KiB is 581,632 B and
+     leaves 2,988 B, this route's standard order of hand. (The 542
+     paragraph above counted four files; the cursor script is the fifth this
+     route has emitted since the readouts landed, and the table has always
+     summed it. The bytes were right; the list was short.)
+
+     WHAT IT BOUGHT, IN FOUR PARTS. (1) The price tab draws CANDLES from a
+     year of [date, open, high, low, close, volume] the card now publishes,
+     with a volume strip beneath and the 50-session average the pipeline
+     derives beside them — the chart still computes nothing, it reads two
+     more fields. That retires two of the sentences the paragraph above paid
+     for: the Volume tab has a series now, and 6M and 1Y are inside a
+     252-session window rather than outside a forty. (2) A GARCH(1,1)-GED
+     card, whose fit lives in shared/flows-garch.js and runs in the pipeline;
+     the page draws the published path over the published returns and bins
+     their ratio under the density the published shape implies. The
+     histogram's binning and the density curve are the only arithmetic here,
+     and both are drawing. (3) The term structure as a card of its own,
+     through the same chartSeries the IV tab uses. (4) The row layout the
+     design draws — cards beside the findings index, chart beside the model,
+     chain beside two stacks, what-changed beside the term — which is markup
+     and stylesheet and costs this table nothing.
+
+     THE RATCHET PARAGRAPH IS RETIRED IN ONE RESPECT: the Workers Builds field
+     it waited on is set, so production parses the stripped tree — 254 KiB
+     on this route as of #113 — and this table measures the repository. The
+     rest of it stands: a raise here is still an argument in the open. */
+  tickerPage: 568,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -1528,7 +1559,7 @@ const CEILING_KIB = {
      on the one route a shed could not cover.
 
      WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
-     is 94k as measured 2026-09-05 — it was 55k when this note was written
+     is 96k as measured 2026-09-13 — it was 55k when this note was written
      and 79k at the last re-measure, and a figure left at the size a file
      used to be is worse than no figure, because a reader takes it for a
      measurement. It arrives only when a reader opens the panel, so it is
@@ -1694,7 +1725,25 @@ const CEILING_KIB = {
      shared/flows-ask.js, which the Worker bundles and the browser never
      fetches — is no longer owed at some point, it is owed before the next
      sentence of code lands on this route. */
-  askPage: 97,
+  /* 97 -> 99, AND THE SENTENCE ABOVE IS NOT RETIRED BY THIS. flows-ask.js
+     96,755 -> 97,907 (+1,152) against git cat-file -s 6e8dc7c:, nav.js
+     2,560 unchanged, total 99,315 -> 100,467 B = 98.11 KiB. 99 KiB is
+     101,376 B and leaves 909 B.
+
+     WHAT IT BOUGHT IS TWO SILENCES THE ROUTE NOW TELLS APART. The Worker
+     answers /api/flows/ask with `unreadable` when the store read FAILED,
+     where it used to answer `pending` — a fault on this site was being
+     reported as a run that had not happened. And it sends `session`: how
+     old the facts are against the last session that has closed, so a
+     reader asking on a morning the pipeline did not run is told, above the
+     answer, that the readings are yesterday's. Neither branch could be
+     shed to the shared module: both are the page choosing what to print,
+     which is the one thing the browser has to hold.
+
+     THE SHED IS STILL OWED, and it is now the next thing this route does:
+     the paragraph above measured 14k of prose that belongs in
+     shared/flows-ask.js, and 909 B of hand is not a second sentence. */
+  askPage: 99,
   strategyPage: 120,
   trackPage: 118,
   /* 95 -> 102, THE SAME DOCK AS EVERY OTHER ROUTE. The market page was the

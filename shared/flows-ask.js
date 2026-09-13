@@ -56,6 +56,7 @@
    ============================================================= */
 
 import { buildBrief, briefStoreFrom, silenceOf, num } from "./flows-brief.js";
+import { lastCompletedSession } from "./flows-freshness.js";
 
 /* THE SLOT RENAME IS IMPORTED, NOT RESTATED. flows-brief reads six
    slots — long, short, watch, events, alerts, sectorPremium — while
@@ -1232,6 +1233,99 @@ export function buildFactIndex(store) {
   return { facts, silences, generatedAt, cardNames: cards.names };
 }
 
+/* ---------- keeping the index honest between nightly runs ---------
+
+   THE INDEX IS BUILT ONCE A NIGHT AND TWO OF ITS SURFACES MOVE ALL DAY.
+   The Worker's cron merges the vendor's flow alerts into the day's record
+   and re-reads the market tide every fifteen minutes inside the session
+   (worker.js, refreshFlowsIntraday), so the PAGES for those feeds are
+   fresh — and the assistant, answering out of the nightly `brief`, kept
+   quoting last night's counts beside them. A reader asking "how many
+   alerts today" at 14:00 was answered from 08:00.
+
+   refreshIntradayFacts is the repair, and it is deliberately narrow: it
+   rebuilds ONLY the facts whose source is one of the two intraday keys,
+   through the same builders the nightly index used, and leaves every
+   other fact — boards, cards, news, the briefing's own sentences —
+   exactly as published. It is not a second publisher of the index; it is
+   the same constructor run over a newer copy of two inputs. A feed that
+   yields no fact keeps its old ones, which is the rule the cron already
+   applies to the feeds themselves: a quiet read never blanks a record. */
+export const INTRADAY_SOURCES = Object.freeze(["flowalerts", "pulse"]);
+
+export function refreshIntradayFacts(index, feeds) {
+  const facts = index && Array.isArray(index.facts) ? index.facts.slice() : [];
+  const replaced = {};
+  let refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
+  for (const key of INTRADAY_SOURCES) {
+    const p = feeds && Object.hasOwn(feeds, key) ? feeds[key] : undefined;
+    const published = answered(p);
+    if (!published || PUBLISHED_QUIET.has(published.status) ||
+        PUBLISHED_UNREADABLE.has(published.status)) continue;
+    const surface = SURFACES.find((x) => x.key === key);
+    if (!surface) continue;
+    /* THE STAMP IS THE READ, NOT THE NIGHTLY BUILD. atOf() reads
+       generatedAt, which the cron never rewrites; readAt is what it does
+       write, and it is the instant these figures were true at. */
+    const at = typeof published.readAt === "string" && published.readAt
+      ? published.readAt : atOf(published);
+    const built = surface.build(published, at, () => {});
+    if (!built.length) continue;
+    let first = facts.findIndex((f) => f && f.source === key);
+    const kept = facts.filter((f) => !f || f.source !== key);
+    if (first === -1) first = kept.length;
+    else first = Math.min(first, kept.length);
+    kept.splice(first, 0, ...built);
+    facts.length = 0; for (const f of kept) facts.push(f);
+    replaced[key] = built.length;
+    if (at && (refreshedAt === null || Date.parse(at) > Date.parse(refreshedAt))) refreshedAt = at;
+  }
+  return { ...(index || {}), facts, refreshedAt, replaced };
+}
+
+/* ---------- how old the facts are, said once ----------------------
+
+   EVERY STAMP ON THE KEY CAN BE HONEST AND THE KEY STILL YESTERDAY'S. A
+   pipeline that did not run leaves the previous session's briefing in
+   place with its own true generatedAt, and nothing on the wire says
+   "this is not the session you are standing in". This is the one place
+   the assistant is handed a clock — the Worker's, at the moment of the
+   question — and it uses it for exactly one comparison: the session the
+   index describes against the last session that has closed. */
+export function briefAge(index, now) {
+  const session = index && typeof index.sessionDate === "string" && index.sessionDate
+    ? index.sessionDate.slice(0, 10) : null;
+  const expected = now === undefined || now === null ? null : lastCompletedSession(now);
+  const stale = session !== null && expected !== null && session < expected;
+  const refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
+  const generatedAt = index && typeof index.generatedAt === "string" ? index.generatedAt : null;
+  let say = null;
+  if (stale) {
+    say = "These readings describe the session of " + session + ". The most recent session " +
+      "that has closed is " + expected + " and its briefing has not been published, so " +
+      "nothing here is a reading of that session or of today.";
+  }
+  return { sessionDate: session, expected, stale, generatedAt, refreshedAt, say };
+}
+
+/** The dated line both prompts open with, so the model knows WHEN. */
+function factsHeader(meta) {
+  const a = meta && typeof meta === "object" ? meta : {};
+  const parts = [];
+  if (a.sessionDate) parts.push("These facts describe the trading session of " + a.sessionDate);
+  else parts.push("These facts describe one trading session");
+  if (a.generatedAt) parts.push("the briefing was built at " + a.generatedAt);
+  if (a.refreshedAt) {
+    parts.push("the flow-alert and market-pulse readings were last re-read at " + a.refreshedAt);
+  }
+  let line = parts.join("; ") + ".";
+  if (a.stale && a.say) {
+    line += " STALE: " + a.say + " If asked about today or the latest session, say that the " +
+      "facts are from " + a.sessionDate + " and that " + a.expected + " has not been published.";
+  }
+  return line;
+}
+
 /* ---------- selection -------------------------------------------- */
 
 /* A BARE UPPERCASE TOKEN IS A TICKER ONLY IN A SENTENCE THAT HAS
@@ -1870,7 +1964,7 @@ export function renderFactsPlain(picked, question) {
  * "fact 15" writes a 15 that no payload published, and its own
  * answer would then be refused for a numeral this prompt handed it.
  */
-export function promptFor(picked, question) {
+export function promptFor(picked, question, meta) {
   const facts = Array.isArray(picked) ? picked : [];
   const system = [
     "You answer questions about a stock options briefing using ONLY the facts supplied " +
@@ -1926,6 +2020,7 @@ export function promptFor(picked, question) {
     : "";
   const user = "Question: " + (typeof question === "string" ? question.trim() : "") +
     coverage +
+    "\n\n" + factsHeader(meta) +
     "\n\nFacts measured for this session:\n" +
     facts.map((f) => "- " + f.say).join("\n");
 
@@ -1964,7 +2059,7 @@ export function promptFor(picked, question) {
  * one: a summary CHOOSES what to lead with, and choosing is where a model
  * reaches for a superlative nobody measured.
  */
-export function promptForSummary(picked) {
+export function promptForSummary(picked, meta) {
   const facts = Array.isArray(picked) ? picked : [];
   const system = [
     "You write a short standing summary of a stock options briefing using ONLY the " +
@@ -2002,7 +2097,7 @@ export function promptForSummary(picked) {
       "or position.",
   ].join("\n");
 
-  const user = "Facts measured for this session:\n" +
+  const user = factsHeader(meta) + "\n\nFacts measured for this session:\n" +
     facts.map((f) => "- " + f.say).join("\n");
 
   return { system, user };

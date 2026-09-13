@@ -152,15 +152,14 @@ const truncated = cards.filter((c) =>
      milliseconds and fails with the two panel names in the message — which is
      what makes it usable while somebody is editing the order. */
   const PANEL_H = {
-    __stats: 330, levels: 313, displacement: 360, context: 350, scoreOverlay: 506,
+    __stats: 330, levels: 313, displacement: 360, context: 350,
     deltaExposure: 416, charm: 435, vanna: 435, congress: 632, calendar: 520,
     aggressor: 550, pricedMove: 584, surface: 668, ivSurface: 640, oiDeltas: 661,
     marketRank: 865, path: 712, darkpool: 688, gamma: 795, skewTerm: 829,
     volContext: 756, topContracts: 1044, __score: 1034,
-    /* MEASURED THE SAME WAY AS THE TWENTY-THREE ABOVE — rendered at 1440 with
+    /* MEASURED THE SAME WAY AS THE TWENTY-TWO ABOVE — rendered at 1440 with
        the real Latin Modern, panel content height off getBoundingClientRect,
-       both span-2 and so both 763px wide, the width scoreOverlay's 506 was
-       taken at. `__sessions` is the tallest panel in the registry and that is
+       both span-2 and so both 763px wide. `__sessions` is the tallest panel in the registry and that is
        what it is: twenty rows, five columns, three stats and a qualifier. */
     premiumTrack: 460, __sessions: 996,
   };
@@ -282,10 +281,14 @@ const truncated = cards.filter((c) =>
 
      A panel may be published and undrawn only by being named below, with a
      reason. That keeps the omission an argued decision rather than the silent
-     default it was. The list is empty today and that is the point: every
-     panel this pipeline pays for is on a page. */
+     default it was. One entry today, and it is read rather than merely
+     published: see the reason beside it. */
   const DELIBERATELY_UNDRAWN = new Map([
-    /* e.g. ["someKey", "why the ticker page is not where this belongs"] */
+    ["scoreOverlay",
+      "published and READ but not drawn: the score-over-price series was dropped from the " +
+      "page by the reader's own verdict — a daily score over a close told them nothing they " +
+      "used — while the join it carries is what paintChange derives \"what changed\" from, " +
+      "so it stays on the wire as the input to a panel rather than as a panel"],
   ]);
   for (const card of withChain) {
     for (const key of Object.keys(card.panels)) {
@@ -1511,13 +1514,13 @@ try {
        target: the day a panel gains a lead this line fails and is rewritten
        deliberately, which is the only way a slot cannot quietly stop being
        filled. Six became ten when congress, marketRank, scoreOverlay and
-       surface gained leads; the four that arrived with them each answer their
+       surface gained leads (scoreOverlay has since left the page); the four that arrived with them each answer their
        panel's own question out of a field the payload already carried, and
        none of them is a sentence lifted from a drawing. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
       ["aggressor", "calendar", "charm", "congress", "context", "darkpool",
         "deltaExposure", "displacement", "levels", "marketRank", "oiDeltas",
-        "path", "pricedMove", "scoreOverlay", "surface", "topContracts",
+        "path", "pricedMove", "surface", "topContracts",
         "vanna", "volContext"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
@@ -2583,138 +2586,10 @@ try {
     await page.close();
   }
 
-  /* ---------- 6f. the score laid over the price -------------------
-
-     THE CHART THE DIRECTIVE ASKED FOR, and the one whose failure mode is
-     invisible: two ~40-point series zipped by position draw a smooth,
-     plausible, entirely fictional line. The join is tested in
-     tests/flows-overlay-contract.mjs against a fixture built to break an
-     index join; what is tested HERE is that the drawing tells the truth
-     about what the join returned — above all that a gap breaks the line
-     rather than being bridged or zeroed. */
-  {
-    const base = withChain.find((c) =>
-      c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
-      c.panels.scoreOverlay.rows.length >= 6);
-    ok(base, "an emitted card carries a joined score overlay");
-
-    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
-    const errors = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
-
-    const readOvl = async (card) => {
-      await mount(page, card, { ticker: card.ticker });
-      return page.evaluate(() => {
-        const host = document.querySelector('.ft-panel[data-panel="scoreOverlay"] > div');
-        const svg = host.querySelector("svg.ovl");
-        const score = host.querySelector(".ovl-score");
-        return {
-          hasSvg: !!svg,
-          viewBox: svg ? svg.getAttribute("viewBox") : null,
-          par: svg ? svg.getAttribute("preserveAspectRatio") : null,
-          box: svg ? (({ width, height }) => ({ width, height }))(svg.getBoundingClientRect()) : null,
-          bars: host.querySelectorAll(".ovl-bar").length,
-          negBars: host.querySelectorAll(".ovl-bar.is-neg").length,
-          zeroBars: host.querySelectorAll(".ovl-bar.is-zero").length,
-          hasScore: !!score,
-          band: !!host.querySelector(".ovl-band"),
-          said: host.textContent,
-          aria: svg ? svg.getAttribute("aria-label") : null,
-          empty: [...host.querySelectorAll("[data-empty]")].map((n) => n.getAttribute("data-empty")),
-        };
-      });
-    };
-
-    const good = await readOvl(base);
-    ok(good.hasSvg, "the overlay draws a chart");
-    eq(good.par, "xMidYMid meet",
-       "with the aspect ratio that keeps one viewBox unit at one CSS pixel — `none` " +
-       "scales the axes independently and distorts every slope on the panel");
-    /* THE REPOSITORY'S CHART INVARIANT, measured from the visible host. */
-    const vbW = Number(good.viewBox.split(/\s+/)[2]);
-    const ratio = good.box.width / vbW;
-    ok(Math.abs(ratio - 1) < 0.02,
-       `one viewBox unit is one CSS pixel (drawn ${vbW}, laid out ${good.box.width.toFixed(1)}, ` +
-       `ratio ${ratio.toFixed(3)})`);
-    ok(good.hasScore && good.bars > 0, "the score is drawn, as bars");
-    ok(good.aria && /sessions from/.test(good.aria),
-       "and the chart names its own window to a screen reader");
-
-    /* ---- THE GAP. A session nobody scored draws NOTHING.
-
-       This used to count subpaths in a path `d`, because the score was one
-       stroke and a hole had to be programmed to break it. Bars make the
-       refusal structural: one rect per scored session, so an unscored one has
-       no rect and there is no stroke that could have bridged it. Counting
-       bars is therefore a STRONGER test than counting moves — a path could
-       always have been made to bridge by a later edit, and a missing rect
-       cannot be. ---- */
-    const holed = JSON.parse(JSON.stringify(base));
-    const mid = Math.floor(holed.panels.scoreOverlay.rows.length / 2);
-    holed.panels.scoreOverlay.rows[mid].score = null;
-    holed.panels.scoreOverlay.scored -= 1;
-    holed.panels.scoreOverlay.gaps += 1;
-    const gapped = await readOvl(holed);
-    eq(gapped.bars, good.bars - 1,
-       "a hole in the middle draws one FEWER bar — the session nobody scored is " +
-       "absent from the drawing rather than bridged across");
-    ok(/no score/i.test(gapped.said),
-       "and the panel says in words how many sessions carry no score");
-
-    /* ---- A LONE SCORED SESSION BETWEEN TWO HOLES. This was the line's worst
-       case and is the bar chart's ordinary one: a one-point subpath has no
-       length and rendered as nothing at all, so a real measurement vanished
-       and needed a hand-placed dot. A lone bar is a bar. ---- */
-    const island = JSON.parse(JSON.stringify(base));
-    const rows = island.panels.scoreOverlay.rows;
-    for (let i = 0; i < rows.length; i++) if (i !== 2) rows[i].score = null;
-    island.panels.scoreOverlay.scored = 1;
-    island.panels.scoreOverlay.gaps = rows.length - 1;
-    const lone = await readOvl(island);
-    eq(lone.bars, 1,
-       "a scored session with holes on both sides draws exactly one bar, and is not lost");
-
-    /* ---- A ZERO IS A READING, NOT A HOLE, and on a bar chart that needs
-       saying twice: it must draw a bar AND that bar must not be tinted like a
-       direction it does not carry. ---- */
-    const zeroed = JSON.parse(JSON.stringify(base));
-    zeroed.panels.scoreOverlay.rows[mid].score = 0;
-    const atZero = await readOvl(zeroed);
-    eq(atZero.bars, good.bars,
-       "a measured zero still draws its bar: it is a name sitting at neutral, which " +
-       "is a reading this system publishes and means, not an unscored session");
-    ok(atZero.zeroBars >= 1,
-       "and it is drawn in the neutral ink rather than as a positive or a negative — " +
-       "the centre of the dead band carries no direction");
-
-    /* ---- THE TWO EMPTY STATES, which are not the same sentence. ---- */
-    const disjoint = JSON.parse(JSON.stringify(base));
-    disjoint.panels.scoreOverlay = {
-      status: "quiet",
-      reason: "the price window and the score window do not share a single session",
-      priceSpan: { from: "2027-01-04", to: "2027-03-01", sessions: 42 },
-      scoreSpan: { from: "2026-08-03", to: "2026-08-24", sessions: 16 },
-      overlap: 0,
-    };
-    const noOverlap = await readOvl(disjoint);
-    ok(!noOverlap.hasSvg, "disjoint windows draw no chart");
-    ok(noOverlap.empty.includes("quiet"),
-       "and are tagged as the MEASURED silence: both windows were read in full");
-
-    const absent = JSON.parse(JSON.stringify(base));
-    absent.panels.scoreOverlay = {
-      status: "unavailable",
-      reason: "the score track was not assembled this run",
-    };
-    const noTrack = await readOvl(absent);
-    ok(noTrack.empty.includes("unavailable"),
-       "while a track that was never assembled is the pipeline-side absence, tagged " +
-       "differently — a reader must be able to tell a skipped leg from a name that " +
-       "was never on a board");
-
-    eq(errors.length, 0, `the overlay renders without throwing (${errors.join("; ")})`);
-    await page.close();
-  }
+  /* ---------- 6f. (the score-over-price series left the page) ----------
+     Its join is still tested in tests/flows-overlay-contract.mjs and still
+     published, because "what changed" is derived from it; the drawing was
+     dropped by the reader's own verdict. */
 
   /* ---------- 6g. the second-order Greeks -------------------------
 
@@ -2906,49 +2781,19 @@ try {
      generated from the registry and a test that only read the registry would
      pass on a page that never mounted it. */
   {
-    eq(TICKER_PANELS[0].key, "scoreOverlay",
-       "the score-over-price series is the first panel the registry mounts");
-    eq(TICKER_PANELS[0].tier, "lead", "and it is the Overview station's lead");
-    eq(TICKER_PANELS[1].key, "__score",
-       "with the derivation directly under it — demoted, not dropped: still the second " +
-       "thing the page says about the number a reader arrived carrying");
-    eq(TICKER_PANELS[0].span, 2,
-       "the series keeps both columns, because a 60-session line in a 424px host is a " +
-       "sparkline and the panel's whole claim is that a reading is new");
-    /* STILL 1, AND THIS TIME THE NUMBER WAS RE-MEASURED RATHER THAN INHERITED.
-
-       The gauge added ~125px to this panel, so span 2 was tried: the worst
-       side-by-side gap on the page fell from 607px to 433px and the
-       derivation stopped appearing in the worst pair at all. THAT READING WAS
-       AN ARTEFACT. A row holding one span-2 panel has a gap of zero because
-       it has nothing to differ from, so emptying a row scores as evening it.
-
-       Occupancy says what the gap could not, at 1440 on an emitted card:
-
-         span 1   scoreOverlay 763 + __score 373 = 1136 of 1152 — a full row
-         span 2   scoreOverlay 763 alone, __score 763 alone — 389px of void, twice
-
-       So span 2 traded one uneven row for two half-empty ones. The original
-       reasoning — five gauges and their weights set their own width — was
-       right about the outcome even though the panel has since gained a
-       drawing that does size to its host: the second column still buys more
-       void than arc, because the panel it would take it from is the one
-       span-1 panel that fills the row beside it.
-
-       The render harness now reports that occupancy beside the gap, because
-       this is the second time a layout change here was scored by a number
-       that could not see it. */
-    eq(TICKER_PANELS[1].span, 1,
-       "and the derivation gives its second column up — it is the span-1 panel that fills " +
-       "the series' row, and a span-2 host spends the difference on void, not on arc");
+    eq(TICKER_PANELS[0].key, "__score",
+       "the derivation is the first panel the registry mounts: a reader arrives from a " +
+       "board row carrying a score, and the first thing the page owes them is where it came " +
+       "from (the score-over-price series that used to lead was dropped from the page)");
+    eq(TICKER_PANELS[0].span, 1,
+       "at its own width — five gauges and their weights set their own width, and a span-2 " +
+       "host spends the difference on void, not on arc");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>
       [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => s.dataset.panel));
-    eq(order[0], "scoreOverlay",
-       "and it is first in the document too — a reader arrives from a board row carrying " +
-       "a score, and the first thing the page owes them is what that score has done since");
-    eq(order[1], "__score", "with the derivation second in the document as well");
+    eq(order[0], "__score", "and it is first in the document too");
+    ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
 
     /* THE OTHER THREE MOVES, PINNED AS ADJACENCIES rather than as indices. An
@@ -3064,8 +2909,8 @@ try {
       eq(members[0].tier, "lead",
          `and it is the group's first panel (${members[0].key}), not one buried inside it`);
     }
-    eq(TICKER_PANELS[0].key, "scoreOverlay",
-       "and the very first lead is the score-over-price series");
+    eq(TICKER_PANELS[0].key, "__score",
+       "and the very first lead is the score derivation");
 
     /* THE GRID IS FIVE STATIONS AND NOTHING ELSE, each opening with its own
        heading. The headings used to be siblings of the panels, inserted

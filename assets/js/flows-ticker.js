@@ -5167,10 +5167,12 @@
      before they register. `drawerFor` resolves a string against the registry
      at CALL time, which is the only time the answer is knowable.
 
-     THE TWO THAT STAY FUNCTIONS ARE NOT AN EXCEPTION TO THE RULE, they are
-     the two the default station needs: `scoreOverlay` and `__score` draw the
-     signal station a reader lands on, and flows-panels.js keeps both so that
-     first paint owes nothing to the network. */
+     THE ONE THAT STAYS A FUNCTION IS NOT AN EXCEPTION TO THE RULE, it is
+     the one the default station needs: `__score` draws the signal station a
+     reader lands on, and flows-panels.js keeps it so that first paint owes
+     nothing to the network. (P.overlay is still in the library: the join it
+     draws is what "what changed" reads, though the page no longer mounts the
+     drawing.) */
   const DRAW = {
     gamma: "gamma",
     aggressor: drawAggressor,
@@ -5190,7 +5192,6 @@
     darkpool: drawDarkpool,
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
-    scoreOverlay: P.overlay,
     deltaExposure: "deltaExposure",
     charm: "charm",
     vanna: "vanna",
@@ -5815,8 +5816,7 @@
    * to know is which group a section belongs to, which the section says.
    */
   const PANEL_CHROME = {
-    scoreOverlay: { group: "signal", tier: "lead" },
-    __score: { group: "signal", tier: "table" },
+    __score: { group: "signal", tier: "lead" },
     __stats: { group: "signal", tier: "table" },
     __sessions: { group: "tape", tier: "table" },
     gamma: { group: "convexity", tier: "lead" },
@@ -5906,8 +5906,14 @@
        what changed SINCE the session those two draw, so it reads after
        them. Falls back to the cards and then to the bar, so the insertion
        survives either block being absent. */
-    const after = document.querySelector(".ft-top") || $("ftCards") || barEl;
-    after.parentNode.insertBefore(changeEl, after.nextSibling);
+    /* THE DESIGN'S THIRD ROW, FIRST CELL. shared/flows-pages.js names this
+       insertion beside .ft-band4; with no band it lands under the chart row. */
+    const band4 = document.querySelector(".ft-band4");
+    if (band4) band4.insertBefore(changeEl, band4.firstChild);
+    else {
+      const after = document.querySelector(".ft-top") || $("ftCards") || barEl;
+      after.parentNode.insertBefore(changeEl, after.nextSibling);
+    }
   }
 
   /**
@@ -6908,7 +6914,9 @@
         ? p.lead.say.trim() : "";
       if (!say) continue;
       const title = section.querySelector(".ft-panel-t");
-      found.push({ key, say, title: title ? title.textContent.trim() : key });
+      const station = section.closest(".ft-station[data-group]");
+      found.push({ key, say, title: title ? title.textContent.trim() : key,
+        group: station ? String(station.getAttribute("data-group")) : "" });
     }
     const CAP = 5;
     for (const f of found.slice(0, CAP)) {
@@ -6919,6 +6927,8 @@
          "read more" repeated five times is five links a screen reader cannot
          tell apart. */
       a.setAttribute("aria-label", f.say + " \u2014 open " + f.title);
+      /* THE DOT IS THE STATION'S COLOUR — see the note beside #ftBrief. */
+      a.append(el("span", "ft-brief-d" + (f.group ? " is-" + f.group : "")));
       a.append(el("span", "ft-brief-t", f.say));
       a.append(el("span", "ft-brief-c", "\u203a"));
       li.append(a);
@@ -6971,9 +6981,17 @@
     { key: "1W", n: 5 },
     { key: "1M", n: 21 },
     { key: "3M", n: 63 },
+    { key: "6M", n: 126 },
     { key: "1Y", n: 252 },
+    { key: "3Y", n: 756 },
   ];
-  let period = "1M";
+  let period = "3M";
+  /* THE PRICE TAB'S TWO DRAWING CONTROLS. Candles or a close line, and the
+     50-session average the card publishes beside the candles. Both change
+     what is drawn and neither changes what is claimed: the average is read
+     from `sma50`, never computed here. */
+  let chartStyle = "candles";
+  let showSma = true;
 
   const CHART_TABS = ["price", "iv", "volume", "premium", "netflow"];
   const CHART_LABEL = {
@@ -6996,6 +7014,39 @@
     if (key === "price") {
       const c = ok("context");
       if (!c) return { silence: "No price window was published for this name this run." };
+      const candles = Array.isArray(c.candles) ? c.candles : [];
+      if (candles.length >= 2) {
+        /* THE CANDLES, WHEN THE CARD CARRIES THEM. A year of
+           [date, open, high, low, close, volume] and the 50-session average
+           the pipeline derived beside them — one field each, read straight
+           off the panel. Older cards fall through to the 42 closes below. */
+        const sma = Array.isArray(c.sma50) ? c.sma50 : [];
+        return {
+          kind: chartStyle === "line" ? "line" : "candles", unit: "close" +
+            (chartStyle === "line" ? "" : ", with each session's open, high and low"),
+          clock: "one " + (chartStyle === "line" ? "mark" : "candle") + " a session, " +
+            candles.length + " of them, " + candles[0][0] + " to " +
+            candles[candles.length - 1][0] + " — a session the vendor could not price " +
+            "is absent rather than bridged",
+          sma: showSma && sma.some((v) => isNum(v) !== null),
+          points: candles.map((r, i) => {
+            const o = isNum(r[1]), h = isNum(r[2]), l = isNum(r[3]), v = isNum(r[4]);
+            const vol = isNum(r[5]), m = isNum(sma[i]);
+            return {
+              v, o, h, l, vol, sma: m,
+              label: r[0] ? String(r[0]) : "Session " + (i + 1),
+              rows: [
+                { k: "Open", v: o === null ? "not published" : px2(o) },
+                { k: "High", v: h === null ? "not published" : px2(h) },
+                { k: "Low", v: l === null ? "not published" : px2(l) },
+                { k: "Close", v: px2(v) },
+                { k: "Volume", v: vol === null ? "not published" : compact(vol) + " shares" },
+                { k: "SMA 50", v: m === null ? "fewer than 50 sessions behind it" : px2(m) },
+              ],
+            };
+          }),
+        };
+      }
       const closes = Array.isArray(c.closes) ? c.closes : [];
       const dates = Array.isArray(c.closeDates) ? c.closeDates : [];
       if (closes.length < 2) return { silence: "Fewer than two closes were published." };
@@ -7049,13 +7100,36 @@
     }
 
     if (key === "volume") {
-      /* NOT A FAILURE AND NOT AN EMPTY READ. The key does not exist: no
-         surface in this payload carries a per-name volume series. Said in
-         those words so it is not mistaken for a run that came back thin. */
-      return { silence: "This payload publishes no per-name volume series — not a thin " +
-        "run, a field that does not exist. Contract volume is published per STRIKE and " +
-        "per contract, which the chain and the aggressor ladder draw; neither is a " +
-        "series through time, so neither can be drawn here under this label." };
+      /* SHARE VOLUME, OFF THE CANDLES. Each session's traded shares is the
+         sixth field of the candle row the price tab draws, so this is the
+         same array asked for a different column. A card from before the
+         candles were published has no such series, and says so in those
+         words rather than as a thin run: contract volume is published per
+         STRIKE, which the chain draws, and is not a series through time. */
+      const c = ok("context");
+      const candles = c && Array.isArray(c.candles) ? c.candles : [];
+      if (candles.length < 2 || !candles.some((r) => isNum(r[5]) !== null)) {
+        return { silence: "This card publishes no per-name share-volume series — a field " +
+          "cards built before the candles were published do not carry. Contract volume is " +
+          "published per STRIKE, which the chain draws; it is not a series through time." };
+      }
+      return {
+        kind: "bars", unit: "shares traded, one bar a session",
+        clock: "one bar a session, " + candles.length + " of them, " + candles[0][0] + " to " +
+          candles[candles.length - 1][0] + " — a bar takes the colour of its session, " +
+          "close above open or below it",
+        points: candles.map((r, i) => {
+          const o = isNum(r[1]), v = isNum(r[4]), vol = isNum(r[5]);
+          return {
+            v: vol, tone: o === null || v === null ? "flat" : v > o ? "pos" : v < o ? "neg" : "flat",
+            label: r[0] ? String(r[0]) : "Session " + (i + 1),
+            rows: [
+              { k: "Volume", v: vol === null ? "not published" : compact(vol) + " shares" },
+              { k: "Close", v: v === null ? "not published" : px2(v) },
+            ],
+          };
+        }),
+      };
     }
 
     if (key === "premium") {
@@ -7136,6 +7210,29 @@
       });
       if (tabs) tabs.append(b);
     }
+    /* THE PRICE TAB'S OWN CONTROLS, beside the tabs and only on that tab:
+       candles or a line, and the published 50-session average on or off.
+       Neither survives to another tab because neither means anything there. */
+    if (tabs && chartTab === "price") {
+      const ctl = el("span", "ft-chart-ctl");
+      const style = el("button", "ft-chart-tab ft-chart-tab--ctl" +
+        (chartStyle === "candles" ? " is-on" : ""), "Candles");
+      style.type = "button";
+      style.setAttribute("aria-pressed", chartStyle === "candles" ? "true" : "false");
+      style.title = "Candles show each session's open, high, low and close; the line shows closes only.";
+      style.addEventListener("click", () => {
+        chartStyle = chartStyle === "candles" ? "line" : "candles";
+        paintChart(card);
+      });
+      const sma = el("button", "ft-chart-tab ft-chart-tab--ctl ft-chart-tab--sma" +
+        (showSma ? " is-on" : ""), "SMA (50)");
+      sma.type = "button";
+      sma.setAttribute("aria-pressed", showSma ? "true" : "false");
+      sma.title = "The 50-session average of closes, as the card publishes it.";
+      sma.addEventListener("click", () => { showSma = !showSma; paintChart(card); });
+      ctl.append(style, sma);
+      tabs.append(ctl);
+    }
 
     const spec = chartSeries(chartTab, card);
     /* THE WINDOW IS APPLIED HERE, ON THE POINTS THE SERIES RETURNED, so
@@ -7175,12 +7272,30 @@
       return;
     }
 
-    const W = 620, H = 260, padL = 8, padR = 46, padT = 12, padB = 22;
+    /* THE VOLUME PANE, WHEN THE POINTS CARRY ONE. Candles publish each
+       session's shares beneath the price the way the design draws them —
+       a strip along the bottom on its own scale, so a bar's height is a share
+       count and never a price. */
+    const hasVol = spec.kind === "candles" && spec.points.some((pt) => pt.vol !== null);
+    const W = 620, H = hasVol ? 320 : 260, padL = 8, padR = 46, padT = 12, padB = 22;
+    const volH = hasVol ? 56 : 0, volGap = hasVol ? 10 : 0;
     const plotL = padL, plotW = W - padL - padR;
-    const plotT = padT, plotH = H - padT - padB;
+    const plotT = padT, plotH = H - padT - padB - volH - volGap;
 
     let lo = Infinity, hi = -Infinity;
-    for (const pt of live) { if (pt.v < lo) lo = pt.v; if (pt.v > hi) hi = pt.v; }
+    for (const pt of live) {
+      if (spec.kind === "candles") {
+        /* THE FRAME HOLDS THE WICKS, not only the closes, and the average
+           when it is drawn — a line that leaves the plot is a line that was
+           not framed. */
+        for (const v of [pt.v, pt.h, pt.l, spec.sma ? pt.sma : null]) {
+          if (v === null) continue;
+          if (v < lo) lo = v; if (v > hi) hi = v;
+        }
+      } else {
+        if (pt.v < lo) lo = pt.v; if (pt.v > hi) hi = pt.v;
+      }
+    }
     /* BARS ARE MEASURED FROM ZERO AND A LINE IS NOT. A signed bar whose axis
        starts at the smallest value encodes its length against an arbitrary
        floor, which is the defect this wave already fixed once on the premium
@@ -7219,13 +7334,76 @@
         if (pt.v === null) continue;
         const yy = y(pt.v);
         svg.append(svgEl("rect", {
-          class: "ft-chart-bar " + (pt.v > 0 ? "is-pos" : pt.v < 0 ? "is-neg" : "is-flat"),
+          class: "ft-chart-bar " + (pt.tone ? "is-" + pt.tone
+            : pt.v > 0 ? "is-pos" : pt.v < 0 ? "is-neg" : "is-flat"),
           x: x(i) - bw / 2, width: bw,
           y: Math.min(yy, zero), height: Math.max(1, Math.abs(yy - zero)),
         }));
       }
       svg.append(svgEl("line", { class: "ft-chart-zero",
         x1: plotL, x2: plotL + plotW, y1: zero, y2: zero }));
+    } else if (spec.kind === "candles") {
+      /* ONE WICK AND ONE BODY A SESSION. The body runs open to close and
+         takes the session's colour; a session with no open or no range is
+         drawn as its close alone, a tick, rather than invented. */
+      const bw = Math.max(1.2, Math.min(9, (plotW / n) * 0.62));
+      for (let i = 0; i < n; i++) {
+        const pt = spec.points[i];
+        if (pt.v === null) continue;
+        const cx = x(i);
+        /* A CLOSE ON ITS OPEN IS FLAT — a doji is not an up day. */
+        const tone = pt.o === null ? "flat" : pt.v > pt.o ? "pos" : pt.v < pt.o ? "neg" : "flat";
+        if (pt.h !== null && pt.l !== null) {
+          svg.append(svgEl("line", { class: "ft-chart-wick is-" + tone,
+            x1: cx, x2: cx, y1: y(pt.h), y2: y(pt.l) }));
+        }
+        const top = pt.o === null ? y(pt.v) : Math.min(y(pt.o), y(pt.v));
+        const bot = pt.o === null ? y(pt.v) : Math.max(y(pt.o), y(pt.v));
+        svg.append(svgEl("rect", { class: "ft-chart-body is-" + tone,
+          x: cx - bw / 2, width: bw, y: top, height: Math.max(1, bot - top) }));
+      }
+      if (spec.sma) {
+        let d = "", pen = false;
+        for (let i = 0; i < n; i++) {
+          const m = spec.points[i].sma;
+          if (m === null) { pen = false; continue; }
+          d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(m).toFixed(2) + " ";
+          pen = true;
+        }
+        if (d) svg.append(svgEl("path", { class: "ft-chart-sma", d: d.trim(), fill: "none" }));
+      }
+      /* THE LAST CLOSE, TAGGED ON THE AXIS, which is the one figure a reader
+         checks the frame against. */
+      const last = live[live.length - 1];
+      const ly = y(last.v);
+      svg.append(svgEl("rect", { class: "ft-chart-tag", x: plotL + plotW + 1, y: ly - 7,
+        width: padR - 2, height: 14, rx: 3 }));
+      const lt = svgEl("text", { class: "ft-chart-tag-t", x: plotL + plotW + padR / 2, y: ly + 3,
+        "text-anchor": "middle" });
+      lt.textContent = px2(last.v);
+      svg.append(lt);
+      if (hasVol) {
+        let vmax = 0;
+        for (const pt of spec.points) if (pt.vol !== null && pt.vol > vmax) vmax = pt.vol;
+        const vTop = plotT + plotH + volGap, vBase = vTop + volH;
+        for (let i = 0; i < n; i++) {
+          const pt = spec.points[i];
+          if (pt.vol === null || !(vmax > 0)) continue;
+          const tone = pt.o === null || pt.v === null ? "flat"
+            : pt.v > pt.o ? "pos" : pt.v < pt.o ? "neg" : "flat";
+          const hh = (pt.vol / vmax) * volH;
+          svg.append(svgEl("rect", { class: "ft-chart-vol is-" + tone,
+            x: x(i) - bw / 2, width: bw, y: vBase - hh, height: Math.max(0.5, hh) }));
+        }
+        svg.append(svgEl("line", { class: "ft-chart-rule", x1: plotL, x2: plotL + plotW,
+          y1: vBase, y2: vBase }));
+        const vt = svgEl("text", { class: "ft-chart-ax", x: plotL + plotW + 4, y: vTop + 8 });
+        vt.textContent = compact(vmax);
+        svg.append(vt);
+        const vl = svgEl("text", { class: "ft-chart-ax", x: plotL, y: vTop - 2 });
+        vl.textContent = "Volume";
+        svg.append(vl);
+      }
     } else {
       /* A GAP IS A GAP. A session the payload could not price breaks the
          line rather than being bridged to its neighbour, which would draw a
@@ -7238,6 +7416,16 @@
         pen = true;
       }
       svg.append(svgEl("path", { class: "ft-chart-line", d: d.trim(), fill: "none" }));
+      if (spec.sma) {
+        let m = "", pen2 = false;
+        for (let i = 0; i < n; i++) {
+          const v = spec.points[i].sma;
+          if (v === null || v === undefined) { pen2 = false; continue; }
+          m += (pen2 ? "L" : "M") + x(i).toFixed(2) + " " + y(v).toFixed(2) + " ";
+          pen2 = true;
+        }
+        if (m) svg.append(svgEl("path", { class: "ft-chart-sma", d: m.trim(), fill: "none" }));
+      }
     }
 
     const ends = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
@@ -7247,6 +7435,21 @@
       class: "ft-chart-ax", x: plotL + plotW, y: H - 6, "text-anchor": "end" });
     end2.textContent = String(spec.points[n - 1].label || "");
     svg.append(end2);
+
+    /* THE LAST SESSION'S FIGURES ABOVE THE PLOT, the way the design prints
+       O H L C over its candles: the same row the cursor prints for the last
+       point, laid out once so it is there before a pointer arrives. */
+    if (spec.kind === "candles" || (chartTab === "price" && spec.points[n - 1].o !== undefined)) {
+      const lastPt = spec.points[n - 1];
+      const strip = el("div", "ft-chart-ohlc");
+      for (const r of lastPt.rows) {
+        const k = el("span", "ft-chart-ohlc-k", r.k === "SMA 50" ? "SMA 50" : r.k.charAt(0));
+        const v = el("span", "ft-chart-ohlc-v" + (r.k === "SMA 50" ? " is-sma" : ""), r.v);
+        if (r.k === "SMA 50" && !spec.sma) continue;
+        strip.append(k, v);
+      }
+      body.append(strip);
+    }
 
     body.append(svg);
 
@@ -7330,6 +7533,318 @@
       });
       host.append(b);
     }
+  }
+
+  /* ---------- the volatility model beside the price ------------------
+
+     GARCH(1,1) WITH GED INNOVATIONS, FITTED IN THE PIPELINE AND DRAWN HERE.
+     shared/flows-garch.js fits the model once from the year of closes and
+     publishes four parameters, the conditional-volatility path and the
+     returns it was fitted to. Nothing in this function fits, forecasts or
+     re-estimates: the top chart is the published path over the published
+     returns, and the histogram bins the returns divided by that path —
+     which is drawing, since both arrays are on the card — under the density
+     the published shape implies.
+
+     THE HISTOGRAM IS THE HONEST HALF. A fitted curve on its own is a claim
+     the model is right; the standardised returns binned beneath it are what
+     let a reader see whether the tails belong to the model or to the name.
+
+     ITS OWN PERIOD ROW. The hero's control windows the series chart, and
+     this card follows the design in carrying its own so the two can be
+     read at different reaches — a month of price against a year of
+     volatility is an ordinary comparison. Same rule as the hero's: a window
+     the card cannot reach is disabled and says how far it does reach. */
+  const GARCH_PERIODS = [{ key: "1M", n: 21 }, { key: "3M", n: 63 }, { key: "6M", n: 126 },
+    { key: "1Y", n: 252 }];
+  let garchPeriod = "3M";
+
+  function paintGarch(card) {
+    const host = $("ftGarch"), body = $("ftGarchBody"), sub = $("ftGarchS");
+    const tabs = $("ftGarchTabs");
+    if (!host || !body) return;
+    body.replaceChildren();
+    if (tabs) tabs.replaceChildren();
+    const c = (card.panels || {}).context;
+    const g = c && c.status === "ok" ? c.garch : null;
+    if (!g) { host.hidden = true; return; }
+    if (g.status !== "ok" || !Array.isArray(g.condVol) || !Array.isArray(g.returns)) {
+      body.append(el("p", "ft-chart-dead", "No volatility model was fitted for this name: " +
+        String(g.reason || "the fit was not published") + "."));
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+    const all = g.condVol.map((v, i) => ({
+      v: isNum(v), r: isNum(g.returns[i]),
+      label: Array.isArray(g.dates) && g.dates[i] ? String(g.dates[i]) : "Session " + (i + 1),
+    }));
+    const have = all.length;
+    for (const pd of GARCH_PERIODS) {
+      const b = el("button", "ft-period-b" + (garchPeriod === pd.key ? " is-on" : ""), pd.key);
+      b.type = "button";
+      const can = pd.n <= have;
+      b.disabled = !can;
+      b.title = can ? "The last " + pd.n + " of the " + have + " fitted sessions."
+        : "The fit covers " + have + " sessions and " + pd.key + " needs " + pd.n + ".";
+      b.setAttribute("aria-pressed", garchPeriod === pd.key ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (garchPeriod === pd.key) return;
+        garchPeriod = pd.key;
+        paintGarch(card);
+      });
+      if (tabs) tabs.append(b);
+    }
+    const per = GARCH_PERIODS.find((x) => x.key === garchPeriod);
+    const pts = per && per.n < have ? all.slice(have - per.n) : all;
+    const n = pts.length;
+
+    /* ---- the path over the returns ---- */
+    const W = 620, H = 230, padL = 34, padR = 10, padT = 14, padB = 20;
+    const retH = 54, gap = 10;
+    const plotL = padL, plotW = W - padL - padR;
+    const plotT = padT, plotH = H - padT - padB - retH - gap;
+    let vhi = 0, rmax = 0;
+    for (const pt of pts) {
+      if (pt.v !== null && pt.v > vhi) vhi = pt.v;
+      if (pt.r !== null && Math.abs(pt.r) > rmax) rmax = Math.abs(pt.r);
+    }
+    if (!(vhi > 0)) vhi = 1;
+    if (!(rmax > 0)) rmax = 1;
+    const x = (i) => plotL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const y = (v) => plotT + plotH - (v / vhi) * plotH;
+    const svg = svgEl("svg", { class: "ft-chart-svg ft-garch-svg", viewBox: "0 0 " + W + " " + H,
+      role: "img", tabindex: "0",
+      "aria-label": "Conditional volatility, " + n + " sessions, over the daily returns" });
+    for (const frac of [0, 0.5, 1]) {
+      const v = vhi * frac, yy = y(v);
+      svg.append(svgEl("line", { class: "ft-chart-rule", x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      const t = svgEl("text", { class: "ft-chart-ax", x: plotL - 4, y: yy + 3, "text-anchor": "end" });
+      t.textContent = v.toFixed(0) + "%";
+      svg.append(t);
+    }
+    const bw = Math.max(1, Math.min(6, (plotW / n) * 0.6));
+    const rTop = plotT + plotH + gap, rMid = rTop + retH / 2;
+    for (let i = 0; i < n; i++) {
+      const r = pts[i].r;
+      if (r === null) continue;
+      const hh = (Math.abs(r) / rmax) * (retH / 2);
+      /* THREE ARMS: a zero return is a measured flat day, not a small up. */
+      svg.append(svgEl("rect", { class: "ft-garch-ret is-" + (r < 0 ? "neg" : r > 0 ? "pos" : "flat"),
+        x: x(i) - bw / 2, width: bw, y: r >= 0 ? rMid - hh : rMid, height: Math.max(0.5, hh) }));
+    }
+    svg.append(svgEl("line", { class: "ft-chart-zero", x1: plotL, x2: plotL + plotW, y1: rMid, y2: rMid }));
+    const rl = svgEl("text", { class: "ft-chart-ax", x: plotL - 4, y: rTop + 4, "text-anchor": "end" });
+    rl.textContent = "+" + rmax.toFixed(1) + "%";
+    svg.append(rl);
+    const rl2 = svgEl("text", { class: "ft-chart-ax", x: plotL - 4, y: rTop + retH, "text-anchor": "end" });
+    rl2.textContent = "−" + rmax.toFixed(1) + "%";
+    svg.append(rl2);
+    let d = "", pen = false;
+    for (let i = 0; i < n; i++) {
+      const v = pts[i].v;
+      if (v === null) { pen = false; continue; }
+      d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(v).toFixed(2) + " ";
+      pen = true;
+    }
+    svg.append(svgEl("path", { class: "ft-chart-line ft-garch-line", d: d.trim(), fill: "none" }));
+    const e0 = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
+    e0.textContent = pts[0].label;
+    svg.append(e0);
+    const e1 = svgEl("text", { class: "ft-chart-ax", x: plotL + plotW, y: H - 6, "text-anchor": "end" });
+    e1.textContent = pts[n - 1].label;
+    svg.append(e1);
+    body.append(svg);
+    if (window.FlowsCursor) {
+      window.FlowsCursor.attach(svg, {
+        name: "Conditional volatility",
+        band: { y0: plotT, y1: rTop + retH },
+        points: pts.map((pt, i) => ({
+          x: x(i), label: pt.label,
+          rows: [
+            { k: "Conditional vol", v: pt.v === null ? "not published" : pt.v.toFixed(1) + "% annualised" },
+            { k: "Daily return", v: pt.r === null ? "not published"
+              : (pt.r > 0 ? "+" : pt.r < 0 ? "−" : "") + Math.abs(pt.r).toFixed(2) + "%",
+              cls: pt.r === null ? "" : pt.r > 0 ? "is-pos" : pt.r < 0 ? "is-neg" : "" },
+          ],
+        })),
+      });
+    }
+    const legend = el("div", "ft-garch-legend");
+    legend.append(el("span", "ft-garch-lg is-vol", "Conditional volatility, annualised"),
+      el("span", "ft-garch-lg is-ret", "Daily return"));
+    body.append(legend);
+
+    /* ---- the standardised returns under the fitted density ---- */
+    const wrap = el("div", "ft-garch-dist");
+    const distH = el("h3", "ft-garch-h3", "Return distribution (GED)");
+    wrap.append(distH);
+    const row = el("div", "ft-garch-row");
+    const DW = 360, DH = 120, dl = 8, dr = 8, dt = 8, db = 16;
+    const dplotW = DW - dl - dr, dplotH = DH - dt - db;
+    const Z = 4, BINS = 32;
+    const counts = new Array(BINS).fill(0);
+    let zn = 0;
+    for (let i = 0; i < all.length; i++) {
+      const v = all[i].v, r = all[i].r;
+      if (v === null || r === null || !(v > 0)) continue;
+      const z = r / (v / Math.sqrt(252));
+      const b = Math.floor(((z + Z) / (2 * Z)) * BINS);
+      if (b < 0 || b >= BINS) { zn++; continue; }
+      counts[b]++; zn++;
+    }
+    const binW = (2 * Z) / BINS;
+    const dens = counts.map((k) => (zn ? k / (zn * binW) : 0));
+    const nu = isNum(g.nu);
+    const ged = (z) => {
+      if (nu === null) return 0;
+      const lg = (t) => {
+        if (t < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * t)) - lg(1 - t);
+        const cc = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+          771.32342877765313, -176.61502916214059, 12.507343278686905,
+          -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+        t -= 1;
+        let a = cc[0];
+        const tt = t + 7.5;
+        for (let i = 1; i < 9; i++) a += cc[i] / (t + i);
+        return 0.5 * Math.log(2 * Math.PI) + (t + 0.5) * Math.log(tt) - tt + Math.log(a);
+      };
+      const lam = Math.sqrt(Math.pow(2, -2 / nu) * Math.exp(lg(1 / nu) - lg(3 / nu)));
+      const logC = Math.log(nu) - Math.log(lam) - (1 + 1 / nu) * Math.LN2 - lg(1 / nu);
+      return Math.exp(logC - 0.5 * Math.pow(Math.abs(z / lam), nu));
+    };
+    let dmax = 0;
+    for (const v of dens) if (v > dmax) dmax = v;
+    for (let z = -Z; z <= Z; z += 0.05) { const v = ged(z); if (v > dmax) dmax = v; }
+    if (!(dmax > 0)) dmax = 1;
+    const dx = (z) => dl + ((z + Z) / (2 * Z)) * dplotW;
+    const dy = (v) => dt + dplotH - (v / dmax) * dplotH;
+    const dsvg = svgEl("svg", { class: "ft-chart-svg ft-garch-dsvg", viewBox: "0 0 " + DW + " " + DH,
+      role: "img", "aria-label": "Histogram of " + zn + " standardised returns under the fitted GED density" });
+    for (let b = 0; b < BINS; b++) {
+      if (!counts[b]) continue;
+      const z0 = -Z + b * binW;
+      dsvg.append(svgEl("rect", { class: "ft-garch-bin", x: dx(z0) + 0.5, width: Math.max(0.5, (dplotW / BINS) - 1),
+        y: dy(dens[b]), height: Math.max(0.5, dt + dplotH - dy(dens[b])) }));
+    }
+    if (nu !== null) {
+      let dd = "";
+      for (let z = -Z, k = 0; z <= Z + 1e-9; z += 0.05, k++) {
+        dd += (k ? "L" : "M") + dx(z).toFixed(2) + " " + dy(ged(z)).toFixed(2) + " ";
+      }
+      dsvg.append(svgEl("path", { class: "ft-garch-ged", d: dd.trim(), fill: "none" }));
+    }
+    for (const z of [-4, -2, 0, 2, 4]) {
+      const t = svgEl("text", { class: "ft-chart-ax", x: dx(z), y: DH - 4, "text-anchor": "middle" });
+      t.textContent = z === 0 ? "0" : (z > 0 ? "+" : "−") + Math.abs(z) + " sd";
+      dsvg.append(t);
+    }
+    row.append(dsvg);
+    const table = el("dl", "ft-garch-params");
+    const put = (k, v, title) => {
+      const dk = el("dt", "", k);
+      if (title) dk.title = title;
+      table.append(dk, el("dd", "", v));
+    };
+    const f4 = (v) => (v === null ? DASH : v.toFixed(v < 0.01 ? 6 : 4));
+    put("shape (nu)", nu === null ? DASH : nu.toFixed(2),
+      "The GED shape: 2 is the normal, below it the tails are heavier.");
+    put("omega", f4(isNum(g.omega)), "The constant in the variance recursion, in squared daily percent.");
+    put("alpha", f4(isNum(g.alpha)), "How much yesterday's squared shock feeds today's variance.");
+    put("beta", f4(isNum(g.beta)), "How much yesterday's variance carries into today's.");
+    put("alpha + beta", isNum(g.persistence) === null ? DASH : g.persistence.toFixed(3),
+      "Persistence: how slowly a shock decays. Close to 1 is slow.");
+    put("long-run vol", isNum(g.longRunVol) === null ? DASH : g.longRunVol.toFixed(1) + "%",
+      "The unconditional volatility the parameters imply, annualised.");
+    row.append(table);
+    wrap.append(row);
+    body.append(wrap);
+
+    if (sub) {
+      const nn = isNum(g.n);
+      const d0 = Array.isArray(g.dates) && g.dates.length ? g.dates[0] : null;
+      const d1 = Array.isArray(g.dates) && g.dates.length ? g.dates[g.dates.length - 1] : null;
+      sub.textContent = "Fitted by maximum likelihood on " + (nn === null ? "the" : nn) +
+        " daily log returns" + (d0 && d1 ? ", " + d0 + " to " + d1 : "") +
+        ", demeaned once. The path is the model's conditional standard deviation, annualised; " +
+        "the histogram bins each return divided by that day's path, " + zn + " of them, " +
+        "under the density the fitted shape implies" +
+        (nu === null ? "" : " (2 would be normal; " + nu.toFixed(2) + " is " +
+          (nu < 2 ? "heavier-tailed" : nu > 2 ? "thinner-tailed" : "normal") + ")") +
+        ". Windowed to " + garchPeriod + "." +
+        (g.converged === false ? " The fit did not settle: " + String(g.reason || "") +
+          " — the path is what the likelihood found and no more." : "") +
+        " No forecast is drawn: this describes the year, not tomorrow.";
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- the term structure as a card of its own ----------------
+     The IV tab's series, drawn again through chartSeries so there is one
+     derivation; see the note beside #ftIvt in shared/flows-pages.js. */
+  function paintIvt(card) {
+    const host = $("ftIvt"), body = $("ftIvtBody"), sub = $("ftIvtS");
+    if (!host || !body) return;
+    body.replaceChildren();
+    const spec = chartSeries("iv", card);
+    if (spec.silence) {
+      body.append(el("p", "ft-chart-dead", spec.silence));
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+    const live = spec.points.filter((pt) => pt.v !== null);
+    if (live.length < 2) { host.hidden = true; return; }
+    const W = 360, H = 150, padL = 36, padR = 10, padT = 12, padB = 22;
+    const plotL = padL, plotW = W - padL - padR, plotT = padT, plotH = H - padT - padB;
+    let lo = Infinity, hi = -Infinity;
+    for (const pt of live) { if (pt.v < lo) lo = pt.v; if (pt.v > hi) hi = pt.v; }
+    if (lo === hi) { lo -= 0.01; hi += 0.01; }
+    const n = spec.points.length;
+    const x = (i) => plotL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const y = (v) => plotT + plotH - ((v - lo) / (hi - lo)) * plotH;
+    const svg = svgEl("svg", { class: "ft-chart-svg", viewBox: "0 0 " + W + " " + H,
+      role: "img", tabindex: "0", "aria-label": "Implied volatility by expiry, " + n + " expiries" });
+    for (const frac of [0, 0.5, 1]) {
+      const v = lo + (hi - lo) * frac, yy = y(v);
+      svg.append(svgEl("line", { class: "ft-chart-rule", x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      const t = svgEl("text", { class: "ft-chart-ax", x: plotL - 4, y: yy + 3, "text-anchor": "end" });
+      t.textContent = vol1(v);
+      svg.append(t);
+    }
+    let d = "", pen = false;
+    for (let i = 0; i < n; i++) {
+      const pt = spec.points[i];
+      if (pt.v === null) { pen = false; continue; }
+      d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(pt.v).toFixed(2) + " ";
+      pen = true;
+    }
+    svg.append(svgEl("path", { class: "ft-chart-line", d: d.trim(), fill: "none" }));
+    for (let i = 0; i < n; i++) {
+      const pt = spec.points[i];
+      if (pt.v === null) continue;
+      svg.append(svgEl("circle", { class: "ft-ivt-dot", cx: x(i), cy: y(pt.v), r: 3 }));
+      /* AT MOST SIX EXPIRY LABELS, the ends always among them; the cursor
+         names every one. Twelve dates across 300 units overprint. */
+      const every = Math.max(1, Math.ceil((n - 1) / 5));
+      if (i !== 0 && i !== n - 1 && (i % every !== 0 || n - 1 - i < every)) continue;
+      const t = svgEl("text", { class: "ft-chart-ax", x: x(i), y: H - 6,
+        "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle" });
+      t.textContent = String(pt.label || "").split(" · ")[0].slice(5);
+      svg.append(t);
+    }
+    body.append(svg);
+    if (window.FlowsCursor) {
+      window.FlowsCursor.attach(svg, {
+        name: "Implied volatility by expiry",
+        band: { y0: plotT, y1: plotT + plotH },
+        points: spec.points.map((pt, i) => ({ x: x(i), label: String(pt.label || ""),
+          rows: pt.v === null ? [{ k: "Implied vol", v: "not published" }] : pt.rows })),
+      });
+    }
+    if (sub) sub.textContent = "Implied volatility — " + spec.unit + ". " +
+      spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+    host.hidden = false;
   }
 
   /* ---------- the option chain, ordered by strike around spot --------
@@ -8587,6 +9102,8 @@
        payload already carries and neither waits on a second fetch. */
     paintChart(card);
     paintPeriod(card);
+    paintGarch(card);
+    paintIvt(card);
     paintChain(card);
     paintMix(card);
     paintBrief(card);

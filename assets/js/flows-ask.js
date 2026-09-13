@@ -1386,10 +1386,14 @@
       var session = typeof brief.sessionDate === "string" && brief.sessionDate
         ? brief.sessionDate : null;
       var built = stampSaid(brief.generatedAt);
+      /* WHEN THE INTRADAY READINGS WERE LAST RE-READ, if the cron has done so
+         since the build: the flow-alert and pulse facts move inside the
+         session and the stamp says how far behind the tape they can be. */
+      var reread = stampSaid(brief.refreshedAt);
       status.textContent = [
         session === null ? "Briefing published without a session date" : "Session " + session,
         built === null ? "no build stamp on this key" : "built " + built,
-      ].join(" · ");
+      ].concat(reread === null ? [] : ["alerts and pulse re-read " + reread]).join(" \u00b7 ");
     }
 
     /* THE PROSE TRAVELS WITH THE NUMBERS — published in the payload beside the
@@ -1498,6 +1502,18 @@
       return;
     }
 
+    /* AND THE READ THAT FAILED, WHICH IS THE OTHER SILENCE THE ROUTE NOW
+       TELLS APART. Same envelope shape, a different word and a different
+       sentence: a fault on this site, not a run that has not happened. */
+    if (payload.status === "unreadable") {
+      answerHost.append(emptyLine("unreadable",
+        typeof payload.note === "string" && payload.note.trim() !== ""
+          ? payload.note.trim()
+          : "The briefing could not be read from the store, so no answer is offered. That " +
+            "is a fault on this site rather than a fact about the session."));
+      return;
+    }
+
     var block = llmBlock(payload);
     var guard = payload.guard && typeof payload.guard === "object" ? payload.guard : null;
     var fired = guardFired(guard);
@@ -1506,6 +1522,15 @@
     /* READING FIRST. The answer is the finding and it goes at the top at
        reading size; everything that qualifies it follows in the open, and
        only the method goes behind the disclosure at the bottom. */
+    /* HOW OLD THE FACTS ARE, ABOVE THE ANSWER. The route compares the
+       session the index describes against the last session that has closed
+       and sends the result as `session`; when they differ, the reader is
+       told before reading a sentence that could be taken as today's. */
+    var age = payload.session && typeof payload.session === "object" ? payload.session : null;
+    if (age && age.stale === true && typeof age.say === "string" && age.say.trim() !== "") {
+      answerHost.append(qualifier(age.say.trim()));
+    }
+
     var said = typeof payload.answer === "string" ? payload.answer.trim() : "";
     if (said === "") {
       answerHost.append(emptyLine("unreadable",

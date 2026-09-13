@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "197";
+export const ASSET_VERSION = "202";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -71,6 +71,7 @@ const ICONS = {
   ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-4.2-4.2",
   bell: "M12 3a6 6 0 0 0-6 6c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6a6 6 0 0 0-6-6ZM10 19a2 2 0 0 0 4 0",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4",
 };
 const icon = (name) => {
   const d = ICONS[name];
@@ -1897,31 +1898,6 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
     </div>
-    <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT, WINDOWING THE SERIES
-         BLOCK BELOW.
-
-         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
-         already on this card, so no period here costs a request — and no
-         period can reach further back than the card's own window, which is
-         the whole reason the disabled states below exist.
-
-         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
-         than being dropped from the row or drawn empty. The price window is
-         about forty sessions, so 3M and 1Y are outside it on every name and
-         the pill says so when a reader asks. A control that silently does
-         nothing is worse than one that explains itself.
-
-         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
-         on different clocks — sessions for price and premium, intraday
-         buckets for net flow, tenor for the volatility curve. The chart's
-         own note states the window it drew, which is the same rule the
-         overview's control follows: the control switches what is shown and
-         the note names it. -->
-    <div class="ft-hero-b ft-hero-b--period">
-      <span class="ft-hero-k">Period</span>
-      <div class="ft-period" id="ftPeriod" role="group"
-           aria-label="Window the series below"></div>
-    </div>
 
   </section>
   <!-- THE BAR SITS DIRECTLY UNDER THE HERO, AND IT USED TO SIT UNDER FOUR
@@ -2032,7 +2008,56 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        and the insertion says so at its own end. -->
   <div class="ft-split">
     <div class="ft-split-main">
+  <!-- ROW 0 OF THE DESIGN: the session's figures with what this card found
+       beside them. The findings index used to hold a sticky column of its own
+       down the right edge; the design keeps it to one row-mate of the cards,
+       and everything under that row runs the full width. THE CARDS SET THE
+       ROW'S HEIGHT and the index fills it, scrolling inside its own box when
+       it has more findings than the row has room for — its last line already
+       counts them. -->
+  <div class="ft-row0">
+    <div class="ft-row0-l">
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <div class="ft-flags" id="ftFlags" hidden></div>
+    </div>
+    <div class="ft-row0-r">
+  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
+
+       The design puts a findings panel at the top right and calls it an AI
+       summary. This product has one of those — Neuron, on the overview — and
+       it is generated per SESSION, not per name; a per-name one is a pipeline
+       change, not a renderer change, so calling this that would be a claim
+       about how it was made. What this is instead: the leads the panels below
+       already publish, gathered at the top with a way into each.
+
+       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
+       line is the panel's own published lead — the same string the panel
+       prints, read from the same field — so
+       the two cannot disagree about a number; what this adds is that a reader
+       sees the findings before scrolling, and can go straight to the one that
+       matters. A second sentence ABOUT the same data, written here, is what
+       the rule forbids, and there is none.
+
+       THE DOTS ARE STATION COLOURS, NOT SEVERITIES. The design colours each
+       bullet, and the panel asked for the design's look by name. Nothing on
+       this card ranks its findings by severity, so a red/amber/green dot
+       would be this renderer inventing an opinion the payload does not
+       carry; each dot instead takes the colour of the station its finding
+       came from, which is a fact about the page and one a reader can check
+       by following the link. The heading is the design's; the line under
+       the list still says what the list is: the panels' own findings,
+       counted. -->
+  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
+    <h2 class="ft-brief-h" id="ftBriefH">
+      <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
+      <span class="ft-brief-hn">AI Summary</span>
+      <span class="ft-brief-beta">Beta</span>
+    </h2>
+    <ol class="ft-brief-l" id="ftBriefL"></ol>
+    <p class="ft-brief-s" id="ftBriefS"></p>
+  </aside>
+    </div>
+  </div>
   <!-- THE TWO BLOCKS THE DESIGN PUTS SIDE BY SIDE UNDER THE FIGURES: a
        series on the left, the book on the right. They are one grid rather
        than two stacked sections because that pairing is the shape of the
@@ -2067,14 +2092,76 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        and says so when it is opened, rather than being dropped from a row
        the design specifies or drawn from a quantity that is not volume. -->
   <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
+  <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT: IN THE CHART'S OWN HEADER,
+         windowing the series it sits over.
+
+         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
+         already on this card, so no period here costs a request — and no
+         period can reach further back than the card's own window, which is
+         the whole reason the disabled states below exist.
+
+         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
+         than being dropped from the row or drawn empty. The price window is
+         about forty sessions, so 3M and 1Y are outside it on every name and
+         the pill says so when a reader asks. A control that silently does
+         nothing is worse than one that explains itself.
+
+         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
+         on different clocks — sessions for price and premium, intraday
+         buckets for net flow, tenor for the volatility curve. The chart's
+         own note states the window it drew, which is the same rule the
+         overview's control follows: the control switches what is shown and
+         the note names it. -->
     <div class="ft-chart-top">
       <h2 class="ft-chart-h" id="ftChartH">Series</h2>
+      <div class="ft-period" id="ftPeriod" role="group"
+           aria-label="Window the series below"></div>
       <div class="ft-chart-tabs" id="ftChartTabs" role="tablist"
            aria-label="Which series to draw"></div>
     </div>
     <div class="ft-chart-body" id="ftChartBody"></div>
     <p class="ft-chart-s" id="ftChartS"></p>
   </section>
+  <!-- THE VOLATILITY MODEL BESIDE THE PRICE. GARCH(1,1) with GED
+       innovations, fitted ONCE in the pipeline from the same year of closes
+       the candles draw (shared/flows-garch.js) and published on the context
+       panel: four parameters, the conditional-volatility path, the returns.
+       The card draws the path over the returns and bins the standardised
+       returns under the density the fitted shape implies; it fits nothing
+       and forecasts nothing, and its note says so. Its own period row,
+       because a month of price against a year of volatility is an ordinary
+       thing to want to see. -->
+  <section class="ft-garch" id="ftGarch" hidden aria-labelledby="ftGarchH">
+    <div class="ft-chart-top">
+      <h2 class="ft-chart-h" id="ftGarchH">GARCH(1,1) — GED</h2>
+      <div class="ft-period" id="ftGarchTabs" role="group"
+           aria-label="Window the volatility path"></div>
+    </div>
+    <div class="ft-chart-body" id="ftGarchBody"></div>
+    <p class="ft-chart-s" id="ftGarchS"></p>
+  </section>
+  </div>
+  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
+       auto-fit grid so the next one joins it without a layout change.
+
+       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
+       The aggressor panel below draws NET contracts by strike — calls lifted
+       minus puts lifted — which is a direction. How much of the volume was
+       calls and how much was puts is a different quantity, published per
+       strike as calls and puts on the same ladder, and until now it
+       reached a reader only through that panel's cursor readout. A ring is
+       what a share of a whole looks like.
+
+       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
+       The ladder keeps the strikes nearest the money and publishes how many
+       it measured, how many the chain had, and how many carried no split at
+       all — so the share is of what was measured rather than of everything
+       that traded. -->
+  <!-- ROW 2 OF THE DESIGN: the chain on the left, the volume ring over the
+       recent flow in the middle, the levels over the sector peers on the right. Three
+       columns until there is no width for them; the two stacks are plain
+       columns so the grid sees three items and not five. -->
+  <div class="ft-band3">
   <!-- THE OPTION CHAIN, WHICH IS THE SAME ROWS THE TOP-CONTRACTS PANEL
        RANKS, ASKED A DIFFERENT QUESTION.
 
@@ -2098,83 +2185,12 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-chain-body" id="ftChainBody"></div>
     <p class="ft-chain-s" id="ftChainS"></p>
   </section>
-  </div>
-  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
-       auto-fit grid so the next one joins it without a layout change.
-
-       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
-       The aggressor panel below draws NET contracts by strike — calls lifted
-       minus puts lifted — which is a direction. How much of the volume was
-       calls and how much was puts is a different quantity, published per
-       strike as calls and puts on the same ladder, and until now it
-       reached a reader only through that panel's cursor readout. A ring is
-       what a share of a whole looks like.
-
-       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
-       The ladder keeps the strikes nearest the money and publishes how many
-       it measured, how many the chain had, and how many carried no split at
-       all — so the share is of what was measured rather than of everything
-       that traded. -->
-  <div class="ft-band3">
+    <div class="ft-col">
     <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
       <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
       <div class="ft-mix-body" id="ftMixBody"></div>
       <p class="ft-mix-s" id="ftMixS"></p>
     </section>
-  </div>
-    </div>
-    <aside class="ft-split-side" aria-label="What this card found">
-  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
-
-       The design puts a findings panel at the top right and calls it an AI
-       summary. This product has one of those — Neuron, on the overview — and
-       it is generated per SESSION, not per name; a per-name one is a pipeline
-       change, not a renderer change, so calling this that would be a claim
-       about how it was made. What this is instead: the leads the panels below
-       already publish, gathered at the top with a way into each.
-
-       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
-       line is the panel's own published lead — the same string the panel
-       prints, read from the same field — so
-       the two cannot disagree about a number; what this adds is that a reader
-       sees the findings before scrolling, and can go straight to the one that
-       matters. A second sentence ABOUT the same data, written here, is what
-       the rule forbids, and there is none.
-
-       NO SEVERITY DOTS. The design colours each bullet red, amber or green.
-       Nothing on this card ranks its findings by severity, so a coloured dot
-       would be this renderer inventing an opinion the payload does not carry;
-       the marks are neutral and the reading carries its own sign in its own
-       words. -->
-  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
-    <h2 class="ft-brief-h" id="ftBriefH">What this card found</h2>
-    <ol class="ft-brief-l" id="ftBriefL"></ol>
-    <p class="ft-brief-s" id="ftBriefS"></p>
-  </aside>
-  <div class="ft-flags" id="ftFlags" hidden></div>
-  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
-       THEM IN — and this is a MOVE, not a second drawing.
-
-       The levels panel keeps its table in the grid, which carries every
-       level with its two distances and its provenance. What this card adds
-       is position: the design wants the prices a move runs into visible
-       WITHOUT scrolling, beside the findings, because they are what a
-       reader checks a quote against. Same panel, same field, same numbers,
-       read from panels.levels.levels — the nearest-first order is the
-       payload's own, sorted at shared/flows-card.js:304, so this card does
-       not re-sort and cannot disagree about which level is nearest.
-
-       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
-       publish either word. What it publishes is a gamma flip, a max pain,
-       a call wall and a put wall — each a named construction with a stated
-       derivation — so the labels stay the payload's own. Renaming a gamma
-       flip "resistance" would be this renderer asserting a behaviour the
-       card never measured. -->
-  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
-    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
-    <ol class="ft-lv-l" id="ftLvL"></ol>
-    <p class="ft-lv-s" id="ftLvS"></p>
-  </aside>
   <!-- RECENT FLOW, AND THE WORD "RECENT" IS DOING LESS WORK THAN IT LOOKS.
 
        The rows are the vendor's own FLOW ALERTS for this name: each one is a
@@ -2203,6 +2219,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <ol class="ft-flow-l" id="ftFlowL"></ol>
     <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>
+    </div>
+    <div class="ft-col">
+  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
+       THEM IN — and this is a MOVE, not a second drawing.
+
+       The levels panel keeps its table in the grid, which carries every
+       level with its two distances and its provenance. What this card adds
+       is position: the design wants the prices a move runs into visible
+       WITHOUT scrolling, beside the findings, because they are what a
+       reader checks a quote against. Same panel, same field, same numbers,
+       read from panels.levels.levels — the nearest-first order is the
+       payload's own, sorted at shared/flows-card.js:304, so this card does
+       not re-sort and cannot disagree about which level is nearest.
+
+       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
+       publish either word. What it publishes is a gamma flip, a max pain,
+       a call wall and a put wall — each a named construction with a stated
+       derivation — so the labels stay the payload's own. Renaming a gamma
+       flip "resistance" would be this renderer asserting a behaviour the
+       card never measured. -->
+  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
+    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
+    <ol class="ft-lv-l" id="ftLvL"></ol>
+    <p class="ft-lv-s" id="ftLvS"></p>
+  </aside>
   <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
        right column and calls Related. Drawn from the same session's BOARDS —
        the only place this page learns about any name but its own — so the
@@ -2215,7 +2256,24 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-rel-l" id="ftRelL"></div>
     <p class="ft-rel-s" id="ftRelS"></p>
   </aside>
-    </aside>
+    </div>
+  </div>
+  <!-- ROW 3 OF THE DESIGN: what changed beside the term structure. #ftChange is inserted by the controller as this row's first
+       child — the one place these two files have to agree, and the insertion
+       says so at its own end. -->
+  <div class="ft-band4">
+  <!-- THE VOLATILITY TERM STRUCTURE AS ITS OWN CARD, where the design puts
+       it. It is the series chart's IV tab drawn a second time from the same
+       field through the same helper — one source rendered twice, the
+       precedent .ft-brief set — so the two cannot disagree; what this adds is
+       that the curve is on the page without a tab being opened. -->
+  <section class="ft-ivt" id="ftIvt" hidden aria-labelledby="ftIvtH">
+    <h2 class="ft-chart-h ft-ivt-h" id="ftIvtH">Implied volatility term structure</h2>
+    <div class="ft-chart-body" id="ftIvtBody"></div>
+    <p class="ft-chart-s" id="ftIvtS"></p>
+  </section>
+  </div>
+    </div>
   </div>
 
 
@@ -2647,6 +2705,32 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <p class="fc-note" id="sgContextNote"></p>
   </section>
 
+  <!-- THE DESK: THE BOOK AND THE LEDGER ON ONE SIDE, THE ANSWER ON THE OTHER.
+
+       This page is a calculator, and the whole of its use is the loop between
+       picking a contract and seeing what the position it joins now pays. In
+       one column that loop is a scroll: the chain is a 26rem scroller at the
+       top and the payoff diagram is two thousand pixels below it, so every
+       Buy is followed by a journey and a comparison from memory. Side by side
+       the diagram redraws in view of the row that changed it, which is the
+       difference between reading a result and working.
+
+       LEFT IS WHAT YOU PICK FROM AND WHAT YOU HAVE PICKED: the chain, then
+       the ledger of legs it built. Both are wide numeric tables and they want
+       the same column. RIGHT IS WHAT IT MEANS: the payoff, the five numbers
+       that line reduces to, and the scenario.
+
+       ONE COLUMN REMAINS THE DEFAULT and the grid appears only where there is
+       width for two, measured rather than guessed: the chain is 736px at the
+       density the stylesheet sets and the diagram wants 300 before its axis
+       type starts colliding, so the tier opens at 94rem and not before.
+
+       THE REFUSALS AND THE METHOD ARE OUTSIDE IT, deliberately: they are not
+       part of the loop, they are what the page will not do, and they run the
+       full width underneath where a reader meets them after the work rather
+       than in the middle of it. -->
+  <div class="sg-desk">
+  <div class="sg-desk__book">
   <section class="fc-panel sg-panel" id="sgChainPanel" hidden aria-labelledby="sgChainH">
     <h2 class="fc-panel-h" id="sgChainH">The book, one expiry at a time</h2>
     <div class="sg-controls">
@@ -2673,26 +2757,40 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
          aria-label="Listed contracts at the selected expiry" hidden>
       <table class="flows-table sg-chain">
         <caption class="flows-caption">
-          Every contract the vendor lists at this expiry, unfiltered. The premium
-          desk screens this same endpoint down to what is sellable; this page does
-          not, because a long in-the-money call is a position a reader builds and
-          the desk&#39;s universe cannot express it. A greek the vendor did not send
-          is an em dash — the vendor marks all five nullable and its own example
-          carries a row with none of them.
+          Every contract the vendor lists at this expiry, unfiltered. Click an
+          ASK to buy that contract and a BID to sell it — the side each price is
+          actually dealt on. The premium desk screens this same endpoint down to
+          what is sellable; this page does not, because a long in-the-money call
+          is a position a reader builds and the desk&#39;s universe cannot express
+          it. A greek the vendor did not send is an em dash — the vendor marks
+          all five nullable and its own example carries a row with none of them.
         </caption>
+        <!-- THE TWO SIDES MIRROR AROUND THE STRIKE, which is the shape a chain
+             is read in: the quotes nearest the strike column are the ones
+             compared across it, and delta and implied volatility sit outside
+             them because they qualify a side rather than trade against the
+             other. The call side therefore runs outward-in and the put side
+             inward-out, and the renderer appends its cells in that order. -->
         <thead>
           <tr>
-            <th scope="col" class="c-num">Bid</th>
-            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" colspan="4" class="sg-side">Calls</th>
+            <!-- The strike column's banner cell is deliberately empty: the row
+                 below names it, and the two sides it separates are named here.
+                 The visually-hidden class is base.css's own, so the cell still
+                 has an accessible name for a table a screen reader walks. -->
+            <th scope="col" class="c-num sg-k"><span class="visually-hidden">Strike</span></th>
+            <th scope="col" colspan="4" class="sg-side">Puts</th>
+          </tr>
+          <tr>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
             <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction. The percent-or-fraction convention is decided once from the whole expiry's median, never per contract">IV</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
-            <th scope="col" class="c-num">Call</th>
+            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract — a short leg is opened at the bid, which is the price a seller is actually offered">Bid</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract — a long leg is opened at the ask, which is the price a buyer actually pays">Ask</abbr></th>
             <th scope="col" class="c-num sg-k">Strike</th>
-            <th scope="col" class="c-num">Put</th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract">Bid</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract">Ask</abbr></th>
             <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction">IV</abbr></th>
-            <th scope="col" class="c-num">Bid</th>
-            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
           </tr>
         </thead>
         <tbody id="sgChainBody"></tbody>
@@ -2741,16 +2839,21 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <div class="fc-note" id="sgLegsNote"></div>
   </section>
 
-  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
-    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
-    <div id="sgReadings"></div>
-    <p class="fc-note" id="sgReadNote"></p>
-  </section>
-
+  </div>
+  <div class="sg-desk__work">
+  <!-- THE DIAGRAM LEADS THE COLUMN, because it is the answer: the readings
+       under it are that same line reduced to five numbers, and a reader who
+       has just clicked Buy is looking for the shape before the figures. -->
   <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
     <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
     <div id="sgPlot"></div>
     <p class="fc-note" id="sgPlotNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
+    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
+    <div id="sgReadings"></div>
+    <p class="fc-note" id="sgReadNote"></p>
   </section>
 
   <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
@@ -2768,6 +2871,8 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <div id="sgScene"></div>
     <p class="fc-note" id="sgSceneNote"></p>
   </section>
+  </div>
+  </div>
 
   <!-- STATIC, AND IN THE DOCUMENT RATHER THAN IN THE RENDERER. These are the
        claims the page declines to make; they are true before any fetch, they
@@ -2777,40 +2882,48 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
   <section class="fc-panel sg-panel" id="sgRefusePanel" aria-labelledby="sgRefuseH">
     <h2 class="fc-panel-h" id="sgRefuseH">What this page will not tell you</h2>
     <dl class="sg-refuse">
-      <dt>Buying power reduction</dt>
-      <dd>
-        <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
-        the same short put reduces buying power by different amounts at two
-        brokers on the same afternoon, and by different amounts again in a
-        portfolio-margin account. Nothing in the vendor&#39;s specification
-        mentions buying power, margin or collateral anywhere in its 28,755
-        lines. Publishing one would be inventing a figure about your money.
-      </dd>
-      <dt>Conditional value at risk</dt>
-      <dd>
-        <strong>Refused.</strong> A tail expectation is an average over a
-        distribution, and no distribution is quoted anywhere on this page. It
-        would need a volatility surface, a drift and a horizon, none of which
-        the vendor supplies and all of which would be chosen here. The
-        distribution-free statement this page can make instead is the maximum
-        loss at expiry, which is below and is exact.
-      </dd>
-      <dt>Beta-weighted delta</dt>
-      <dd>
-        <strong>Published, with its terms stated.</strong> It is not delta
-        times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
-        index&#39;s price), so it needs a reference index and that index&#39;s live
-        price, and it is a different number against a different index. Both
-        are named and printed in the readings above rather than assumed, and
-        when either is missing the reading is an em dash — never a zero.
-      </dd>
-      <dt>A share leg</dt>
-      <dd>
-        <strong>Not offered yet.</strong> A covered call or a collar cannot be
-        expressed here, because this page builds positions out of listed
-        contracts only. Said out loud rather than left for you to discover by
-        looking for a control that is not there.
-      </dd>
+      <div class="sg-refuse-i">
+        <dt>Buying power reduction</dt>
+        <dd>
+          <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
+          the same short put reduces buying power by different amounts at two
+          brokers on the same afternoon, and by different amounts again in a
+          portfolio-margin account. Nothing in the vendor&#39;s specification
+          mentions buying power, margin or collateral anywhere in its 28,755
+          lines. Publishing one would be inventing a figure about your money.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>Conditional value at risk</dt>
+        <dd>
+          <strong>Refused.</strong> A tail expectation is an average over a
+          distribution, and no distribution is quoted anywhere on this page. It
+          would need a volatility surface, a drift and a horizon, none of which
+          the vendor supplies and all of which would be chosen here. The
+          distribution-free statement this page can make instead is the maximum
+          loss at expiry, which is below and is exact.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>Beta-weighted delta</dt>
+        <dd>
+          <strong>Published, with its terms stated.</strong> It is not delta
+          times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
+          index&#39;s price), so it needs a reference index and that index&#39;s live
+          price, and it is a different number against a different index. Both
+          are named and printed in the readings above rather than assumed, and
+          when either is missing the reading is an em dash — never a zero.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>A share leg</dt>
+        <dd>
+          <strong>Not offered yet.</strong> A covered call or a collar cannot be
+          expressed here, because this page builds positions out of listed
+          contracts only. Said out loud rather than left for you to discover by
+          looking for a control that is not there.
+        </dd>
+      </div>
     </dl>
   </section>
 
@@ -2865,3 +2978,4 @@ export const FLOWS_PAGES = {
   politicalPage,
   tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };
+

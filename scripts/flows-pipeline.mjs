@@ -35,6 +35,7 @@ import {
 } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
+import { fitGarch } from "../shared/flows-garch.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
@@ -1799,6 +1800,20 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
        no key to join on. candleDate is already used three times in this file;
        this costs one more map over candles held in memory. */
     closeDates: candlesAscending(ohlc).slice(-42).map(candleDate),
+    /* THE YEAR OF CANDLES, WHOLE. The 42 closes above were cut for a
+       sparkline; the ticker page now draws candles, a 50-session average
+       and a session-volume series, and windows them to a year. Every row
+       is [date, open, high, low, close, volume] off the same candles the
+       ATR and the liquidity floor were measured on — nothing is fetched
+       for this, and a field the vendor left blank is null rather than 0. */
+    candles: candlesAscending(ohlc).slice(-252).map((c) => [
+      candleDate(c), num(c.open, null), num(c.high, null), num(c.low, null),
+      num(c.close, null), num(c.volume, null),
+    ]),
+    /* GARCH(1,1)-GED ON THE SAME YEAR, fitted here rather than on the page
+       so the four parameters and the path are published once. See
+       shared/flows-garch.js for what is and is not published. */
+    garch: fitGarch(closes, candlesAscending(ohlc).map(candleDate)),
     /* Computed from the FULL year, not from the 42 retained for the
        sparkline: a 42-session return needs 43 closes, so reading it back out
        of the 42-element slice resolved to null on every name. */
@@ -5868,12 +5883,22 @@ function fakeEnrichment(ticker, spot, seed) {
   });
 
   let px = spot;
-  /* ENDING AT THE SESSION, NOT STARTING SOMEWHERE. The prices are unchanged —
-     they come off `rnd()` and never off the clock — so only the dates move,
-     and they move onto the days this pipeline actually asks the vendor for. */
+  /* ENDING AT THE SESSION, NOT STARTING SOMEWHERE. The prices come off
+     `rnd()` and never off the clock, so only the dates move, and they move
+     onto the days this pipeline actually asks the vendor for.
+
+     THE MOVES CLUSTER, DELIBERATELY. A uniform step every day is a series
+     with no tails and no memory, and the GARCH fit on the card reads that
+     honestly as "no ARCH effect, shape at the ceiling" — an edge case, on
+     every fixture, so the converged path was never exercised. The recursion
+     below is the model itself at textbook equity parameters; an
+     approximately normal innovation is three uniforms summed. */
   const days = tradingDaysEndingAt(DRY_SESSION_DATE, 252);
+  let s2 = 1.6, lastMove = 0;
   const ohlc = Array.from({ length: 252 }, (_, i) => {
-    const move = (rnd() - 0.5) * spot * 0.03;
+    s2 = 0.08 + 0.09 * lastMove * lastMove + 0.86 * s2;
+    lastMove = Math.sqrt(s2) * (rnd() + rnd() + rnd() - 1.5) * 2;
+    const move = px * lastMove / 100;
     const open = px; px = Math.max(1, px + move);
     return {
       // A real candle carries a timestamp; without one the fixture would not

@@ -1215,10 +1215,15 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 
 .flows-foot {
   margin-top: 1.4rem;
-  max-width: var(--measure);
+  /* THE CAP IS ON THE COLUMN, NOT ON THE BLOCK. --measure is the line length
+     prose is readable at, and capping the whole footer at it made a page-wide
+     method note one tall column against empty width. The columns below each
+     hold a measure of their own, which is what the cap was always for. */
+  max-width: none;
   font-size: var(--fs-note);
   color: var(--ink-faint);
 }
+.flows-foot .flows-foot-p { max-width: var(--measure); }
 
 @media (prefers-reduced-motion: reduce) {
   .flows-submit,
@@ -7744,6 +7749,19 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 .flows-foot .flows-foot-p { margin: 0 0 var(--space-2); }
 .flows-foot .flows-foot-p:last-child { margin-bottom: 0; }
+/* THE METHOD NOTE IS A SET OF NOTES, NOT ONE RUN. Four paragraphs stacked at
+   full measure read as a single wall and the last one — the risk warning —
+   is the one a reader never reaches. Columns give each its own block and put
+   the whole of it inside one screen; the spans are already separate elements,
+   so this is a layout change and not a rewrite of a single sentence. */
+@media (min-width: 60rem) {
+  .flows-foot {
+    display: grid; gap: 0 var(--space-3);
+    grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+    align-items: start;
+  }
+  .flows-foot .flows-foot-p { margin-bottom: var(--space-2); }
+}
 #plFoot {
   max-width: none;
   columns: 30rem;
@@ -8373,10 +8391,12 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
      240px the track refuses to shrink and the overflow lands on the document,
      which is the one thing .cc's min-width:0 note is about. `min(15rem, 100%)`
      asks for 15rem and settles for the width it actually has. */
-  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
   gap: var(--space-2) var(--space-3);
   margin: 0;
 }
+/* The pair, as one cell — see the note beside add() in flows-strategy.js. */
+.sg-fact { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 
 .sg-facts dt {
   font-family: var(--font-figure);
@@ -8397,7 +8417,14 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* A dt whose value came with an explanation gets the dotted underline every
    other abbr on this site uses, so a reader knows there is one to read. */
-.sg-facts dt[title] { border-bottom: 1px dotted var(--hairline); display: inline-block; }
+/* THE DOTTED RULE IS AN AFFORDANCE ON A WORD, NOT A DIVIDER ACROSS A COLUMN.
+   Inside the flex cell the inline-block stretched to the track's full width
+   and read as a horizontal rule under every label — `align-self: start` puts
+   it back around the text it marks. */
+.sg-facts dt[title] {
+  border-bottom: 1px dotted var(--hairline);
+  display: inline-block; align-self: start;
+}
 
 /* NOT A NUMBER, AND IT MUST NOT LOOK LIKE ONE. "unbounded" sits where a
    dollar figure sits, so it is set in italic serif at the reading size — the
@@ -8415,8 +8442,30 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 /* ---------- the chain ------------------------------------------ */
 
 .sg-chainwrap { max-height: 26rem; overflow: auto; }
+/* THE HEAD STAYS WHILE THE STRIKES MOVE. The book opens centred on the money,
+   which means it opens SCROLLED — so without this the first thing a reader
+   sees is nine columns of figures with no column names anywhere on screen,
+   and the two that are controls (bid, ask) are indistinguishable from the two
+   that are not. Both header rows stick: the second carries the column names
+   and the first says which side of the strike they belong to. The background
+   is opaque because rows scroll UNDER it. */
+.sg-chain thead th { position: sticky; z-index: 1; background: var(--panel-head); }
+.sg-chain thead tr:first-child th { top: 0; }
+.sg-chain thead tr:nth-child(2) th { top: 1.55rem; }
 
-.sg-chain { font-variant-numeric: tabular-nums; }
+/* A CHAIN IS A DENSE INSTRUMENT, and this one is nine numeric columns beside
+   a diagram. At the body size it measured 767px against the 579 its column
+   holds at 1440, so the put side scrolled out of sight — which is the same as
+   not drawing it. The note size and a tighter horizontal padding bring it
+   inside the column; the VERTICAL rhythm is untouched, because row height is
+   what makes a long table scannable and it is also the click target on a
+   quote. Every figure here is tabular, so nothing shifts as the numbers do. */
+.sg-chain {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+  --tbl-pad-x: 0.34rem;
+}
+.sg-chain .sg-qb { padding-inline: 0.34rem; }
 
 .sg-chain th[scope="row"].sg-k,
 .sg-chain thead .sg-k {
@@ -8430,6 +8479,35 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    it is a landmark for the eye, not a reading. */
 .sg-chain tr.is-atm th[scope="row"].sg-k { color: var(--gold-harvest); }
 .sg-chain tr.is-atm td { border-block: 1px solid var(--hairline); }
+
+/* THE SIDE BANNERS over the four columns each half owns. */
+.sg-side {
+  font-family: var(--font-figure); font-size: var(--fs-micro);
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+  text-align: center; font-weight: 600;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+/* A QUOTE THAT IS A CONTROL. The cell keeps the table's numeric alignment and
+   the button inside it is the whole cell, so the target is the figure a reader
+   is already aiming at rather than a word beside it. Underlined on hover and
+   focus rather than tinted: the two sides differ by WHICH price they are, not
+   by a hue, and this table is read down a column. */
+.sg-q { padding: 0; }
+.sg-qb {
+  display: block; width: 100%;
+  padding: 0.32rem 0.5rem;
+  font: inherit; font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: none; border: 0; border-radius: 0.25rem;
+  color: inherit; cursor: pointer;
+}
+.sg-qb:hover { background: var(--panel-head); color: var(--ink); text-decoration: underline; }
+.sg-qb:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: -2px; }
+/* The ask opens a LONG and the bid a SHORT; the mark says which without a
+   colour, for the same reason every other sign on this page is a position. */
+.sg-qb--long::after { content: " +"; color: var(--gold-celadon); }
+.sg-qb--short::after { content: " \2212"; color: var(--ink-faint); }
 
 .sg-act { white-space: nowrap; }
 
@@ -8468,7 +8546,20 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* ---------- the legs ------------------------------------------- */
 
-.sg-legs { font-variant-numeric: tabular-nums; }
+.sg-legs {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+  /* 0.3rem, MEASURED: the ledger is ten columns in the 744px the book track
+     leaves inside its panel, and at 0.4 it came to 758 — fourteen pixels over,
+     which put the Remove control half outside the box. */
+  --tbl-pad-x: 0.3rem;
+}
+/* THE LEG NAME IS THE ONE CELL HERE THAT IS WORDS, and nowrap on it made a
+   ten-column table 950px wide — wider than the chain it sits under. It wraps;
+   every other cell on the row is a figure and stays on one line. */
+.sg-legs td:first-child, .sg-legs th[scope="row"] {
+  white-space: normal; min-width: 8.5rem; line-height: 1.3;
+}
 
 .sg-qty { min-height: 28px; min-width: 28px; }
 .sg-qty,
@@ -8502,6 +8593,9 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 /* A strike is a landmark. Dotted so it never competes with either curve. */
 .sg-strike { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 2 3; }
+/* A level line, fainter than a strike: it carries a labelled dollar amount
+   and must not read as a feature of the position the way a strike does. */
+.sg-grid { stroke: color-mix(in srgb, var(--hairline) 45%, transparent); stroke-width: 1; }
 
 /* Today's price, dashed and slightly brighter than a strike: it is the one
    vertical on the drawing that is a measurement rather than a parameter. */
@@ -8537,7 +8631,71 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 /* THE REFUSALS ARE PROSE AND ARE SET AS PROSE. They are the page's argument
    rather than its output, so they take the serif reading face and a measure,
    and they do not sit in the mono grid the readings use. */
-.sg-refuse { margin: 0; }
+/* =============================================================
+   THE DESK: the book beside what it builds.
+
+   ONE COLUMN IS THE DEFAULT AND TWO IS THE EARNED CASE. The grid opens at
+   84rem, which is the width at which the narrower track still clears the
+   400px the payoff diagram needs before its axis labels start colliding —
+   the same floor renderPlot() states. Below it the stack is not a
+   degradation, it is the correct layout for a screen that cannot hold both.
+
+   THE BOOK IS THE STICKY HALF, NOT THE WORK. Picking a contract is the
+   repeated action and the diagram is what it is checked against, so the
+   chain stays in view while the readings and the scenario scroll past it.
+   Capped at the viewport with its own overflow for the reason the rail's
+   note gives: a sticky box taller than the screen hides its own tail with
+   nothing saying so. */
+.sg-desk { display: grid; gap: var(--space-3); min-width: 0; }
+.sg-desk > * { min-width: 0; }
+.sg-desk__book, .sg-desk__work {
+  display: flex; flex-direction: column; gap: var(--space-3); min-width: 0;
+}
+.sg-desk__book > *, .sg-desk__work > * { margin: 0; }
+/* 94rem, AND THE NUMBER IS MEASURED. The chain is 736px wide at the density
+   set below and the panel spends another ~40 on its own padding, so the book
+   track is 48.5rem; the diagram's floor is the 300px renderPlot() states, and
+   the work track clears it from 94rem up. Below that the single column is not
+   a fallback, it is the layout a screen that narrow actually has room for —
+   the chain alone would scroll sideways in half of it. */
+@media (min-width: 94rem) {
+  .sg-desk {
+    grid-template-columns: minmax(0, 48.5rem) minmax(0, 1fr);
+    /* START, NOT STRETCH: the work column is three boxes whose height is their
+       content, and stretched to the book's height the last would grow a tail
+       of empty panel under the scenario. */
+    align-items: start;
+  }
+  /* NEITHER COLUMN STICKS, AND THAT IS A MEASUREMENT RATHER THAN A
+     PREFERENCE. The work column is the diagram, the payoff table, five
+     readings and a scenario: about 1,100px, which does not fit a laptop
+     viewport, so sticking it would put every reader inside a nested scroller
+     with the scenario controls below its fold. What the side-by-side layout
+     was for is already won — the diagram is beside the row that changes it —
+     and the rest is ordinary page scroll. */
+}
+
+/* THE REFUSALS READ AS A CARD EACH, not as a wall of prose. Four claims the
+   page declines to make, each a heading and a paragraph — as one dl they ran
+   the full measure and read as an essay, which is the one shape that makes a
+   reader skip them. Two columns and a rule between them says "four separate
+   statements" before a word is read. */
+.sg-refuse {
+  margin: 0;
+  display: grid; gap: var(--space-2) var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+}
+/* THE PAIR IS ONE BOX, which is why the markup wraps each dt+dd in a div —
+   a grouping HTML5 admits inside a dl precisely so a pair can be styled as a
+   unit. Without it a column break could land between a claim and its reason,
+   and "Refused." would head one column while the sentence explaining it
+   headed the next. */
+.sg-refuse-i {
+  display: flex; flex-direction: column; gap: 0.3rem; min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--panel-border); border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--bg-elev) 35%, transparent);
+}
 
 .sg-refuse dt {
   font-family: var(--font-figure);
@@ -8548,10 +8706,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   margin-top: var(--space-2);
 }
 .sg-refuse dt:first-child { margin-top: 0; }
+.sg-refuse dt { margin-top: 0; }
 
 .sg-refuse dd {
   margin: 0.3rem 0 0;
-  max-width: var(--measure);
   color: var(--ink-dim);
   font-size: var(--fs-note);
   line-height: 1.55;
@@ -9832,34 +9990,32 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
    width itself; the rail's 60/60 pair did exactly that until this wave, so
    this tier is a min alone and the single-column case is the unqualified
    default above. */
+/* ONE COLUMN, FULL WIDTH. The sticky right column this used to carry is
+   gone: the design keeps the findings index to one row beside the figures
+   (.ft-row0) and runs every band under it across the whole width. */
 .ft-split { display: grid; gap: var(--space-3); }
+.ft-split-main { min-width: 0; }
+/* ROW 0: the six cards and what this card found, side by side once there is
+   room for both. The index is the narrower half and keeps a fixed track so
+   the cards' auto-fit does not squeeze it. */
+.ft-row0 { display: grid; gap: var(--space-3); min-width: 0; }
+.ft-row0 > * { min-width: 0; }
+.ft-row0-l { display: grid; gap: var(--space-2); align-content: start; min-width: 0; }
+.ft-row0-l > * { margin: 0; }
+/* SIX IN ONE ROW BESIDE THE INDEX: the 8rem floor (a phone measurement) wraps
+   the sixth card under the other five once the index takes its 22rem. */
+@media (min-width: 72rem) { .ft-row0-l .ft-cards { grid-template-columns: repeat(auto-fit, minmax(min(6.5rem, 100%), 1fr)); } }
+.ft-row0-r { min-width: 0; }
+.ft-row0-r > .ft-brief { margin: 0; }
 @media (min-width: 72rem) {
-  .ft-split {
-    grid-template-columns: minmax(0, 1fr) 20rem;
-    /* START, NOT STRETCH. The right column is three boxes whose height is
-       their content; stretched to the left column's height they would grow a
-       tail of empty panel under the sector strip. */
-    align-items: start;
-  }
-  /* STICKY, BECAUSE THE LEFT COLUMN IS THE LONGER ONE. What the card found is
-     an index INTO the page, so it earns its place beside the reading rather
-     than scrolling away from it. Capped at the viewport with its own overflow
-     for the reason the rail's note gives: a sticky box taller than the screen
-     hides its own tail with no affordance saying so. */
-  .ft-split-side {
-    position: sticky;
-    top: calc(var(--ft-bar-h, 9rem) + 1rem);
-    max-height: calc(100vh - var(--ft-bar-h, 9rem) - 2rem);
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  .ft-row0 { grid-template-columns: minmax(0, 1fr) 22rem; align-items: stretch; }
+  /* THE CARDS SET THE HEIGHT. The index is taken out of flow inside its cell
+     so its five findings cannot stretch the row; it scrolls inside the box. */
+  .ft-row0-r { position: relative; }
+  .ft-row0-r > .ft-brief {
+    position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
   }
 }
-.ft-split-main { min-width: 0; }
-.ft-split-side { min-width: 0; display: flex; flex-direction: column; }
-/* The three boxes already carry their own bottom margin from the stacked
-   layout; in a flex column that margin is the gap, so the last one's is
-   removed rather than a second spacing system introduced. */
-.ft-split-side > :last-child { margin-bottom: 0; }
 
 
 /* ---------- the six cards ----------
@@ -10013,26 +10169,39 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
 .ft-brief-i + .ft-brief-i { border-top: 1px solid var(--hairline); }
 .ft-brief-a {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.45rem 0;
   color: var(--ink-dim);
   text-decoration: none;
-  /* A NEUTRAL MARK, NOT A SEVERITY DOT: nothing on this card ranks its own
-     findings, so the bullet says "one of several" and nothing more. */
-  position: relative;
 }
-.ft-brief-a::before {
-  content: "";
-  position: absolute;
-  left: -0.55rem;
-  top: 0.85em;
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 999px;
-  background: var(--ink-faint);
-  opacity: 0.7;
+/* THE DOT TAKES ITS STATION'S COLOUR, not a severity: see the note beside
+   #ftBrief in shared/flows-pages.js. Five stations, five hues the rail and
+   the tab row already use for the same groups. */
+.ft-brief-d {
+  flex: none; width: 0.5rem; height: 0.5rem; margin-top: 0.45em;
+  border-radius: 999px; background: var(--ink-faint);
+}
+.ft-brief-d.is-signal { background: var(--gold-harvest); }
+.ft-brief-d.is-overview { background: var(--gold-harvest); }
+.ft-brief-d.is-convexity { background: var(--flow-down); }
+.ft-brief-d.is-volatility { background: #7aa7ff; }
+.ft-brief-d.is-tape { background: var(--flow-up); }
+.ft-brief-d.is-context { background: var(--flow-up); }
+.ft-brief-t { flex: 1 1 auto; }
+.ft-brief-h {
+  display: flex; align-items: center; gap: 0.45rem;
+  text-transform: none; letter-spacing: 0; font-size: var(--fs-note);
+  color: var(--ink);
+}
+.ft-brief-ic { display: inline-flex; color: var(--gold-harvest); }
+.ft-brief-ic svg { width: 1rem; height: 1rem; }
+.ft-brief-hn { font-weight: 600; }
+.ft-brief-beta {
+  font-family: var(--font-figure); font-size: 0.6rem; line-height: 1;
+  letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;
+  padding: 0.2rem 0.4rem; border-radius: 0.3rem;
+  color: var(--gold-harvest); border: 1px solid var(--gold-harvest);
 }
 .ft-brief-a:hover, .ft-brief-a:focus-visible { color: var(--ink); }
 .ft-brief-a:hover .ft-brief-c, .ft-brief-a:focus-visible .ft-brief-c { color: var(--gold-harvest); }
@@ -10423,9 +10592,76 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
      grows — so it is the one given a growing body below; the chain's rows
      are fixed by how many contracts traded. */
   .ft-top { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: stretch; }
-  .ft-chart { display: flex; flex-direction: column; }
-  .ft-chart-body { flex: 1; display: flex; align-items: center; }
+  .ft-chart, .ft-garch { display: flex; flex-direction: column; }
+  .ft-chart-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
 }
+/* ROW 2: chain | ring | levels over flow. The two stacks are plain columns
+   so the grid lays out three items; each stack's cards keep their own gap. */
+.ft-band3 { grid-template-columns: minmax(0, 1fr); }
+.ft-col { display: grid; gap: var(--space-3); align-content: start; min-width: 0; }
+.ft-col > * { margin: 0; min-width: 0; }
+@media (min-width: 60rem) {
+  .ft-band3 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+}
+/* ROW 3: what changed | the term structure | the sector peers. */
+.ft-band4 {
+  display: grid; gap: var(--space-3); margin-top: var(--space-3);
+  grid-template-columns: minmax(0, 1fr); min-width: 0;
+}
+.ft-band4 > * { min-width: 0; margin: 0; }
+@media (min-width: 60rem) {
+  .ft-band4 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+}
+/* The chart header carries the period pills between its name and its tabs. */
+.ft-chart-top .ft-period { margin-inline: auto 0; }
+.ft-chart-ctl { display: inline-flex; gap: 0.3rem; margin-left: 0.35rem; padding-left: 0.5rem;
+  border-left: 1px solid var(--panel-border); }
+.ft-chart-tab--sma.is-on { color: var(--bg); }
+.ft-chart-ohlc {
+  display: flex; flex-wrap: wrap; gap: 0.2rem 0.55rem; align-items: baseline;
+  margin: 0 0 0.35rem; font-family: var(--font-figure); font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.ft-chart-ohlc-k { color: var(--ink-faint); }
+.ft-chart-ohlc-v { color: var(--ink); font-weight: 600; }
+.ft-chart-ohlc-v.is-sma { color: var(--gold-harvest); }
+.ft-chart-wick.is-pos, .ft-chart-body.is-pos, .ft-chart-vol.is-pos { stroke: var(--flow-up); fill: var(--flow-up); }
+.ft-chart-wick.is-neg, .ft-chart-body.is-neg, .ft-chart-vol.is-neg { stroke: var(--flow-down); fill: var(--flow-down); }
+.ft-chart-wick.is-flat, .ft-chart-body.is-flat, .ft-chart-vol.is-flat { stroke: var(--ink-faint); fill: var(--ink-faint); }
+.ft-chart-wick { stroke-width: 1; }
+.ft-chart-vol { opacity: 0.55; }
+.ft-chart-sma { stroke: var(--gold-harvest); stroke-width: 1.4; }
+.ft-chart-tag { fill: var(--gold-harvest); }
+.ft-chart-tag-t { fill: var(--bg); font-family: var(--font-figure); font-size: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+/* The volatility card. */
+.ft-garch-line { stroke: var(--gold-harvest); stroke-width: 1.3; }
+.ft-garch-ret { opacity: 0.55; }
+.ft-garch-ret.is-pos { fill: var(--flow-up); }
+.ft-garch-ret.is-neg { fill: var(--flow-down); }
+.ft-garch-ret.is-flat { fill: var(--ink-faint); }
+.ft-garch-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin: 0.3rem 0 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-garch-lg::before { content: ""; display: inline-block; width: 0.9rem; height: 2px;
+  vertical-align: middle; margin-right: 0.35rem; background: var(--gold-harvest); }
+.ft-garch-lg.is-ret::before { height: 0.5rem; background: color-mix(in srgb, var(--ink-faint) 60%, transparent); }
+.ft-garch-dist { margin-top: var(--space-2); padding-top: var(--space-2);
+  border-top: 1px solid var(--panel-border); }
+.ft-garch-h3 { margin: 0 0 0.35rem; font-size: var(--fs-note); font-weight: 600; color: var(--ink); }
+.ft-garch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2);
+  align-items: center; min-width: 0; }
+.ft-garch-row > * { min-width: 0; }
+.ft-garch-dsvg { width: 100%; }
+.ft-garch-bin { fill: color-mix(in srgb, var(--ink-faint) 55%, transparent); }
+.ft-garch-ged { stroke: var(--gold-harvest); stroke-width: 1.5; }
+.ft-garch-params { margin: 0; display: grid; grid-template-columns: auto auto; gap: 0.2rem 0.8rem;
+  font-family: var(--font-figure); font-size: var(--fs-micro); font-variant-numeric: tabular-nums;
+  padding: 0.45rem 0.6rem; border: 1px solid var(--panel-border); border-radius: var(--radius-1, 0.4rem); }
+.ft-garch-params dt { color: var(--ink-faint); }
+.ft-garch-params dd { margin: 0; text-align: right; color: var(--ink); font-weight: 600; }
+@media (max-width: 30rem) { .ft-garch-row { grid-template-columns: minmax(0, 1fr); } }
+.ft-ivt-dot { fill: var(--gold-harvest); }
+.ft-ivt-h { display: block; }
 .ft-chart {
   padding: 0.75rem 0.9rem;
   border: 1px solid var(--panel-border);
@@ -10518,6 +10754,8 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    document (these six are siblings of the grid, not panels inside a station)
    and it should not be bent to save a selector. */
 .ft-chart,
+.ft-garch,
+.ft-ivt,
 .ft-chain,
 .ft-lv,
 .ft-flow,
@@ -10565,8 +10803,14 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-chain-top .ft-chain-h {
   margin: 0; padding: 0; border: 0; background: none; border-radius: 0;
 }
+/* The findings index keeps the strip but wears the design's title: mixed
+   case, an icon, a Beta pill. Declared after the strip so it wins. */
+.ft-brief-h {
+  text-transform: none; letter-spacing: 0; font-size: var(--fs-note);
+  color: var(--ink); display: flex; align-items: center; gap: 0.45rem;
+}
 @media (max-width: 30rem) {
-  .ft-chart, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
+  .ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
   .ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
   .ft-chart-top, .ft-chain-top { padding-inline: var(--space-2); }
 }

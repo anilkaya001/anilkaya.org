@@ -8,7 +8,8 @@
    a gate tested once. */
 
 import assert from "node:assert/strict";
-import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay} from "../shared/flows-freshness.js";
+import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession }
+  from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -93,6 +94,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(REFRESH_CADENCE_MINUTES, 15,
     "the cadence pages quote matches the wrangler.toml cron — a page promising " +
     "15-minute freshness against a 30-minute cron would be lying politely");
+}
+
+/* ---------- the last session that has closed ------------------- */
+{
+  eq(lastCompletedSession(new Date("2026-07-08T21:00:00Z")), "2026-07-08",
+    "Wednesday 17:00 ET: today's session has closed and settled, so today");
+  eq(lastCompletedSession(new Date("2026-07-08T18:00:00Z")), "2026-07-07",
+    "Wednesday 14:00 ET: today is still open, so yesterday");
+  eq(lastCompletedSession(new Date("2026-07-08T20:15:00Z")), "2026-07-07",
+    "the 16:15 settle edge itself still counts the day as open — the same edge the " +
+    "refresh window keeps inclusive");
+  eq(lastCompletedSession(new Date("2026-07-11T15:00:00Z")), "2026-07-10",
+    "Saturday: the Friday before");
+  eq(lastCompletedSession(new Date("2026-07-13T12:00:00Z")), "2026-07-10",
+    "Monday 08:00 ET: still Friday, across the weekend");
+  eq(lastCompletedSession(new Date("2026-01-14T21:30:00Z")), "2026-01-14",
+    "Wednesday 16:30 ET in January — closed under standard time, where the same UTC " +
+    "instant would still be open in July");
+  eq(lastCompletedSession(new Date("2026-07-14T02:30:00Z")), "2026-07-13",
+    "22:30 ET on Monday is Tuesday in UTC and is still Monday's session in New York");
+  eq(lastCompletedSession("nope"), null, "an unreadable instant is null");
 }
 
 console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock read through the IANA ` +

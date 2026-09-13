@@ -233,10 +233,16 @@ try {
     return row ? row.pnl : null;
   };
 
+  /* THE QUOTE IS THE CONTROL. The chain used to carry a Buy and a Sell button
+     per side; it now opens a long leg from the ASK and a short one from the
+     BID, which is where those two prices are actually dealt and is what every
+     options platform already teaches. The label names the price as well as the
+     contract, so these selectors are more specific than the pair they replace
+     rather than less. */
   const buy = (expiry, strike, kind) =>
-    page.click(`[aria-label="Buy the ${expiry} ${strike} ${kind}"]`);
+    page.click(`[aria-label^="Buy the ${expiry} ${strike} ${kind} at the ask"]`);
   const sell = (expiry, strike, kind) =>
-    page.click(`[aria-label="Sell the ${expiry} ${strike} ${kind}"]`);
+    page.click(`[aria-label^="Sell the ${expiry} ${strike} ${kind} at the bid"]`);
   const clearPosition = () => page.click("#sgClear");
 
   /* ---------- 1. the page, before anything is asked of it -------- */
@@ -359,13 +365,16 @@ try {
        did not send. */
     const row120 = rows.find((r) => r.cells.includes("$120"));
     ok(row120, "the $120 strike renders");
-    eq(row120.cells[3], DASH,
+    /* THE CALL SIDE READS OUTWARD-IN — delta, implied volatility, bid, ask —
+       so the two quotes sit against the strike column they are compared
+       across. The indices below are that order and the header states it. */
+    eq(row120.cells[0], DASH,
        "the delta of a contract the vendor sent no greeks for is an EM DASH, not 0.000 — " +
        "an absent reading and a measured zero are different facts and this page's whole " +
        "discipline is keeping them apart");
-    eq(row120.cells[2], DASH,
+    eq(row120.cells[1], DASH,
        "and so is its implied volatility, which is absent on the same row");
-    eq(row120.cells[0], "$0.45",
+    eq(row120.cells[2], "$0.45",
        "while the quote it DOES carry still renders: absence is per field, not per row");
 
     const note = flat(await page.locator("#sgChainNote").textContent());

@@ -30,7 +30,8 @@
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
-         promptForSummary, renderSummaryPlain, summaryFingerprint }
+         promptForSummary, renderSummaryPlain, summaryFingerprint,
+         refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
 
 let checks = 0;
@@ -2106,6 +2107,74 @@ import { readFile } from "node:fs/promises";
   const told = promptFor(onPage.picked, "what is new for calls").system;
   ok(/3\. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS/.test(told) && /UNAVAILABLE means/.test(told),
      "rule 3 names four silences, unavailable among them");
+}
+
+/* ---------- the intraday refresh of the index ------------------- */
+{
+  const index = { ...INDEX, sessionDate: "2026-09-04" };
+  const before = index.facts.filter((f) => f.source === "flowalerts");
+  ok(before.length >= 1, "the nightly index carries at least one flow-alert fact to replace");
+  const fresh = {
+    ...ALERTS, readAt: "2026-09-04T18:00:00.000Z", refreshed: "intraday",
+    rows: [{ t: "SYN35" }, { t: "SYN23" }, { t: "SYN99" }, { t: "SYN12" }], seen: 4,
+  };
+  const next = refreshIntradayFacts(index, { flowalerts: fresh });
+  const after = next.facts.filter((f) => f.source === "flowalerts");
+  eq(next.replaced.flowalerts, after.length, "the count replaced is the count now present");
+  ok(after.some((f) => /holds 4 of the 4 alerts/.test(f.say)),
+     "the flow-alert fact now quotes the intraday count, not last night's");
+  ok(after.every((f) => f.at === "2026-09-04T18:00:00.000Z"),
+     "and is stamped with the READ, not the nightly build — readAt is what the cron writes");
+  eq(next.refreshedAt, "2026-09-04T18:00:00.000Z", "the index records when it was refreshed");
+  eq(next.facts.length - index.facts.length, after.length - before.length,
+     "nothing else entered or left the index");
+  eq(next.facts.findIndex((f) => f.source === "flowalerts"),
+     index.facts.findIndex((f) => f.source === "flowalerts"),
+     "the rebuilt facts sit where the old ones sat, so selection order is unchanged");
+  same(index.facts.filter((f) => !INTRADAY_SOURCES.includes(f.source)).map((f) => f.id),
+       next.facts.filter((f) => !INTRADAY_SOURCES.includes(f.source)).map((f) => f.id),
+       "every fact from a nightly surface is untouched, id for id");
+  eq(INDEX.facts.filter((f) => f.source === "flowalerts")[0].say, before[0].say,
+     "and the input index was not mutated");
+
+  const quiet = refreshIntradayFacts(index, { flowalerts: { status: "quiet", rows: [] } });
+  same(quiet.facts.map((f) => f.id), index.facts.map((f) => f.id),
+       "a quiet read replaces nothing — the same rule the cron applies to the feed itself");
+  const pendingOnly = refreshIntradayFacts(index, { pulse: { status: "pending" } });
+  same(pendingOnly.facts.map((f) => f.id), index.facts.map((f) => f.id),
+       "a pending feed replaces nothing either");
+  eq(refreshIntradayFacts(index, {}).refreshedAt, null,
+     "with nothing to read from, no refresh stamp is invented");
+}
+
+/* ---------- how old the facts are ------------------------------- */
+{
+  const idx = { sessionDate: "2026-09-10", generatedAt: "2026-09-10T22:00:00Z", facts: [] };
+  const current = briefAge(idx, new Date("2026-09-11T14:00:00Z"));
+  eq(current.stale, false, "on the next day inside the session, the prior close is current");
+  eq(current.expected, "2026-09-10", "and the expected session is the one the index has");
+  const late = briefAge(idx, new Date("2026-09-12T15:00:00Z"));
+  eq(late.stale, true, "a day later, with 2026-09-11 closed and unpublished, it is stale");
+  eq(late.expected, "2026-09-11", "and the sentence names the session that is missing");
+  ok(/2026-09-10/.test(late.say) && /2026-09-11/.test(late.say),
+     "both dates are in the reader's sentence");
+  eq(briefAge({ facts: [] }, new Date()).stale, false,
+     "an index with no session date cannot be called stale — nothing to compare");
+  eq(briefAge(idx).expected, null, "and with no clock there is no expectation");
+
+  const { user } = promptFor(INDEX.facts.slice(0, 2), "what happened", late);
+  ok(/session of 2026-09-10/.test(user), "the prompt tells the model which session the facts are");
+  ok(/STALE:/.test(user) && /2026-09-11 has not been published/.test(user),
+     "and, when stale, says which session is missing in the same words the reader sees");
+  const { user: fresh } = promptFor(INDEX.facts.slice(0, 2), "what happened",
+    { ...current, refreshedAt: "2026-09-11T13:45:00Z" });
+  ok(/re-read at 2026-09-11T13:45:00Z/.test(fresh) && !/STALE/.test(fresh),
+     "a current index says when its intraday readings were re-read and carries no stale line");
+  const { user: bare } = promptFor(INDEX.facts.slice(0, 2), "what happened");
+  ok(/describe one trading session/.test(bare),
+     "with no meta at all the header still opens the facts, dated only as 'one session'");
+  ok(/session of 2026-09-10/.test(promptForSummary(INDEX.facts.slice(0, 3), late).user),
+     "the summary lane is dated the same way");
 }
 
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +

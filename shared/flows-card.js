@@ -771,7 +771,8 @@ export function buildPricedMove({
 
 /** Where the name has been: period returns and its position in a year's range. */
 export function buildContext(
-  { closes, closeDates, r5, r21, r42, week52Pos, changePct }, { asOf = null } = {},
+  { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch },
+  { asOf = null } = {},
 ) {
   /* FILTERED IN LOCKSTEP, WHICH IS THE WHOLE POINT.
 
@@ -866,7 +867,44 @@ export function buildContext(
     /* Sessions the filter removed. Non-zero means index is NOT time in the
        arrays above, which is precisely when a reader needs the dates. */
     dropped: rawCloses.length - series.length,
+    ...candleFields(candles),
+    /* The volatility model, carried as the pipeline fitted it. Absent on a
+       card built before the fit existed; `unavailable` with its reason when
+       the year was too short to fit. */
+    ...(garch && typeof garch === "object" ? { garch } : {}),
   }, asOf);
+}
+
+/** Up to 252 sessions of candles for the chart, with a 50-session close average. */
+export const SMA_SESSIONS = 50;
+function candleFields(candles) {
+  if (!Array.isArray(candles)) return {};
+  /* THE SAME FILTER `closes` GETS, ON THE SAME RULE: a candle whose close is
+     null or non-positive is not a price and is dropped whole, so the two
+     arrays disagree only by the sessions this one reaches further back. */
+  const rows = [];
+  for (const c of candles) {
+    if (!Array.isArray(c) || c.length < 6) continue;
+    const close = numOrNull(c[4]);
+    if (close === null || !(close > 0)) continue;
+    const d = typeof c[0] === "string" && c[0] ? c[0].slice(0, 10) : null;
+    const px = (v) => { const n = numOrNull(v); return n === null || !(n > 0) ? null : Number(n.toFixed(4)); };
+    const vol = numOrNull(c[5]);
+    rows.push([d, px(c[1]), px(c[2]), px(c[3]), Number(close.toFixed(4)),
+      vol === null || vol < 0 ? null : Math.round(vol)]);
+  }
+  if (rows.length < 2) return {};
+  /* THE AVERAGE IS DERIVED ONCE, HERE, so the page draws it rather than
+     computing it. Null until fifty closes exist behind a session — an
+     average of fewer is a different quantity wearing the label. */
+  const sma = new Array(rows.length).fill(null);
+  let run = 0;
+  for (let i = 0; i < rows.length; i++) {
+    run += rows[i][4];
+    if (i >= SMA_SESSIONS) run -= rows[i - SMA_SESSIONS][4];
+    if (i >= SMA_SESSIONS - 1) sma[i] = Number((run / SMA_SESSIONS).toFixed(4));
+  }
+  return { candles: rows, candleKeys: ["date", "open", "high", "low", "close", "volume"], sma50: sma };
 }
 
 /* ---------- intraday path ---------------------------------------- */
@@ -2434,6 +2472,8 @@ export function buildCard({
     r5: f.r5, r21: f.r21, r42: f.r42,
     week52Pos: f.week52Pos,
     changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
+    candles: f.candles,
+    garch: f.garch,
   }, { asOf: sessionDate });
 
   return {

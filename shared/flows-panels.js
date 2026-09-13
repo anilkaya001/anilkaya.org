@@ -92,10 +92,10 @@
  *
  * IT IS NOW A SEQUENCE OF STATIONS: five sections a reader tabs between
  * rather than five headings in one scroll, so a group is what a reader is ON
- * and the order within one is what they read top to bottom. Four entries
- * moved for that reading — `scoreOverlay` leads, being the only panel that
- * can say a reading is NEW, and `displacement`, `path` and `marketRank` each
- * move up beside the panel they are the second reading of.
+ * and the order within one is what they read top to bottom. Three entries
+ * moved for that reading — `displacement`, `path` and `marketRank` each
+ * move up beside the panel they are the second reading of. (`scoreOverlay`
+ * once led here; it was dropped from the page, see below.)
  *
  * AND ORDER IS NOW ALSO A HEIGHT ARGUMENT, which is the fourth rewrite. At two
  * columns a station's span-1 panels pair off in this order, and a pair shares
@@ -195,21 +195,18 @@ export const TICKER_PANELS = Object.freeze([
      it. The row-mate for `__score` has to be a panel near 1034px, and none
      exists in this station — that is a real finding about `__score`, whose
      1034px is three prose blocks, and it is not fixed from here. */
-  { key: "scoreOverlay", id: "ftOverlay", span: 2, group: "signal", tier: "lead",
-    title: "Score over price",
-    /* THE TYPOGRAPHIC APOSTROPHE, as every other question on this page uses.
-       escapeHTML turns an ASCII ' into &#39;, and the worker suite compares
-       the registry's string against the served markup — so a straight quote
-       here fails a test whose message is about the question "reaching the
-       markup", which is not what went wrong. U+2019 passes through untouched
-       and is what this site sets prose in anyway. */
-    question: "How has this name’s daily score moved against its own price?" },
-  /* THE DERIVATION, SECOND AND NARROWER. It gave up the lead to the series
-     above it and its second column with it: five gauges and their weights are
-     a column of rows, not a drawing, and a span-2 host spent the extra 470px
-     on white space beside a list that sets its own width. `tier: "table"` for
-     the same reason — rows a reader scans, not a chart sized from its host. */
-  { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "table",
+  /* THE SCORE-OVER-PRICE SERIES IS GONE FROM THE PAGE, by the reader's own
+     verdict: a daily score laid over a close told them nothing they used.
+     The JOIN it drew is still published (panels.scoreOverlay) and still read
+     — "what changed" is derived from it — so nothing is lost but a drawing.
+     The derivation leads the signal station again, at its own width. */
+  /* THE DERIVATION, FIRST AND NARROW. Five gauges and their weights are a
+     column of rows, not a drawing, and a span-2 host spent the extra 470px on
+     white space beside a list that sets its own width. `tier: "lead"` because
+     every station has exactly one lead and it is the first panel a reader
+     meets; the series that held it is gone, and the derivation is what the
+     station opens on now. */
+  { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "lead",
     title: "Score derivation",
     question: "Which components produced this score, and how heavily?" },
   /* THE SECOND SENTINEL, AND THE FIRST PANEL HERE NOT ABOUT ONE PAYLOAD KEY.
