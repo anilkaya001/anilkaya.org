@@ -6919,6 +6919,331 @@
     host.hidden = !found.length;
   }
 
+  /* ---------- the option chain, ordered by strike around spot --------
+
+     THE SAME ROWS THE TOP-CONTRACTS PANEL RANKS, ASKED A DIFFERENT
+     QUESTION — which is what makes this a second DRAWING and not a second
+     spelling of one reading. That panel orders by volume and answers
+     "which single lines carried the day"; ordering the same array by
+     STRIKE and ruling spot through it answers "what does the book look
+     like around the money", which a volume ranking cannot show at all.
+     Neither writes the other's sentence, and the target design carries
+     both blocks for exactly that reason.
+
+     THE SPOT ROW IS A SIDE BOUNDARY, NOT A STRIKE BOUNDARY, and the
+     subtitle says so. It separates the calls from the puts and states the
+     price both ladders are measured against. Reading it as "everything
+     above is above spot" would be wrong on any chain where a call strike
+     sits below the money, which is most of them.
+
+     NO DELTA COLUMN, WHICH IS THE DESIGN'S ONE COLUMN THIS PAYLOAD
+     CANNOT FILL. Per-contract delta is not published, and
+     shared/flows-chain.js states in its own header why it is not derived
+     either: a delta needs a risk-free rate and a dividend, neither of
+     which the vendor sends. The column is ABSENT rather than filled with
+     the aggressor count that happens to share its sign — that
+     substitution is the mislabelling this wave already caught once, on
+     this same panel's call/put volume.
+
+     ORDER IS A CONTROL, AND IT IS THE ONE INTERACTION A TABLE TAKES.
+     Strike ascending is the chain's own reading; volume descending is the
+     ranked one. Both are orderings of the rows in hand — nothing is
+     re-derived and no row enters or leaves — so the control cannot change
+     what the card claims, only what a reader meets first. */
+  const CHAIN_ORDER = [
+    { key: "k", label: "Strike", how: "by strike, ascending" },
+    { key: "vol", label: "Volume", how: "by volume, largest first" },
+  ];
+  let chainOrder = "k";
+
+  function paintChain(card) {
+    const host = $("ftChain"), body = $("ftChainBody"), sub = $("ftChainS");
+    const tabs = $("ftChainTabs");
+    if (!host || !body) return;
+    body.replaceChildren();
+    if (tabs) tabs.replaceChildren();
+
+    const panels = card.panels || {};
+    const panel = panels.topContracts;
+    const rows = panel && panel.status === "ok" && Array.isArray(panel.rows)
+      ? panel.rows : [];
+    /* HIDDEN RATHER THAN DEAD-PANELLED. The grid's own topContracts panel
+       states the silence in full, with the payload's reason; a second
+       statement of one absence in the column beside it is the copy this
+       page refuses. */
+    if (!rows.length) { host.hidden = true; return; }
+
+    const lv = panels.levels;
+    const spot = lv && lv.status === "ok" ? isNum(lv.spot) : null;
+
+    for (const o of CHAIN_ORDER) {
+      const b = el("button", "ft-chain-tab" + (chainOrder === o.key ? " is-on" : ""), o.label);
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", chainOrder === o.key ? "true" : "false");
+      b.setAttribute("aria-label", "Order the chain " + o.how);
+      b.addEventListener("click", () => {
+        if (chainOrder === o.key) return;
+        chainOrder = o.key;
+        paintChain(card);
+      });
+      if (tabs) tabs.append(b);
+    }
+
+    /* THE TWO SIDES ARE PARTITIONED BEFORE ANYTHING IS ORDERED, so a row
+       whose symbol carried no parsable type joins NEITHER ladder rather
+       than defaulting into the calls. The count of those is said below. */
+    const calls = [], puts = [];
+    let untyped = 0;
+    for (const r of rows) {
+      if (r.cp === "C") calls.push(r);
+      else if (r.cp === "P") puts.push(r);
+      else untyped++;
+    }
+
+    const order = (list) => list.slice().sort((a, b) => {
+      if (chainOrder === "vol") {
+        const av = isNum(a.vol), bv = isNum(b.vol);
+        /* A ROW THE VENDOR DID NOT COUNT SORTS LAST IN EITHER DIRECTION,
+           rather than ahead of every counted row as a silent zero. */
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return bv - av;
+      }
+      const ak = isNum(a.k), bk = isNum(b.k);
+      if (ak === null && bk === null) return 0;
+      if (ak === null) return 1;
+      if (bk === null) return -1;
+      return ak - bk;
+    });
+
+    const COLS = [
+      { k: "k", label: "Strike", cls: "c-num ftc-k" },
+      { k: "bidPx", label: "Bid", cls: "c-num ftc-bid" },
+      { k: "askPx", label: "Ask", cls: "c-num ftc-ask" },
+      { k: "vol", label: "Vol", cls: "c-num ftc-vol" },
+      { k: "oi", label: "OI", cls: "c-num ftc-oi" },
+      { k: "iv", label: "IV", cls: "c-num ftc-iv" },
+    ];
+
+    const cellText = (r, key) => {
+      if (key === "k" || key === "bidPx" || key === "askPx") return px2(r[key]);
+      if (key === "vol" || key === "oi") return compact(r[key]);
+      /* IV IS A FRACTION IN THE PAYLOAD and vol1 is the one place this
+         section turns a fraction into a percentage. A second conversion
+         written here would be a second definition of the unit. */
+      return isNum(r.iv) === null ? DASH : vol1(r.iv);
+    };
+
+    const table = el("table", "ftc-table");
+    const thead = el("thead");
+    const hr = el("tr", "ftc-headrow");
+    const corner = el("th", "ftc-side");
+    corner.scope = "col";
+    corner.append(el("span", "visually-hidden", "Side"));
+    hr.append(corner);
+    for (const c of COLS) {
+      const th = el("th", c.cls, c.label);
+      th.scope = "col";
+      hr.append(th);
+    }
+    thead.append(hr);
+    table.append(thead);
+
+    /* NEAREST THE MONEY IS MARKED, ON EACH SIDE, AND ONLY WITH A SPOT.
+       The target highlights one row; the row it highlights is the one a
+       reader's eye goes to, so which row that is has to be a measured
+       fact rather than a position in the list. With no spot there is no
+       "nearest", and nothing is marked. */
+    const nearestOf = (list) => {
+      if (spot === null) return null;
+      let best = null, bestD = Infinity;
+      for (const r of list) {
+        const k = isNum(r.k);
+        if (k === null) continue;
+        const d = Math.abs(k - spot);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+      return best;
+    };
+
+    const section = (label, list, cls) => {
+      if (!list.length) return;
+      const tbody = el("tbody", "ftc-body " + cls);
+      const near = nearestOf(list);
+      const shown = order(list);
+      shown.forEach((r, i) => {
+        const tr = el("tr", "ftc-row" + (r === near ? " is-near" : ""));
+        if (i === 0) {
+          const th = el("th", "ftc-side " + cls, label);
+          th.scope = "rowgroup";
+          th.rowSpan = shown.length;
+          tr.append(th);
+        }
+        for (const c of COLS) {
+          const td = el("td", c.cls, cellText(r, c.k));
+          if (c.k === "k" && r.expiry) td.title = "Expires " + r.expiry;
+          tr.append(td);
+        }
+        if (r === near) {
+          tr.title = "Nearest the money on the " +
+            (cls === "is-call" ? "call" : "put") + " side.";
+        }
+        tbody.append(tr);
+      });
+      table.append(tbody);
+    };
+
+    section("Calls", calls, "is-call");
+
+    /* THE SPOT RULE, AND IT IS OMITTED RATHER THAN DASHED WHEN THERE IS
+       NO SPOT. A rule reading "Spot —" between two ladders says a price
+       was measured and lost; the levels panel says why it is absent. */
+    if (spot !== null) {
+      const tb = el("tbody", "ftc-spotb");
+      const tr = el("tr", "ftc-spot");
+      const td = el("td", "ftc-spotc");
+      td.colSpan = COLS.length + 1;
+      td.append(el("span", "ftc-spot-k", "Spot"));
+      td.append(el("span", "ftc-spot-v", px2(spot)));
+      tr.append(td);
+      tb.append(tr);
+      table.append(tb);
+    }
+
+    section("Puts", puts, "is-put");
+    body.append(table);
+
+    if (sub) {
+      const bits = [];
+      bits.push("The " + rows.length + " contract" + (rows.length === 1 ? "" : "s") +
+        " on this chain that traded today, " +
+        (chainOrder === "vol" ? "by volume, largest first" : "by strike, ascending") +
+        " within each side");
+      bits.push(spot === null
+        ? "no spot price resolved this run, so the sides are not ruled against one"
+        : "the rule between them is the last price, not a strike boundary: a " +
+          "call below it and a put above it are both ordinary");
+      if (untyped) {
+        bits.push(untyped + " row" + (untyped === 1 ? "" : "s") +
+          " carried no parsable option type and " +
+          (untyped === 1 ? "is" : "are") + " in neither ladder");
+      }
+      /* THE POPULATION, SAID IN THE SAME BREATH AS THE ORDERING. `total`
+         is every contract that traded; `rows` is what the payload kept.
+         A table that shows a cut without saying it is the completeness
+         claim this section refuses by name. */
+      const total = isNum(panel.total);
+      if (total !== null && total > rows.length) {
+        bits.push("cut from " + total + " that traded, the largest by volume kept");
+      }
+      bits.push("no per-contract delta: it needs a rate and a dividend the vendor " +
+        "does not send, so the column is absent rather than guessed");
+      /* EACH CLAUSE IS A SENTENCE, SO EACH STARTS WITH A CAPITAL. The first
+         draft joined the clauses with ". " and left them as written, which
+         rendered "…within each side. the rule between them…" — four
+         lowercase sentence openings in one subtitle. Capitalising at the
+         JOIN rather than in each string keeps the clauses composable: a
+         clause is added or dropped above without anyone having to remember
+         which position it will land in. */
+      sub.textContent = bits
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(". ") + ".";
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- key levels, in the column the design puts them in ------
+
+     A MOVE, NOT A SECOND DRAWING. The levels panel keeps its full table
+     in the grid; what this adds is POSITION — the prices a move runs into,
+     visible without scrolling, beside the findings. Same panel, same
+     field, same order: `levels` is sorted nearest-first by the payload at
+     shared/flows-card.js:304, so this card does not re-sort and cannot
+     disagree with the panel about which level is nearest.
+
+     THE LABELS ARE THE PAYLOAD'S. The design says "Resistance" and
+     "Support"; this card publishes a gamma flip, a max pain, a call wall
+     and a put wall, each a named construction with a stated derivation.
+     Calling a gamma flip "resistance" would assert a behaviour nothing
+     here measured.
+
+     THE BAR IS THE DISTANCE, SCALED ACROSS THE LEVELS DRAWN. It is not a
+     probability and not a strength: it is |distance| as a share of the
+     furthest level on this card, which is the only thing a bar over a set
+     of levels can honestly encode. The figure beside it carries the
+     signed percentage, so the bar never has to mean direction. */
+  function paintLevels(card) {
+    const host = $("ftLv"), list = $("ftLvL"), sub = $("ftLvS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const panels = card.panels || {};
+    const p = panels.levels;
+    const levels = p && p.status === "ok" && Array.isArray(p.levels) ? p.levels : [];
+    if (!levels.length) { host.hidden = true; return; }
+
+    const spot = isNum(p.spot);
+    let widest = 0;
+    for (const lv of levels) {
+      const d = isNum(lv.distPct);
+      if (d !== null && Math.abs(d) > widest) widest = Math.abs(d);
+    }
+
+    for (const lv of levels) {
+      const li = el("li", "ft-lv-i");
+      const px = isNum(lv.px);
+      const d = isNum(lv.distPct);
+      const above = d === null ? null : d > 0 ? true : d < 0 ? false : null;
+      li.append(el("span", "ft-lv-px" + (
+        above === null ? "" : above ? " is-pos" : " is-neg"), px2(px)));
+      li.append(el("span", "ft-lv-k", lv.label || lv.kind || DASH));
+
+      const bar = el("span", "ft-lv-bar");
+      bar.setAttribute("aria-hidden", "true");
+      if (d !== null && widest > 0) {
+        const fill = el("span", "ft-lv-fill" + (
+          above === null ? "" : above ? " is-pos" : " is-neg"));
+        fill.style.width = Math.max(4, Math.round((Math.abs(d) / widest) * 100)) + "%";
+        bar.append(fill);
+      }
+      li.append(bar);
+
+      const dist = el("span", "ft-lv-d");
+      /* THE ATR DISTANCE IS THE ONE A READER SIZES WITH and it is
+         omitted, never zeroed, when ATR did not resolve — the same
+         sentence buildLevels uses for the same field.
+
+         AND THE UNIT IS SPELLED OUT, NOT SET AS A SIGMA. contracts.mjs
+         refuses that glyph in this file and gives the reason: the card's
+         distances are in ATR and the desk's are in SD, two different
+         denominators that one Greek letter used to hide. */
+      const atr = isNum(lv.distAtr);
+      dist.textContent = d === null ? DASH
+        : neg((d * 100).toFixed(1)) + "%" + (atr === null ? "" : " · " +
+          neg(Math.abs(atr).toFixed(2)) + " ATR");
+      li.append(dist);
+
+      li.title = (lv.label || lv.kind || "This level") +
+        (px === null ? "" : " at " + px.toFixed(2)) +
+        (spot === null || d === null ? "" :
+          ", " + Math.abs(d * 100).toFixed(1) + "% " +
+          (above ? "above" : "below") + " spot " + spot.toFixed(2)) +
+        (atr === null ? ". ATR did not resolve this run, so there is no sigma distance."
+          : ", " + Math.abs(atr).toFixed(2) + " ATR away.");
+      list.append(li);
+    }
+
+    if (sub) {
+      sub.textContent = levels.length + " level" + (levels.length === 1 ? "" : "s") +
+        " resolved this run, nearest first" +
+        (spot === null ? "" : ", against spot " + spot.toFixed(2)) +
+        ". The bar is each level's distance as a share of the furthest drawn here, " +
+        "not a probability.";
+    }
+    host.hidden = false;
+  }
+
   /* ---------- the other names in this sector -------------------------
 
      THE ONE THING ON THIS PAGE THAT IS NOT ABOUT THIS NAME, and the design
@@ -7562,7 +7887,12 @@
        every surface that states it. */
     paintHero(card, chg);
     paintCards(card);
+    /* THE CHAIN AND THE LEVELS PAINT FROM THE CARD ALONE, so they are in
+       this pass rather than the board handler's: both read panels the card
+       payload already carries and neither waits on a second fetch. */
+    paintChain(card);
     paintBrief(card);
+    paintLevels(card);
     paintFlags(card, chg);
     /* AFTER THE BOARDS ARRIVE, NOT WITH THE CARD. switchRows is filled by a
        separate fetch; when the card paints first this draws nothing and the

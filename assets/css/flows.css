@@ -10093,3 +10093,217 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   line-height: 1.45;
   color: var(--ink-faint);
 }
+
+/* ---------- the option chain, and the key-levels card ---------------
+
+   BOTH ARE THE SAME OBJECT AS .ft-brief AND .ft-rel BESIDE THEM: one
+   border, one radius, one elevated ground, one uppercase caption. That
+   repetition is the point — four cards in one column that each chose
+   their own chrome read as four unrelated widgets, and the column's job
+   is to read as one summary.
+
+   THE CHAIN IS WIDER THAN THE COLUMN, so it lives in .ft-split-main
+   under the six cards rather than beside them, and its table is the one
+   place on this page allowed to scroll sideways. Seven columns of
+   tabular figures do not fit a phone at any type size that is still
+   readable, and the alternatives are both worse: wrapping turns one
+   contract into two visual rows, and dropping columns silently removes
+   readings a reader cannot then discover. */
+.ft-chain {
+  margin: var(--space-3) 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+}
+.ft-chain-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.ft-chain-h {
+  margin: 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-chain-tabs { display: flex; gap: 0.3rem; }
+.ft-chain-tab {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.ft-chain-tab:hover { color: var(--ink); }
+.ft-chain-tab.is-on {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+  font-weight: 700;
+}
+/* THE ONE SIDEWAYS SCROLLER ON THIS PAGE, and it is on the table's own
+   box rather than on the card, so the caption and the subtitle stay put
+   while the figures move. */
+.ft-chain-body { overflow-x: auto; }
+.ftc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+.ftc-table th, .ftc-table td {
+  padding: 0.28rem 0.5rem;
+  white-space: nowrap;
+}
+.ftc-headrow th {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+  text-align: right;
+}
+.ftc-headrow th.ftc-side { text-align: left; }
+/* THE SIDE LABEL IS A ROWSPAN RAIL, which is what lets one word stand
+   against a block of rows without repeating on each — the same shape the
+   target draws, and the reason it is a <th scope="rowgroup"> rather than
+   a decorated cell: a screen reader announces the side once per block. */
+.ftc-side {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  /* CENTRED ALONG THE BLOCK IT LABELS, and `center` rather than `left`
+     because this cell is rotated: in vertical-rl, `left` is the TOP of the
+     run, and the 180deg turn then lands it at the bottom — which is where
+     the first render put both words, against the last row of each side
+     rather than beside the middle of it. `center` is invariant to the
+     rotation, so the label sits against the middle of its rowgroup at any
+     row count. */
+  text-align: center;
+  vertical-align: middle;
+  width: 1.5rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--ink-faint);
+}
+.ftc-side.is-call { color: var(--flow-up); }
+.ftc-side.is-put { color: var(--flow-down); }
+.ftc-table td { text-align: right; }
+.ftc-row + .ftc-row td { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ftc-k { font-weight: 700; }
+.ftc-body.is-call .ftc-k { color: var(--flow-up); }
+.ftc-body.is-put .ftc-k { color: var(--flow-down); }
+.ftc-bid { color: var(--flow-down); }
+.ftc-ask { color: var(--flow-up); }
+/* NEAREST THE MONEY, MARKED THE WAY THE TARGET MARKS IT — a warm wash and
+   a left rule. It is a measured row, not a selected one, so it carries no
+   hover or focus affordance that would suggest it can be activated. */
+.ftc-row.is-near td { background: color-mix(in srgb, var(--gold-harvest) 12%, transparent); }
+.ftc-row.is-near .ftc-k { box-shadow: inset 2px 0 0 var(--gold-harvest); }
+.ftc-spotc {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  border-top: 1px solid var(--gold-harvest);
+  border-bottom: 1px solid var(--gold-harvest);
+  background: color-mix(in srgb, var(--gold-harvest) 8%, transparent);
+}
+.ftc-spot-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-right: 0.5rem;
+}
+.ftc-spot-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ft-chain-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.ft-lv {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-lv-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-lv-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+/* FOUR TRACKS, NOT A FLEX ROW: the price, the name, the bar and the
+   distance line up down the card, which is the whole reason a set of
+   levels reads as a set. A flex row sizes each item to its own content,
+   so a two-word label and a four-word one put their bars in different
+   places and the column stops being comparable. */
+.ft-lv-i {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(2.5rem, 4rem) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ft-lv-px {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+.ft-lv-px.is-pos { color: var(--flow-up); }
+.ft-lv-px.is-neg { color: var(--flow-down); }
+.ft-lv-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.ft-lv-bar {
+  height: 0.32rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hairline) 70%, transparent);
+  overflow: hidden;
+  display: block;
+}
+.ft-lv-fill { display: block; height: 100%; border-radius: 999px; background: var(--ink-faint); }
+.ft-lv-fill.is-pos { background: var(--flow-up); }
+.ft-lv-fill.is-neg { background: var(--flow-down); }
+.ft-lv-d {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.ft-lv-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}

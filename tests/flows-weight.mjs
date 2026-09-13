@@ -899,8 +899,51 @@ const CEILING_KIB = {
      could not land between the identity and the figures. 639px now.
 
      494 LEAVES 743 B, which is room for a fix and not for a feature, the
-     standard every raise above claimed and the 496 paragraph made real. */
-  tickerPage: 494,
+     standard every raise above claimed and the 496 paragraph made real.
+
+     494 -> 508 ON 2026-09-13, AND THE MEASUREMENT FIRST. `stat` on disk
+     against `git cat-file -s 12a6952:` — the head this branch was green on
+     before the change:
+
+       flows-dock.js      6,007 ->   6,007
+       nav.js             2,560 ->   2,560
+       flows-cursor.js   13,123 ->  13,123
+       flows-panels.js   71,727 ->  71,727
+       flows-ticker.js  411,696 -> 425,132   (+13,436)
+       ----------------------------------------------
+       total            505,113 -> 518,549 B = 506.40 KiB
+
+     Four of the five files are byte-identical: everything here is in the
+     controller. 505,113 sat 743 B inside the 494 KiB (505,856 B) ceiling, so
+     the route is 12,693 B over it now.
+
+     WHAT THE 13,436 B BOUGHT: the option chain and the key-levels card, the
+     two blocks the target design puts beside the price chart and in the
+     right column, neither of which existed on this route. Both are drawn
+     from panels the card payload ALREADY carries — topContracts and levels —
+     so the payload does not grow and this page makes no additional fetch.
+
+     AND IT IS TWO DRAWINGS, NOT TWO SPELLINGS OF ONE READING, which is the
+     bar this file holds every addition to. The chain orders topContracts'
+     rows by STRIKE and rules spot between the sides; the grid's own panel
+     orders the same array by VOLUME. A volume ranking cannot show where spot
+     sits in the ladder and a ladder cannot show which line was the largest,
+     so neither block writes the other's sentence — the two orderings answer
+     two questions. The levels card is a MOVE: same panel, same field, same
+     nearest-first order the payload publishes, read at a position where it
+     does not need a scroll.
+
+     508 AND NOT 507. 507 KiB is 519,168 B and would leave 619 B — and 619 B
+     is one paragraph of the comments this change just added. That is exactly
+     the trap the unusualPage entry below names by name: a ceiling so tight
+     that the next typo fix fails CI and gets "fixed" by deleting prose, which
+     is bookkeeping rather than engineering. 508 KiB is 520,192 B and leaves
+     1,643 B — the same order the 493 -> 496 raise chose deliberately, and on
+     the same reasoning: room for a fix, not for a feature. This route is
+     still owed the reduction the paragraph above describes, so the next
+     change to it should have to argue in the open rather than find
+     pre-authorised room waiting. */
+  tickerPage: 508,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

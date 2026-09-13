@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "188";
+export const ASSET_VERSION = "189";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1968,6 +1968,29 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <div class="ft-split">
     <div class="ft-split-main">
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <!-- THE OPTION CHAIN, WHICH IS THE SAME ROWS THE TOP-CONTRACTS PANEL
+       RANKS, ASKED A DIFFERENT QUESTION.
+
+       That panel orders by VOLUME and answers "which single lines carried
+       the day". This one orders by STRIKE, splits the two sides and rules
+       the last price between them, and answers "what does the book look
+       like around spot". Two orderings of one array are not two spellings
+       of one reading: a volume ranking cannot show where spot sits in the
+       ladder, and a ladder cannot show which line was the largest. Neither
+       block restates the other's sentence, and the design carries both for
+       that reason — a chain above, a ranked tape below.
+
+       SERVED EMPTY AND HIDDEN, like every other block on this page. A
+       chain card over a name whose chain leg never ran is furniture. -->
+  <section class="ft-chain" id="ftChain" hidden aria-labelledby="ftChainH">
+    <div class="ft-chain-top">
+      <h2 class="ft-chain-h" id="ftChainH">Options chain</h2>
+      <div class="ft-chain-tabs" id="ftChainTabs" role="tablist"
+           aria-label="How to order the chain"></div>
+    </div>
+    <div class="ft-chain-body" id="ftChainBody"></div>
+    <p class="ft-chain-s" id="ftChainS"></p>
+  </section>
     </div>
     <aside class="ft-split-side" aria-label="What this card found">
   <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
@@ -1998,6 +2021,29 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <p class="ft-brief-s" id="ftBriefS"></p>
   </aside>
   <div class="ft-flags" id="ftFlags" hidden></div>
+  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
+       THEM IN — and this is a MOVE, not a second drawing.
+
+       The levels panel keeps its table in the grid, which carries every
+       level with its two distances and its provenance. What this card adds
+       is position: the design wants the prices a move runs into visible
+       WITHOUT scrolling, beside the findings, because they are what a
+       reader checks a quote against. Same panel, same field, same numbers,
+       read from panels.levels.levels — the nearest-first order is the
+       payload's own, sorted at shared/flows-card.js:304, so this card does
+       not re-sort and cannot disagree about which level is nearest.
+
+       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
+       publish either word. What it publishes is a gamma flip, a max pain,
+       a call wall and a put wall — each a named construction with a stated
+       derivation — so the labels stay the payload's own. Renaming a gamma
+       flip "resistance" would be this renderer asserting a behaviour the
+       card never measured. -->
+  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
+    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
+    <ol class="ft-lv-l" id="ftLvL"></ol>
+    <p class="ft-lv-s" id="ftLvS"></p>
+  </aside>
   <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
        right column and calls Related. Drawn from the same session's BOARDS —
        the only place this page learns about any name but its own — so the
