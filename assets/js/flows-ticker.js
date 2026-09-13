@@ -7454,6 +7454,112 @@
     host.hidden = false;
   }
 
+  /* ---------- volume by type: the split the ladder publishes ---------
+
+     A DIFFERENT QUANTITY FROM THE PANEL IT READS. The aggressor ladder draws
+     NET contracts per strike — calls lifted minus puts lifted — which is a
+     direction and can be zero on a strike where thousands traded. `calls`
+     and `puts` on the same rows are VOLUME, and their share of the total is
+     drawn nowhere: until now it reached a reader only by driving that
+     panel's cursor onto one strike at a time.
+
+     THE POPULATION IS THE LADDER. The ladder keeps the strikes nearest the
+     money and publishes measuredStrikes, total and strikesUnreported for
+     exactly this reason, so the subtitle says what the share is a share OF
+     rather than letting a ring imply the whole chain.
+
+     TWO ARMS AND A MEASURED ZERO. A name whose ladder carries no volume at
+     all is not a fifty-fifty split; it is no reading, and the card hides. */
+  function paintMix(card) {
+    const host = $("ftMix"), body = $("ftMixBody"), sub = $("ftMixS");
+    if (!host || !body) return;
+    body.replaceChildren();
+    const p = (card.panels || {}).aggressor;
+    const bars = p && p.status === "ok" && Array.isArray(p.bars) ? p.bars : [];
+    if (!bars.length) { host.hidden = true; return; }
+
+    let calls = 0, puts = 0, missing = 0;
+    for (const b of bars) {
+      const c = isNum(b && b.calls), q = isNum(b && b.puts);
+      if (c !== null) calls += c;
+      if (q !== null) puts += q;
+      const m = isNum(b && b.volMissing);
+      if (m !== null) missing += m;
+    }
+    const total = calls + puts;
+    if (!(total > 0)) { host.hidden = true; return; }
+
+    const R = 54, T = 15, C = 70, TAU = Math.PI * 2;
+    const svg = svgEl("svg", {
+      class: "ft-mix-svg", viewBox: "0 0 140 140",
+      role: "img",
+      "aria-label": "Call and put volume, " + compact(calls) + " calls and " +
+        compact(puts) + " puts of " + compact(total) + " contracts",
+    });
+    /* ONE ARC A SIDE, DRAWN FROM THE SHARE ITSELF. The stroke-dasharray is
+       the circumference times the share, so the ink IS the number — there is
+       no rounding to a whole degree between the figure and the drawing. */
+    const circ = TAU * R;
+    const ring = (share, cls, offset) => {
+      const el2 = svgEl("circle", {
+        class: "ft-mix-arc " + cls, cx: C, cy: C, r: R, fill: "none",
+        "stroke-width": T,
+        "stroke-dasharray": (circ * share).toFixed(2) + " " + (circ * (1 - share)).toFixed(2),
+        "stroke-dashoffset": (-circ * offset).toFixed(2),
+        transform: "rotate(-90 " + C + " " + C + ")",
+      });
+      svg.append(el2);
+    };
+    ring(calls / total, "is-call", 0);
+    ring(puts / total, "is-put", calls / total);
+
+    const mid = svgEl("text", { class: "ft-mix-v", x: C, y: C + 2,
+      "text-anchor": "middle" });
+    mid.textContent = compact(total);
+    svg.append(mid);
+    const cap = svgEl("text", { class: "ft-mix-c", x: C, y: C + 18,
+      "text-anchor": "middle" });
+    cap.textContent = "contracts";
+    svg.append(cap);
+    body.append(svg);
+
+    const legend = el("ul", "ft-mix-l");
+    const row = (label, v, cls) => {
+      const li = el("li", "ft-mix-i");
+      li.append(el("span", "ft-mix-dot " + cls));
+      li.append(el("span", "ft-mix-k", label));
+      li.append(el("span", "ft-mix-n", compact(v)));
+      li.append(el("span", "ft-mix-p", Math.round((v / total) * 100) + "%"));
+      legend.append(li);
+    };
+    row("Calls", calls, "is-call");
+    row("Puts", puts, "is-put");
+    body.append(legend);
+
+    if (sub) {
+      const shown = isNum(p.measuredStrikes);
+      const all = isNum(p.total);
+      const unrep = isNum(p.strikesUnreported);
+      const bits = ["Contracts traded at the " + bars.length + " strike" +
+        (bars.length === 1 ? "" : "s") + " this ladder draws" +
+        (shown === null || all === null || all <= shown ? ""
+          : ", of " + all + " on the chain")];
+      if (unrep) {
+        bits.push(unrep + " strike" + (unrep === 1 ? "" : "s") +
+          " carried no aggressor split and are in neither arc");
+      }
+      if (missing) {
+        bits.push(missing + " contract" + (missing === 1 ? "" : "s") +
+          " the vendor reported no volume for are counted in neither");
+      }
+      bits.push("This is the volume SPLIT, not the net: the ladder beside it " +
+        "draws calls lifted minus puts lifted, which is a direction and can be " +
+        "zero where thousands traded");
+      sub.textContent = bits.join(". ") + ".";
+    }
+    host.hidden = false;
+  }
+
   /* ---------- key levels, in the column the design puts them in ------
 
      A MOVE, NOT A SECOND DRAWING. The levels panel keeps its full table
@@ -8344,6 +8450,7 @@
        payload already carries and neither waits on a second fetch. */
     paintChart(card);
     paintChain(card);
+    paintMix(card);
     paintBrief(card);
     paintLevels(card);
     paintFlags(card, chg);

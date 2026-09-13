@@ -1006,8 +1006,23 @@ const CEILING_KIB = {
      530 LEAVES 2,188 B, the same order 508 and 517 fixed as this route's
      standard. The ratchet paragraph above stands and is not retired by
      this: 494 -> 530 in one day is 36 KiB, and the drawer split and the
-     comment strip are still what this route actually needs. */
-  tickerPage: 530,
+     comment strip are still what this route actually needs.
+
+     530 -> 535, for the volume ring. flows-ticker.js 447,275 -> 451,842
+     (+4,567) against git cat-file -s 383ef66:, the other four identical,
+     total 540,692 -> 545,259 B = 532.48 KiB. Leaves 2,581 B.
+
+     WHAT IT BOUGHT, AND WHY IT IS NOT A SECOND DRAWING OF THE LADDER: the
+     aggressor panel draws NET contracts per strike — calls lifted minus puts
+     lifted — which is a direction and is zero on a strike where thousands
+     traded in balance. The `calls` and `puts` fields on those same rows are
+     VOLUME, a different quantity, and they were drawn nowhere: a reader could
+     only reach them by driving that panel's cursor onto one strike at a time.
+     The ring is their share, and the arc length is computed from the share
+     itself rather than from a rounded angle, so the ink is the number.
+
+     THE RATCHET PARAGRAPH STILL STANDS. 494 -> 535 in one day is 41 KiB. */
+  tickerPage: 535,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

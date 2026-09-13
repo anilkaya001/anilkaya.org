@@ -10569,3 +10569,71 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   .ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
   .ft-chart-top, .ft-chain-top { padding-inline: var(--space-2); }
 }
+
+/* ---------- the band under the row, and the volume ring -------------
+
+   auto-fit so the band holds one card today and three later without a
+   layout change; the card carries the same chrome as everything else. */
+.ft-band3 {
+  display: grid; gap: var(--space-3); margin-top: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  min-width: 0;
+}
+.ft-band3 > * { min-width: 0; }
+.ft-mix {
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: var(--space-2) var(--panel-pad-x) var(--space-3);
+}
+.ft-mix-h {
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+/* Ring and legend side by side, stacking when the card is narrow — the
+   legend is the readable half, so it is the one that keeps its width. */
+.ft-mix-body {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2); min-width: 0;
+}
+.ft-mix-svg { width: 8.75rem; height: 8.75rem; flex: none; }
+.ft-mix-arc.is-call { stroke: var(--flow-up); }
+.ft-mix-arc.is-put { stroke: var(--flow-down); }
+.ft-mix-v {
+  fill: var(--ink); font-family: var(--font-figure);
+  font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ft-mix-c {
+  fill: var(--ink-faint); font-family: var(--font-figure); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.ft-mix-l { list-style: none; margin: 0; padding: 0; flex: 1 1 8rem; min-width: 0; }
+.ft-mix-i {
+  display: grid; grid-template-columns: 0.55rem 1fr auto auto;
+  align-items: center; gap: 0.45rem;
+  padding: 0.25rem 0;
+  font-size: var(--fs-note); font-variant-numeric: tabular-nums;
+}
+.ft-mix-i + .ft-mix-i { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ft-mix-dot { width: 0.55rem; height: 0.55rem; border-radius: 999px; display: block; }
+.ft-mix-dot.is-call { background: var(--flow-up); }
+.ft-mix-dot.is-put { background: var(--flow-down); }
+.ft-mix-k { font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-mix-n { font-weight: 700; }
+.ft-mix-p { color: var(--ink-faint); }
+.ft-mix-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro);
+  line-height: 1.45; color: var(--ink-faint);
+}
+@media (max-width: 30rem) { .ft-mix { --panel-pad-x: 0px; } .ft-mix-h { padding-inline: var(--space-2); } }

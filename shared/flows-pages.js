@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "192";
+export const ASSET_VERSION = "193";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -2073,6 +2073,29 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-chain-body" id="ftChainBody"></div>
     <p class="ft-chain-s" id="ftChainS"></p>
   </section>
+  </div>
+  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
+       auto-fit grid so the next one joins it without a layout change.
+
+       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
+       The aggressor panel below draws NET contracts by strike — calls lifted
+       minus puts lifted — which is a direction. How much of the volume was
+       calls and how much was puts is a different quantity, published per
+       strike as calls and puts on the same ladder, and until now it
+       reached a reader only through that panel's cursor readout. A ring is
+       what a share of a whole looks like.
+
+       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
+       The ladder keeps the strikes nearest the money and publishes how many
+       it measured, how many the chain had, and how many carried no split at
+       all — so the share is of what was measured rather than of everything
+       that traded. -->
+  <div class="ft-band3">
+    <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
+      <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
+      <div class="ft-mix-body" id="ftMixBody"></div>
+      <p class="ft-mix-s" id="ftMixS"></p>
+    </section>
   </div>
     </div>
     <aside class="ft-split-side" aria-label="What this card found">
