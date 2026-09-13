@@ -972,6 +972,10 @@ export function foldCardOutcomes(tickers, run) {
   const results = (run && run.results) || [];
   const out = {
     built: 0, failed: 0, unenriched: 0, deadlineSkipped: 0, skipped: 0, gammaProfiles: [],
+    /* The three GARCH outcomes and the two parameters worth watching across a
+       cross-section — see the note beside `garch` on the worker's return. */
+    garchConverged: 0, garchUnconverged: 0, garchUnavailable: 0,
+    garchNu: [], garchPersistence: [],
   };
   list.forEach((ticker, i) => {
     if (!attempted[i]) { out.deadlineSkipped++; out.skipped++; return; }
@@ -991,6 +995,19 @@ export function foldCardOutcomes(tickers, run) {
        that is order-independent only because of what a describer happens to
        do is one refactor away from moving with the wire. */
     if (outcome.gamma) out.gammaProfiles.push(outcome.gamma);
+    /* COUNTED HERE RATHER THAN SUMMED AT THE CALL SITE, so the tally is built
+       by the same walk that decides what "built" means and cannot drift from
+       it — the counting discipline this whole function exists for. */
+    const g = outcome.garch;
+    if (g && typeof g === "object") {
+      if (g.status !== "ok") out.garchUnavailable++;
+      else if (g.converged === false) out.garchUnconverged++;
+      else {
+        out.garchConverged++;
+        if (Number.isFinite(g.nu)) out.garchNu.push(g.nu);
+        if (Number.isFinite(g.persistence)) out.garchPersistence.push(g.persistence);
+      }
+    }
   });
   return out;
 }
@@ -8756,6 +8773,21 @@ async function main() {
         gamma: card.panels && card.panels.gamma && card.panels.gamma.status === "ok"
           ? card.panels.gamma.bars
           : null,
+        /* WHAT THE VOLATILITY FIT DID, CARRIED OUT OF THE WORKER. The GARCH
+           fit is the one reading on the card produced by an OPTIMISER rather
+           than by arithmetic, so it is the one that can quietly stop working
+           on live data while every test passes: the suite proves it recovers
+           known parameters from a simulated series, and a simulated series is
+           exactly where a maximum-likelihood fit is best behaved. Nothing in
+           the run said how it fared on real closes, so the first live run
+           after it shipped published fifty fits and reported none of them.
+           Three states travel, because they are three different facts: a fit
+           that settled, a fit that ran and did not settle, and a name with too
+           short a history to fit at all. */
+        garch: card.panels && card.panels.context && card.panels.context.status === "ok"
+          && card.panels.context.garch
+          ? card.panels.context.garch
+          : null,
       };
     } catch (error) {
       /* THE WORKER MUST NOT THROW. runPooled says why: a rejection here takes
@@ -8782,6 +8814,53 @@ async function main() {
   const cards = foldCardOutcomes(cardTickers, cardsRun);
   const { built: cardsBuilt, failed: cardsFailed, skipped: cardsSkipped,
     unenriched, deadlineSkipped, gammaProfiles } = cards;
+
+  /* THE VOLATILITY FIT, REPORTED ONCE PER RUN — and it is reported because it
+     was not. The first live run after the GARCH card shipped fitted fifty
+     names and said nothing about any of them, so the only evidence the model
+     worked outside a fixture was that the cards got bigger. A fit is not a
+     sum: it can converge on a simulated series and sit on the edge of the
+     parameter space on a real one, and the page would draw that unconverged
+     path with its own honest caveat while the run reported a clean morning.
+
+     THE MEDIAN SHAPE IS THE LINE TO WATCH. A GED shape of 2 is the normal and
+     equity returns sit below it; a cross-section whose median nu drifts to the
+     ceiling is the optimiser giving up on every name at once, which is a
+     different failure from any single name failing and is invisible name by
+     name. Persistence rides along for the same reason: alpha + beta near 1 is
+     ordinary and a median near 0 would mean the ARCH term stopped being
+     identified. Both are printed as medians of the CONVERGED fits only,
+     because averaging in a fit that did not settle would describe a
+     population the parameters do not belong to. */
+  const midOf = (xs) => {
+    if (!xs.length) return null;
+    const sorted = xs.slice().sort((a, b) => a - b);
+    return sorted[Math.floor((sorted.length - 1) / 2)];
+  };
+  const fitTotal = cards.garchConverged + cards.garchUnconverged + cards.garchUnavailable;
+  if (fitTotal > 0) {
+    const nu = midOf(cards.garchNu);
+    const per = midOf(cards.garchPersistence);
+    console.log(
+      "  " + (DRY_RUN ? "[dry-run] " : "") +
+      `garch: ${cards.garchConverged} of ${fitTotal} fit(s) converged` +
+      (cards.garchUnconverged
+        ? `, ${cards.garchUnconverged} ran and did not settle` : "") +
+      (cards.garchUnavailable
+        ? `, ${cards.garchUnavailable} had too short a history to fit` : "") +
+      (nu === null ? "" : `; median shape nu ${nu.toFixed(2)}` +
+        ` (2 is the normal, equities sit below it)`) +
+      (per === null ? "" : `, median persistence ${per.toFixed(3)}`) +
+      /* The page draws an unconverged path under its own caveat, so this is a
+         reading about the MODEL rather than a failure of the run. Said out
+         loud so a morning where most names stop settling is visible in the
+         log rather than only in fifty separate cards nobody opens. */
+      (cards.garchConverged === 0 && fitTotal > 0
+        ? " — NOT ONE FIT SETTLED, which is a fact about the model on this" +
+          " cross-section and not about any one name"
+        : ""),
+    );
+  }
   console.log(
     `cards: ${cardsBuilt}/${onBoard.size} built` +
     (cardsFailed ? `, ${cardsFailed} failed` : "") +
