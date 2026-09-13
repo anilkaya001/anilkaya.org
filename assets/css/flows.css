@@ -11625,7 +11625,28 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    file's own note at line 385 makes this argument about `transform: none`
    versus `translateY(0px)` for exactly the same reason. */
 @media (prefers-reduced-motion: reduce) {
-  .ft-hero:not([hidden]) .ft-hero-b,
+  /* THE SELECTOR MUST MATCH THE ONE IT CANCELS, AND FOR ONE REVISION IT DID
+     NOT. The entrance above was first written as `.ft-hero-b` and corrected
+     to `.ft-hero:not([hidden]) > *` when the nth-child ladder turned out to
+     be off by two — but this block kept the old, narrower selector. So
+     `.ft-hero-id` and `.ft-hero-px`, the two direct children that are not
+     tiles, went on carrying `animation-name: ft-settle` for a reader who had
+     asked for no motion.
+
+     THE DURATION TOKENS DO NOT SAVE IT, and this file's own argument two
+     paragraphs up is why: a zero-duration animation still fires, still
+     promotes a compositing layer, and still applies `both` fill. That is
+     precisely the reasoning that justified writing this block at all, so
+     leaving two elements outside it made the block's own case against
+     itself.
+
+     IT IS THE DEFECT tests/flows-motion.mjs EXISTS FOR — its header records
+     the deck card carrying a hover transform past this preference "for two
+     years, and no test could have said so". A counter-block is only a cover
+     while its selector list is the same set; written by hand, twice, it is
+     two lists that can drift. Kept in the same shape as the rule above,
+     child combinator included, so the two read as one pair. */
+  .ft-hero:not([hidden]) > *,
   .ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief,
   .ft-rel, .ft-mix, .ft-grid .ft-panel, .ft-brief-i {
     animation: none;
