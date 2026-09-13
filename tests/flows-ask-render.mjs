@@ -648,10 +648,27 @@ await page.unroute("**/api/flows/ask");
      }),
      "the guarantee is kept, whole, inside a closed disclosure: it is reassurance about " +
      "what the box will NOT do, and the fold rule allows reassurance to fold");
-  ok(await page.evaluate(() => {
+  /* WAITED FOR, NOT RACED, AND THE DISTINCTION IS WHAT THIS ASSERTION IS
+     ABOUT. Its claim is that the meter is OPEN — outside the disclosure the
+     guarantee folds into — because a budget you can only see after spending
+     from it is a receipt. Its claim is not that the meter paints within some
+     number of milliseconds of the field appearing.
+
+     But that is what it was measuring. flows-ask.js paints the meter from
+     `optional("/api/flows/ai-usage")`, and when docked that request does not
+     start until the rail is opened — so between the two waits above (the
+     field exists, the caret is in it) and this line there was an unwaited
+     network round-trip to a D1 read. It won almost every time and lost on
+     2026-09-13, reporting a fold-rule violation that had not happened.
+
+     A BOUNDED WAIT REMOVES THE RACE WITHOUT WEAKENING THE CLAIM: a meter
+     that never paints still fails here, on the same sentence, because the
+     wait expires and the predicate is the same one. What it can no longer do
+     is fail because a database was slow. */
+  ok(await page.waitForFunction(() => {
        const meter = document.querySelector("#askMeter");
        return !!meter && !meter.closest("details") && meter.textContent.trim().length > 0;
-     }),
+     }, null, { timeout: 5000 }).then(() => true, () => false),
      "while the meter stays open, because its numbers are a withholding about capacity: a " +
      "budget you can only see after spending from it is a receipt");
 
