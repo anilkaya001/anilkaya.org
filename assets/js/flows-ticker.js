@@ -7231,7 +7231,20 @@
       sma.title = "The 50-session average of closes, as the card publishes it.";
       sma.addEventListener("click", () => { showSma = !showSma; paintChart(card); });
       ctl.append(style, sma);
-      tabs.append(ctl);
+      /* OUT OF THE TABS AND INTO THE HEADER STRIP, which is a one-word
+         change with a reason the repaint made visible. The series tabs are
+         now drawn as a segmented TRACK — one recessed shape with one lit
+         segment in it — and these two are not members of that set: they are
+         a style choice and an overlay switch that apply to whichever series
+         is showing. Inside the track they read as a fifth and sixth series.
+         The strip is the same flex row the track sits in, so they land at
+         its right end, which is where the design puts them.
+
+         THE FALLBACK IS THE OLD PARENT AND NOT A THROW. If the strip is
+         ever restructured so the track is not its child, the controls go
+         back where they were and still work; a missing parentNode here
+         would otherwise drop two working controls off the card. */
+      (tabs.parentNode || tabs).append(ctl);
     }
 
     const spec = chartSeries(chartTab, card);

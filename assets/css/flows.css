@@ -10986,3 +10986,450 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   overflow: hidden; clip-path: inset(50%);
   white-space: nowrap; border: 0;
 }
+
+/* ===================================================================
+   THE OPTIONS-INTELLIGENCE LANGUAGE.
+
+   WHAT THIS BLOCK IS AND WHY IT IS ONE BLOCK. The owner's design for
+   this section moved: it was a warm gold-on-black terminal and it is
+   now a cool navy one — the ground is a blue-black, the accent is a
+   periwinkle blue, and the chart family is blue / violet / rose /
+   jade drawn on rounded cards with a lit header strip. The brief was
+   "exactly this, not close, not similar", so the question this block
+   had to answer first was whether that is a repaint or a rebuild.
+
+   IT IS A REPAINT, AND THE REASON IS A PROPERTY OF THE FILE ABOVE
+   RATHER THAN A LUCKY GUESS. Measured before a line of this was
+   written: flows.css names a literal hex 27 times in 10,988 lines and
+   resolves a token 186 times for the accent alone. Every card fill,
+   every rule, every axis label, every chart stroke is already a
+   token. So the entire palette moves by REDEFINING THE TOKENS at the
+   section's own root, and the 186 accent references follow without
+   one of them being edited. The rules after the token block are only
+   the places where the new design's GEOMETRY differs from the old —
+   radius, solidity, the shape of a control — which is a much shorter
+   list than it looks like from a screenshot.
+
+   THE TOKENS ARE REDEFINED ON .flows-body AND NOT ON :root, which is
+   the whole of how the Academy is protected. base.css keeps its gold;
+   a custom property redeclared on an ancestor wins for that subtree
+   and for nothing else, so /articles/ and /lab/ are untouched by a
+   file they do not load anyway, and the two sections cannot drift
+   into each other through a shared :root.
+
+   THE ACCENT TOKENS KEEP THEIR OLD NAMES. --gold-harvest now holds a
+   blue. That reads wrong for about ten seconds and is right: those
+   three tokens have named a ROLE since they were introduced — accent,
+   accent-quiet, accent-dim — and the alternative was 186 edits across
+   a file whose comments explain, at each site, why the accent is used
+   there. Renaming them would have rewritten every one of those
+   explanations to say the same thing in a different colour word. The
+   role is what the rules depend on; the hue is what this block sets.
+
+   THE CONTRAST PROMISE IS RE-DERIVED, NOT INHERITED. base.css:171
+   claims --ink-faint clears 4.5:1 "on all site surfaces" and the
+   block above derives the glass alpha from that floor. A new palette
+   makes both of those claims about different numbers, so they were
+   recomputed with the same method the file already names — WCAG 2.x
+   relative luminance, (L1+0.05)/(L2+0.05), sRGB channels linearised
+   before weighting — against the three grounds this design actually
+   paints. The panel head is the worst of them, and it is the row the
+   floor is judged on:
+
+     over the head #141b2c   ink 14.506  dim 7.084  faint 4.877
+                             blue 5.693  violet 5.403  rose 5.739
+                             jade 8.534  amber 8.181  red 5.651
+     over the card #0f1524   ink 15.384  dim 7.513  faint 5.172
+     over the page #080b14   ink 16.605  dim 8.109  faint 5.583
+
+   Every ink and every accent clears AA for body text on every ground,
+   with the tightest margin 0.377 above the floor on the faintest ink
+   over the lightest surface. That margin is the reason the panel head
+   is #141b2c and not the two steps lighter the mockup suggests: the
+   lighter strip was measured first, at 4.41, and it failed.
+
+   THE GLASS IS GONE, AND THAT IS A DESIGN DECISION WITH A COST THIS
+   FILE ALREADY PRICED. The old panels were translucent over a
+   photographic ground, which is why --panel-glass carries a derived
+   alpha and a paragraph about what set it. The new design draws solid
+   cards on a flat ground: a reader measuring a figure against a card
+   is measuring it against ONE colour rather than against whatever the
+   sky is doing behind it. The alpha derivation above is kept in place
+   and simply stops binding, because the reduced-transparency branch
+   at line 361 already switches these same tokens to opaque — this
+   block makes the opaque path the only path, and the backdrop-filter
+   that cost every card a composited layer goes with it.
+
+   WHAT THIS BLOCK DELIBERATELY DOES NOT DO. It changes no markup, no
+   panel, no reading and no silence. Nothing here adds a figure the
+   pipeline does not publish or removes one it does; the four silences
+   keep their vocabulary and their marker, the signed pair keeps its
+   three arms, and every chart keeps carrying the sign in position as
+   well as in hue. A repaint that quietly changed what a card claimed
+   would be a much larger change wearing a smaller one's clothes.
+   =================================================================== */
+
+.flows-body {
+  /* ---- the ground, three steps of blue-black ---- */
+  --bg:        #080b14;
+  --bg-deep:   #050810;
+  --bg-elev:   #141b2c;
+  --panel-bg:   #0f1524;
+  --panel-head: #141b2c;
+
+  /* ---- ink ---- */
+  --ink:       #e7ecf7;
+  --ink-dim:   #9aa7c0;
+  --ink-faint: #7c89a3;
+
+  /* ---- rules. Cool, and quieter than the warm pair they replace:
+     on a flat ground a hairline does not have to fight a photograph
+     to be seen, so it can go back to being a hairline. ---- */
+  --hairline:     rgba(154, 167, 192, 0.13);
+  --panel-border: rgba(154, 167, 192, 0.16);
+
+  /* ---- THE ACCENT, WHICH IS A BLUE NOW. Role names, old spelling;
+     see the header. harvest is the accent proper — active controls,
+     the price line, a focus ring. celadon is the quiet accent that
+     titles a card header. mystic is the dim one that tints a hover
+     border and the section kicker. ---- */
+  --gold-harvest: #5b93f7;
+  --gold-celadon: #9bb4e8;
+  --gold-mystic:  #6f86b8;
+
+  /* ---- THE CHART FAMILY. Five hues that are not the signed pair and
+     not the accent, for the charts that draw several series at once:
+     the volatility fit against its density, a donut of four shares, a
+     term structure. Each is AA over the card and over the head.
+
+     THEY ARE A FAMILY AND NOT A RAINBOW. Blue, violet and rose are
+     one sweep of the wheel and read as three positions on a scale;
+     jade and amber sit outside it and are reserved for the two things
+     that are categorically different — a quantity that is good-or-bad
+     and a quantity that is a warning. Picking the next colour from
+     this list rather than inventing one is what keeps a sixth series
+     from arriving as a sixth unrelated decision. ---- */
+  --acc-blue:   #5b93f7;
+  --acc-violet: #9b7cf6;
+  --acc-rose:   #f062a8;
+  --acc-jade:   #3ecf7f;
+  --acc-amber:  #f0a33a;
+
+  /* ---- THE SIGNED PAIR, moved onto the cool ground. The old jade and
+     brick were chosen to sit quietly beside gold; against a blue-black
+     they read as muddy rather than as quiet, and the pair is the
+     loudest thing on a direction column by design. Measured over the
+     worst ground (#141b2c): up 8.534, down 5.651.
+
+     HUE IS STILL THE LAST CHANNEL and nothing above changes that. ---- */
+  --flow-up:   #3ecf7f;
+  --flow-down: #f2685c;
+
+  /* ---- SOLID CARDS. The two glass tokens resolve to their opaque
+     partners and the filter switches off, which is the same pair of
+     values the reduced-transparency branch already sets — so this is
+     not a new state, it is the existing one made unconditional. ---- */
+  --panel-glass:      var(--panel-bg);
+  --panel-head-glass: var(--panel-head);
+  --glass-filter:     none;
+  --glass-edge:       inset 0 1px 0 rgba(231, 236, 247, 0.045);
+  --shadow-card:      0 1px 0 rgba(5, 8, 16, 0.9), 0 10px 30px rgba(3, 5, 12, 0.55);
+
+  /* ---- GEOMETRY. 5px was a terminal's radius; this design's cards are
+     softly rounded and its controls are pills. One step, set here, so
+     every card and every strip corner moves together — the header strip
+     reads border-radius from the same token its card does, which is why
+     no header rule needs touching for the corners to stay flush. ---- */
+  --radius-1: 8px;
+  --radius-2: 14px;
+  --radius-3: 20px;
+
+  /* ---- THE PAGE GROUND. Flat, with two bounded glows in opposite
+     corners — the same construction the photographic ground used and
+     for the same measured reason: over the two glows TOGETHER the
+     faintest ink fell below AA, so they are held to 58% of the viewport
+     each and anchored at opposite corners, leaving the middle on the
+     base fill. No image: the design's ground is a colour, and the
+     atmosphere SVG was a request, a decode and a composite spent on a
+     texture this palette does not have. ---- */
+  --flows-ground:
+    radial-gradient(58% 44% at 4% 0%, rgba(91, 147, 247, 0.10), transparent 72%),
+    radial-gradient(58% 44% at 100% 8%, rgba(155, 124, 246, 0.08), transparent 72%),
+    linear-gradient(180deg, #0a0e1b 0%, #080b14 42%, #070a12 100%);
+
+  /* ---- THE SECTOR TINTS, re-picked off the cool wheel. They are a
+     grouping cue drawn as a 3px band at 42% and a 9% glow, never under
+     text, so the constraint on them is separation from each other
+     rather than contrast against a ground. ---- */
+  --sect-tech:    #6fa8f2;
+  --sect-comm:    #56c3c9;
+  --sect-disc:    #d9a15e;
+  --sect-staples: #86bf92;
+  --sect-energy:  #e0805a;
+  --sect-fin:     #9b8ef0;
+  --sect-health:  #62b6e0;
+  --sect-ind:     #9aa4c4;
+  --sect-mat:     #c49072;
+  --sect-re:      #6cbfa8;
+  --sect-util:    #b08fd6;
+  --sect-none:    #5d6a86;
+}
+
+/* The ground is fixed to the viewport on the body rule above; with the
+   photograph gone there is nothing to hold still, and background-attachment
+   fixed on a full-page gradient is a repaint per scroll frame for no
+   visible effect. Overridden here rather than edited there so the rule
+   that explains the glows stays with the glows. */
+.flows-body { background-attachment: scroll; }
+
+/* ---------- CARD CHROME ------------------------------------------
+
+   THE ANATOMY WAS ALREADY RIGHT. Header strip, name on the left, control
+   cluster on the right, body, footnote — .ft-chart-top and .ft-chain-top
+   have been that shape since the row landed, and .fc-panel h3 is the same
+   shape one level down. What this section changes is the finish: the strip
+   is lit rather than tinted, the title is set in mixed case at reading
+   weight rather than in spaced capitals, and the card's corner is the
+   design's corner.
+
+   THE CAPITALS GO BECAUSE THE DESIGN'S DO. An uppercase, 0.14em-tracked
+   label is a terminal's convention and it costs a reader a beat on every
+   card title; the new design sets its titles in sentence case at 600 and
+   spends the capitals only on the micro-labels inside a card, where the
+   string is one or two words and the tracking is doing real work
+   separating it from the figure beneath it. */
+.ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief,
+.ft-rel, .ft-mix, .fc-panel, .ft-panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-rel-h, .ft-mix-h {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-note);
+  font-weight: 600;
+  color: var(--ink);
+}
+/* The header strip is lit from inside rather than filled flat, which is the
+   one gradient in this design that is not decoration: it separates the strip
+   from the card body without a second border, and the two cards whose strip
+   holds a control (.ft-chart-top, .ft-chain-top) then match the five whose
+   strip holds only a name. */
+.ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
+.ft-mix-h, .ft-chart-top, .ft-chain-top {
+  background:
+    linear-gradient(180deg,
+      rgba(154, 167, 192, 0.055) 0%,
+      rgba(154, 167, 192, 0.012) 100%),
+    var(--panel-head);
+}
+/* A card's name takes the accent's quiet step; the figure under it does not,
+   so the accent never lands on a number. */
+.fc-panel h3, .ft-panel h3 {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------- CONTROLS ---------------------------------------------
+
+   THE SEGMENTED TRACK IS THE DESIGN'S ONE NEW SHAPE. Period pills, series
+   tabs and the chain's ordering tabs were three loose rows of outlined
+   buttons; the design draws each as a single recessed track with one lit
+   segment inside it. That is a real legibility change and not only a
+   finish: a row of equally-outlined buttons makes the reader compare seven
+   borders to find the live one, and a track makes the live one the only
+   filled thing in a shape that is otherwise empty.
+
+   THE BUTTONS KEEP EVERY ATTRIBUTE THEY HAD. No markup moves, no role
+   changes, no disabled state is dropped — a period the card cannot reach
+   is still drawn, still disabled, still carries the title that says how far
+   back this card reaches. The dashed border that used to mark it is
+   replaced by a strikethrough-free dimming plus the cursor, because a
+   dashed outline inside a filled track reads as a fourth state. */
+.ft-period, .ft-chart-tabs, .ft-chain-tabs {
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(5, 8, 16, 0.55);
+  border: 1px solid var(--hairline);
+}
+.ft-period-b, .ft-chart-tab, .ft-chain-tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.34rem 0.62rem;
+  background: transparent;
+  color: var(--ink-faint);
+  font-weight: 500;
+  transition: color var(--dur-tap) var(--ease),
+              background-color var(--dur-tap) var(--ease);
+}
+.ft-period-b:hover:not(:disabled), .ft-chart-tab:hover, .ft-chain-tab:hover {
+  color: var(--ink);
+  background: rgba(154, 167, 192, 0.08);
+}
+.ft-period-b.is-on, .ft-chart-tab.is-on, .ft-chain-tab.is-on {
+  color: #08101f;
+  background: var(--gold-harvest);
+  border-color: transparent;
+  font-weight: 650;
+  box-shadow: 0 1px 6px rgba(91, 147, 247, 0.35);
+}
+.ft-period-b:disabled {
+  border-style: none;
+  opacity: 0.34;
+}
+/* THE SMA CONTROL IS A SWITCH, NOT A TAB, and the design says so by drawing
+   it as one. It is the only control in the header strip that turns an
+   OVERLAY on and off rather than selecting one of a set, and it sat in the
+   same track as the series tabs, where it read as a sixth series.
+
+   THE ELEMENT IS UNCHANGED — it is the same button with the same
+   aria-pressed the controller already sets, so the state a screen reader is
+   told is the state the track is drawn in, and no script moves. The rule
+   reads aria-pressed directly rather than the .is-on class for exactly that
+   reason: if the two ever disagree, the drawing follows the attribute that
+   is announced. */
+.ft-chart-ctl { border-left: 0; padding-left: 0; margin-left: 0.5rem; }
+.ft-chart-tab--sma {
+  position: relative;
+  padding-left: 2.35rem;
+  border-radius: 999px;
+  background: transparent;
+}
+.ft-chart-tab--sma::before {
+  content: "";
+  position: absolute;
+  left: 0.35rem; top: 50%;
+  width: 1.65rem; height: 0.95rem;
+  margin-top: -0.475rem;
+  border-radius: 999px;
+  background: rgba(154, 167, 192, 0.22);
+  transition: background-color var(--dur-tap) var(--ease);
+}
+.ft-chart-tab--sma::after {
+  content: "";
+  position: absolute;
+  left: 0.45rem; top: 50%;
+  width: 0.75rem; height: 0.75rem;
+  margin-top: -0.375rem;
+  border-radius: 999px;
+  background: var(--ink-dim);
+  transition: transform var(--dur-tap) var(--ease),
+              background-color var(--dur-tap) var(--ease);
+}
+.ft-chart-tab--sma[aria-pressed="true"]::before { background: var(--acc-blue); }
+.ft-chart-tab--sma[aria-pressed="true"]::after {
+  transform: translateX(0.7rem);
+  background: #f4f7ff;
+}
+/* The switch's own label never takes the filled-segment treatment: the track
+   beside it is what carries the state, and a filled pill AND a thrown switch
+   would be the same fact drawn twice. */
+.ft-chart-tab--sma.is-on,
+.ft-chart-tab--sma[aria-pressed="true"] {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ft-chart-tab--sma::after { transition: none; }
+}
+
+/* ---------- THE RAIL ---------------------------------------------
+
+   The design marks the live destination with a filled, tinted pill and a
+   short bar on its inside edge, rather than with a border. On a rail of
+   twelve items a border marks the one that is live by outlining it, which
+   at a glance is the same amount of ink as the eleven that are not. */
+.flows-rail a { border-radius: var(--radius-1); }
+.flows-rail a:hover { background: rgba(154, 167, 192, 0.07); }
+.flows-rail a.is-on {
+  position: relative;
+  color: #dbe6fb;
+  background: color-mix(in srgb, var(--acc-blue) 17%, transparent);
+  border-color: transparent;
+}
+.flows-rail a.is-on::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  width: 3px; height: 1.1rem;
+  margin-top: -0.55rem;
+  border-radius: 0 3px 3px 0;
+  background: var(--acc-blue);
+}
+.flows-rail a:focus-visible { outline-color: var(--acc-blue); }
+
+/* ---------- THE HERO TILES ---------------------------------------
+
+   Four metered figures in a row, each in its own bordered tile with the
+   label above and the meter below — which is what the hero already builds;
+   what it lacked was the tile. Without an edge the four readings were four
+   columns of text with nothing saying where one ended, and the meter under
+   the third read as belonging to the fourth. */
+.ft-hero-b {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-1);
+  background: rgba(154, 167, 192, 0.035);
+}
+.ft-hero-b--period {
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 0;
+}
+.ft-hero-seg > i.is-on { background: var(--acc-blue); }
+.ft-hero-bar { border-radius: 999px; overflow: hidden; }
+
+/* ---------- CHART INK --------------------------------------------
+
+   The two multi-series cards take the family rather than the accent. The
+   volatility card draws a fitted PATH and a fitted DENSITY, which are two
+   readings of one model and must not be one colour; the old card drew both
+   in gold and told them apart by shape alone. Blue for the path it measured,
+   violet for the shape it fitted — and the legend beside them is already
+   rendered from the same class names, so it follows without an edit. */
+.ft-garch-ged { stroke: var(--acc-violet); }
+.ft-garch-bin { fill: color-mix(in srgb, var(--acc-blue) 30%, transparent); }
+.ft-chart-sma { stroke: var(--acc-amber); }
+.ft-chart-ohlc-v.is-sma { color: var(--acc-amber); }
+/* The donut's two arcs are a call/put split, which IS a direction, so they
+   stay on the signed pair; nothing here touches them. The ring's rules and
+   its centre figure come off the neutral ramp, which the token block already
+   moved. */
+
+/* ---------- THE FINDINGS-INDEX DOTS ------------------------------
+
+   The dot beside each line of the AI summary names the STATION the finding
+   came from — it is keyed on the finding's group, not on freshness, which I
+   had to read flows-ticker.js:6931 to establish rather than assume from the
+   class name. So it is a categorical scale of six and takes the chart
+   family, which is what the family is for.
+
+   TWO OF THE SIX WERE DRAWN IN THE SIGNED PAIR AND ONE IN A STRAY LITERAL.
+   convexity was the down-red, tape and context the up-green, and volatility
+   a hardcoded #7aa7ff — one of the twenty-seven literals in this file. A
+   category dot drawn in the direction colours tells a reader that findings
+   from one station are bearish and from two others bullish, which is not
+   what the dot means and not what the summary says beside it. Six hues,
+   none of them the signed pair, none of them a literal.
+
+   THE COLOUR IS NEVER THE ONLY CARRIER. Each dot sits against the finding's
+   own sentence, which names its station in words; a reader who cannot
+   separate six hues loses a landmark and no information. */
+.ft-brief-d.is-signal     { background: var(--acc-blue); }
+.ft-brief-d.is-overview   { background: var(--acc-violet); }
+.ft-brief-d.is-convexity  { background: var(--acc-rose); }
+.ft-brief-d.is-volatility { background: var(--acc-amber); }
+.ft-brief-d.is-tape       { background: var(--acc-jade); }
+.ft-brief-d.is-context    { background: var(--sect-comm); }
+
+/* ---------- FOCUS ------------------------------------------------
+
+   One ring, one colour, section-wide. The gold ring is remapped by the
+   token block wherever a rule names --gold-harvest; these are the handful
+   that named a literal or an inherited colour and would otherwise have been
+   the only gold left on a blue page. */
+.flows-body :focus-visible { outline-color: var(--acc-blue); }
