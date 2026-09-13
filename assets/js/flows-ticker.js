@@ -5167,10 +5167,12 @@
      before they register. `drawerFor` resolves a string against the registry
      at CALL time, which is the only time the answer is knowable.
 
-     THE TWO THAT STAY FUNCTIONS ARE NOT AN EXCEPTION TO THE RULE, they are
-     the two the default station needs: `scoreOverlay` and `__score` draw the
-     signal station a reader lands on, and flows-panels.js keeps both so that
-     first paint owes nothing to the network. */
+     THE ONE THAT STAYS A FUNCTION IS NOT AN EXCEPTION TO THE RULE, it is
+     the one the default station needs: `__score` draws the signal station a
+     reader lands on, and flows-panels.js keeps it so that first paint owes
+     nothing to the network. (P.overlay is still in the library: the join it
+     draws is what "what changed" reads, though the page no longer mounts the
+     drawing.) */
   const DRAW = {
     gamma: "gamma",
     aggressor: drawAggressor,
@@ -5190,7 +5192,6 @@
     darkpool: drawDarkpool,
     oiDeltas: drawOiDeltas,
     volContext: drawVolContext,
-    scoreOverlay: P.overlay,
     deltaExposure: "deltaExposure",
     charm: "charm",
     vanna: "vanna",
@@ -5815,8 +5816,7 @@
    * to know is which group a section belongs to, which the section says.
    */
   const PANEL_CHROME = {
-    scoreOverlay: { group: "signal", tier: "lead" },
-    __score: { group: "signal", tier: "table" },
+    __score: { group: "signal", tier: "lead" },
     __stats: { group: "signal", tier: "table" },
     __sessions: { group: "tape", tier: "table" },
     gamma: { group: "convexity", tier: "lead" },
