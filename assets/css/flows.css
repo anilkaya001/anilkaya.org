@@ -11473,6 +11473,13 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-brief-ask-i:focus-visible { outline: 2px solid var(--acc-blue); outline-offset: 1px; }
 .ft-brief-ask-b {
   flex: none;
+  /* THE CONTAINING BLOCK FOR THE VISUALLY-HIDDEN LABEL BELOW. Without it the
+     absolutely-positioned span resolves against whatever ancestor happens to
+     be positioned — the panel, or the page — and a 1px box placed off the
+     page's own edge is how a zero-overflow invariant fails at 320px on a
+     rule that looks purely cosmetic. tests/flows-motion.mjs asserts that
+     invariant on every Flows route. */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
