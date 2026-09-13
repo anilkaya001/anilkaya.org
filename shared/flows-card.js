@@ -2494,6 +2494,22 @@ export function buildCard({
   return {
     v: CARD_SCHEMA_VERSION,
     ticker,
+    /* WHICH OF THE TWO KINDS OF CARD THIS IS, said once at the top rather
+       than inferred by counting how many panels came back unavailable.
+
+       A BOARD card is built for one of the names the run went deep on: the
+       per-name legs were fetched, so every panel is a measurement or a
+       stated silence about a measurement that was attempted. A CROSS-SECTION
+       card is built for a name the run enriched but did not take deep — the
+       price, the candles, the volatility fit and the score are all real and
+       all of this session, and the seven panels that need their own vendor
+       calls were never requested.
+
+       IT IS DERIVED FROM `unfetched` RATHER THAN PASSED SEPARATELY, so there
+       is one source of truth for "were the per-name legs spent". Two flags
+       that could disagree is how a card comes to claim one depth and read as
+       the other. */
+    depth: unfetched ? "cross-section" : "board",
     /* WHO THIS IS AND WHAT IT DOES, ~30 BYTES, AND IT REMOVES A REQUEST.
 
        Both fields are on the board row this card was built from and neither

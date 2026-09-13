@@ -904,6 +904,34 @@ export function cardFacts(store) {
     /* A NULL CARD IS A READ THAT FAILED, not a name with no card, and
        typeof null is "object" — the null arm is written on its own. */
     if (card === null || typeof card !== "object" || card.status === "pending") continue;
+    /* BOARD-DEPTH CARDS ONLY, AND THIS IS A DECISION RATHER THAN A FILTER
+       THAT DRIFTED IN.
+
+       The pipeline now writes a card for every name it enriched, not only
+       the fifty it took deep — which doubled the population this index
+       walks and pushed the brief past its 120KB budget, shedding 46 names.
+       tests/flows-pipeline-contract.mjs refuses that in so many words:
+       "raise the ceiling as a decision or trim a fact, but do not let
+       coverage fall in silence". The ceiling cannot move — the ingest route
+       accepts 128KB and 120 is what the shed already targets — so the
+       population is what has to be chosen, in the open, here.
+
+       IT IS THE BOARD, FOR TWO REASONS THAT ARE NOT ABOUT BYTES. This index
+       feeds the ASSISTANT, whose subject is the session's signal, and the
+       board is what the run measured that signal over. And a cross-section
+       card is thin by construction: seven of its panels were never fetched,
+       so most of what it could contribute is a stated absence, which would
+       crowd out real readings from names that have them.
+
+       WHAT A READER LOSES, SAID PLAINLY: the assistant has no pre-built
+       facts for an off-board name. The ticker page still serves that name's
+       whole card — price, candles, the volatility fit, the score — so
+       nothing is hidden; it is the assistant's index that is scoped, and it
+       publishes its denominator so the page can say so.
+
+       Cards written before `depth` existed carry the key not at all, and
+       they were all board cards, so an absent depth reads as "board". */
+    if (card.depth === "cross-section") continue;
     const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
     entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
   }

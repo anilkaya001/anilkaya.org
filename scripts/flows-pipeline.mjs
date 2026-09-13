@@ -8491,11 +8491,29 @@ async function main() {
      will each say "did not make the cut" — true of every one of them, and
      collectively not a finding. The number is logged here and published on
      every card so neither a reader nor the next run has to infer it. */
+  /* THE NAMES THAT WILL GET A CARD, BOTH LANES, RESOLVED ONCE HERE.
+
+     The cross-section lane at the end of this function publishes a card for
+     every enriched name the board did not take deep, so "the names that get
+     a card" is no longer "the names on the board". This list is computed
+     once and used by both the coverage population below and the lane
+     itself, because two derivations of one set is how a panel comes to
+     state a denominator that does not match the cards it was written onto.
+
+     AND IT HAD TO MOVE, NOT JUST WIDEN. indexMarketCross decides membership
+     against `tickers`: a name outside that set is reported as not placing
+     in the feed, which for a cross-section name would have been a WRONG
+     NUMBER rather than a missing one — "did not make the cut" printed over
+     a name that did. The join itself is free either way; it reads two
+     market-wide responses the pulse leg already fetched. */
+  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+  const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
+
   const marketCross = indexMarketCross({
     oiChange: crossRaws ? crossRaws.oiChange : null,
     darkpool: crossRaws ? crossRaws.darkpool : null,
     limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
-    tickers: [...onBoard.keys()],
+    tickers: cardedTickers,
     sessionDate,
   });
   for (const feed of CROSS_FEEDS) {
@@ -8921,7 +8939,11 @@ async function main() {
      name's partial one. */
   let extraBuilt = 0, extraFailed = 0, extraSkipped = 0;
   {
-    const extraTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+    /* THE SAME LIST THE COVERAGE POPULATION WAS BUILT FROM, not a second
+       filter over the same two maps. If these ever diverged, marketRank
+       would publish a denominator counting names this lane did not write a
+       card for, or omit names it did. */
+    const extraTickers = crossSectionTickers;
     if (extraTickers.length) {
       const unfetched =
         "this name was measured in the run's cross-section but is not on today's board, " +
