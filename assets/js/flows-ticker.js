@@ -5626,7 +5626,6 @@
   /* ---------- staleness --------------------------------------------- */
 
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
-  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
   /* Mirrored from flows-ui.js:155 — the shape the publisher validates on the
      way out, and the gate the parse below sits behind. This page cannot call
      the shared function: shared/flows-pages.js:1308 serves it flows-panels.js
@@ -5636,12 +5635,55 @@
      alignment is named so a future reader knows which file is the original. */
   const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+  /* THE SESSION THE CURRENT RUN DESCRIBES, filled when the boards land.
+     Null until then, and null forever if both board reads fail — which is
+     why the write stamp below is a fallback rather than a deletion. */
+  let boardSession = null;
+
   /* TWO INDEPENDENT TESTS, because a card can be freshly WRITTEN from a stale
      SESSION: the pipeline runs, the vendor is behind, and the payload lands
-     with today's timestamp and Friday's numbers. Either fires the band. */
+     with today's timestamp and Friday's numbers. Either fires the band.
+
+     BOTH ARMS WERE WRONG, IN OPPOSITE DIRECTIONS, AND THE MEASUREMENT SAYS
+     SO. The session arm was a fixed four-day wall-clock window, so AAPL's
+     2026-09-10 card read against a 2026-09-11 board — a session behind, no
+     candles, no volatility fit — was SILENT, and stayed silent for four
+     days. The write arm is thirty hours, so a perfectly current Friday card
+     read on Sunday accused itself of being two days old. One test blind for
+     four days, the other crying wolf every Monday, and between them a reader
+     learned to ignore the band.
+
+     THE FIX IS TO STOP ANSWERING A CALENDAR QUESTION WITH A STOPWATCH. The
+     card names the session it describes and the board names the session this
+     run describes. Comparing those two strings needs no clock, no timezone,
+     no weekend rule and no holiday table — and it cannot drift out of step
+     with the product, because both facts are the product's own. A skewed
+     browser clock, a reader in Tokyo and a long weekend all give the same
+     answer, which is what the millisecond arithmetic could never do.
+
+     THE WRITE STAMP IS NOT DELETED, IT IS DEMOTED. It is the only thing left
+     to say when the comparison cannot be made: a card with no readable
+     session date, or a page whose board reads both failed. Under that guard
+     it can no longer fire on a card whose session is provably current, which
+     is the whole of the Monday false positive. */
   function assessAge(card) {
     const now = Date.now();
     const parts = [];
+    const mine = ISO_DAY.test(String(card.sessionDate || "")) ? String(card.sessionDate) : null;
+
+    if (mine && boardSession) {
+      /* THREE ARMS, NOT TWO. Behind is the finding. Level is silent — the
+         card describes the session the board describes, whatever its write
+         stamp says. AHEAD is silent too and is not impossible: a run whose
+         card publish lands and whose board publish fails leaves a card newer
+         than the board, and accusing THAT card of staleness would be exactly
+         backwards. */
+      if (mine < boardSession) {
+        parts.push("every figure on this page is from the session of " + mine +
+          ", and the board has since published " + boardSession);
+      }
+      return parts;
+    }
 
     /* A NON-POSITIVE STAMP IS AN ABSENT ONE, normalised once here rather than
        tested at each use. isNum(0) is 0, not null, so the bare `written !==
@@ -5669,35 +5711,28 @@
       const age = days >= 1
         ? days + (days === 1 ? " day" : " days")
         : hours + (hours === 1 ? " hour" : " hours");
-      parts.push("this card was last written " + age + " ago");
-    }
-
-    /* THE SHAPE IS CHECKED BEFORE THE PARSE, because Date.parse is lenient
-       enough to be dangerous: a truncated "YYYY-MM" plus the suffix comes back
-       FINITE in V8 and dates the card to the first of that month, raising
-       "it reports the session of 2026-09" over numbers written minutes ago.
-       A string that parses is not a date that was measured.
-
-       AND 21:00Z, NOT MIDNIGHT. 21:00Z is after every US close, so a session
-       date is aged from the end of its own session rather than from its
-       midnight. Aging from midnight called a session stale up to 21 hours
-       before flows-ui.js:255 and flows-history.js:664 did — the deepest
-       per-name surface in the product disagreeing with every page a reader
-       could have reached it from. */
-    let session = null;
-    if (ISO_DAY.test(String(card.sessionDate || ""))) {
-      const parsed = Date.parse(String(card.sessionDate) + "T21:00:00Z");
-      if (Number.isFinite(parsed)) session = parsed;
-    }
-    if (session !== null && now - session > STALE_SESSION_MS) {
-      parts.push("it reports the session of " + card.sessionDate);
+      parts.push("this card was last written " + age + " ago" +
+        (mine ? ", and no board is readable to say which session is current"
+              : ", and it names no session it describes"));
     }
     return parts;
   }
 
   function setStale(parts) {
     if (!staleEl) return;
-    if (!parts.length) { staleEl.hidden = true; staleEl.textContent = ""; return; }
+    /* IT CLEARS AS WELL AS SETS, WHICH IT DID NOT BEFORE. The band was only
+       ever raised: nothing removed `is-stale` from the grid once it was on.
+       That was invisible while the verdict was drawn once per paint, and it
+       stops being invisible the moment the verdict can CHANGE — the boards
+       land after first paint and can turn a stale card current. A function
+       that only ever accuses would have left the rail and the dimmed charts
+       behind on a card it had just cleared. */
+    if (!parts.length) {
+      staleEl.hidden = true;
+      staleEl.textContent = "";
+      grid.classList.remove("is-stale");
+      return;
+    }
     staleEl.textContent = "Stale: " + parts.join(", ") + ".";
     staleEl.hidden = false;
     /* CHROME AS WELL AS WORDS, and never opacity on the glyphs — a dimmed
@@ -6901,77 +6936,6 @@
      AND IT SAYS HOW MANY IT IS NOT SHOWING. A list of five under a card with
      nineteen readings is a selection, and a selection that does not state its
      own denominator reads as a census. */
-  /* ---------- the findings, written out --------------------------------
-
-     WHAT THIS IS AND WHAT IT IS NOT. The card is titled "AI Summary" and the
-     owner asked for it to read as one being written. The animation is the
-     only thing here that is new: every sentence is still `panels[key].lead.say`
-     verbatim, still written once by the panel that owns the number, and the
-     reveal cannot change a character of it. A typing effect over a sentence a
-     model had composed live would be honest; over gathered findings it is
-     presentation, so it is built to be unable to alter what it presents.
-
-     THE THREE PROPERTIES THAT MAKE A REVEAL SAFE TO SHIP:
-
-     1. THE PAGE IS READABLE AT REST. The text starts in `data-say`, not in a
-        stylesheet and not behind an opacity that an interrupted animation
-        could leave at zero. If this function never runs, `finish()` below is
-        still what every other path calls, and it writes the full string.
-     2. IT ALWAYS COMPLETES. One rAF loop drives every line off a single
-        clock, and a hard deadline writes all of them out whatever the frame
-        rate did — a slow device gets a shorter animation, never a truncated
-        sentence. A second paint cancels the first by generation, so two
-        overlapping cards cannot interleave characters.
-     3. CONSENT IS OBEYED BY NOT ANIMATING AT ALL. `calm` is the same
-        MediaQueryList the cursor spotlight reads, re-checked per paint
-        rather than latched at boot, and under it the lines are simply
-        written. Not slower: absent.
-
-     THE BUDGET IS FIXED, NOT PER-CHARACTER. Five findings at a character a
-     frame would run past six seconds and turn a summary into a wait. The
-     whole reveal is capped at WRITE_MS and the per-line share divides it, so
-     the last sentence lands at the same moment whether the card carries two
-     findings or five. */
-  const WRITE_MS = 1500;
-  let writeGen = 0;
-
-  function writeOut(list) {
-    const spans = [...list.querySelectorAll(".ft-brief-t[data-say]")];
-    if (!spans.length) return;
-    const gen = ++writeGen;
-    const finish = () => {
-      for (const s of spans) s.textContent = s.getAttribute("data-say") || "";
-      list.classList.remove("is-writing");
-    };
-    if (calm.matches || typeof requestAnimationFrame !== "function") { finish(); return; }
-    for (const s of spans) s.textContent = "";
-    list.classList.add("is-writing");
-    /* EACH LINE STARTS WHERE THE ONE ABOVE IS HALF DONE. Fully sequential
-       reads as a queue and fully simultaneous reads as a flicker; a half-line
-       overlap is what looks like writing. */
-    const step = WRITE_MS / (spans.length + 1);
-    const span = WRITE_MS - step * (spans.length - 1) / 2;
-    const t0 = performance.now();
-    const tick = (now) => {
-      if (gen !== writeGen) return;                 // a newer card is drawing
-      const since = now - t0;
-      let done = true;
-      for (let i = 0; i < spans.length; i++) {
-        const say = spans[i].getAttribute("data-say") || "";
-        const p = Math.max(0, Math.min(1, (since - i * step / 2) / span));
-        /* Math.round, not floor: floor leaves the final character unwritten
-           until p reaches exactly 1, which on a frame that overshoots the
-           deadline never happens. */
-        const n = Math.round(p * say.length);
-        if (spans[i].textContent.length !== n) spans[i].textContent = say.slice(0, n);
-        if (p < 1) done = false;
-      }
-      if (done || since > WRITE_MS * 2) finish();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }
-
   function paintBrief(card) {
     const host = $("ftBrief"), list = $("ftBriefL"), sub = $("ftBriefS");
     if (!host || !list) return;
@@ -7000,36 +6964,102 @@
       a.setAttribute("aria-label", f.say + " \u2014 open " + f.title);
       /* THE DOT IS THE STATION'S COLOUR — see the note beside #ftBrief. */
       a.append(el("span", "ft-brief-d" + (f.group ? " is-" + f.group : "")));
-      /* THE TEXT NODE IS BUILT EMPTY AND THE SENTENCE RIDES AN ATTRIBUTE.
+      /* THE FINDING ARRIVES A WORD AT A TIME, THROUGH THE MECHANISM THIS
+         PRODUCT ALREADY HAS.
 
-         The writing animation below fills it a character at a time, so the
-         string has to live somewhere that a second paint, an interrupted
-         animation or a reader who never sees the animation at all can
-         recover it from. `data-say` is that somewhere: one place holds the
-         finding, and the visible text is a view of it rather than a second
-         copy that can be left half-written.
+         `.ak-w` and `.ak-caret` are the Neuron dock's reveal \u2014 the one the
+         overview uses over the genuine model-written summary. Reusing it
+         here rather than writing a second one is the write-once rule applied
+         to behaviour instead of to prose: two answers to "how does text
+         appear in this product" is how the two drift into looking like
+         different features.
 
-         AND THE ACCESSIBLE NAME IS ALREADY COMPLETE. The aria-label above
-         carries the whole sentence from the first frame, so a screen reader
-         reads the finding immediately and never hears it being typed \u2014
-         which is the correct behaviour for a decorative reveal. */
+         AND THE SPLIT IS BY WORD, WHICH IS A CORRECTNESS PROPERTY RATHER
+         THAN A STYLE ONE. neuronWords states the reason in shared/
+         flows-pages.js and it is decisive here: a per-letter reveal running
+         through "$412.8M" reads as a figure counting up. Every sentence in
+         this list carries measured figures, so a per-letter typewriter would
+         animate a number that was measured once, days ago, as though it were
+         being computed. Whole words appear; no digit is ever partial.
+
+         THE SPANS ARE SEPARATED BY REAL SPACES, so the sentence is still one
+         run of text to find-in-page, to a copy, and to a screen reader \u2014
+         which also already has the whole finding from the aria-label above.
+
+         THE DELAY IS CLAMPED at the same 32 the dock uses, so a long finding
+         does not push its own tail past the point a reader has given up. */
       const t = el("span", "ft-brief-t");
-      t.setAttribute("data-say", f.say);
+      const words = f.say.split(/\s+/).filter(Boolean);
+      words.forEach((w, wi) => {
+        if (wi) t.append(" ");
+        const s = el("span", "ak-w", w);
+        s.style.setProperty("--d", String(Math.min(wi, 32)));
+        t.append(s);
+      });
+      /* ONE CARET, ON THE LAST FINDING, and it stops after eight blinks \u2014
+         both properties come free with .ak-caret. One because five blinking
+         blocks is five things moving; on the last because that is where the
+         writing ends, and a caret that never stops is promising a sixth
+         finding that is not coming. */
+      if (f === found[Math.min(found.length, CAP) - 1]) {
+        const caret = el("span", "ak-caret");
+        caret.style.setProperty("--d", String(Math.min(words.length, 32) + 1));
+        caret.setAttribute("aria-hidden", "true");
+        t.append(caret);
+      }
       a.append(t);
       a.append(el("span", "ft-brief-c", "\u203a"));
       li.append(a);
       list.append(li);
     }
-    writeOut(list);
+    /* A CARD WITH NO LEADS SAYS SO, AND IS NOT DELETED.
+
+       THE DEFECT THIS FIXES, MEASURED ACROSS ALL 213 LIVE CARD ROWS: leads
+       did not exist in the payload before 2026-09-07, so 46 cards written
+       between 2026-08-25 and 2026-09-04 carry ZERO of them. On every one of
+       those names `host.hidden = !found.length` removed the entire summary
+       card from the page and nothing anywhere said why. That is the one
+       place on this route where the four silences were not applied — every
+       other empty block on this page carries a data-empty and a sentence,
+       and this one simply vanished, which reads to a reader as a feature
+       that does not work rather than as a card that predates the findings.
+
+       `unavailable` IS THE RIGHT ONE OF THE FOUR. Not `pending`: no later
+       fetch will add leads to a card that was built without them, and
+       pending invites a reload that cannot help. Not `quiet`: the panels
+       were not measured and found silent, they were never asked for a
+       finding at all. The card was built before the question existed, which
+       is a thing about the payload's age — so the sentence says that, and
+       the staleness band above it says how old.
+
+       THE LIST STAYS EMPTY AND THE QUESTION BOX GOES WITH IT. A box
+       offering to answer questions about a name whose panels produced no
+       findings would be inviting a reader to spend a model call on a card
+       that has nothing to say about itself. */
     if (sub) {
       sub.textContent = found.length > CAP
         ? "The first " + CAP + " of " + found.length + " findings on this card, in page order."
         : (found.length
           ? found.length + (found.length === 1 ? " finding" : " findings") +
             " on this card, in page order."
-          : "");
+          : "This card carries no panel findings. It was built before the panels " +
+            "published them, so there is nothing here to gather — the readings " +
+            "themselves are on the panels below, unaffected.");
     }
-    host.hidden = !found.length;
+    /* THE SILENCE IS ON THE SENTENCE, NOT ON THE CARD. The marker rules are
+       keyed on `.fb-empty[data-empty=...]` (flows.css:1193) and they style a
+       MESSAGE — the dagger, the dashed edge, the flush-left setting. Putting
+       the attribute on the <aside> would have claimed a silence for a card
+       whose sub-line is the only silent thing in it, and matched no rule
+       anyway. The sub-line takes the class and the attribute, so this block
+       joins the vocabulary the rest of the page already speaks instead of
+       inventing a fifth way to be empty. */
+    if (sub) {
+      sub.classList.toggle("fb-empty", !found.length);
+      if (found.length) sub.removeAttribute("data-empty");
+      else sub.setAttribute("data-empty", "unavailable");
+    }
+    host.hidden = false;
 
     /* THE QUESTION BOX OPENS WITH THE CARD AND CLOSES WITH IT.
 
@@ -7041,7 +7071,7 @@
        each time would submit the same question once per name ever viewed. */
     const form = $("ftBriefAsk");
     if (form) {
-      form.hidden = host.hidden;
+      form.hidden = !found.length;
       const field = $("ftBriefQ");
       if (field) {
         field.placeholder = "What changed in " + (card.ticker || "this name") + "?";
@@ -9258,11 +9288,14 @@
          - the regime is stated by the gamma panel, off `spotGammaShare`,
            beside the ladder it was measured from;
          - the BUILD time is in the stale banner — and only when it is a
-           reading. `markStale` prints "this card was last written N days
-           ago" once the age passes STALE_WRITE_MS, which is the one state in
-           which a build timestamp tells a reader anything. On a fresh card it
-           said "built 2026-09-12" on every screen of every panel to report
-           that nothing was wrong.
+           reading. The band prints "this card was last written N days ago"
+           once the age passes STALE_WRITE_MS AND the session comparison
+           cannot be made, which is now the one state in which a build
+           timestamp tells a reader anything: when the card's session can be
+           compared against the board's, that comparison is the finding and
+           the write stamp says nothing a reader needs. On a fresh card the
+           old rule said "built 2026-09-12" on every screen of every panel to
+           report that nothing was wrong.
 
        That last one is the honest exception and it is written down because
        the first draft of this comment claimed all four were "in the hero or
@@ -9409,8 +9442,23 @@
         : states.includes("unreadable") ? "unreadable"
         : states.includes("pending") ? "pending"
         : states[0];
+      /* THE SESSION THE RUN DESCRIBES, TAKEN FROM WHICHEVER BOARD IS
+         READABLE. Both carry it and both come out of one publish, so they
+         agree by construction; the `||` is for the morning one of the two
+         reads fails, not for a disagreement. Shape-checked before it is
+         trusted, because a comparison against a malformed string would be a
+         verdict drawn from a value nobody measured. */
+      const bs = (p) => (p && ISO_DAY.test(String(p.sessionDate || "")) ? String(p.sessionDate) : null);
+      boardSession = bs(long) || bs(short);
       paintRank();
       if (painted) paintRelated(painted);
+      /* THE BAND IS RE-ASSESSED, because the verdict it drew at paint time
+         was made without the one fact that decides it. A card painted before
+         the boards land falls into the write-stamp arm; once the session is
+         known the comparison can be made, so it is made again rather than
+         left at the answer the page could give a second earlier. setStale
+         clears as well as sets, so a card wrongly banded is un-banded. */
+      if (painted) setStale(assessAge(painted));
       return switchRows;
     });
     return boardsAsked;

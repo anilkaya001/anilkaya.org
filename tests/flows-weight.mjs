@@ -1085,15 +1085,29 @@ const CEILING_KIB = {
      it waited on is set, so production parses the stripped tree — 254 KiB
      on this route as of #113 — and this table measures the repository. The
      rest of it stands: a raise here is still an argument in the open. */
-  /* 568 -> 576, for the findings card doing the two things its title claims.
-     flows-ticker.js 486,402 -> 495,244 (+8,842) against
+  /* 568 -> 580, for the findings card doing the two things its title claims
+     and for the staleness band finally answering the question it asks.
+     flows-ticker.js 486,402 -> 498,815 (+12,413) against
      git cat-file -s 9de92a2:, the other FOUR identical — flows-panels.js
      71,727, flows-cursor.js 13,123, flows-dock.js 6,005, nav.js 2,560 —
-     total 579,817 -> 588,659 B = 574.86 KiB. 576 KiB is 589,824 B and
-     leaves 1,165 B, which is the narrow order of hand the 470->480
+     total 579,817 -> 592,230 B = 578.35 KiB. 580 KiB is 593,920 B and
+     leaves 1,690 B, which is the narrow order of hand the 470->480
      paragraph argues for rather than the 2,988 B the raise above left: this
      route is still owed a reduction, so the next change to it should have
      to argue in the open rather than find room waiting.
+
+     THIS NUMBER WAS 576 AN HOUR AGO AND THE HONEST THING IS TO SAY WHY IT
+     MOVED TWICE IN ONE WAVE. The 576 raise was measured against a
+     per-character typing animation that has since been DELETED — 3,638 B of
+     it — because shared/flows-pages.js:402 had already settled the question
+     it re-opened: "a per-letter typewriter running through $412.8M reads as
+     a figure counting up". Every sentence in that list carries measured
+     figures, so the first implementation animated numbers that were measured
+     once, days earlier, as though they were being computed live. The reveal
+     now reuses `.ak-w` and `.ak-caret`, the word-at-a-time mechanism the
+     Neuron dock already uses over the genuine model-written summary — one
+     answer in this product to "how does text appear", not two. What replaced
+     the 3,638 B, and then some, is the staleness rewrite below.
 
      WHAT IT BOUGHT, IN TWO PARTS.
 
@@ -1122,8 +1136,40 @@ const CEILING_KIB = {
      something) and fills `#askQ`, which are the same two affordances a
      reader uses. A second mount was never an option — flows-ask.js takes
      #askApp by id and flows-dock.js's header records that two mounts
-     collide on it. */
-  tickerPage: 576,
+     collide on it.
+
+     (3) THE STALENESS BAND STOPS ANSWERING A CALENDAR QUESTION WITH A
+     STOPWATCH, which is the largest single item here and the one that fixes
+     a defect rather than adding a feature. Both arms were wrong in opposite
+     directions and the production store proved it: the session arm was a
+     fixed four-day wall-clock window, so AAPL's 2026-09-10 card read against
+     a 2026-09-11 board — a session behind, no candles, no volatility fit —
+     was SILENT and would stay silent for four days; the write arm is thirty
+     hours, so a perfectly current Friday card read on Sunday accused itself
+     of being two days old. One blind for four days, the other crying wolf
+     every Monday, and between them a reader learns to ignore the band.
+
+     The replacement compares two strings the product itself published — the
+     card's sessionDate against the board's — which needs no clock, no
+     timezone, no weekend rule and no holiday table, and gives the same
+     verdict to a reader in Tokyo with a skewed clock. Three arms (behind /
+     level / ahead), because a card newer than the board is not impossible —
+     a run whose card publish lands and whose board publish fails produces
+     one — and accusing that card of staleness would be backwards. The write
+     stamp is demoted rather than deleted: it is what remains when the
+     comparison cannot be made. Net of 1,001 B of Date.parse arithmetic and
+     one dead constant this removed, and of setStale learning to CLEAR the
+     grid's is-stale class, which it never did — invisible while the verdict
+     was drawn once per paint, and a real defect the moment the boards can
+     land after first paint and turn a stale card current.
+
+     (4) A CARD WITH NO LEADS SAYS SO INSTEAD OF VANISHING. Leads postdate
+     2026-09-07, so of the 213 live card rows 46 carry none, and on every one
+     of those names `host.hidden = !found.length` removed the whole summary
+     card and said nothing — the one place on this route where the four
+     silences were not applied. It now carries `unavailable` on its sub-line,
+     in the `.fb-empty` vocabulary the rest of the page already speaks. */
+  tickerPage: 580,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

@@ -11438,30 +11438,6 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    THE FINDINGS CARD: A QUESTION BOX, AND A SUMMARY THAT WRITES ITSELF.
    =================================================================== */
 
-/* THE CARET IS DRAWN BY THE LIST, NOT BY EACH LINE. `.is-writing` is set for
-   the length of the reveal and removed by the same `finish()` every exit path
-   calls, so a caret can never outlive the animation that justifies it. It
-   sits after the last line rather than after each — five blinking carets is
-   five things moving, and what a reader should see is one hand writing. */
-.ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
-  content: "";
-  display: inline-block;
-  width: 0.5ch;
-  height: 1em;
-  margin-left: 0.1ch;
-  vertical-align: -0.14em;
-  background: var(--acc-blue);
-  animation: ft-caret 1s steps(2, jump-none) infinite;
-}
-@keyframes ft-caret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-/* THE ROW DOES NOT REFLOW AS IT FILLS. A line growing a character at a time
-   through a wrapping paragraph re-wraps on every frame, which reads as the
-   card twitching rather than as text appearing — and it moves the links under
-   it, so a reader reaching for one is aiming at a target that keeps sliding.
-   A fixed minimum height on the text reserves the line before it is written. */
-.ft-brief-l.is-writing .ft-brief-t { min-height: 1.5em; }
-
 /* ---------- the question box -------------------------------------
 
    It sits under the findings and inside their card, separated by the same
@@ -11625,13 +11601,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 @media (prefers-reduced-motion: reduce) {
   .ft-hero:not([hidden]) .ft-hero-b,
   .ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief,
-  .ft-rel, .ft-mix, .ft-grid .ft-panel, .ft-brief-i,
-  .ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
+  .ft-rel, .ft-mix, .ft-grid .ft-panel, .ft-brief-i {
     animation: none;
-  }
-  /* The caret is not slowed to nothing, it is removed: a block that does not
-     blink is a block sitting after the text for no reason. */
-  .ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
-    content: none;
   }
 }
